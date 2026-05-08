@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelForm } from "@/components/address-label-form";
@@ -52,6 +52,36 @@ export default function AddressDetailPage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formDeleting, setFormDeleting] = useState(false);
   const latchedFormSuffixRef = useRef<string>("");
+  // Scope the latch to the *currently mounted* form instance. When the
+  // user navigates to another `/address-book/<addr>` mid-write, the old
+  // form unmounts but its in-flight Promise's `finally` still calls
+  // `onSavingChange(false, oldFormId)`. Without this guard, that stale
+  // callback would clear the new form's latch mid-mutation. The form
+  // passes its `useId()` value with every event; we record the owner on
+  // the leading-edge `true` and ignore trailing `false` calls from any
+  // other instance.
+  const mutationOwnerRef = useRef<string | null>(null);
+  const handleSavingChange = useCallback((saving: boolean, formId: string) => {
+    if (saving) {
+      mutationOwnerRef.current = formId;
+      setFormSaving(true);
+    } else if (formId === mutationOwnerRef.current) {
+      mutationOwnerRef.current = null;
+      setFormSaving(false);
+    }
+  }, []);
+  const handleDeletingChange = useCallback(
+    (deleting: boolean, formId: string) => {
+      if (deleting) {
+        mutationOwnerRef.current = formId;
+        setFormDeleting(true);
+      } else if (formId === mutationOwnerRef.current) {
+        mutationOwnerRef.current = null;
+        setFormDeleting(false);
+      }
+    },
+    [],
+  );
 
   if (!valid) return null;
 
@@ -125,17 +155,25 @@ export default function AddressDetailPage() {
             </h2>
           </div>
           {/* Save-flow safety: never render a writable form until the labels
-              SWR has resolved a real response (`hasLoaded`). On error we
-              REPLACE the form with an error banner instead of falling
-              through — saving an empty form into an existing entry would
-              silently overwrite name/tags/notes. The save path can't
-              distinguish "no entry exists" from "we couldn't load the
-              entry list", so a write during a degraded read window is a
-              data-loss footgun. Same gating handles session-loading: the
-              provider only fires SWR after `useSession()` reaches
-              `authenticated`, so during session hydration `data` stays
-              undefined → `hasLoaded === false` → form stays hidden. */}
-          {labelsError ? (
+              SWR has resolved a real response (`hasLoaded`). The save path
+              can't distinguish "no entry exists" from "we couldn't load
+              the entry list", so a write during a never-loaded window is
+              a data-loss footgun (would overwrite an existing entry with
+              empty fields). Block the form in that pre-load error case.
+              Same gating handles session-loading: the provider only
+              fires SWR after `useSession()` reaches `authenticated`, so
+              during session hydration `data` stays undefined →
+              `hasLoaded === false` → form stays hidden.
+
+              AFTER the first successful load, transient 30s-poll
+              failures keep stale `data` in SWR (so `getEntry` still
+              returns the prior entry) but flip `error`. We keep the
+              form mounted in that case — unmounting would discard
+              in-progress edits — and surface a non-destructive banner
+              above it instead. The save path's optimistic update has
+              the prior-known entry to merge against, same as it would
+              between successful polls. */}
+          {labelsError && !labelsLoaded ? (
             <div role="alert" className="px-5 py-4 text-xs text-red-300">
               {`Couldn't load labels: ${labelsError.message}. Refresh the page to retry — saving while the read failed could overwrite an existing label.`}
             </div>
@@ -153,30 +191,41 @@ export default function AddressDetailPage() {
               ))}
             </div>
           ) : (
-            <AddressLabelForm
-              // Remount on:
-              //   - state transitions (custom / contract / new) — covers the
-              //     deep-link-with-no-cache case where SWR resolves after
-              //     first paint.
-              //   - the loaded entry's `updatedAt` changing — covers the
-              //     "another teammate edited this label, SWR refreshed it,
-              //     and a save from this page would otherwise overwrite the
-              //     newer remote value with my stale local state". The cost
-              //     is losing in-progress local edits when a remote update
-              //     lands; that's the right tradeoff vs. silently
-              //     clobbering newer data without optimistic-concurrency.
-              // The key is latched while a local save is in flight (see
-              // `formKey` derivation above) so the optimistic-update
-              // `updatedAt` bump doesn't unmount the saving form.
-              key={formKey}
-              address={address}
-              initial={formInitial}
-              onSavingChange={setFormSaving}
-              onDeletingChange={setFormDeleting}
-              // No onSaved/onDeleted callbacks — the provider's optimistic
-              // update + SWR revalidate already refresh the page data. No
-              // navigation on save; users stay on the page to keep editing.
-            />
+            <>
+              {labelsError && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="border-b border-amber-900/30 bg-amber-950/30 px-5 py-2 text-xs text-amber-300"
+                >
+                  {`Couldn't refresh labels (${labelsError.message}). Editing existing data — changes save against the last successful read.`}
+                </div>
+              )}
+              <AddressLabelForm
+                // Remount on:
+                //   - state transitions (custom / contract / new) — covers the
+                //     deep-link-with-no-cache case where SWR resolves after
+                //     first paint.
+                //   - the loaded entry's `updatedAt` changing — covers the
+                //     "another teammate edited this label, SWR refreshed it,
+                //     and a save from this page would otherwise overwrite the
+                //     newer remote value with my stale local state". The cost
+                //     is losing in-progress local edits when a remote update
+                //     lands; that's the right tradeoff vs. silently
+                //     clobbering newer data without optimistic-concurrency.
+                // The key is latched while a local save is in flight (see
+                // `formKey` derivation above) so the optimistic-update
+                // `updatedAt` bump doesn't unmount the saving form.
+                key={formKey}
+                address={address}
+                initial={formInitial}
+                onSavingChange={handleSavingChange}
+                onDeletingChange={handleDeletingChange}
+                // No onSaved/onDeleted callbacks — the provider's optimistic
+                // update + SWR revalidate already refresh the page data. No
+                // navigation on save; users stay on the page to keep editing.
+              />
+            </>
           )}
         </aside>
 

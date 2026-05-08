@@ -247,17 +247,16 @@ describe("AddressDetailPage — labels loading state", () => {
     ).not.toBeNull();
   });
 
-  it("replaces the form with an error banner when labels SWR errors (no save UI)", () => {
-    // Codex P2: previously a labels error fell through to the form, so a
-    // save into a degraded read window could overwrite an existing entry
-    // with empty fields. Pin the new behaviour: on error, the form is
-    // hidden entirely behind an error banner.
-    mockLabelsHasLoaded = true;
+  it("replaces the form with an error banner when labels SWR errors BEFORE the first successful read", () => {
+    // First-load failure: SWR has never resolved, `getEntry` returns
+    // undefined-meaning-unknown (could be "no entry exists" or "we
+    // couldn't load anything"), so a save would risk overwriting an
+    // existing entry with empty fields. Block the form entirely.
+    mockLabelsHasLoaded = false;
     mockLabelsError = new Error("hasura is down");
     mockGetEntry.mockReturnValue(undefined);
     render();
 
-    // No form, no skeleton — error banner replaces both
     expect(
       container.querySelector('[aria-label="Loading label form"]'),
     ).toBeNull();
@@ -265,6 +264,34 @@ describe("AddressDetailPage — labels loading state", () => {
     const alert = container.querySelector('[role="alert"]');
     expect(alert?.textContent).toMatch(/Could.{0,3}t load labels/);
     expect(alert?.textContent).toContain("hasura is down");
+  });
+
+  it("preserves the form + shows a non-destructive banner when a background refresh fails AFTER the first successful load (codex round 7)", () => {
+    // Codex flagged that the previous round REPLACED the form with the
+    // error banner on every error, including transient 30s-poll failures
+    // — discarding the user's in-progress edits. SWR keeps stale `data`
+    // across refresh failures, so `getEntry` still returns the prior
+    // entry; we keep the form mounted and surface the failure as a
+    // non-destructive `role=status` banner above it.
+    mockLabelsHasLoaded = true;
+    mockLabelsError = new Error("hasura is down");
+    mockGetEntry.mockReturnValue({
+      entry: {
+        name: "Existing Label",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    render();
+
+    // Form still mounts — user keeps their editing context.
+    expect(container.querySelector("#al-name")).not.toBeNull();
+    // No "alert" replaces the form; banner is "status" so it's
+    // non-destructive (announced softly, not as a blocking error).
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    const banner = container.querySelector('[role="status"]');
+    expect(banner?.textContent).toMatch(/refresh labels/);
+    expect(banner?.textContent).toContain("hasura is down");
   });
 });
 

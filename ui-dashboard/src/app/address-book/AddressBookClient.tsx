@@ -232,7 +232,16 @@ export default function AddressBookPage({
                         : explorerAddressUrl(row.network, row.address)
                     }
                     onEdit={() => setEditTarget({ address: row.address })}
-                    detailHref={`/address-book/${row.address}`}
+                    // The detail page renders the writable label form +
+                    // forensic report editor unconditionally. Read-only
+                    // surfaces (e.g. embedded views with `canEdit=false`)
+                    // hide the inline Edit / +Tag actions; we must also
+                    // skip the row overlay link, otherwise a row click
+                    // would round-trip into an editable detail page and
+                    // bypass the read-only mode entirely.
+                    detailHref={
+                      userCanEdit ? `/address-book/${row.address}` : undefined
+                    }
                   />
                 );
               })}

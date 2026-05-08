@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useId, useMemo, useRef, useState, type RefObject } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
@@ -97,18 +97,24 @@ type Props = {
    * `updatedAt` would otherwise unmount the saving form and remount a fresh
    * one (`saving=false`) while the PUT is still in flight, re-enabling Save
    * for a window where a double-click can submit overlapping writes. The
-   * modal doesn't need this — its key is stable across opens.
+   * `formId` argument is a per-mount identifier (React `useId`) — the
+   * detail page records the owner on the leading-edge `true` call and
+   * ignores trailing `false` calls from other instances, so a save that
+   * resolves AFTER the user navigated to a different address can't
+   * release the latch held by the new form. The modal doesn't pass this
+   * prop — its key is stable across opens.
    */
-  onSavingChange?: (saving: boolean) => void;
+  onSavingChange?: (saving: boolean, formId: string) => void;
   /**
    * Same as `onSavingChange` but for the delete flow. `deleteEntry`'s
    * optimistic update REMOVES the entry, transitioning the page key from
    * `custom:<updatedAt>` → `new`. Without this latch, a fresh form
    * (`deleting=false`) mounts mid-DELETE and a save typed into it can
    * race the in-flight DELETE — if the DELETE completes last it wipes
-   * out the just-saved label.
+   * out the just-saved label. `formId` carries the same per-mount
+   * scoping as `onSavingChange`.
    */
-  onDeletingChange?: (deleting: boolean) => void;
+  onDeletingChange?: (deleting: boolean, formId: string) => void;
 };
 
 export function AddressLabelForm({
@@ -128,6 +134,12 @@ export function AddressLabelForm({
     isCustom: isCustomLabel,
     customEntries,
   } = useAddressLabels();
+  // Per-mount identity used to scope `onSavingChange` / `onDeletingChange`
+  // callbacks at the page level. Stable for the lifetime of this mount;
+  // remounting (e.g. after the page key flips on address change) gets a
+  // fresh ID, so a stale `finally` from a prior mount cannot release the
+  // latch on the new mount's mid-flight write.
+  const formInstanceId = useId();
   const internalFirstInputRef = useRef<HTMLInputElement>(null);
   // Use the parent's ref when provided (modal); otherwise an internal ref
   // exists so the JSX still has a stable target.
@@ -177,7 +189,7 @@ export function AddressLabelForm({
       initial?.name,
     );
     setSaving(true);
-    onSavingChange?.(true);
+    onSavingChange?.(true, formInstanceId);
     setError(null);
     try {
       await upsertEntry(address, {
@@ -191,7 +203,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to save label.");
     } finally {
       setSaving(false);
-      onSavingChange?.(false);
+      onSavingChange?.(false, formInstanceId);
     }
   }
 
@@ -200,7 +212,7 @@ export function AddressLabelForm({
   // are display aliases.
   async function handleDelete() {
     setDeleting(true);
-    onDeletingChange?.(true);
+    onDeletingChange?.(true, formInstanceId);
     setError(null);
     try {
       await deleteEntry(address);
@@ -209,7 +221,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to delete label.");
     } finally {
       setDeleting(false);
-      onDeletingChange?.(false);
+      onDeletingChange?.(false, formInstanceId);
     }
   }
 

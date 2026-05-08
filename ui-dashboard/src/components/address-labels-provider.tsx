@@ -120,6 +120,24 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // its save UI on `hasLoaded` could otherwise let a fast save PUT empty
   // defaults over an existing label during that window.
   const [hasLoaded, setHasLoaded] = useState(false);
+  // Reset `hasLoaded` when the auth status leaves "authenticated" using
+  // the React-blessed "store information from previous renders" pattern
+  // (https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // — comparing prev vs. current state DURING render avoids the
+  // `setState`-in-`useEffect` derived-state anti-pattern.
+  //
+  // Without this, a sign-out → sign-in round-trip with the detail page
+  // mounted would leave `hasLoaded` stuck at the prior session's `true`
+  // value, so the page would render a writable form on the new
+  // session's stale fallback data before the new authenticated
+  // `/api/address-labels` read lands.
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (prevStatus !== status) {
+    setPrevStatus(status);
+    if (status !== "authenticated" && hasLoaded) {
+      setHasLoaded(false);
+    }
+  }
   const { data, error, isLoading } = useSWR<EntriesState>(
     status === "authenticated" ? SWR_KEY : null,
     fetchAllLabels,

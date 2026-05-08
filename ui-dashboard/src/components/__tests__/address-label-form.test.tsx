@@ -237,8 +237,10 @@ describe("AddressLabelForm — save flow", () => {
     });
 
     // Fired before the await — page sees `true` while the PUT is in flight.
-    expect(onSavingChange).toHaveBeenCalledWith(true);
-    expect(onSavingChange).not.toHaveBeenCalledWith(false);
+    // (Callback now receives (saving, formId); page uses formId to ignore
+    // stale callbacks from prior mounts after an address change.)
+    expect(onSavingChange).toHaveBeenCalledWith(true, expect.any(String));
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true]);
 
     // Resolve the upsert and drain microtasks so the finally block runs.
     await act(async () => {
@@ -248,9 +250,12 @@ describe("AddressLabelForm — save flow", () => {
     });
 
     // After resolve, the false signal lets the page snap its key to the
-    // post-save updatedAt.
-    expect(onSavingChange).toHaveBeenCalledWith(false);
+    // post-save updatedAt. The formId on `false` must equal the formId on
+    // `true` — the page checks identity to discard stale callbacks.
     expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    const [trueCall, falseCall] = onSavingChange.mock.calls;
+    expect(trueCall[1]).toBe(falseCall[1]);
+    expect(typeof trueCall[1]).toBe("string");
   });
 
   it("fires onSavingChange(false) on save failure so the page key unfreezes even when the PUT throws", async () => {
@@ -348,8 +353,8 @@ describe("AddressLabelForm — delete flow", () => {
     act(() => {
       clickByText("Remove label");
     });
-    expect(onDeletingChange).toHaveBeenCalledWith(true);
-    expect(onDeletingChange).not.toHaveBeenCalledWith(false);
+    expect(onDeletingChange).toHaveBeenCalledWith(true, expect.any(String));
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true]);
 
     await act(async () => {
       resolveDelete();
@@ -357,6 +362,9 @@ describe("AddressLabelForm — delete flow", () => {
       await Promise.resolve();
     });
     expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    const [trueCall, falseCall] = onDeletingChange.mock.calls;
+    // formId stable across the (true → false) pair
+    expect(trueCall[1]).toBe(falseCall[1]);
   });
 
   it("fires onDeletingChange(false) on delete failure — latch must release even on error", async () => {

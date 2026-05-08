@@ -181,6 +181,15 @@ export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
 /**
  * If a Redis entry has `label` but no `name`, auto-upgrade to the new schema.
  * This handles both partially-migrated Redis data and stale SWR cache entries.
+ *
+ * Pre-migration entries don't carry an `updatedAt` — we substitute the empty
+ * string `""` (rather than `new Date().toISOString()`) so the value is stable
+ * across SWR polls. The detail page keys the form mount on `entry.updatedAt`,
+ * so a fresh timestamp on every fetch would discard in-progress edits every
+ * 30 s for legacy rows. The merge logic in `mergeEntries` already handles
+ * empty `updatedAt` via `?? ""`, so ordering semantics are preserved (any
+ * persisted timestamp sorts after `""`, which is the right "newer wins"
+ * behaviour for a save that adds the timestamp).
  */
 export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
   const entry = raw as Record<string, unknown>;
@@ -207,10 +216,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
         isPublic: entry.isPublic === true ? true : undefined,
         ...(source ? { source } : {}),
         ...(createdAt ? { createdAt } : {}),
-        updatedAt:
-          typeof entry.updatedAt === "string"
-            ? entry.updatedAt
-            : new Date().toISOString(),
+        updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
       };
     }
   }
@@ -232,10 +238,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
       isPublic: entry.isPublic === true ? true : undefined,
       ...(source ? { source } : {}),
       ...(createdAt ? { createdAt } : {}),
-      updatedAt:
-        typeof entry.updatedAt === "string"
-          ? entry.updatedAt
-          : new Date().toISOString(),
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
     };
   }
 
@@ -250,10 +253,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     isPublic: entry.isPublic === true ? true : undefined,
     ...(source ? { source } : {}),
     ...(createdAt ? { createdAt } : {}),
-    updatedAt:
-      typeof entry.updatedAt === "string"
-        ? entry.updatedAt
-        : new Date().toISOString(),
+    updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
   };
 }
 
