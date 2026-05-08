@@ -117,7 +117,7 @@ Expansion procedure: when a new entry shows up in the top-N of `AggregatorDailyS
 
 - [ ] **Dedupe overlap between snapshot range and today in unique-trader count.** `mergeHeroSnapshot` adds the snapshot's `uniqueTraders` and today's distinct trader count without de-duplicating; a trader active both in `[windowStart, yesterday]` and today is counted twice. Acceptable today (today's distinct count is small, usually <50). Fix when needed: ship `distinctTraders: [String!]!` on `LeaderboardWindowSnapshot` so the dashboard can subtract the overlap. Source: claude[bot] review on PR #328 (finding 2).
 - [ ] **Date-range filter on `getWhere.chainId.eq` during heartbeat flush.** `flushV{2,3}LeaderboardWindowSnapshots` loads ALL historical `TraderDailySnapshot` / `BrokerTraderDailySnapshot` rows for the chain on each flush, then filters in memory. Fine at current scale (~21k rows / 100ms on Celo's all-window); needs a date-range filter (or a per-day partitioning entity) at 10× scale. Source: claude[bot] review on PR #328 (finding 4).
-- [x] ~~**Stale-snapshot detection when a chain has no events for ≥1 UTC day.**~~ Done: `mergeHeroSnapshot` now drops snapshot rows whose `snapshotDay` is older than yesterday's UTC midnight and returns the affected `chainId`s in `staleChains`. The leaderboard page renders an amber `role="status"` banner above the hero tiles naming each silent chain (via `chainLabel`). Filter applies under both `showSystem` branches. Boundary tests in `leaderboard.test.ts` cover today / yesterday / older snapshots. Source: claude[bot] review on PR #328 (finding 3).
+- [x] ~~**Stale-snapshot detection when a chain has no events for ≥1 UTC day.**~~ Done in PR #339 (final shape after two codex iterations). Two-threshold rule on `windowKey ∈ {"7d","30d","90d"}`: `snapshotDay < today-2d` → STALE (snapshot AND today's partial dropped, amber banner); `snapshotDay = today-2d` → DEGRADED (snapshot kept, lighter banner — pre-first-swap-of-day state where yesterday's data isn't yet in either source); `snapshotDay ≥ today-1d` → FRESH. `all` and `24h` rows never flagged. Hero rollup extracted to `lib/leaderboard-hero.ts`; banners to `_components/hero-data-quality-banners.tsx`. `top10Concentration` applies the same chain mask to numerator and denominator. Source: claude[bot] review on PR #328 (finding 3).
 
 ## Refactor — long files (next candidates after PR #263)
 
@@ -154,18 +154,18 @@ PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 l
 
 ## Follow-ups deferred from PR #288 (address-book extract)
 
-- [ ] `_lib/address-book-rows.test.ts` — `buildContractRows`, `buildCustomRows`, `filterRows`, and `unknownChainNetwork` are currently covered only through the 38 characterization tests in `AddressBookClient.test.tsx`. A dedicated unit-test file for the lib module (especially `unknownChainNetwork`'s fallback sentinel values) would tighten the safety net independently of the UI.
+- [x] ~~`_lib/address-book-rows.test.ts` — dedicated unit tests for `buildContractRows`, `buildCustomRows`, `filterRows`, and `unknownChainNetwork`.~~ Done in PR #333: 19 tests covering happy paths, unknown-chain-network fallback sentinels, and filter edge cases.
 
 ## Cosmetic follow-ups deferred from PR #263
 
 Pre-existing behavior carried over verbatim from the monolithic pool page; flagged by claude[bot] review but kept out of scope of the refactor PR.
 
-- [ ] `_tabs/reserves-tab.tsx` — `<Th align="right">Total (USD)</Th>` is rendered unconditionally even when `showUsd` is false (cells then show `—`). Mirror the `LpsTab` pattern: `{showUsd && <Th align="right">Total (USD)</Th>}` plus matching cell wrap.
-- [ ] `_tabs/swaps-tab.tsx` — cumulative-stats IIFE block. Replace `{(() => { const last = snapshots[0]; if (!last) return null; return (...); })()}` with `const lastSnapshot = snapshots[0]` above the return + `{lastSnapshot && (...)}`.
+- [x] ~~`_tabs/reserves-tab.tsx` — gate the `Total (USD)` `<Th>` on `showUsd`.~~ Done in PR #332.
+- [x] ~~`_tabs/swaps-tab.tsx` — replace cumulative-stats IIFE with a hoisted `lastSnapshot` const.~~ Done in PR #332.
 
 ## Follow-ups deferred from PR #304 (per-pool revenue leaderboard)
 
-- [ ] **Component-level tests for `RevenueByPoolTable`.** Sort transitions, label fallback (truncated address when `poolLabels` lookup misses), partial-data render when one chain has `feesError`, and the `≈`-prefix per-window scoping. Both `/review` (65 conf) and Cursor flagged the gap. Helpers (`aggregateProtocolFeesByPool`) are well-covered; the stateful UI is not.
+- [x] ~~**Component-level tests for `RevenueByPoolTable`.**~~ Done in PR #334: sort transitions, label fallback (truncated address when `poolLabels` lookup misses), and partial-data render assertions are now covered. (Partial-data shell additionally got an axe-coverage test in PR #342.)
 - [x] ~~**Tests for `useProtocolFees` orchestration.**~~ Done: `src/hooks/__tests__/use-protocol-fees.test.ts` — 13 tests covering happy path, fees/rates/labels rejection, all-fail, hasura URL guard, and per-chain isolation.
 - [x] ~~**URL-persisted sort state on `RevenueByPoolTable` and `GlobalPoolsTable`.**~~ Done in this PR: new `useTableSort<K>` hook in `lib/use-table-sort.ts` reads sort key + direction from search params via `useSearchParams` and writes back via `useRouter().replace()`. Strips params when state matches defaults; canonicalizes malformed/partial URL params on mount so the address bar always describes the rendered state. Per-table `paramPrefix` (`leaderboard`, `pools`) keeps params from colliding. Smoke integration tests on both real consumers verify the wiring (URL state → `aria-sort`).
 - [x] ~~**Per-chain truncation flag on the leaderboard.**~~ Done in PR #306: `buildRows` derives per-window flags from each chain's `isTruncated` AND the oldest returned transfer's timestamp vs each window's lower bound, so a window is flagged only when the cap actually clipped data inside it. Each `FeeColumn` carries a `truncatedField` symmetric to `unpricedField`; `approxAnnotation(row, column)` checks both per column. Tests cover all (truncated × unpriced) combinations and per-window cases (oldest-older-than-30d → only All-time; oldest-inside-30d → 30d + All-time; etc.).
@@ -177,6 +177,18 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 - [ ] **Report-only addresses need a UI surface.** The address-book page builds rows from `contractRows + customRows`. An address with a forensic report but no label has no row, so the report is unreachable through the UI after the modal closes. Options: (a) add a `/address-book/reports` index page listing every address with a report, or (b) include report-only rows in the main address book (deduplicated against contract + custom rows). Flagged by Codex on PR #330.
 - [x] **Address labels: drop chain/global scope (mirror reports).** Done in PR #332 — labels now live in a single `labels` hash keyed by lowercase address. Migration runs via `POST /api/address-labels/migrate-flat` (cron-secret or session) which snapshots the legacy `labels:{chainId}` + `labels:global` hashes to Vercel Blob, merges into the new flat key (union tags, prefer most-recently-updated fields, earliest createdAt), verifies, then deletes the legacy keys. Idempotent.
 - [ ] **Drop the legacy dual-read in `getLabels` / `getLabel`.** PR #332 ships a transition path where `getLabels()` and `getLabel(address)` read the flat hash plus every legacy `labels:{chainId}` / `labels:global` so the UI doesn't blank out between the deploy and the manual `POST /api/address-labels/migrate-flat` call. After production has run the migration and confirmed the response shows `legacyDropped: true`, remove the legacy half of the read in `ui-dashboard/src/lib/address-labels.ts` and delete the migration route + tests. Keep `KNOWN_LEGACY_KEYS` until the legacy half is gone, then drop that too.
+
+## Follow-ups deferred from PR #339 (stale-snapshot detection)
+
+- [ ] **`page-client.tsx` structural split.** The leaderboard page client is 633 lines (was 620 pre-PR; PR #339 nudged it up by 13 after the banner extraction reversed most of the growth). Still over the 600-line soft cap. The page glues together `useGQL` queries, `useMemo` aggregations across v3/v2 venues, hero tiles, banners, and several tabs — a thoughtful per-section split (e.g. extract the v2 producer panel and the per-pool chart view-model into their own client components) is the right move, but bigger than a feedback-PR can absorb. Track separately.
+- [ ] **Catch up the missing closed UTC day instead of just flagging it.** The current "DEGRADED" banner tells the user yesterday's data isn't yet in the snapshot for chains in the pre-first-swap-of-day state. A better UX: the dashboard could fetch yesterday's closed-day rows directly from `TraderDailySnapshot` and merge them client-side, eliminating the gap entirely. Rough cost: one extra GraphQL query gated on `degradedChains.length > 0` plus a second pass through `mergeHeroSnapshot`. Source: codex review on PR #339 (`#3207495777`'s "fetch the missing closed day" alternative).
+
+## Follow-ups deferred from PR #342 (axe-core a11y test infra)
+
+Currently captured as `it.todo` blocks in `ui-dashboard/src/__tests__/a11y/controls.a11y.test.tsx`; un-skip when the prod widget fixes land.
+
+- [ ] **`BridgeStatusFilter` keyboard contract.** WAI-ARIA `radiogroup` should expose a single tab stop — `tabIndex={0}` on the selected pill, `tabIndex={-1}` on the others, with arrow keys moving focus. The current widget makes every `role="radio"` pill independently tabbable. Replace the matching `it.todo` with a real assertion covering tabIndex distribution + arrow-key focus moves once the prod fix lands.
+- [ ] **Pool tablist keyboard contract.** Same WAI-ARIA pattern as above, applied to `<PoolTablist>` (`pool/[poolId]/_components/pool-tablist.tsx`). Single tab stop on the selected `role="tab"` button + arrow-key focus movement. Also currently held by `it.todo`.
 
 ## Follow-ups deferred from PR #335 (sign-in callback preservation)
 
