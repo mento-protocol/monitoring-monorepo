@@ -563,6 +563,41 @@ describe("validateSnapshotReports", () => {
     expect(Object.keys(result.reports)).toEqual([upper.toLowerCase()]);
     expect(result.reports[upper.toLowerCase()].body).toBe("ok");
   });
+
+  it("silently drops empty titles (matches sanitizeReportInput drop-on-empty)", async () => {
+    // upgradeReport's truthiness check on `raw.title` coerces empty string
+    // to undefined. validateSnapshotReports now lets empty titles through
+    // unchanged so the behavior matches the live editor — the validator
+    // and the persistence layer agree, and a hand-edited blob with
+    // `title: ""` lands as a titleless record (not an invisible-but-stored
+    // field).
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports({
+      [ADDR_A]: {
+        body: "ok",
+        title: "",
+        version: 1,
+      },
+    });
+    if ("error" in result) throw new Error("expected ok");
+    expect(result.reports[ADDR_A].title).toBeUndefined();
+  });
+
+  it("rejects non-string title (defensive: type coercion shouldn't happen)", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports({
+      [ADDR_A]: {
+        body: "ok",
+        title: 123,
+        version: 1,
+      },
+    });
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/title is not a string/),
+    });
+  });
 });
 
 describe("isEntriesMap", () => {

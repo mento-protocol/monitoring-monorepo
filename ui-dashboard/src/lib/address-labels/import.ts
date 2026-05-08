@@ -139,6 +139,23 @@ export async function handleSnapshot(
     }
   }
 
+  // Reject the mixed `{ labels, reports }` shape explicitly. The simple
+  // format uses `labels` (not `addresses`), and `isSnapshot` now matches
+  // anything with a `reports` key — so a legacy `{ labels, reports }`
+  // payload routes here instead of to `handleSimpleFormat`. Without this
+  // guard, the labels would be silently ignored (handleSnapshot only reads
+  // `addresses`/`global`/`chains`) and the caller would see a 200 with
+  // `imported.addresses = 0`. Surface the contradiction instead.
+  if ((body as { labels?: unknown }).labels !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          "Snapshot must use `addresses` (not `labels`); a payload with both `labels` and `reports` is ambiguous — pick the simple format ({labels}) or the snapshot format ({addresses, reports}).",
+      },
+      { status: 400 },
+    );
+  }
+
   if (body.addresses !== undefined) {
     if (!isEntriesMap(body.addresses)) {
       return NextResponse.json(
@@ -375,17 +392,23 @@ export function validateSnapshotReports(
         error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
       };
     }
-    if (
-      p.title !== undefined &&
-      p.title !== null &&
-      (typeof p.title !== "string" || p.title.length > MAX_REPORT_TITLE_LENGTH)
-    ) {
-      return {
-        error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters or is not a string`,
-      };
+    if (p.title !== undefined && p.title !== null) {
+      if (typeof p.title !== "string") {
+        return {
+          error: `Report for ${addr} title is not a string`,
+        };
+      }
+      if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
+        return {
+          error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
+        };
+      }
     }
     validated[addr.toLowerCase()] = p;
   }
+  // upgradeReports coerces falsy titles (empty/whitespace) to undefined —
+  // matching sanitizeReportInput's drop-on-empty behavior — so a payload
+  // with `title: ""` lands in Redis as if no title were ever set.
   return { reports: upgradeReports(validated) };
 }
 

@@ -359,6 +359,37 @@ describe("POST /api/address-labels/import", () => {
     expect(importReports).not.toHaveBeenCalled();
   });
 
+  it("rejects the ambiguous `{ labels, reports }` mixed shape with 400", async () => {
+    // After widening `isSnapshot` to recognise reports-only payloads, a
+    // legacy simple-format shape with reports tagged on (`{ labels: {...},
+    // reports: {...} }`) routes to handleSnapshot. handleSnapshot reads
+    // `addresses`, not `labels` — so without an explicit guard the labels
+    // would be silently dropped and the caller would see 200 / addresses=0.
+    // The route now returns 400 to surface the contradiction.
+    const res = await POST(
+      jsonReq({
+        labels: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        reports: {
+          [validAddress]: {
+            body: "x",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
   it("imports the Gnosis Safe format (chainId field is ignored)", async () => {
     const res = await POST(
       jsonReq([
