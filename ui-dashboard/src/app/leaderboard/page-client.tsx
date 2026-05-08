@@ -8,15 +8,7 @@ import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
-  BROKER_LEADERBOARD_TODAY_TRADERS,
-  BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
-  BROKER_LEADERBOARD_WINDOW_LATEST,
-  BROKER_LEADERBOARD_YESTERDAY_TRADERS,
   BROKER_TRADER_DAILY_TOP,
-  LEADERBOARD_TODAY_TRADERS,
-  LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
-  LEADERBOARD_WINDOW_LATEST,
-  LEADERBOARD_YESTERDAY_TRADERS,
   POOL_DAILY_VOLUME,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
@@ -27,33 +19,24 @@ import {
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
-  mergeHeroSnapshot,
   rangeDays,
-  top10Concentration,
-  weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
   type LeaderboardRangeKey,
-  type LeaderboardTodayTraderRow,
-  type LeaderboardWindowFirstDayRow,
-  type LeaderboardWindowRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
 import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
 import {
   LEADERBOARD_CHART_RANGES,
   LEADERBOARD_FALLBACK_CHART_RANGES,
-  SECONDS_PER_DAY,
   type RangeKey,
 } from "@/lib/time-series";
 import { HeroDataQualityBanners } from "./_components/hero-data-quality-banners";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 import { TopPoolsList } from "./_components/top-pools-list";
-import {
-  V2LeaderboardAggregatorTable,
-  V2LeaderboardTraderTable,
-} from "./_components/v2-leaderboard-tables";
+import { V2LeaderboardSection } from "./_components/v2-leaderboard-section";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
+import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useLeaderboardUrlState } from "./_lib/url-state";
 
 type PoolRow = {
@@ -131,55 +114,6 @@ export function LeaderboardClient() {
     limit: ENVIO_MAX_ROWS,
   });
 
-  // Pre-rolled hero snapshot (one row per chain for the active window).
-  // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
-  // [windowStart, yesterday]; today's partial is fetched separately and
-  // added client-side.
-  const heroV3Result = useGQL<{
-    LeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, { windowKey: range });
-  const heroV2Result = useGQL<{
-    BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null, {
-    windowKey: range,
-  });
-
-  // Isolated first-day slice query (split from the primary hero
-  // query so a hosted-Hasura schema lag on the new columns can
-  // degrade JUST the catch-up). Joined client-side by chainId in
-  // `mergeHeroSnapshot`.
-  const heroFirstDayV3Result = useGQL<{
-    LeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
-  }>(venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
-    windowKey: range,
-  });
-  const heroFirstDayV2Result = useGQL<{
-    BrokerLeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
-    windowKey: range,
-  });
-
-  // Today's UTC midnight in seconds. The hero snapshot's upper bound is
-  // yesterday, so today's TraderDailySnapshot rows fill in the gap.
-  // Memoised on `utcDayKey` so it flips at midnight without retriggering
-  // every minute.
-  const todayMidnight = useMemo(
-    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-    [utcDayKey],
-  );
-  const todayV3Result = useGQL<{
-    TraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null, {
-    todayMidnight,
-    isSystemAddressIn,
-  });
-  const todayV2Result = useGQL<{
-    BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null, {
-    todayMidnight,
-    isSystemAddressIn,
-  });
-
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
   const poolVolumeRows = poolVolumeResult.data?.TraderPoolDailySnapshot ?? [];
@@ -253,113 +187,20 @@ export function LeaderboardClient() {
   // plus today's partial (both exact, no Hasura row cap). Top-10
   // concentration uses the existing top-50 query for the numerator and
   // the snapshot total for the denominator: exact end-to-end.
-  const heroSnapshotRows =
-    venue === "v3"
-      ? heroV3Result.data?.LeaderboardWindowSnapshot
-      : heroV2Result.data?.BrokerLeaderboardWindowSnapshot;
-  const todayPartialRows =
-    venue === "v3"
-      ? todayV3Result.data?.TraderDailySnapshot
-      : todayV2Result.data?.BrokerTraderDailySnapshot;
-
-  const heroFirstDayRows =
-    venue === "v3"
-      ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
-      : heroFirstDayV2Result.data?.BrokerLeaderboardWindowSnapshot;
-
-  // First-pass merge — without `yesterdayRows`. Used solely to
-  // discover which chains are in the DEGRADED state (snapshotDay =
-  // today - 2 days), so we can gate the yesterday-traders query on
-  // them. Cheap (one O(snapshotRows + todayRows) pass).
-  const degradedChainsForGate = useMemo(
-    () =>
-      mergeHeroSnapshot({
-        snapshotRows: heroSnapshotRows,
-        todayRows: todayPartialRows,
-        showSystem,
-        todayMidnightSeconds: todayMidnight,
-      }).degradedChains,
-    [heroSnapshotRows, todayPartialRows, showSystem, todayMidnight],
-  );
-
-  // Catch-up query for DEGRADED chains: fetches yesterday's
-  // trader-day rows scoped to the degraded chainIds so the second
-  // merge pass can perform slice subtraction (drop the snapshot's
-  // first day, add yesterday + today). Gated on
-  // `degradedChainsForGate.length > 0` via `useGQL`'s null-passthrough
-  // convention so we don't burn Envio quota when no chain needs
-  // catching up.
-  const yesterdayMidnight = todayMidnight - SECONDS_PER_DAY;
-  const yesterdayV3Result = useGQL<{
-    TraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(
-    venue === "v3" && degradedChainsForGate.length > 0
-      ? LEADERBOARD_YESTERDAY_TRADERS
-      : null,
-    {
-      yesterdayMidnight,
-      isSystemAddressIn,
-      chainIdIn: degradedChainsForGate,
-    },
-  );
-  const yesterdayV2Result = useGQL<{
-    BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(
-    venue === "v2" && degradedChainsForGate.length > 0
-      ? BROKER_LEADERBOARD_YESTERDAY_TRADERS
-      : null,
-    {
-      yesterdayMidnight,
-      isSystemAddressIn,
-      chainIdIn: degradedChainsForGate,
-    },
-  );
-  const yesterdayPartialRows =
-    venue === "v3"
-      ? yesterdayV3Result.data?.TraderDailySnapshot
-      : yesterdayV2Result.data?.BrokerTraderDailySnapshot;
-
-  const heroTotals = useMemo(
-    () =>
-      mergeHeroSnapshot({
-        snapshotRows: heroSnapshotRows,
-        todayRows: todayPartialRows,
-        firstDayRows: heroFirstDayRows,
-        yesterdayRows: yesterdayPartialRows,
-        showSystem,
-        todayMidnightSeconds: todayMidnight,
-      }),
-    [
-      heroSnapshotRows,
-      todayPartialRows,
-      heroFirstDayRows,
-      yesterdayPartialRows,
-      showSystem,
-      todayMidnight,
-    ],
-  );
-  const totalVolume = useMemo(
-    () => weiToUsd(heroTotals.totalVolumeUsdWei),
-    [heroTotals.totalVolumeUsdWei],
-  );
-  const totalTraders = heroTotals.uniqueTraders;
-  const totalSwaps = heroTotals.totalSwapCount;
-
-  // Source list for top-10 concentration's numerator (top-50 paginated
-  // per-day query). Denominator is the exact snapshot total above. The
-  // helper applies the same stale-chain mask to numerator AND denominator
-  // so the ratio stays coherent when a chain is silent — see
-  // `top10Concentration` JSDoc in `lib/leaderboard.ts` for the rationale.
+  //
+  // The hook owns the hero/today GraphQL queries, the `mergeHeroSnapshot`
+  // call, and the top-10 ratio computation. The `kpiSource` numerator
+  // still flows in from the active venue's table query so the hero
+  // and table queries can degrade independently.
   const kpiSource = venue === "v3" ? aggregated : v2Aggregated;
-  const concentration = useMemo(
-    () =>
-      top10Concentration({
-        rowsByVolumeDesc: kpiSource,
-        totalVolumeUsdWei: heroTotals.totalVolumeUsdWei,
-        staleChains: heroTotals.staleChains,
-      }),
-    [kpiSource, heroTotals.totalVolumeUsdWei, heroTotals.staleChains],
-  );
+  const hero = useHeroRollup({
+    venue,
+    range,
+    showSystem,
+    isSystemAddressIn,
+    utcDayKey,
+    kpiSource,
+  });
 
   // Leaderboard ranges include `24h` (used by v3 single-line + v2
   // single-line charts via `range !== "24h"` gate elsewhere) and `7d`,
@@ -387,17 +228,6 @@ export function LeaderboardClient() {
   // post-deploy resync window for that new entity) doesn't take down the
   // producer view that's the actual outreach driver. Codex review:
   // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
-  // Tiles + chart load when the hero snapshot AND its today-partial both
-  // land. The top-50 table loads independently from the existing
-  // TraderDailySnapshot query (which is fast — capped at 1000 by design).
-  const heroIsLoading =
-    venue === "v3"
-      ? heroV3Result.isLoading || todayV3Result.isLoading
-      : heroV2Result.isLoading || todayV2Result.isLoading;
-  const heroHasError =
-    venue === "v3"
-      ? !!heroV3Result.error || !!todayV3Result.error
-      : !!heroV2Result.error || !!todayV2Result.error;
   const tableIsLoading =
     venue === "v3"
       ? tradersResult.isLoading || poolsResult.isLoading
@@ -445,7 +275,8 @@ export function LeaderboardClient() {
   // Headline reads `totalVolume` from the hero snapshot, so it follows
   // hero loading/error — not the table's. Change pill is week-over-week
   // if the range is ≥7d, otherwise null (24h has no meaningful WoW peer).
-  const headline = heroIsLoading || heroHasError ? "" : formatUSD(totalVolume);
+  const headline =
+    hero.isLoading || hero.hasError ? "" : formatUSD(hero.totalVolume);
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -524,41 +355,45 @@ export function LeaderboardClient() {
       </header>
 
       <HeroDataQualityBanners
-        staleChains={heroTotals.staleChains}
-        degradedChains={heroTotals.degradedChains}
-        isLoading={heroIsLoading}
-        hasError={heroHasError}
+        staleChains={hero.staleChains}
+        degradedChains={hero.degradedChains}
+        isLoading={hero.isLoading}
+        hasError={hero.hasError}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Tile
           label="Total volume"
           value={
-            heroIsLoading ? "…" : heroHasError ? "—" : formatUSD(totalVolume)
+            hero.isLoading
+              ? "…"
+              : hero.hasError
+                ? "—"
+                : formatUSD(hero.totalVolume)
           }
           subtitle={rangeSubtitle(range)}
         />
         <Tile
           label="Unique traders"
           value={
-            heroIsLoading
+            hero.isLoading
               ? "…"
-              : heroHasError
+              : hero.hasError
                 ? "—"
-                : totalTraders.toLocaleString()
+                : hero.totalTraders.toLocaleString()
           }
-          subtitle={`${totalSwaps.toLocaleString()} swaps`}
+          subtitle={`${hero.totalSwaps.toLocaleString()} swaps`}
         />
         <Tile
           label={
             isTableCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
           }
           value={
-            heroIsLoading || tableIsLoading
+            hero.isLoading || tableIsLoading
               ? "…"
-              : heroHasError || tableHasError
+              : hero.hasError || tableHasError
                 ? "—"
-                : `${isTableCapHit ? "≈ " : ""}${concentration.toFixed(1)}%`
+                : `${isTableCapHit ? "≈ " : ""}${hero.concentration.toFixed(1)}%`
           }
           subtitle={
             isTableCapHit
@@ -659,46 +494,16 @@ export function LeaderboardClient() {
           />
         </section>
       ) : (
-        <>
-          <section>
-            <h2 className="mb-3 text-sm font-medium text-slate-300">
-              Top v2 producers ({rangeLabel(range)})
-            </h2>
-            <V2LeaderboardTraderTable
-              traders={v2Aggregated}
-              isLoading={tableIsLoading}
-              hasError={tableHasError}
-            />
-          </section>
-          <section>
-            <h2 className="mb-3 text-sm font-medium text-slate-300">
-              v2 volume by aggregator / entry-point ({rangeLabel(range)})
-            </h2>
-            <p className="mb-3 text-xs text-slate-500">
-              Canonical name from <code>aggregators.json</code>. Large{" "}
-              <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
-                unknown
-              </span>{" "}
-              rows are unclassified routers — file an entry to label them and
-              reach out to the operator about migrating to v3.
-            </p>
-            {isV2AggregatorCapHit && (
-              <div className="mb-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
-                <strong className="font-medium">
-                  Approximate aggregator list.
-                </strong>{" "}
-                Showing the top {ENVIO_MAX_ROWS.toLocaleString()} aggregator-day
-                rows by single-day volume — long-tail aggregators whose daily
-                volume doesn&apos;t crack the cap may be missing.
-              </div>
-            )}
-            <V2LeaderboardAggregatorTable
-              aggregators={v2AggregatorAggregated}
-              isLoading={v2AggIsLoading}
-              hasError={v2AggHasError}
-            />
-          </section>
-        </>
+        <V2LeaderboardSection
+          rangeLabel={rangeLabel(range)}
+          v2Aggregated={v2Aggregated}
+          v2AggregatorAggregated={v2AggregatorAggregated}
+          tableIsLoading={tableIsLoading}
+          tableHasError={tableHasError}
+          v2AggIsLoading={v2AggIsLoading}
+          v2AggHasError={v2AggHasError}
+          isV2AggregatorCapHit={isV2AggregatorCapHit}
+        />
       )}
     </div>
   );
