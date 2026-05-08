@@ -80,6 +80,24 @@ type AddressLabelsContextValue = {
    */
   hasLoaded: boolean;
   error: Error | undefined;
+  /**
+   * Mark a save/delete as pending against `address`. Returns an
+   * "unmark" function the caller MUST invoke when the request settles
+   * (success or failure). The provider tracks pending mutations
+   * globally — surviving the detail page's mount/unmount lifecycle —
+   * so a user who saves on `/address-book/[A]`, leaves to
+   * `/address-book` index, then re-enters `[A]` before the original
+   * request settles still sees the in-flight state and the form keeps
+   * Save/Remove disabled. Both modal and detail surfaces share this
+   * ledger so a save kicked off in one surface blocks a competing
+   * second write in the other.
+   */
+  markPendingMutation: (address: string) => () => void;
+  /**
+   * True when at least one save/delete is in flight for `address`.
+   * Re-renders when the count flips between 0 and >0.
+   */
+  isMutationPending: (address: string | null) => boolean;
 };
 
 const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
@@ -342,6 +360,44 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     await mutate(SWR_KEY);
   }, [mutate]);
 
+  // Pending-mutations ledger. Tracks address → in-flight count so
+  // surfaces (modal, detail page) can read it to disable competing
+  // writes against the same address. State (not a ref) because
+  // consumers gate render output on it. Lives in the provider rather
+  // than the detail page so a user who navigates away from the
+  // detail route mid-write and re-enters the same address still
+  // sees the in-flight state — the page would otherwise unmount and
+  // rebuild a fresh, empty ledger.
+  const [pendingMutations, setPendingMutations] = useState<
+    Record<string, number>
+  >({});
+  const markPendingMutation = useCallback((address: string): (() => void) => {
+    const lower = address.toLowerCase();
+    setPendingMutations((m) => ({ ...m, [lower]: (m[lower] ?? 0) + 1 }));
+    let unmarked = false;
+    return () => {
+      // Idempotent: a caller that defensively unmarks twice (e.g. via
+      // a finally block plus an error handler) shouldn't decrement
+      // past zero and unblock a subsequent save.
+      if (unmarked) return;
+      unmarked = true;
+      setPendingMutations((m) => {
+        const next = { ...m };
+        const c = (next[lower] ?? 0) - 1;
+        if (c <= 0) delete next[lower];
+        else next[lower] = c;
+        return next;
+      });
+    };
+  }, []);
+  const isMutationPending = useCallback(
+    (address: string | null): boolean => {
+      if (!address) return false;
+      return (pendingMutations[address.toLowerCase()] ?? 0) > 0;
+    },
+    [pendingMutations],
+  );
+
   const value: AddressLabelsContextValue = {
     getName,
     getTags,
@@ -355,6 +411,8 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     isLoading,
     hasLoaded,
     error: error as Error | undefined,
+    markPendingMutation,
+    isMutationPending,
   };
 
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;

@@ -14,6 +14,7 @@ import {
   buildCustomRows,
   filterRows,
   findContractInitial,
+  hasAmbiguousContractMatches,
   type AddressRow,
 } from "./_lib/address-book-rows";
 import { importFile, exportLabels } from "./_lib/address-book-import-export";
@@ -262,6 +263,17 @@ export default function AddressBookPage({
             findContractInitial(editTarget.address)
           }
           onClose={() => setEditTarget(null)}
+          // Mirror of the detail page's `requireExplicitName` gate.
+          // When the address is registered as a contract under
+          // multiple disagreeing names AND there's no custom entry
+          // yet, force the user to type the right name — otherwise a
+          // tag-only save persists `name: ""` and `buildAddressBookRows`
+          // suppresses every contract row for that address under a
+          // nameless custom row.
+          requireExplicitName={
+            !getEntry(editTarget.address)?.entry &&
+            hasAmbiguousContractMatches(editTarget.address)
+          }
         />
       )}
     </div>

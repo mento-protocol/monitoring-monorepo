@@ -44,6 +44,8 @@ export default function AddressDetailPage() {
     getEntry,
     hasLoaded: labelsLoaded,
     error: labelsError,
+    markPendingMutation,
+    isMutationPending,
   } = useAddressLabels();
   const { hasReport } = useAddressReportsIndex();
 
@@ -55,20 +57,13 @@ export default function AddressDetailPage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formDeleting, setFormDeleting] = useState(false);
   const latchedFormSuffixRef = useRef<string>("");
-  // Pending mutations BY ADDRESS (not by current mount). Address-change
-  // resets clear `formSaving` / `formDeleting` for the CURRENT mount,
-  // but if a save started on form A is still in flight after the user
-  // navigates B → A, the freshly mounted form A would otherwise enable
-  // Save (its internal `saving=false`) and a second click could fire
-  // an overlapping PUT/DELETE. Track pending by address so a remount
-  // for the same address sees the prior request and stays disabled
-  // until it settles. The ref maps formInstanceId → originating
-  // address so we can decrement the right bucket when the request
-  // resolves.
-  const formIdToAddressRef = useRef<Map<string, string>>(new Map());
-  const [pendingByAddress, setPendingByAddress] = useState<
-    Record<string, number>
-  >({});
+  // Pending mutations are tracked GLOBALLY in the labels provider so
+  // they survive this page's mount/unmount lifecycle (a user who saves
+  // → navigates to the index → re-enters the same address before the
+  // request settles still sees the in-flight state). This component
+  // just keeps a per-formInstanceId map of unmark callbacks so the
+  // matching `false` event releases the right pending entry.
+  const unmarkPendingRef = useRef<Map<string, () => void>>(new Map());
   const addressRef = useRef(address);
   addressRef.current = address;
   // Scope each latch to the *currently mounted* form instance, with
@@ -85,29 +80,23 @@ export default function AddressDetailPage() {
   // stuck true and the latch permanently held.
   const savingOwnerRef = useRef<string | null>(null);
   const deletingOwnerRef = useRef<string | null>(null);
-  // Helpers update the pending-by-address ledger AND the per-flow latch
-  // owner. The latch owner is checked for stale-callback dedup
-  // (round 7); the pending ledger is checked on form mount for the
-  // round-trip race (codex round 11). Both must update on every
-  // begin/end so the two views stay coherent.
-  const incPending = useCallback((formId: string) => {
-    formIdToAddressRef.current.set(formId, addressRef.current);
-    setPendingByAddress((m) => ({
-      ...m,
-      [addressRef.current]: (m[addressRef.current] ?? 0) + 1,
-    }));
-  }, []);
+  // Helpers wrap the provider's `markPendingMutation` (which returns
+  // an `unmark` closure) so the matching `false` event can find and
+  // call the right unmark. Updates BOTH the global pending ledger AND
+  // the per-flow latch owner — owner is checked for stale-callback
+  // dedup (round 7); ledger is checked on form mount for the
+  // round-trip race (rounds 11 + 12). Both must move in lock-step.
+  const incPending = useCallback(
+    (formId: string) => {
+      const unmark = markPendingMutation(addressRef.current);
+      unmarkPendingRef.current.set(formId, unmark);
+    },
+    [markPendingMutation],
+  );
   const decPending = useCallback((formId: string) => {
-    const addr = formIdToAddressRef.current.get(formId);
-    formIdToAddressRef.current.delete(formId);
-    if (!addr) return;
-    setPendingByAddress((m) => {
-      const next = { ...m };
-      const c = (next[addr] ?? 0) - 1;
-      if (c <= 0) delete next[addr];
-      else next[addr] = c;
-      return next;
-    });
+    const unmark = unmarkPendingRef.current.get(formId);
+    unmarkPendingRef.current.delete(formId);
+    unmark?.();
   }, []);
   const handleSavingChange = useCallback(
     (saving: boolean, formId: string) => {
@@ -184,9 +173,11 @@ export default function AddressDetailPage() {
   // in the index. Force an explicit name for that case.
   const requireExplicitName = !entry && hasAmbiguousContractMatches(address);
   // Disable Save/Remove on this mount when there's a pending mutation
-  // for THIS address from any prior mount — see `pendingByAddress`
-  // declaration above for the round-trip-race rationale.
-  const hasPendingForThisAddress = (pendingByAddress[address] ?? 0) > 0;
+  // for THIS address from any prior mount — read from the provider so
+  // the value survives this page's mount/unmount lifecycle (a user
+  // who saved → bounced to /address-book → came back to /[A] before
+  // the request settled would otherwise see a fresh empty ledger).
+  const hasPendingForThisAddress = isMutationPending(address);
 
   // Pin the form's remount key during any in-flight local mutation
   // (save OR delete). Both `upsertEntry` and `deleteEntry` apply

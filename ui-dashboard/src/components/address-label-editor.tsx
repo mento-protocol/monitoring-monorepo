@@ -25,9 +25,21 @@ type Props = {
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
   onClose: () => void;
+  /**
+   * Forwarded to the inner form. Forces an explicit name when set —
+   * used when the address is registered as a contract under multiple
+   * disagreeing names so a tag-only save can't persist an empty
+   * global label that suppresses every contract row in the index.
+   */
+  requireExplicitName?: boolean;
 };
 
-export function AddressLabelEditor({ address, initial, onClose }: Props) {
+export function AddressLabelEditor({
+  address,
+  initial,
+  onClose,
+  requireExplicitName,
+}: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
@@ -171,6 +183,7 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
           onDeleted={onClose}
           onCancel={onClose}
           firstFieldRef={firstInputRef}
+          requireExplicitName={requireExplicitName}
         />
       </div>
       <div
