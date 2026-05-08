@@ -9,6 +9,10 @@ import {
   selectStaleTransfers,
   resolveFeeTokenMeta,
 } from "../src/EventHandlers.ts";
+import {
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
+} from "../src/rpc.ts";
 import { makePoolId } from "../src/helpers.ts";
 
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
@@ -92,9 +96,11 @@ const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000042";
 
 /**
  * Seed a minimal FPMM pool so context.Pool.get(POOL_ADDRESS) returns a pool
- * with `source` containing "fpmm".
+ * with `source` containing "fpmm". Pre-seeds the rebalanceThresholds RPC
+ * mock so the factory's now-block-scoped effect doesn't hit live RPC.
  */
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
+  _setMockRebalanceThresholds(42220, POOL_ADDRESS, { above: 100, below: 100 });
   const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
     token0: TOKEN_ADDRESS,
     token1: "0x0000000000000000000000000000000000000043",
@@ -140,6 +146,10 @@ function createTransferEvent(overrides: {
 // ---------------------------------------------------------------------------
 
 describe("ERC20FeeToken.Transfer handler", () => {
+  afterEach(() => {
+    _clearMockRebalanceThresholds();
+  });
+
   it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async function () {
     this.timeout(10_000);
     let mockDb = MockDb.createMockDb();

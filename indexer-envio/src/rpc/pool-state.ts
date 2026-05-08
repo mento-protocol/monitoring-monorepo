@@ -378,6 +378,30 @@ export async function fetchInvertRateFeed(
   }
 }
 
+/** @internal Test-only: pre-set mock thresholds for a pool address. The
+ * factory and self-heal paths read this map first, falling through to the
+ * live RPC only when no mock is set. Call `_clearMockRebalanceThresholds()`
+ * between tests to avoid leaking state. */
+const _testRebalanceThresholds = new Map<
+  string,
+  { above: number; below: number } | null
+>();
+
+export function _setMockRebalanceThresholds(
+  chainId: number,
+  poolAddress: string,
+  thresholds: { above: number; below: number } | null,
+): void {
+  _testRebalanceThresholds.set(
+    `${chainId}:${poolAddress.toLowerCase()}`,
+    thresholds,
+  );
+}
+
+export function _clearMockRebalanceThresholds(): void {
+  _testRebalanceThresholds.clear();
+}
+
 /** Fetch the pool's rebalance thresholds (above and below) at a specific
  * block. Standalone getters do NOT require the oracle to be live (unlike
  * getRebalancingState which reverts on stale/expired oracle data). Returns
@@ -391,6 +415,10 @@ export async function fetchRebalanceThresholds(
   blockNumber: bigint,
   log: RpcLogger = consoleLogger,
 ): Promise<{ above: number; below: number } | null> {
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRebalanceThresholds.has(testKey)) {
+    return _testRebalanceThresholds.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
