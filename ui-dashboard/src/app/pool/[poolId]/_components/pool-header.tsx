@@ -20,6 +20,9 @@ import { formatTimestamp, relativeTime } from "@/lib/format";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool, TradingLimit } from "@/lib/types";
+import { useV2ExchangeConfig } from "@/hooks/use-v2-exchange-config";
+import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
+import { V2ExchangePanel } from "./v2-exchange-panel";
 
 export function PoolHeader({
   pool,
@@ -34,6 +37,11 @@ export function PoolHeader({
 }) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
+  // Live v2 BiPoolManager exchange state (only fired for virtual pools —
+  // hook gates internally so the call is a no-op for FPMM).
+  const { data: v2Data } = useV2ExchangeConfig(pool);
+  const v2Config = v2Data?.ok ? v2Data.config : null;
+  const v2Deprecated = v2Config?.isDeprecated ?? false;
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -77,6 +85,11 @@ export function PoolHeader({
           <AddressLink address={poolContractAddress} readOnly />
         </span>
         <SourceBadge source={pool.source} />
+        {v2Deprecated && (
+          <span className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-300">
+            Deprecated
+          </span>
+        )}
         <MarketHoursPill pool={pool} />
         {deployTxHash ? (
           <a
@@ -95,58 +108,59 @@ export function PoolHeader({
         )}
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
-        <Stat
-          label={
-            <span className="inline-flex items-center gap-1">
-              Uptime
-              <UptimeInfoIcon pool={pool} />
-            </span>
-          }
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <UptimeValue pool={pool} />
-            )
-          }
-        />
-        <Stat
-          label="Oracle Price"
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <OraclePriceValue pool={pool} network={network} />
-            )
-          }
-        />
-        <Stat
-          label="Trading Limits"
-          value={
-            <LimitStatusValue
-              pool={pool}
-              tradingLimits={tradingLimits}
-              hasError={tradingLimitsError}
+        {isVirtual ? (
+          <VirtualPoolHeaderTiles pool={pool} />
+        ) : (
+          <>
+            <Stat
+              label={
+                <span className="inline-flex items-center gap-1">
+                  Uptime
+                  <UptimeInfoIcon pool={pool} />
+                </span>
+              }
+              value={<UptimeValue pool={pool} />}
             />
-          }
-        />
-        <Stat
-          label="Rebalance Status"
-          value={
-            isVirtual || !pool.rebalancerAddress ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <RebalanceStatusValue
-                pool={pool}
-                network={network}
-                strategyAddress={pool.rebalancerAddress}
-              />
-            )
-          }
-        />
-        <DeviationCell pool={pool} network={network} />
+            <Stat
+              label="Oracle Price"
+              value={<OraclePriceValue pool={pool} network={network} />}
+            />
+            <Stat
+              label="Trading Limits"
+              value={
+                <LimitStatusValue
+                  pool={pool}
+                  tradingLimits={tradingLimits}
+                  hasError={tradingLimitsError}
+                />
+              }
+            />
+            <Stat
+              label="Rebalance Status"
+              value={
+                pool.rebalancerAddress ? (
+                  <RebalanceStatusValue
+                    pool={pool}
+                    network={network}
+                    strategyAddress={pool.rebalancerAddress}
+                  />
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )
+              }
+            />
+            <DeviationCell pool={pool} network={network} />
+          </>
+        )}
       </dl>
-      {!isVirtual && (
+      {isVirtual ? (
+        <>
+          <div className="my-5 h-px bg-slate-800" />
+          <V2ExchangePanel pool={pool} network={network} />
+          <div className="my-5 h-px bg-slate-800" />
+          <PoolLifecyclePanel pool={pool} />
+        </>
+      ) : (
         <>
           <div className="my-5 h-px bg-slate-800" />
           <PoolConfigPanel pool={pool} />
@@ -154,5 +168,54 @@ export function PoolHeader({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Header KPIs for VirtualPools. The v3 metrics (uptime, oracle, deviation,
+ * trading limits, rebalance) are FPMM-only — virtual pools wrap a v2
+ * BiPoolManager exchange where those concepts don't apply. Show pair
+ * activity instead: lifetime swap count via the wrapper, age, and the
+ * underlying exchange status (active/deprecated).
+ */
+function VirtualPoolHeaderTiles({ pool }: { pool: Pool }) {
+  const { data: v2 } = useV2ExchangeConfig(pool);
+  const v2Config = v2?.ok ? v2.config : null;
+  const status = v2Config?.isDeprecated
+    ? "Deprecated"
+    : v2Config
+      ? "Active"
+      : "—";
+  const statusColor = v2Config?.isDeprecated
+    ? "text-amber-300"
+    : v2Config
+      ? "text-emerald-300"
+      : "text-slate-500";
+  return (
+    <>
+      <Stat
+        label="v2 Exchange Status"
+        value={<span className={statusColor}>{status}</span>}
+      />
+      <Stat
+        label="Wrapper Swaps"
+        value={(pool.swapCount ?? 0).toLocaleString()}
+        title="Swaps that flowed through the v3 Router → VirtualPool wrapper. Direct v2-broker swaps on the same pair are tracked separately and shown in the activity panel below."
+        mono
+      />
+      <Stat
+        label="Last Bucket Reset"
+        value={
+          v2Config?.isDeprecated ? (
+            <span className="text-slate-500">—</span>
+          ) : v2Config ? (
+            relativeTime(v2Config.lastBucketUpdate)
+          ) : (
+            <span className="text-slate-500">…</span>
+          )
+        }
+        title={v2Config?.lastBucketUpdate}
+      />
+    </>
   );
 }
