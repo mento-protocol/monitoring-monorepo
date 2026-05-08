@@ -210,6 +210,63 @@ describe("AddressLabelForm — save flow", () => {
     const [, calledEntry] = mockUpsertEntry.mock.calls[0];
     expect(calledEntry.notes).toBeUndefined();
   });
+
+  it("fires onSavingChange(true) before upsert and onSavingChange(false) after — used by the detail page to pin its remount key during in-flight optimistic updates", async () => {
+    // Codex P2 race: the detail page's form key includes `entry.updatedAt`,
+    // and `upsertEntry` bumps `updatedAt` optimistically before the PUT
+    // resolves. Without onSavingChange the page can't suppress the remount,
+    // and a double-click during the in-flight window can submit overlapping
+    // writes. Pin the contract: callback fires true → resolve → false.
+    let resolveUpsert: () => void = () => undefined;
+    mockUpsertEntry.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpsert = resolve;
+        }),
+    );
+    const onSavingChange = vi.fn();
+    render({ address: VALID_ADDR, onSavingChange });
+    setInputValue("al-name", "Alice");
+
+    // Submit but do NOT await — we need to inspect state mid-flight.
+    const form = container.querySelector("form")!;
+    act(() => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    // Fired before the await — page sees `true` while the PUT is in flight.
+    expect(onSavingChange).toHaveBeenCalledWith(true);
+    expect(onSavingChange).not.toHaveBeenCalledWith(false);
+
+    // Resolve the upsert and drain microtasks so the finally block runs.
+    await act(async () => {
+      resolveUpsert();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // After resolve, the false signal lets the page snap its key to the
+    // post-save updatedAt.
+    expect(onSavingChange).toHaveBeenCalledWith(false);
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+  });
+
+  it("fires onSavingChange(false) on save failure so the page key unfreezes even when the PUT throws", async () => {
+    // Without the finally branch, a failed save would leave the page key
+    // pinned forever — subsequent successful saves on the same address
+    // wouldn't remount on remote refresh, defeating the cross-tab guard.
+    mockUpsertEntry.mockRejectedValueOnce(new Error("boom"));
+    const onSavingChange = vi.fn();
+    render({ address: VALID_ADDR, onSavingChange });
+    setInputValue("al-name", "Alice");
+    await submit();
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    // Error surfaced to the user too.
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("boom");
+  });
 });
 
 describe("AddressLabelForm — delete flow", () => {

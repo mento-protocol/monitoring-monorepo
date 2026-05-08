@@ -90,6 +90,16 @@ type Props = {
    * and land focus on the dialog's close button instead of the field.
    */
   firstFieldRef?: RefObject<HTMLInputElement | null>;
+  /**
+   * Fires whenever an in-flight save begins / ends. The detail page uses
+   * this to pin its remount key during the save: `upsertEntry`'s optimistic
+   * SWR update bumps `entry.updatedAt` immediately, and a key that includes
+   * `updatedAt` would otherwise unmount the saving form and remount a fresh
+   * one (`saving=false`) while the PUT is still in flight, re-enabling Save
+   * for a window where a double-click can submit overlapping writes. The
+   * modal doesn't need this — its key is stable across opens.
+   */
+  onSavingChange?: (saving: boolean) => void;
 };
 
 export function AddressLabelForm({
@@ -100,6 +110,7 @@ export function AddressLabelForm({
   onDeleted,
   onCancel,
   firstFieldRef,
+  onSavingChange,
 }: Props) {
   const {
     upsertEntry,
@@ -156,6 +167,7 @@ export function AddressLabelForm({
       initial?.name,
     );
     setSaving(true);
+    onSavingChange?.(true);
     setError(null);
     try {
       await upsertEntry(address, {
@@ -169,6 +181,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to save label.");
     } finally {
       setSaving(false);
+      onSavingChange?.(false);
     }
   }
 

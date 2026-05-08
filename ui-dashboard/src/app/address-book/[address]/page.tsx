@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelForm } from "@/components/address-label-form";
@@ -54,6 +54,29 @@ export default function AddressDetailPage() {
   // accidentally drop the registry-supplied display name. Mirrors the
   // modal flow in `AddressBookClient`.
   const formInitial = entry ?? findContractInitial(address);
+
+  // Pin the form's remount key during in-flight local saves. `upsertEntry`'s
+  // optimistic SWR update bumps `entry.updatedAt` synchronously, and the
+  // key includes that timestamp (so a teammate's remote edit forces a
+  // remount that prevents a stale-state overwrite — see codex round 4).
+  // Without this latch, the saving form unmounts mid-PUT and a fresh form
+  // mounts with `saving=false`, re-enabling the Save button for a window
+  // where a double-click could submit overlapping writes despite the
+  // form's local saving guard. The form drives `formSaving` via
+  // `onSavingChange`; the ref below snaps to the live key only when no
+  // save is in flight, so the cross-tab/teammate-edit remount path still
+  // fires the moment the local save settles. Using a ref (vs. effect-
+  // synced state) avoids the `setState`-in-`useEffect` derived-state
+  // anti-pattern — the conditional write is idempotent within a frame
+  // (always writes the current `liveFormKey` when `!formSaving`), so
+  // concurrent re-renders are safe.
+  const [formSaving, setFormSaving] = useState(false);
+  const liveFormKey = `${address}:${entry ? `custom:${entry.updatedAt}` : formInitial ? "contract" : "new"}`;
+  const latchedFormKeyRef = useRef(liveFormKey);
+  if (!formSaving) {
+    latchedFormKeyRef.current = liveFormKey;
+  }
+  const formKey = formSaving ? latchedFormKeyRef.current : liveFormKey;
 
   return (
     <div className="space-y-6">
@@ -122,9 +145,13 @@ export default function AddressDetailPage() {
               //     is losing in-progress local edits when a remote update
               //     lands; that's the right tradeoff vs. silently
               //     clobbering newer data without optimistic-concurrency.
-              key={`${address}:${entry ? `custom:${entry.updatedAt}` : formInitial ? "contract" : "new"}`}
+              // The key is latched while a local save is in flight (see
+              // `formKey` derivation above) so the optimistic-update
+              // `updatedAt` bump doesn't unmount the saving form.
+              key={formKey}
               address={address}
               initial={formInitial}
+              onSavingChange={setFormSaving}
               // No onSaved/onDeleted callbacks — the provider's optimistic
               // update + SWR revalidate already refresh the page data. No
               // navigation on save; users stay on the page to keep editing.
