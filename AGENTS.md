@@ -106,6 +106,26 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 - Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
 
+### Dynamic-route metadata + private data — `docs/pr-checklists/dynamic-route-metadata.md`
+
+- Any Next.js dynamic route whose `generateMetadata` reads access-controlled data (`getLabel`, `findReport`, anything Redis-backed) MUST gate on an explicit "is public" flag (`isPublic === true`) before emitting any field into title / og / twitter tags. `generateMetadata` runs without a session and the rendered tags are visible to every crawler / shared-link preview — without a privacy gate you've leaked PII to anyone who guesses the URL. Caused PR #345's only P1 (codex round 4)
+- `export const revalidate = 0` when the metadata source is access-controlled. Non-zero ISR caching means an editor toggling a label from public → private leaves the prior public tags served from the edge cache for the cache window. Privacy revocation must be honoured immediately; per-request Redis cost is bounded by `withTimeout` and only fires for crawler unfurls
+- Put the metadata-fetching body in a dedicated helper file (e.g. `_lib/og-metadata.ts`) the layout/page imports — NOT directly in `layout.tsx`. The RSC label-leak guard test (`rsc-label-leak-guard.test.ts`) allowlists files that legitimately read Redis; allowlisting a whole layout means a future edit can quietly add an untrusted call inside the default render path. Helper-file scope keeps the guard tight (PR #345 commit `b476776`)
+
+### SWR optimistic-update + React-key remount races
+
+- When a child component is React-keyed by a field your optimistic update also writes to (e.g. `key={entry.updatedAt}` while `upsertEntry` bumps `updatedAt` synchronously in `mutate(...)`), you've created a self-remount race against your own writes. Mid-PUT the form unmounts and a fresh mount (with `saving=false`) re-enables the Save button, opening a double-submit window. Reach for the pending-ledger architecture shipped in PR #345 (`address-labels-provider.tsx` + `address-book/[address]/page.tsx`) before re-deriving these through 15 review rounds:
+  - **Per-mount instance ID via counter-backed ref** — NOT `useId`. `useId` is tree-position-stable, so a remount at the same key path returns the same id and stale-callback dedup falsely accepts old `(false)` calls.
+  - **Separate save / delete owner refs** — a single shared `mutationOwnerRef` breaks under cross-flow timing (Save→Remove fast-click); each flow needs its own owner.
+  - **Pending ledger lifted to provider state** — page-mount-scoped state dies on navigation; a user who saves → bounces to the index → re-enters the same address sees a fresh empty ledger and an enabled Save button. Survive page mounts by living in `AddressLabelsProvider`.
+  - **Synchronous `inFlightRef` guards** — React's `setSaving(true)` is async; a fast double-click slips past the disabled state. A `useRef({ saving: false, deleting: false })` flipped synchronously inside the handler before any state setter is the only thing that prevents two PUTs from leaving the form for the same Save click.
+  - **`<fieldset disabled>` cascade** — disabling Save/Remove without disabling the inputs lets users type into a "would-be-discarded" form; on the optimistic→settled `updatedAt` transition the remount drops their edits. Wrap inputs+buttons in a fieldset.
+  - **Content fingerprint always in keys** — not just when `updatedAt` is empty. Imports preserve a non-empty `updatedAt` even when content changed; `JSON.stringify([name, tags, notes, isPublic])` in the key catches that case.
+
+### Sibling-audit rule for multi-component flows
+
+- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
+
 ## Quick Commands
 
 ```bash
