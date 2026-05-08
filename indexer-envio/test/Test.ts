@@ -1653,6 +1653,79 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
+  it("MedianUpdated: zero median keeps threshold direction pinned to frozen lastMedianPrice", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c5";
+    const FEED_ID = "0x000000000000000000000000000000000000c005";
+    const FROZEN_MEDIAN = 1_000_000_000_000_000_000_000_000n;
+    const BREACH_STARTED_AT = 1_700_005_000n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
+      oraclePrice: FROZEN_MEDIAN,
+      lastMedianPrice: FROZEN_MEDIAN,
+      lastMedianAt: 1_700_004_900n,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      rebalanceThresholdAbove: 5000,
+      rebalanceThresholdBelow: 3000,
+      rebalanceThresholdsKnown: true,
+      rebalanceThreshold: 3000,
+      priceDifference: 3333n,
+      deviationBreachStartedAt: BREACH_STARTED_AT,
+      healthStatus: "WARN",
+      source: "fpmm_update_reserves",
+    });
+
+    const outageMedianEvent = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED_ID,
+      value: 0n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 22,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 702, timestamp: 1_700_006_000 },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: outageMedianEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.ok(pool, "Pool must exist after zero-median MedianUpdated");
+    assert.equal(pool.oraclePrice, 0n, "event payload still mirrors the outage");
+    assert.equal(
+      pool.lastMedianPrice,
+      FROZEN_MEDIAN,
+      "zero median must freeze lastMedianPrice at the last good value",
+    );
+    assert.equal(
+      pool.rebalanceThreshold,
+      3000,
+      "active threshold must keep following the frozen median direction during outages",
+    );
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BREACH_STARTED_AT,
+      "outage median must not spuriously close the existing breach by flipping to the `above` side",
+    );
+    assert.equal(
+      pool.healthStatus,
+      "WARN",
+      "health status must remain on the breached path while the frozen median still implies the `below` side",
+    );
+  });
+
   it("UpdateReserves: uses contract priceDifference when fetchRebalancingState succeeds", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c1";
     const CONTRACT_PRICE_DIFF = 200n; // 200 bps from contract

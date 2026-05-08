@@ -238,10 +238,23 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // (`effectiveThreshold(pool)`) see the direction-correct value
       // until the next state-sync event re-confirms.
       const rebalanceThreshold = updatedPool.rebalanceThresholdsKnown
-        ? pickActiveThreshold(updatedPool, {
-            above: updatedPool.rebalanceThresholdAbove,
-            below: updatedPool.rebalanceThresholdBelow,
-          })
+        ? pickActiveThreshold(
+            {
+              reserves0: updatedPool.reserves0,
+              reserves1: updatedPool.reserves1,
+              // Zero medians freeze `lastMedianPrice`; threshold direction must
+              // keep following that frozen value rather than the transient 0
+              // event payload, or outages incorrectly flip to the `above` side.
+              oraclePrice: updatedPool.lastMedianPrice,
+              invertRateFeed: updatedPool.invertRateFeed,
+              token0Decimals: updatedPool.token0Decimals,
+              token1Decimals: updatedPool.token1Decimals,
+            },
+            {
+              above: updatedPool.rebalanceThresholdAbove,
+              below: updatedPool.rebalanceThresholdBelow,
+            },
+          )
         : updatedPool.rebalanceThreshold;
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
       const priceDifference =
