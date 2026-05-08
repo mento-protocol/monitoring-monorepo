@@ -285,6 +285,33 @@ describe("BridgeStatusFilter a11y", () => {
       expect(document.activeElement).toBe(pillByLabel("Delivered"));
     });
 
+    it("roving tabindex: arrow-key focus moves the single tab stop to the focused pill", () => {
+      // Codex finding on PR #350: under URL-backed `selected`,
+      // tying `tabIndex={0}` to the selected pill leaves a stale tab
+      // stop while focus is on the newly arrived pill, breaking the
+      // single-tab-stop contract for Tab/Shift+Tab navigation. The
+      // local roving tabindex must follow focus.
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={() => undefined}
+        />,
+      );
+      // Initial: "All" holds the tab stop.
+      expect(pillByLabel("All").tabIndex).toBe(0);
+      // ArrowRight from "All" → focus moves to "Pending"; tab stop moves with it.
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "ArrowRight");
+      expect(document.activeElement).toBe(pillByLabel("Pending"));
+      expect(pillByLabel("Pending").tabIndex).toBe(0);
+      // Tab stop is now exclusively on "Pending"; "All" and the rest are -1.
+      const tabbable = radios().filter((r) => r.tabIndex === 0);
+      expect(tabbable).toHaveLength(1);
+      expect(tabbable[0].textContent?.trim()).toBe("Pending");
+    });
+
     it("axe still passes after the keyboard contract is in place", async () => {
       render(
         <BridgeStatusFilter
@@ -517,6 +544,36 @@ describe("PoolTablist a11y (real component)", () => {
       const last = TABS[TABS.length - 1];
       expect(document.activeElement).toBe(tabById(`tab-${last}`));
       expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("roving tabindex: arrow-key focus moves the single tab stop without changing `active`", () => {
+      // Codex finding on PR #350: with manual activation, focus can
+      // move to a non-selected tab without changing `active`. Tying
+      // `tabIndex={0}` to `active` would leave the user able to Tab
+      // back to the selected tab instead of leaving the group.
+      // Roving tabindex must follow focus.
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      // Initial: only "rebalances" is the tab stop.
+      const initialTabbable = tabs().filter((t) => t.tabIndex === 0);
+      expect(initialTabbable).toHaveLength(1);
+      expect(initialTabbable[0].id).toBe("tab-rebalances");
+      // ArrowLeft → focus moves to "reserves"; tab stop moves with it.
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowLeft");
+      const movedTabbable = tabs().filter((t) => t.tabIndex === 0);
+      expect(movedTabbable).toHaveLength(1);
+      expect(movedTabbable[0].id).toBe("tab-reserves");
+      expect(tabById("tab-rebalances").tabIndex).toBe(-1);
+      // `active` (and therefore `aria-selected`) is unchanged.
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(tabById("tab-rebalances").getAttribute("aria-selected")).toBe(
+        "true",
+      );
+      expect(tabById("tab-reserves").getAttribute("aria-selected")).toBe(
+        "false",
+      );
     });
 
     it("clicking the focused tab activates it (Enter/Space dispatch via native button onClick)", () => {

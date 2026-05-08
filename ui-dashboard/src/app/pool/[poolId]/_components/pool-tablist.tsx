@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { LimitSelect } from "@/components/controls";
 import { TABS_WITHOUT_LIMIT_SELECT, type Tab } from "../_lib/constants";
 import { getTabLabel } from "../_lib/helpers";
@@ -48,10 +49,30 @@ export function PoolTablist({
   limit: number;
   onLimitChange: (limit: number) => void;
 }) {
-  // The selected tab is the single tab stop. Resolve its index in the
-  // visible list so we can fall back to it when keydown originates outside
-  // the tab buttons (defensive — shouldn't happen via Tab focus).
+  const tablistRef = useRef<HTMLDivElement>(null);
   const activeIndex = Math.max(0, visibleTabs.indexOf(active));
+  // Roving tabindex: `tabIndex={0}` follows the FOCUSED tab, not the
+  // selected one. Initialised from `active`. With manual activation,
+  // focus can intentionally diverge from selection (user arrows to a
+  // tab without committing); leaving `tabIndex={0}` on the selected
+  // tab in that state would re-trap Tab back to the selected tab
+  // instead of letting it leave the group (codex finding on PR #350).
+  const [focusedIndex, setFocusedIndex] = useState(activeIndex);
+  // Re-sync `focusedIndex` to `active` when the prop changes externally
+  // (e.g. browser back-button mutating the URL) and focus is NOT
+  // currently in the tablist. When focus IS inside, the user owns the
+  // roving position — leave it alone. Detected during render via a
+  // ref of the last-seen `activeIndex`, then `setFocusedIndex` schedules
+  // a re-render. React allows `setState` during render for
+  // derived-from-prop sync; this avoids the
+  // `no-direct-set-state-in-use-effect` lint and the extra effect tick.
+  const lastActiveIndexRef = useRef(activeIndex);
+  if (lastActiveIndexRef.current !== activeIndex) {
+    lastActiveIndexRef.current = activeIndex;
+    if (!tablistRef.current?.contains(document.activeElement)) {
+      setFocusedIndex(activeIndex);
+    }
+  }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
@@ -69,7 +90,7 @@ export function PoolTablist({
     );
     if (tabs.length === 0) return;
     const currentIndex = tabs.indexOf(e.target as HTMLButtonElement);
-    const fromIndex = currentIndex === -1 ? activeIndex : currentIndex;
+    const fromIndex = currentIndex === -1 ? focusedIndex : currentIndex;
 
     let nextIndex: number;
     if (key === "Home") {
@@ -85,6 +106,7 @@ export function PoolTablist({
 
     // Manual activation: move focus only, do NOT call `onSelect` here.
     // Activation happens on Space/Enter (native button onClick) or click.
+    // The focused tab's `onFocus` updates `focusedIndex` synchronously.
     tabs[nextIndex]?.focus();
   }
 
@@ -97,25 +119,27 @@ export function PoolTablist({
     // critical a11y violation.
     <div className="flex gap-1 border-b border-slate-800">
       <div
+        ref={tablistRef}
         className="flex gap-1"
         role="tablist"
         aria-label="Pool data tabs"
         onKeyDown={handleKeyDown}
         // `tabIndex={-1}` keeps the wrapper out of the natural tab
         // order (the WAI-ARIA roving-tabindex pattern keeps focus on
-        // the selected `role="tab"` child) while satisfying
+        // a single `role="tab"` child) while satisfying
         // `jsx-a11y/interactive-supports-focus`, which requires an
         // element with an interactive role be focusable.
         tabIndex={-1}
       >
-        {visibleTabs.map((t) => (
+        {visibleTabs.map((t, i) => (
           <button
             key={t}
             role="tab"
             id={`tab-${t}`}
             aria-selected={active === t}
             aria-controls={`panel-${t}`}
-            tabIndex={active === t ? 0 : -1}
+            tabIndex={i === focusedIndex ? 0 : -1}
+            onFocus={() => setFocusedIndex(i)}
             onClick={() => onSelect(t)}
             className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium capitalize transition-colors ${
               active === t

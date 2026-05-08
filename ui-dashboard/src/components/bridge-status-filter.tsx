@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { bridgeStatusDetailLabel } from "@/lib/bridge-status";
 import type { BridgeStatus } from "@/lib/types";
 
@@ -43,11 +44,31 @@ export function BridgeStatusFilter({
   selected,
   onChange,
 }: BridgeStatusFilterProps) {
-  // Index in the radio sequence that should hold `tabIndex={0}`.
-  // 0 = "All" pill (matches `selected === null`); otherwise the index of the
-  // matching status + 1 (offset by the leading "All" pill).
+  const groupRef = useRef<HTMLDivElement>(null);
+  // Index in the radio sequence (0 = "All" pill, 1..N = `options[i - 1]`).
   const activeIndex =
     selected === null ? 0 : Math.max(0, options.indexOf(selected) + 1);
+  // Roving tabindex: `tabIndex={0}` follows the FOCUSED radio, not
+  // the selected one. Tying the tab stop to `selected` was racy on
+  // URL-backed callers — between an arrow keystroke and the
+  // router.replace re-render, focus had already moved but the prop
+  // (and therefore tabIndex) hadn't, leaving the user able to Tab
+  // back to the stale tab stop instead of leaving the group (codex
+  // finding on PR #350). The local `focusedIndex` updates
+  // synchronously via the radios' `onFocus`.
+  const [focusedIndex, setFocusedIndex] = useState(activeIndex);
+  // Re-sync to `activeIndex` on external prop changes (e.g. browser
+  // back-button mutating the URL) when focus is NOT in the group.
+  // Detected during render via a ref; `setState` during render is
+  // React-allowed for derived-from-prop sync and avoids the
+  // `no-direct-set-state-in-use-effect` lint.
+  const lastActiveIndexRef = useRef(activeIndex);
+  if (lastActiveIndexRef.current !== activeIndex) {
+    lastActiveIndexRef.current = activeIndex;
+    if (!groupRef.current?.contains(document.activeElement)) {
+      setFocusedIndex(activeIndex);
+    }
+  }
 
   // Resolve a radio index back to its `selected` value. Index 0 = "All"
   // (null); 1..N = `options[index - 1]`.
@@ -74,8 +95,8 @@ export function BridgeStatusFilter({
     if (radios.length === 0) return;
     const currentIndex = radios.indexOf(e.target as HTMLButtonElement);
     // If the keydown originated outside the radio set (e.g. on the wrapper
-    // itself), fall back to the currently selected pill.
-    const fromIndex = currentIndex === -1 ? activeIndex : currentIndex;
+    // itself), fall back to the currently focused pill.
+    const fromIndex = currentIndex === -1 ? focusedIndex : currentIndex;
 
     let nextIndex: number;
     if (key === "Home") {
@@ -99,6 +120,7 @@ export function BridgeStatusFilter({
     // child) while still satisfying `jsx-a11y/interactive-supports-focus`,
     // which insists an element with an interactive role be focusable.
     <div
+      ref={groupRef}
       role="radiogroup"
       aria-label="Filter transfers by status"
       className="flex flex-wrap items-center gap-1.5"
@@ -110,7 +132,8 @@ export function BridgeStatusFilter({
         type="button"
         role="radio"
         aria-checked={selected === null}
-        tabIndex={activeIndex === 0 ? 0 : -1}
+        tabIndex={focusedIndex === 0 ? 0 : -1}
+        onFocus={() => setFocusedIndex(0)}
         onClick={() => selected !== null && onChange(null)}
         className={
           "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
@@ -130,7 +153,8 @@ export function BridgeStatusFilter({
             type="button"
             role="radio"
             aria-checked={active}
-            tabIndex={radioIndex === activeIndex ? 0 : -1}
+            tabIndex={radioIndex === focusedIndex ? 0 : -1}
+            onFocus={() => setFocusedIndex(radioIndex)}
             onClick={() => !active && onChange(status)}
             className={
               "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
