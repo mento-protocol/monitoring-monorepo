@@ -68,6 +68,15 @@ type AddressLabelsContextValue = {
    */
   revalidate: () => Promise<void>;
   isLoading: boolean;
+  /**
+   * True iff the labels SWR has resolved a real response. Distinguishes
+   * "successfully empty" from "still loading / not yet authenticated" —
+   * `customEntries` is always `[]` until data lands, so without this flag
+   * a deep-link page can't tell whether `getEntry(address)` returning
+   * undefined means "no such label" or "haven't fetched yet". Save flows
+   * that need to avoid stomping an existing entry should gate on this.
+   */
+  hasLoaded: boolean;
   error: Error | undefined;
 };
 
@@ -287,6 +296,13 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     await mutate(SWR_KEY);
   }, [mutate]);
 
+  // hasLoaded is true once SWR returns a real response. `data === undefined`
+  // covers both the "session still loading → SWR not started" case (the
+  // hook's key is `null`, so `data` stays undefined) and the "fetch in
+  // flight" case. After authentication + first response (even an empty
+  // `{}`), `data` becomes defined and stays defined across re-renders.
+  const hasLoaded = data !== undefined;
+
   const value: AddressLabelsContextValue = {
     getName,
     getTags,
@@ -298,6 +314,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     deleteEntry,
     revalidate,
     isLoading,
+    hasLoaded,
     error: error as Error | undefined,
   };
 

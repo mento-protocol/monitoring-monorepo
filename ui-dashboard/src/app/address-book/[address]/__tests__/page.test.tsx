@@ -11,6 +11,7 @@ const VALID_ADDR = "0x" + "a".repeat(40);
 
 let mockParamsAddress = VALID_ADDR;
 let mockLabelsLoading = false;
+let mockLabelsHasLoaded = true;
 let mockLabelsError: Error | undefined = undefined;
 const mockReplace = vi.fn();
 const mockGetEntry = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("@/components/address-labels-provider", () => ({
     isCustom: () => false,
     customEntries: [],
     isLoading: mockLabelsLoading,
+    hasLoaded: mockLabelsHasLoaded,
     error: mockLabelsError,
   }),
 }));
@@ -81,6 +83,7 @@ beforeEach(() => {
   root = createRoot(container);
   mockParamsAddress = VALID_ADDR;
   mockLabelsLoading = false;
+  mockLabelsHasLoaded = true;
   mockLabelsError = undefined;
   mockReplace.mockClear();
   mockGetEntry.mockReset();
@@ -196,8 +199,12 @@ describe("AddressDetailPage — populated state", () => {
 });
 
 describe("AddressDetailPage — labels loading state", () => {
-  it("defers form render while labels SWR is in flight (no entry seeded from undefined)", () => {
-    mockLabelsLoading = true;
+  it("defers form render until labels SWR resolves (gates on hasLoaded, not isLoading)", () => {
+    // Codex P2: during session-loading the provider doesn't fire SWR yet,
+    // so `isLoading` is false but `data` is still undefined → `hasLoaded`
+    // false. Without the gate, the form would render as blank-new and a
+    // fast save would PUT empty fields over an existing entry.
+    mockLabelsHasLoaded = false;
     mockGetEntry.mockReturnValue(undefined);
     render();
 
@@ -214,17 +221,24 @@ describe("AddressDetailPage — labels loading state", () => {
     ).not.toBeNull();
   });
 
-  it("falls through to the form when labels SWR errors so the user can still enter a label", () => {
-    mockLabelsLoading = false;
-    mockLabelsError = new Error("boom");
+  it("replaces the form with an error banner when labels SWR errors (no save UI)", () => {
+    // Codex P2: previously a labels error fell through to the form, so a
+    // save into a degraded read window could overwrite an existing entry
+    // with empty fields. Pin the new behaviour: on error, the form is
+    // hidden entirely behind an error banner.
+    mockLabelsHasLoaded = true;
+    mockLabelsError = new Error("hasura is down");
     mockGetEntry.mockReturnValue(undefined);
     render();
 
-    // No skeleton, real form present
+    // No form, no skeleton — error banner replaces both
     expect(
       container.querySelector('[aria-label="Loading label form"]'),
     ).toBeNull();
-    expect(container.querySelector("#al-name")).not.toBeNull();
+    expect(container.querySelector("#al-name")).toBeNull();
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toMatch(/Could.{0,3}t load labels/);
+    expect(alert?.textContent).toContain("hasura is down");
   });
 });
 

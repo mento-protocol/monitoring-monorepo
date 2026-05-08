@@ -39,7 +39,7 @@ export default function AddressDetailPage() {
 
   const {
     getEntry,
-    isLoading: labelsLoading,
+    hasLoaded: labelsLoaded,
     error: labelsError,
   } = useAddressLabels();
   const { hasReport } = useAddressReportsIndex();
@@ -81,12 +81,22 @@ export default function AddressDetailPage() {
               {hasLabel ? "Edit label" : "Add label"}
             </h2>
           </div>
-          {/* While SWR is still resolving the labels list (deep-link with no
-              fallback in cache), defer rendering the form so we don't seed
-              local state from `undefined` and silently overwrite an existing
-              label on save. Errors fall through to the form so the user can
-              still enter a fresh label even if the read path is degraded. */}
-          {labelsLoading && !labelsError ? (
+          {/* Save-flow safety: never render a writable form until the labels
+              SWR has resolved a real response (`hasLoaded`). On error we
+              REPLACE the form with an error banner instead of falling
+              through — saving an empty form into an existing entry would
+              silently overwrite name/tags/notes. The save path can't
+              distinguish "no entry exists" from "we couldn't load the
+              entry list", so a write during a degraded read window is a
+              data-loss footgun. Same gating handles session-loading: the
+              provider only fires SWR after `useSession()` reaches
+              `authenticated`, so during session hydration `data` stays
+              undefined → `hasLoaded === false` → form stays hidden. */}
+          {labelsError ? (
+            <div role="alert" className="px-5 py-4 text-xs text-red-300">
+              {`Couldn't load labels: ${labelsError.message}. Refresh the page to retry — saving while the read failed could overwrite an existing label.`}
+            </div>
+          ) : !labelsLoaded ? (
             <div
               aria-live="polite"
               aria-label="Loading label form"
