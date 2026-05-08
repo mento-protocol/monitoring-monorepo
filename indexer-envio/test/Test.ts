@@ -1843,26 +1843,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     const thresholdEvent = (
-      FPMM as unknown as {
-        RebalanceThresholdUpdated: {
-          createMockEvent: (args: {
-            oldThresholdAbove: bigint;
-            oldThresholdBelow: bigint;
-            newThresholdAbove: bigint;
-            newThresholdBelow: bigint;
-            mockEventData: {
-              chainId: number;
-              logIndex: number;
-              srcAddress: string;
-              block: { number: number; timestamp: number };
-            };
-          }) => unknown;
-          processEvent: (args: {
-            event: unknown;
-            mockDb: MockDb;
-          }) => Promise<MockDb>;
-        };
-      }
+      FPMM as any
     ).RebalanceThresholdUpdated.createMockEvent({
       oldThresholdAbove: 100n,
       oldThresholdBelow: 100n,
@@ -1875,16 +1856,7 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 1001, timestamp: 1_700_008_100 },
       },
     });
-    mockDb = await (
-      FPMM as unknown as {
-        RebalanceThresholdUpdated: {
-          processEvent: (args: {
-            event: unknown;
-            mockDb: MockDb;
-          }) => Promise<MockDb>;
-        };
-      }
-    ).RebalanceThresholdUpdated.processEvent({
+    mockDb = await (FPMM as any).RebalanceThresholdUpdated.processEvent({
       event: thresholdEvent,
       mockDb,
     });

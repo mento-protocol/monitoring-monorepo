@@ -10,9 +10,10 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers";
 import {
-  ORACLE_ADAPTER_SCALE_FACTOR,
   buildRebalanceOutcome,
+  scaleRpcRebalanceState,
   tryDeriveRebalanceState,
+  type ResolvedRebalanceState,
 } from "../../priceDifference";
 import {
   rebalanceIncentiveAtBlockEffect,
@@ -28,38 +29,6 @@ import {
   upsertSnapshot,
 } from "../../pool";
 import { recordHealthSample } from "../../healthScore";
-
-// Resolved shape consumed by both UpdateReserves and Rebalanced handlers.
-// Shared between the entity-derived path and the `getRebalancingState` RPC
-// fallback so downstream code is identical regardless of source.
-type ResolvedRebalanceState = {
-  oraclePrice: bigint;
-  rebalanceThreshold: number;
-  priceDifference: bigint;
-};
-
-/** Convert `rebalancingStateEffect` output into the resolved shape — apply
- * the OracleAdapter SCALE_FACTOR and the invertRateFeed flip exactly as
- * the legacy state-sync code did. Kept as a tiny helper so the entity-
- * derived path and the RPC-fallback path always agree on the scalar. */
-function scaleRpcRebalanceState(
-  rs: {
-    oraclePriceNumerator: bigint;
-    oraclePriceDenominator: bigint;
-    rebalanceThreshold: number;
-    priceDifference: bigint;
-  },
-  existing: { invertRateFeed: boolean } | undefined,
-): ResolvedRebalanceState {
-  const isInverted = existing?.invertRateFeed ?? false;
-  return {
-    oraclePrice: isInverted
-      ? rs.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-      : rs.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
-    rebalanceThreshold: rs.rebalanceThreshold,
-    priceDifference: rs.priceDifference,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // FPMM.UpdateReserves
@@ -80,13 +49,11 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Lever 4: try to derive {oraclePrice, rebalanceThreshold, priceDifference}
-  // from the entity store before reaching for the RPC. Pool.get must come
-  // first so we can attempt the derive; the RPC is only fired when the
-  // entity isn't yet populated (cold-start: pre-MedianUpdated for the
-  // feed, or pre-RebalanceThresholdUpdated seed). Eliminates the
-  // `getRebalancingState` `eth_call` for every steady-state UpdateReserves
-  // — the bulk of the catch-up RPC budget on Celo.
+  // Try to derive {oraclePrice, rebalanceThreshold, priceDifference} from
+  // the entity store before reaching for the RPC. Pool.get must come first
+  // so the derive attempt can run; the RPC fires only when the entity
+  // isn't yet seeded (cold-start: pre-MedianUpdated for the feed, or
+  // pre-RebalanceThresholdUpdated seed).
   const fetched = await context.Pool.get(poolId);
   // Self-heal invertRateFeed before reading it for the oraclePrice flip.
   // Without this, a pool deployed during an RPC blip whose first event is
@@ -96,16 +63,14 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     ? await selfHealInvertRateFeed(context, fetched)
     : undefined;
 
-  const eventReserves = {
-    reserve0: event.params.reserve0,
-    reserve1: event.params.reserve1,
-  };
-  // The contract's `getRebalancingState` reads reserves AFTER the swap/mint/
-  // burn that triggered this UpdateReserves — i.e. the values now in the
-  // event params. Pool's persisted reserves still reflect the prior block
-  // here, so we pass the override.
+  // Override reserves: `getRebalancingState` reads post-event state on
+  // chain, but `existing.reserves0/1` still hold the prior block's value
+  // until `upsertPool` runs below.
   let resolved: ResolvedRebalanceState | null = existing
-    ? tryDeriveRebalanceState(existing, eventReserves)
+    ? tryDeriveRebalanceState(existing, {
+        reserve0: event.params.reserve0,
+        reserve1: event.params.reserve1,
+      })
     : null;
   if (!resolved) {
     const rs = await context.effect(rebalancingStateEffect, {
@@ -218,10 +183,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
+  // Sequence Pool.get first (cheap local lookup, no RPC) so we can
   // (a) attempt the entity-derived rebalanceState and skip the
-  //     `getRebalancingState` RPC entirely when the entity has the data
-  //     (Lever 4 — eliminates the bulk of `eth_call` traffic on Celo);
+  //     `getRebalancingState` RPC entirely when the entity has the data,
   // (b) skip `fetchRebalanceIncentiveAtBlock` for pools whose
   //     `rebalanceIncentive()` getter is already known missing (-2 sentinel
   //     from PR #222) — otherwise every rebalance on an old FPMM would
@@ -241,12 +205,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     ? tryDeriveRebalanceState(existing)
     : null;
 
-  // `preReserves` is sampled at `blockNumber - 1` so that subtracting from
-  // the post-rebalance reserves on `pool` (after `upsertPool` below) gives
-  // the rebalance's swap notional. Sibling Swap events are not emitted by
-  // FPMM.rebalance() (separate code path), so RPC at the previous block is
-  // the cleanest source until Lever 4 PR 3 swaps it for a ReserveUpdate
-  // entity lookup.
+  // `preReserves` is sampled at `blockNumber - 1` so subtracting from the
+  // post-rebalance reserves on `pool` (after `upsertPool` below) gives the
+  // rebalance's swap notional. Sibling Swap events are not emitted by
+  // FPMM.rebalance() (separate code path).
   const [rebalancingStateRpc, preReserves, blockScopedIncentive] =
     await Promise.all([
       derivedRebalanceState
