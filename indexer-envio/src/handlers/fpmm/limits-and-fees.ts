@@ -19,6 +19,7 @@ import {
   upsertSnapshot,
 } from "../../pool";
 import { pickActiveThreshold } from "../../priceDifference";
+import { recordHealthSample } from "../../healthScore";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -206,7 +207,7 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     },
     { above, below },
   );
-  const pool = await upsertPool({
+  const upserted = await upsertPool({
     context,
     chainId: event.chainId,
     poolId,
@@ -222,6 +223,22 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     },
     existing: { pool: existing },
   });
+  // Advance the health-time accumulators so the interval since the last
+  // sample is attributed against the pre-update deviationRatio. Without
+  // this the next oracle/reserve event would attribute it against the
+  // post-update ratio, inflating `healthBinarySeconds` for tightening
+  // events on quiet pools. We discard `snapshotFields` because no
+  // OracleSnapshot row is written for threshold-only events (the chart
+  // history covers oracle reports + median updates, not governance
+  // threshold changes).
+  const { poolUpdate } = recordHealthSample(
+    upserted,
+    upserted.priceDifference,
+    upserted.rebalanceThreshold,
+    blockTimestamp,
+  );
+  const pool = { ...upserted, ...poolUpdate };
+  context.Pool.set(pool);
   await upsertSnapshot({
     context,
     pool,
