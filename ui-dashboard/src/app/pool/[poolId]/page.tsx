@@ -239,12 +239,6 @@ function PoolDetail() {
     poolNeedsRates && ratePoolsData === undefined && !allPoolsError;
   const ratesError = allPoolsError !== undefined;
 
-  // Return null while redirect is pending to avoid a transient error flash
-  // and unnecessary error announcement for assistive tech. MUST sit below
-  // all hook declarations so React sees the same hook order every render —
-  // an early return above a hook violates the Rules of Hooks and throws
-  // "Rendered fewer hooks than expected" when the query resolves mid-page.
-  if (!poolLoading && !poolErr && !pool) return null;
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
   // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
@@ -263,6 +257,11 @@ function PoolDetail() {
   // Without this, refresh / share / back-forward render `tab` while the
   // address bar still says `requestedTab`, so users can't reproduce the
   // visible state. Same pattern as the legacy-poolId redirect above.
+  //
+  // MUST sit ABOVE the `!pool` early-return below — putting it after the
+  // return changes the hook count between the loading-render (effect
+  // fires) and the not-found-render (effect doesn't fire), which trips
+  // React's "rendered fewer hooks" guard.
   useEffect(() => {
     if (
       pool &&
@@ -276,6 +275,13 @@ function PoolDetail() {
       setURL(tab, limit);
     }
   }, [pool, tab, requestedTab, rawTab, visibleTabs, limit, setURL]);
+
+  // Return null while redirect is pending to avoid a transient error flash
+  // and unnecessary error announcement for assistive tech. MUST sit below
+  // all hook declarations so React sees the same hook order every render —
+  // an early return above a hook violates the Rules of Hooks and throws
+  // "Rendered fewer hooks than expected" when the query resolves mid-page.
+  if (!poolLoading && !poolErr && !pool) return null;
 
   return (
     <div className="space-y-6">

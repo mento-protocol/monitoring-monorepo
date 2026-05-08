@@ -51,7 +51,12 @@ export function useV2ExchangeConfig(
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      shouldRetryOnError: false,
+      // Retry on transient errors at the same 60s cadence as
+      // `refreshInterval` (no exponential-backoff burst) up to 3 attempts,
+      // so a single upstream 502 self-heals on the next tick instead of
+      // wedging the panel until the user reloads.
+      errorRetryCount: 3,
+      errorRetryInterval: 60_000,
     },
   );
 
