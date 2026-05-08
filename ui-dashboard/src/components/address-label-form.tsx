@@ -133,13 +133,15 @@ type Props = {
    */
   requireExplicitName?: boolean;
   /**
-   * Forces Save / Remove buttons disabled regardless of internal
-   * saving / deleting state. Used by the detail page when there's a
-   * pending mutation against the same address from a prior mount: a
-   * user who saved on form A, navigated away, and came back would
-   * otherwise see an enabled Save button (the new mount has its own
-   * `saving=false`) and could fire a SECOND PUT before the first
-   * resolves. Held until the prior request settles, then released.
+   * Forces the entire form (inputs + Save/Remove buttons) read-only
+   * regardless of internal saving / deleting state. Used by surfaces
+   * (modal, detail page) when a pending mutation already exists for
+   * the same address — without this, the inputs would still be
+   * editable while Save was disabled, and edits typed in that window
+   * would be discarded the moment the in-flight request settled and
+   * remounted the form (formKey flips on the optimistic→settled
+   * `updatedAt` transition). Disabling inputs makes the read-only
+   * state visible and stops users from losing typed data.
    */
   externallyDisabled?: boolean;
 };
@@ -271,167 +273,182 @@ export function AddressLabelForm({
 
   return (
     <form onSubmit={handleSave} noValidate>
-      <div className="px-5 py-4 space-y-4">
-        {/* Address */}
-        <div>
-          <label
-            htmlFor="al-address"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Address {isNewAddress && <span className="text-indigo-400">*</span>}
-          </label>
-          {isNewAddress ? (
+      {/* `<fieldset disabled>` cascades to every form control inside —
+          input, textarea, button — so when an earlier write is still
+          pending against this address, the user can't type into the
+          inputs (only to lose those edits when the pending request
+          settles and remounts the form). Keeps the read-only state
+          visible and consistent with the disabled Save / Remove
+          buttons. */}
+      <fieldset
+        disabled={externallyDisabled}
+        className="border-0 p-0 m-0 disabled:opacity-60"
+      >
+        <div className="px-5 py-4 space-y-4">
+          {/* Address */}
+          <div>
+            <label
+              htmlFor="al-address"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Address{" "}
+              {isNewAddress && <span className="text-indigo-400">*</span>}
+            </label>
+            {isNewAddress ? (
+              <input
+                ref={firstInputRef}
+                id="al-address"
+                type="text"
+                value={address}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  onAddressChange?.(e.target.value);
+                }}
+                placeholder="0x…"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            ) : (
+              <p className="font-mono text-xs text-slate-300 break-all select-all">
+                {address}
+              </p>
+            )}
+          </div>
+
+          {/* Name */}
+          <div>
+            <label
+              htmlFor="al-name"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Name{" "}
+              {requireExplicitName ? (
+                <span className="text-indigo-400">*</span>
+              ) : isContractRow ? (
+                <span className="text-slate-500">(optional)</span>
+              ) : (
+                <span className="text-slate-500">(optional if tags added)</span>
+              )}
+            </label>
             <input
-              ref={firstInputRef}
-              id="al-address"
+              ref={isNewAddress ? undefined : firstInputRef}
+              id="al-name"
               type="text"
-              value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                onAddressChange?.(e.target.value);
-              }}
-              placeholder="0x…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={
+                isContractRow
+                  ? "Leave blank to keep contract name"
+                  : "e.g. Binance Hot Wallet"
+              }
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
-          ) : (
-            <p className="font-mono text-xs text-slate-300 break-all select-all">
-              {address}
+          </div>
+
+          {/* Tags */}
+          <div>
+            <span
+              id="al-tags-label"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Tags <span className="text-slate-500">(optional)</span>
+            </span>
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              suggestions={tagSuggestions}
+              aria-labelledby="al-tags-label"
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label
+              htmlFor="al-notes"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Notes <span className="text-slate-500">(optional)</span>
+            </label>
+            <textarea
+              id="al-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Any context about this address…"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+            />
+          </div>
+
+          {/* Visibility toggle */}
+          <div className="flex items-center gap-3">
+            <label
+              htmlFor="al-public"
+              className="text-xs font-medium text-slate-400"
+            >
+              Visible to public
+            </label>
+            <button
+              type="button"
+              id="al-public"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={() => setIsPublic(!isPublic)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                isPublic ? "bg-indigo-600" : "bg-slate-700"
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  isPublic ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+            <span className="text-xs text-slate-500">
+              {isPublic
+                ? "Anyone can see this label"
+                : "Only team members can see this label"}
+            </span>
+          </div>
+
+          {error && (
+            <p role="alert" className="text-xs text-red-400">
+              {error}
             </p>
           )}
         </div>
 
-        {/* Name */}
-        <div>
-          <label
-            htmlFor="al-name"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Name{" "}
-            {isContractRow ? (
-              <span className="text-slate-500">(optional)</span>
-            ) : (
-              <span className="text-slate-500">(optional if tags added)</span>
+        <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
+          <div>
+            {hasExistingCustomEntry && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || saving || externallyDisabled}
+                className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? "Removing…" : "Remove label"}
+              </button>
             )}
-          </label>
-          <input
-            ref={isNewAddress ? undefined : firstInputRef}
-            id="al-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={
-              isContractRow
-                ? "Leave blank to keep contract name"
-                : "e.g. Binance Hot Wallet"
-            }
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-        </div>
-
-        {/* Tags */}
-        <div>
-          <span
-            id="al-tags-label"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Tags <span className="text-slate-500">(optional)</span>
-          </span>
-          <TagInput
-            tags={tags}
-            onChange={setTags}
-            suggestions={tagSuggestions}
-            aria-labelledby="al-tags-label"
-          />
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label
-            htmlFor="al-notes"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Notes <span className="text-slate-500">(optional)</span>
-          </label>
-          <textarea
-            id="al-notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="Any context about this address…"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
-          />
-        </div>
-
-        {/* Visibility toggle */}
-        <div className="flex items-center gap-3">
-          <label
-            htmlFor="al-public"
-            className="text-xs font-medium text-slate-400"
-          >
-            Visible to public
-          </label>
-          <button
-            type="button"
-            id="al-public"
-            role="switch"
-            aria-checked={isPublic}
-            onClick={() => setIsPublic(!isPublic)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              isPublic ? "bg-indigo-600" : "bg-slate-700"
-            }`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                isPublic ? "translate-x-4" : "translate-x-0.5"
-              }`}
-            />
-          </button>
-          <span className="text-xs text-slate-500">
-            {isPublic
-              ? "Anyone can see this label"
-              : "Only team members can see this label"}
-          </span>
-        </div>
-
-        {error && (
-          <p role="alert" className="text-xs text-red-400">
-            {error}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
-        <div>
-          {hasExistingCustomEntry && (
+          </div>
+          <div className="flex gap-2">
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+            )}
             <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || saving || externallyDisabled}
-              className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+              type="submit"
+              disabled={saving || deleting || externallyDisabled}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
             >
-              {deleting ? "Removing…" : "Remove label"}
+              {saving ? "Saving…" : "Save"}
             </button>
-          )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          <button
-            type="submit"
-            disabled={saving || deleting || externallyDisabled}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
+      </fieldset>
     </form>
   );
 }

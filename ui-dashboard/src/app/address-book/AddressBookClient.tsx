@@ -26,8 +26,17 @@ export default function AddressBookPage({
 }: {
   canEdit?: boolean;
 }) {
-  const { customEntries, getEntry, revalidate, isLoading, error } =
-    useAddressLabels();
+  const {
+    customEntries,
+    getEntry,
+    revalidate,
+    isLoading,
+    error,
+    markPendingMutation,
+    isMutationPending,
+    markPendingReportMutation,
+    isReportMutationPending,
+  } = useAddressLabels();
   // Hook lifted from AddressTableRow so the SWR subscription, useSession
   // call, and per-render Set construction happen ONCE per table render
   // instead of N times (one per row). Cursor flagged the per-row pattern
@@ -62,6 +71,82 @@ export default function AddressBookPage({
   const allRows = useMemo<AddressRow[]>(
     () => filterRows(buildAddressBookRows(contractRows, customRows), search),
     [customRows, contractRows, search],
+  );
+
+  // Pending-ledger wiring for the modal — mirrors the detail page's
+  // pattern (see `[address]/page.tsx`). The modal is short-lived but
+  // its in-flight Promise's `finally` runs after `onSaved → onClose`,
+  // so the unmark map outlives the modal mount via this stable parent.
+  // Keys by `formId:op` so save and delete on the same mount don't
+  // overwrite each other's unmark closure (codex round 13).
+  const editTargetAddress = editTarget?.address ?? "";
+  const editTargetAddressRef = useRef(editTargetAddress);
+  editTargetAddressRef.current = editTargetAddress;
+  const labelUnmarkRef = useRef<Map<string, () => void>>(new Map());
+  const reportUnmarkRef = useRef<Map<string, () => void>>(new Map());
+  const handleLabelSavingChange = useCallback(
+    (saving: boolean, formId: string) => {
+      const key = `${formId}:save`;
+      if (saving) {
+        labelUnmarkRef.current.set(
+          key,
+          markPendingMutation(editTargetAddressRef.current),
+        );
+      } else {
+        const u = labelUnmarkRef.current.get(key);
+        labelUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingMutation],
+  );
+  const handleLabelDeletingChange = useCallback(
+    (deleting: boolean, formId: string) => {
+      const key = `${formId}:delete`;
+      if (deleting) {
+        labelUnmarkRef.current.set(
+          key,
+          markPendingMutation(editTargetAddressRef.current),
+        );
+      } else {
+        const u = labelUnmarkRef.current.get(key);
+        labelUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingMutation],
+  );
+  const handleReportSavingChange = useCallback(
+    (saving: boolean, editorId: string) => {
+      const key = `${editorId}:save`;
+      if (saving) {
+        reportUnmarkRef.current.set(
+          key,
+          markPendingReportMutation(editTargetAddressRef.current),
+        );
+      } else {
+        const u = reportUnmarkRef.current.get(key);
+        reportUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
+  );
+  const handleReportDeletingChange = useCallback(
+    (deleting: boolean, editorId: string) => {
+      const key = `${editorId}:delete`;
+      if (deleting) {
+        reportUnmarkRef.current.set(
+          key,
+          markPendingReportMutation(editTargetAddressRef.current),
+        );
+      } else {
+        const u = reportUnmarkRef.current.get(key);
+        reportUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
   );
 
   const handleExport = useCallback(() => {
@@ -274,6 +359,18 @@ export default function AddressBookPage({
             !getEntry(editTarget.address)?.entry &&
             hasAmbiguousContractMatches(editTarget.address)
           }
+          // Pending-ledger wiring — modal saves count toward the same
+          // global ledger as detail-page saves. Disable label/report
+          // editors when there's a pending mutation against this
+          // address from any other surface (detail page, prior
+          // modal). Once the original request settles, both ledgers
+          // decrement and the disabled state lifts automatically.
+          onLabelSavingChange={handleLabelSavingChange}
+          onLabelDeletingChange={handleLabelDeletingChange}
+          externallyDisabledLabel={isMutationPending(editTarget.address)}
+          onReportSavingChange={handleReportSavingChange}
+          onReportDeletingChange={handleReportDeletingChange}
+          externallyDisabledReport={isReportMutationPending(editTarget.address)}
         />
       )}
     </div>

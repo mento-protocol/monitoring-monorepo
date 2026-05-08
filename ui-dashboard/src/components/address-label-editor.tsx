@@ -32,6 +32,21 @@ type Props = {
    * global label that suppresses every contract row in the index.
    */
   requireExplicitName?: boolean;
+  // Forwarded to the label form. Hosts (e.g. `AddressBookClient`)
+  // wire these into the provider's pending-mutation ledger so a
+  // save started in one surface (modal) blocks competing writes
+  // from another (detail page) for the same address.
+  onLabelSavingChange?: (saving: boolean, formId: string) => void;
+  onLabelDeletingChange?: (deleting: boolean, formId: string) => void;
+  /** Disable the entire label form (inputs + buttons). */
+  externallyDisabledLabel?: boolean;
+  // Same callbacks but for the forensic-report editor inside the
+  // Report tab. Tracked separately so a label save doesn't block a
+  // report save against the same address (or vice versa).
+  onReportSavingChange?: (saving: boolean, editorId: string) => void;
+  onReportDeletingChange?: (deleting: boolean, editorId: string) => void;
+  /** Disable the entire forensic-report editor. */
+  externallyDisabledReport?: boolean;
 };
 
 export function AddressLabelEditor({
@@ -39,6 +54,12 @@ export function AddressLabelEditor({
   initial,
   onClose,
   requireExplicitName,
+  onLabelSavingChange,
+  onLabelDeletingChange,
+  externallyDisabledLabel,
+  onReportSavingChange,
+  onReportDeletingChange,
+  externallyDisabledReport,
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
@@ -184,6 +205,9 @@ export function AddressLabelEditor({
           onCancel={onClose}
           firstFieldRef={firstInputRef}
           requireExplicitName={requireExplicitName}
+          onSavingChange={onLabelSavingChange}
+          onDeletingChange={onLabelDeletingChange}
+          externallyDisabled={externallyDisabledLabel}
         />
       </div>
       <div
@@ -192,7 +216,12 @@ export function AddressLabelEditor({
         aria-labelledby="al-tab-report"
         hidden={activeTab !== "report"}
       >
-        <AddressReportEditor address={draftAddress} />
+        <AddressReportEditor
+          address={draftAddress}
+          onSavingChange={onReportSavingChange}
+          onDeletingChange={onReportDeletingChange}
+          externallyDisabled={externallyDisabledReport}
+        />
       </div>
     </dialog>
   );

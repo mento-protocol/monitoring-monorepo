@@ -46,6 +46,8 @@ export default function AddressDetailPage() {
     error: labelsError,
     markPendingMutation,
     isMutationPending,
+    markPendingReportMutation,
+    isReportMutationPending,
   } = useAddressLabels();
   const { hasReport } = useAddressReportsIndex();
 
@@ -64,8 +66,44 @@ export default function AddressDetailPage() {
   // just keeps a per-formInstanceId map of unmark callbacks so the
   // matching `false` event releases the right pending entry.
   const unmarkPendingRef = useRef<Map<string, () => void>>(new Map());
+  // Separate map for report-mutation unmark callbacks — report writes
+  // live in their own provider ledger so a label save doesn't block a
+  // report save against the same address.
+  const unmarkReportPendingRef = useRef<Map<string, () => void>>(new Map());
   const addressRef = useRef(address);
   addressRef.current = address;
+  const handleReportSavingChange = useCallback(
+    (saving: boolean, editorId: string) => {
+      const key = `${editorId}:save`;
+      if (saving) {
+        unmarkReportPendingRef.current.set(
+          key,
+          markPendingReportMutation(addressRef.current),
+        );
+      } else {
+        const u = unmarkReportPendingRef.current.get(key);
+        unmarkReportPendingRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
+  );
+  const handleReportDeletingChange = useCallback(
+    (deleting: boolean, editorId: string) => {
+      const key = `${editorId}:delete`;
+      if (deleting) {
+        unmarkReportPendingRef.current.set(
+          key,
+          markPendingReportMutation(addressRef.current),
+        );
+      } else {
+        const u = unmarkReportPendingRef.current.get(key);
+        unmarkReportPendingRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
+  );
   // Scope each latch to the *currently mounted* form instance, with
   // SEPARATE owner refs per flow. When the user navigates to another
   // `/address-book/<addr>` mid-write, the old form unmounts but its
@@ -86,16 +124,24 @@ export default function AddressDetailPage() {
   // the per-flow latch owner — owner is checked for stale-callback
   // dedup (round 7); ledger is checked on form mount for the
   // round-trip race (rounds 11 + 12). Both must move in lock-step.
+  //
+  // The unmark map is keyed by `${formId}:${op}` (not just formId)
+  // because save and delete on the same mount can briefly overlap if
+  // a fast double-click slips between React's state commit and the
+  // button-disable render — using formId alone would let the second
+  // op's `incPending` overwrite the first's unmark closure, leaking
+  // a permanently-incremented count in the provider's ledger.
   const incPending = useCallback(
-    (formId: string) => {
+    (formId: string, op: "save" | "delete") => {
       const unmark = markPendingMutation(addressRef.current);
-      unmarkPendingRef.current.set(formId, unmark);
+      unmarkPendingRef.current.set(`${formId}:${op}`, unmark);
     },
     [markPendingMutation],
   );
-  const decPending = useCallback((formId: string) => {
-    const unmark = unmarkPendingRef.current.get(formId);
-    unmarkPendingRef.current.delete(formId);
+  const decPending = useCallback((formId: string, op: "save" | "delete") => {
+    const key = `${formId}:${op}`;
+    const unmark = unmarkPendingRef.current.get(key);
+    unmarkPendingRef.current.delete(key);
     unmark?.();
   }, []);
   const handleSavingChange = useCallback(
@@ -103,11 +149,11 @@ export default function AddressDetailPage() {
       if (saving) {
         savingOwnerRef.current = formId;
         setFormSaving(true);
-        incPending(formId);
+        incPending(formId, "save");
       } else {
         // Always decrement pending — the request settled regardless of
         // whether the current latch owner matches.
-        decPending(formId);
+        decPending(formId, "save");
         if (formId === savingOwnerRef.current) {
           savingOwnerRef.current = null;
           setFormSaving(false);
@@ -121,9 +167,9 @@ export default function AddressDetailPage() {
       if (deleting) {
         deletingOwnerRef.current = formId;
         setFormDeleting(true);
-        incPending(formId);
+        incPending(formId, "delete");
       } else {
-        decPending(formId);
+        decPending(formId, "delete");
         if (formId === deletingOwnerRef.current) {
           deletingOwnerRef.current = null;
           setFormDeleting(false);
@@ -203,19 +249,19 @@ export default function AddressDetailPage() {
   // conditional write is idempotent within a frame, so concurrent
   // re-renders are safe.
   const formMutating = formSaving || formDeleting;
-  // Suffix derivation. `entry.updatedAt` is the cheap version key for
-  // anything that's been written via the v2 schema. Legacy rows
-  // (`upgradeEntry` returns `""` for the synth fallback to keep the
-  // key stable across SWR polls) need a content fingerprint instead
-  // — otherwise a teammate's import / migration that changes a
-  // legacy row but preserves `updatedAt: ""` would leave THIS form
-  // mounted with stale fields, and a save would overwrite the
-  // imported data. Use `JSON.stringify` for the fingerprint so the
-  // delimiter is unambiguous: a free-form `|`/`,` concat could
-  // collide for content that contained those characters (e.g.
-  // tags `['a,b','c']` vs `['a','b,c']` both serialise to `a,b,c`).
+  // Suffix derivation. ALWAYS include a content fingerprint, not
+  // just when `updatedAt` is empty. Reason: the import path can
+  // preserve a non-empty `updatedAt` from a snapshot whose
+  // name/tags/notes have since changed — a teammate restoring an
+  // older backup, for example, hands SWR a row with the same
+  // timestamp but different content. Without content in the key,
+  // the form stays mounted with stale fields and a save overwrites
+  // the imported data. The fingerprint uses `JSON.stringify` for
+  // unambiguous encoding (collision-free vs. a free-form `|`/`,`
+  // concat). Cost: an extra ~80 bytes in the key string per render —
+  // imperceptible vs. the correctness gain.
   const liveFormSuffix = entry
-    ? `custom:${entry.updatedAt || `legacy:${JSON.stringify([entry.name, entry.tags, entry.notes ?? "", entry.isPublic ?? false])}`}`
+    ? `custom:${entry.updatedAt}:${JSON.stringify([entry.name, entry.tags, entry.notes ?? "", entry.isPublic ?? false])}`
     : formInitial
       ? "contract"
       : "new";
@@ -355,7 +401,13 @@ export default function AddressDetailPage() {
               resolve — wiping the user's typed-on-B draft. With the
               key, the old instance is unmounted before the resolve
               fires; React no-ops setters on unmounted components. */}
-          <AddressReportEditor key={address} address={address} />
+          <AddressReportEditor
+            key={address}
+            address={address}
+            onSavingChange={handleReportSavingChange}
+            onDeletingChange={handleReportDeletingChange}
+            externallyDisabled={isReportMutationPending(address)}
+          />
         </section>
       </div>
     </div>

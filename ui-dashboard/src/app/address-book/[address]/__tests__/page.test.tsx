@@ -34,6 +34,8 @@ vi.mock("@/components/address-labels-provider", () => ({
     error: mockLabelsError,
     markPendingMutation: () => () => undefined,
     isMutationPending: () => false,
+    markPendingReportMutation: () => () => undefined,
+    isReportMutationPending: () => false,
   }),
 }));
 

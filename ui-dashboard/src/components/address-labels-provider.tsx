@@ -81,7 +81,7 @@ type AddressLabelsContextValue = {
   hasLoaded: boolean;
   error: Error | undefined;
   /**
-   * Mark a save/delete as pending against `address`. Returns an
+   * Mark a label save/delete as pending against `address`. Returns an
    * "unmark" function the caller MUST invoke when the request settles
    * (success or failure). The provider tracks pending mutations
    * globally — surviving the detail page's mount/unmount lifecycle —
@@ -94,10 +94,24 @@ type AddressLabelsContextValue = {
    */
   markPendingMutation: (address: string) => () => void;
   /**
-   * True when at least one save/delete is in flight for `address`.
-   * Re-renders when the count flips between 0 and >0.
+   * True when at least one label save/delete is in flight for
+   * `address`. Re-renders when the count flips between 0 and >0.
    */
   isMutationPending: (address: string | null) => boolean;
+  /**
+   * Same as `markPendingMutation` but for forensic-report writes.
+   * Tracked separately from label mutations because the two are
+   * independent operations on the same address — a label save
+   * shouldn't block a report save against the same address (or vice
+   * versa). Same surfaces share this ledger so detail-page report
+   * edits and modal-tab report edits can't race each other.
+   */
+  markPendingReportMutation: (address: string) => () => void;
+  /**
+   * True when at least one report save/delete is in flight for
+   * `address`. Independent of `isMutationPending` (label).
+   */
+  isReportMutationPending: (address: string | null) => boolean;
 };
 
 const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
@@ -360,42 +374,67 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     await mutate(SWR_KEY);
   }, [mutate]);
 
-  // Pending-mutations ledger. Tracks address → in-flight count so
+  // Pending-mutations ledgers. Tracks address → in-flight count so
   // surfaces (modal, detail page) can read it to disable competing
   // writes against the same address. State (not a ref) because
   // consumers gate render output on it. Lives in the provider rather
   // than the detail page so a user who navigates away from the
   // detail route mid-write and re-enters the same address still
   // sees the in-flight state — the page would otherwise unmount and
-  // rebuild a fresh, empty ledger.
-  const [pendingMutations, setPendingMutations] = useState<
+  // rebuild a fresh, empty ledger. Label and report ledgers are
+  // SEPARATE: a label save shouldn't block a report save against the
+  // same address (or vice versa) — they're independent operations.
+  const [pendingLabelMutations, setPendingLabelMutations] = useState<
     Record<string, number>
   >({});
-  const markPendingMutation = useCallback((address: string): (() => void) => {
-    const lower = address.toLowerCase();
-    setPendingMutations((m) => ({ ...m, [lower]: (m[lower] ?? 0) + 1 }));
-    let unmarked = false;
-    return () => {
-      // Idempotent: a caller that defensively unmarks twice (e.g. via
-      // a finally block plus an error handler) shouldn't decrement
-      // past zero and unblock a subsequent save.
-      if (unmarked) return;
-      unmarked = true;
-      setPendingMutations((m) => {
-        const next = { ...m };
-        const c = (next[lower] ?? 0) - 1;
-        if (c <= 0) delete next[lower];
-        else next[lower] = c;
-        return next;
-      });
-    };
-  }, []);
+  const [pendingReportMutations, setPendingReportMutations] = useState<
+    Record<string, number>
+  >({});
+  // Single helper factory keeps the two ledgers' implementations in
+  // lock-step. Returns `mark(address) → unmark` — `unmark` is
+  // idempotent (a caller who defensively unmarks twice can't decrement
+  // past zero and unblock a subsequent write).
+  const buildMarker = useCallback(
+    (setLedger: React.Dispatch<React.SetStateAction<Record<string, number>>>) =>
+      (address: string): (() => void) => {
+        const lower = address.toLowerCase();
+        setLedger((m) => ({ ...m, [lower]: (m[lower] ?? 0) + 1 }));
+        let unmarked = false;
+        return () => {
+          if (unmarked) return;
+          unmarked = true;
+          setLedger((m) => {
+            const next = { ...m };
+            const c = (next[lower] ?? 0) - 1;
+            if (c <= 0) delete next[lower];
+            else next[lower] = c;
+            return next;
+          });
+        };
+      },
+    [],
+  );
+  const markPendingMutation = useMemo(
+    () => buildMarker(setPendingLabelMutations),
+    [buildMarker],
+  );
+  const markPendingReportMutation = useMemo(
+    () => buildMarker(setPendingReportMutations),
+    [buildMarker],
+  );
   const isMutationPending = useCallback(
     (address: string | null): boolean => {
       if (!address) return false;
-      return (pendingMutations[address.toLowerCase()] ?? 0) > 0;
+      return (pendingLabelMutations[address.toLowerCase()] ?? 0) > 0;
     },
-    [pendingMutations],
+    [pendingLabelMutations],
+  );
+  const isReportMutationPending = useCallback(
+    (address: string | null): boolean => {
+      if (!address) return false;
+      return (pendingReportMutations[address.toLowerCase()] ?? 0) > 0;
+    },
+    [pendingReportMutations],
   );
 
   const value: AddressLabelsContextValue = {
@@ -413,6 +452,8 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     error: error as Error | undefined,
     markPendingMutation,
     isMutationPending,
+    markPendingReportMutation,
+    isReportMutationPending,
   };
 
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;

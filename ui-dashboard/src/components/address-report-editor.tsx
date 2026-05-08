@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { ADDRESS_REPORTS_INDEX_SWR_KEY } from "@/hooks/use-address-reports-index";
@@ -14,6 +14,26 @@ import { isValidAddress, relativeTimeFromIso } from "@/lib/format";
 type Props = {
   /** Address being edited. Empty string disables the form. */
   address: string;
+  /**
+   * Fires when an in-flight report save begins / ends. Used by host
+   * surfaces (detail page, AddressLabelEditor modal) to mark the
+   * write in `AddressLabelsProvider`'s pending ledger so a second
+   * surface mounted for the same address sees the in-flight state
+   * and can block competing writes. `editorId` is a per-mount token
+   * — same per-mount-token pattern as `AddressLabelForm`'s `formId`.
+   */
+  onSavingChange?: (saving: boolean, editorId: string) => void;
+  /** Same as `onSavingChange` but for the delete flow. */
+  onDeletingChange?: (deleting: boolean, editorId: string) => void;
+  /**
+   * When true, all controls (title input, body textarea, view/edit
+   * toggle, Save, Delete) are disabled. Used by the host when there's
+   * already a pending report mutation for this address from another
+   * surface — without this, the user could type into the inputs and
+   * lose those edits the moment the in-flight request settles and
+   * the SWR record-key updates.
+   */
+  externallyDisabled?: boolean;
 };
 
 async function fetchSingleReport(
@@ -31,7 +51,12 @@ async function fetchSingleReport(
   return (await res.json()) as AddressReport;
 }
 
-export function AddressReportEditor({ address }: Props) {
+export function AddressReportEditor({
+  address,
+  onSavingChange,
+  onDeletingChange,
+  externallyDisabled,
+}: Props) {
   const trimmed = address.trim();
   const normalizedAddress = trimmed.toLowerCase();
   const isAddressValid = isValidAddress(trimmed);
@@ -65,6 +90,15 @@ export function AddressReportEditor({ address }: Props) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-mount identity used to scope `onSavingChange` / `onDeletingChange`
+  // callbacks at the host level (mirrors `AddressLabelForm`'s formId
+  // pattern). Counter-backed (not `useId`) so a fresh mount at the
+  // same React tree slot gets a real per-mount token.
+  const editorInstanceIdRef = useRef<string | null>(null);
+  if (editorInstanceIdRef.current === null) {
+    editorInstanceIdRef.current = `report-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  const editorInstanceId = editorInstanceIdRef.current;
   const [seenRecordKey, setSeenRecordKey] = useState(recordKey);
   if (recordKey !== seenRecordKey) {
     setSeenRecordKey(recordKey);
@@ -103,6 +137,7 @@ export function AddressReportEditor({ address }: Props) {
       return;
     }
     setSaving(true);
+    onSavingChange?.(true, editorInstanceId);
     setError(null);
     let saved = false;
     try {
@@ -133,6 +168,7 @@ export function AddressReportEditor({ address }: Props) {
       setError(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setSaving(false);
+      onSavingChange?.(false, editorInstanceId);
     }
 
     // Post-save bookkeeping. Failures here do NOT undo the save — Redis
@@ -160,6 +196,8 @@ export function AddressReportEditor({ address }: Props) {
     bodyLen,
     mutate,
     globalMutate,
+    onSavingChange,
+    editorInstanceId,
   ]);
 
   const handleDelete = useCallback(async () => {
@@ -172,6 +210,7 @@ export function AddressReportEditor({ address }: Props) {
       return;
     }
     setDeleting(true);
+    onDeletingChange?.(true, editorInstanceId);
     setError(null);
     let deleted = false;
     try {
@@ -196,6 +235,7 @@ export function AddressReportEditor({ address }: Props) {
       setError(e instanceof Error ? e.message : "Delete failed.");
     } finally {
       setDeleting(false);
+      onDeletingChange?.(false, editorInstanceId);
     }
 
     if (deleted) {
@@ -208,7 +248,15 @@ export function AddressReportEditor({ address }: Props) {
         );
       }
     }
-  }, [data, hasExisting, trimmed, mutate, globalMutate]);
+  }, [
+    data,
+    hasExisting,
+    trimmed,
+    mutate,
+    globalMutate,
+    onDeletingChange,
+    editorInstanceId,
+  ]);
 
   if (!isAddressValid) {
     return (
@@ -249,7 +297,10 @@ export function AddressReportEditor({ address }: Props) {
   }
 
   return (
-    <div className="flex flex-col">
+    <fieldset
+      disabled={externallyDisabled}
+      className="flex flex-col border-0 p-0 m-0 disabled:opacity-60"
+    >
       <div className="px-5 py-4 space-y-3">
         {/* Status row */}
         <div className="flex items-center justify-between text-xs">
@@ -388,6 +439,6 @@ export function AddressReportEditor({ address }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </fieldset>
   );
 }

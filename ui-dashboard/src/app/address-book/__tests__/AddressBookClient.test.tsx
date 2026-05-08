@@ -58,6 +58,10 @@ const mockUseAddressLabels = vi.fn(() => ({
   revalidate: mockRevalidate,
   isLoading: false as boolean,
   error: undefined as Error | undefined,
+  markPendingMutation: () => () => undefined,
+  isMutationPending: () => false,
+  markPendingReportMutation: () => () => undefined,
+  isReportMutationPending: () => false,
 }));
 
 vi.mock("@/components/address-labels-provider", () => ({
@@ -196,6 +200,10 @@ beforeEach(() => {
     revalidate: mockRevalidate,
     isLoading: false as boolean,
     error: undefined as Error | undefined,
+    markPendingMutation: () => () => undefined,
+    isMutationPending: () => false,
+    markPendingReportMutation: () => () => undefined,
+    isReportMutationPending: () => false,
   }));
 
   capturedEditor = null;
@@ -395,6 +403,10 @@ describe("AddressBookClient — initial render", () => {
       revalidate: mockRevalidate,
       isLoading: true,
       error: undefined,
+      markPendingMutation: () => () => undefined,
+      isMutationPending: () => false,
+      markPendingReportMutation: () => () => undefined,
+      isReportMutationPending: () => false,
     });
     render();
     expect(container.textContent).toContain("Loading labels…");
@@ -410,6 +422,10 @@ describe("AddressBookClient — initial render", () => {
       revalidate: mockRevalidate,
       isLoading: false,
       error: new Error("hasura is down"),
+      markPendingMutation: () => () => undefined,
+      isMutationPending: () => false,
+      markPendingReportMutation: () => () => undefined,
+      isReportMutationPending: () => false,
     });
     render();
     const alert = container.querySelector('[role="alert"]');
