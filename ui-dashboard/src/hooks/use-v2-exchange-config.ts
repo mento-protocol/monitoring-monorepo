@@ -51,12 +51,17 @@ export function useV2ExchangeConfig(
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      // Retry on transient errors at the same 60s cadence as
-      // `refreshInterval` (no exponential-backoff burst) up to 3 attempts,
-      // so a single upstream 502 self-heals on the next tick instead of
-      // wedging the panel until the user reloads.
-      errorRetryCount: 3,
-      errorRetryInterval: 60_000,
+      // Custom retry — SWR 2.x suppresses `refreshInterval` while the
+      // hook is in error state, so without an explicit retry path a
+      // single upstream 502 wedges the panel until the user reloads.
+      // Retry indefinitely at the same 60s cadence as `refreshInterval`
+      // (no exponential-backoff burst) but only when the document is
+      // visible, so background tabs don't pile up upstream calls during
+      // a long outage.
+      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        setTimeout(() => revalidate({ retryCount }), 60_000);
+      },
     },
   );
 

@@ -46,7 +46,16 @@ export function useRebalanceCheck(
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      shouldRetryOnError: false,
+      // Custom retry — SWR 2.x suppresses `refreshInterval` while the
+      // hook is in error state, so without an explicit retry path a
+      // transient 502 wedges "Diagnostics unavailable" until reload.
+      // Retry indefinitely at the same 30s cadence as `refreshInterval`
+      // but only when the document is visible (background tabs don't
+      // pile up upstream calls during a long outage).
+      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        setTimeout(() => revalidate({ retryCount }), 30_000);
+      },
     },
   );
 

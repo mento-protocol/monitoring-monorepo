@@ -27,6 +27,7 @@ import {
   networkForChainId,
 } from "@/lib/networks";
 import { isValidAddress } from "@/lib/format";
+import { redactRpcUrl } from "@/lib/redact-rpc-url";
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 1024;
@@ -185,13 +186,17 @@ export async function GET(
       })
       .catch((err) => {
         // Synchronous throw from `resolveV2ExchangeConfig` (programmer error,
-        // viem internal). Same throttle applies.
+        // viem internal). Redact the RPC URL — viem embeds the transport URL
+        // in error messages + stacks, and a future RPC provider with path-
+        // based API keys (Infura/Alchemy-style) would otherwise leak
+        // credentials into Sentry/server logs. Same throttle applies.
+        const redacted = redactRpcUrl(err, rpcUrl);
         maybeCaptureSentry(key, () => {
-          Sentry.captureException(err, {
+          Sentry.captureException(redacted, {
             tags: { route: "v2-exchange-config", network: networkId },
           });
         });
-        console.error("[v2-exchange-config]", networkId, poolAddress, err);
+        console.error("[v2-exchange-config]", networkId, poolAddress, redacted);
         throw err;
       })
       .finally(() => {
