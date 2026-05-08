@@ -21,11 +21,12 @@
  *    flag the "two radios checked" anti-pattern.
  *
  * 3. Pool tabs structural fragment — a `role="tablist"` containing
- *    `role="tab"` buttons with `aria-selected` and `aria-controls`. We
- *    render a static fragment (the real pool page is too heavy to mount
- *    here without mocking Hasura, the network provider, breach panel, etc.)
- *    that mirrors the page.tsx shape exactly so axe verifies the role
- *    plumbing without us re-deriving it.
+ *    `role="tab"` buttons with `aria-selected` and `aria-controls`. The
+ *    fragment is driven by the **real** `TABS` source from
+ *    `_lib/constants.ts` (and `getTabLabel`), so it can't drift behind
+ *    the page when a tab is added/removed. Mounting the real page is
+ *    deferred — would need mocks for Hasura, network provider, ~10
+ *    hooks; not worth the complexity for one tablist test.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,6 +35,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
 import { LimitSelect } from "@/components/controls";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
+import { TABS, type Tab } from "@/app/pool/[poolId]/_lib/constants";
+import { getTabLabel } from "@/app/pool/[poolId]/_lib/helpers";
 import type { BridgeStatus } from "@/lib/types";
 
 let container: HTMLDivElement;
@@ -131,23 +134,27 @@ describe("BridgeStatusFilter a11y", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Pool tablist — structural fragment mirroring the real pool page
+// Pool tablist — structural fragment driven by the real `TABS` source
 // ---------------------------------------------------------------------------
-
-const TAB_KEYS = [
-  "swaps",
-  "reserves",
-  "rebalances",
-  "oracle",
-  "limits",
-] as const;
+//
+// We can't mount the real pool page here (it pulls in Hasura, network
+// provider, ~10 hooks). But the tablist's role contract is what we want
+// to pin: `role="tablist"` + N `role="tab"` buttons with `aria-selected`
+// and `aria-controls` linking to a `role="tabpanel"`. By importing the
+// real `TABS` (and `getTabLabel`) the test fails the moment the canonical
+// list grows or shrinks — it can't drift behind the page silently.
+//
+// The page hides `breaches` for virtual pools and `ols` when no OLS pool
+// is active; this test just checks the structural contract for the
+// always-visible majority. A future PR that mocks the heavy hooks can
+// promote this to a real-page render.
 
 describe("Pool tablist a11y", () => {
-  function renderTablist(active: (typeof TAB_KEYS)[number]) {
+  function renderTablist(active: Tab) {
     render(
       <>
         <div role="tablist" aria-label="Pool data tabs">
-          {TAB_KEYS.map((t) => (
+          {TABS.map((t) => (
             <button
               key={t}
               role="tab"
@@ -156,7 +163,7 @@ describe("Pool tablist a11y", () => {
               aria-selected={active === t}
               aria-controls={`panel-${t}`}
             >
-              {t}
+              {getTabLabel(t)}
             </button>
           ))}
         </div>
@@ -165,16 +172,18 @@ describe("Pool tablist a11y", () => {
           id={`panel-${active}`}
           aria-labelledby={`tab-${active}`}
         >
-          <p>{active} content</p>
+          <p>{getTabLabel(active)} content</p>
         </div>
       </>,
     );
   }
 
-  it("emits exactly one aria-selected=true tab and links it to the visible panel", async () => {
+  it("renders one button per canonical tab and emits exactly one aria-selected=true", async () => {
     renderTablist("rebalances");
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(TAB_KEYS.length);
+    // Pin against the real source — if `TABS` grows, this test demands a
+    // visit to revisit the page-level wiring for the new entry.
+    expect(tabs).toHaveLength(TABS.length);
     const selected = Array.from(tabs).filter(
       (t) => t.getAttribute("aria-selected") === "true",
     );

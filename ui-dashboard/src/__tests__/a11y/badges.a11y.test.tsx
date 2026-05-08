@@ -149,34 +149,77 @@ describe("LimitBadge a11y", () => {
 });
 
 describe("SourceBadge / KindBadge a11y", () => {
-  it("SourceBadge renders FPMM and Virtual variants without violations", async () => {
+  // SourceBadge derives its label from the input source string: any value
+  // containing "fpmm" → "FPMM"; everything else → "Virtual".
+  const SOURCE_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+    ["fpmm_factory", "FPMM"],
+    ["virtual_pool_factory", "Virtual"],
+  ];
+
+  // KindBadge passes through the input as the visible text.
+  const KIND_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+    ["MINT", "MINT"],
+    ["BURN", "BURN"],
+  ];
+
+  it("SourceBadge has no axe violations across variants", async () => {
     render(
       <ul aria-label="Pool source badges">
-        <li>
-          <SourceBadge source="fpmm_factory" />
-        </li>
-        <li>
-          <SourceBadge source="virtual_pool_factory" />
-        </li>
+        {SOURCE_VARIANTS.map(([source]) => (
+          <li key={source}>
+            <SourceBadge source={source} />
+          </li>
+        ))}
       </ul>,
     );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
 
-  it("KindBadge renders MINT and BURN variants without violations", async () => {
+  it("SourceBadge: every variant carries its expected visible text label", () => {
+    render(
+      <ul>
+        {SOURCE_VARIANTS.map(([source]) => (
+          <li key={source} data-testid={`source-${source}`}>
+            <SourceBadge source={source} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [source, expected] of SOURCE_VARIANTS) {
+      const li = container.querySelector(`[data-testid="source-${source}"]`);
+      expect(li?.textContent).toContain(expected);
+    }
+  });
+
+  it("KindBadge has no axe violations across variants", async () => {
     render(
       <ul aria-label="Liquidity event badges">
-        <li>
-          <KindBadge kind="MINT" />
-        </li>
-        <li>
-          <KindBadge kind="BURN" />
-        </li>
+        {KIND_VARIANTS.map(([kind]) => (
+          <li key={kind}>
+            <KindBadge kind={kind} />
+          </li>
+        ))}
       </ul>,
     );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+
+  it("KindBadge: every variant carries its expected visible text label", () => {
+    render(
+      <ul>
+        {KIND_VARIANTS.map(([kind]) => (
+          <li key={kind} data-testid={`kind-${kind}`}>
+            <KindBadge kind={kind} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [kind, expected] of KIND_VARIANTS) {
+      const li = container.querySelector(`[data-testid="kind-${kind}"]`);
+      expect(li?.textContent).toContain(expected);
+    }
   });
 });
 
@@ -234,12 +277,17 @@ describe("Bridge badge a11y", () => {
     }
   });
 
-  it("BridgeProviderBadge passes axe", async () => {
+  it("BridgeProviderBadge passes axe and renders the expected label per provider", async () => {
     render(
-      <div aria-label="Bridge provider badges">
+      <div aria-label="Bridge provider badges" data-testid="bridge-provider">
         <BridgeProviderBadge provider="WORMHOLE" />
       </div>,
     );
+    const wrap = container.querySelector('[data-testid="bridge-provider"]');
+    // The component maps WORMHOLE → "Wormhole"; assert the label renders so
+    // a refactor that drops the Record lookup (and falls through to the
+    // raw enum value) trips this test.
+    expect(wrap?.textContent).toContain("Wormhole");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
