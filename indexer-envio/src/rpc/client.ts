@@ -302,9 +302,14 @@ export function getFallbackRpcClient(
     return null;
   }
 
-  const perChainOverride = process.env[config.envVar];
-  const legacyGlobal = process.env.ENVIO_RPC_URL;
-  const primaryRawUrl = perChainOverride ?? legacyGlobal ?? config.default;
+  // Use truthiness (||), not nullish coalescing (??), so empty-string env
+  // vars fall through to the next source — matching getRpcClient's `if
+  // (perChainOverride)` resolution. Mismatched semantics here would let a
+  // blank ENVIO_RPC_URL_<chainId> resolve `primaryUrl=""` while the actual
+  // primary uses `config.default`, causing the `sameUrl` check below to
+  // miss and produce a self-referencing fallback client.
+  const primaryRawUrl =
+    process.env[config.envVar] || process.env.ENVIO_RPC_URL || config.default;
   const primaryUrl = withHyperRpcToken(primaryRawUrl);
   if (sameUrl(fallbackUrl, primaryUrl)) {
     fallbackRpcClients.set(chainId, null);

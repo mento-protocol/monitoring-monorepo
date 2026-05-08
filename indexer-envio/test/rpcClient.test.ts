@@ -374,6 +374,17 @@ describe("getFallbackRpcClient", () => {
     assert.equal(getFallbackRpcClient(143), null);
   });
 
+  it("treats an empty ENVIO_RPC_URL_<chainId> as unset when resolving primary for the same-URL guard", () => {
+    // getRpcClient uses truthiness; getFallbackRpcClient must agree. If we
+    // used `??` and ENVIO_RPC_URL_143 = "", primaryUrl would be "" while
+    // the actual primary is config.default ("https://rpc2.monad.xyz") — the
+    // sameUrl check would miss and we'd return a self-referencing fallback
+    // client at config.default.
+    process.env.ENVIO_RPC_URL_143 = "";
+    delete process.env.ENVIO_RPC_FALLBACK_URL_143;
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
   it("returns null for an unknown chainId", () => {
     assert.equal(getFallbackRpcClient(999999), null);
   });
