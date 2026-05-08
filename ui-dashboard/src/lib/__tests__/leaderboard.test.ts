@@ -14,6 +14,7 @@ import {
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
   type LeaderboardTodayTraderRow,
+  type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
@@ -847,14 +848,33 @@ describe("mergeHeroSnapshot", () => {
       totalSwapCountIncludingSystem: overrides.totalSwapCount ?? 0,
       uniqueTraders: 0,
       uniqueTradersIncludingSystem: overrides.uniqueTraders ?? 0,
-      // First-day slice defaults to zero — tests that exercise the
-      // DEGRADED-chain catch-up path override these explicitly.
+      ...overrides,
+    };
+  }
+
+  /** Factory for the isolated first-day slice row — auto-pairs with a
+   *  `snap()` row by chainId/snapshotDay so tests pass them together. */
+  function firstDay(
+    overrides: Partial<LeaderboardWindowFirstDayRow> & { chainId: number },
+  ): LeaderboardWindowFirstDayRow {
+    const snapshotDay = overrides.snapshotDay ?? String(YESTERDAY_MIDNIGHT);
+    return {
+      snapshotDay,
       firstDayVolumeUsdWei: "0",
-      firstDayVolumeUsdWeiIncludingSystem: "0",
+      firstDayVolumeUsdWeiIncludingSystem:
+        overrides.firstDayVolumeUsdWeiIncludingSystem ??
+        overrides.firstDayVolumeUsdWei ??
+        "0",
       firstDaySwapCount: 0,
-      firstDaySwapCountIncludingSystem: 0,
+      firstDaySwapCountIncludingSystem:
+        overrides.firstDaySwapCountIncludingSystem ??
+        overrides.firstDaySwapCount ??
+        0,
       firstDayExclusiveUniqueTraders: 0,
-      firstDayExclusiveUniqueTradersIncludingSystem: 0,
+      firstDayExclusiveUniqueTradersIncludingSystem:
+        overrides.firstDayExclusiveUniqueTradersIncludingSystem ??
+        overrides.firstDayExclusiveUniqueTraders ??
+        0,
       ...overrides,
     };
   }
@@ -1430,8 +1450,14 @@ describe("mergeHeroSnapshot", () => {
           totalVolumeUsdWei: USD(700),
           totalSwapCount: 35,
           uniqueTraders: 7,
-          // First-day slice of the snapshot — these get subtracted
-          // off when yesterday rows arrive.
+        }),
+      ],
+      // First-day slice from the isolated query — paired by
+      // (chainId, snapshotDay).
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(120),
           firstDaySwapCount: 6,
           firstDayExclusiveUniqueTraders: 2,
@@ -1466,7 +1492,11 @@ describe("mergeHeroSnapshot", () => {
     expect(out.staleChains).toEqual([]);
   });
 
-  it("degraded chain + EMPTY yesterday rows: chain stays degraded; totals untouched (data IS missing)", () => {
+  it("degraded chain + EMPTY yesterday rows: slice still subtracts (zero yesterday is authoritative, not 'data missing')", () => {
+    // `yesterdayRows: []` means the query completed and reported zero
+    // activity yesterday. The window must still slide forward by
+    // subtracting the first-day slice — without subtraction, hero
+    // KPIs would keep an extra closed day and overstate totals.
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1475,33 +1505,39 @@ describe("mergeHeroSnapshot", () => {
           totalVolumeUsdWei: USD(500),
           totalSwapCount: 20,
           uniqueTraders: 4,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(100),
           firstDaySwapCount: 5,
           firstDayExclusiveUniqueTraders: 1,
         }),
       ],
       todayRows: [],
-      // Caller fired the query (because degradedChains was non-empty
-      // first pass) but there was no activity yesterday on the
-      // degraded chain. The catch-up should NOT happen.
       yesterdayRows: [],
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // Snapshot totals untouched.
-    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
-    expect(out.totalSwapCount).toBe(20);
-    expect(out.uniqueTraders).toBe(4);
-    // Banner stays — accurately reflects missing yesterday data.
-    expect(out.degradedChains).toEqual([10143]);
+    // Volume: 500 - 100 (first-day) + 0 (no yesterday) = 400.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(400)));
+    // Swaps: 20 - 5 + 0 = 15.
+    expect(out.totalSwapCount).toBe(15);
+    // Unique: 4 - 1 + 0 = 3.
+    expect(out.uniqueTraders).toBe(3);
+    // Chain has been supplemented authoritatively → no longer degraded.
+    expect(out.degradedChains).toEqual([]);
   });
 
-  it("degraded chain + yesterday rows for a DIFFERENT chain: this chain stays degraded", () => {
-    // Edge case: yesterdayRows might carry rows for chains that
-    // weren't in the degraded list (though normally the query is
-    // bounded by the gate's chainIdIn). Yesterday-rows for unrelated
-    // chains must NOT supplement the degraded chain — and the
-    // degraded chain must stay in the list.
+  it("degraded chain + yesterday rows only for a DIFFERENT chain: this chain still gets slice subtraction (zero yesterday rows for it)", () => {
+    // `yesterdayRows` carries rows for chain 42220 (not degraded) but
+    // none for 10143 (degraded). Per the authoritative-empty semantics,
+    // 10143 still gets its first-day slice subtracted with a zero
+    // yesterday contribution — sliding the window forward by one
+    // day. Rows for non-degraded chains are ignored (the rollup
+    // already covered them via snapshot + today).
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1510,6 +1546,12 @@ describe("mergeHeroSnapshot", () => {
           totalVolumeUsdWei: USD(500),
           totalSwapCount: 20,
           uniqueTraders: 4,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(100),
           firstDaySwapCount: 5,
           firstDayExclusiveUniqueTraders: 1,
@@ -1527,13 +1569,20 @@ describe("mergeHeroSnapshot", () => {
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // Degraded chain (10143) stays in list; its totals untouched.
-    expect(out.degradedChains).toEqual([10143]);
-    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
-    expect(out.totalSwapCount).toBe(20);
+    // 10143 supplemented with empty per-chain rows: 500 - 100 = 400.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(400)));
+    expect(out.totalSwapCount).toBe(15);
+    expect(out.uniqueTraders).toBe(3);
+    // No longer degraded.
+    expect(out.degradedChains).toEqual([]);
   });
 
-  it("mixed: one chain supplements via yesterday rows, another stays degraded (no rows for it)", () => {
+  it("mixed: one degraded chain has yesterday rows, another doesn't — both supplemented; only stale stays banner-worthy", () => {
+    // Authoritative-yesterday semantics: every degraded chain gets
+    // its first-day slice subtracted, regardless of whether the
+    // chain itself shows up in `yesterdayRows`. Chains without rows
+    // get a zero yesterday contribution. The `degradedChains` return
+    // value is empty after catch-up because all sliced.
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1544,21 +1593,31 @@ describe("mergeHeroSnapshot", () => {
           uniqueTraders: 8,
         }),
         snap({
-          chainId: 10143, // degraded — yesterday rows present → supplement
+          chainId: 10143, // degraded — yesterday rows present → supplement w/ rows
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           totalVolumeUsdWei: USD(300),
           totalSwapCount: 15,
           uniqueTraders: 3,
-          firstDayVolumeUsdWei: USD(50),
-          firstDaySwapCount: 3,
-          firstDayExclusiveUniqueTraders: 1,
         }),
         snap({
-          chainId: 8453, // degraded — no yesterday rows → stays degraded
+          chainId: 8453, // degraded — no yesterday rows → supplement w/ zero
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           totalVolumeUsdWei: USD(200),
           totalSwapCount: 8,
           uniqueTraders: 2,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(50),
+          firstDaySwapCount: 3,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+        firstDay({
+          chainId: 8453,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(40),
           firstDaySwapCount: 2,
           firstDayExclusiveUniqueTraders: 1,
@@ -1576,14 +1635,14 @@ describe("mergeHeroSnapshot", () => {
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // Fresh: 800. Degraded-supplemented: 300 - 50 + 70 = 320.
-    // Degraded-stays: 200 (no subtraction). Total = 1320.
-    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1320)));
-    // Swaps: 40 + (15 - 3 + 4) + 8 = 64.
-    expect(out.totalSwapCount).toBe(64);
-    // Unique traders: 8 + (3 - 1 + 1) + 2 = 13.
-    expect(out.uniqueTraders).toBe(13);
-    expect(out.degradedChains).toEqual([8453]);
+    // Fresh: 800. 10143 sliced: 300 - 50 + 70 = 320.
+    // 8453 sliced: 200 - 40 + 0 = 160. Total = 1280.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1280)));
+    // Swaps: 40 + (15 - 3 + 4) + (8 - 2 + 0) = 62.
+    expect(out.totalSwapCount).toBe(62);
+    // Unique traders: 8 + (3 - 1 + 1) + (2 - 1 + 0) = 12.
+    expect(out.uniqueTraders).toBe(12);
+    expect(out.degradedChains).toEqual([]);
     expect(out.staleChains).toEqual([]);
   });
 
@@ -1602,6 +1661,12 @@ describe("mergeHeroSnapshot", () => {
           totalSwapCountIncludingSystem: 50,
           uniqueTraders: 4,
           uniqueTradersIncludingSystem: 9,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(80),
           firstDayVolumeUsdWeiIncludingSystem: USD(150),
           firstDaySwapCount: 4,
@@ -1651,6 +1716,12 @@ describe("mergeHeroSnapshot", () => {
           totalSwapCountIncludingSystem: 50,
           uniqueTraders: 4,
           uniqueTradersIncludingSystem: 9,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(80),
           firstDayVolumeUsdWeiIncludingSystem: USD(150),
           firstDaySwapCount: 4,
@@ -1690,8 +1761,8 @@ describe("mergeHeroSnapshot", () => {
 
   it("yesterdayRows undefined: degraded chain stays in list (caller didn't fire the query)", () => {
     // Caller's first-pass merge returned non-empty degradedChains,
-    // but the gated query hasn't completed yet (or wasn't fired).
-    // The merge must behave the same as before slice-subtraction
+    // but the gated query hasn't completed yet (or errored). The
+    // merge must behave the same as before slice-subtraction
     // existed: snapshot kept, banner shown.
     const out = mergeHeroSnapshot({
       snapshotRows: [
@@ -1701,6 +1772,12 @@ describe("mergeHeroSnapshot", () => {
           totalVolumeUsdWei: USD(500),
           totalSwapCount: 20,
           uniqueTraders: 4,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(80),
           firstDaySwapCount: 4,
           firstDayExclusiveUniqueTraders: 1,
@@ -1713,6 +1790,119 @@ describe("mergeHeroSnapshot", () => {
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
     expect(out.degradedChains).toEqual([10143]);
+  });
+
+  it("firstDayRows undefined (isolated query hasn't completed): degraded chain stays in list even if yesterdayRows present", () => {
+    // Catch-up requires BOTH the firstDay slice AND yesterday rows.
+    // If only one has landed, the chain stays degraded — fall back to
+    // the pre-catch-up behavior rather than risk an inconsistent
+    // partial subtraction.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      // firstDayRows omitted — isolated query lagging.
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(50),
+          swapCount: 2,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Snapshot untouched, chain still degraded.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
+    expect(out.degradedChains).toEqual([10143]);
+  });
+
+  it("undefined vs [] semantics: undefined keeps degraded; [] slides the window", () => {
+    // Pin the distinction. Same snapshot, two passes, only the
+    // yesterdayRows arg differs. firstDayRows is present in both.
+    const baseArgs = {
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    };
+    const undefinedPass = mergeHeroSnapshot(baseArgs);
+    const emptyPass = mergeHeroSnapshot({ ...baseArgs, yesterdayRows: [] });
+    // undefined: snapshot untouched, chain stays degraded.
+    expect(undefinedPass.totalVolumeUsdWei).toBe(BigInt(USD(500)));
+    expect(undefinedPass.degradedChains).toEqual([10143]);
+    // []: slice subtraction runs, chain drops out of degraded.
+    expect(emptyPass.totalVolumeUsdWei).toBe(BigInt(USD(400)));
+    expect(emptyPass.degradedChains).toEqual([]);
+  });
+
+  it("showSystem=false + only-system yesterday rows: filtered out, but slice still subtracts (zero non-system contribution)", () => {
+    // The only yesterday rows are system-address; with
+    // `showSystem=false` they're filtered before the per-chain
+    // bucket. The first-day slice still subtracts (authoritative
+    // empty) and the chain drops from degraded.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(80),
+          firstDaySwapCount: 4,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xsys",
+          volumeUsdWei: USD(40),
+          swapCount: 3,
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // 500 - 80 (first-day primary) + 0 (system row filtered out) = 420.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(420)));
+    expect(out.totalSwapCount).toBe(16);
+    expect(out.uniqueTraders).toBe(3);
+    expect(out.degradedChains).toEqual([]);
   });
 });
 

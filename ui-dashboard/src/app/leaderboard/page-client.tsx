@@ -9,10 +9,12 @@ import { formatUSD } from "@/lib/format";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_LEADERBOARD_TODAY_TRADERS,
+  BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   BROKER_LEADERBOARD_WINDOW_LATEST,
   BROKER_LEADERBOARD_YESTERDAY_TRADERS,
   BROKER_TRADER_DAILY_TOP,
   LEADERBOARD_TODAY_TRADERS,
+  LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
   LEADERBOARD_YESTERDAY_TRADERS,
   POOL_DAILY_VOLUME,
@@ -33,6 +35,7 @@ import {
   type BrokerTraderDailyRow,
   type LeaderboardRangeKey,
   type LeaderboardTodayTraderRow,
+  type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
@@ -141,6 +144,21 @@ export function LeaderboardClient() {
     windowKey: range,
   });
 
+  // Isolated first-day slice query (split from the primary hero
+  // query so a hosted-Hasura schema lag on the new columns can
+  // degrade JUST the catch-up). Joined client-side by chainId in
+  // `mergeHeroSnapshot`.
+  const heroFirstDayV3Result = useGQL<{
+    LeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
+  }>(venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
+    windowKey: range,
+  });
+  const heroFirstDayV2Result = useGQL<{
+    BrokerLeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
+  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
+    windowKey: range,
+  });
+
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
   // yesterday, so today's TraderDailySnapshot rows fill in the gap.
   // Memoised on `utcDayKey` so it flips at midnight without retriggering
@@ -244,6 +262,11 @@ export function LeaderboardClient() {
       ? todayV3Result.data?.TraderDailySnapshot
       : todayV2Result.data?.BrokerTraderDailySnapshot;
 
+  const heroFirstDayRows =
+    venue === "v3"
+      ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
+      : heroFirstDayV2Result.data?.BrokerLeaderboardWindowSnapshot;
+
   // First-pass merge — without `yesterdayRows`. Used solely to
   // discover which chains are in the DEGRADED state (snapshotDay =
   // today - 2 days), so we can gate the yesterday-traders query on
@@ -301,6 +324,7 @@ export function LeaderboardClient() {
       mergeHeroSnapshot({
         snapshotRows: heroSnapshotRows,
         todayRows: todayPartialRows,
+        firstDayRows: heroFirstDayRows,
         yesterdayRows: yesterdayPartialRows,
         showSystem,
         todayMidnightSeconds: todayMidnight,
@@ -308,6 +332,7 @@ export function LeaderboardClient() {
     [
       heroSnapshotRows,
       todayPartialRows,
+      heroFirstDayRows,
       yesterdayPartialRows,
       showSystem,
       todayMidnight,

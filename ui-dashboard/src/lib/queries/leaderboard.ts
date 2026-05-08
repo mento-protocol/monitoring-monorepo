@@ -214,13 +214,6 @@ export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
 // adds today's partial from the small TraderDailySnapshot query below.
 // ---------------------------------------------------------------------------
 
-// `firstDay*` fields ship as part of the same query (rather than a
-// separate isolated one) because they're a tightly-coupled slice of
-// the same snapshot row — splitting would duplicate the per-chain
-// fetch and complicate `mergeHeroSnapshot`'s slice-subtraction step.
-// Schema-required UI changes follow the standard deploy sequence
-// (indexer → re-sync → merge → promote) so hosted Hasura always knows
-// the new columns before the dashboard ships.
 export const LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
   query LeaderboardWindowLatest($windowKey: String!) {
     LeaderboardWindowSnapshot(
@@ -240,12 +233,6 @@ export const LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
       totalSwapCountIncludingSystem
       uniqueTraders
       uniqueTradersIncludingSystem
-      firstDayVolumeUsdWei
-      firstDayVolumeUsdWeiIncludingSystem
-      firstDaySwapCount
-      firstDaySwapCountIncludingSystem
-      firstDayExclusiveUniqueTraders
-      firstDayExclusiveUniqueTradersIncludingSystem
     }
   }
 `;
@@ -269,6 +256,49 @@ export const BROKER_LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
       totalSwapCountIncludingSystem
       uniqueTraders
       uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+// Isolated firstDay slice query — same rationale as POOL_CONFIG_EXT /
+// POOL_BREACH_ROLLUP in queries/pools.ts. Hosted Hasura rejects new
+// columns with "field not found" during the deploy+resync window, so
+// keeping these in a separate query means the hero KPIs survive the
+// rollout and only the DEGRADED-chain catch-up enhancement degrades
+// (chains stay in `degradedChains` until the slice query lands). After
+// the schema is live, normal operation is restored.
+//
+// Joined client-side by chainId in `mergeHeroSnapshot`.
+export const LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query LeaderboardWindowFirstDayLatest($windowKey: String!) {
+    LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query BrokerLeaderboardWindowFirstDayLatest($windowKey: String!) {
+    BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
       firstDayVolumeUsdWei
       firstDayVolumeUsdWeiIncludingSystem
       firstDaySwapCount
