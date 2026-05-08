@@ -58,6 +58,7 @@ export async function fetchBreakerList(
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: breakerBoxAddress,
@@ -270,6 +271,7 @@ export async function fetchBreakerDefaults(
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
     const tradingModeP = readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: breakerBoxAddress,
@@ -300,6 +302,7 @@ export async function fetchBreakerDefaults(
     const [tmRes, cdRes, thrRes] = await Promise.all([
       tradingModeP,
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: breakerAddress as `0x${string}`,
@@ -311,6 +314,7 @@ export async function fetchBreakerDefaults(
         log,
       ),
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: breakerAddress as `0x${string}`,
@@ -380,6 +384,7 @@ export async function fetchBreakerFeedState(
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
     const statusP = readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: breakerBoxAddress,
@@ -417,6 +422,7 @@ export async function fetchBreakerFeedState(
     const [statusRes, cdRes, thrRes, kindSpecific] = await Promise.all([
       statusP,
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: breakerAddress as `0x${string}`,
@@ -429,6 +435,7 @@ export async function fetchBreakerFeedState(
         log,
       ),
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: breakerAddress as `0x${string}`,
@@ -443,6 +450,7 @@ export async function fetchBreakerFeedState(
       kind === "MEDIAN_DELTA"
         ? Promise.all([
             readContractWithBlockFallback(
+              chainId,
               client,
               {
                 address: breakerAddress as `0x${string}`,
@@ -455,6 +463,7 @@ export async function fetchBreakerFeedState(
               log,
             ),
             readContractWithBlockFallback(
+              chainId,
               client,
               {
                 address: breakerAddress as `0x${string}`,
@@ -468,6 +477,7 @@ export async function fetchBreakerFeedState(
             ),
           ])
         : readContractWithBlockFallback(
+            chainId,
             client,
             {
               address: breakerAddress as `0x${string}`,

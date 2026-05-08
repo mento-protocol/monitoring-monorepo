@@ -8,8 +8,10 @@ import type { createPublicClient } from "viem";
 import {
   RATE_LIMIT_RETRY_DELAYS_MS,
   _resetRpcFailureCounts,
+  fallbackLikelyHasBlock,
   isRateLimitError,
   logRpcFailure,
+  recordFallbackArchiveMiss,
   sanitizeErrorMessage,
 } from "./client";
 import { consoleLogger, type RpcLogger } from "./log";
@@ -31,16 +33,23 @@ const BLOCK_NOT_AVAILABLE_RE =
 
 /** Matches RPC error messages indicating the node lacks archive depth back
  * to the requested block — *the contract IS deployed there, the node just
- * doesn't have state pruned that far back*. Quiknode emits the full phrase:
+ * doesn't have state pruned that far back*.
  *
- *   "Block requested not found. Request might be querying historical state
- *    that is not available."
+ * Provider-specific phrasings:
+ * - QuickNode: `"Block requested not found. Request might be querying
+ *   historical state that is not available."` — match on `querying
+ *   historical state`.
+ * - QuickNode (alternate): `"Invalid parameters were provided to the RPC
+ *   method. Double check you have provided the correct parameters."` — fires
+ *   when the requested block is below the pruning window. Match the full
+ *   two-sentence form so unrelated "Invalid parameters" errors (malformed
+ *   address, wrong ABI selector, future provider-specific tweaks) don't
+ *   trigger archive-depth handling and poison the runtime horizon.
  *
- * We match on `querying historical state` only (the unambiguous archive-
- * depth marker). The bare `Block requested not found` phrase by itself can
- * also mean "transient lag — node hasn't seen this block yet" on some
- * providers, which is recoverable via the BLOCK_NOT_AVAILABLE_RE retry
- * path; mis-classifying it as archive-depth would skip those retries.
+ * The bare `Block requested not found` phrase by itself can also mean
+ * "transient lag — node hasn't seen this block yet" on some providers,
+ * which is recoverable via the BLOCK_NOT_AVAILABLE_RE retry path; mis-
+ * classifying it as archive-depth would skip those retries.
  *
  * Distinct from BLOCK_NOT_AVAILABLE_RE: archive-depth failures are
  * recoverable only via a deeper-archive secondary at the SAME block.
@@ -52,7 +61,8 @@ const BLOCK_NOT_AVAILABLE_RE =
  * fallback throws, callers' existing try/catch returns null, indexer
  * preserves the prior known-good value (or schema default) until the
  * indexer reaches a block whose state the primary can serve. */
-const ARCHIVE_DEPTH_RE = /querying historical state/i;
+const ARCHIVE_DEPTH_RE =
+  /querying historical state|Invalid parameters were provided to the RPC method\. Double check you have provided the correct parameters/i;
 
 export type BlockFallbackResult = {
   result: unknown;
@@ -108,6 +118,7 @@ export const _testHooks = {
  * (the read returned `latest` instead of the requested block).
  */
 export async function readContractWithBlockFallback(
+  chainId: number,
   client: ReturnType<typeof createPublicClient>,
   args: Record<string, unknown>,
   blockNumber?: bigint,
@@ -177,8 +188,12 @@ export async function readContractWithBlockFallback(
       }
       if (exitedWithRateLimit) {
         // Retries exhausted with rate-limit still in place — try fallback
-        // client at the same block. usedLatestFallback stays false.
-        if (fallbackClient) {
+        // client at the same block IF the fallback's known archive horizon
+        // covers it. Otherwise, throw the rate-limit error directly: a call
+        // to a fallback we know lacks the block would just surface a
+        // confusing archive-miss error masking the underlying rate-limit
+        // cause, and waste a round trip we already know will fail.
+        if (fallbackClient && fallbackLikelyHasBlock(chainId, blockNumber)) {
           log.warn(
             `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
           );
@@ -186,6 +201,16 @@ export async function readContractWithBlockFallback(
             const result = await makeCall(fallbackClient, blockNumber);
             return { result, usedFallback: true, usedLatestFallback: false };
           } catch (fallbackErr) {
+            // Fallback failed. If it's an archive-depth miss, record it so
+            // future rate-limit fallbacks for older blocks on this chain
+            // skip the secondary entirely.
+            if (
+              blockNumber !== undefined &&
+              fallbackErr instanceof Error &&
+              ARCHIVE_DEPTH_RE.test(fallbackErr.message)
+            ) {
+              recordFallbackArchiveMiss(chainId, blockNumber);
+            }
             // Throw the fallback error (not the primary rate-limit error)
             // so the caller can classify it — e.g.
             // fetchRebalanceIncentiveAtBlock needs to see "returned no
@@ -237,6 +262,16 @@ export async function readContractWithBlockFallback(
         } catch (fallbackErr) {
           // Secondary also failed (rate-limit, deeper-archive miss,
           // contract-not-deployed-at-this-block, or some other transient).
+          // If it's an archive-depth miss, learn the secondary's horizon
+          // so future rate-limit fallbacks skip the secondary at deeper
+          // blocks instead of surfacing a confusing "Invalid parameters"
+          // error.
+          if (
+            fallbackErr instanceof Error &&
+            ARCHIVE_DEPTH_RE.test(fallbackErr.message)
+          ) {
+            recordFallbackArchiveMiss(chainId, blockNumber);
+          }
           // Throw the secondary's error so callers can classify it
           // correctly — e.g. fetchRebalanceIncentiveAtBlock needs to see
           // "returned no data" to stamp the -2 sentinel for older pools

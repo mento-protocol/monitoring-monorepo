@@ -104,6 +104,7 @@ export async function fetchErc20Decimals(
     // a primary rate-limit on `decimals()` throws straight to the caller
     // and dumps a viem stack trace into the warn channel.
     const { result } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: tokenAddress as `0x${string}`,
@@ -266,6 +267,7 @@ export async function fetchRebalancingState(
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -317,6 +319,7 @@ export async function fetchReserves(
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -357,6 +360,7 @@ export async function fetchInvertRateFeed(
   try {
     const client = getRpcClient(chainId);
     const { result } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -391,6 +395,7 @@ export async function fetchRebalanceThreshold(
     const fallback = getFallbackRpcClient(chainId);
     const [aboveRes, belowRes] = await Promise.all([
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: poolAddress as `0x${string}`,
@@ -402,6 +407,7 @@ export async function fetchRebalanceThreshold(
         log,
       ),
       readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: poolAddress as `0x${string}`,
@@ -439,6 +445,7 @@ export async function fetchReferenceRateFeedID(
   try {
     const client = getRpcClient(chainId);
     const { result } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -481,6 +488,7 @@ export async function fetchNumReporters(
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address,
@@ -528,6 +536,7 @@ export async function fetchReportExpiry(
   try {
     const client = getRpcClient(chainId);
     const tokenExpiryRes = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address,
@@ -549,6 +558,7 @@ export async function fetchReportExpiry(
       expiry = tokenExpiry;
     } else {
       const globalRes = await readContractWithBlockFallback(
+        chainId,
         client,
         {
           address,
@@ -584,6 +594,7 @@ export async function fetchTokenDecimalsScaling(
   try {
     const client = getRpcClient(chainId);
     const { result } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -612,6 +623,7 @@ export async function fetchTradingLimits(
     const client = getRpcClient(chainId);
     const { result: raw, usedLatestFallback } =
       await readContractWithBlockFallback(
+        chainId,
         client,
         {
           address: poolAddress as `0x${string}`,
@@ -683,6 +695,7 @@ async function readFeeGetter(
     throw new Error("Mock transient RPC failure");
   }
   const { result } = await readContractWithBlockFallback(
+    chainId,
     client,
     {
       address: poolAddress as `0x${string}`,
@@ -740,6 +753,7 @@ export async function fetchRebalanceIncentiveAtBlock(
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
       client,
       {
         address: poolAddress as `0x${string}`,
