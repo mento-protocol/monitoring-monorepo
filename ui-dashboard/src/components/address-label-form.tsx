@@ -67,6 +67,15 @@ type Props = {
   address: string;
   /** Pre-filled values when editing an existing entry. */
   initial?: AddressEntry;
+  /**
+   * Bubbles the typed address up to the parent every time it changes (only
+   * in new-address mode — the input only renders when `address === ""`).
+   * The modal listens for this so the Forensic Report tab can read the
+   * draft instead of the empty initial prop. The detail page never
+   * triggers it (always opens with a non-empty URL address) and can omit
+   * this prop.
+   */
+  onAddressChange?: (next: string) => void;
   /** Called after a successful save. The modal uses this to close itself; the detail page can use it for revalidation/toast. */
   onSaved?: () => void;
   /** Called after a successful delete. Modal closes here; detail page navigates back. */
@@ -86,6 +95,7 @@ type Props = {
 export function AddressLabelForm({
   address: initialAddress,
   initial,
+  onAddressChange,
   onSaved,
   onDeleted,
   onCancel,
@@ -197,7 +207,10 @@ export function AddressLabelForm({
               id="al-address"
               type="text"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                onAddressChange?.(e.target.value);
+              }}
               placeholder="0x…"
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />

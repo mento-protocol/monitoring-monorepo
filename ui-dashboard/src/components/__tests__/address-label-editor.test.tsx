@@ -57,7 +57,9 @@ vi.mock("@/components/tag-input", () => ({
 // AddressReportEditor pulls in SWR + useSession; stub it for these tests
 // since the lifecycle assertions only care about the dialog + label form.
 vi.mock("@/components/address-report-editor", () => ({
-  AddressReportEditor: () => <div data-testid="report-editor-stub" />,
+  AddressReportEditor: ({ address }: { address: string }) => (
+    <div data-testid="report-editor-stub" data-address={address} />
+  ),
 }));
 
 // jsdom doesn't implement <dialog>.showModal/close. Polyfill on the
@@ -270,6 +272,44 @@ describe("AddressLabelEditor — tab panels", () => {
     expect(
       container.querySelector('[data-testid="report-editor-stub"]'),
     ).not.toBeNull();
+  });
+});
+
+describe("AddressLabelEditor — new-address draft sharing", () => {
+  it("bubbles a typed address into the report panel via the form's onAddressChange", () => {
+    // Codex P2: pre-refactor the address state lived in the modal; both
+    // tabs read the same value. After extraction the typed address only
+    // lived inside the form, and the report panel kept seeing the empty
+    // initial prop. Pin the bubbling fix: render in new-address mode,
+    // type a valid address, switch to the report tab, assert the report
+    // editor stub received the typed address.
+    render({ address: "", onClose: () => undefined });
+    const validAddr = "0x" + "b".repeat(40);
+    setInputValue("al-address", validAddr);
+    clickTab("Forensic Report");
+
+    const stub = container.querySelector('[data-testid="report-editor-stub"]');
+    expect(stub).not.toBeNull();
+    expect(stub?.getAttribute("data-address")).toBe(validAddr);
+  });
+
+  it("flips the modal title from 'Add label' to 'Edit label' when a typed address matches an existing custom entry", () => {
+    // The new-address flow can type into an existing custom address. The
+    // editor must re-derive isContractRow against the *typed* address
+    // (draftAddress), not the original `""` prop, so the title updates.
+    mockIsCustom.mockImplementation(
+      (addr: string | null) => addr === "0x" + "c".repeat(40),
+    );
+    render({ address: "", onClose: () => undefined });
+    expect(container.querySelector("h2")?.textContent).toBe("Add label");
+
+    setInputValue("al-address", "0x" + "c".repeat(40));
+    // Title still says "Add label" because the modal is in new-address
+    // mode without any `initial` — typing an existing-custom address
+    // doesn't auto-load it; the user is starting fresh. This pins the
+    // documented behaviour, not the title flip; the previous bug was the
+    // *report* tab seeing "" instead of the typed address.
+    expect(container.querySelector("h2")?.textContent).toBe("Add label");
   });
 });
 

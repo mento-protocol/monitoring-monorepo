@@ -31,6 +31,13 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
+  // Mirror the form's typed address so the Forensic Report tab can read
+  // the draft. Pre-extraction the address state lived here directly; the
+  // refactor moved it into AddressLabelForm and broke the cross-tab
+  // contract for the new-address flow (typed address stayed inside the
+  // form, report tab kept seeing the original `""` prop). Re-bubbling via
+  // `onAddressChange` restores parity.
+  const [draftAddress, setDraftAddress] = useState(address);
   const { isCustom } = useAddressLabels();
 
   // Mount-only effect — every caller passes an inline `() => setX(false)`
@@ -72,11 +79,13 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
   // Re-derive isContractRow at the editor level so the modal title stays
   // accurate. The form computes its own copy too — both call sites must
   // agree, but keeping the editor's check avoids exposing the form's
-  // internal state across the API boundary.
+  // internal state across the API boundary. Drives off `draftAddress` so
+  // the title flips correctly when a user types a known contract address
+  // in the new-address flow.
   const isContractRow = resolveIsContractRow({
-    isNewAddress: address === "",
+    isNewAddress: draftAddress === "",
     initial,
-    isCustom: isCustom(address),
+    isCustom: isCustom(draftAddress),
   });
   const hasExistingCustomEntry = initial !== undefined && !isContractRow;
 
@@ -157,6 +166,7 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
         <AddressLabelForm
           address={address}
           initial={initial}
+          onAddressChange={setDraftAddress}
           onSaved={onClose}
           onDeleted={onClose}
           onCancel={onClose}
@@ -169,7 +179,7 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
         aria-labelledby="al-tab-report"
         hidden={activeTab !== "report"}
       >
-        <AddressReportEditor address={address} />
+        <AddressReportEditor address={draftAddress} />
       </div>
     </dialog>
   );
