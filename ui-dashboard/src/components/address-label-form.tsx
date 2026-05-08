@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
@@ -73,8 +73,14 @@ type Props = {
   onDeleted?: () => void;
   /** When provided, renders a Cancel button in the form footer. Used by the modal. */
   onCancel?: () => void;
-  /** Autofocus the first input on mount. Modal sets this true; the detail page leaves it false to avoid hijacking page-load focus. */
-  focusOnMount?: boolean;
+  /**
+   * Optional ref attached to the form's first focusable field (address input
+   * in new-address mode, name input otherwise). The modal owns focus
+   * management and calls `.focus()` AFTER `dialog.showModal()` settles —
+   * doing it inside this component would race the dialog's own focus steps
+   * and land focus on the dialog's close button instead of the field.
+   */
+  firstFieldRef?: RefObject<HTMLInputElement | null>;
 };
 
 export function AddressLabelForm({
@@ -83,7 +89,7 @@ export function AddressLabelForm({
   onSaved,
   onDeleted,
   onCancel,
-  focusOnMount: shouldFocus = false,
+  firstFieldRef,
 }: Props) {
   const {
     upsertEntry,
@@ -91,7 +97,10 @@ export function AddressLabelForm({
     isCustom: isCustomLabel,
     customEntries,
   } = useAddressLabels();
-  const firstInputRef = useRef<HTMLInputElement>(null);
+  const internalFirstInputRef = useRef<HTMLInputElement>(null);
+  // Use the parent's ref when provided (modal); otherwise an internal ref
+  // exists so the JSX still has a stable target.
+  const firstInputRef = firstFieldRef ?? internalFirstInputRef;
 
   const isNewAddress = initialAddress === "";
 
@@ -109,10 +118,6 @@ export function AddressLabelForm({
     const all = new Set([...SUGGESTED_TAGS, ...used]);
     return [...all].sort((a, b) => a.localeCompare(b));
   }, [customEntries]);
-
-  useEffect(() => {
-    if (shouldFocus) firstInputRef.current?.focus();
-  }, [shouldFocus]);
 
   // When editing an existing contract row (not a new address, no custom label yet),
   // label is optional — empty means "keep the contract name".

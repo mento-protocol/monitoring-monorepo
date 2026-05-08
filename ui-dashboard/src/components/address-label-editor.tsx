@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AddressLabelForm } from "@/components/address-label-form";
+import {
+  AddressLabelForm,
+  resolveIsContractRow,
+} from "@/components/address-label-form";
 import { AddressReportEditor } from "@/components/address-report-editor";
+import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 
 // Re-export pure helpers so existing test imports
@@ -25,23 +29,56 @@ type Props = {
 
 export function AddressLabelEditor({ address, initial, onClose }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
+  const { isCustom } = useAddressLabels();
+
+  // Mount-only effect — every caller passes an inline `() => setX(false)`
+  // arrow as `onClose`, so depending on it would re-fire `showModal()` on
+  // every parent re-render and throw `InvalidStateError` on the
+  // already-open dialog. Latch the close handler in a ref so the cleanup
+  // closure can call the latest version without invalidating the effect.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
-    dialog.showModal();
+    if (!dialog.open) dialog.showModal();
+    // Focus the form's first field AFTER showModal — running it before
+    // would race the dialog's native focus steps and the eventual focus
+    // would land on the dialog's close button instead of the editable
+    // field. Wrap in rAF so the focus call lands after the dialog's
+    // initial focus pass.
+    requestAnimationFrame(() => {
+      firstInputRef.current?.focus();
+    });
 
-    // Close when clicking the native backdrop (target === dialog element itself)
+    // Close on backdrop click (target === dialog element itself).
     const handleBackdropClick = (e: MouseEvent) => {
-      if (e.target === dialog) onClose();
+      if (e.target === dialog) onCloseRef.current();
     };
     dialog.addEventListener("click", handleBackdropClick);
     return () => dialog.removeEventListener("click", handleBackdropClick);
-  }, [onClose]);
+    // Mount-only by design. The effect captures `onCloseRef.current` lazily
+    // (re-read inside the click handler) so it always sees the latest
+    // `onClose` without re-firing `showModal()` when the parent re-renders
+    // with a fresh inline arrow.
+  }, []);
 
-  const hasExistingCustomEntry = initial !== undefined;
+  // Re-derive isContractRow at the editor level so the modal title stays
+  // accurate. The form computes its own copy too — both call sites must
+  // agree, but keeping the editor's check avoids exposing the form's
+  // internal state across the API boundary.
+  const isContractRow = resolveIsContractRow({
+    isNewAddress: address === "",
+    initial,
+    isCustom: isCustom(address),
+  });
+  const hasExistingCustomEntry = initial !== undefined && !isContractRow;
 
   return (
     <dialog
@@ -108,30 +145,32 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
         </button>
       </div>
 
-      {activeTab === "report" ? (
-        <div
-          role="tabpanel"
-          id="al-tab-report-panel"
-          aria-labelledby="al-tab-report"
-        >
-          <AddressReportEditor address={address} />
-        </div>
-      ) : (
-        <div
-          role="tabpanel"
-          id="al-tab-label-panel"
-          aria-labelledby="al-tab-label"
-        >
-          <AddressLabelForm
-            address={address}
-            initial={initial}
-            onSaved={onClose}
-            onDeleted={onClose}
-            onCancel={onClose}
-            focusOnMount
-          />
-        </div>
-      )}
+      {/* Both tab panels stay mounted — toggling visibility via `hidden`
+          (instead of conditional render) preserves user-typed state in the
+          label form when they peek at the report tab and switch back. */}
+      <div
+        role="tabpanel"
+        id="al-tab-label-panel"
+        aria-labelledby="al-tab-label"
+        hidden={activeTab !== "label"}
+      >
+        <AddressLabelForm
+          address={address}
+          initial={initial}
+          onSaved={onClose}
+          onDeleted={onClose}
+          onCancel={onClose}
+          firstFieldRef={firstInputRef}
+        />
+      </div>
+      <div
+        role="tabpanel"
+        id="al-tab-report-panel"
+        aria-labelledby="al-tab-report"
+        hidden={activeTab !== "report"}
+      >
+        <AddressReportEditor address={address} />
+      </div>
     </dialog>
   );
 }
