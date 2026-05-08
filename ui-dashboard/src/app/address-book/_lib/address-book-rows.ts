@@ -18,12 +18,16 @@ export type AddressRow = AddressBookRow;
  * Look up a contract-name pre-fill for the address-label form. Walks every
  * configured network's static `addressLabels` registry case-insensitively.
  *
- * Same address on multiple chains generally has the same contract name
- * (deterministic deploys); first match wins, which is fine for editor pre-fill
- * because the user can always override.
- *
- * Returns `undefined` for addresses that aren't in any contract registry —
- * the form then renders as a fresh custom-label entry.
+ * Returns `undefined` when:
+ *   - no configured network has a label for this address, OR
+ *   - configured networks DISAGREE on the name (e.g.
+ *     `0x0dd57f6f...` is `Yield Split` on Celo and `ProtocolFeeRecipient`
+ *     on Monad). The detail URL is chain-agnostic so we can't tell which
+ *     chain the user clicked from. Pre-filling with first-match-wins
+ *     would let a save on the Monad row persist `Yield Split` as the
+ *     GLOBAL custom name — suppressing the Monad contract row in the
+ *     index under Celo's label. Better to render an empty form and let
+ *     the user type the right name for their context.
  *
  * Shared between the modal flow (`AddressBookClient`) and the detail page
  * (`/address-book/[address]`) so both surfaces preserve contract names when a
@@ -38,19 +42,22 @@ export function findContractInitial(address: string): AddressEntry | undefined {
   // a deep-link to an address that only exists in the devnet registry
   // would seed the form with a devnet-only contract name and a save
   // would persist that as a global custom label.
+  const matchedNames = new Set<string>();
   for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
     const net = NETWORKS[id];
     for (const [registered, name] of Object.entries(net.addressLabels)) {
       if (registered.toLowerCase() === lower) {
-        return {
-          name,
-          tags: [],
-          updatedAt: new Date().toISOString(),
-        };
+        matchedNames.add(name);
       }
     }
   }
-  return undefined;
+  if (matchedNames.size !== 1) return undefined;
+  const [name] = matchedNames;
+  return {
+    name,
+    tags: [],
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------

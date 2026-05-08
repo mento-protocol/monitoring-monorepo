@@ -279,7 +279,15 @@ export default function AddressDetailPage() {
               Forensic Report
             </h2>
           </div>
-          <AddressReportEditor address={address} />
+          {/* `key={address}` so a navigation A → B forces a fresh mount
+              of the report editor. Without it, React reuses the same
+              instance with a new `address` prop and an in-flight
+              save/delete from A would have its `finally` setters
+              (setTitle/setBody/setPreviewMode) mutate B's state on
+              resolve — wiping the user's typed-on-B draft. With the
+              key, the old instance is unmounted before the resolve
+              fires; React no-ops setters on unmounted components. */}
+          <AddressReportEditor key={address} address={address} />
         </section>
       </div>
     </div>
