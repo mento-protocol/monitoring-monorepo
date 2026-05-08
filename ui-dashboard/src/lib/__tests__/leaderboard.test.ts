@@ -847,6 +847,14 @@ describe("mergeHeroSnapshot", () => {
       totalSwapCountIncludingSystem: overrides.totalSwapCount ?? 0,
       uniqueTraders: 0,
       uniqueTradersIncludingSystem: overrides.uniqueTraders ?? 0,
+      // First-day slice defaults to zero — tests that exercise the
+      // DEGRADED-chain catch-up path override these explicitly.
+      firstDayVolumeUsdWei: "0",
+      firstDayVolumeUsdWeiIncludingSystem: "0",
+      firstDaySwapCount: 0,
+      firstDaySwapCountIncludingSystem: 0,
+      firstDayExclusiveUniqueTraders: 0,
+      firstDayExclusiveUniqueTradersIncludingSystem: 0,
       ...overrides,
     };
   }
@@ -1401,6 +1409,309 @@ describe("mergeHeroSnapshot", () => {
     expect(out.totalSwapCount).toBe(62);
     expect(out.uniqueTraders).toBe(13);
     expect(out.staleChains).toEqual([11155111]);
+    expect(out.degradedChains).toEqual([10143]);
+  });
+
+  // ─── Degraded-chain catch-up via slice subtraction ───────────────
+  // PR #339 shipped the DEGRADED banner; this PR ships the catch-up.
+  // For a `7d` snapshot anchored at `T-2`, the snapshot covers
+  // `[T-7, T-2]` (6 closed days). Naively adding yesterday + today
+  // on top yields 8 days because the boundary day `T-7` is still in
+  // the count. Slice subtraction drops the snapshot's first-day
+  // contribution and replaces with yesterday + today, yielding the
+  // correct 7-day rolling window.
+
+  it("degraded chain + yesterday rows: slice subtraction supplements totals; chain drops from degradedChains", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(700),
+          totalSwapCount: 35,
+          uniqueTraders: 7,
+          // First-day slice of the snapshot — these get subtracted
+          // off when yesterday rows arrive.
+          firstDayVolumeUsdWei: USD(120),
+          firstDaySwapCount: 6,
+          firstDayExclusiveUniqueTraders: 2,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(80),
+          swapCount: 4,
+        }),
+        today({
+          chainId: 10143,
+          trader: "0xb",
+          volumeUsdWei: USD(40),
+          swapCount: 2,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Volume: snapshot 700 - firstDay 120 + yesterday (80+40) = 700.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(700)));
+    // Swaps: 35 - 6 + (4+2) = 35.
+    expect(out.totalSwapCount).toBe(35);
+    // Unique traders: 7 - 2 (exclusive) + 2 (yesterday distinct).
+    expect(out.uniqueTraders).toBe(7);
+    // Chain has been supplemented → no longer degraded.
+    expect(out.degradedChains).toEqual([]);
+    expect(out.staleChains).toEqual([]);
+  });
+
+  it("degraded chain + EMPTY yesterday rows: chain stays degraded; totals untouched (data IS missing)", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      // Caller fired the query (because degradedChains was non-empty
+      // first pass) but there was no activity yesterday on the
+      // degraded chain. The catch-up should NOT happen.
+      yesterdayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Snapshot totals untouched.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
+    expect(out.totalSwapCount).toBe(20);
+    expect(out.uniqueTraders).toBe(4);
+    // Banner stays — accurately reflects missing yesterday data.
+    expect(out.degradedChains).toEqual([10143]);
+  });
+
+  it("degraded chain + yesterday rows for a DIFFERENT chain: this chain stays degraded", () => {
+    // Edge case: yesterdayRows might carry rows for chains that
+    // weren't in the degraded list (though normally the query is
+    // bounded by the gate's chainIdIn). Yesterday-rows for unrelated
+    // chains must NOT supplement the degraded chain — and the
+    // degraded chain must stay in the list.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 42220, // not the degraded chain
+          trader: "0xz",
+          volumeUsdWei: USD(50),
+          swapCount: 1,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Degraded chain (10143) stays in list; its totals untouched.
+    expect(out.degradedChains).toEqual([10143]);
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
+    expect(out.totalSwapCount).toBe(20);
+  });
+
+  it("mixed: one chain supplements via yesterday rows, another stays degraded (no rows for it)", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220, // fresh — yesterday cadence
+          snapshotDay: String(YESTERDAY_MIDNIGHT),
+          totalVolumeUsdWei: USD(800),
+          totalSwapCount: 40,
+          uniqueTraders: 8,
+        }),
+        snap({
+          chainId: 10143, // degraded — yesterday rows present → supplement
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(300),
+          totalSwapCount: 15,
+          uniqueTraders: 3,
+          firstDayVolumeUsdWei: USD(50),
+          firstDaySwapCount: 3,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+        snap({
+          chainId: 8453, // degraded — no yesterday rows → stays degraded
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(200),
+          totalSwapCount: 8,
+          uniqueTraders: 2,
+          firstDayVolumeUsdWei: USD(40),
+          firstDaySwapCount: 2,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(70),
+          swapCount: 4,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Fresh: 800. Degraded-supplemented: 300 - 50 + 70 = 320.
+    // Degraded-stays: 200 (no subtraction). Total = 1320.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1320)));
+    // Swaps: 40 + (15 - 3 + 4) + 8 = 64.
+    expect(out.totalSwapCount).toBe(64);
+    // Unique traders: 8 + (3 - 1 + 1) + 2 = 13.
+    expect(out.uniqueTraders).toBe(13);
+    expect(out.degradedChains).toEqual([8453]);
+    expect(out.staleChains).toEqual([]);
+  });
+
+  it("slice subtraction uses *IncludingSystem fields when showSystem=true", () => {
+    // showSystem=true reads the *IncludingSystem totals; the
+    // first-day subtraction MUST also use the *IncludingSystem
+    // first-day fields, otherwise the units diverge.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalVolumeUsdWeiIncludingSystem: USD(900),
+          totalSwapCount: 20,
+          totalSwapCountIncludingSystem: 50,
+          uniqueTraders: 4,
+          uniqueTradersIncludingSystem: 9,
+          firstDayVolumeUsdWei: USD(80),
+          firstDayVolumeUsdWeiIncludingSystem: USD(150),
+          firstDaySwapCount: 4,
+          firstDaySwapCountIncludingSystem: 10,
+          firstDayExclusiveUniqueTraders: 1,
+          firstDayExclusiveUniqueTradersIncludingSystem: 3,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(100),
+          swapCount: 5,
+          isSystemAddress: false,
+        }),
+        today({
+          chainId: 10143,
+          trader: "0xsys",
+          volumeUsdWei: USD(40),
+          swapCount: 3,
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: true,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // *IncludingSystem branch: 900 - 150 + (100 + 40) = 890.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(890)));
+    // Swaps: 50 - 10 + (5+3) = 48.
+    expect(out.totalSwapCount).toBe(48);
+    // Unique: 9 - 3 + 2 = 8.
+    expect(out.uniqueTraders).toBe(8);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("slice subtraction uses primary fields when showSystem=false; system rows in yesterday filtered out", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalVolumeUsdWeiIncludingSystem: USD(900),
+          totalSwapCount: 20,
+          totalSwapCountIncludingSystem: 50,
+          uniqueTraders: 4,
+          uniqueTradersIncludingSystem: 9,
+          firstDayVolumeUsdWei: USD(80),
+          firstDayVolumeUsdWeiIncludingSystem: USD(150),
+          firstDaySwapCount: 4,
+          firstDaySwapCountIncludingSystem: 10,
+          firstDayExclusiveUniqueTraders: 1,
+          firstDayExclusiveUniqueTradersIncludingSystem: 3,
+        }),
+      ],
+      todayRows: [],
+      yesterdayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(100),
+          swapCount: 5,
+          isSystemAddress: false,
+        }),
+        today({
+          chainId: 10143,
+          trader: "0xsys",
+          volumeUsdWei: USD(40),
+          swapCount: 3,
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Primary branch: 500 - 80 + 100 (system row filtered) = 520.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(520)));
+    // Swaps: 20 - 4 + 5 = 21.
+    expect(out.totalSwapCount).toBe(21);
+    // Unique: 4 - 1 + 1 = 4.
+    expect(out.uniqueTraders).toBe(4);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("yesterdayRows undefined: degraded chain stays in list (caller didn't fire the query)", () => {
+    // Caller's first-pass merge returned non-empty degradedChains,
+    // but the gated query hasn't completed yet (or wasn't fired).
+    // The merge must behave the same as before slice-subtraction
+    // existed: snapshot kept, banner shown.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+          firstDayVolumeUsdWei: USD(80),
+          firstDaySwapCount: 4,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      todayRows: [],
+      // yesterdayRows omitted entirely.
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
     expect(out.degradedChains).toEqual([10143]);
   });
 });

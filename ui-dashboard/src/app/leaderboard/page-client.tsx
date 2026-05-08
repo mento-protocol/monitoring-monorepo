@@ -10,9 +10,11 @@ import {
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_LEADERBOARD_TODAY_TRADERS,
   BROKER_LEADERBOARD_WINDOW_LATEST,
+  BROKER_LEADERBOARD_YESTERDAY_TRADERS,
   BROKER_TRADER_DAILY_TOP,
   LEADERBOARD_TODAY_TRADERS,
   LEADERBOARD_WINDOW_LATEST,
+  LEADERBOARD_YESTERDAY_TRADERS,
   POOL_DAILY_VOLUME,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
@@ -241,15 +243,75 @@ export function LeaderboardClient() {
     venue === "v3"
       ? todayV3Result.data?.TraderDailySnapshot
       : todayV2Result.data?.BrokerTraderDailySnapshot;
-  const heroTotals = useMemo(
+
+  // First-pass merge — without `yesterdayRows`. Used solely to
+  // discover which chains are in the DEGRADED state (snapshotDay =
+  // today - 2 days), so we can gate the yesterday-traders query on
+  // them. Cheap (one O(snapshotRows + todayRows) pass).
+  const degradedChainsForGate = useMemo(
     () =>
       mergeHeroSnapshot({
         snapshotRows: heroSnapshotRows,
         todayRows: todayPartialRows,
         showSystem,
         todayMidnightSeconds: todayMidnight,
-      }),
+      }).degradedChains,
     [heroSnapshotRows, todayPartialRows, showSystem, todayMidnight],
+  );
+
+  // Catch-up query for DEGRADED chains: fetches yesterday's
+  // trader-day rows scoped to the degraded chainIds so the second
+  // merge pass can perform slice subtraction (drop the snapshot's
+  // first day, add yesterday + today). Gated on
+  // `degradedChainsForGate.length > 0` via `useGQL`'s null-passthrough
+  // convention so we don't burn Envio quota when no chain needs
+  // catching up.
+  const yesterdayMidnight = todayMidnight - SECONDS_PER_DAY;
+  const yesterdayV3Result = useGQL<{
+    TraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(
+    venue === "v3" && degradedChainsForGate.length > 0
+      ? LEADERBOARD_YESTERDAY_TRADERS
+      : null,
+    {
+      yesterdayMidnight,
+      isSystemAddressIn,
+      chainIdIn: degradedChainsForGate,
+    },
+  );
+  const yesterdayV2Result = useGQL<{
+    BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(
+    venue === "v2" && degradedChainsForGate.length > 0
+      ? BROKER_LEADERBOARD_YESTERDAY_TRADERS
+      : null,
+    {
+      yesterdayMidnight,
+      isSystemAddressIn,
+      chainIdIn: degradedChainsForGate,
+    },
+  );
+  const yesterdayPartialRows =
+    venue === "v3"
+      ? yesterdayV3Result.data?.TraderDailySnapshot
+      : yesterdayV2Result.data?.BrokerTraderDailySnapshot;
+
+  const heroTotals = useMemo(
+    () =>
+      mergeHeroSnapshot({
+        snapshotRows: heroSnapshotRows,
+        todayRows: todayPartialRows,
+        yesterdayRows: yesterdayPartialRows,
+        showSystem,
+        todayMidnightSeconds: todayMidnight,
+      }),
+    [
+      heroSnapshotRows,
+      todayPartialRows,
+      yesterdayPartialRows,
+      showSystem,
+      todayMidnight,
+    ],
   );
   const totalVolume = useMemo(
     () => weiToUsd(heroTotals.totalVolumeUsdWei),
