@@ -99,12 +99,22 @@ export async function fetchErc20Decimals(
   if (mocked !== undefined) return mocked;
   try {
     const client = getRpcClient(chainId);
-    const raw = await client.readContract({
-      address: tokenAddress as `0x${string}`,
-      abi: ERC20_DECIMALS_ABI,
-      functionName: "decimals",
-    });
-    const d = Number(raw);
+    // Route through readContractWithBlockFallback (with no blockNumber)
+    // for free rate-limit retry + secondary-RPC fallback. Without this,
+    // a primary rate-limit on `decimals()` throws straight to the caller
+    // and dumps a viem stack trace into the warn channel.
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: tokenAddress as `0x${string}`,
+        abi: ERC20_DECIMALS_ABI,
+        functionName: "decimals",
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    const d = Number(result);
     if (d < 0 || d > 36) return null;
     return d;
   } catch (err) {
@@ -346,11 +356,17 @@ export async function fetchInvertRateFeed(
 ): Promise<boolean | null> {
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "invertRateFeed",
-    });
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "invertRateFeed",
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
     return result as boolean;
   } catch (err) {
     logRpcFailure(chainId, "invertRateFeed", poolAddress, err, undefined, log);
@@ -360,27 +376,44 @@ export async function fetchInvertRateFeed(
 
 /** Fetch the pool's rebalance threshold using standalone getters that do NOT
  * require the oracle to be live (unlike getRebalancingState which reverts when
- * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or 0. */
+ * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or
+ * `null` on transient RPC failure. The pool entity treats absence /
+ * `<= 0` as "not yet known" (defaults to the 10000 fallback in `pool.ts`),
+ * so callers can persist 0 for "configured to never rebalance" and
+ * `undefined`/null for "retry next event" without ambiguity. */
 export async function fetchRebalanceThreshold(
   chainId: number,
   poolAddress: string,
   log: RpcLogger = consoleLogger,
-): Promise<number> {
+): Promise<number | null> {
   try {
     const client = getRpcClient(chainId);
-    const [above, below] = await Promise.all([
-      client.readContract({
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "rebalanceThresholdAbove",
-      }),
-      client.readContract({
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "rebalanceThresholdBelow",
-      }),
+    const fallback = getFallbackRpcClient(chainId);
+    const [aboveRes, belowRes] = await Promise.all([
+      readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_MINIMAL_ABI,
+          functionName: "rebalanceThresholdAbove",
+        },
+        undefined,
+        fallback,
+        log,
+      ),
+      readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_MINIMAL_ABI,
+          functionName: "rebalanceThresholdBelow",
+        },
+        undefined,
+        fallback,
+        log,
+      ),
     ]);
-    return Math.max(Number(above), Number(below));
+    return Math.max(Number(aboveRes.result), Number(belowRes.result));
   } catch (err) {
     logRpcFailure(
       chainId,
@@ -390,7 +423,7 @@ export async function fetchRebalanceThreshold(
       undefined,
       log,
     );
-    return 0;
+    return null;
   }
 }
 
@@ -405,11 +438,17 @@ export async function fetchReferenceRateFeedID(
 
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "referenceRateFeedID",
-    });
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "referenceRateFeedID",
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
     return (result as string).toLowerCase();
   } catch (err) {
     logRpcFailure(
@@ -544,11 +583,17 @@ export async function fetchTokenDecimalsScaling(
 ): Promise<bigint | null> {
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: fn,
-    });
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: fn,
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
     return result as bigint;
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
@@ -622,9 +667,11 @@ function isUnsupportedGetterError(reason: unknown): boolean {
 
 async function readFeeGetter(
   client: ReturnType<typeof getRpcClient>,
+  chainId: number,
   poolAddress: string,
   functionName: "lpFee" | "protocolFee" | "rebalanceIncentive",
   mock: FeeGetterMock | undefined,
+  log: RpcLogger,
 ): Promise<bigint> {
   if (mock) {
     if ("fulfilled" in mock) return mock.fulfilled;
@@ -635,11 +682,18 @@ async function readFeeGetter(
     }
     throw new Error("Mock transient RPC failure");
   }
-  return client.readContract({
-    address: poolAddress as `0x${string}`,
-    abi: FPMM_FEE_ABI,
-    functionName,
-  }) as Promise<bigint>;
+  const { result } = await readContractWithBlockFallback(
+    client,
+    {
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_FEE_ABI,
+      functionName,
+    },
+    undefined,
+    getFallbackRpcClient(chainId),
+    log,
+  );
+  return result as bigint;
 }
 
 /** Test-only sentinel: `null` represents an RPC failure mock, distinct
@@ -740,13 +794,22 @@ export async function fetchFees(
     }
     const client = getRpcClient(chainId);
     const results = await Promise.allSettled([
-      readFeeGetter(client, poolAddress, "lpFee", mock?.lpFee),
-      readFeeGetter(client, poolAddress, "protocolFee", mock?.protocolFee),
+      readFeeGetter(client, chainId, poolAddress, "lpFee", mock?.lpFee, log),
       readFeeGetter(
         client,
+        chainId,
+        poolAddress,
+        "protocolFee",
+        mock?.protocolFee,
+        log,
+      ),
+      readFeeGetter(
+        client,
+        chainId,
         poolAddress,
         "rebalanceIncentive",
         mock?.rebalanceReward,
+        log,
       ),
     ]);
     const [lpFeeR, protocolFeeR, rebalanceRewardR] = results;

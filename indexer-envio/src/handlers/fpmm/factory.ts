@@ -231,7 +231,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     oracleDelta.invertRateFeedKnown = true;
   }
 
-  if (rebalanceThreshold > 0) {
+  if (rebalanceThreshold !== undefined && rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;
   }
 
