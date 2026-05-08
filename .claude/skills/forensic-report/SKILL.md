@@ -1,0 +1,207 @@
+---
+name: forensic-report
+description: Use this skill when investigating a specific on-chain address (operator EOA, contract, attacker, MEV bot, suspicious counterparty, etc.) and producing a forensic report for the Mento address book. Triggers on requests like "investigate 0x...", "produce a forensic report on this address", "who is 0x...", "/forensic-report", "/onchain-sleuth", "/detective", or any time you're asked to identify an unknown address that interacts with Mento and the answer needs to land in the address-book report editor. Apply whenever the goal is a long-form attribution + activity write-up that gets stored in the `reports` Upstash hash.
+---
+
+# Forensic Report
+
+Produce a structured investigation report for an on-chain address and (optionally) push it directly to the production `reports` hash in Upstash so it shows up in the address book without copy-paste.
+
+## When to use this
+
+You're looking at an address that matters to Mento — a counterparty pulling funds out of a Mento pool, an MEV bot whose pattern keeps showing up in swap traces, a deployer of a contract you don't recognise, a wallet flagged in an alert — and you want a durable attribution + activity write-up rather than a 500-char `notes` blurb. The output goes into the address book's Forensic Report tab and feeds the 📄 indicator on the address book index.
+
+If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"), use the label form instead.
+
+## Inputs
+
+- **address** (required): `0x…` (40 hex chars). Skill normalises to lowercase.
+- **context** (optional, one line): why you started looking — "showed up in the breaker-trip post-mortem", "biggest counterparty on the Mento broker last month", etc. Used in the TL;DR.
+- **chain hint** (optional): default Celo since that's where Mento lives. Used for the storage probe + tx-anatomy section.
+
+## Output
+
+Two artefacts:
+
+1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
+2. **Optional production upload**: `HSET reports <addressLower> <jsonReport>` against the `address-labels` Upstash database via `mcp__upstash__redis_database_run_redis_commands`. Schema below; sets `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
+
+## Output template
+
+The literal shape every report follows lives at `template.md` next to this file. Read it once, then mirror its structure exactly: same eight named H2 sections in the same order (TL;DR, Cast of characters, What it does, Transaction anatomy, Capital and scale, Why \_\_\_ why these venues, Arkham coverage, Bottom line), same code-fenced storage / tx blocks, same "Investigation date" footer. The template is the spec — don't invent new sections, don't drop existing ones, don't reorder.
+
+## Procedure (how to fill the template)
+
+Run these in order. Each step maps onto a section of the template — fill that section as evidence comes in, don't wait until the end.
+
+### Step 1 — Bootstrap
+
+```bash
+ADDR=$(echo "0x…" | tr 'A-Z' 'a-z')   # always lowercase the storage key
+CHAIN=celo                            # default; override if user said otherwise
+DATE=$(date -u +%F)
+mkdir -p .investigations
+```
+
+Check whether a report already exists (we may be UPDATING, not creating):
+
+```js
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "reports", "<addrLower>"]],
+});
+```
+
+If a report exists, parse it for `version` and `createdAt` — you'll preserve them on upload.
+
+Also pull any existing label so the H1 nickname matches what's in the address book:
+
+```js
+commands: [["HGET", "labels", "<addrLower>"]];
+```
+
+### Step 2 — Cast of characters (Arkham + funder graph)
+
+Use the `arkham` skill (project-scoped). Arkham doesn't cover Celo or Monad, so the play is:
+
+1. Run `address_enriched/all` on the target address — gets every chain Arkham DOES cover. Often returns zero hits for a Celo-native contract; that's a signal, not a failure.
+2. Walk inbound funders on the target chain. Use `dune sim evm activity <addr> --activity-type receive` (the `sim` skill is user-scoped) to find the FIRST funder. That funder is usually the operator EOA.
+3. Run `address_enriched/all` on the operator EOA across all chains — this is where personas like ENS / opensea / multichain footprint usually surface.
+4. Trace one more hop back: who funded the operator? If it's a bridge (Stargate, LayerZero, Hop, Across), name the bridge in the table.
+5. For contracts: also pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table.
+
+For each address you add to the Cast: include age (days since first activity), multichain footprint (which chains it's been seen on), and a one-line "what it does" note.
+
+### Step 3 — What it does
+
+**For a contract target** — read public storage directly. Most arb / MEV contracts leave trivial getters in (router addresses, allowlists, fee tiers, hardcoded principals). Use the chain's full-node RPC (NOT HyperRPC — `eth_call` requires a full node):
+
+```bash
+RPC=https://forno.celo.org   # or whatever full-node RPC for the target chain
+cast call $ADDR "router()(address)" --rpc-url $RPC
+cast call $ADDR "routerSushi()(address)" --rpc-url $RPC
+cast call $ADDR "lastAddress()(address)" --rpc-url $RPC
+# … etc, try every name a typical arb contract uses
+```
+
+If the contract is verified (sourcify or Celoscan): pull source, name the patterns. If unverified: look at the top selectors by frequency on Celoscan / explorer; OpenChain-decode any matching ones (`https://openchain.xyz/signatures?function=0x…`).
+
+**For an EOA target** — behavioural profile. Top counterparties (`dune sim evm activity` filtered by counterparty), top tokens held (`dune sim evm balances`), tx-time distribution if relevant.
+
+### Step 4 — Transaction anatomy
+
+Pick a representative tx — preferably a recent successful one with the typical calldata shape. Use `cast tx <hash> --rpc-url $RPC` for the raw shape, then decode the selector via OpenChain.
+
+Note the revert rate. For arb / MEV: ~30–50% reverts is normal (failed sniping). If it's lower, the bot is well-tuned; higher, it's overshooting.
+
+### Step 5 — Capital and scale
+
+```bash
+dune sim evm balances $PRINCIPAL --chain-ids 42220 -o json | jq '.balance_data | length'
+dune sim evm balances $PRINCIPAL --chain-ids 42220 -o json | jq '.balance_data[] | {symbol, amount, value_usd}'
+```
+
+Sum the USD value, drop scam airdrops (zero-value tokens with names like `CLAIM`, `voucher`). For tx volume, hit Celoscan / Etherscan API or use the explorer UI count.
+
+### Step 6 — Why \_\_\_, why these venues
+
+Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing (`Mento broker is oracle-priced, Uniswap V3 is AMM-priced — the spread between them is the alpha`). Don't say "MEV" — say which kind (statistical arb / sandwich / liquidation / JIT).
+
+### Step 7 — Arkham coverage
+
+Be candid about what Arkham did and didn't tell you. If the chain isn't supported, say it. If Arkham returned zero, say it. The "negative result" section is part of the audit trail — future you needs to know which leads were dead ends.
+
+### Step 8 — Bottom line
+
+Five bullets, one sentence each: Who / What / Where / How much / Goal. This is the section a Slack reader will copy-paste, so it has to stand alone without the rest of the report.
+
+### Step 9 — Save the draft
+
+Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 3 words of the H1 display name, lowercased, kebab-cased. Example: H1 `Arbitrage Executor (idontloseiwin.eth)` → slug `arbitrage-executor`.
+
+### Step 10 — Push to production (only on user confirmation)
+
+By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash.
+
+**Build the payload:**
+
+```js
+const body = readFile(".investigations/<addr>-<slug>.md");
+if (body.length > 50000) throw new Error("body exceeds 50KB cap");
+
+const title = extractTitleFromH1(body); // text after the ` — ` separator, ≤200 chars
+const now = new Date().toISOString();
+
+// If updating an existing report, preserve createdAt + bump version.
+const existing = await HGET("reports", addrLower);
+const prev = existing ? JSON.parse(existing) : null;
+
+const payload = {
+  body,
+  title: title?.slice(0, 200),
+  authorEmail: "philip.paetz@me.com", // matches the userEmail context
+  source: "claude", // already in the AddressReport enum
+  createdAt: prev?.createdAt ?? now,
+  updatedAt: now,
+  version: prev ? prev.version + 1 : 1,
+};
+```
+
+**Write it:**
+
+```js
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HSET", "reports", addrLower, JSON.stringify(payload)]],
+});
+```
+
+**Verify:**
+
+```js
+commands: [["HGET", "reports", addrLower]];
+```
+
+The address-book index endpoint reads from the same hash on every request, so the 📄 indicator + the report editor will pick up the new content on the next page load — no SWR mutate hook needed from this side.
+
+## Schema invariants (mirror these — the API enforces the same rules)
+
+- `body`: required, non-empty, ≤ 50,000 characters (50KB)
+- `title`: optional, ≤ 200 characters, dropped if empty after trim
+- `source`: `"manual" | "claude" | "import"` — always set `"claude"` from this skill
+- `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
+
+These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.
+
+## Reference: production database
+
+```
+database_id: c687bf0d-f61f-498e-879a-016de335b4ce
+hash:        reports
+key shape:   <lowercase 0x address>
+value shape: JSON-stringified AddressReport (see schema above)
+```
+
+The `address-labels` Upstash database also holds the `labels` hash (custom address labels) and `minipay:*` keys (the MiniPay tagging cron's bookkeeping). Don't touch those from this skill.
+
+## Worked example
+
+The seed report — `0xb64c8b0a3F8008d5028D8F9323b858F17b18C3C4` (Arbitrage Executor / `idontloseiwin.eth`) — is the canonical reference. If a section feels under-specified above, look at how that section is written in the production hash:
+
+```js
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "reports", "0xb64c8b0a3f8008d5028d8f9323b858f17b18c3c4"]],
+});
+```
+
+Match its tone (specific, evidence-anchored, code-fenced for storage / tx data), structure (the eight named sections in order), and length (1500–2500 words for a meaty target; less is fine for a thin one).
+
+## Rules
+
+- **Never commit a draft.** `.investigations/` is gitignored for a reason. If a report belongs in the team's history, it lives in the production `reports` hash + the daily Vercel Blob backup, NOT in git.
+- **Never write a label or the `labels` hash from this skill.** Labels are a separate concern; the `arkham` skill or the address-book modal handles those.
+- **Never push to prod without explicit user confirmation.** Local draft is the default; upload only on `--upload` or after the user says "ship it" / "upload it" / equivalent.
+- **Mirror the schema invariants.** Don't write a payload the API would reject — that includes the body length cap, title length cap, version monotonicity, and `createdAt` preservation on update.
+- **Cite evidence.** Every claim about an address gets a tx hash, an Arkham response, a Sim balance snapshot, or a storage read backing it. "Probably MEV" is not enough; "selector `0x49aa2402` calls into a contract whose public `routerUniswap()` returns Uniswap V3 SwapRouter02 (factory `0xafe208a3…` matches official UniV3 on Celo)" is.
+- **Skip the report if attribution is weak.** Better to write a label + notes blurb than to ship a forensic report full of "may be" / "appears to be" / "possibly". Reports are durable; uncertainty in them poisons the audit trail.

@@ -23,3 +23,9 @@ WORK.md
 # evidence logs) stay local. Committing a roadmap of unpatched findings to
 # a public repo is its own finding; keep this folder out of git.
 .redteam/
+# Forensic-report drafts. Reports often name individuals, link wallets to
+# real-world identities, and quote on-chain evidence in a form that's
+# fine for the team to review in the address book but not a thing to put
+# in a public git history. Drafts live here, get reviewed locally, and
+# get uploaded to Upstash via the `/forensic-report` skill — not git.
+.investigations/
