@@ -458,7 +458,14 @@ describe("isSnapshot", () => {
     expect(isSnapshot({ global: {} })).toBe(true);
   });
 
-  it("returns false when none of addresses/global/chains are present", () => {
+  it("returns true for a payload with only the new `reports` key", () => {
+    // Reports-only snapshot — recognised so that a backup with reports but
+    // no labels still routes to handleSnapshot (instead of falling through
+    // to handleSimpleFormat and erroring out).
+    expect(isSnapshot({ reports: {} })).toBe(true);
+  });
+
+  it("returns false when none of addresses/global/chains/reports are present", () => {
     expect(isSnapshot({ exportedAt: "2026-01-01T00:00:00Z" })).toBe(false);
   });
 

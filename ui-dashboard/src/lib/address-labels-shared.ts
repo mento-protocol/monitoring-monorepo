@@ -3,6 +3,8 @@
  * Safe to import from client components, providers, and server code alike.
  */
 
+import type { AddressReport } from "./address-reports-shared";
+
 // Types
 
 export type AddressEntry = {
@@ -35,7 +37,13 @@ export type AddressEntryRecord = AddressEntry & {
  * The `chains` field is retained as an OPTIONAL READ for backward compat
  * with older snapshots that predate the global-only refactor — old backups
  * with `labels:{chainId}` entries can still be imported. New writes always
- * produce `addresses` only. */
+ * produce `addresses` only.
+ *
+ * `reports` is the forensic-report payload (markdown bodies up to 50KB
+ * each, keyed by lowercase address). Optional so older snapshots that
+ * predate the parity backfill still parse without error. The daily backup
+ * cron emits both `addresses` and `reports` so a Redis flush has a single
+ * snapshot to restore from. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
   /** Flat per-address entries — current shape. */
@@ -44,6 +52,10 @@ export type AddressLabelsSnapshot = {
   global?: Record<string, AddressEntry>;
   /** Legacy: chainId → address → entry. Read-only; merged into addresses on import. */
   chains?: Record<string, Record<string, AddressEntry>>;
+  /** Forensic reports keyed by lowercase address. Optional for back-compat
+   * with snapshots predating PR #339; new daily backups always include it
+   * (possibly as an empty record when no reports exist yet). */
+  reports?: Record<string, AddressReport>;
 };
 
 /** Tally of newly-imported labels returned by the import API. */

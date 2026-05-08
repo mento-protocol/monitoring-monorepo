@@ -28,6 +28,11 @@ import {
   type AddressLabelsSnapshot,
   type ImportedCounts,
 } from "@/lib/address-labels";
+import {
+  importReports,
+  upgradeReports,
+  type AddressReport,
+} from "@/lib/address-reports";
 import { isValidAddress } from "@/lib/format";
 
 /**
@@ -168,22 +173,74 @@ export async function handleSnapshot(
     }
   }
 
-  if (Object.keys(merged).length === 0) {
+  // Reports are decoupled from the labels merge — they have their own
+  // Redis hash with no conflict semantics shared with labels. Restore them
+  // verbatim from the snapshot when present (keeping the snapshot's
+  // version/createdAt/updatedAt instead of bumping via the Lua upsert).
+  let reportsToImport: Record<string, AddressReport> = {};
+  if (body.reports !== undefined) {
+    if (
+      typeof body.reports !== "object" ||
+      body.reports === null ||
+      Array.isArray(body.reports)
+    ) {
+      return NextResponse.json(
+        { error: "Invalid reports map" },
+        { status: 400 },
+      );
+    }
+    // Validate keys are valid addresses; drop any that aren't (matches the
+    // labels path's policy of refusing junk keys without poisoning the
+    // import). Use upgradeReports to tolerate partial/legacy shapes.
+    const filtered: Record<string, unknown> = {};
+    for (const [addr, raw] of Object.entries(
+      body.reports as Record<string, unknown>,
+    )) {
+      if (!isValidAddress(addr)) {
+        return NextResponse.json(
+          { error: `Invalid report address: ${addr}` },
+          { status: 400 },
+        );
+      }
+      if (typeof raw !== "object" || raw === null) {
+        return NextResponse.json(
+          { error: `Invalid report payload for ${addr}` },
+          { status: 400 },
+        );
+      }
+      filtered[addr.toLowerCase()] = raw;
+    }
+    reportsToImport = upgradeReports(filtered);
+  }
+
+  if (
+    Object.keys(merged).length === 0 &&
+    Object.keys(reportsToImport).length === 0
+  ) {
     return NextResponse.json({ ok: true, imported: emptyCounts() });
   }
 
   try {
-    let existing: Record<string, AddressEntry>;
-    try {
-      existing = await getLabels();
-    } catch (err) {
-      return serverError(err);
+    let importedAddresses = 0;
+    if (Object.keys(merged).length > 0) {
+      let existing: Record<string, AddressEntry>;
+      try {
+        existing = await getLabels();
+      } catch (err) {
+        return serverError(err);
+      }
+      const finalLabels = sanitizeAndFilter(
+        mergeWithExisting(merged, existing),
+      );
+      await importLabels(finalLabels);
+      importedAddresses = Object.keys(finalLabels).length;
     }
-    const finalLabels = sanitizeAndFilter(mergeWithExisting(merged, existing));
-    await importLabels(finalLabels);
+    if (Object.keys(reportsToImport).length > 0) {
+      await importReports(reportsToImport);
+    }
     return NextResponse.json({
       ok: true,
-      imported: { addresses: Object.keys(finalLabels).length },
+      imported: { addresses: importedAddresses },
     });
   } catch (err) {
     return serverError(err);
@@ -297,9 +354,11 @@ export function isGnosisSafeFormat(
 
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
   if (typeof v !== "object" || v === null) return false;
-  // A snapshot has at least one of `addresses`, `global`, `chains`.
+  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`.
   const obj = v as Record<string, unknown>;
-  return "addresses" in obj || "global" in obj || "chains" in obj;
+  return (
+    "addresses" in obj || "global" in obj || "chains" in obj || "reports" in obj
+  );
 }
 
 /**

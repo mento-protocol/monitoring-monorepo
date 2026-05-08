@@ -16,6 +16,7 @@ vi.mock("@/lib/address-labels", async () => {
   return {
     importLabels: vi.fn().mockResolvedValue(undefined),
     getLabels: vi.fn().mockResolvedValue({}),
+    mergeEntries: shared.mergeEntries,
     upgradeEntries: shared.upgradeEntries,
     upgradeEntry: shared.upgradeEntry,
     sanitizeEntry: shared.sanitizeEntry,
@@ -23,8 +24,19 @@ vi.mock("@/lib/address-labels", async () => {
   };
 });
 
+vi.mock("@/lib/address-reports", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-reports-shared")
+  >("@/lib/address-reports-shared");
+  return {
+    importReports: vi.fn().mockResolvedValue(undefined),
+    upgradeReports: shared.upgradeReports,
+  };
+});
+
 import { getAuthSession } from "@/auth";
 import { importLabels, getLabels } from "@/lib/address-labels";
+import { importReports } from "@/lib/address-reports";
 
 type ImportedCounts = { addresses: number };
 
@@ -58,6 +70,7 @@ beforeEach(() => {
   });
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 });
 
 describe("POST /api/address-labels/import", () => {
@@ -149,6 +162,113 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(200);
     const counts = await getImported(res);
     expect(counts.addresses).toBe(2);
+  });
+
+  it("snapshot WITHOUT `reports` parses without error (back-compat for old backups)", async () => {
+    // Acceptance criterion: restoring a pre-#339 snapshot must not throw.
+    // The labels-only path is the canonical old-snapshot shape.
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-03-01T00:00:00Z",
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-03-01T00:00:00Z",
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("snapshot WITH `reports` restores both labels and reports", async () => {
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-05-01T00:00:00Z",
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-05-01T00:00:00Z",
+          },
+        },
+        reports: {
+          [validAddress]: {
+            body: "Investigation",
+            authorEmail: "alice@mentolabs.xyz",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-30T00:00:00Z",
+            version: 2,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledTimes(1);
+    expect(importReports).toHaveBeenCalledTimes(1);
+    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(reportArg[validAddress.toLowerCase()].body).toBe("Investigation");
+    expect(reportArg[validAddress.toLowerCase()].version).toBe(2);
+  });
+
+  it("snapshot with ONLY `reports` (no labels) still restores reports", async () => {
+    // Routes through handleSnapshot via the reports-key recognition in
+    // isSnapshot — without it the body would fall through to
+    // handleSimpleFormat and 400 on the missing `labels` field.
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-05-01T00:00:00Z",
+        reports: {
+          [validAddress]: {
+            body: "Investigation only",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-30T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a snapshot whose `reports` key is not a plain object", async () => {
+    const res = await POST(
+      jsonReq({
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        reports: "not an object",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose `reports` key has an invalid address", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          "not-an-address": {
+            body: "x",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
   });
 
   it("imports the Gnosis Safe format (chainId field is ignored)", async () => {

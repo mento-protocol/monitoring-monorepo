@@ -17,6 +17,20 @@ vi.mock("@/lib/address-labels", () => ({
   }),
 }));
 
+vi.mock("@/lib/address-reports", () => ({
+  getAllReports: vi.fn().mockResolvedValue({
+    "0xabc": {
+      body: "Suspected MEV operator. See thread.",
+      title: "Investigation",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-30T00:00:00Z",
+      version: 3,
+    },
+  }),
+}));
+
 const mockPut = vi.fn().mockResolvedValue({
   pathname: "address-labels-backup-2026-03-24.json",
   url: "https://blob.vercel-storage.com/address-labels-backup-2026-03-24.json",
@@ -27,11 +41,25 @@ vi.mock("@vercel/blob", () => ({
 }));
 
 import { getAuthSession } from "@/auth";
+import { getAllReports } from "@/lib/address-reports";
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("CRON_SECRET", "test-cron-secret");
+  // Reset to the default report fixture each run — individual tests override
+  // when they need the empty-hash branch.
+  (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({
+    "0xabc": {
+      body: "Suspected MEV operator. See thread.",
+      title: "Investigation",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-30T00:00:00Z",
+      version: 3,
+    },
+  });
 });
 
 describe("GET /api/address-labels/backup", () => {
@@ -98,6 +126,48 @@ describe("GET /api/address-labels/backup", () => {
     // Legacy snapshot fields no longer emitted.
     expect(stored.global).toBeUndefined();
     expect(stored.chains).toBeUndefined();
+  });
+
+  it("embeds forensic reports under the `reports` key alongside addresses", async () => {
+    // Restore parity: a Redis flush would otherwise lose every forensic
+    // report in the same Upstash instance. The wire-format key is `reports`
+    // (NOT `addressReports`) — keep this assertion exact, matching the
+    // import path's expected shape.
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await GET(req);
+
+    const [, content] = mockPut.mock.calls[0];
+    const stored = JSON.parse(content as string);
+    expect(stored).toHaveProperty("reports");
+    expect(stored.reports).not.toHaveProperty("addressReports");
+    expect(stored.reports["0xabc"]).toEqual({
+      body: "Suspected MEV operator. See thread.",
+      title: "Investigation",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-30T00:00:00Z",
+      version: 3,
+    });
+  });
+
+  it("emits an empty `reports` object when no reports exist (not omitted)", async () => {
+    // Always-present key keeps the wire format stable for restore tooling
+    // — a downstream tool checking `snapshot.reports` shouldn't have to
+    // distinguish "not yet backfilled" from "no reports yet".
+    (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await GET(req);
+
+    const [, content] = mockPut.mock.calls[0];
+    const stored = JSON.parse(content as string);
+    expect(stored.reports).toEqual({});
   });
 
   it("overwrites same-day backup (deterministic filename)", async () => {
