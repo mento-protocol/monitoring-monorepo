@@ -3,12 +3,12 @@
 // ---------------------------------------------------------------------------
 
 import {
-  OpenLiquidityStrategy,
+  indexer,
   type OlsPool,
   type OlsLiquidityEvent,
   type OlsLifecycleEvent,
-} from "generated";
-import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
+} from "envio";
+import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 
 /**
  * OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}".
@@ -76,101 +76,106 @@ async function getOrCreateOlsPool(args: {
 // PoolAdded
 // ---------------------------------------------------------------------------
 
-OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
-  const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = makePoolId(event.chainId, event.params.pool);
-  const olsAddress = asAddress(event.srcAddress);
-  const p = event.params.params;
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "OpenLiquidityStrategy", event: "PoolAdded" },
+  async ({ event, context }) => {
+    const id = eventId(event.chainId, event.block.number, event.logIndex);
+    const poolId = makePoolId(event.chainId, event.params.pool);
+    const olsAddress = asAddress(event.srcAddress);
+    const p = event.params.params;
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // params tuple: [pool, debtToken, cooldown, protocolFeeRecipient,
-  //                liquiditySourceIncentiveExpansion, protocolIncentiveExpansion,
-  //                liquiditySourceIncentiveContraction, protocolIncentiveContraction]
-  const olsPool: OlsPool = {
-    id: makeOlsPoolId(poolId, olsAddress),
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    isActive: true,
-    debtToken: asAddress(p[1]),
-    rebalanceCooldown: p[2], // already bigint
-    lastRebalance: 0n,
-    protocolFeeRecipient: asAddress(p[3]),
-    liquiditySourceIncentiveExpansion: p[4],
-    liquiditySourceIncentiveContraction: p[6],
-    protocolIncentiveExpansion: p[5],
-    protocolIncentiveContraction: p[7],
-    olsRebalanceCount: 0,
-    addedAtBlock: blockNumber,
-    addedAtTimestamp: blockTimestamp,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
+    const olsPool: OlsPool = {
+      id: makeOlsPoolId(poolId, olsAddress),
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      isActive: true,
+      debtToken: asAddress(p.debtToken),
+      rebalanceCooldown: p.cooldown,
+      lastRebalance: 0n,
+      protocolFeeRecipient: asAddress(p.protocolFeeRecipient),
+      liquiditySourceIncentiveExpansion: p.liquiditySourceIncentiveExpansion,
+      liquiditySourceIncentiveContraction:
+        p.liquiditySourceIncentiveContraction,
+      protocolIncentiveExpansion: p.protocolIncentiveExpansion,
+      protocolIncentiveContraction: p.protocolIncentiveContraction,
+      olsRebalanceCount: 0,
+      addedAtBlock: blockNumber,
+      addedAtTimestamp: blockTimestamp,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
 
-  context.OlsPool.set(olsPool);
+    context.OlsPool.set(olsPool);
 
-  const lifecycle: OlsLifecycleEvent = {
-    id,
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    action: "POOL_ADDED",
-    cooldown: 0n,
-    txHash: event.transaction.hash,
-    blockNumber,
-    blockTimestamp,
-  };
+    const lifecycle: OlsLifecycleEvent = {
+      id,
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      action: "POOL_ADDED",
+      cooldown: 0n,
+      txHash: event.transaction.hash,
+      blockNumber,
+      blockTimestamp,
+    };
 
-  context.OlsLifecycleEvent.set(lifecycle);
-});
+    context.OlsLifecycleEvent.set(lifecycle);
+  },
+);
 
 // ---------------------------------------------------------------------------
 // PoolRemoved
 // ---------------------------------------------------------------------------
 
-OpenLiquidityStrategy.PoolRemoved.handler(async ({ event, context }) => {
-  const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = makePoolId(event.chainId, event.params.pool);
-  const olsAddress = asAddress(event.srcAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "OpenLiquidityStrategy", event: "PoolRemoved" },
+  async ({ event, context }) => {
+    const id = eventId(event.chainId, event.block.number, event.logIndex);
+    const poolId = makePoolId(event.chainId, event.params.pool);
+    const olsAddress = asAddress(event.srcAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  const existing = await getOrCreateOlsPool({
-    context,
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    blockNumber,
-    blockTimestamp,
-  });
-  context.OlsPool.set({
-    ...existing,
-    isActive: false,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
+    const existing = await getOrCreateOlsPool({
+      context,
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      blockNumber,
+      blockTimestamp,
+    });
+    context.OlsPool.set({
+      ...existing,
+      isActive: false,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
 
-  const lifecycle: OlsLifecycleEvent = {
-    id,
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    action: "POOL_REMOVED",
-    cooldown: 0n,
-    txHash: event.transaction.hash,
-    blockNumber,
-    blockTimestamp,
-  };
+    const lifecycle: OlsLifecycleEvent = {
+      id,
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      action: "POOL_REMOVED",
+      cooldown: 0n,
+      txHash: event.transaction.hash,
+      blockNumber,
+      blockTimestamp,
+    };
 
-  context.OlsLifecycleEvent.set(lifecycle);
-});
+    context.OlsLifecycleEvent.set(lifecycle);
+  },
+);
 
 // ---------------------------------------------------------------------------
 // RebalanceCooldownSet
 // ---------------------------------------------------------------------------
 
-OpenLiquidityStrategy.RebalanceCooldownSet.handler(
+indexer.onEvent(
+  { contract: "OpenLiquidityStrategy", event: "RebalanceCooldownSet" },
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.params.pool);
@@ -214,46 +219,49 @@ OpenLiquidityStrategy.RebalanceCooldownSet.handler(
 // LiquidityMoved
 // ---------------------------------------------------------------------------
 
-OpenLiquidityStrategy.LiquidityMoved.handler(async ({ event, context }) => {
-  const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = makePoolId(event.chainId, event.params.pool);
-  const olsAddress = asAddress(event.srcAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "OpenLiquidityStrategy", event: "LiquidityMoved" },
+  async ({ event, context }) => {
+    const id = eventId(event.chainId, event.block.number, event.logIndex);
+    const poolId = makePoolId(event.chainId, event.params.pool);
+    const olsAddress = asAddress(event.srcAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Update lastRebalance + counter on OlsPool, even if indexing started
-  // after the historical PoolAdded event.
-  const existing = await getOrCreateOlsPool({
-    context,
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    blockNumber,
-    blockTimestamp,
-  });
-  context.OlsPool.set({
-    ...existing,
-    lastRebalance: blockTimestamp,
-    olsRebalanceCount: existing.olsRebalanceCount + 1,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
+    // Update lastRebalance + counter on OlsPool, even if indexing started
+    // after the historical PoolAdded event.
+    const existing = await getOrCreateOlsPool({
+      context,
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      blockNumber,
+      blockTimestamp,
+    });
+    context.OlsPool.set({
+      ...existing,
+      lastRebalance: blockTimestamp,
+      olsRebalanceCount: existing.olsRebalanceCount + 1,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
 
-  const olsEvent: OlsLiquidityEvent = {
-    id,
-    chainId: event.chainId,
-    poolId,
-    olsAddress,
-    direction: Number(event.params.direction), // 0=Expand, 1=Contract
-    tokenGivenToPool: asAddress(event.params.tokenGivenToPool),
-    amountGivenToPool: event.params.amountGivenToPool,
-    tokenTakenFromPool: asAddress(event.params.tokenTakenFromPool),
-    amountTakenFromPool: event.params.amountTakenFromPool,
-    caller: event.transaction.from ?? "",
-    txHash: event.transaction.hash,
-    blockNumber,
-    blockTimestamp,
-  };
+    const olsEvent: OlsLiquidityEvent = {
+      id,
+      chainId: event.chainId,
+      poolId,
+      olsAddress,
+      direction: Number(event.params.direction), // 0=Expand, 1=Contract
+      tokenGivenToPool: asAddress(event.params.tokenGivenToPool),
+      amountGivenToPool: event.params.amountGivenToPool,
+      tokenTakenFromPool: asAddress(event.params.tokenTakenFromPool),
+      amountTakenFromPool: event.params.amountTakenFromPool,
+      caller: event.transaction.from ?? "",
+      txHash: event.transaction.hash,
+      blockNumber,
+      blockTimestamp,
+    };
 
-  context.OlsLiquidityEvent.set(olsEvent);
-});
+    context.OlsLiquidityEvent.set(olsEvent);
+  },
+);

@@ -2,17 +2,24 @@
 // ERC20FeeToken Transfer handler — protocol fee tracking
 // ---------------------------------------------------------------------------
 
-import { ERC20FeeToken, type ProtocolFeeTransfer } from "generated";
-import { eventId, asAddress, makePoolId } from "../helpers";
+import { indexer, type ProtocolFeeTransfer } from "envio";
+import { eventId, asAddress, makePoolId } from "../helpers.js";
 import {
   YIELD_SPLIT_ADDRESS,
   resolveFeeTokenMeta,
   selectStaleTransfers,
   backfilledTokens,
-} from "../feeToken";
-import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot";
+} from "../feeToken.js";
+import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot.js";
 
-ERC20FeeToken.Transfer.handler(
+indexer.onEvent(
+  {
+    contract: "ERC20FeeToken",
+    event: "Transfer",
+    // Topic-level filter: Envio only delivers Transfer events where `to`
+    // matches the yield split address.
+    where: () => ({ params: { to: YIELD_SPLIT_ADDRESS } }),
+  },
   async ({ event, context }) => {
     // Sender provenance check: only persist transfers originating from known
     // FPMM pools. This prevents arbitrary third-party transfers to the yield
@@ -103,8 +110,9 @@ ERC20FeeToken.Transfer.handler(
     const backfillKey = `${chainId}:${normalizedToken}`;
     if (symbol !== "UNKNOWN" && !backfilledTokens.has(backfillKey)) {
       try {
-        const unknownRecords =
-          await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
+        const unknownRecords = await context.ProtocolFeeTransfer.getWhere({
+          token: { _eq: normalizedToken },
+        });
         const stale = selectStaleTransfers(unknownRecords, chainId);
         // Cache pool fetches across the loop — many stale transfers share a
         // pool, especially on busy chains.
@@ -156,10 +164,5 @@ ERC20FeeToken.Transfer.handler(
         );
       }
     }
-  },
-  {
-    // Topic-level filter: Envio only delivers Transfer events where `to`
-    // matches the yield split address.
-    eventFilters: { to: YIELD_SPLIT_ADDRESS },
   },
 );

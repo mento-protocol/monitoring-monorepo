@@ -8,24 +8,24 @@ import type {
   PoolSnapshot,
   PoolDailySnapshot,
   DeviationThresholdBreach,
-} from "generated";
+} from "envio";
 import {
   hourBucket,
   dayBucket,
   snapshotId,
   dailySnapshotId,
   extractAddressFromPoolId,
-} from "./helpers";
-import { computePriceDifference } from "./priceDifference";
+} from "./helpers.js";
+import { computePriceDifference } from "./priceDifference.js";
 import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
-} from "./rpc/effects";
-import { isVirtualPool } from "./helpers";
-import { recordBreachTransition } from "./deviationBreach";
+} from "./rpc/effects.js";
+import { isVirtualPool } from "./helpers.js";
+import { recordBreachTransition } from "./deviationBreach.js";
 
 // ---------------------------------------------------------------------------
 // Health status computation
@@ -303,7 +303,7 @@ export async function selfHealInvertRateFeed(
     chainId: pool.chainId,
     poolAddress: poolAddr,
   });
-  if (invert === undefined) return pool;
+  if (invert === null) return pool;
   return {
     ...pool,
     invertRateFeed: invert,
@@ -479,7 +479,7 @@ export const upsertPool = async ({
         rateFeedID,
         blockNumber,
       });
-      if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
+      if (expiry !== null) healedOracleDelta.oracleExpiry = expiry;
     }
   }
 

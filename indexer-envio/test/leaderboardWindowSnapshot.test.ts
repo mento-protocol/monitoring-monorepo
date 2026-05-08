@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import type {
   BrokerLeaderboardWindowSnapshot,
@@ -6,7 +5,7 @@ import type {
   LeaderboardChainState,
   LeaderboardWindowSnapshot,
   TraderDailySnapshot,
-} from "generated";
+} from "envio";
 import {
   WINDOW_KEYS,
   aggregatePerWindow,
@@ -14,7 +13,7 @@ import {
   windowStartDay,
   type TraderDailyRow,
   type TraderWindowAggregate,
-} from "../src/leaderboardWindowSnapshot";
+} from "../src/leaderboardWindowSnapshot.js";
 import {
   flushV2LeaderboardWindowSnapshots,
   flushV3LeaderboardWindowSnapshots,
@@ -22,7 +21,7 @@ import {
   maybeHeartbeatFlushV3,
   type V2FlushContext,
   type V3FlushContext,
-} from "../src/leaderboardWindowFlush";
+} from "../src/leaderboardWindowFlush.js";
 
 const CHAIN = 42220;
 const TRADER_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

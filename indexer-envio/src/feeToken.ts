@@ -1,8 +1,8 @@
-import { ERC20_DECIMALS_ABI } from "./abis";
-import { getRpcClient } from "./rpc";
-import { consoleLogger, type RpcLogger } from "./rpc/log";
-import _contractsJson from "@mento-protocol/contracts/contracts.json";
-import _namespaces from "../config/deployment-namespaces.json";
+import { ERC20_DECIMALS_ABI } from "./abis.js";
+import { getRpcClient } from "./rpc.js";
+import { consoleLogger, type RpcLogger } from "./rpc/log.js";
+import _contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
+import _namespaces from "../config/deployment-namespaces.json" with { type: "json" };
 
 /**
  * Address that receives all protocol fees across all chains.
@@ -65,7 +65,7 @@ export function _clearFeeTokenMetaCache(): void {
  * + StableToken rules in sync with shared-config; don't weaken the Mock*
  * exclusion here.
  */
-import type { ContractsJson } from "./contractAddresses";
+import type { ContractsJson } from "./contractAddresses.js";
 
 function buildKnownTokenMeta(): Map<
   string,

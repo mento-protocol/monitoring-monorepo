@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import generated from "generated";
+import assert from "node:assert/strict";
+import generated from "envio";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -143,7 +142,7 @@ describe("Broker.Swap handler", () => {
           routedViaV3Router: boolean;
         }
       | undefined;
-    assert.isOk(row, "BrokerSwapEvent row missing");
+    assert.ok(row, "BrokerSwapEvent row missing");
     assert.equal(row!.chainId, CHAIN_CELO);
     // All address fields lowercased per `asAddress`.
     assert.equal(row!.exchangeProvider, BIPOOL_MANAGER.toLowerCase());
@@ -171,7 +170,7 @@ describe("Broker.Swap handler", () => {
     const row = mockDb.entities.BrokerSwapEvent.get(`${CHAIN_CELO}_200_0`) as
       | { txTo: string; routedViaV3Router: boolean }
       | undefined;
-    assert.isOk(row, "BrokerSwapEvent row missing");
+    assert.ok(row, "BrokerSwapEvent row missing");
     assert.equal(row!.txTo, V3_ROUTER.toLowerCase());
     // Crucial: the v2 chart filter (`routedViaV3Router=false`) excludes this
     // row, preventing double-count against the VirtualPool.Swap volume that
@@ -204,7 +203,7 @@ describe("Broker.Swap handler", () => {
     const snap = mockDb.entities.BrokerDailySnapshot.get(snapshotId) as
       | { swapCount: number; volumeUsdWei: bigint; routedViaV3Router: boolean }
       | undefined;
-    assert.isOk(snap, "BrokerDailySnapshot missing");
+    assert.ok(snap, "BrokerDailySnapshot missing");
     assert.equal(snap!.swapCount, 2);
     // 1000 + 500 = 1500 CUSD in USD-wei.
     assert.equal(snap!.volumeUsdWei, 1_500n * 10n ** 18n);
@@ -272,7 +271,7 @@ describe("Broker.Swap handler", () => {
           lastSeenTimestamp: bigint;
         }
       | undefined;
-    assert.isOk(row, "BrokerTraderDailySnapshot missing");
+    assert.ok(row, "BrokerTraderDailySnapshot missing");
     assert.equal(row!.chainId, CHAIN_CELO);
     assert.equal(row!.trader, TRADER.toLowerCase());
     assert.equal(row!.swapCount, 2);
@@ -305,7 +304,7 @@ describe("Broker.Swap handler", () => {
     const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
       `${CHAIN_CELO}-${TRADER.toLowerCase()}-${dayTs}`,
     ) as { swapCount: number; volumeUsdWei: bigint } | undefined;
-    assert.isOk(
+    assert.ok(
       traderRow,
       "BrokerTraderDailySnapshot should still exist for the broker-direct swap",
     );
@@ -354,9 +353,8 @@ describe("Broker.Swap handler", () => {
       makePoolId(CHAIN_CELO, VIRTUAL_POOL_ADDR),
     ) as { source: string } | undefined;
     assert.ok(seededPool, "VirtualPool must exist after VirtualPoolDeployed");
-    assert.include(
-      seededPool!.source,
-      "virtual",
+    assert.ok(
+      seededPool!.source.includes("virtual"),
       "Seeded pool must carry a virtual_* source so isVirtualPool() detects it",
     );
 
@@ -374,7 +372,7 @@ describe("Broker.Swap handler", () => {
 
     // BrokerSwapEvent: still written (raw audit log preserves all events).
     const eventRow = mockDb.entities.BrokerSwapEvent.get(`${CHAIN_CELO}_100_0`);
-    assert.isOk(
+    assert.ok(
       eventRow,
       "BrokerSwapEvent should still record the raw VirtualPool-routed swap",
     );
@@ -385,7 +383,7 @@ describe("Broker.Swap handler", () => {
     const dailyRow = mockDb.entities.BrokerDailySnapshot.get(
       `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
     );
-    assert.isOk(
+    assert.ok(
       dailyRow,
       "BrokerDailySnapshot should still record this swap in the legacy 'direct' partition",
     );
@@ -394,8 +392,9 @@ describe("Broker.Swap handler", () => {
     const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
       `${CHAIN_CELO}-${VIRTUAL_POOL_ADDR}-${dayTs}`,
     );
-    assert.isUndefined(
+    assert.equal(
       traderRow,
+      undefined,
       "VirtualPool-routed Broker.Swap must not produce a BrokerTraderDailySnapshot — would double-count vs the v3 VirtualPool.Swap path",
     );
 
@@ -411,8 +410,9 @@ describe("Broker.Swap handler", () => {
           `${CHAIN_CELO}-${name}-${dayTs}`,
         ),
     );
-    assert.isTrue(
+    assert.equal(
       allAggregatorRowsEmpty,
+      true,
       "VirtualPool-routed Broker.Swap must not produce any BrokerAggregatorDailySnapshot row",
     );
   });
@@ -454,7 +454,7 @@ describe("Broker.Swap handler", () => {
           volumeUsdWei: bigint;
         }
       | undefined;
-    assert.isOk(row, "BrokerAggregatorDailySnapshot missing");
+    assert.ok(row, "BrokerAggregatorDailySnapshot missing");
     assert.equal(row!.aggregator, "direct");
     assert.equal(row!.lastSeenAggregatorAddress, BROKER_PROXY.toLowerCase());
     assert.equal(row!.swapCount, 3);
@@ -465,12 +465,12 @@ describe("Broker.Swap handler", () => {
     assert.equal(row!.volumeUsdWei, 3_000n * 10n ** 18n);
 
     // Marker entities exist per (aggregator, trader, day).
-    assert.isOk(
+    assert.ok(
       mockDb.entities.BrokerAggregatorTraderDayMarker.get(
         `${CHAIN_CELO}-direct-${TRADER.toLowerCase()}-${dayTs}`,
       ),
     );
-    assert.isOk(
+    assert.ok(
       mockDb.entities.BrokerAggregatorTraderDayMarker.get(
         `${CHAIN_CELO}-direct-${TRADER_B.toLowerCase()}-${dayTs}`,
       ),
@@ -501,7 +501,7 @@ describe("Broker.Swap handler", () => {
           swapCount: number;
         }
       | undefined;
-    assert.isOk(row, "unknown-bucket row missing");
+    assert.ok(row, "unknown-bucket row missing");
     assert.equal(row!.aggregator, "unknown");
     assert.equal(row!.lastSeenAggregatorAddress, MYSTERY_ROUTER.toLowerCase());
     assert.equal(row!.swapCount, 1);

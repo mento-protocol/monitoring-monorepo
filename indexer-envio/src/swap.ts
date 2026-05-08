@@ -1,5 +1,5 @@
-import { asAddress } from "./helpers";
-import { computeSwapUsdWei } from "./usd";
+import { asAddress } from "./helpers.js";
+import { computeSwapUsdWei } from "./usd.js";
 
 /** Subset of an Envio FPMM/VirtualPool Swap event we need to derive the new
  *  trader-facing fields on `SwapEvent`. Loosely typed so both handlers can pass

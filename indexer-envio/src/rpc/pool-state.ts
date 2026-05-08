@@ -7,11 +7,11 @@ import {
   FPMM_FEE_ABI,
   FPMM_TRADING_LIMITS_ABI,
   ERC20_DECIMALS_ABI,
-} from "../abis";
-import type { TradingLimitData } from "../tradingLimits";
-import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
-import { readContractWithBlockFallback } from "./block-fallback";
-import { consoleLogger, type RpcLogger } from "./log";
+} from "../abis.js";
+import type { TradingLimitData } from "../tradingLimits.js";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
+import { readContractWithBlockFallback } from "./block-fallback.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
@@ -345,9 +345,9 @@ export async function fetchReserves(
 }
 
 /** Fetch the pool's invertRateFeed flag. Returns null on RPC error so the
- * caller can distinguish "RPC failed" from a real `false`. With
- * `preload_handlers: true`, an effect that returned a fabricated `false` on
- * a transient blip would memoize and persist the wrong orientation for an
+ * caller can distinguish "RPC failed" from a real `false`. Under v3's
+ * always-on preload, an effect that returned a fabricated `false` on a
+ * transient blip would memoize and persist the wrong orientation for an
  * actually-inverted pool — every downstream oracle/health calc would be on
  * the wrong side of the rate until reindex. Caller skips the assignment on
  * null and the schema default (false) survives until the next event triggers

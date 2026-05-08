@@ -1,10 +1,9 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
+import assert from "node:assert/strict";
 import {
   computeMedianLineageNext,
   computeOracleJumpBps,
   type MedianLineageState,
-} from "../src/oracleJump";
+} from "../src/oracleJump.js";
 
 // SortedOracles stores prices at 24dp; the helper works on raw values so we
 // use 1e24 to represent "price = 1.0".
@@ -21,11 +20,11 @@ const EMPTY_LINEAGE: MedianLineageState = {
 
 describe("computeOracleJumpBps", () => {
   it("returns null when no prior median (prevMedian == 0)", () => {
-    assert.isNull(computeOracleJumpBps(0n, ONE));
+    assert.equal(computeOracleJumpBps(0n, ONE, null));
   });
 
   it("returns null when new median is 0 (transient outage — don't record 100%-down)", () => {
-    assert.isNull(computeOracleJumpBps(ONE, 0n));
+    assert.equal(computeOracleJumpBps(ONE, 0n, null));
   });
 
   it("returns '0.0000' for an unchanged median", () => {
@@ -117,7 +116,7 @@ describe("computeMedianLineageNext", () => {
       lastOracleJumpAt: 2_000n,
     };
     const next = computeMedianLineageNext(seeded, 0n, 3_000n);
-    assert.deepEqual(next, seeded);
+    assert.deepStrictEqual(next, seeded);
   });
 
   it("post-outage non-zero median promotes the frozen lastMedian into prev*", () => {

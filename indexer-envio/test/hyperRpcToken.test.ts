@@ -1,6 +1,9 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { withHyperRpcToken, getRpcClient, _clearRpcClients } from "../src/rpc";
+import {
+  withHyperRpcToken,
+  getRpcClient,
+  _clearRpcClients,
+} from "../src/rpc.js";
 
 describe("withHyperRpcToken", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;

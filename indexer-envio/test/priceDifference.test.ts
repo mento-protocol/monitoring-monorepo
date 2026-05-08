@@ -1,10 +1,9 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { computePriceDifference } from "../src/EventHandlers";
+import { computePriceDifference } from "../src/EventHandlers.js";
 import {
   buildRebalanceOutcome,
   computeEffectivenessRatio,
-} from "../src/priceDifference";
+} from "../src/priceDifference.js";
 
 const SCALE = 10n ** 24n;
 

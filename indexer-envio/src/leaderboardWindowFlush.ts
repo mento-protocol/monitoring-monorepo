@@ -5,45 +5,26 @@
 // the dashboard adds today's partial from a small TraderDailySnapshot
 // query (see ui-dashboard/src/lib/queries/leaderboard.ts).
 //
-// Cost: one getWhere.chainId.eq() per UTC-day rollover per chain (not per
-// event), reused across all 4 in-memory window aggregations. Roughly
-// O(active_traders × days_indexed) memory at flush time, ~21k rows /
+// Cost: one `getWhere({chainId:{_eq:n}})` per UTC-day rollover per chain
+// (not per event), reused across all 4 in-memory window aggregations.
+// Roughly O(active_traders × days_indexed) memory at flush time, ~21k rows /
 // 100ms wall on Celo's "all" window — within Envio's per-event handler
 // budget.
 
-import type {
-  BrokerLeaderboardWindowSnapshot,
-  BrokerTraderDailySnapshot,
-  LeaderboardChainState,
-  LeaderboardWindowSnapshot,
-  TraderDailySnapshot,
-} from "generated";
-import { SECONDS_PER_DAY, dayBucket } from "./helpers";
+import type { BrokerLeaderboardWindowSnapshot, EvmOnEventContext } from "envio";
+import { SECONDS_PER_DAY, dayBucket } from "./helpers.js";
 import {
   WINDOW_KEYS,
   aggregatePerWindow,
   buildLeaderboardWindowSnapshot,
   windowStartDay,
-} from "./leaderboardWindowSnapshot";
+} from "./leaderboardWindowSnapshot.js";
 
 // ────────────────────────────────────────────────────────────────────
 // v3 — TraderDailySnapshot → LeaderboardWindowSnapshot
 // ────────────────────────────────────────────────────────────────────
 
-export type V3FlushContext = {
-  TraderDailySnapshot: {
-    getWhere: {
-      chainId: { eq: (v: number) => Promise<TraderDailySnapshot[]> };
-    };
-  };
-  LeaderboardChainState: {
-    get: (id: string) => Promise<LeaderboardChainState | undefined>;
-    set: (entity: LeaderboardChainState) => void;
-  };
-  LeaderboardWindowSnapshot: {
-    set: (entity: LeaderboardWindowSnapshot) => void;
-  };
-};
+export type V3FlushContext = EvmOnEventContext;
 
 /** Flush all 4 window snapshots for a single (chainId, snapshotDay).
  *  Idempotent: re-running with the same args overwrites with identical rows. */
@@ -54,9 +35,9 @@ export async function flushV3LeaderboardWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.TraderDailySnapshot.getWhere.chainId.eq(
-    args.chainId,
-  );
+  const rows = await args.context.TraderDailySnapshot.getWhere({
+    chainId: { _eq: args.chainId },
+  });
   const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
   for (const w of WINDOW_KEYS) {
     const snap = buildLeaderboardWindowSnapshot({
@@ -116,20 +97,7 @@ export async function maybeHeartbeatFlushV3(args: {
 // v2 — BrokerTraderDailySnapshot → BrokerLeaderboardWindowSnapshot
 // ────────────────────────────────────────────────────────────────────
 
-export type V2FlushContext = {
-  BrokerTraderDailySnapshot: {
-    getWhere: {
-      chainId: { eq: (v: number) => Promise<BrokerTraderDailySnapshot[]> };
-    };
-  };
-  LeaderboardChainState: {
-    get: (id: string) => Promise<LeaderboardChainState | undefined>;
-    set: (entity: LeaderboardChainState) => void;
-  };
-  BrokerLeaderboardWindowSnapshot: {
-    set: (entity: BrokerLeaderboardWindowSnapshot) => void;
-  };
-};
+export type V2FlushContext = EvmOnEventContext;
 
 export async function flushV2LeaderboardWindowSnapshots(args: {
   context: V2FlushContext;
@@ -138,9 +106,9 @@ export async function flushV2LeaderboardWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.BrokerTraderDailySnapshot.getWhere.chainId.eq(
-    args.chainId,
-  );
+  const rows = await args.context.BrokerTraderDailySnapshot.getWhere({
+    chainId: { _eq: args.chainId },
+  });
   const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
   for (const w of WINDOW_KEYS) {
     // BrokerLeaderboardWindowSnapshot is structurally identical to

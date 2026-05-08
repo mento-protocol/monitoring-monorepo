@@ -1,6 +1,11 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-testnet
 description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143)
+
+# Disable v3's `src/handlers/` auto-loading — see config.multichain.mainnet.yaml
+# for the rationale. Each contract below explicitly points at
+# `src/EventHandlers.ts`.
+handlers: null
 #
 # Per-chain RPC overrides: ENVIO_RPC_URL_11142220 and ENVIO_RPC_URL_10143.
 # Do NOT use the generic ENVIO_RPC_URL in multichain mode.
@@ -128,12 +133,12 @@ contracts:
       - event: RateChangeThresholdUpdated
       - event: ReferenceValueUpdated
 
-networks:
+chains:
   # ---------------------------------------------------------------------------
   # Celo Sepolia (chain 11142220)
   # ---------------------------------------------------------------------------
   - id: 11142220
-    rpc_config:
+    rpc:
       url: ${ENVIO_RPC_URL_CELO_SEPOLIA:-https://forno.celo-sepolia.celo-testnet.org}
     start_block: ${ENVIO_START_BLOCK_CELO_SEPOLIA:-18946570}
     contracts:
@@ -214,8 +219,6 @@ networks:
       - name: ValueDeltaBreaker
         address: [] # Not yet deployed on Monad Testnet — add address when available
 
-unordered_multichain_mode: true
-preload_handlers: true
 field_selection:
   transaction_fields:
     - hash

@@ -1,9 +1,8 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
   isSystemAddress,
   _staticSystemAddressesForChain,
-} from "../src/system-addresses";
+} from "../src/system-addresses.js";
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;

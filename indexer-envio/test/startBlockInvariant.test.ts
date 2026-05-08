@@ -1,10 +1,9 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
   START_BLOCK_ENV_NAME,
-} from "../src/EventHandlers";
+} from "../src/EventHandlers.js";
 
 // Chain IDs used in tests (mainnet only — startup guard only covers mainnet)
 const CELO = 42220;

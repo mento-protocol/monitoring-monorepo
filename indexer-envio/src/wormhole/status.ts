@@ -11,7 +11,7 @@
  * sequence, not a digest — see config.multichain.mainnet.yaml). QUEUED_OUTBOUND
  * is intentionally absent from the enum until that correlation is built.
  */
-import type { BridgeTransfer, WormholeTransferDetail } from "generated";
+import type { BridgeTransfer, WormholeTransferDetail } from "envio";
 
 export type BridgeStatus =
   | "PENDING"

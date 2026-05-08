@@ -20,33 +20,36 @@
  * scratch, and stamp the source identity + transceiverDigest onto the
  * BridgeTransfer/detail keyed by the authoritative manager digest.
  */
-import { WormholeTransceiver } from "generated";
-import { bytes32ToAddress } from "../../wormhole/detail";
-import { wormholeToEvmChainId } from "../../wormhole/chainIds";
-import type { WormholeTransceiverContext } from "../../wormhole/handlerContext";
+import { indexer } from "envio";
+import { bytes32ToAddress } from "../../wormhole/detail.js";
+import { wormholeToEvmChainId } from "../../wormhole/chainIds.js";
+import type { WormholeTransceiverContext } from "../../wormhole/handlerContext.js";
 
 type HandlerContext = WormholeTransceiverContext;
 
-WormholeTransceiver.ReceivedMessage.handler(async ({ event, context }) => {
-  const p = event.params;
-  const emitterChainId = Number(p.emitterChainId);
-  const sourceEvm = wormholeToEvmChainId(emitterChainId);
-  // If we can't map the Wormhole chain id to an EVM chain we index, the
-  // scratch would never be drained by a MessageAttestedTo we emit (different
-  // peer). Skip — leaves no state behind.
-  if (sourceEvm === null) return;
+indexer.onEvent(
+  { contract: "WormholeTransceiver", event: "ReceivedMessage" },
+  async ({ event, context }) => {
+    const p = event.params;
+    const emitterChainId = Number(p.emitterChainId);
+    const sourceEvm = wormholeToEvmChainId(emitterChainId);
+    // If we can't map the Wormhole chain id to an EVM chain we index, the
+    // scratch would never be drained by a MessageAttestedTo we emit (different
+    // peer). Skip — leaves no state behind.
+    if (sourceEvm === null) return;
 
-  const pendingId = `${event.chainId}-${event.transaction.hash.toLowerCase()}-${event.logIndex}`;
-  (context as HandlerContext).WormholeDestPending.set({
-    id: pendingId,
-    chainId: event.chainId,
-    txHash: event.transaction.hash,
-    transceiverDigest: p.digest.toLowerCase(),
-    sourceChainId: sourceEvm,
-    sourceTransceiver: bytes32ToAddress(p.emitterAddress),
-    sourceWormholeChainId: emitterChainId,
-    msgSequence: p.sequence,
-    destTransceiver: event.srcAddress.toLowerCase(),
-    blockTimestamp: BigInt(event.block.timestamp),
-  });
-});
+    const pendingId = `${event.chainId}-${event.transaction.hash.toLowerCase()}-${event.logIndex}`;
+    (context as HandlerContext).WormholeDestPending.set({
+      id: pendingId,
+      chainId: event.chainId,
+      txHash: event.transaction.hash,
+      transceiverDigest: p.digest.toLowerCase(),
+      sourceChainId: sourceEvm,
+      sourceTransceiver: bytes32ToAddress(p.emitterAddress),
+      sourceWormholeChainId: emitterChainId,
+      msgSequence: p.sequence,
+      destTransceiver: event.srcAddress.toLowerCase(),
+      blockTimestamp: BigInt(event.block.timestamp),
+    });
+  },
+);

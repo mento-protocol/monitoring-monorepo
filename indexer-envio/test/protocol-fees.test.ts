@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "envio";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -140,8 +139,7 @@ function createTransferEvent(overrides: {
 // ---------------------------------------------------------------------------
 
 describe("ERC20FeeToken.Transfer handler", () => {
-  it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async function () {
-    this.timeout(10_000);
+  it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -160,8 +158,7 @@ describe("ERC20FeeToken.Transfer handler", () => {
     assert.equal(transfer!.token, TOKEN_ADDRESS);
   });
 
-  it("skips transfers from non-pool senders", async function () {
-    this.timeout(10_000);
+  it("skips transfers from non-pool senders", async () => {
     let mockDb = MockDb.createMockDb();
     // Seed the FPMM pool so the handler has a real DB, but send from a
     // different address that is NOT a pool.
@@ -182,8 +179,7 @@ describe("ERC20FeeToken.Transfer handler", () => {
     );
   });
 
-  it("skips transfers when no pool exists at all", async function () {
-    this.timeout(10_000);
+  it("skips transfers when no pool exists at all", async () => {
     const mockDb = MockDb.createMockDb();
     // No pools seeded — completely empty DB.
 
@@ -213,8 +209,7 @@ describe("UNKNOWN backfill behavior", () => {
     _clearFeeTokenMetaCache(); // prevent cross-test cache pollution
   });
 
-  it("stores UNKNOWN when RPC fails on first transfer", async function () {
-    this.timeout(15_000);
+  it("stores UNKNOWN when RPC fails on first transfer", async () => {
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -235,8 +230,7 @@ describe("UNKNOWN backfill behavior", () => {
     );
   });
 
-  it("stores resolved symbol when RPC succeeds", async function () {
-    this.timeout(15_000);
+  it("stores resolved symbol when RPC succeeds", async () => {
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -257,8 +251,7 @@ describe("UNKNOWN backfill behavior", () => {
     );
   });
 
-  it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async function () {
-    this.timeout(15_000);
+  it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async () => {
     // First transfer: fails
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
@@ -323,7 +316,7 @@ describe("selectStaleTransfers", () => {
       { id: `${CHAIN_A}_102_3`, tokenSymbol: "UNKNOWN" },
     ];
     const stale = selectStaleTransfers(records, CHAIN_A);
-    assert.deepEqual(
+    assert.deepStrictEqual(
       stale.map((r) => r.id),
       [`${CHAIN_A}_100_1`, `${CHAIN_A}_102_3`],
     );
@@ -344,11 +337,11 @@ describe("selectStaleTransfers", () => {
       { id: `${CHAIN_A}_300_1`, tokenSymbol: "USDm" },
       { id: `${CHAIN_A}_300_2`, tokenSymbol: "GBPm" },
     ];
-    assert.deepEqual(selectStaleTransfers(records, CHAIN_A), []);
+    assert.deepStrictEqual(selectStaleTransfers(records, CHAIN_A), []);
   });
 
   it("returns empty array when records list is empty", () => {
-    assert.deepEqual(selectStaleTransfers([], CHAIN_A), []);
+    assert.deepStrictEqual(selectStaleTransfers([], CHAIN_A), []);
   });
 
   it("is not confused by a chainId that is a prefix of another (e.g. 42 vs 42220)", () => {
@@ -389,7 +382,7 @@ describe("KNOWN_TOKEN_META static fallback", () => {
       "0x765de816845861e75a25fca122bb6898b8b1282a",
     );
 
-    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
+    assert.deepStrictEqual(meta, { symbol: "USDm", decimals: 18 });
   });
 
   // Wormhole NTT hub/spoke split: Monad ships USDm as "USDmSpoke" in the
@@ -401,6 +394,6 @@ describe("KNOWN_TOKEN_META static fallback", () => {
 
     const meta = await resolveFeeTokenMeta(143, monadUsdm);
 
-    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
+    assert.deepStrictEqual(meta, { symbol: "USDm", decimals: 18 });
   });
 });

@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 /**
  * Dynamic Contract Registration
  *
@@ -19,7 +18,7 @@
  *    (Envio test harness limitation — no processContractRegister() equivalent).
  */
 import { strict as assert } from "assert";
-import generated from "generated";
+import generated from "envio";
 
 // Import EventHandlers to trigger handler registrations (side-effect import).
 // This causes fpmm.ts / virtualPool.ts to call their .contractRegister() and

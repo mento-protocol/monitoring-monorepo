@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "envio";
 import { makePoolId } from "../src/helpers.ts";
 
 type MockDb = {
@@ -88,8 +87,7 @@ function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
 }
 
 describe("FPMM fee-config event handlers", () => {
-  it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async function () {
-    this.timeout(10_000);
+  it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -108,8 +106,7 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 250n);
   });
 
-  it("ProtocolFeeUpdated writes newFee to Pool.protocolFee without touching lpFee", async function () {
-    this.timeout(10_000);
+  it("ProtocolFeeUpdated writes newFee to Pool.protocolFee without touching lpFee", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -128,11 +125,10 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 300n);
     // lpFee not touched — stays at the seed-time sentinel (-1) or whatever
     // fetchFees returned; the point is ProtocolFeeUpdated must not clobber it.
-    assert.notEqual(pool!.lpFee, 7);
+    assert.notStrictEqual(pool!.lpFee, 7);
   });
 
-  it("RebalanceIncentiveUpdated writes newIncentive to Pool.rebalanceReward", async function () {
-    this.timeout(10_000);
+  it("RebalanceIncentiveUpdated writes newIncentive to Pool.rebalanceReward", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -154,8 +150,7 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 350n);
   });
 
-  it("returns silently when Pool does not exist (no-op on unknown pool)", async function () {
-    this.timeout(10_000);
+  it("returns silently when Pool does not exist (no-op on unknown pool)", async () => {
     const mockDb = MockDb.createMockDb();
     // Do NOT seed — pool is unknown.
 

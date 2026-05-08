@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import type {
   AggregatorDailySnapshot,
@@ -9,11 +8,11 @@ import type {
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
-} from "generated";
+} from "envio";
 import {
   applyLeaderboardSnapshots,
   type LeaderboardContext,
-} from "../src/leaderboardSnapshots";
+} from "../src/leaderboardSnapshots.js";
 
 // Real addresses on Celo (chain 42220).
 const CHAIN = 42220;

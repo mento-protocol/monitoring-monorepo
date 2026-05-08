@@ -12,18 +12,18 @@
 // into another in Envio's unordered_multichain_mode.
 // ---------------------------------------------------------------------------
 
-import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import {
   readContractWithBlockFallback,
   type BlockFallbackResult,
-} from "./block-fallback";
-import { consoleLogger, type RpcLogger } from "./log";
+} from "./block-fallback.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 import {
   BREAKER_BOX_ABI,
   MEDIAN_DELTA_BREAKER_ABI,
   VALUE_DELTA_BREAKER_ABI,
-} from "../abis";
-import { requireContractAddress } from "../contractAddresses";
+} from "../abis.js";
+import { requireContractAddress } from "../contractAddresses.js";
 
 export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 
@@ -181,6 +181,7 @@ async function probeFunction(
   abi: readonly unknown[],
   functionName: string,
   args: readonly unknown[] = [],
+  log: RpcLogger = consoleLogger,
 ): Promise<"present" | "missing" | "rpc_error"> {
   try {
     const client = getRpcClient(chainId);
@@ -202,7 +203,16 @@ async function probeFunction(
     // misclassify legitimate RPC/contract errors as selector misses and
     // permanently persist the wrong BreakerKind.
     const msg = err instanceof Error ? err.message : String(err ?? "");
-    return msg.includes("returned no data") ? "missing" : "rpc_error";
+    if (msg.includes("returned no data")) return "missing";
+    logRpcFailure(
+      chainId,
+      `probe:${functionName}`,
+      address,
+      err,
+      undefined,
+      log,
+    );
+    return "rpc_error";
   }
 }
 
@@ -215,6 +225,7 @@ async function probeFunction(
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";
@@ -226,6 +237,7 @@ export async function fetchBreakerKind(
     MEDIAN_DELTA_BREAKER_ABI,
     "medianRatesEMA",
     [probeAddr],
+    log,
   );
   if (mdProbe === "rpc_error") return null;
   if (mdProbe === "present") return "MEDIAN_DELTA";
@@ -236,6 +248,7 @@ export async function fetchBreakerKind(
     VALUE_DELTA_BREAKER_ABI,
     "referenceValues",
     [probeAddr],
+    log,
   );
   if (vdProbe === "rpc_error") return null;
   if (vdProbe === "present") return "VALUE_DELTA";

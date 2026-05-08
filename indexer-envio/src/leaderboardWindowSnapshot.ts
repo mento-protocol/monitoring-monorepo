@@ -1,15 +1,14 @@
 // Pure-function helpers for the LeaderboardWindowSnapshot heartbeat flush.
-// Kept context-free so they're unit-testable without Envio's mockDb, which
-// hides multi-id `set()` calls within a single handler invocation (an
-// observed quirk of the test harness, not a documented invariant).
+// Kept context-free so they're unit-testable as pure functions, independent
+// of any Envio test indexer plumbing.
 //
 // The async flush wrappers and heartbeat trigger live in
 // leaderboardWindowFlush.ts; they wire these pure pieces to the
 // TraderDailySnapshot / BrokerTraderDailySnapshot / Leaderboard*State
 // entity tables.
 
-import type { LeaderboardWindowSnapshot } from "generated";
-import { SECONDS_PER_DAY } from "./helpers";
+import type { LeaderboardWindowSnapshot } from "envio";
+import { SECONDS_PER_DAY } from "./helpers.js";
 
 // Mirror of `LeaderboardRangeKey` in
 // `ui-dashboard/src/lib/leaderboard.ts` — duplicated because the
@@ -98,9 +97,10 @@ export interface TraderDailyRow {
 
 /** Group raw daily-snapshot rows by trader, summed across each window's
  *  [windowStartDay, snapshotDay] inclusive range. Out-of-range and
- *  cross-chain rows are dropped (defensive: getWhere.chainId.eq() can
- *  surface rows the caller doesn't want under some Envio Map-index
- *  internals; see the cargo-culted check in handlers/feeToken.ts).
+ *  cross-chain rows are dropped defensively in case `getWhere({chainId:
+ *  {_eq:n}})` ever surfaces rows the caller doesn't want under Envio's
+ *  index internals — same belt-and-suspenders pattern used in
+ *  handlers/feeToken.ts.
  *
  *  Also tracks per-trader first-day slice (volume + swap count on
  *  `windowStartDay`) and an `activeOutsideFirstDay` flag so the snapshot

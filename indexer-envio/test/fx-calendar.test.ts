@@ -1,21 +1,29 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("FX calendar config", () => {
   const vendored = JSON.parse(
-    readFileSync(join(__dirname, "..", "config", "fx-calendar.json"), "utf8"),
+    readFileSync(
+      join(import.meta.dirname, "..", "config", "fx-calendar.json"),
+      "utf8",
+    ),
   );
   const shared = JSON.parse(
     readFileSync(
-      join(__dirname, "..", "..", "shared-config", "fx-calendar.json"),
+      join(
+        import.meta.dirname,
+        "..",
+        "..",
+        "shared-config",
+        "fx-calendar.json",
+      ),
       "utf8",
     ),
   );
 
   it("keeps the vendored indexer copy in sync with shared-config", () => {
-    assert.deepEqual(
+    assert.deepStrictEqual(
       vendored,
       shared,
       "indexer-envio/config/fx-calendar.json must match shared-config/fx-calendar.json",

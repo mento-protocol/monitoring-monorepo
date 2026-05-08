@@ -9,8 +9,8 @@
  * We use static JSON subpath imports — TypeScript compiles these to require()
  * under module:CommonJS, making them CJS-safe for the Envio handler runtime.
  */
-import _contractsJson from "@mento-protocol/contracts/contracts.json";
-import _namespaces from "../config/deployment-namespaces.json";
+import _contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
+import _namespaces from "../config/deployment-namespaces.json" with { type: "json" };
 
 // Vendored chain ID -> namespace map for Envio hosted compatibility.
 // Envio may build indexer-envio outside the pnpm workspace, so the indexer

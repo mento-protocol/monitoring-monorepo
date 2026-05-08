@@ -16,8 +16,8 @@
 //   - freshnessLimit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
 // ---------------------------------------------------------------------------
 
-import type { Pool, OracleSnapshot } from "generated";
-import FX_CALENDAR from "../config/fx-calendar.json";
+import type { Pool, OracleSnapshot } from "envio";
+import FX_CALENDAR from "../config/fx-calendar.json" with { type: "json" };
 
 /** Safety cap for carry-forward duration (1 hour) */
 const MAX_CARRY_SECONDS = 3600n;

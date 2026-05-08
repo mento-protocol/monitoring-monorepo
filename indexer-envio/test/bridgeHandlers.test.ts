@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 /**
  * Bridge-flows handler-level tests — exercise the codex-review scenarios
  * that cannot be checked by pure-function tests:
@@ -11,8 +10,8 @@
  * MockDb, then assert on the resulting entity rows.
  */
 import { strict as assert } from "assert";
-import generated from "generated";
-import { findByNttManager } from "../src/wormhole/nttAddresses";
+import generated from "envio";
+import { findByNttManager } from "../src/wormhole/nttAddresses.js";
 
 // Side-effect: register handlers with Envio.
 import "../src/EventHandlers.ts";
@@ -422,7 +421,7 @@ describe("Bridge-flows handlers — tokenAddress source-chain resolution", () =>
       celo.tokenAddress.toLowerCase(),
       "TransferRedeemed leaves source-chain tokenAddress intact (must not overwrite with Monad's address)",
     );
-    assert.notEqual(
+    assert.notStrictEqual(
       afterDest!.tokenAddress.toLowerCase(),
       monad!.tokenAddress.toLowerCase(),
       "tokenAddress is NOT the dest-chain token proxy",

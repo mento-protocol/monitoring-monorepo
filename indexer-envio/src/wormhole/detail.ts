@@ -5,7 +5,7 @@
  * Lives outside src/bridge.ts because neither is generic — both are coupled
  * to the Wormhole NTT message format.
  */
-import type { WormholeTransferDetail } from "generated";
+import type { WormholeTransferDetail } from "envio";
 
 const ADDRESS_ZERO_PADDING = "0".repeat(24);
 

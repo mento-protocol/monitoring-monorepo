@@ -7,7 +7,7 @@
 
 import { createPublicClient, http } from "viem";
 
-import { consoleLogger, type RpcLogger } from "./log";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // RPC failure logging

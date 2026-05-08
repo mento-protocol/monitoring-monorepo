@@ -1,13 +1,12 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
+import assert from "node:assert/strict";
 import {
   classifyBreachEvent,
   openBreachId,
   recordBreachTransition,
-} from "../src/deviationBreach";
-import { DEVIATION_BREACH_GRACE_SECONDS } from "../src/pool";
-import type { DeviationThresholdBreach } from "generated";
-import { makePool } from "./helpers/makePool";
+} from "../src/deviationBreach.js";
+import { DEVIATION_BREACH_GRACE_SECONDS } from "../src/pool.js";
+import type { DeviationThresholdBreach } from "envio";
+import { makePool } from "./helpers/makePool.js";
 
 // ---------------------------------------------------------------------------
 // In-memory mock context shaped like the Envio loader context used by
@@ -85,7 +84,7 @@ describe("recordBreachTransition — rising edge", () => {
       source: "fpmm_swap",
     });
 
-    assert.deepEqual(poolUpdate, {}); // no cumulative change on rising edge
+    assert.deepStrictEqual(poolUpdate, {}); // no cumulative change on rising edge
     assert.equal(store.size, 1);
     const row = store.get(openBreachId(next.id, MON_NOON))!;
     assert.equal(row.startedAt, MON_NOON);
@@ -616,7 +615,7 @@ describe("recordBreachTransition — falling edge", () => {
       txHash: "0xheal-close",
       source: "oracle_reported",
     });
-    assert.deepEqual(poolUpdate, {});
+    assert.deepStrictEqual(poolUpdate, {});
     assert.equal(store.size, 0);
   });
 
@@ -790,8 +789,8 @@ describe("recordBreachTransition — UpdateReserves followed by a semantic handl
         source: "fpmm_update_reserves",
       },
     );
-    assert.deepEqual(postUR, {}); // no close yet
-    assert.isUndefined(store.get(open.id)!.endedAt);
+    assert.deepStrictEqual(postUR, {}); // no close yet
+    assert.equal(store.get(open.id, undefined)!.endedAt);
 
     // Step 2: Rebalance fires next in the same tx. `prev` carries the
     // held anchor; `next.anchor = 0n` because Rebalance is NOT a
@@ -842,7 +841,7 @@ describe("recordBreachTransition — no transition", () => {
       txHash: "0xhealthy",
       source: "fpmm_swap",
     });
-    assert.deepEqual(poolUpdate, {});
+    assert.deepStrictEqual(poolUpdate, {});
     assert.equal(store.size, 0);
   });
 
@@ -866,7 +865,7 @@ describe("recordBreachTransition — no transition", () => {
       txHash: "0xtolerance",
       source: "fpmm_swap",
     });
-    assert.deepEqual(poolUpdate, {});
+    assert.deepStrictEqual(poolUpdate, {});
     assert.equal(store.size, 0);
   });
 });

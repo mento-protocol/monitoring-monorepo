@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { buildSwapTraderFields } from "../src/swap";
+import { buildSwapTraderFields } from "../src/swap.js";
 
 const CHAIN_CELO = 42220;
 const USDM = "0x765de816845861e75a25fca122bb6898b8b1282a";

@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
   classifyAggregator,
@@ -6,7 +5,7 @@ import {
   _aggregatorAddressesForChain,
   _allClusterNames,
   _directEntriesForChain,
-} from "../src/aggregators";
+} from "../src/aggregators.js";
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;

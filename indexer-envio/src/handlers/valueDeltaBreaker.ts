@@ -5,8 +5,8 @@
 // Trip / reset transitions are handled by the BreakerBox handler.
 // ---------------------------------------------------------------------------
 
-import { ValueDeltaBreaker } from "generated";
-import { asAddress, asBigInt } from "../helpers";
+import { indexer } from "envio";
+import { asAddress, asBigInt } from "../helpers.js";
 import {
   ensureBreaker,
   ensureBreakerConfig,
@@ -16,19 +16,23 @@ import {
   handleRateFeedCooldownTimeUpdated,
   makeBreakerId,
   maybePreloadBreaker,
-} from "../breakers";
+} from "../breakers.js";
 
 // Cooldown + threshold config events are shared with MedianDeltaBreaker.
-ValueDeltaBreaker.DefaultCooldownTimeUpdated.handler(
+indexer.onEvent(
+  { contract: "ValueDeltaBreaker", event: "DefaultCooldownTimeUpdated" },
   handleDefaultCooldownTimeUpdated,
 );
-ValueDeltaBreaker.DefaultRateChangeThresholdUpdated.handler(
+indexer.onEvent(
+  { contract: "ValueDeltaBreaker", event: "DefaultRateChangeThresholdUpdated" },
   handleDefaultRateChangeThresholdUpdated,
 );
-ValueDeltaBreaker.RateFeedCooldownTimeUpdated.handler(
+indexer.onEvent(
+  { contract: "ValueDeltaBreaker", event: "RateFeedCooldownTimeUpdated" },
   handleRateFeedCooldownTimeUpdated,
 );
-ValueDeltaBreaker.RateChangeThresholdUpdated.handler(
+indexer.onEvent(
+  { contract: "ValueDeltaBreaker", event: "RateChangeThresholdUpdated" },
   handleRateChangeThresholdUpdated,
 );
 
@@ -36,33 +40,36 @@ ValueDeltaBreaker.RateChangeThresholdUpdated.handler(
 // ValueDelta-only: reference value (the fixed peg, e.g. 1.0)
 // ---------------------------------------------------------------------------
 
-ValueDeltaBreaker.ReferenceValueUpdated.handler(async ({ event, context }) => {
-  const breakerAddress = asAddress(event.srcAddress);
-  const rateFeedID = asAddress(event.params.rateFeedID);
-  const breakerId = makeBreakerId(event.chainId, breakerAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "ValueDeltaBreaker", event: "ReferenceValueUpdated" },
+  async ({ event, context }) => {
+    const breakerAddress = asAddress(event.srcAddress);
+    const rateFeedID = asAddress(event.params.rateFeedID);
+    const breakerId = makeBreakerId(event.chainId, breakerAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  if (await maybePreloadBreaker(context, breakerId)) return;
+    if (await maybePreloadBreaker(context, breakerId)) return;
 
-  const breaker = await ensureBreaker(
-    context,
-    event.chainId,
-    breakerAddress,
-    blockNumber,
-    blockTimestamp,
-  );
-  if (!breaker) return;
-  const cfg = await ensureBreakerConfig(
-    context,
-    event.chainId,
-    breaker,
-    rateFeedID,
-    blockNumber,
-  );
-  if (!cfg) return;
+    const breaker = await ensureBreaker(
+      context,
+      event.chainId,
+      breakerAddress,
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!breaker) return;
+    const cfg = await ensureBreakerConfig(
+      context,
+      event.chainId,
+      breaker,
+      rateFeedID,
+      blockNumber,
+    );
+    if (!cfg) return;
 
-  const ref = event.params.referenceValue;
-  if (cfg.referenceValue === ref) return;
-  context.BreakerConfig.set({ ...cfg, referenceValue: ref });
-});
+    const ref = event.params.referenceValue;
+    if (cfg.referenceValue === ref) return;
+    context.BreakerConfig.set({ ...cfg, referenceValue: ref });
+  },
+);

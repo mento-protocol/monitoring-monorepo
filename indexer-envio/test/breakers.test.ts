@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
 import {
   computeCooldownEndsAt,

@@ -1,45 +1,15 @@
-import type {
-  AggregatorDailySnapshot,
-  AggregatorTraderDayMarker,
-  Pool,
-  TraderDailySnapshot,
-  TraderPoolDailySnapshot,
-  TraderPoolDayMarker,
-} from "generated";
-import { applyFeeBps } from "./usd";
-import { isSystemAddress } from "./system-addresses";
-import { classifyAggregator } from "./aggregators";
-import { dayBucket, extractAddressFromPoolId } from "./helpers";
+import type { Pool } from "envio";
+import { applyFeeBps } from "./usd.js";
+import { isSystemAddress } from "./system-addresses.js";
+import { classifyAggregator } from "./aggregators.js";
+import { dayBucket, extractAddressFromPoolId } from "./helpers.js";
 import {
   maybeHeartbeatFlushV3,
   type V3FlushContext,
-} from "./leaderboardWindowFlush";
+} from "./leaderboardWindowFlush.js";
 
-/** Subset of Envio's handler context that the leaderboard snapshot helper
- *  reads/writes. Both the FPMM and VirtualPool swap handlers' contexts are
- *  structurally compatible with this shape. */
-export type LeaderboardContext = V3FlushContext & {
-  TraderDailySnapshot: {
-    get: (id: string) => Promise<TraderDailySnapshot | undefined>;
-    set: (entity: TraderDailySnapshot) => void;
-  };
-  TraderPoolDailySnapshot: {
-    get: (id: string) => Promise<TraderPoolDailySnapshot | undefined>;
-    set: (entity: TraderPoolDailySnapshot) => void;
-  };
-  AggregatorDailySnapshot: {
-    get: (id: string) => Promise<AggregatorDailySnapshot | undefined>;
-    set: (entity: AggregatorDailySnapshot) => void;
-  };
-  TraderPoolDayMarker: {
-    get: (id: string) => Promise<TraderPoolDayMarker | undefined>;
-    set: (entity: TraderPoolDayMarker) => void;
-  };
-  AggregatorTraderDayMarker: {
-    get: (id: string) => Promise<AggregatorTraderDayMarker | undefined>;
-    set: (entity: AggregatorTraderDayMarker) => void;
-  };
-};
+/** v3 indexer context, aliased here for the leaderboard helpers. */
+export type LeaderboardContext = V3FlushContext;
 
 export interface SwapAmounts {
   amount0In: bigint;

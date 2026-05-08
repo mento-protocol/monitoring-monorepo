@@ -1,6 +1,14 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-mainnet
 description: Mento v3 multichain mainnet indexer — Celo (42220) + Monad (143)
+
+# Disable v3's `src/handlers/` auto-loading. Each contract below explicitly
+# points at `src/EventHandlers.ts`, which side-effect imports the same
+# files in `src/handlers/`. Without this `null`, v3 would auto-load
+# `src/handlers/*` AND fire the same files via the entry point — double
+# registration would double-apply every stateful update (volumes, fee
+# snapshots, breach counters, etc.).
+handlers: null
 #
 # ⚠️  BREAKING CHANGE — DEPLOYMENT CHECKLIST ⚠️
 #
@@ -172,7 +180,7 @@ contracts:
     events:
       - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
 
-networks:
+chains:
   # ---------------------------------------------------------------------------
   # Celo Mainnet (chain 42220)
   # ---------------------------------------------------------------------------
@@ -278,8 +286,6 @@ networks:
           - 0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093 # CHFm
           - 0x01c9d280150f932d4a2fe11f40b0d72bffbcd339 # JPYm
 
-unordered_multichain_mode: true
-preload_handlers: true
 field_selection:
   transaction_fields:
     - hash

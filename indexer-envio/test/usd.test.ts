@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
   applyFeeBps,
@@ -7,7 +6,7 @@ import {
   normalizeRewardBps,
   USD_PEGGED_SYMBOLS,
   USD_WEI_DECIMALS,
-} from "../src/usd";
+} from "../src/usd.js";
 
 // Real Celo mainnet addresses — resolvable through KNOWN_TOKEN_META
 // (`feeToken.ts` builds it from `@mento-protocol/contracts/contracts.json`).
@@ -180,7 +179,7 @@ describe("USD_PEGGED_SYMBOLS — drift protection vs ui-dashboard/src/lib/tokens
   ]);
 
   it("matches the dashboard's USD_PEGGED_SYMBOLS set verbatim", () => {
-    assert.deepEqual(
+    assert.deepStrictEqual(
       [...USD_PEGGED_SYMBOLS].sort(),
       [...EXPECTED].sort(),
       "indexer USD_PEGGED_SYMBOLS drifted from ui-dashboard/src/lib/tokens.ts:12-21 — update both in lockstep",

@@ -1,4 +1,4 @@
-import { KNOWN_TOKEN_META } from "./feeToken";
+import { KNOWN_TOKEN_META } from "./feeToken.js";
 
 /**
  * Tokens treated as $1.00 for USD conversion. Mirrors

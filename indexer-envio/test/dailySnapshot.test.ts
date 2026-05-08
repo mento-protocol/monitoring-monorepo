@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import generated from "generated";
+import assert from "node:assert/strict";
+import generated from "envio";
 import {
   _clearMockReserves,
   _clearMockERC20Decimals,
@@ -279,7 +278,7 @@ describe("PoolDailySnapshot rollup", () => {
 
     assert.ok(day1, "day 1 PoolDailySnapshot must exist");
     assert.ok(day2, "day 2 PoolDailySnapshot must exist");
-    assert.notEqual(day1!.id, day2!.id, "distinct daily rows");
+    assert.notStrictEqual(day1!.id, day2!.id, "distinct daily rows");
 
     assert.equal(day1!.swapCount, 1);
     assert.equal(day1!.swapVolume0, 1_000_000_000_000_000_000n);

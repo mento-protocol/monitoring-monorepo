@@ -13,8 +13,8 @@ import {
   logRpcFailure,
   recordFallbackArchiveMiss,
   sanitizeErrorMessage,
-} from "./client";
-import { consoleLogger, type RpcLogger } from "./log";
+} from "./client.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 /** Matches common RPC error messages indicating the requested block is not
  * yet available on the node. Different providers emit different messages:

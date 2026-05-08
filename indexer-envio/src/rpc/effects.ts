@@ -34,14 +34,14 @@ import {
   fetchReserves,
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
-} from "./pool-state";
+} from "./pool-state.js";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
   fetchBreakerKind,
   fetchBreakerList,
   type BreakerKindRpc,
-} from "./breakers";
+} from "./breakers.js";
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
@@ -50,7 +50,7 @@ import {
 //
 // `S.nullable(T)` accepts null on input but produces `T | undefined` on
 // output (Sury's design). Effect handlers that wrap fetchers returning
-// `T | null` therefore coalesce `null ?? undefined` before returning. Call
+// `T | null` therefore coalesce `null ?? null` before returning. Call
 // sites awaiting `context.effect(...)` see `T | undefined`; legacy callers
 // of `fetch*` continue to see `T | null` until they migrate in commits 2-3.
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ export const erc20DecimalsEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -158,7 +158,7 @@ export const referenceRateFeedIDEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -184,7 +184,7 @@ export const invertRateFeedEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -212,7 +212,7 @@ export const rebalanceThresholdEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -256,15 +256,15 @@ export const tokenDecimalsScalingEffect = createEffect(
     // wrong (default 18) decimals.
     if (!input.fallbackTokenAddress) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     const decimals = await context.effect(erc20DecimalsEffect, {
       chainId: input.chainId,
       tokenAddress: input.fallbackTokenAddress,
     });
-    if (decimals === undefined) {
+    if (decimals === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return 10n ** BigInt(decimals);
   },
@@ -310,7 +310,7 @@ export const feesEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     if (
       result.lpFee === undefined ||
@@ -377,7 +377,7 @@ export const reservesEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const rebalancingStateEffect = createEffect(
@@ -398,7 +398,7 @@ export const rebalancingStateEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const rebalanceIncentiveAtBlockEffect = createEffect(
@@ -419,7 +419,7 @@ export const rebalanceIncentiveAtBlockEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -445,7 +445,7 @@ export const numReportersEffect = createEffect(
       input.rateFeedID,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const reportExpiryEffect = createEffect(
@@ -466,7 +466,7 @@ export const reportExpiryEffect = createEffect(
       input.rateFeedID,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -501,7 +501,7 @@ export const tradingLimitsEffect = createEffect(
       input.token,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -528,7 +528,7 @@ export const breakerListEffect = createEffect(
   },
   async ({ input, context }) =>
     (await fetchBreakerList(input.chainId, input.blockNumber, context.log)) ??
-    undefined,
+    null,
 );
 
 export const breakerKindEffect = createEffect(
@@ -548,7 +548,7 @@ export const breakerKindEffect = createEffect(
     const result = await fetchBreakerKind(input.chainId, input.breakerAddress);
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -574,7 +574,7 @@ export const breakerDefaultsEffect = createEffect(
       input.kind as BreakerKindRpc,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const breakerFeedStateEffect = createEffect(
@@ -600,14 +600,14 @@ export const breakerFeedStateEffect = createEffect(
       input.blockNumber,
       context.log,
     );
-    if (result === null) return undefined;
+    if (result === null) return null;
     // The schema's nullable inner fields output `T | undefined`, but the
     // fetcher returns `T | null` for kind-specific fields. Map at the boundary.
     return {
       ...result,
-      smoothingFactor: result.smoothingFactor ?? undefined,
-      medianRatesEMA: result.medianRatesEMA ?? undefined,
-      referenceValue: result.referenceValue ?? undefined,
+      smoothingFactor: result.smoothingFactor ?? null,
+      medianRatesEMA: result.medianRatesEMA ?? null,
+      referenceValue: result.referenceValue ?? null,
     };
   },
 );

@@ -1,6 +1,9 @@
-import aggregatorsRaw from "../config/aggregators.json";
-import { CONTRACT_NAMESPACE_BY_CHAIN } from "./contractAddresses";
-import { isSystemAddress, iterateContractAddresses } from "./system-addresses";
+import aggregatorsRaw from "../config/aggregators.json" with { type: "json" };
+import { CONTRACT_NAMESPACE_BY_CHAIN } from "./contractAddresses.js";
+import {
+  isSystemAddress,
+  iterateContractAddresses,
+} from "./system-addresses.js";
 
 interface AggregatorEntry {
   name: string;

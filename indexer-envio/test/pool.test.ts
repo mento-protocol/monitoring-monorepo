@@ -1,70 +1,72 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import type { Pool } from "generated";
+import assert from "node:assert/strict";
+import type { Pool } from "envio";
 import {
   isInDeviationBreach,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
-} from "../src/pool";
-import { makePool } from "./helpers/makePool";
+} from "../src/pool.js";
+import { makePool } from "./helpers/makePool.js";
 
 describe("isInDeviationBreach", () => {
   it("false when priceDifference is well below threshold", () => {
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 4999n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 4999n, rebalanceThreshold: 5000 }, false),
       ),
     );
   });
 
   it("false at exact threshold (devRatio = 1.0, inside tolerance)", () => {
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 5000n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 5000n, rebalanceThreshold: 5000 }, false),
       ),
     );
   });
 
   it("false inside the 1% tolerance dead zone (devRatio = 1.005)", () => {
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 5025n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 5025n, rebalanceThreshold: 5000 }, false),
       ),
     );
   });
 
   it("false at exactly the tolerance line — strict `>` (devRatio = 1.01)", () => {
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 5050n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 5050n, rebalanceThreshold: 5000 }, false),
       ),
     );
   });
 
   it("true just above the tolerance line (devRatio = 1.012)", () => {
-    assert.isTrue(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 5060n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 5060n, rebalanceThreshold: 5000 }, true),
       ),
     );
   });
 
   it("true on a large breach (devRatio = 1.5)", () => {
-    assert.isTrue(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 7500n, rebalanceThreshold: 5000 }),
+        makePool({ priceDifference: 7500n, rebalanceThreshold: 5000 }, true),
       ),
     );
   });
 
   it("false for virtual pools regardless of deviation", () => {
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({
-          source: "virtual_pool_factory",
-          priceDifference: 10_000n,
-          rebalanceThreshold: 5000,
-        }),
+        makePool(
+          {
+            source: "virtual_pool_factory",
+            priceDifference: 10_000n,
+            rebalanceThreshold: 5000,
+          },
+          false,
+        ),
       ),
     );
   });
@@ -72,19 +74,19 @@ describe("isInDeviationBreach", () => {
   it("falls back to threshold=10000 when rebalanceThreshold === 0; tolerance applies on top", () => {
     // 10_100 = at tolerance boundary (1.01x of 10_000 fallback) — not a breach.
     // 10_101 = just above tolerance (1.0101x of 10_000 fallback) — a breach.
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 10_000n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_000n, rebalanceThreshold: 0 }, false),
       ),
     );
-    assert.isFalse(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 10_100n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_100n, rebalanceThreshold: 0 }, false),
       ),
     );
-    assert.isTrue(
+    assert.equal(
       isInDeviationBreach(
-        makePool({ priceDifference: 10_101n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_101n, rebalanceThreshold: 0 }, true),
       ),
     );
   });
@@ -193,7 +195,7 @@ describe("nextDeviationBreachStartedAt", () => {
     const TS2 = TS + 3600n;
     const afterReentry = nextDeviationBreachStartedAt(s2Updated, s3, TS2);
     assert.equal(afterReentry, TS2);
-    assert.notEqual(afterReentry, firstStart);
+    assert.notStrictEqual(afterReentry, firstStart);
   });
 
   it("virtual pools always stay at 0n", () => {
@@ -310,17 +312,17 @@ describe("maybePreloadPool", () => {
   it("returns false and touches nothing when not in preload phase", async () => {
     const { context, calls } = makeCtx(false, {});
     const result = await maybePreloadPool(context, "42220-0xabc");
-    assert.isFalse(result);
-    assert.deepEqual(calls.poolGets, []);
-    assert.deepEqual(calls.breachGets, []);
+    assert.equal(result, false);
+    assert.deepStrictEqual(calls.poolGets, []);
+    assert.deepStrictEqual(calls.breachGets, []);
   });
 
   it("preloads Pool only when pool is missing (no anchor to warm)", async () => {
     const { context, calls } = makeCtx(true, { "42220-0xabc": undefined });
     const result = await maybePreloadPool(context, "42220-0xabc");
-    assert.isTrue(result);
-    assert.deepEqual(calls.poolGets, ["42220-0xabc"]);
-    assert.deepEqual(calls.breachGets, []);
+    assert.equal(result, true);
+    assert.deepStrictEqual(calls.poolGets, ["42220-0xabc"]);
+    assert.deepStrictEqual(calls.breachGets, []);
   });
 
   it("preloads Pool only when pool exists but has no open breach anchor", async () => {
@@ -328,9 +330,9 @@ describe("maybePreloadPool", () => {
     const id = pool.id;
     const { context, calls } = makeCtx(true, { [id]: pool });
     const result = await maybePreloadPool(context, id);
-    assert.isTrue(result);
-    assert.deepEqual(calls.poolGets, [id]);
-    assert.deepEqual(calls.breachGets, []);
+    assert.equal(result, true);
+    assert.deepStrictEqual(calls.poolGets, [id]);
+    assert.deepStrictEqual(calls.breachGets, []);
   });
 
   it("preloads both Pool AND the open breach row (correct `{poolId}-{anchor}` id) when an anchor is set", async () => {
@@ -339,9 +341,9 @@ describe("maybePreloadPool", () => {
     const id = pool.id;
     const { context, calls } = makeCtx(true, { [id]: pool });
     const result = await maybePreloadPool(context, id);
-    assert.isTrue(result);
-    assert.deepEqual(calls.poolGets, [id]);
-    assert.deepEqual(calls.breachGets, [`${id}-${anchor}`]);
+    assert.equal(result, true);
+    assert.deepStrictEqual(calls.poolGets, [id]);
+    assert.deepStrictEqual(calls.breachGets, [`${id}-${anchor}`]);
   });
 
   it("accepts an array of poolIds — oracle handlers preload many pools at once", async () => {
@@ -355,10 +357,10 @@ describe("maybePreloadPool", () => {
       [bId]: { ...poolB, id: bId },
     });
     const result = await maybePreloadPool(context, [aId, bId]);
-    assert.isTrue(result);
+    assert.equal(result, true);
     assert.sameMembers(calls.poolGets, [aId, bId]);
     // Only poolA has an open anchor → only its breach row is warmed.
-    assert.deepEqual(calls.breachGets, [
+    assert.deepStrictEqual(calls.breachGets, [
       `${aId}-${poolA.deviationBreachStartedAt}`,
     ]);
   });
@@ -366,8 +368,8 @@ describe("maybePreloadPool", () => {
   it("handles an empty array of poolIds cleanly (no-op in preload)", async () => {
     const { context, calls } = makeCtx(true, {});
     const result = await maybePreloadPool(context, []);
-    assert.isTrue(result);
-    assert.deepEqual(calls.poolGets, []);
-    assert.deepEqual(calls.breachGets, []);
+    assert.equal(result, true);
+    assert.deepStrictEqual(calls.poolGets, []);
+    assert.deepStrictEqual(calls.breachGets, []);
   });
 });
