@@ -492,5 +492,6 @@ export {
   top10Concentration,
   type HeroSnapshotTotals,
   type LeaderboardTodayTraderRow,
+  type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
 } from "@/lib/leaderboard-hero";

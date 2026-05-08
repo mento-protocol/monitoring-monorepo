@@ -20,9 +20,15 @@
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 /** Wire shape of LeaderboardWindowSnapshot / BrokerLeaderboardWindowSnapshot
- *  rows. Both v3 and v2 GraphQL queries return the same fields. The primary
- *  total* fields exclude system addresses; the *IncludingSystem siblings
- *  feed the "Show system addresses = on" toggle. */
+ *  rows from the primary query. Both v3 and v2 GraphQL queries return the
+ *  same fields. The primary total* fields exclude system addresses; the
+ *  *IncludingSystem siblings feed the "Show system addresses = on" toggle.
+ *
+ *  The `firstDay*` slice ships in a SEPARATE isolated query
+ *  (`LEADERBOARD_WINDOW_FIRSTDAY_LATEST`) — see
+ *  `LeaderboardWindowFirstDayRow` — so that a hosted-Hasura schema lag
+ *  on the new columns can degrade JUST the DEGRADED-chain catch-up
+ *  rather than blanking the hero KPIs entirely. */
 export type LeaderboardWindowRow = {
   id: string;
   chainId: number;
@@ -35,6 +41,26 @@ export type LeaderboardWindowRow = {
   totalSwapCountIncludingSystem: number;
   uniqueTraders: number;
   uniqueTradersIncludingSystem: number;
+};
+
+/** Wire shape of the isolated first-day slice query
+ *  (`LEADERBOARD_WINDOW_FIRSTDAY_LATEST` / broker sibling). Joined
+ *  client-side onto `LeaderboardWindowRow` by `chainId` so the page
+ *  survives a hosted-Hasura schema lag on the new columns — only the
+ *  DEGRADED-chain catch-up degrades, the hero KPIs stay rendered.
+ *
+ *  Always 0 for `all` and `24h` windows by design (no first-day
+ *  boundary / empty range respectively); populated for `7d` / `30d` /
+ *  `90d`. */
+export type LeaderboardWindowFirstDayRow = {
+  chainId: number;
+  snapshotDay: string;
+  firstDayVolumeUsdWei: string;
+  firstDayVolumeUsdWeiIncludingSystem: string;
+  firstDaySwapCount: number;
+  firstDaySwapCountIncludingSystem: number;
+  firstDayExclusiveUniqueTraders: number;
+  firstDayExclusiveUniqueTradersIncludingSystem: number;
 };
 
 /** Wire shape of today's partial trader-day rows. v3 and v2 share this
@@ -91,6 +117,22 @@ function isStaleableWindow(windowKey: string): boolean {
   return windowKey === "7d" || windowKey === "30d" || windowKey === "90d";
 }
 
+/** Build a `{chainId-snapshotDay}` lookup over the isolated firstDay
+ *  rows. Keying by both fields (not just chainId) defends against the
+ *  brief heartbeat-cadence window where the primary snapshot query
+ *  and the isolated firstDay query could land on different
+ *  snapshotDays for the same chainId — a stale-cache mismatch would
+ *  otherwise subtract a slice that doesn't belong to the snapshot. */
+function buildFirstDaySnapshotKeyMap(
+  rows: ReadonlyArray<LeaderboardWindowFirstDayRow>,
+): Map<string, LeaderboardWindowFirstDayRow> {
+  const m = new Map<string, LeaderboardWindowFirstDayRow>();
+  for (const row of rows) {
+    m.set(`${row.chainId}-${row.snapshotDay}`, row);
+  }
+  return m;
+}
+
 /**
  * Sum hero-tile totals across all chains, combining the pre-rolled
  * [windowStart, yesterday] snapshot with today's partial.
@@ -141,10 +183,72 @@ function isStaleableWindow(windowKey: string): boolean {
  * cumulative from epoch (empty days don't invalidate the total), and
  * `24h` is written as an intentionally-empty range by the indexer and
  * fully covered by `todayRows` on the dashboard side.
+ *
+ * Optional DEGRADED-chain catch-up (slice subtraction): when the
+ * caller passes `yesterdayRows` (a `TraderDailySnapshot` query
+ * filtered to `timestamp = todayMidnight - 86400` and gated on
+ * `chainId_in: degradedChains`), this helper supplements the rollup
+ * for every degraded chain by:
+ *
+ *   1. subtracting the snapshot's `firstDay*` slice (the boundary
+ *      day that would otherwise be double-counted because
+ *      `windowStartDay` slides with `snapshotDay`),
+ *   2. adding yesterday's rows on top,
+ *   3. dropping the chain from the returned `degradedChains` list.
+ *
+ * For a `7d` window with `snapshotDay = T-2`, the snapshot covers
+ * `[T-7, T-2]` (6 days). Naively adding yesterday + today on top
+ * yields `[T-7, T]` = 8 days. Slice subtraction drops `T-7` so the
+ * effective window becomes `[T-6, T]` = 7 days, matching the
+ * non-degraded baseline.
+ *
+ * The semantics distinguish "query not yet fired / completed" from
+ * "query completed, chain genuinely silent yesterday":
+ *
+ *   yesterdayRows === undefined  →  caller hasn't fired the query
+ *                                   yet (or it errored). Every
+ *                                   degraded chain stays in
+ *                                   `degradedChains`; banner is
+ *                                   shown until data lands.
+ *
+ *   yesterdayRows === []         →  query completed authoritatively
+ *                                   (zero activity yesterday across
+ *                                   all degraded chains). Every
+ *                                   degraded chain still gets its
+ *                                   firstDay slice subtracted —
+ *                                   sliding the window forward by one
+ *                                   day with a zero contribution from
+ *                                   yesterday is correct, not "data
+ *                                   missing".
+ *
+ *   yesterdayRows = [..rows..]   →  partial: chains with rows get
+ *                                   their slice + yesterday rows;
+ *                                   chains without rows still get
+ *                                   the slice subtraction (zero
+ *                                   yesterday contribution).
+ *
+ * Unique-trader caveat: the catch-up adds yesterday's distinct
+ * traders without de-duplicating against the snapshot's retained
+ * `[windowStartDay+1, snapshotDay]` slice — a trader active both in
+ * `[T-6, T-2]` and `T-1` is counted twice. This mirrors the existing
+ * snapshot-vs-today double-count comment above (today's overlap is
+ * already approximate) and keeps the wire shape minimal. Volume and
+ * swap counts ARE exact through the slice subtraction.
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
   todayRows: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
+  /** First-day slice for the same (chainId, snapshotDay) tuples as
+   *  `snapshotRows`, joined client-side. Lives in a separate isolated
+   *  query so a hosted-Hasura schema lag on the new columns degrades
+   *  ONLY the catch-up (chains stay degraded) instead of failing the
+   *  primary hero query. `undefined` until the isolated query lands. */
+  firstDayRows?: ReadonlyArray<LeaderboardWindowFirstDayRow> | undefined;
+  /** Optional yesterday's-closed-day rows (one trader-day per row),
+   *  used to catch up DEGRADED chains via slice subtraction. Caller
+   *  fires `LEADERBOARD_YESTERDAY_TRADERS` only when `degradedChains`
+   *  from a prior pass is non-empty; `undefined` otherwise. */
+  yesterdayRows?: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
   showSystem: boolean;
   todayMidnightSeconds: number;
 }): HeroSnapshotTotals {
@@ -159,6 +263,10 @@ export function mergeHeroSnapshot(args: {
   let uniqueFromSnapshot = 0;
   const staleChains: number[] = [];
   const degradedChains: number[] = [];
+  // Track per-chain snapshot rows for degraded chains so the post-pass
+  // slice-subtraction step can read the firstDay* fields without
+  // re-iterating the whole list.
+  const degradedSnapshotByChain = new Map<number, LeaderboardWindowRow>();
   for (const row of args.snapshotRows ?? []) {
     if (isStaleableWindow(row.windowKey)) {
       const snapDay = Number(row.snapshotDay);
@@ -174,6 +282,7 @@ export function mergeHeroSnapshot(args: {
         // most of the window); yesterday's closed-day data is the only
         // gap and is signaled to the user via a lighter banner.
         degradedChains.push(row.chainId);
+        degradedSnapshotByChain.set(row.chainId, row);
       }
     }
     if (args.showSystem) {
@@ -199,12 +308,100 @@ export function mergeHeroSnapshot(args: {
     totalSwapCount += row.swapCount;
     todayTraders.add(`${row.chainId}-${row.trader}`);
   }
+
+  // ─── Degraded-chain catch-up via slice subtraction ──────────────
+  // For each degraded chain: drop the snapshot's first-day slice, then
+  // add any yesterday rows for the chain. Net effect on a 7d window
+  // with snapshotDay=T-2: snapshot covered [T-7, T-2] (6 days); after
+  // subtraction it covers [T-6, T-2] (5 days); add yesterday (T-1)
+  // and today (already added above) to land at [T-6, T] = 7 days. Same
+  // identity for 30d/90d.
+  //
+  // The catch-up requires BOTH the isolated firstDay query
+  // (`firstDayRows`) AND the yesterday-traders query (`yesterdayRows`)
+  // to have landed. `undefined` for either means the catch-up isn't
+  // ready — chain stays degraded, banner shown. Empty arrays are
+  // authoritative ("query completed, zero contribution") and trigger
+  // the slice subtraction with a zero yesterday contribution.
+  const remainingDegradedChains: number[] = [];
+  let yesterdayUniqueTradersAdded = 0;
+  const firstDayBySnapshotKey = args.firstDayRows
+    ? buildFirstDaySnapshotKeyMap(args.firstDayRows)
+    : null;
+  if (args.yesterdayRows !== undefined && firstDayBySnapshotKey !== null) {
+    // Bucket yesterday's rows by chainId (and apply the system filter)
+    // once, so the per-chain loop is O(degradedChains.length).
+    const yesterdayByChain = new Map<number, LeaderboardTodayTraderRow[]>();
+    for (const row of args.yesterdayRows) {
+      if (!args.showSystem && row.isSystemAddress) continue;
+      const list = yesterdayByChain.get(row.chainId);
+      if (list) {
+        list.push(row);
+      } else {
+        yesterdayByChain.set(row.chainId, [row]);
+      }
+    }
+    for (const chainId of degradedChains) {
+      const snap = degradedSnapshotByChain.get(chainId);
+      // Match firstDay row by (chainId, snapshotDay) — the isolated
+      // query and the primary query both use `distinct_on: [chainId]`
+      // ordered by `snapshotDay desc`, so they'll converge on the same
+      // snapshotDay per chain in steady state. Defensive lookup
+      // handles brief mismatches around heartbeat boundaries.
+      const firstDay = snap
+        ? firstDayBySnapshotKey.get(`${chainId}-${snap.snapshotDay}`)
+        : undefined;
+      if (!snap || !firstDay) {
+        // First-day slice not available for this chain — keep
+        // degraded rather than fall back to a partial subtraction
+        // (which could be inconsistent with the primary snapshot).
+        remainingDegradedChains.push(chainId);
+        continue;
+      }
+      // Slice subtraction off the snapshot. Use the same showSystem
+      // branch the snapshot was added under so the units match. Even
+      // when yesterday has zero rows for this chain, subtracting the
+      // first-day slice is correct: it slides the window forward by
+      // one day with a zero contribution from yesterday.
+      if (args.showSystem) {
+        totalVolumeUsdWei -= BigInt(
+          firstDay.firstDayVolumeUsdWeiIncludingSystem,
+        );
+        totalSwapCount -= firstDay.firstDaySwapCountIncludingSystem;
+        uniqueFromSnapshot -=
+          firstDay.firstDayExclusiveUniqueTradersIncludingSystem;
+      } else {
+        totalVolumeUsdWei -= BigInt(firstDay.firstDayVolumeUsdWei);
+        totalSwapCount -= firstDay.firstDaySwapCount;
+        uniqueFromSnapshot -= firstDay.firstDayExclusiveUniqueTraders;
+      }
+      // Add yesterday's rows for this chain (may be empty).
+      const yRows = yesterdayByChain.get(chainId);
+      if (yRows && yRows.length > 0) {
+        const yesterdayTradersForChain = new Set<string>();
+        for (const row of yRows) {
+          totalVolumeUsdWei += BigInt(row.volumeUsdWei);
+          totalSwapCount += row.swapCount;
+          yesterdayTradersForChain.add(row.trader);
+        }
+        yesterdayUniqueTradersAdded += yesterdayTradersForChain.size;
+      }
+      // Chain has been supplemented (with zero or more yesterday
+      // rows), so it drops out of `degradedChains`.
+    }
+  } else {
+    // First-day or yesterday query hasn't completed yet (or errored):
+    // every degraded chain stays degraded.
+    remainingDegradedChains.push(...degradedChains);
+  }
+
   return {
     totalVolumeUsdWei,
     totalSwapCount,
-    uniqueTraders: uniqueFromSnapshot + todayTraders.size,
+    uniqueTraders:
+      uniqueFromSnapshot + todayTraders.size + yesterdayUniqueTradersAdded,
     staleChains,
-    degradedChains,
+    degradedChains: remainingDegradedChains,
   };
 }
 

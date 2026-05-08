@@ -13,6 +13,7 @@ import {
   buildLeaderboardWindowSnapshot,
   windowStartDay,
   type TraderDailyRow,
+  type TraderWindowAggregate,
 } from "../src/leaderboardWindowSnapshot";
 import {
   flushV2LeaderboardWindowSnapshots,
@@ -45,6 +46,23 @@ function row(
     volumeUsdWei: 100n * ONE_USD,
     swapCount: 1,
     isSystemAddress: false,
+    ...overrides,
+  };
+}
+
+/** Test-only factory for `TraderWindowAggregate` — fills in the firstDay
+ *  fields with neutral defaults so tests that don't exercise slice
+ *  semantics don't have to repeat them. */
+function agg(
+  overrides: Partial<TraderWindowAggregate> & { trader: string },
+): TraderWindowAggregate {
+  return {
+    volumeUsdWei: 0n,
+    swapCount: 0,
+    isSystemAddress: false,
+    firstDayVolumeUsdWei: 0n,
+    firstDaySwapCount: 0,
+    activeOutsideFirstDay: true,
     ...overrides,
   };
 }
@@ -108,18 +126,18 @@ describe("buildLeaderboardWindowSnapshot", () => {
       snapshotDay: DAY_2026_05_07,
       windowStartDay: DAY_2026_05_07,
       aggregates: [
-        {
+        agg({
           trader: TRADER_A,
           volumeUsdWei: 100n * ONE_USD,
           swapCount: 2,
           isSystemAddress: false,
-        },
-        {
+        }),
+        agg({
           trader: TRADER_B,
           volumeUsdWei: 50n * ONE_USD,
           swapCount: 1,
           isSystemAddress: true,
-        },
+        }),
       ],
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
@@ -130,6 +148,87 @@ describe("buildLeaderboardWindowSnapshot", () => {
     assert.equal(snap.totalSwapCountIncludingSystem, 3);
     assert.equal(snap.uniqueTraders, 1);
     assert.equal(snap.uniqueTradersIncludingSystem, 2);
+  });
+
+  it("firstDay fields default to zero when no aggregates carry first-day slice", () => {
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "7d",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_2026_04_30 + SECONDS_PER_DAY,
+      aggregates: [
+        agg({
+          trader: TRADER_A,
+          volumeUsdWei: 100n * ONE_USD,
+          swapCount: 2,
+          // No firstDayVolumeUsdWei / firstDaySwapCount overrides → 0
+          activeOutsideFirstDay: true,
+        }),
+      ],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayVolumeUsdWei, 0n);
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 0n);
+    assert.equal(snap.firstDaySwapCount, 0);
+    assert.equal(snap.firstDaySwapCountIncludingSystem, 0);
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 0);
+  });
+
+  it("firstDay slice + exclusive-trader count: system split mirrors total*", () => {
+    // Two non-system traders + one system. Trader A is active only on
+    // day 1 (firstDayExclusive). Trader B is active across the whole
+    // window (volume ≥ firstDay slice). System trader C is active only
+    // on day 1 too — counts toward the *IncludingSystem sibling but
+    // NOT the primary firstDayExclusiveUniqueTraders.
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "7d",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_2026_04_30 + SECONDS_PER_DAY,
+      aggregates: [
+        agg({
+          trader: TRADER_A,
+          volumeUsdWei: 30n * ONE_USD,
+          swapCount: 1,
+          isSystemAddress: false,
+          firstDayVolumeUsdWei: 30n * ONE_USD,
+          firstDaySwapCount: 1,
+          activeOutsideFirstDay: false,
+        }),
+        agg({
+          trader: TRADER_B,
+          volumeUsdWei: 100n * ONE_USD,
+          swapCount: 5,
+          isSystemAddress: false,
+          firstDayVolumeUsdWei: 20n * ONE_USD,
+          firstDaySwapCount: 1,
+          activeOutsideFirstDay: true,
+        }),
+        agg({
+          trader: TRADER_C,
+          volumeUsdWei: 7n * ONE_USD,
+          swapCount: 1,
+          isSystemAddress: true,
+          firstDayVolumeUsdWei: 7n * ONE_USD,
+          firstDaySwapCount: 1,
+          activeOutsideFirstDay: false,
+        }),
+      ],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    // Primary (system excluded): A + B contribute. A's $30 + B's $20 first-day = $50.
+    assert.equal(snap.firstDayVolumeUsdWei, 50n * ONE_USD);
+    assert.equal(snap.firstDaySwapCount, 2);
+    // Only A is exclusive on day 1 (no other-day activity).
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 1);
+    // *IncludingSystem: also fold in system trader C's $7.
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 57n * ONE_USD);
+    assert.equal(snap.firstDaySwapCountIncludingSystem, 3);
+    // C also exclusive on day 1 → system-included count is 2.
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 2);
   });
 });
 
@@ -257,6 +356,245 @@ describe("aggregatePerWindow", () => {
     );
     assert.equal(grouped["all"].length, 1);
     assert.equal(grouped["7d"].length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First-day slice (drives the dashboard's DEGRADED-chain catch-up via
+// slice subtraction in `mergeHeroSnapshot`). For rolling windows
+// (`7d` / `30d` / `90d`) the first day is the snapshot's
+// `windowStartDay`. For `all` and `24h` there is no meaningful
+// first-day boundary — the slice fields stay zero.
+// ---------------------------------------------------------------------------
+
+describe("aggregatePerWindow — firstDay slice", () => {
+  // For 7d windows with snapshotDay = DAY_2026_05_07, windowStartDay
+  // = DAY_2026_05_07 - 5 days (covers 6 closed days + today). The
+  // helper at `windowStartDay()` returns that constant.
+  const DAY_FIRST_OF_7D = DAY_2026_05_07 - 5n * SECONDS_PER_DAY;
+
+  it("4 traders, 2 active only on first day → firstDayExclusiveUniqueTraders=2 + firstDayVolume sums those two", () => {
+    // TRADER_A: $50 on day 1 only → exclusive
+    // TRADER_B: $80 on day 1 only → exclusive
+    // TRADER_C: $30 on day 1, $40 on day 3 → not exclusive (day-3 row)
+    // TRADER_D: $25 on day 4 only → not in firstDay slice
+    const grouped = aggregatePerWindow(
+      [
+        row({
+          trader: TRADER_A,
+          timestamp: DAY_FIRST_OF_7D,
+          volumeUsdWei: 50n * ONE_USD,
+          swapCount: 2,
+        }),
+        row({
+          trader: TRADER_B,
+          timestamp: DAY_FIRST_OF_7D,
+          volumeUsdWei: 80n * ONE_USD,
+          swapCount: 4,
+        }),
+        row({
+          trader: TRADER_C,
+          timestamp: DAY_FIRST_OF_7D,
+          volumeUsdWei: 30n * ONE_USD,
+          swapCount: 1,
+        }),
+        row({
+          trader: TRADER_C,
+          timestamp: DAY_FIRST_OF_7D + 2n * SECONDS_PER_DAY,
+          volumeUsdWei: 40n * ONE_USD,
+          swapCount: 2,
+        }),
+        row({
+          trader: "0xdddddddddddddddddddddddddddddddddddddddd",
+          timestamp: DAY_FIRST_OF_7D + 3n * SECONDS_PER_DAY,
+          volumeUsdWei: 25n * ONE_USD,
+          swapCount: 1,
+        }),
+      ],
+      CHAIN,
+      DAY_2026_05_07,
+    );
+    const w7d = grouped["7d"];
+    // Each trader's individual aggregate carries the right slice:
+    const a = w7d.find((x) => x.trader === TRADER_A);
+    const b = w7d.find((x) => x.trader === TRADER_B);
+    const c = w7d.find((x) => x.trader === TRADER_C);
+    assert(a && b && c);
+    assert.equal(a.firstDayVolumeUsdWei, 50n * ONE_USD);
+    assert.equal(a.firstDaySwapCount, 2);
+    assert.equal(a.activeOutsideFirstDay, false);
+    assert.equal(b.firstDayVolumeUsdWei, 80n * ONE_USD);
+    assert.equal(b.activeOutsideFirstDay, false);
+    assert.equal(c.firstDayVolumeUsdWei, 30n * ONE_USD);
+    assert.equal(c.firstDaySwapCount, 1);
+    assert.equal(c.activeOutsideFirstDay, true);
+
+    // Roll up via buildLeaderboardWindowSnapshot to verify the
+    // exclusive-traders count threads through correctly.
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "7d",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_FIRST_OF_7D,
+      aggregates: w7d,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 2, "A and B exclusive");
+    assert.equal(
+      snap.firstDayVolumeUsdWei,
+      (50n + 80n + 30n) * ONE_USD,
+      "first-day volume = sum of all traders' first-day rows",
+    );
+    assert.equal(snap.firstDaySwapCount, 2 + 4 + 1);
+  });
+
+  it("trader active every day in window → firstDayExclusiveUniqueTraders=0; firstDayVolume = that trader's first-day row only", () => {
+    // TRADER_A active on every day from DAY_FIRST_OF_7D through
+    // DAY_2026_05_07 (6 inclusive days). First-day slice = the day-1
+    // row only; exclusive count = 0.
+    const rows: TraderDailyRow[] = [];
+    for (let d = 0n; d < 6n; d += 1n) {
+      rows.push(
+        row({
+          trader: TRADER_A,
+          timestamp: DAY_FIRST_OF_7D + d * SECONDS_PER_DAY,
+          volumeUsdWei: 10n * ONE_USD,
+          swapCount: 1,
+        }),
+      );
+    }
+    const grouped = aggregatePerWindow(rows, CHAIN, DAY_2026_05_07);
+    const w7d = grouped["7d"];
+    assert.equal(w7d.length, 1);
+    const a = w7d[0]!;
+    assert.equal(a.volumeUsdWei, 60n * ONE_USD, "all 6 days");
+    assert.equal(a.firstDayVolumeUsdWei, 10n * ONE_USD, "day-1 only");
+    assert.equal(a.firstDaySwapCount, 1);
+    assert.equal(
+      a.activeOutsideFirstDay,
+      true,
+      "active on day 2..6 too — not exclusive",
+    );
+
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "7d",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_FIRST_OF_7D,
+      aggregates: w7d,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
+  });
+
+  it('"all" window: firstDay fields all zero (no lower-bound boundary)', () => {
+    const grouped = aggregatePerWindow(
+      [
+        row({
+          trader: TRADER_A,
+          // Even the very first row in the indexer's history has no
+          // claim to "first day" semantics for an `all` window — the
+          // dashboard never subtracts a slice off `all`.
+          timestamp: 1n,
+          volumeUsdWei: 100n * ONE_USD,
+        }),
+      ],
+      CHAIN,
+      DAY_2026_05_07,
+    );
+    const wAll = grouped["all"];
+    assert.equal(wAll.length, 1);
+    const a = wAll[0]!;
+    assert.equal(a.firstDayVolumeUsdWei, 0n);
+    assert.equal(a.firstDaySwapCount, 0);
+    assert.equal(
+      a.activeOutsideFirstDay,
+      true,
+      "non-bounded windows treat every trader as active outside first day → exclusive count 0",
+    );
+
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "all",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: 0n,
+      aggregates: wAll,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayVolumeUsdWei, 0n);
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 0n);
+    assert.equal(snap.firstDaySwapCount, 0);
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
+  });
+
+  it('"24h" window: firstDay fields all zero (snapshot range is empty by construction)', () => {
+    // The 24h window's snapshot range is empty: windowStartDay =
+    // snapshotDay + 1, an upper-of-upper bound. No rows pass the
+    // filter and the firstDay slice is naturally zero. Even if a row
+    // somehow landed inside (it can't), firstDay would still be off
+    // because `hasFirstDayBoundary` is false for 24h (`days <= 1`).
+    const grouped = aggregatePerWindow(
+      [row({ trader: TRADER_A, timestamp: DAY_2026_05_07 })],
+      CHAIN,
+      DAY_2026_05_07,
+    );
+    assert.equal(grouped["24h"].length, 0);
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "24h",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_2026_05_07 + SECONDS_PER_DAY,
+      aggregates: grouped["24h"],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayVolumeUsdWei, 0n);
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
+  });
+
+  it("mixed system/non-system on first day: primary excludes system; *IncludingSystem includes them", () => {
+    // TRADER_A: non-system, day-1 only → contributes to both primary
+    // and *IncludingSystem first-day fields.
+    // TRADER_B: system, day-1 only → contributes only to
+    // *IncludingSystem first-day fields.
+    const grouped = aggregatePerWindow(
+      [
+        row({
+          trader: TRADER_A,
+          timestamp: DAY_FIRST_OF_7D,
+          volumeUsdWei: 25n * ONE_USD,
+          swapCount: 1,
+          isSystemAddress: false,
+        }),
+        row({
+          trader: TRADER_B,
+          timestamp: DAY_FIRST_OF_7D,
+          volumeUsdWei: 100n * ONE_USD,
+          swapCount: 5,
+          isSystemAddress: true,
+        }),
+      ],
+      CHAIN,
+      DAY_2026_05_07,
+    );
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "7d",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: DAY_FIRST_OF_7D,
+      aggregates: grouped["7d"],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.firstDayVolumeUsdWei, 25n * ONE_USD);
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 125n * ONE_USD);
+    assert.equal(snap.firstDaySwapCount, 1);
+    assert.equal(snap.firstDaySwapCountIncludingSystem, 6);
+    assert.equal(snap.firstDayExclusiveUniqueTraders, 1);
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 2);
   });
 });
 

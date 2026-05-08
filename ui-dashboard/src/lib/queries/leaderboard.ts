@@ -260,6 +260,55 @@ export const BROKER_LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
   }
 `;
 
+// Isolated firstDay slice query — same rationale as POOL_CONFIG_EXT /
+// POOL_BREACH_ROLLUP in queries/pools.ts. Hosted Hasura rejects new
+// columns with "field not found" during the deploy+resync window, so
+// keeping these in a separate query means the hero KPIs survive the
+// rollout and only the DEGRADED-chain catch-up enhancement degrades
+// (chains stay in `degradedChains` until the slice query lands). After
+// the schema is live, normal operation is restored.
+//
+// Joined client-side by chainId in `mergeHeroSnapshot`.
+export const LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query LeaderboardWindowFirstDayLatest($windowKey: String!) {
+    LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query BrokerLeaderboardWindowFirstDayLatest($windowKey: String!) {
+    BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
 /**
  * Today's partial — added on top of the snapshot's [windowStart, yesterday]
  * total to keep hero numbers current to the minute. Today's
@@ -300,6 +349,66 @@ export const BROKER_LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
       where: {
         timestamp: { _gte: $todayMidnight }
         isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+/**
+ * Yesterday's closed-day rows for chains in the DEGRADED state
+ * (snapshotDay = today - 2 UTC days). The dashboard fires this only
+ * when `mergeHeroSnapshot`'s prior pass returned a non-empty
+ * `degradedChains` list, then re-runs the merge with `yesterdayRows`
+ * to perform slice subtraction on the snapshot's first day and
+ * supplement with yesterday's data — eliminating the
+ * pre-first-swap-of-day gap.
+ *
+ * `chainIdIn` bounds the query to the degraded chains only — a
+ * Mento-wide fetch would dwarf the |degradedChains × ~100 traders|
+ * bound that's typical here. With `_eq` on the timestamp the row
+ * count is well under the 1000-row Hasura cap.
+ */
+export const LEADERBOARD_YESTERDAY_TRADERS = /* GraphQL */ `
+  query LeaderboardYesterdayTraders(
+    $yesterdayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $chainIdIn: [Int!]!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _eq: $yesterdayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+        chainId: { _in: $chainIdIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_YESTERDAY_TRADERS = /* GraphQL */ `
+  query BrokerLeaderboardYesterdayTraders(
+    $yesterdayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $chainIdIn: [Int!]!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _eq: $yesterdayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+        chainId: { _in: $chainIdIn }
       }
       limit: 1000
     ) {

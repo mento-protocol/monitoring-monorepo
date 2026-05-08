@@ -59,12 +59,29 @@ export function windowStartDay(
 }
 
 /** Per-trader summed totals over a window. Built once per
- *  (chainId, snapshotDay, windowKey) by aggregatePerWindow. */
+ *  (chainId, snapshotDay, windowKey) by aggregatePerWindow.
+ *
+ *  `firstDayVolumeUsdWei` / `firstDaySwapCount` / `activeOutsideFirstDay`
+ *  expose the first-day slice (rows where `timestamp ===
+ *  windowStartDay`) so the snapshot can ship a `firstDay*` field set
+ *  the dashboard uses for slice subtraction in the DEGRADED-chain
+ *  catch-up path. Always zero / true (resp.) for `all` and `24h`
+ *  windows because their first-day boundary is undefined / outside
+ *  the inclusive range. */
 export interface TraderWindowAggregate {
   trader: string;
   volumeUsdWei: bigint;
   swapCount: number;
   isSystemAddress: boolean;
+  /** Volume contributed on `windowStartDay` only. 0 outside that day. */
+  firstDayVolumeUsdWei: bigint;
+  /** Swap count on `windowStartDay` only. 0 outside that day. */
+  firstDaySwapCount: number;
+  /** True if the trader has ANY row at `timestamp > windowStartDay`
+   *  inside the window. Used to compute the
+   *  `firstDayExclusiveUniqueTraders` count: traders whose entire
+   *  window activity is on the first day have `false` here. */
+  activeOutsideFirstDay: boolean;
 }
 
 /** Minimal subset of TraderDailySnapshot / BrokerTraderDailySnapshot fields
@@ -83,7 +100,15 @@ export interface TraderDailyRow {
  *  [windowStartDay, snapshotDay] inclusive range. Out-of-range and
  *  cross-chain rows are dropped (defensive: getWhere.chainId.eq() can
  *  surface rows the caller doesn't want under some Envio Map-index
- *  internals; see the cargo-culted check in handlers/feeToken.ts). */
+ *  internals; see the cargo-culted check in handlers/feeToken.ts).
+ *
+ *  Also tracks per-trader first-day slice (volume + swap count on
+ *  `windowStartDay`) and an `activeOutsideFirstDay` flag so the snapshot
+ *  builder can ship the `firstDay*` slice fields the DEGRADED-chain
+ *  dashboard catch-up needs. For `all` and `24h` windows the first-day
+ *  fields are forced to neutral values (0 volume, 0 count, `true`
+ *  activeOutsideFirstDay) — `all` has no first-day boundary and `24h`
+ *  has an empty inclusive range. */
 export function aggregatePerWindow(
   rows: ReadonlyArray<TraderDailyRow>,
   chainId: number,
@@ -93,10 +118,20 @@ export function aggregatePerWindow(
   for (const w of WINDOW_KEYS) {
     const start = windowStartDay(snapshotDay, w);
     const byTrader = new Map<string, TraderWindowAggregate>();
+    // The "first day" only makes sense for windows with a real lower
+    // bound that overlaps the data: `7d` / `30d` / `90d`. `all` returns
+    // 0n (epoch) — all real rows are >= start, none equal start, so the
+    // first-day slice is empty by definition. `24h` returns
+    // `snapshotDay + 1`, an empty range above the upper bound, so the
+    // slice is empty too. We force the firstDay* fields off for those
+    // windows below.
+    const days = WINDOW_DAYS[w];
+    const hasFirstDayBoundary = days !== null && days > 1;
     for (const r of rows) {
       if (r.chainId !== chainId) continue;
       if (r.timestamp < start) continue;
       if (r.timestamp > snapshotDay) continue;
+      const isFirstDay = hasFirstDayBoundary && r.timestamp === start;
       const existing = byTrader.get(r.trader);
       if (existing) {
         existing.volumeUsdWei += r.volumeUsdWei;
@@ -105,12 +140,25 @@ export function aggregatePerWindow(
         // the window aggregate. Mirrors TraderDailySnapshot's per-day rule.
         existing.isSystemAddress =
           existing.isSystemAddress || r.isSystemAddress;
+        if (isFirstDay) {
+          existing.firstDayVolumeUsdWei += r.volumeUsdWei;
+          existing.firstDaySwapCount += r.swapCount;
+        } else {
+          existing.activeOutsideFirstDay = true;
+        }
       } else {
         byTrader.set(r.trader, {
           trader: r.trader,
           volumeUsdWei: r.volumeUsdWei,
           swapCount: r.swapCount,
           isSystemAddress: r.isSystemAddress,
+          firstDayVolumeUsdWei: isFirstDay ? r.volumeUsdWei : 0n,
+          firstDaySwapCount: isFirstDay ? r.swapCount : 0,
+          // For windows without a first-day boundary (`all` / `24h`),
+          // mark every trader `activeOutsideFirstDay = true` so the
+          // exclusive-traders count is naturally zero — the slice
+          // subtraction is a no-op there, which is correct.
+          activeOutsideFirstDay: !hasFirstDayBoundary || !isFirstDay,
         });
       }
     }
@@ -135,7 +183,16 @@ export interface BuildSnapshotArgs {
  *  per-trader, so each entry in `aggregates` is one unique trader. The
  *  primary `total*` fields exclude system addresses to match the dashboard's
  *  default "Show system addresses = off" view; sibling `*IncludingSystem`
- *  fields keep the all-up totals for the toggle-on case. */
+ *  fields keep the all-up totals for the toggle-on case.
+ *
+ *  The `firstDay*` fields ship the snapshot's `windowStartDay` slice so
+ *  the dashboard can drop the boundary day when supplementing a
+ *  DEGRADED chain's hero KPIs with a yesterday-rows query — see
+ *  `mergeHeroSnapshot` in `ui-dashboard/src/lib/leaderboard-hero.ts`.
+ *  `firstDayExclusiveUniqueTraders` counts traders whose entire window
+ *  activity falls on the first day; subtracting it from `uniqueTraders`
+ *  yields the trader count for the inner `[windowStartDay+1,
+ *  snapshotDay]` slice without needing a per-trader set on the wire. */
 export function buildLeaderboardWindowSnapshot(
   args: BuildSnapshotArgs,
 ): LeaderboardWindowSnapshot {
@@ -144,13 +201,29 @@ export function buildLeaderboardWindowSnapshot(
   let totalSwapCount = 0;
   let totalSwapCountIncludingSystem = 0;
   let nonSystemCount = 0;
+  let firstDayVolumeUsdWei = 0n;
+  let firstDayVolumeUsdWeiIncludingSystem = 0n;
+  let firstDaySwapCount = 0;
+  let firstDaySwapCountIncludingSystem = 0;
+  let firstDayExclusiveUniqueTraders = 0;
+  let firstDayExclusiveUniqueTradersIncludingSystem = 0;
   for (const a of args.aggregates) {
     totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
     totalSwapCountIncludingSystem += a.swapCount;
+    firstDayVolumeUsdWeiIncludingSystem += a.firstDayVolumeUsdWei;
+    firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
+    if (!a.activeOutsideFirstDay) {
+      firstDayExclusiveUniqueTradersIncludingSystem += 1;
+    }
     if (!a.isSystemAddress) {
       totalVolumeUsdWei += a.volumeUsdWei;
       totalSwapCount += a.swapCount;
       nonSystemCount += 1;
+      firstDayVolumeUsdWei += a.firstDayVolumeUsdWei;
+      firstDaySwapCount += a.firstDaySwapCount;
+      if (!a.activeOutsideFirstDay) {
+        firstDayExclusiveUniqueTraders += 1;
+      }
     }
   }
   return {
@@ -165,6 +238,12 @@ export function buildLeaderboardWindowSnapshot(
     totalSwapCountIncludingSystem,
     uniqueTraders: nonSystemCount,
     uniqueTradersIncludingSystem: args.aggregates.length,
+    firstDayVolumeUsdWei,
+    firstDayVolumeUsdWeiIncludingSystem,
+    firstDaySwapCount,
+    firstDaySwapCountIncludingSystem,
+    firstDayExclusiveUniqueTraders,
+    firstDayExclusiveUniqueTradersIncludingSystem,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };

@@ -4,9 +4,13 @@ import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
   BROKER_LEADERBOARD_TODAY_TRADERS,
+  BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   BROKER_LEADERBOARD_WINDOW_LATEST,
+  BROKER_LEADERBOARD_YESTERDAY_TRADERS,
   LEADERBOARD_TODAY_TRADERS,
+  LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
+  LEADERBOARD_YESTERDAY_TRADERS,
 } from "@/lib/queries/leaderboard";
 import {
   mergeHeroSnapshot,
@@ -14,6 +18,7 @@ import {
   weiToUsd,
   type LeaderboardRangeKey,
   type LeaderboardTodayTraderRow,
+  type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
@@ -119,15 +124,95 @@ export function useHeroRollup({
       ? todayV3Result.data?.TraderDailySnapshot
       : todayV2Result.data?.BrokerTraderDailySnapshot;
 
-  const heroTotals = useMemo(
+  // Isolated first-day slice query (split from the primary hero query so
+  // a hosted-Hasura schema lag on the new `firstDay*` columns degrades
+  // ONLY the catch-up — chains stay degraded — instead of failing the
+  // primary hero query). Joined client-side by `chainId-snapshotDay` in
+  // `mergeHeroSnapshot`.
+  const heroFirstDayV3Result = useGQL<{
+    LeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
+  }>(venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
+    windowKey: range,
+  });
+  const heroFirstDayV2Result = useGQL<{
+    BrokerLeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
+  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
+    windowKey: range,
+  });
+  const firstDayRows =
+    venue === "v3"
+      ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
+      : heroFirstDayV2Result.data?.BrokerLeaderboardWindowSnapshot;
+
+  // First-pass merge — without `yesterdayRows`. Used solely to discover
+  // which chains are in the DEGRADED state (snapshotDay = today - 2 days),
+  // so we can gate the yesterday-traders query on them. Cheap (one
+  // O(snapshotRows + todayRows) pass).
+  const degradedChainsForGate = useMemo(
     () =>
       mergeHeroSnapshot({
         snapshotRows,
         todayRows: todayPartialRows,
         showSystem,
         todayMidnightSeconds: todayMidnight,
-      }),
+      }).degradedChains,
     [snapshotRows, todayPartialRows, showSystem, todayMidnight],
+  );
+
+  // Catch-up query for DEGRADED chains: fetches yesterday's trader-day
+  // rows scoped to the degraded chainIds so the second merge pass can
+  // perform slice subtraction (drop the snapshot's first day, add
+  // yesterday + today). Gated on `degradedChainsForGate.length > 0` via
+  // `useGQL`'s null-passthrough so we don't burn Envio quota when no
+  // chain needs catching up.
+  const yesterdayMidnight = todayMidnight - SECONDS_PER_DAY;
+  const yesterdayV3Result = useGQL<{
+    TraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(
+    venue === "v3" && degradedChainsForGate.length > 0
+      ? LEADERBOARD_YESTERDAY_TRADERS
+      : null,
+    {
+      yesterdayMidnight,
+      isSystemAddressIn,
+      chainIdIn: degradedChainsForGate,
+    },
+  );
+  const yesterdayV2Result = useGQL<{
+    BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(
+    venue === "v2" && degradedChainsForGate.length > 0
+      ? BROKER_LEADERBOARD_YESTERDAY_TRADERS
+      : null,
+    {
+      yesterdayMidnight,
+      isSystemAddressIn,
+      chainIdIn: degradedChainsForGate,
+    },
+  );
+  const yesterdayPartialRows =
+    venue === "v3"
+      ? yesterdayV3Result.data?.TraderDailySnapshot
+      : yesterdayV2Result.data?.BrokerTraderDailySnapshot;
+
+  const heroTotals = useMemo(
+    () =>
+      mergeHeroSnapshot({
+        snapshotRows,
+        todayRows: todayPartialRows,
+        firstDayRows,
+        yesterdayRows: yesterdayPartialRows,
+        showSystem,
+        todayMidnightSeconds: todayMidnight,
+      }),
+    [
+      snapshotRows,
+      todayPartialRows,
+      firstDayRows,
+      yesterdayPartialRows,
+      showSystem,
+      todayMidnight,
+    ],
   );
   const totalVolume = useMemo(
     () => weiToUsd(heroTotals.totalVolumeUsdWei),

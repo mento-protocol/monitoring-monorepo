@@ -180,8 +180,8 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 
 ## Follow-ups deferred from PR #339 (stale-snapshot detection)
 
-- [x] ~~**`page-client.tsx` structural split.**~~ Done: extracted `useHeroRollup()` to `_lib/use-hero-rollup.ts` (owns the snapshot/today queries, `mergeHeroSnapshot`, and `top10Concentration`) and the v2 producer + aggregator JSX panel to `_components/v2-leaderboard-section.tsx`. Page-client lands at 525 lines (well under the 600-line soft cap, within the 520–580 target range).
-- [ ] **Catch up the missing closed UTC day instead of just flagging it.** The current "DEGRADED" banner tells the user yesterday's data isn't yet in the snapshot for chains in the pre-first-swap-of-day state. A better UX: the dashboard could fetch yesterday's closed-day rows directly from `TraderDailySnapshot` and merge them client-side, eliminating the gap entirely. Rough cost: one extra GraphQL query gated on `degradedChains.length > 0` plus a second pass through `mergeHeroSnapshot`. Source: codex review on PR #339 (`#3207495777`'s "fetch the missing closed day" alternative).
+- [x] ~~**`page-client.tsx` structural split.**~~ Done in PR #349: extracted `useHeroRollup()` to `_lib/use-hero-rollup.ts` (owns the snapshot/today queries, `mergeHeroSnapshot`, and `top10Concentration`) and the v2 producer + aggregator JSX panel to `_components/v2-leaderboard-section.tsx`. Page-client lands at 525 lines.
+- [x] ~~**Catch up the missing closed UTC day instead of just flagging it.**~~ Done in this PR — the dashboard now fetches yesterday's closed-day rows from `TraderDailySnapshot` (gated on `degradedChains.length > 0`) and performs slice subtraction in `mergeHeroSnapshot`: drop the snapshot's first-day contribution (new `firstDay*` schema fields on `LeaderboardWindowSnapshot` / `BrokerLeaderboardWindowSnapshot`), then add yesterday + today, restoring the rolling-window's full N-day count. Chains supplemented this way drop from `degradedChains` so the banner only surfaces chains with genuinely missing data.
 
 ## Follow-ups deferred from PR #342 (axe-core a11y test infra)
 
