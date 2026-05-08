@@ -559,11 +559,12 @@ export type HeroSnapshotTotals = {
  * `todayMidnightSeconds` is the UTC midnight of "today" in Unix seconds
  * (must match the unit `snapshotDay` is stored in — see
  * `indexer-envio/schema.graphql` LeaderboardWindowSnapshot.snapshotDay
- * and `leaderboardWindowFlush.ts:dayBucket`). A snapshot is considered
- * stale when `snapshotDay < todayMidnightSeconds - 86400`, i.e. the
- * snapshot is older than yesterday. Yesterday and today both pass —
- * yesterday is the normal heartbeat cadence (the indexer doesn't write
- * "today" itself, that's filled in client-side from `todayRows`).
+ * and `indexer-envio/src/helpers.ts:dayBucket`). A snapshot is
+ * considered stale when `snapshotDay < todayMidnightSeconds - 86400`,
+ * i.e. the snapshot is older than yesterday. Yesterday and today both
+ * pass — yesterday is the normal heartbeat cadence (the indexer
+ * doesn't write "today" itself, that's filled in client-side from
+ * `todayRows`).
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
