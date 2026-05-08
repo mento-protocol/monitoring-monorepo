@@ -11,14 +11,20 @@ vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn(),
 }));
 
+vi.mock("@/lib/address-reports", () => ({
+  getAllReports: vi.fn().mockResolvedValue({}),
+}));
+
 import { getAuthSession } from "@/auth";
 import { getLabels } from "@/lib/address-labels";
+import { getAllReports } from "@/lib/address-reports";
 
 beforeEach(() => {
   vi.clearAllMocks();
   (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
     user: { email: "test@mentolabs.xyz" },
   });
+  (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({});
 });
 
 describe("GET /api/address-labels/export", () => {
@@ -55,6 +61,26 @@ describe("GET /api/address-labels/export", () => {
     // Legacy global/chains keys must NOT appear in new snapshots.
     expect(body.global).toBeUndefined();
     expect(body.chains).toBeUndefined();
+  });
+
+  it("includes forensic reports under `reports` (parity with daily backup)", async () => {
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({
+      "0xabc": {
+        body: "Investigation",
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-30T00:00:00Z",
+        version: 1,
+      },
+    });
+
+    const res = await GET();
+    const body = (await res.json()) as {
+      reports?: Record<string, { body: string; version: number }>;
+    };
+    expect(body.reports).toBeDefined();
+    expect(body.reports?.["0xabc"].body).toBe("Investigation");
+    expect(body.reports?.["0xabc"].version).toBe(1);
   });
 
   it("ignores any chainId/scope query params (back-compat)", async () => {
