@@ -49,6 +49,7 @@ export function useV2ExchangeConfig(
       // hammering the upstream RPC route.
       refreshInterval: 60_000,
       revalidateOnFocus: false,
+      revalidateOnReconnect: false,
       dedupingInterval: 15_000,
       shouldRetryOnError: false,
     },

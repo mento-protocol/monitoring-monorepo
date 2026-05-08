@@ -210,6 +210,12 @@ function isExchangeNotFoundRevert(err: unknown): boolean {
   const reverted = err.walk(
     (e) => e instanceof ContractFunctionRevertedError,
   ) as ContractFunctionRevertedError | undefined;
+  // Matches the BiPoolManager revert string:
+  //   "An exchange with the specified id does not exist"
+  // If the contract message ever changes, this falls through to `rpc_failed`
+  // and a deprecated pool would render an upstream-error UI instead of the
+  // amber deprecation callout — a unit test in v2-exchange-config.test.ts
+  // exercises the exact reason string so a contract bump would surface here.
   return reverted?.reason?.includes("does not exist") ?? false;
 }
 
