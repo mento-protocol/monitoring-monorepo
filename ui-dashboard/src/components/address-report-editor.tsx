@@ -99,6 +99,14 @@ export function AddressReportEditor({
     editorInstanceIdRef.current = `report-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
   const editorInstanceId = editorInstanceIdRef.current;
+  // Synchronous in-flight guards. Without them a fast double-click
+  // can fire `handleSave` / `handleDelete` twice from the same mount
+  // (React's `setSaving(true)` is async); both calls would emit
+  // `onSavingChange(true, editorId)` and the host's `${editorId}:save`
+  // unmark slot would be overwritten after incrementing the provider
+  // ledger twice — only one decrement runs and the address stays
+  // permanently report-pending.
+  const inFlightRef = useRef({ saving: false, deleting: false });
   const [seenRecordKey, setSeenRecordKey] = useState(recordKey);
   if (recordKey !== seenRecordKey) {
     setSeenRecordKey(recordKey);
@@ -136,6 +144,8 @@ export function AddressReportEditor({
       setError("Body cannot be empty.");
       return;
     }
+    if (inFlightRef.current.saving) return;
+    inFlightRef.current.saving = true;
     setSaving(true);
     onSavingChange?.(true, editorInstanceId);
     setError(null);
@@ -169,6 +179,7 @@ export function AddressReportEditor({
     } finally {
       setSaving(false);
       onSavingChange?.(false, editorInstanceId);
+      inFlightRef.current.saving = false;
     }
 
     // Post-save bookkeeping. Failures here do NOT undo the save — Redis
@@ -209,6 +220,8 @@ export function AddressReportEditor({
     ) {
       return;
     }
+    if (inFlightRef.current.deleting) return;
+    inFlightRef.current.deleting = true;
     setDeleting(true);
     onDeletingChange?.(true, editorInstanceId);
     setError(null);
@@ -236,6 +249,7 @@ export function AddressReportEditor({
     } finally {
       setDeleting(false);
       onDeletingChange?.(false, editorInstanceId);
+      inFlightRef.current.deleting = false;
     }
 
     if (deleted) {

@@ -183,6 +183,15 @@ export function AddressLabelForm({
     formInstanceIdRef.current = `form-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
   const formInstanceId = formInstanceIdRef.current;
+  // Synchronous guards against double-click. React's `setSaving(true)`
+  // is async — between two rapid clicks both submit handlers can pass
+  // through the form's `disabled` check and fire `onSavingChange(true,
+  // formId)` twice with the same id. The host's `${formId}:save`
+  // unmark slot would then be overwritten after incrementing the
+  // provider ledger twice; only one decrement runs and the address
+  // stays permanently pending. Refs flip synchronously inside the
+  // handler so a second call returns immediately.
+  const inFlightRef = useRef({ saving: false, deleting: false });
   const internalFirstInputRef = useRef<HTMLInputElement>(null);
   // Use the parent's ref when provided (modal); otherwise an internal ref
   // exists so the JSX still has a stable target.
@@ -232,6 +241,8 @@ export function AddressLabelForm({
       isContractRow,
       initial?.name,
     );
+    if (inFlightRef.current.saving) return;
+    inFlightRef.current.saving = true;
     setSaving(true);
     onSavingChange?.(true, formInstanceId);
     setError(null);
@@ -248,6 +259,7 @@ export function AddressLabelForm({
     } finally {
       setSaving(false);
       onSavingChange?.(false, formInstanceId);
+      inFlightRef.current.saving = false;
     }
   }
 
@@ -255,6 +267,8 @@ export function AddressLabelForm({
   // by design. Reports are evidence/history attached to the address; labels
   // are display aliases.
   async function handleDelete() {
+    if (inFlightRef.current.deleting) return;
+    inFlightRef.current.deleting = true;
     setDeleting(true);
     onDeletingChange?.(true, formInstanceId);
     setError(null);
@@ -266,6 +280,7 @@ export function AddressLabelForm({
     } finally {
       setDeleting(false);
       onDeletingChange?.(false, formInstanceId);
+      inFlightRef.current.deleting = false;
     }
   }
 
@@ -274,14 +289,16 @@ export function AddressLabelForm({
   return (
     <form onSubmit={handleSave} noValidate>
       {/* `<fieldset disabled>` cascades to every form control inside —
-          input, textarea, button — so when an earlier write is still
-          pending against this address, the user can't type into the
-          inputs (only to lose those edits when the pending request
-          settles and remounts the form). Keeps the read-only state
-          visible and consistent with the disabled Save / Remove
-          buttons. */}
+          input, textarea, button — so the user can't type into the
+          inputs while either (a) a prior mutation against this
+          address is pending (`externallyDisabled`) OR (b) THIS form
+          is mid-save/mid-delete (`saving || deleting`). Both
+          scenarios end with a remount that discards local edits
+          (the optimistic→settled `updatedAt` flip changes the page
+          key). Disabling inputs covers the data-loss footgun on
+          both paths. */}
       <fieldset
-        disabled={externallyDisabled}
+        disabled={externallyDisabled || saving || deleting}
         className="border-0 p-0 m-0 disabled:opacity-60"
       >
         <div className="px-5 py-4 space-y-4">
