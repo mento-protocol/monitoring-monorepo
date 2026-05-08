@@ -55,7 +55,7 @@ export async function fetchBreakerList(
 
   try {
     const client = getRpcClient(chainId);
-    const { result } = await readContractWithBlockFallback(
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
       client,
       {
         address: breakerBoxAddress,
@@ -73,6 +73,11 @@ export async function fetchBreakerList(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
+    // Breaker registration is governance-controlled and changes over time
+    // (BreakerAdded/Removed events). A `latest`-block fallback would seed
+    // current breakers under an old `registeredAtBlock`, so refuse and
+    // let the bootstrap retry on the next event for this feed.
+    if (usedLatestFallback) return null;
     return (result as readonly string[]).map((a) => a.toLowerCase());
   } catch (err) {
     logRpcFailure(
@@ -273,6 +278,8 @@ export async function fetchBreakerDefaults(
 
     if (kind === "MARKET_HOURS") {
       const tm = await tradingModeP;
+      // Reject latest-block fallback — see comment in the multi-read branch.
+      if (tm.usedLatestFallback) return null;
       return {
         activatesTradingMode: Number(tm.result as number),
         defaultCooldownTime: 0n,
@@ -307,6 +314,17 @@ export async function fetchBreakerDefaults(
         fallback,
       ),
     ]);
+    // Breaker defaults change with governance (DefaultCooldownTimeUpdated /
+    // DefaultRateChangeThresholdUpdated events). If ANY of the three reads
+    // fell back to `latest`, fail closed — bootstrap re-runs on the next
+    // event and re-attempts. Persisting current defaults under a historical
+    // `registeredAtBlock` would silently corrupt the Breaker entity.
+    if (
+      tmRes.usedLatestFallback ||
+      cdRes.usedLatestFallback ||
+      thrRes.usedLatestFallback
+    )
+      return null;
     return {
       activatesTradingMode: Number(tmRes.result as number),
       defaultCooldownTime: cdRes.result as bigint,
@@ -365,6 +383,8 @@ export async function fetchBreakerFeedState(
 
     if (kind === "MARKET_HOURS") {
       const s = await statusP;
+      // Reject latest-block fallback — see comment in the multi-read branch.
+      if (s.usedLatestFallback) return null;
       const status = parseRateFeedBreakerStatus(s.result);
       return {
         enabled: status.enabled,
@@ -445,12 +465,23 @@ export async function fetchBreakerFeedState(
           ),
     ]);
 
+    // Reject latest-block fallback on any of the per-feed reads. Breaker
+    // feed state (status/cooldown/threshold/EMA/reference) is governance-
+    // controlled and accumulates with each MedianUpdated, so a `latest`-
+    // block stand-in for a historical block would corrupt the BreakerConfig
+    // entity. Bootstrap re-runs on the next event for this feed and tries
+    // again with fresher chain progress.
+    if (statusRes.usedLatestFallback) return null;
+    if (cdRes.usedLatestFallback) return null;
+    if (thrRes.usedLatestFallback) return null;
     const status = parseRateFeedBreakerStatus(statusRes.result);
     if (kind === "MEDIAN_DELTA") {
       const [sfRes, emaRes] = kindSpecific as [
         BlockFallbackResult,
         BlockFallbackResult,
       ];
+      if (sfRes.usedLatestFallback) return null;
+      if (emaRes.usedLatestFallback) return null;
       return {
         enabled: status.enabled,
         tradingMode: status.tradingMode,
@@ -463,6 +494,7 @@ export async function fetchBreakerFeedState(
       };
     }
     const refRes = kindSpecific as BlockFallbackResult;
+    if (refRes.usedLatestFallback) return null;
     return {
       enabled: status.enabled,
       tradingMode: status.tradingMode,

@@ -282,4 +282,272 @@ describe("readContractWithBlockFallback", () => {
     assert.equal((calls[4] as any).functionName, "bar");
     assert.deepEqual((calls[4] as any).args, ["0xfeed"]);
   });
+
+  // -------------------------------------------------------------------------
+  // Archive-depth fallback (primary's archive doesn't reach this block, but
+  // a deeper-archive secondary does). Distinct from rate-limit fallback
+  // because the secondary is consulted on the archive-depth error pattern,
+  // not just rate-limit. Distinct from block-not-available because the
+  // recovery is the SAME block on a deeper RPC, not `latest` on the same RPC.
+  // -------------------------------------------------------------------------
+
+  it("archive-depth: secondary at SAME block returns block-scoped result", async () => {
+    const primaryCalls: Record<string, unknown>[] = [];
+    const fallbackCalls: Record<string, unknown>[] = [];
+    const primary = mockClient(async (args) => {
+      primaryCalls.push({ ...args });
+      throw new Error(
+        "Block requested not found. Request might be querying historical state that is not available.",
+      );
+    });
+    const fallback = mockClient(async (args) => {
+      fallbackCalls.push({ ...args });
+      return "deep-archive-result";
+    });
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      68202836n,
+      fallback,
+    );
+    assert.equal(res.result, "deep-archive-result");
+    assert.equal(res.usedFallback, true);
+    assert.equal(
+      res.usedLatestFallback,
+      false,
+      "block-scoped accuracy must be preserved when secondary returns at the same block",
+    );
+    assert.equal(
+      primaryCalls.length,
+      1,
+      "no retries on primary for archive-depth",
+    );
+    assert.equal(fallbackCalls.length, 1);
+    assert.equal((fallbackCalls[0] as any).blockNumber, 68202836n);
+  });
+
+  it("archive-depth: matches 'querying historical state' phrasing too", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "RPC error: querying historical state that is not available on this node",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
+  it("archive-depth: secondary also fails → throws (fail-closed)", async () => {
+    // Pre-PR behaviour preserved: archive-depth + secondary failure
+    // throws to the caller. We must NOT silently fall through to `latest`
+    // because many call sites consume `result` without checking
+    // `usedLatestFallback` — that would corrupt historical entity state
+    // with current-block data.
+    const primary = mockClient(async () => {
+      throw new Error(
+        "querying historical state that is not available on this node",
+      );
+    });
+    const fallback = mockClient(async () => {
+      throw new Error("rate limit"); // Secondary itself rate-limits
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      /rate limit/,
+      "should propagate the secondary error, not swallow it into a latest read",
+    );
+  });
+
+  it("archive-depth: secondary returns 'returned no data' → throws so caller classifies it", async () => {
+    // The 'returned no data' classification matters: e.g.
+    // fetchRebalanceIncentiveAtBlock stamps a -2 sentinel for older pools
+    // missing the getter. Eating this into a `latest` read would replace
+    // the legitimate "getter doesn't exist" signal with current-block
+    // contract state.
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => {
+      throw new Error('The contract function "x" returned no data ("0x").');
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      /returned no data/,
+      "should propagate the 'returned no data' error so the caller can stamp the -2 sentinel",
+    );
+  });
+
+  it("archive-depth: no fallback configured → throws original error", async () => {
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      throw new Error(
+        "Block requested not found. Request might be querying historical state that is not available.",
+      );
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      /querying historical state/,
+      "no fallback → must throw, not silently use latest",
+    );
+    assert.equal(
+      primaryCallNo,
+      1,
+      "no retry loop on primary for archive-depth (would deterministically fail)",
+    );
+  });
+
+  it("archive-depth: error surfaced AFTER rate-limit retry routes to secondary at same block", async () => {
+    // Production scenario the targeted Codex P2 finding flagged: shallow
+    // primary returns 429 first, our retries wait it out, then the next
+    // attempt returns the archive-depth error. Pre-fix this short-
+    // circuited (non-rate-limit retry error → throw), bypassing the
+    // same-block secondary.
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      if (primaryCallNo === 1) throw new Error("rate limit exceeded");
+      throw new Error(
+        "querying historical state that is not available on this node",
+      );
+    });
+    const fallback = mockClient(async () => "secondary-block-scoped");
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "secondary-block-scoped");
+    assert.equal(res.usedFallback, true);
+    assert.equal(
+      res.usedLatestFallback,
+      false,
+      "block-scoped result, not latest — secondary is consulted at the requested block even when the archive-depth error surfaced after the rate-limit cleared",
+    );
+  });
+
+  it("archive-depth: secondary error sanitization redacts URL-bearing messages before logging", async () => {
+    // Tokenized RPC URLs (HyperRPC, quiknode-with-token) can appear in
+    // viem error stacks. The diagnostic warning must redact them so logs
+    // don't leak credentials. We capture stderr via console.warn
+    // monkeypatch to assert.
+    const origWarn = console.warn;
+    const captured: string[] = [];
+    console.warn = (...m: unknown[]) => {
+      captured.push(m.join(" "));
+    };
+    try {
+      const primary = mockClient(async () => {
+        throw new Error("querying historical state");
+      });
+      const fallback = mockClient(async () => {
+        throw new Error(
+          'HTTP request failed. URL: "https://misty.quiknode.pro/SECRET-TOKEN-12345" reason: timeout',
+        );
+      });
+      await assert.rejects(
+        readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      );
+      const fallbackFailedLine = captured.find((l) =>
+        l.includes("RPC_ARCHIVE_FALLBACK_FAILED"),
+      );
+      assert.ok(
+        fallbackFailedLine,
+        "archive-fallback-failed warning must fire",
+      );
+      assert.ok(
+        !fallbackFailedLine.includes("SECRET-TOKEN-12345"),
+        "secondary error message must be sanitized (token-bearing URL redacted)",
+      );
+      assert.ok(
+        fallbackFailedLine.includes("<redacted>"),
+        "sanitized URL replacement marker must appear",
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it("archive-depth regex: bare 'block requested not found' is treated as transient-lag, NOT archive-depth", async () => {
+    // The bare phrase (without "querying historical state" qualifier)
+    // tends to mean "node hasn't seen this block yet" — a transient lag
+    // recoverable via retry-then-latest. ARCHIVE_DEPTH_RE intentionally
+    // narrows to the historical-state phrasing so it doesn't capture this
+    // case; BLOCK_NOT_AVAILABLE_RE includes the bare phrase so it lands in
+    // the retry-then-latest branch where it belongs.
+    let primaryCallNo = 0;
+    const primary = mockClient(async (args) => {
+      primaryCallNo++;
+      if ((args as any).blockNumber !== undefined) {
+        throw new Error("Block requested not found");
+      }
+      return "latest-result";
+    });
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      null,
+    );
+    assert.equal(res.result, "latest-result");
+    assert.equal(
+      res.usedLatestFallback,
+      true,
+      "bare phrase routes to BLOCK_NOT_AVAILABLE_RE retry-then-latest path",
+    );
+    // 1 initial + 3 retries with blockNumber + 1 latest = 5
+    assert.equal(primaryCallNo, 5, "retry loop fires for transient-lag path");
+  });
+
+  it("post-rate-limit-retry block-miss: throws fail-closed (does NOT route to retry-then-latest)", async () => {
+    // The previous fix routed retry-surfaced non-rate-limit errors through
+    // the archive-depth / block-not-available branches. That was correct
+    // for archive-depth (the secondary CAN serve the same block) but wrong
+    // for block-not-available — historical callers like fetchNumReporters,
+    // fetchReportExpiry, and fetchTradingLimits don't check
+    // usedLatestFallback, so silently degrading to current-block data after
+    // a 429-then-block-miss would corrupt their entity state. Pin
+    // fail-closed for the post-retry block-miss shape.
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      if (primaryCallNo === 1) throw new Error("rate limit");
+      throw new Error("header not found"); // block-miss after retry
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      /header not found/,
+      "post-rate-limit-retry block-miss must throw — caller's try/catch returns null",
+    );
+  });
+
+  it("post-rate-limit-retry archive-depth: still routes to secondary (regression guard)", async () => {
+    // Companion to the test above: archive-depth surfacing after a
+    // rate-limit retry MUST still hit the same-block secondary fallback,
+    // because that's the only way to preserve block-scoped accuracy.
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      if (primaryCallNo === 1) throw new Error("rate limit");
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => "secondary-block-scoped");
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "secondary-block-scoped");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
 });

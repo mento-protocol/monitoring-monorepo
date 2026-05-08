@@ -24,7 +24,11 @@ export function _resetRpcFailureCounts(): void {
   _rpcFailureCounts.clear();
 }
 
-function sanitizeErrorMessage(msg: string): string {
+/** Strip URLs from RPC error messages so tokenized endpoints (HyperRPC,
+ * quiknode, Alchemy) don't leak credentials into logs. Exported so
+ * `block-fallback.ts` can sanitize secondary-RPC errors before logging
+ * them in the archive-fallback diagnostic warning. */
+export function sanitizeErrorMessage(msg: string): string {
   return msg.replace(/https?:\/\/[^\s,)""]*/g, (url) => {
     try {
       const u = new URL(url);
