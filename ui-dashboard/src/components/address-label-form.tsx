@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, type RefObject } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
@@ -139,7 +139,19 @@ export function AddressLabelForm({
   // remounting (e.g. after the page key flips on address change) gets a
   // fresh ID, so a stale `finally` from a prior mount cannot release the
   // latch on the new mount's mid-flight write.
-  const formInstanceId = useId();
+  //
+  // Why not `useId`: it returns a value derived from the component's
+  // position in the React tree, which is stable across remounts at the
+  // same slot. If a save was in flight on the old mount and the user
+  // remounted at the same key path, the new mount would receive the
+  // SAME `useId` and the page's identity check would falsely accept
+  // the old mount's trailing `false` callback. A counter-backed ref
+  // initialized at first render gives a real per-mount token instead.
+  const formInstanceIdRef = useRef<string | null>(null);
+  if (formInstanceIdRef.current === null) {
+    formInstanceIdRef.current = `form-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  const formInstanceId = formInstanceIdRef.current;
   const internalFirstInputRef = useRef<HTMLInputElement>(null);
   // Use the parent's ref when provided (modal); otherwise an internal ref
   // exists so the JSX still has a stable target.

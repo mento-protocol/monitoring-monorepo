@@ -5,6 +5,7 @@ import {
   use,
   useCallback,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -138,6 +139,15 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       setHasLoaded(false);
     }
   }
+  // Mirror status into a ref so SWR's onSuccess (which fires
+  // asynchronously, potentially after status has flipped) can read the
+  // CURRENT value rather than the closure-captured one. Without this,
+  // a fetch started while authenticated that resolves AFTER sign-out
+  // would set hasLoaded back to true, defeating the render-time reset
+  // — and the next page render would treat fallback/stale data as
+  // "loaded" and put up a writable form.
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const { data, error, isLoading } = useSWR<EntriesState>(
     status === "authenticated" ? SWR_KEY : null,
     fetchAllLabels,
@@ -146,8 +156,12 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       fallbackData: emptyState(),
       // Fires after every successful fetch. Setting state to the same
       // value (`true`) after the first fetch is a React no-op so this
-      // doesn't trigger extra renders on the 30s refresh cadence.
-      onSuccess: () => setHasLoaded(true),
+      // doesn't trigger extra renders on the 30s refresh cadence. Gate
+      // on `statusRef` so a fetch resolving after sign-out doesn't
+      // flip the flag back to true against a stale session.
+      onSuccess: () => {
+        if (statusRef.current === "authenticated") setHasLoaded(true);
+      },
     },
   );
 
