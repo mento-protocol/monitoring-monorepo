@@ -16,7 +16,18 @@ export async function generateMetadata({
   params: Promise<{ address: string }>;
 }): Promise<Metadata> {
   const { address: raw } = await params;
-  const address = decodeURIComponent(raw).toLowerCase();
+  // Wrap `decodeURIComponent` — a malformed percent-encoding (e.g.
+  // `/address-book/%zz`) throws `URIError`. `generateMetadata` running
+  // during build / on-demand revalidation would otherwise propagate that
+  // up and break OG generation for the whole route. Fall back to the raw
+  // param; `isValidAddress` immediately rejects it and we return the
+  // fallback metadata.
+  let address: string;
+  try {
+    address = decodeURIComponent(raw).toLowerCase();
+  } catch {
+    address = raw.toLowerCase();
+  }
   if (!isValidAddress(address)) {
     return {
       title: FALLBACK_TITLE,

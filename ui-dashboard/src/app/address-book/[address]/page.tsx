@@ -14,10 +14,20 @@ export default function AddressDetailPage() {
   const params = useParams<{ address: string }>();
   const router = useRouter();
   // URL params come URI-encoded; the labels store + reports store both key
-  // by lowercase, so normalize once here.
+  // by lowercase, so normalize once here. Wrap `decodeURIComponent` in a
+  // try-catch — a malformed percent-encoding (e.g. `/address-book/%zz`)
+  // throws `URIError` and would otherwise crash the page into the error
+  // boundary instead of the soft redirect that `isValidAddress` triggers
+  // for any other garbage path. Falling back to the raw param keeps that
+  // path silent: `isValidAddress("%zz")` returns false, so the effect
+  // below `router.replace("/address-book")`s.
   const address = useMemo(() => {
     const raw = params?.address ?? "";
-    return decodeURIComponent(raw).toLowerCase();
+    try {
+      return decodeURIComponent(raw).toLowerCase();
+    } catch {
+      return raw.toLowerCase();
+    }
   }, [params?.address]);
 
   const valid = isValidAddress(address);

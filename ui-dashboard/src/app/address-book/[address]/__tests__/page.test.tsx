@@ -111,6 +111,18 @@ describe("AddressDetailPage — invalid address", () => {
     expect(mockReplace).toHaveBeenCalledWith("/address-book");
     expect(container.textContent).toBe("");
   });
+
+  it("redirects gracefully on a malformed percent-encoded URL (e.g. /%zz) instead of throwing", () => {
+    // Cursor flagged that an unguarded `decodeURIComponent` would throw
+    // `URIError` and dump the user into the error boundary. Pin the
+    // try-catch fallback: malformed input falls through to
+    // `isValidAddress` (returns false) → silent redirect, same UX as any
+    // other garbage path.
+    mockParamsAddress = "%zz";
+    expect(() => render()).not.toThrow();
+    expect(mockReplace).toHaveBeenCalledWith("/address-book");
+    expect(container.textContent).toBe("");
+  });
 });
 
 describe("AddressDetailPage — empty state", () => {
