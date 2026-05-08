@@ -6,7 +6,7 @@ Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
 
 ### 1. `axe-core` accessibility checks for dashboard UI ✅
 
-Done. `vitest-axe@1.0.0-pre.5` + `axe-core` wired in `ui-dashboard/package.json`; 21 tests across 4 consolidated files under `ui-dashboard/src/__tests__/a11y/` (badges, sortable tables + empty/error/loading shells, controls — labelled `<select>`, `radiogroup`, `tablist` — and skeletons). Total runtime ~1.1s, well under the 30s budget. No broad suppressions, no Plotly certification. See `ui-dashboard/AGENTS.md` "Dynamic content accessibility" for the maintenance contract.
+Done. `vitest-axe@1.0.0-pre.5` + `axe-core` wired in `ui-dashboard/package.json`; 24 tests across 4 consolidated files under `ui-dashboard/src/__tests__/a11y/` (badges, sortable tables + empty/error/loading shells, controls — labelled `<select>`, `radiogroup`, `tablist` — and skeletons). Per-variant label assertions on every health/limit/bridge badge catch silent label-drift refactors that pure axe runs miss. Total runtime ~1.5s, well under the 30s budget. No broad suppressions, no Plotly certification. See `ui-dashboard/AGENTS.md` "Dynamic content accessibility" for the maintenance contract.
 
 ### 2. Browser-based component/interaction testing pilot
 

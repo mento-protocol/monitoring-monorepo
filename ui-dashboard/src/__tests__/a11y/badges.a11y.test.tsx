@@ -55,64 +55,96 @@ function render(element: React.ReactElement) {
 }
 
 describe("HealthBadge a11y", () => {
+  // Status → expected visible label. Values are the labels the component
+  // promises to render (see `configs` in src/components/badges.tsx). The
+  // multi-variant axe pass below only catches missing accessible names; this
+  // table catches a silent label-drift refactor (e.g. CRITICAL losing its
+  // text and falling back to color-only signalling).
+  const HEALTH_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+    ["OK", "OK"],
+    ["WARN", "WARN"],
+    ["WEEKEND", "Weekend"],
+    ["CRITICAL", "CRITICAL"],
+    ["N/A", "N/A"],
+  ];
+
   it("has no axe violations across all status variants", async () => {
     // Render every status simultaneously so axe sees the full enum surface
-    // in one pass — keeps the test count bounded but still catches a
-    // per-status regression (e.g. CRITICAL losing its label).
+    // in one pass — keeps the test count bounded.
     render(
       <ul aria-label="Pool health badges">
-        <li>
-          <HealthBadge status="OK" />
-        </li>
-        <li>
-          <HealthBadge status="WARN" />
-        </li>
-        <li>
-          <HealthBadge status="WEEKEND" />
-        </li>
-        <li>
-          <HealthBadge status="CRITICAL" />
-        </li>
-        <li>
-          <HealthBadge status="N/A" />
-        </li>
+        {HEALTH_VARIANTS.map(([status]) => (
+          <li key={status}>
+            <HealthBadge status={status} />
+          </li>
+        ))}
       </ul>,
     );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
 
-  it("CRITICAL status carries a visible text label, not just a colored dot", () => {
+  it("every status variant carries its expected visible text label", () => {
+    render(
+      <ul>
+        {HEALTH_VARIANTS.map(([status]) => (
+          <li key={status} data-testid={`health-${status}`}>
+            <HealthBadge status={status} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [status, expected] of HEALTH_VARIANTS) {
+      const li = container.querySelector(`[data-testid="health-${status}"]`);
+      expect(li?.textContent).toContain(expected);
+    }
+  });
+
+  it("CRITICAL status renders its dot inside an aria-hidden subtree (color signalled but not announced)", () => {
     render(<HealthBadge status="CRITICAL" />);
-    // Text content includes both the dot emoji (aria-hidden) and the label
-    // "CRITICAL". The accessible-name path strips aria-hidden subtrees, so
-    // the badge's accessible text is "CRITICAL" — never just color.
-    expect(container.textContent).toContain("CRITICAL");
+    // The accessible-name path strips aria-hidden subtrees, so the badge's
+    // accessible text is "CRITICAL" — never just color.
     const dot = container.querySelector('[aria-hidden="true"]');
     expect(dot).not.toBeNull();
   });
 });
 
 describe("LimitBadge a11y", () => {
+  const LIMIT_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+    ["OK", "OK"],
+    ["WARN", "WARN"],
+    ["CRITICAL", "CRITICAL"],
+    ["N/A", "N/A"],
+  ];
+
   it("has no axe violations across all status variants", async () => {
     render(
       <ul aria-label="Trading limit badges">
-        <li>
-          <LimitBadge status="OK" />
-        </li>
-        <li>
-          <LimitBadge status="WARN" />
-        </li>
-        <li>
-          <LimitBadge status="CRITICAL" />
-        </li>
-        <li>
-          <LimitBadge status="N/A" />
-        </li>
+        {LIMIT_VARIANTS.map(([status]) => (
+          <li key={status}>
+            <LimitBadge status={status} />
+          </li>
+        ))}
       </ul>,
     );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+
+  it("every status variant carries its expected visible text label", () => {
+    render(
+      <ul>
+        {LIMIT_VARIANTS.map(([status]) => (
+          <li key={status} data-testid={`limit-${status}`}>
+            <LimitBadge status={status} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [status, expected] of LIMIT_VARIANTS) {
+      const li = container.querySelector(`[data-testid="limit-${status}"]`);
+      expect(li?.textContent).toContain(expected);
+    }
   });
 });
 
@@ -149,40 +181,57 @@ describe("SourceBadge / KindBadge a11y", () => {
 });
 
 describe("Bridge badge a11y", () => {
+  // STUCK is a derived overlay, not a raw BridgeStatus — surfaces once a
+  // SENT/ATTESTED transfer ages past 24h. The three in-flight states all
+  // collapse to "In progress" via `bridgeStatusLabel` (intentional UX —
+  // operators see one phase, not three sub-phases).
+  const BRIDGE_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+    ["PENDING", "Pending"],
+    ["SENT", "In progress"],
+    ["ATTESTED", "In progress"],
+    ["DELIVERED", "Delivered"],
+    ["QUEUED_INBOUND", "In progress"],
+    ["CANCELLED", "Cancelled"],
+    ["FAILED", "Failed"],
+    ["STUCK", "Stuck"],
+  ];
+
   it("BridgeStatusBadge passes axe across every status overlay", async () => {
     render(
       <ul aria-label="Bridge status badges">
-        <li>
-          <BridgeStatusBadge status="PENDING" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="SENT" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="ATTESTED" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="DELIVERED" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="QUEUED_INBOUND" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="CANCELLED" />
-        </li>
-        <li>
-          <BridgeStatusBadge status="FAILED" />
-        </li>
-        <li>
-          {/* Derived overlay — `STUCK` is not a real BridgeStatus value but
-              flows through `bridgeStatusLabel` once a SENT/ATTESTED transfer
-              ages past 24h. Test the overlay surface explicitly. */}
-          <BridgeStatusBadge status="STUCK" />
-        </li>
+        {BRIDGE_VARIANTS.map(([status]) => (
+          <li key={status}>
+            <BridgeStatusBadge
+              status={
+                status as Parameters<typeof BridgeStatusBadge>[0]["status"]
+              }
+            />
+          </li>
+        ))}
       </ul>,
     );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+
+  it("every status variant carries its expected visible text label", () => {
+    render(
+      <ul>
+        {BRIDGE_VARIANTS.map(([status]) => (
+          <li key={status} data-testid={`bridge-${status}`}>
+            <BridgeStatusBadge
+              status={
+                status as Parameters<typeof BridgeStatusBadge>[0]["status"]
+              }
+            />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [status, expected] of BRIDGE_VARIANTS) {
+      const li = container.querySelector(`[data-testid="bridge-${status}"]`);
+      expect(li?.textContent).toContain(expected);
+    }
   });
 
   it("BridgeProviderBadge passes axe", async () => {
