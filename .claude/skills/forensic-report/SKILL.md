@@ -24,7 +24,7 @@ If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"),
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: `HSET reports <addressLower> <jsonReport>` against the `address-labels` Upstash database via `mcp__upstash__redis_database_run_redis_commands`. Schema below; sets `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
+2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
 
 ## Output template
 
@@ -96,12 +96,15 @@ Note the revert rate. For arb / MEV: ~30–50% reverts is normal (failed sniping
 
 ### Step 5 — Capital and scale
 
+Pass the chain hint through to Sim — Mento is on Celo (`42220`) but the skill also runs against Monad (`10143`) and any future chain. Hardcoding `--chain-ids 42220` would return empty / unrelated holdings for a Monad principal:
+
 ```bash
-dune sim evm balances $PRINCIPAL --chain-ids 42220 -o json | jq '.balance_data | length'
-dune sim evm balances $PRINCIPAL --chain-ids 42220 -o json | jq '.balance_data[] | {symbol, amount, value_usd}'
+CHAIN_ID=42220   # Celo. Use 10143 for Monad. Map other chains as needed.
+dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data | length'
+dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data[] | {symbol, amount, value_usd}'
 ```
 
-Sum the USD value, drop scam airdrops (zero-value tokens with names like `CLAIM`, `voucher`). For tx volume, hit Celoscan / Etherscan API or use the explorer UI count.
+Sum the USD value, drop scam airdrops (zero-value tokens with names like `CLAIM`, `voucher`). For tx volume, hit the chain's block explorer API (Celoscan, MonadScan, etc.) or use the explorer UI count.
 
 ### Step 6 — Why \_\_\_, why these venues
 
@@ -121,45 +124,87 @@ Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 
 
 ### Step 10 — Push to production (only on user confirmation)
 
-By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash.
+By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash via the SAME atomic Lua upsert the API route uses — never split-read-modify-write, which races the editor and any other skill invocation.
 
-**Build the payload:**
+**Derive the uploader's email at runtime, not from a hardcoded value.** The skill is committed and runs from any teammate's checkout; hardcoding one email would mis-attribute every other person's reports and leak PII into git. Pull from `git config user.email`:
+
+```bash
+AUTHOR_EMAIL=$(git config --get user.email)
+if [ -z "$AUTHOR_EMAIL" ]; then
+  echo "git config user.email is unset — set it before uploading" >&2
+  exit 1
+fi
+```
+
+**Build the partial payload** (Lua script stamps `createdAt` / `updatedAt` / `version`):
 
 ```js
 const body = readFile(".investigations/<addr>-<slug>.md");
 if (body.length > 50000) throw new Error("body exceeds 50KB cap");
 
 const title = extractTitleFromH1(body); // text after the ` — ` separator, ≤200 chars
-const now = new Date().toISOString();
-
-// If updating an existing report, preserve createdAt + bump version.
-const existing = await HGET("reports", addrLower);
-const prev = existing ? JSON.parse(existing) : null;
-
-const payload = {
+const partial = {
   body,
-  title: title?.slice(0, 200),
-  authorEmail: "philip.paetz@me.com", // matches the userEmail context
+  ...(title ? { title: title.slice(0, 200) } : {}),
+  authorEmail: AUTHOR_EMAIL, // from git config user.email at runtime
   source: "claude", // already in the AddressReport enum
-  createdAt: prev?.createdAt ?? now,
-  updatedAt: now,
-  version: prev ? prev.version + 1 : 1,
 };
 ```
 
-**Write it:**
+**Write it via Lua EVAL** (atomic — same script as `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts`):
 
 ```js
+const UPSERT_SCRIPT = `
+local key = KEYS[1]
+local addr = ARGV[1]
+local payload = cjson.decode(ARGV[2])
+local now = ARGV[3]
+
+local existing = redis.call('HGET', key, addr)
+local prior = nil
+if existing then
+  prior = cjson.decode(existing)
+end
+
+payload.createdAt = (prior and prior.createdAt) or now
+payload.updatedAt = now
+payload.version = ((prior and prior.version) or 0) + 1
+
+local encoded = cjson.encode(payload)
+redis.call('HSET', key, addr, encoded)
+return encoded
+`;
+
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HSET", "reports", addrLower, JSON.stringify(payload)]],
+  commands: [
+    [
+      "EVAL",
+      UPSERT_SCRIPT,
+      "1",
+      "reports",
+      addrLower,
+      JSON.stringify(partial),
+      new Date().toISOString(),
+    ],
+  ],
 });
 ```
+
+The script returns the persisted record (already JSON-encoded). It handles every edge case the dashboard data layer handles:
+
+- `createdAt` preserved when updating; stamped fresh on first write
+- `updatedAt` always = now
+- `version` = `(prior.version or 0) + 1` — works even when the prior record is a legacy/partial entry without a numeric `version` field (Lua coerces `nil` → `0`, so first write is `1`, never `NaN`)
+- Atomic against concurrent writers — the editor route + this skill + any future caller can interleave without losing updates
 
 **Verify:**
 
 ```js
-commands: [["HGET", "reports", addrLower]];
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "reports", addrLower]],
+});
 ```
 
 The address-book index endpoint reads from the same hash on every request, so the 📄 indicator + the report editor will pick up the new content on the next page load — no SWR mutate hook needed from this side.
