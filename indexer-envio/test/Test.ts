@@ -1703,7 +1703,11 @@ describe("Envio Celo indexer handlers", () => {
 
     const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after zero-median MedianUpdated");
-    assert.equal(pool.oraclePrice, 0n, "event payload still mirrors the outage");
+    assert.equal(
+      pool.oraclePrice,
+      0n,
+      "event payload still mirrors the outage",
+    );
     assert.equal(
       pool.lastMedianPrice,
       FROZEN_MEDIAN,
