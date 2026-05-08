@@ -13,6 +13,7 @@ import {
   buildContractRows,
   buildCustomRows,
   filterRows,
+  findContractInitial,
   type AddressRow,
 } from "./_lib/address-book-rows";
 import { importFile, exportLabels } from "./_lib/address-book-import-export";
@@ -249,33 +250,11 @@ export default function AddressBookPage({
           address={editTarget.address}
           initial={
             getEntry(editTarget.address)?.entry ??
-            contractInitial(editTarget.address)
+            findContractInitial(editTarget.address)
           }
           onClose={() => setEditTarget(null)}
         />
       )}
     </div>
   );
-}
-
-function contractInitial(address: string) {
-  // Walk every network's static contract registry case-insensitively —
-  // `@mento-protocol/contracts` exports checksummed mixed-case keys, but
-  // callers may pass either casing. Same address on multiple chains
-  // generally has the same contract name (deterministic deploys); if names
-  // diverge we use the first hit, which is fine for editor pre-fill since
-  // the user can override.
-  const lower = address.toLowerCase();
-  for (const net of Object.values(NETWORKS)) {
-    for (const [registered, name] of Object.entries(net.addressLabels)) {
-      if (registered.toLowerCase() === lower) {
-        return {
-          name,
-          tags: [],
-          updatedAt: new Date().toISOString(),
-        };
-      }
-    }
-  }
-  return undefined;
 }

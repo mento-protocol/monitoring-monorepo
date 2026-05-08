@@ -10,6 +10,8 @@ import { createRoot, type Root } from "react-dom/client";
 const VALID_ADDR = "0x" + "a".repeat(40);
 
 let mockParamsAddress = VALID_ADDR;
+let mockLabelsLoading = false;
+let mockLabelsError: Error | undefined = undefined;
 const mockReplace = vi.fn();
 const mockGetEntry = vi.fn();
 const mockHasReport = vi.fn();
@@ -26,8 +28,23 @@ vi.mock("@/components/address-labels-provider", () => ({
     deleteEntry: vi.fn(async () => undefined),
     isCustom: () => false,
     customEntries: [],
+    isLoading: mockLabelsLoading,
+    error: mockLabelsError,
   }),
 }));
+
+// Stub the contract-row lookup so tests don't depend on the live registry —
+// the unit tests for `findContractInitial` cover the real walk separately.
+const mockFindContractInitial = vi.fn();
+vi.mock("../../_lib/address-book-rows", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../_lib/address-book-rows")
+  >("../../_lib/address-book-rows");
+  return {
+    ...actual,
+    findContractInitial: (addr: string) => mockFindContractInitial(addr),
+  };
+});
 
 vi.mock("@/hooks/use-address-reports-index", () => ({
   useAddressReportsIndex: () => ({
@@ -63,11 +80,15 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mockParamsAddress = VALID_ADDR;
+  mockLabelsLoading = false;
+  mockLabelsError = undefined;
   mockReplace.mockClear();
   mockGetEntry.mockReset();
   mockGetEntry.mockReturnValue(undefined);
   mockHasReport.mockReset();
   mockHasReport.mockReturnValue(false);
+  mockFindContractInitial.mockReset();
+  mockFindContractInitial.mockReturnValue(undefined);
 });
 
 afterEach(() => {
@@ -159,5 +180,63 @@ describe("AddressDetailPage — populated state", () => {
     render();
     const stub = container.querySelector('[data-testid="report-editor"]');
     expect(stub?.getAttribute("data-address")).toBe(VALID_ADDR);
+  });
+});
+
+describe("AddressDetailPage — labels loading state", () => {
+  it("defers form render while labels SWR is in flight (no entry seeded from undefined)", () => {
+    mockLabelsLoading = true;
+    mockGetEntry.mockReturnValue(undefined);
+    render();
+
+    // Skeleton aria-label present, real form input absent
+    expect(
+      container.querySelector('[aria-label="Loading label form"]'),
+    ).not.toBeNull();
+    expect(container.querySelector("#al-name")).toBeNull();
+    // Header still renders (has truncated address)
+    expect(container.querySelector("h1")?.textContent).toContain("0xaaaa");
+    // Report editor still mounts — its own SWR drives its own loading state
+    expect(
+      container.querySelector('[data-testid="report-editor"]'),
+    ).not.toBeNull();
+  });
+
+  it("falls through to the form when labels SWR errors so the user can still enter a label", () => {
+    mockLabelsLoading = false;
+    mockLabelsError = new Error("boom");
+    mockGetEntry.mockReturnValue(undefined);
+    render();
+
+    // No skeleton, real form present
+    expect(
+      container.querySelector('[aria-label="Loading label form"]'),
+    ).toBeNull();
+    expect(container.querySelector("#al-name")).not.toBeNull();
+  });
+});
+
+describe("AddressDetailPage — contract row fallback", () => {
+  it("seeds the form with the static contract name when no custom label exists", () => {
+    mockGetEntry.mockReturnValue(undefined);
+    mockFindContractInitial.mockReturnValue({
+      name: "BiPoolManager",
+      tags: [],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    render();
+
+    // Header shows the contract name (not just truncated address)
+    expect(container.querySelector("h1")?.textContent).toContain(
+      "BiPoolManager",
+    );
+    // Form name input is pre-filled with the contract name so an in-place
+    // save keeps the registry display name instead of overwriting to empty.
+    const nameInput = container.querySelector<HTMLInputElement>("#al-name");
+    expect(nameInput?.value).toBe("BiPoolManager");
+    // The page should still treat this as `Add label` (no custom entry yet),
+    // not "Edit label" — the contract row is the pre-fill, not the saved entry.
+    expect(container.textContent).toContain("Add label");
+    expect(mockFindContractInitial).toHaveBeenCalledWith(VALID_ADDR);
   });
 });

@@ -18,7 +18,7 @@ export default function AddressDetailError({
       <ErrorBox
         message={
           error.message ||
-          "Failed to load this address. The labels store may be offline, or this address has no data yet."
+          "Failed to load this address — the labels store may be unavailable."
         }
       />
       {error.digest && (

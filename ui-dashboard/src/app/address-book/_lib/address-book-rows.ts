@@ -4,11 +4,47 @@ import {
   isConfiguredNetworkId,
   type Network,
 } from "@/lib/networks";
-import { isArkhamSourced, isMiniPaySourced } from "@/lib/address-labels-shared";
+import {
+  isArkhamSourced,
+  isMiniPaySourced,
+  type AddressEntry,
+} from "@/lib/address-labels-shared";
 import type { AddressBookRow } from "@/lib/address-book";
 import type { AddressEntryRow } from "@/components/address-labels-provider";
 
 export type AddressRow = AddressBookRow;
+
+/**
+ * Look up a contract-name pre-fill for the address-label form. Walks every
+ * configured network's static `addressLabels` registry case-insensitively.
+ *
+ * Same address on multiple chains generally has the same contract name
+ * (deterministic deploys); first match wins, which is fine for editor pre-fill
+ * because the user can always override.
+ *
+ * Returns `undefined` for addresses that aren't in any contract registry —
+ * the form then renders as a fresh custom-label entry.
+ *
+ * Shared between the modal flow (`AddressBookClient`) and the detail page
+ * (`/address-book/[address]`) so both surfaces preserve contract names when a
+ * user opens the form for a known contract row that doesn't yet have a custom
+ * label.
+ */
+export function findContractInitial(address: string): AddressEntry | undefined {
+  const lower = address.toLowerCase();
+  for (const net of Object.values(NETWORKS)) {
+    for (const [registered, name] of Object.entries(net.addressLabels)) {
+      if (registered.toLowerCase() === lower) {
+        return {
+          name,
+          tags: [],
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+  }
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Row builders
