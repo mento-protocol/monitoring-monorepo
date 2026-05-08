@@ -88,6 +88,28 @@ export default function AddressDetailPage() {
     [],
   );
 
+  // Reset the latch when the URL address changes. Prior round scoped
+  // the OWNER refs per flow so stale callbacks couldn't release the
+  // wrong latch — but the latch STATE itself (formSaving /
+  // formDeleting / latchedFormSuffixRef) was global, so a save
+  // started on form A kept `formMutating=true` after the user
+  // navigated to B. When A's PUT eventually resolved, the legitimate
+  // match cleared formSaving, the suffix latch refreshed from B's
+  // data, and B's form remounted mid-edit (discarding in-progress
+  // local state). Reset on address change: the new mount has no
+  // in-flight mutations, so any old callbacks land on null owners
+  // and are ignored. Uses React's "store information from previous
+  // renders" pattern to avoid `setState`-in-useEffect.
+  const prevAddressRef = useRef(address);
+  if (prevAddressRef.current !== address) {
+    prevAddressRef.current = address;
+    if (formSaving) setFormSaving(false);
+    if (formDeleting) setFormDeleting(false);
+    savingOwnerRef.current = null;
+    deletingOwnerRef.current = null;
+    latchedFormSuffixRef.current = "";
+  }
+
   if (!valid) return null;
 
   const resolved = getEntry(address);
@@ -123,8 +145,19 @@ export default function AddressDetailPage() {
   // conditional write is idempotent within a frame, so concurrent
   // re-renders are safe.
   const formMutating = formSaving || formDeleting;
+  // Suffix derivation. `entry.updatedAt` is the cheap version key for
+  // anything that's been written via the v2 schema. Legacy rows
+  // (`upgradeEntry` returns `""` for the synth fallback to keep the
+  // key stable across SWR polls) need a content fingerprint instead
+  // — otherwise a teammate's import / migration that changes a
+  // legacy row but preserves `updatedAt: ""` would leave THIS form
+  // mounted with stale fields, and a save would overwrite the
+  // imported data. The fingerprint is a `|`-joined concat of the
+  // user-visible fields; collisions would require two rows on the
+  // same address to share name + tags + notes + isPublic, which is
+  // a no-op change to the form anyway.
   const liveFormSuffix = entry
-    ? `custom:${entry.updatedAt}`
+    ? `custom:${entry.updatedAt || `legacy:${entry.name}|${entry.tags.join(",")}|${entry.notes ?? ""}|${entry.isPublic ? "1" : "0"}`}`
     : formInitial
       ? "contract"
       : "new";
