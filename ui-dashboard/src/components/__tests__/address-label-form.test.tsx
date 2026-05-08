@@ -239,7 +239,11 @@ describe("AddressLabelForm — save flow", () => {
     // Fired before the await — page sees `true` while the PUT is in flight.
     // (Callback now receives (saving, formId); page uses formId to ignore
     // stale callbacks from prior mounts after an address change.)
-    expect(onSavingChange).toHaveBeenCalledWith(true, expect.any(String));
+    expect(onSavingChange).toHaveBeenCalledWith(
+      true,
+      expect.any(String),
+      expect.any(String),
+    );
     expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true]);
 
     // Resolve the upsert and drain microtasks so the finally block runs.
@@ -353,7 +357,11 @@ describe("AddressLabelForm — delete flow", () => {
     act(() => {
       clickByText("Remove label");
     });
-    expect(onDeletingChange).toHaveBeenCalledWith(true, expect.any(String));
+    expect(onDeletingChange).toHaveBeenCalledWith(
+      true,
+      expect.any(String),
+      expect.any(String),
+    );
     expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true]);
 
     await act(async () => {

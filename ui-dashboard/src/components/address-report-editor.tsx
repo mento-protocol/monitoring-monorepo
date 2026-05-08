@@ -21,10 +21,17 @@ type Props = {
    * surface mounted for the same address sees the in-flight state
    * and can block competing writes. `editorId` is a per-mount token
    * — same per-mount-token pattern as `AddressLabelForm`'s `formId`.
+   * `address` is the editor's current `address` prop (which the modal
+   * may swap as the user types into the new-address input on the
+   * Label tab); the host uses it to mark the right pending entry.
    */
-  onSavingChange?: (saving: boolean, editorId: string) => void;
+  onSavingChange?: (saving: boolean, editorId: string, address: string) => void;
   /** Same as `onSavingChange` but for the delete flow. */
-  onDeletingChange?: (deleting: boolean, editorId: string) => void;
+  onDeletingChange?: (
+    deleting: boolean,
+    editorId: string,
+    address: string,
+  ) => void;
   /**
    * When true, all controls (title input, body textarea, view/edit
    * toggle, Save, Delete) are disabled. Used by the host when there's
@@ -144,10 +151,13 @@ export function AddressReportEditor({
       setError("Body cannot be empty.");
       return;
     }
-    if (inFlightRef.current.saving) return;
+    // Cross-op gate — same rationale as `AddressLabelForm`'s save
+    // guard: a fast Save→Delete sequence would otherwise overlap
+    // PUT and DELETE on the same record.
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
     inFlightRef.current.saving = true;
     setSaving(true);
-    onSavingChange?.(true, editorInstanceId);
+    onSavingChange?.(true, editorInstanceId, trimmed);
     setError(null);
     let saved = false;
     try {
@@ -178,7 +188,7 @@ export function AddressReportEditor({
       setError(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setSaving(false);
-      onSavingChange?.(false, editorInstanceId);
+      onSavingChange?.(false, editorInstanceId, trimmed);
       inFlightRef.current.saving = false;
     }
 
@@ -220,10 +230,10 @@ export function AddressReportEditor({
     ) {
       return;
     }
-    if (inFlightRef.current.deleting) return;
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
     inFlightRef.current.deleting = true;
     setDeleting(true);
-    onDeletingChange?.(true, editorInstanceId);
+    onDeletingChange?.(true, editorInstanceId, trimmed);
     setError(null);
     let deleted = false;
     try {
@@ -248,7 +258,7 @@ export function AddressReportEditor({
       setError(e instanceof Error ? e.message : "Delete failed.");
     } finally {
       setDeleting(false);
-      onDeletingChange?.(false, editorInstanceId);
+      onDeletingChange?.(false, editorInstanceId, trimmed);
       inFlightRef.current.deleting = false;
     }
 
@@ -312,7 +322,7 @@ export function AddressReportEditor({
 
   return (
     <fieldset
-      disabled={externallyDisabled}
+      disabled={externallyDisabled || saving || deleting}
       className="flex flex-col border-0 p-0 m-0 disabled:opacity-60"
     >
       <div className="px-5 py-4 space-y-3">

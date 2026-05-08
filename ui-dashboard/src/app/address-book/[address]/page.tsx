@@ -73,12 +73,12 @@ export default function AddressDetailPage() {
   const addressRef = useRef(address);
   addressRef.current = address;
   const handleReportSavingChange = useCallback(
-    (saving: boolean, editorId: string) => {
+    (saving: boolean, editorId: string, addr: string) => {
       const key = `${editorId}:save`;
       if (saving) {
         unmarkReportPendingRef.current.set(
           key,
-          markPendingReportMutation(addressRef.current),
+          markPendingReportMutation(addr),
         );
       } else {
         const u = unmarkReportPendingRef.current.get(key);
@@ -89,12 +89,12 @@ export default function AddressDetailPage() {
     [markPendingReportMutation],
   );
   const handleReportDeletingChange = useCallback(
-    (deleting: boolean, editorId: string) => {
+    (deleting: boolean, editorId: string, addr: string) => {
       const key = `${editorId}:delete`;
       if (deleting) {
         unmarkReportPendingRef.current.set(
           key,
-          markPendingReportMutation(addressRef.current),
+          markPendingReportMutation(addr),
         );
       } else {
         const u = unmarkReportPendingRef.current.get(key);
@@ -144,8 +144,14 @@ export default function AddressDetailPage() {
     unmarkPendingRef.current.delete(key);
     unmark?.();
   }, []);
+  // The form passes its current address as the third arg —
+  // identical to `addressRef.current` for the detail page (form
+  // is keyed on URL param), so the helpers can use either. Add-new
+  // modal callers in `AddressBookClient` use the parameter directly
+  // because their `editTarget` is `null`.
   const handleSavingChange = useCallback(
-    (saving: boolean, formId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    (saving: boolean, formId: string, _addr: string) => {
       if (saving) {
         savingOwnerRef.current = formId;
         setFormSaving(true);
@@ -163,7 +169,8 @@ export default function AddressDetailPage() {
     [incPending, decPending],
   );
   const handleDeletingChange = useCallback(
-    (deleting: boolean, formId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    (deleting: boolean, formId: string, _addr: string) => {
       if (deleting) {
         deletingOwnerRef.current = formId;
         setFormDeleting(true);

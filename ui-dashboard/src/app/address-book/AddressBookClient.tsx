@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
+import { isValidAddress } from "@/lib/format";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { buildAddressBookRows } from "@/lib/address-book";
@@ -73,25 +74,25 @@ export default function AddressBookPage({
     [customRows, contractRows, search],
   );
 
-  // Pending-ledger wiring for the modal — mirrors the detail page's
-  // pattern (see `[address]/page.tsx`). The modal is short-lived but
-  // its in-flight Promise's `finally` runs after `onSaved → onClose`,
-  // so the unmark map outlives the modal mount via this stable parent.
-  // Keys by `formId:op` so save and delete on the same mount don't
+  // Pending-ledger wiring for both modal flows (edit + add-new) —
+  // mirrors the detail page's pattern (see `[address]/page.tsx`).
+  // The address parameter comes from the form's current state
+  // (passed via the callback), so the add-new modal — where
+  // `editTarget` is null and the user types the address inside the
+  // form — still marks pending against the right address. Keys by
+  // `formId:op` so save and delete on the same mount don't
   // overwrite each other's unmark closure (codex round 13).
-  const editTargetAddress = editTarget?.address ?? "";
-  const editTargetAddressRef = useRef(editTargetAddress);
-  editTargetAddressRef.current = editTargetAddress;
+  // Track add-new draft for `requireExplicitName` evaluation as the
+  // user types — needs to flip live on each keystroke since
+  // `hasAmbiguousContractMatches` only matters for valid addresses.
+  const [addNewDraftAddress, setAddNewDraftAddress] = useState("");
   const labelUnmarkRef = useRef<Map<string, () => void>>(new Map());
   const reportUnmarkRef = useRef<Map<string, () => void>>(new Map());
   const handleLabelSavingChange = useCallback(
-    (saving: boolean, formId: string) => {
+    (saving: boolean, formId: string, address: string) => {
       const key = `${formId}:save`;
       if (saving) {
-        labelUnmarkRef.current.set(
-          key,
-          markPendingMutation(editTargetAddressRef.current),
-        );
+        labelUnmarkRef.current.set(key, markPendingMutation(address));
       } else {
         const u = labelUnmarkRef.current.get(key);
         labelUnmarkRef.current.delete(key);
@@ -101,13 +102,10 @@ export default function AddressBookPage({
     [markPendingMutation],
   );
   const handleLabelDeletingChange = useCallback(
-    (deleting: boolean, formId: string) => {
+    (deleting: boolean, formId: string, address: string) => {
       const key = `${formId}:delete`;
       if (deleting) {
-        labelUnmarkRef.current.set(
-          key,
-          markPendingMutation(editTargetAddressRef.current),
-        );
+        labelUnmarkRef.current.set(key, markPendingMutation(address));
       } else {
         const u = labelUnmarkRef.current.get(key);
         labelUnmarkRef.current.delete(key);
@@ -117,13 +115,10 @@ export default function AddressBookPage({
     [markPendingMutation],
   );
   const handleReportSavingChange = useCallback(
-    (saving: boolean, editorId: string) => {
+    (saving: boolean, editorId: string, address: string) => {
       const key = `${editorId}:save`;
       if (saving) {
-        reportUnmarkRef.current.set(
-          key,
-          markPendingReportMutation(editTargetAddressRef.current),
-        );
+        reportUnmarkRef.current.set(key, markPendingReportMutation(address));
       } else {
         const u = reportUnmarkRef.current.get(key);
         reportUnmarkRef.current.delete(key);
@@ -133,13 +128,10 @@ export default function AddressBookPage({
     [markPendingReportMutation],
   );
   const handleReportDeletingChange = useCallback(
-    (deleting: boolean, editorId: string) => {
+    (deleting: boolean, editorId: string, address: string) => {
       const key = `${editorId}:delete`;
       if (deleting) {
-        reportUnmarkRef.current.set(
-          key,
-          markPendingReportMutation(editTargetAddressRef.current),
-        );
+        reportUnmarkRef.current.set(key, markPendingReportMutation(address));
       } else {
         const u = reportUnmarkRef.current.get(key);
         reportUnmarkRef.current.delete(key);
@@ -337,7 +329,36 @@ export default function AddressBookPage({
       )}
 
       {userCanEdit && addingNew && (
-        <AddressLabelEditor address="" onClose={() => setAddingNew(false)} />
+        <AddressLabelEditor
+          address=""
+          onClose={() => {
+            setAddingNew(false);
+            setAddNewDraftAddress("");
+          }}
+          onDraftAddressChange={setAddNewDraftAddress}
+          // Same ambig-contract guard as the edit / detail flows:
+          // when the user types an address that's registered as a
+          // contract under multiple disagreeing names, force an
+          // explicit name so a tag-only save can't persist
+          // `name: ""` and suppress every contract row in the index.
+          requireExplicitName={
+            isValidAddress(addNewDraftAddress) &&
+            !getEntry(addNewDraftAddress)?.entry &&
+            hasAmbiguousContractMatches(addNewDraftAddress)
+          }
+          // Pending-ledger wiring — a save kicked off in the add-new
+          // modal contributes to the same global ledger as edit /
+          // detail-page saves. Disable when there's a pending
+          // mutation against THIS draft address (rare but real if
+          // the user types an address that's mid-save somewhere
+          // else).
+          onLabelSavingChange={handleLabelSavingChange}
+          onLabelDeletingChange={handleLabelDeletingChange}
+          externallyDisabledLabel={isMutationPending(addNewDraftAddress)}
+          onReportSavingChange={handleReportSavingChange}
+          onReportDeletingChange={handleReportDeletingChange}
+          externallyDisabledReport={isReportMutationPending(addNewDraftAddress)}
+        />
       )}
 
       {userCanEdit && editTarget && (

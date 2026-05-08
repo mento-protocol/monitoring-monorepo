@@ -106,24 +106,30 @@ type Props = {
    * `updatedAt` would otherwise unmount the saving form and remount a fresh
    * one (`saving=false`) while the PUT is still in flight, re-enabling Save
    * for a window where a double-click can submit overlapping writes. The
-   * `formId` argument is a per-mount identifier (React `useId`) — the
-   * detail page records the owner on the leading-edge `true` call and
-   * ignores trailing `false` calls from other instances, so a save that
-   * resolves AFTER the user navigated to a different address can't
-   * release the latch held by the new form. The modal doesn't pass this
-   * prop — its key is stable across opens.
+   * `formId` argument is a per-mount identifier — the detail page records
+   * the owner on the leading-edge `true` call and ignores trailing
+   * `false` calls from other instances, so a save that resolves AFTER
+   * the user navigated to a different address can't release the latch
+   * held by the new form. `address` is the form's current address state
+   * — for the add-new modal flow this is the user's typed value (not
+   * `""` from the initial prop), so the host can mark pending against
+   * the right address in the provider's ledger.
    */
-  onSavingChange?: (saving: boolean, formId: string) => void;
+  onSavingChange?: (saving: boolean, formId: string, address: string) => void;
   /**
    * Same as `onSavingChange` but for the delete flow. `deleteEntry`'s
    * optimistic update REMOVES the entry, transitioning the page key from
    * `custom:<updatedAt>` → `new`. Without this latch, a fresh form
    * (`deleting=false`) mounts mid-DELETE and a save typed into it can
    * race the in-flight DELETE — if the DELETE completes last it wipes
-   * out the just-saved label. `formId` carries the same per-mount
+   * out the just-saved label. `formId` and `address` carry the same
    * scoping as `onSavingChange`.
    */
-  onDeletingChange?: (deleting: boolean, formId: string) => void;
+  onDeletingChange?: (
+    deleting: boolean,
+    formId: string,
+    address: string,
+  ) => void;
   /**
    * When true, the form requires an explicit name regardless of tags
    * (the relaxed "name OR tags" rule is suspended). Used on the detail
@@ -241,10 +247,15 @@ export function AddressLabelForm({
       isContractRow,
       initial?.name,
     );
-    if (inFlightRef.current.saving) return;
+    // Cross-op gate: a fast Save-then-Remove (or vice versa) would
+    // otherwise start the second op before React commits the first
+    // op's `disabled` state. Both `saving` and `deleting` flip
+    // synchronously here so either-side-already-in-flight aborts
+    // the other.
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
     inFlightRef.current.saving = true;
     setSaving(true);
-    onSavingChange?.(true, formInstanceId);
+    onSavingChange?.(true, formInstanceId, address);
     setError(null);
     try {
       await upsertEntry(address, {
@@ -258,7 +269,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to save label.");
     } finally {
       setSaving(false);
-      onSavingChange?.(false, formInstanceId);
+      onSavingChange?.(false, formInstanceId, address);
       inFlightRef.current.saving = false;
     }
   }
@@ -267,10 +278,10 @@ export function AddressLabelForm({
   // by design. Reports are evidence/history attached to the address; labels
   // are display aliases.
   async function handleDelete() {
-    if (inFlightRef.current.deleting) return;
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
     inFlightRef.current.deleting = true;
     setDeleting(true);
-    onDeletingChange?.(true, formInstanceId);
+    onDeletingChange?.(true, formInstanceId, address);
     setError(null);
     try {
       await deleteEntry(address);
@@ -279,7 +290,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to delete label.");
     } finally {
       setDeleting(false);
-      onDeletingChange?.(false, formInstanceId);
+      onDeletingChange?.(false, formInstanceId, address);
       inFlightRef.current.deleting = false;
     }
   }
