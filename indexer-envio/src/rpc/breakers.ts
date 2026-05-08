@@ -17,6 +17,7 @@ import {
   readContractWithBlockFallback,
   type BlockFallbackResult,
 } from "./block-fallback";
+import { consoleLogger, type RpcLogger } from "./log";
 import {
   BREAKER_BOX_ABI,
   MEDIAN_DELTA_BREAKER_ABI,
@@ -43,6 +44,7 @@ export function _setMockBreakerList(
 export async function fetchBreakerList(
   chainId: number,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<string[] | null> {
   if (_testBreakerList.has(chainId)) return _testBreakerList.get(chainId)!;
 
@@ -72,6 +74,7 @@ export async function fetchBreakerList(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     // Breaker registration is governance-controlled and changes over time
     // (BreakerAdded/Removed events). A `latest`-block fallback would seed
@@ -86,6 +89,7 @@ export async function fetchBreakerList(
       breakerBoxAddress,
       err,
       blockNumber,
+      log,
     );
     return null;
   }
@@ -210,6 +214,11 @@ async function probeFunction(
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
+  // Reserved for future use — fetchBreakerKind currently uses probeFunction
+  // which doesn't go through readContractWithBlockFallback. Kept on the
+  // signature so the effect handler can pass `context.log` uniformly.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";
@@ -248,6 +257,7 @@ export async function fetchBreakerDefaults(
   breakerAddress: string,
   kind: BreakerKindRpc,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<BreakerDefaults | null> {
   const cached = _testBreakerDefaults.get(
     breakerKindKey(chainId, breakerAddress),
@@ -274,6 +284,7 @@ export async function fetchBreakerDefaults(
       },
       blockNumber,
       fallback,
+      log,
     );
 
     if (kind === "MARKET_HOURS") {
@@ -302,6 +313,7 @@ export async function fetchBreakerDefaults(
         },
         blockNumber,
         fallback,
+        log,
       ),
       readContractWithBlockFallback(
         client,
@@ -312,6 +324,7 @@ export async function fetchBreakerDefaults(
         },
         blockNumber,
         fallback,
+        log,
       ),
     ]);
     // Breaker defaults change with governance (DefaultCooldownTimeUpdated /
@@ -337,6 +350,7 @@ export async function fetchBreakerDefaults(
       breakerAddress,
       err,
       blockNumber,
+      log,
     );
     return null;
   }
@@ -353,6 +367,7 @@ export async function fetchBreakerFeedState(
   kind: BreakerKindRpc,
   rateFeedID: string,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<BreakerFeedState | null> {
   const mock = _testBreakerFeedState.get(
     breakerFeedStateKey(chainId, breakerAddress, rateFeedID),
@@ -379,6 +394,7 @@ export async function fetchBreakerFeedState(
       },
       blockNumber,
       fallback,
+      log,
     );
 
     if (kind === "MARKET_HOURS") {
@@ -415,6 +431,7 @@ export async function fetchBreakerFeedState(
         },
         blockNumber,
         fallback,
+        log,
       ),
       readContractWithBlockFallback(
         client,
@@ -426,6 +443,7 @@ export async function fetchBreakerFeedState(
         },
         blockNumber,
         fallback,
+        log,
       ),
       kind === "MEDIAN_DELTA"
         ? Promise.all([
@@ -439,6 +457,7 @@ export async function fetchBreakerFeedState(
               },
               blockNumber,
               fallback,
+              log,
             ),
             readContractWithBlockFallback(
               client,
@@ -450,6 +469,7 @@ export async function fetchBreakerFeedState(
               },
               blockNumber,
               fallback,
+              log,
             ),
           ])
         : readContractWithBlockFallback(
@@ -462,6 +482,7 @@ export async function fetchBreakerFeedState(
             },
             blockNumber,
             fallback,
+            log,
           ),
     ]);
 
@@ -512,6 +533,7 @@ export async function fetchBreakerFeedState(
       `${breakerAddress}:${rateFeedID}`,
       err,
       blockNumber,
+      log,
     );
     return null;
   }

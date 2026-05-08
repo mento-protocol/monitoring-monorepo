@@ -28,6 +28,7 @@ ERC20FeeToken.Transfer.handler(
     const { symbol, decimals } = await resolveFeeTokenMeta(
       chainId,
       tokenAddress,
+      context.log,
     );
 
     const id = eventId(chainId, event.block.number, event.logIndex);
@@ -148,10 +149,10 @@ ERC20FeeToken.Transfer.handler(
         }
         backfilledTokens.add(backfillKey);
       } catch (err) {
-        console.warn(
-          `[ERC20FeeToken] Backfill scan failed for ${normalizedToken} on chain ${chainId}. ` +
+        const reason = err instanceof Error ? err.message : String(err);
+        context.log.warn(
+          `[ERC20FeeToken] Backfill scan failed for ${normalizedToken} on chain ${chainId}: ${reason}. ` +
             `Will retry on next transfer.`,
-          err,
         );
       }
     }

@@ -12,6 +12,7 @@ import {
   logRpcFailure,
   sanitizeErrorMessage,
 } from "./client";
+import { consoleLogger, type RpcLogger } from "./log";
 
 /** Matches common RPC error messages indicating the requested block is not
  * yet available on the node. Different providers emit different messages:
@@ -111,6 +112,7 @@ export async function readContractWithBlockFallback(
   args: Record<string, unknown>,
   blockNumber?: bigint,
   fallbackClient?: ReturnType<typeof createPublicClient> | null,
+  log: RpcLogger = consoleLogger,
 ): Promise<BlockFallbackResult> {
   const makeCall = (c: ReturnType<typeof createPublicClient>, block?: bigint) =>
     c.readContract({
@@ -139,7 +141,7 @@ export async function readContractWithBlockFallback(
       let exitedWithRateLimit = true;
       for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
         const delay = RATE_LIMIT_RETRY_DELAYS_MS[i];
-        console.debug(
+        log.debug(
           `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
         );
         await _testHooks.delayFn(delay);
@@ -177,7 +179,7 @@ export async function readContractWithBlockFallback(
         // Retries exhausted with rate-limit still in place — try fallback
         // client at the same block. usedLatestFallback stays false.
         if (fallbackClient) {
-          console.warn(
+          log.warn(
             `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
           );
           try {
@@ -223,7 +225,7 @@ export async function readContractWithBlockFallback(
       ARCHIVE_DEPTH_RE.test(currentError.message)
     ) {
       if (fallbackClient) {
-        console.warn(
+        log.warn(
           `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, using fallback RPC`,
         );
         try {
@@ -244,7 +246,7 @@ export async function readContractWithBlockFallback(
               ? fallbackErr.message
               : String(fallbackErr),
           );
-          console.warn(
+          log.warn(
             `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
           );
           throw fallbackErr;
@@ -269,7 +271,7 @@ export async function readContractWithBlockFallback(
       // the RPC node may just be slightly behind HyperSync.
       for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
         const delay = BLOCK_RETRY_DELAYS_MS[i];
-        console.warn(
+        log.warn(
           `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
         );
         await _testHooks.delayFn(delay);
@@ -287,7 +289,7 @@ export async function readContractWithBlockFallback(
       }
 
       // All retries exhausted — fall back to reading latest.
-      console.warn(
+      log.warn(
         `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );
       const result = await makeCall(client, undefined);

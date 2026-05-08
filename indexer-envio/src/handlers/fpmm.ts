@@ -145,7 +145,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
       // Log when only one token's limits were fetched — partial state is usable
       // but indicates an RPC hiccup that will be retried on the next Swap.
       if (!limits0 || !limits1) {
-        console.warn(
+        context.log.warn(
           `[FPMM.Swap] Partial trading limit fetch for pool ${poolId}: ` +
             `limits0=${!!limits0} limits1=${!!limits1}. ` +
             `limitStatus will reflect the available data only.`,
