@@ -153,12 +153,26 @@ fi
 
 `git config user.email` is local + unauthenticated — a teammate with a stale or impersonated config could persist wrong audit metadata. The dashboard's editor route stamps `authorEmail` from the Google-Workspace-authenticated session for that reason; the skill bypasses the route to keep atomicity (see Lua section below) and so loses the session-auth check. Mitigation: **always show the derived email and ask the user to confirm it matches their workspace identity before sending the EVAL**. If the email is wrong, abort and tell them to fix `git config user.email` (or upload via the editor UI). For a stricter audit trail, route the upload through the editor instead.
 
+**Validate inputs before building the payload.** The skill bypasses the API route, so it also bypasses `sanitizeReportInput` and `isValidAddress` — mirror their checks here or risk persisting a blank report or a Redis key that isn't an `0x` address (ENS, typo, truncation):
+
+```js
+// 1. Address — must match isValidAddress (`/^0x[a-fA-F0-9]{40}$/`)
+const addrLower = String(addrInput).toLowerCase();
+if (!/^0x[a-f0-9]{40}$/.test(addrLower)) {
+  throw new Error("address must be a 0x-prefixed 40-hex string");
+}
+
+// 2. Body — non-empty after trim, ≤ 50KB. Mirrors `sanitizeReportInput`
+//    in `ui-dashboard/src/lib/address-reports-shared.ts`.
+const body = readFile(".investigations/<addr>-<slug>.md");
+if (body.trim() === "")
+  throw new Error("body is empty / whitespace-only — refusing to upload");
+if (body.length > 50000) throw new Error("body exceeds 50KB cap");
+```
+
 **Build the partial payload** (Lua script stamps `createdAt` / `updatedAt` / `version`):
 
 ```js
-const body = readFile(".investigations/<addr>-<slug>.md");
-if (body.length > 50000) throw new Error("body exceeds 50KB cap");
-
 const title = extractTitleFromH1(body); // text after the ` — ` separator, ≤200 chars
 const partial = {
   body,
@@ -185,7 +199,13 @@ end
 
 payload.createdAt = (prior and prior.createdAt) or now
 payload.updatedAt = now
-payload.version = ((prior and prior.version) or 0) + 1
+-- Coerce non-numeric prior versions to 0 before incrementing.
+-- cjson.decode maps JSON null to cjson.null (truthy in Lua), so a
+-- stored {"version": null} from a legacy/partial record would
+-- propagate cjson.null into the arithmetic and crash the EVAL.
+local priorVersion = prior and prior.version
+if type(priorVersion) ~= 'number' then priorVersion = 0 end
+payload.version = priorVersion + 1
 
 local encoded = cjson.encode(payload)
 redis.call('HSET', key, addr, encoded)

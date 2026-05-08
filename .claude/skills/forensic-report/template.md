@@ -53,34 +53,40 @@ status: ok / sometimes error
 
 ## Capital and scale
 
-Principal wallet `0x…` holdings:
+Principal wallet `0x…` holdings on chain `<CHAIN_ID>` (the chain you investigated):
 
-- **N TOKEN** (~$X notional) — actually overlaps with the ERC20 since CELO is dual-natured (note this for CELO specifically)
-- $X stablecoin (USDC + USDT split)
-- Some cUSD, cEUR, WETH dust
-- A handful of scam airdrops (CLAIM nodecoin, fake СELO, USDC voucher) — irrelevant noise
+- **`<amount>` `<TOKEN>`** (~$`<usd>` notional) — note any token with dual-native semantics (e.g. CELO is both native gas + ERC20)
+- $`<usd>` stablecoin (split by stablecoin if it matters: USDC / USDT / DAI / chain-native cUSD-cEUR-etc.)
+- `<list any meaningful additional holdings>`
+- A handful of scam airdrops noted only to confirm they're noise (helps a future reader understand why the headline number is what it is)
 
-Estimated **operating capital ≈ $X**. Volume is N txs / D days ≈ one fire every Ts. With $X–$Y trade sizes, this is **[high-frequency small-ticket arb / whale flows / dust-sized testing]** activity — not [the opposite category].
+Estimated **operating capital ≈ $`<usd>`**. Volume is `<N>` txs / `<D>` days ≈ one fire every `<T>`s. With $`<lo>`–$`<hi>` trade sizes, this is **`<high-frequency small-ticket arb / whale flows / dust-sized testing / etc.>`** activity — not `<the opposite category that would otherwise be a reasonable hypothesis>`.
 
 ## Why \_\_\_, why these venues
 
-One paragraph. Don't just say "arbitrage" — name the structural mispricing. For Celo: the Mento broker is oracle-priced for cUSD/cEUR/cKES/etc., so whenever the external market drifts from the Mento oracle, the Broker becomes mispriced vs Uniswap/Sushi/Curve and a searcher routing through both extracts the spread. List the specific venue combinations (CELO/USDC pools at 0.01% and 0.02% fees, Moola Markets wrappers trading at premiums/discounts, axlUSDC↔cUSD on Curve as bridged-vs-Mento dollar arb, Tri-Pool for three-way stable arb). The bot's design (proprietary, unverified, custom selectors, hardcoded principal, allowlist of callers) is a typical "private MEV searcher" setup — name the design pattern explicitly.
+One paragraph. Don't just say "arbitrage" — name the structural mispricing for THIS chain and THESE venues:
+
+- What's the price discovery mechanism on each venue (oracle-priced AMM, constant-product, concentrated liquidity, RFQ)?
+- Which venues drift relative to which, and why (oracle lag, pegged-asset gap, bridge premium, fee-tier asymmetry)?
+- What's the design pattern the contract uses, and what does it tell you about the operator (proprietary closed-source, allowlist-gated, signature-gated, MEV-share opt-out, etc.)?
+
+Connect the behaviour to the on-chain economics — don't just describe, explain.
 
 ## Arkham coverage
 
-What did Arkham return / not return? Run `address_enriched/all` for cross-chain. If Arkham has zero data on the target — common for Celo-native or Monad-native objects since Arkham doesn't index those chains — say so explicitly. Then walk the funder graph through chains Arkham DOES cover. Name how attribution was actually arrived at:
+What did Arkham return / not return? Run `address_enriched/all` for cross-chain. If Arkham has zero data on the target — common when the chain isn't in Arkham's index (e.g. Celo, Monad) — say so explicitly. Then walk the funder graph through chains Arkham DOES cover. Name how attribution was actually arrived at:
 
-> "Arkham has zero data on the target contract or its hot wallets across all 9 chains it covers. The contract is purely a Celo-native object and Celo isn't supported by Arkham. Attribution had to come from the funder graph on chains Arkham does index, which is how `idontloseiwin.eth` surfaced — they funded the Celo operator from Ethereum/Base, and Stargate funded them on Arbitrum."
+> "Arkham has `<some / no>` data on the target across the chains it covers. Attribution came from `<the curated entity / a high-confidence prediction / the funder graph on chains Arkham does index>`: `<the chain on which the surfacing happened>` showed `<persona / entity>` funded `<operator EOA>`, and `<bridge / direct funder>` funded them on `<upstream chain>`."
 
 ## Bottom line
 
 Five bullets, one sentence each. The LITERAL placeholder text is below — replace every value with what you actually found. Do NOT ship the placeholders. The skill's worked-example section (`SKILL.md` → "Worked example") points at the seed report's real bottom line for tone calibration; this template stays placeholder-only so a fresh investigation that copy-pastes blindly doesn't accidentally persist seed facts about a different address.
 
-- **Who**: <persona / entity, one sentence — who's behind this address>
-- **What**: <contract type / behavioural class, one sentence — what does it do>
-- **Where**: <chain + venues, one sentence — which chain, which contracts/pools/protocols it interacts with>
-- **How much**: <capital + op rate, one sentence — working-capital USD, tx volume, time period>
-- **Goal**: <economic objective, one sentence — what's the strategy capturing>
+- **Who**: `<persona / entity, one sentence — who's behind this address>`
+- **What**: `<contract type / behavioural class, one sentence — what does it do>`
+- **Where**: `<chain + venues, one sentence — which chain, which contracts/pools/protocols it interacts with>`
+- **How much**: `<capital + op rate, one sentence — working-capital USD, tx volume, time period>`
+- **Goal**: `<economic objective, one sentence — what's the strategy capturing>`
 
 ---
 
