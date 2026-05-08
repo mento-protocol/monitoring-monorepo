@@ -52,31 +52,36 @@ export default function AddressDetailPage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formDeleting, setFormDeleting] = useState(false);
   const latchedFormSuffixRef = useRef<string>("");
-  // Scope the latch to the *currently mounted* form instance. When the
-  // user navigates to another `/address-book/<addr>` mid-write, the old
-  // form unmounts but its in-flight Promise's `finally` still calls
-  // `onSavingChange(false, oldFormId)`. Without this guard, that stale
-  // callback would clear the new form's latch mid-mutation. The form
-  // passes its `useId()` value with every event; we record the owner on
-  // the leading-edge `true` and ignore trailing `false` calls from any
-  // other instance.
-  const mutationOwnerRef = useRef<string | null>(null);
+  // Scope each latch to the *currently mounted* form instance, with
+  // SEPARATE owner refs per flow. When the user navigates to another
+  // `/address-book/<addr>` mid-write, the old form unmounts but its
+  // in-flight Promise's `finally` still calls `onSavingChange(false,
+  // oldFormId)` — without this guard, that stale callback would clear
+  // the new form's latch mid-mutation. Save and delete need DISTINCT
+  // owner refs: a single shared ref breaks when one flow starts on
+  // form A, the user navigates to form B, and the OTHER flow starts
+  // before A's request resolves. That second start would overwrite
+  // the shared owner, so A's `false` callback would hit a mismatched
+  // ID and never fire `setFormSaving(false)` — leaving `formSaving`
+  // stuck true and the latch permanently held.
+  const savingOwnerRef = useRef<string | null>(null);
+  const deletingOwnerRef = useRef<string | null>(null);
   const handleSavingChange = useCallback((saving: boolean, formId: string) => {
     if (saving) {
-      mutationOwnerRef.current = formId;
+      savingOwnerRef.current = formId;
       setFormSaving(true);
-    } else if (formId === mutationOwnerRef.current) {
-      mutationOwnerRef.current = null;
+    } else if (formId === savingOwnerRef.current) {
+      savingOwnerRef.current = null;
       setFormSaving(false);
     }
   }, []);
   const handleDeletingChange = useCallback(
     (deleting: boolean, formId: string) => {
       if (deleting) {
-        mutationOwnerRef.current = formId;
+        deletingOwnerRef.current = formId;
         setFormDeleting(true);
-      } else if (formId === mutationOwnerRef.current) {
-        mutationOwnerRef.current = null;
+      } else if (formId === deletingOwnerRef.current) {
+        deletingOwnerRef.current = null;
         setFormDeleting(false);
       }
     },
