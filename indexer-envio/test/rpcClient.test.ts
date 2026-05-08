@@ -1,6 +1,7 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { getRpcClient, _clearRpcClients, _testHooks } from "../src/rpc";
+import { getFallbackRpcClient } from "../src/rpc/client";
 
 // ---------------------------------------------------------------------------
 // Env helpers
@@ -13,6 +14,10 @@ const ENV_KEYS = [
   "ENVIO_RPC_URL_11142220",
   "ENVIO_RPC_URL_143",
   "ENVIO_RPC_URL_10143",
+  "ENVIO_RPC_FALLBACK_URL_42220",
+  "ENVIO_RPC_FALLBACK_URL_11142220",
+  "ENVIO_RPC_FALLBACK_URL_143",
+  "ENVIO_RPC_FALLBACK_URL_10143",
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -300,5 +305,105 @@ describe("logRpcFailure", () => {
     assert.equal(cap.warn.length, 2);
     assert.match(cap.warn[0], /error=raw string/);
     assert.match(cap.warn[1], /error=unknown error/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getFallbackRpcClient
+// ---------------------------------------------------------------------------
+
+describe("getFallbackRpcClient", () => {
+  let envSnap: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    envSnap = snapshotEnv();
+    _clearRpcClients();
+  });
+
+  afterEach(() => {
+    restoreEnv(envSnap);
+    _clearRpcClients();
+  });
+
+  it("returns null when primary uses the hardcoded default and no fallback override is set", () => {
+    delete process.env.ENVIO_RPC_URL_143;
+    delete process.env.ENVIO_RPC_FALLBACK_URL_143;
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("returns a client when primary is overridden and the fallback differs from primary", () => {
+    // Mirrors today's prod state: primary = QuickNode override, fallback =
+    // hardcoded rpc2.monad.xyz.
+    process.env.ENVIO_RPC_URL_143 = "https://example.quiknode.pro/auth-token/";
+    delete process.env.ENVIO_RPC_FALLBACK_URL_143;
+    assert.ok(getFallbackRpcClient(143));
+  });
+
+  it("uses ENVIO_RPC_FALLBACK_URL_<chainId> override when set", () => {
+    // Swap: primary = default (rpc2), fallback = explicit override (e.g.
+    // QuickNode). With the old code path this would have returned null
+    // because primary == default; the new code path must return a client.
+    delete process.env.ENVIO_RPC_URL_143;
+    process.env.ENVIO_RPC_FALLBACK_URL_143 =
+      "https://example.quiknode.pro/auth-token/";
+    assert.ok(getFallbackRpcClient(143));
+  });
+
+  it("returns null when the fallback override resolves to the same URL as primary", () => {
+    process.env.ENVIO_RPC_URL_143 = "https://same.example.org/";
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "https://same.example.org/";
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("normalizes trailing-slash differences when comparing primary and fallback URLs", () => {
+    // Without `URL.href` normalization, `"https://x"` !== `"https://x/"` and
+    // we'd spin up a useless self-referencing fallback client.
+    process.env.ENVIO_RPC_URL_143 = "https://same.example.org";
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "https://same.example.org/";
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("treats an empty ENVIO_RPC_FALLBACK_URL_<chainId> as unset", () => {
+    // Hosted secret platforms sometimes surface blank values; falling
+    // through to `http("")` would crash with UrlRequiredError. Behaviour
+    // must match "unset entirely": fall back to the hardcoded default,
+    // which (for chain 143) equals the primary when ENVIO_RPC_URL_143 is
+    // also unset → null fallback.
+    delete process.env.ENVIO_RPC_URL_143;
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "";
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("treats an empty ENVIO_RPC_URL_<chainId> as unset when resolving primary for the same-URL guard", () => {
+    // getRpcClient uses truthiness; getFallbackRpcClient must agree. If we
+    // used `??` and ENVIO_RPC_URL_143 = "", primaryUrl would be "" while
+    // the actual primary is config.default ("https://rpc2.monad.xyz") — the
+    // sameUrl check would miss and we'd return a self-referencing fallback
+    // client at config.default.
+    process.env.ENVIO_RPC_URL_143 = "";
+    delete process.env.ENVIO_RPC_FALLBACK_URL_143;
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("returns null for an unknown chainId", () => {
+    assert.equal(getFallbackRpcClient(999999), null);
+  });
+
+  it("caches the fallback client across calls (same chainId)", () => {
+    process.env.ENVIO_RPC_URL_143 = "https://example.quiknode.pro/auth-token/";
+    const a = getFallbackRpcClient(143);
+    const b = getFallbackRpcClient(143);
+    assert.ok(a);
+    assert.equal(a, b);
+  });
+
+  it("returns null when the resolved fallback URL is a bare HyperRPC endpoint", () => {
+    // Force resolution to a bare HyperRPC URL via the override; without a
+    // token we can't safely fall back to it (HyperRPC requires path-segment
+    // auth, and the call would fail with eth_call unsupported anyway).
+    delete process.env.ENVIO_API_TOKEN;
+    process.env.ENVIO_RPC_URL_143 = "https://example.org/celo";
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "https://10143.rpc.hypersync.xyz/";
+    assert.equal(getFallbackRpcClient(143), null);
   });
 });

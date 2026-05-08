@@ -112,9 +112,11 @@ export function logRpcFailure(
 // ---------------------------------------------------------------------------
 
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
+// Stores `null` explicitly when no fallback applies for a chain — `has()`
+// then short-circuits the env-var + URL recomputation on every call.
 const fallbackRpcClients = new Map<
   number,
-  ReturnType<typeof createPublicClient>
+  ReturnType<typeof createPublicClient> | null
 >();
 
 /** @internal Test-only: clear the cached RPC clients so getRpcClient()
@@ -255,36 +257,84 @@ export function getRpcClient(
 }
 
 /**
- * @internal Exported only so rpc.ts's fetchers can wire it into
- * `readContractWithBlockFallback` calls. Not part of the stable public API
- * — was a private function in the pre-PR-S6 rpc.ts.
+ * Returns a fallback viem public client for the given chainId, or null when
+ * no useful fallback is available.
  *
- * Returns a fallback viem public client for the given chainId.
- * Uses the hardcoded default RPC (public endpoint) — only created when the
- * primary client is a different URL (env-var override). Returns null if the
- * primary already IS the default (no point falling back to the same endpoint).
+ * Resolution:
+ * 1. `ENVIO_RPC_FALLBACK_URL_{chainId}` — explicit per-chain fallback
+ *    override. Use this when the primary you want to swap to (via
+ *    `ENVIO_RPC_URL_{chainId}` unset → hardcoded default) doesn't already
+ *    cover both backfill and live: e.g. set primary to `rpc2.monad.xyz`
+ *    (deeper archive) and fallback to a tokenized QuickNode URL (higher
+ *    rate limit at head).
+ * 2. Hardcoded default in RPC_CONFIG_BY_CHAIN — used when the primary is
+ *    set via env-var override and the default is a different URL.
+ *
+ * Returns null when the resolved fallback URL equals the primary URL (no
+ * point falling back to the same endpoint), or when the resolved URL is a
+ * bare HyperRPC endpoint (HyperRPC doesn't support eth_call).
  */
 export function getFallbackRpcClient(
   chainId: number,
 ): ReturnType<typeof createPublicClient> | null {
   if (fallbackRpcClients.has(chainId)) {
-    return fallbackRpcClients.get(chainId) ?? null;
+    return fallbackRpcClients.get(chainId)!;
   }
   const config = RPC_CONFIG_BY_CHAIN[chainId];
-  if (!config) return null;
+  if (!config) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
-  const fallbackUrl = withHyperRpcToken(config.default);
-  if (isBareHyperRpcUrl(fallbackUrl)) return null;
+  // Treat empty-string env var as unset. Hosted secret platforms sometimes
+  // surface a blank value when an env var is created but not yet filled in;
+  // an empty URL would crash `createPublicClient({ transport: http("") })`
+  // with `UrlRequiredError` and silently disable the fallback path.
+  const fallbackOverrideRaw = process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`];
+  const fallbackOverride =
+    fallbackOverrideRaw && fallbackOverrideRaw.length > 0
+      ? fallbackOverrideRaw
+      : undefined;
+  const fallbackRawUrl = fallbackOverride ?? config.default;
+  const fallbackUrl = withHyperRpcToken(fallbackRawUrl);
+  if (isBareHyperRpcUrl(fallbackUrl)) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
-  const perChainOverride = process.env[config.envVar];
-  const legacyGlobal = process.env.ENVIO_RPC_URL;
-  if (!perChainOverride && !legacyGlobal) return null;
+  // Use truthiness (||), not nullish coalescing (??), so empty-string env
+  // vars fall through to the next source — matching getRpcClient's `if
+  // (perChainOverride)` resolution. Mismatched semantics here would let a
+  // blank ENVIO_RPC_URL_<chainId> resolve `primaryUrl=""` while the actual
+  // primary uses `config.default`, causing the `sameUrl` check below to
+  // miss and produce a self-referencing fallback client.
+  const primaryRawUrl =
+    process.env[config.envVar] || process.env.ENVIO_RPC_URL || config.default;
+  const primaryUrl = withHyperRpcToken(primaryRawUrl);
+  if (sameUrl(fallbackUrl, primaryUrl)) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
   const client = createPublicClient({
     transport: http(fallbackUrl, { batch: true }),
   });
   fallbackRpcClients.set(chainId, client);
   return client;
+}
+
+/** Compare two URLs by their normalized `URL.href`, so e.g.
+ * `"https://rpc2.monad.xyz"` and `"https://rpc2.monad.xyz/"` (with vs without
+ * trailing slash) collapse to equal — which keeps `getFallbackRpcClient` from
+ * spinning up a self-referencing fallback when the user types one variant in
+ * the env var and the hardcoded default uses the other. Falls back to raw
+ * string equality if either input fails to parse. */
+function sameUrl(a: string, b: string): boolean {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return a === b;
+  }
 }
 
 // ---------------------------------------------------------------------------
