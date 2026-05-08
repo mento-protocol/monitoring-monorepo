@@ -531,13 +531,34 @@ export type HeroSnapshotTotals = {
   totalSwapCount: number;
   uniqueTraders: number;
   /** Chain IDs whose latest snapshot's `snapshotDay` is older than
-   * `today - 1 UTC day` — meaning the chain has been silent for ≥1 full
-   * UTC day and the heartbeat-driven flush hasn't run. Their snapshots
-   * are EXCLUDED from the totals above; the page surfaces a banner so
-   * users know the hero KPIs are missing those chains' historical
-   * volume. Empty array when every chain is fresh. */
+   * `today - 2 UTC days` — meaning the chain has been silent for at
+   * least one full UTC day beyond the indexer's normal pre-heartbeat
+   * lag (the heartbeat fires on the first swap of a new UTC day, so
+   * before today's first swap the latest snapshotDay is naturally
+   * `today - 2 days`; only `today - 3+` indicates a real silence).
+   *
+   * Only populated for rolling windows (`7d`, `30d`, `90d`). The `all`
+   * window is cumulative — old snapshots stay correct because empty
+   * intervening days contribute zero volume. The `24h` window is
+   * intentionally written as an empty range by the indexer and is
+   * fully covered by today's partial, so a stale `24h` snapshotDay
+   * carries no missing-data signal.
+   *
+   * Stale rows are EXCLUDED from the totals above; the page surfaces
+   * a banner naming the affected chains. Empty array when every chain
+   * is fresh, when only `all`/`24h` rows are present, or when the
+   * snapshot input is empty. */
   staleChains: number[];
 };
+
+/** Rolling-window keys whose `snapshotDay` is meaningful for staleness
+ *  detection. The other window keys (`all`, `24h`) are deliberately
+ *  excluded — see `HeroSnapshotTotals.staleChains` for the rationale.
+ *  Mirrors `WINDOW_KEYS` in `indexer-envio/src/leaderboardWindowSnapshot.ts`
+ *  (the indexer and dashboard packages don't share types). */
+function isStaleableWindow(windowKey: string): boolean {
+  return windowKey === "7d" || windowKey === "30d" || windowKey === "90d";
+}
 
 /**
  * Sum hero-tile totals across all chains, combining the pre-rolled
@@ -559,12 +580,21 @@ export type HeroSnapshotTotals = {
  * `todayMidnightSeconds` is the UTC midnight of "today" in Unix seconds
  * (must match the unit `snapshotDay` is stored in — see
  * `indexer-envio/schema.graphql` LeaderboardWindowSnapshot.snapshotDay
- * and `indexer-envio/src/helpers.ts:dayBucket`). A snapshot is
- * considered stale when `snapshotDay < todayMidnightSeconds - 86400`,
- * i.e. the snapshot is older than yesterday. Yesterday and today both
- * pass — yesterday is the normal heartbeat cadence (the indexer
- * doesn't write "today" itself, that's filled in client-side from
- * `todayRows`).
+ * and `indexer-envio/src/helpers.ts:dayBucket`).
+ *
+ * Staleness rule: a row is stale when its `windowKey` is one of the
+ * rolling windows (`7d`/`30d`/`90d`) AND `snapshotDay <
+ * todayMidnightSeconds - 2 * 86400`. Two-day cutoff (not one) because
+ * the indexer's heartbeat fires on the first swap of a new UTC day, so
+ * before today's first swap the latest snapshotDay is naturally
+ * `today - 2 days`. Treating that as stale would generate a false
+ * banner on every chain shortly after UTC midnight or on low-activity
+ * chains. Only `today - 3+ days` reliably indicates a real silence.
+ *
+ * `all` and `24h` rows are never marked stale: `all` is cumulative
+ * from epoch (empty days don't invalidate the total), and `24h` is
+ * written as an intentionally-empty range by the indexer and fully
+ * covered by `todayRows` on the dashboard side.
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
@@ -572,18 +602,22 @@ export function mergeHeroSnapshot(args: {
   showSystem: boolean;
   todayMidnightSeconds: number;
 }): HeroSnapshotTotals {
-  // Cutoff: snapshots strictly older than yesterday's UTC midnight are
-  // stale. `todayMidnightSeconds` is today's UTC midnight; subtracting
-  // SECONDS_PER_DAY gives yesterday's UTC midnight. The comparison is
-  // `< cutoff`, so a snapshotDay that equals yesterday's midnight is
-  // INCLUDED — that's the normal heartbeat output.
-  const staleCutoffSeconds = args.todayMidnightSeconds - SECONDS_PER_DAY;
+  // Cutoff: snapshots strictly older than the day-before-yesterday's
+  // UTC midnight are stale. `todayMidnightSeconds` is today's UTC
+  // midnight; subtracting 2 * SECONDS_PER_DAY gives the boundary. The
+  // comparison is `< cutoff`, so a snapshotDay that equals two-days-ago
+  // midnight is INCLUDED — that's the canonical pre-first-swap state
+  // and must not flag the chain stale.
+  const staleCutoffSeconds = args.todayMidnightSeconds - 2 * SECONDS_PER_DAY;
   let totalVolumeUsdWei = BigInt(0);
   let totalSwapCount = 0;
   let uniqueFromSnapshot = 0;
   const staleChains: number[] = [];
   for (const row of args.snapshotRows ?? []) {
-    if (Number(row.snapshotDay) < staleCutoffSeconds) {
+    if (
+      isStaleableWindow(row.windowKey) &&
+      Number(row.snapshotDay) < staleCutoffSeconds
+    ) {
       // Skip stale rows entirely — applies to both showSystem branches
       // because staleness is independent of system-address filtering.
       staleChains.push(row.chainId);
