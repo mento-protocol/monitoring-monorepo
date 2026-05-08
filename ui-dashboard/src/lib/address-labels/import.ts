@@ -189,9 +189,10 @@ export async function handleSnapshot(
         { status: 400 },
       );
     }
-    // Validate keys are valid addresses; drop any that aren't (matches the
-    // labels path's policy of refusing junk keys without poisoning the
-    // import). Use upgradeReports to tolerate partial/legacy shapes.
+    // Reject junk keys / payloads with 400 (matches handleGnosisSafe). The
+    // labels path is more lenient because old snapshots can carry tag-only
+    // entries; reports always have a body, so a malformed payload is a
+    // real error worth surfacing.
     const filtered: Record<string, unknown> = {};
     for (const [addr, raw] of Object.entries(
       body.reports as Record<string, unknown>,
