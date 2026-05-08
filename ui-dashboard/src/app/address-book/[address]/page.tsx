@@ -44,6 +44,14 @@ export default function AddressDetailPage() {
   } = useAddressLabels();
   const { hasReport } = useAddressReportsIndex();
 
+  // Hooks for the form-key latch (see `formKey` derivation below). These
+  // MUST sit above the `if (!valid)` early return so React's hook count
+  // stays stable when the URL param goes from valid → invalid (e.g. user
+  // edits the address bar) — same component instance, different hook
+  // path otherwise crashes the rules-of-hooks check.
+  const [formSaving, setFormSaving] = useState(false);
+  const latchedFormKeyRef = useRef<string>("");
+
   if (!valid) return null;
 
   const resolved = getEntry(address);
@@ -69,10 +77,11 @@ export default function AddressDetailPage() {
   // synced state) avoids the `setState`-in-`useEffect` derived-state
   // anti-pattern — the conditional write is idempotent within a frame
   // (always writes the current `liveFormKey` when `!formSaving`), so
-  // concurrent re-renders are safe.
-  const [formSaving, setFormSaving] = useState(false);
+  // concurrent re-renders are safe. The ref is initialized to `""` and
+  // populated on the first valid render — that initial value is never
+  // observed because `formSaving` starts false, so `formKey` resolves to
+  // `liveFormKey` immediately.
   const liveFormKey = `${address}:${entry ? `custom:${entry.updatedAt}` : formInitial ? "contract" : "new"}`;
-  const latchedFormKeyRef = useRef(liveFormKey);
   if (!formSaving) {
     latchedFormKeyRef.current = liveFormKey;
   }

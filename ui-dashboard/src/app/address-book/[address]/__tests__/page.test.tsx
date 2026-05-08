@@ -115,6 +115,32 @@ describe("AddressDetailPage — invalid address", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("stable hook count when an address goes valid → invalid on the same component instance (rules-of-hooks regression)", () => {
+    // Cursor flagged that placing the form-key latch's `useState` /
+    // `useRef` *after* the `if (!valid) return null` early return would
+    // trip React's hooks-count check the moment a user typed garbage into
+    // the URL bar (same component instance, fewer hooks the next render →
+    // crash). Pin the fix: re-render the same root with first a valid
+    // address, then an invalid one. React would throw "Rendered fewer
+    // hooks than expected" if the new hooks were still gated by the
+    // early return.
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockParamsAddress = VALID_ADDR;
+    render();
+    expect(container.querySelector("h1")).not.toBeNull();
+
+    mockParamsAddress = "not-an-address";
+    expect(() => render()).not.toThrow();
+    // No "Rendered fewer hooks" or "Rules of Hooks" error logged.
+    const errorCalls = consoleErrorSpy.mock.calls
+      .map((c) => String(c[0] ?? ""))
+      .filter((s) => /hook/i.test(s));
+    expect(errorCalls).toEqual([]);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("redirects gracefully on a malformed percent-encoded URL (e.g. /%zz) instead of throwing", () => {
     // Cursor flagged that an unguarded `decodeURIComponent` would throw
     // `URIError` and dump the user into the error boundary. Pin the
