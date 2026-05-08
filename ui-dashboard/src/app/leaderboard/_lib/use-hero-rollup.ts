@@ -43,7 +43,14 @@ import type { Venue } from "./url-state";
  * slice is small but its derivation chain is dense — naming the slice
  * keeps the parent client readable.
  */
-export function useHeroRollup(args: {
+export function useHeroRollup({
+  venue,
+  range,
+  showSystem,
+  isSystemAddressIn,
+  utcDayKey,
+  kpiSource,
+}: {
   venue: Venue;
   range: LeaderboardRangeKey;
   showSystem: boolean;
@@ -75,13 +82,11 @@ export function useHeroRollup(args: {
   // added client-side.
   const heroV3Result = useGQL<{
     LeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(args.venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, {
-    windowKey: args.range,
-  });
+  }>(venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, { windowKey: range });
   const heroV2Result = useGQL<{
     BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(args.venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null, {
-    windowKey: args.range,
+  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null, {
+    windowKey: range,
   });
 
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
@@ -90,27 +95,27 @@ export function useHeroRollup(args: {
   // every minute.
   const todayMidnight = useMemo(
     () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-    [args.utcDayKey],
+    [utcDayKey],
   );
   const todayV3Result = useGQL<{
     TraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(args.venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null, {
+  }>(venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null, {
     todayMidnight,
-    isSystemAddressIn: args.isSystemAddressIn,
+    isSystemAddressIn,
   });
   const todayV2Result = useGQL<{
     BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(args.venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null, {
+  }>(venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null, {
     todayMidnight,
-    isSystemAddressIn: args.isSystemAddressIn,
+    isSystemAddressIn,
   });
 
   const snapshotRows =
-    args.venue === "v3"
+    venue === "v3"
       ? heroV3Result.data?.LeaderboardWindowSnapshot
       : heroV2Result.data?.BrokerLeaderboardWindowSnapshot;
   const todayPartialRows =
-    args.venue === "v3"
+    venue === "v3"
       ? todayV3Result.data?.TraderDailySnapshot
       : todayV2Result.data?.BrokerTraderDailySnapshot;
 
@@ -119,40 +124,38 @@ export function useHeroRollup(args: {
       mergeHeroSnapshot({
         snapshotRows,
         todayRows: todayPartialRows,
-        showSystem: args.showSystem,
+        showSystem,
         todayMidnightSeconds: todayMidnight,
       }),
-    [snapshotRows, todayPartialRows, args.showSystem, todayMidnight],
+    [snapshotRows, todayPartialRows, showSystem, todayMidnight],
   );
   const totalVolume = useMemo(
     () => weiToUsd(heroTotals.totalVolumeUsdWei),
     [heroTotals.totalVolumeUsdWei],
   );
 
-  // Source list for top-10 concentration's numerator (top-50 paginated
-  // per-day query). Denominator is the exact snapshot total above. The
-  // helper applies the same stale-chain mask to numerator AND denominator
-  // so the ratio stays coherent when a chain is silent — see
-  // `top10Concentration` JSDoc in `lib/leaderboard.ts` for the rationale.
+  // Stale-chain mask is applied to numerator AND denominator in
+  // `top10Concentration` — denominator already excludes them via
+  // `mergeHeroSnapshot` — see that helper's JSDoc in `lib/leaderboard.ts`.
   const concentration = useMemo(
     () =>
       top10Concentration({
-        rowsByVolumeDesc: args.kpiSource,
+        rowsByVolumeDesc: kpiSource,
         totalVolumeUsdWei: heroTotals.totalVolumeUsdWei,
         staleChains: heroTotals.staleChains,
       }),
-    [args.kpiSource, heroTotals.totalVolumeUsdWei, heroTotals.staleChains],
+    [kpiSource, heroTotals.totalVolumeUsdWei, heroTotals.staleChains],
   );
 
   // Tiles + chart load when the hero snapshot AND its today-partial both
   // land. The top-50 table loads independently from the existing
   // TraderDailySnapshot query (which is fast — capped at 1000 by design).
   const isLoading =
-    args.venue === "v3"
+    venue === "v3"
       ? heroV3Result.isLoading || todayV3Result.isLoading
       : heroV2Result.isLoading || todayV2Result.isLoading;
   const hasError =
-    args.venue === "v3"
+    venue === "v3"
       ? !!heroV3Result.error || !!todayV3Result.error
       : !!heroV2Result.error || !!todayV2Result.error;
 
