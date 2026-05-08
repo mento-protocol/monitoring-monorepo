@@ -31,6 +31,13 @@ import { isValidAddress } from "@/lib/format";
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 1024;
 const INFLIGHT_MAX_ENTRIES = 64;
+// Sentry capture throttle per cache key. The SWR hook polls every 60s, and
+// `rpc_failed` results are intentionally not cached, so during a sustained
+// upstream outage every poll cycle from every open tab would fire a
+// separate Sentry event without this. 5 minutes is enough to surface a
+// real incident without flooding — a longer outage still gets a steady
+// trickle of captures so PagerDuty/triage knows it's still ongoing.
+const SENTRY_MIN_INTERVAL_MS = 5 * 60_000;
 
 // Cacheable degraded outcomes: reflect immutable on-chain truth (no contract,
 // not a VP, governance-removed exchange). Transient `rpc_failed` is NOT
@@ -50,6 +57,7 @@ type CacheEntry = {
 
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<ResolveV2Result>>();
+const lastSentryAt = new Map<string, number>();
 
 function setCacheEntry(key: string, entry: CacheEntry): void {
   if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(key)) {
@@ -57,6 +65,21 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
     if (oldest !== undefined) cache.delete(oldest);
   }
   cache.set(key, entry);
+}
+
+/** Throttled Sentry capture. Returns `true` when capture fired so callers
+ *  can branch (e.g. log to console only on the throttled path). Bounded by
+ *  the 1024-entry cache via the same key set, so memory stays flat. */
+function maybeCaptureSentry(
+  key: string,
+  fire: () => void,
+  now: number = Date.now(),
+): boolean {
+  const last = lastSentryAt.get(key) ?? 0;
+  if (now - last < SENTRY_MIN_INTERVAL_MS) return false;
+  lastSentryAt.set(key, now);
+  fire();
+  return true;
 }
 
 export async function GET(
@@ -127,19 +150,43 @@ export async function GET(
     if (inFlight.size >= INFLIGHT_MAX_ENTRIES) {
       return NextResponse.json({ error: "Server busy" }, { status: 503 });
     }
+    // Sentry captures live INSIDE the in-flight promise (not in the per-
+    // request `await` block) so they fire once per upstream RPC call, not
+    // once per concurrent waiter on the same key. The per-key throttle then
+    // dedupes captures across successive cache cycles during a sustained
+    // outage — without it, the SWR hook polling every 60s × N open tabs
+    // would still flood Sentry on the second-and-beyond minutes.
     pending = resolveV2ExchangeConfig(poolAddress, rpcUrl, chainId)
       .then((result) => {
         // Only cache stable outcomes (ok:true or ok:false with a non-transient
         // reason). Transient transport failures (`rpc_failed`) propagate to
-        // the catch block below and surface as 502 — caching them would mask
+        // the awaiter below and surface as 502 — caching them would mask
         // provider outages.
         if (isCacheable(result)) {
           setCacheEntry(key, {
             result,
             expiresAt: Date.now() + CACHE_TTL_MS,
           });
+        } else if (!result.ok && result.reason === "rpc_failed") {
+          maybeCaptureSentry(key, () => {
+            Sentry.captureMessage("v2-exchange-config: upstream RPC failure", {
+              tags: { route: "v2-exchange-config", network: networkId },
+              extra: { poolAddress },
+            });
+          });
         }
         return result;
+      })
+      .catch((err) => {
+        // Synchronous throw from `resolveV2ExchangeConfig` (programmer error,
+        // viem internal). Same throttle applies.
+        maybeCaptureSentry(key, () => {
+          Sentry.captureException(err, {
+            tags: { route: "v2-exchange-config", network: networkId },
+          });
+        });
+        console.error("[v2-exchange-config]", networkId, poolAddress, err);
+        throw err;
       })
       .finally(() => {
         inFlight.delete(key);
@@ -150,30 +197,15 @@ export async function GET(
   try {
     const result = await pending;
     if (!result.ok && result.reason === "rpc_failed") {
-      // Surface as 502 with the same redaction discipline as the
-      // rebalance-check route would once it has redaction. Forno (today's
-      // only RPC for VirtualPool chains) doesn't embed secrets, so we don't
-      // need redaction yet — but Sentry capture must still happen so
-      // operators see real upstream incidents instead of cached degraded UI.
-      Sentry.captureMessage("v2-exchange-config: upstream RPC failure", {
-        tags: { route: "v2-exchange-config", network: networkId },
-        extra: { poolAddress },
-      });
       return NextResponse.json(
         { error: "Upstream RPC error" },
         { status: 502 },
       );
     }
     return NextResponse.json(serializeResult(result));
-  } catch (err) {
-    // Catches anything `resolveV2ExchangeConfig` throws outside its
-    // try/catch (programmer error, viem internal). Forno doesn't embed
-    // secrets; if other RPC providers (with path-embedded API keys) are
-    // added, redact here like rebalance-check/route.ts does.
-    Sentry.captureException(err, {
-      tags: { route: "v2-exchange-config", network: networkId },
-    });
-    console.error("[v2-exchange-config]", networkId, poolAddress, err);
+  } catch {
+    // The in-flight resolver already captured + logged this. Map to 502 here
+    // and stop — re-capturing would defeat the per-key throttle.
     return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }
 }

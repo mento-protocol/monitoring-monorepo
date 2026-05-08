@@ -339,3 +339,76 @@ describe("GET /api/v2-exchange-config — in-flight dedup", () => {
     expect(mockResolveV2ExchangeConfig).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("GET /api/v2-exchange-config — Sentry throttle", () => {
+  it("fires Sentry once when N concurrent waiters share an rpc_failed in-flight promise", async () => {
+    let resolveResolver!: (v: unknown) => void;
+    const pending = new Promise((res) => {
+      resolveResolver = res;
+    });
+    mockResolveV2ExchangeConfig.mockReturnValueOnce(pending);
+
+    const { GET } = await loadRoute();
+
+    // Three concurrent requests for the same pool — all join the same in-
+    // flight promise. The fix moves the Sentry capture into the in-flight
+    // resolver so it fires once per upstream call, not once per waiter.
+    const reqs = [0, 0, 0].map(() =>
+      GET(
+        new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL)),
+        ctxFor(MAINNET_CHAIN_ID, POOL),
+      ),
+    );
+
+    resolveResolver({ ok: false, reason: "rpc_failed" });
+    const results = await Promise.all(reqs);
+
+    expect(results.map((r) => r.status)).toEqual([502, 502, 502]);
+    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledTimes(1);
+    expect(mockSentryCaptureMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("throttles successive rpc_failed captures within the 5-minute window", async () => {
+    mockResolveV2ExchangeConfig.mockResolvedValue({
+      ok: false,
+      reason: "rpc_failed",
+    });
+    const { GET } = await loadRoute();
+
+    // First failure fires Sentry; rpc_failed isn't cached, so the second
+    // request hits the resolver again — but the throttle should suppress
+    // the second capture (both calls land within the 5-minute window).
+    await GET(
+      new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL)),
+      ctxFor(MAINNET_CHAIN_ID, POOL),
+    );
+    await GET(
+      new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL)),
+      ctxFor(MAINNET_CHAIN_ID, POOL),
+    );
+
+    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledTimes(2);
+    expect(mockSentryCaptureMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not throttle captures across distinct cache keys", async () => {
+    mockResolveV2ExchangeConfig.mockResolvedValue({
+      ok: false,
+      reason: "rpc_failed",
+    });
+    const { GET } = await loadRoute();
+    const POOL_B = "0x" + "b".repeat(40);
+
+    await GET(
+      new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL)),
+      ctxFor(MAINNET_CHAIN_ID, POOL),
+    );
+    await GET(
+      new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL_B)),
+      ctxFor(MAINNET_CHAIN_ID, POOL_B),
+    );
+
+    // Distinct pools → distinct keys → both fire.
+    expect(mockSentryCaptureMessage).toHaveBeenCalledTimes(2);
+  });
+});

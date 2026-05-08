@@ -93,12 +93,19 @@ function lookupPricingModuleName(
  * Pure: no caching. Caller decides TTL (the `/api/v2-exchange-config` route
  * caches at the HTTP layer).
  */
+/** Per-call RPC deadline. Forno's median latency is sub-second; 15s leaves
+ *  plenty of headroom while bounding worst-case hang time. Without this, a
+ *  provider that accepts the connection but never responds would hold an
+ *  inFlight slot in the route until process restart, eventually filling the
+ *  64-entry cap and 503'ing every subsequent virtual-pool page request. */
+const RPC_TIMEOUT_MS = 15_000;
+
 export async function resolveV2ExchangeConfig(
   poolAddress: string,
   rpcUrl: string,
   chainId: number,
 ): Promise<ResolveV2Result> {
-  const client = getViemClient(rpcUrl);
+  const client = getViemClient(rpcUrl, { timeoutMs: RPC_TIMEOUT_MS });
   const code = await client.getCode({
     address: poolAddress as `0x${string}`,
   });
