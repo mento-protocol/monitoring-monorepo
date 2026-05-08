@@ -117,7 +117,7 @@ FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
   if (isKnownFeeToken(event.chainId, token0)) {
     context.addERC20FeeToken(token0);
   } else {
-    console.warn(
+    context.log.warn(
       `[FPMMFactory] Rejecting fee-token registration for unknown token0=${token0} ` +
         `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +
         `Bump @mento-protocol/contracts if this token is legitimate.`,
@@ -127,7 +127,7 @@ FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
   if (isKnownFeeToken(event.chainId, token1)) {
     context.addERC20FeeToken(token1);
   } else {
-    console.warn(
+    context.log.warn(
       `[FPMMFactory] Rejecting fee-token registration for unknown token1=${token1} ` +
         `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +
         `Bump @mento-protocol/contracts if this token is legitimate.`,
