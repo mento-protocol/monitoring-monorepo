@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
@@ -67,23 +67,39 @@ type Props = {
   address: string;
   /** Pre-filled values when editing an existing entry. */
   initial?: AddressEntry;
+  /**
+   * Bubbles the typed address up to the parent every time it changes (only
+   * in new-address mode — the input only renders when `address === ""`).
+   * The modal listens for this so the Forensic Report tab can read the
+   * draft instead of the empty initial prop. The detail page never
+   * triggers it (always opens with a non-empty URL address) and can omit
+   * this prop.
+   */
+  onAddressChange?: (next: string) => void;
   /** Called after a successful save. The modal uses this to close itself; the detail page can use it for revalidation/toast. */
   onSaved?: () => void;
   /** Called after a successful delete. Modal closes here; detail page navigates back. */
   onDeleted?: () => void;
   /** When provided, renders a Cancel button in the form footer. Used by the modal. */
   onCancel?: () => void;
-  /** Autofocus the first input on mount. Modal sets this true; the detail page leaves it false to avoid hijacking page-load focus. */
-  focusOnMount?: boolean;
+  /**
+   * Optional ref attached to the form's first focusable field (address input
+   * in new-address mode, name input otherwise). The modal owns focus
+   * management and calls `.focus()` AFTER `dialog.showModal()` settles —
+   * doing it inside this component would race the dialog's own focus steps
+   * and land focus on the dialog's close button instead of the field.
+   */
+  firstFieldRef?: RefObject<HTMLInputElement | null>;
 };
 
 export function AddressLabelForm({
   address: initialAddress,
   initial,
+  onAddressChange,
   onSaved,
   onDeleted,
   onCancel,
-  focusOnMount: shouldFocus = false,
+  firstFieldRef,
 }: Props) {
   const {
     upsertEntry,
@@ -91,7 +107,10 @@ export function AddressLabelForm({
     isCustom: isCustomLabel,
     customEntries,
   } = useAddressLabels();
-  const firstInputRef = useRef<HTMLInputElement>(null);
+  const internalFirstInputRef = useRef<HTMLInputElement>(null);
+  // Use the parent's ref when provided (modal); otherwise an internal ref
+  // exists so the JSX still has a stable target.
+  const firstInputRef = firstFieldRef ?? internalFirstInputRef;
 
   const isNewAddress = initialAddress === "";
 
@@ -109,10 +128,6 @@ export function AddressLabelForm({
     const all = new Set([...SUGGESTED_TAGS, ...used]);
     return [...all].sort((a, b) => a.localeCompare(b));
   }, [customEntries]);
-
-  useEffect(() => {
-    if (shouldFocus) firstInputRef.current?.focus();
-  }, [shouldFocus]);
 
   // When editing an existing contract row (not a new address, no custom label yet),
   // label is optional — empty means "keep the contract name".
@@ -192,7 +207,10 @@ export function AddressLabelForm({
               id="al-address"
               type="text"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                onAddressChange?.(e.target.value);
+              }}
               placeholder="0x…"
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />

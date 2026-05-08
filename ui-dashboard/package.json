@@ -52,6 +52,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-plotly.js": "^2.6.4",
     "@vitest/coverage-v8": "^4.0.18",
+    "axe-core": "^4.11.4",
     "eslint": "^10.0.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-unused-imports": "^4.2.0",
@@ -60,6 +61,7 @@
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "vitest-axe": "1.0.0-pre.5"
   }
 }

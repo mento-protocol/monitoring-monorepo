@@ -484,101 +484,13 @@ export {
   type PoolDailyVolumeRow,
 } from "@/lib/leaderboard-pool";
 
-// ─── Hero KPI rollup ──────────────────────────────────────────────────────
-//
-// The hero tiles (total volume / total swaps / unique traders) read the
-// pre-rolled LeaderboardWindowSnapshot for the [windowStart, yesterday]
-// range and add today's partial from a small TraderDailySnapshot direct
-// query. `mergeHeroSnapshot` does the addition.
-//
-// Concentration % is NOT computed here — the caller divides the top-50
-// query's top-10 sum by `mergeHeroSnapshot().totalVolumeUsdWei` to get
-// an exact ratio. We deliberately avoid pre-rolling top-N volumes
-// indexer-side: top-50 is exact via the existing query (see
-// queries/leaderboard.ts lemma), and the snapshot only needs to supply
-// the exact denominator.
-
-/** Wire shape of LeaderboardWindowSnapshot / BrokerLeaderboardWindowSnapshot
- *  rows. Both v3 and v2 GraphQL queries return the same fields. The primary
- *  total* fields exclude system addresses; the *IncludingSystem siblings
- *  feed the "Show system addresses = on" toggle. */
-export type LeaderboardWindowRow = {
-  id: string;
-  chainId: number;
-  windowKey: string;
-  snapshotDay: string;
-  windowStartDay: string;
-  totalVolumeUsdWei: string;
-  totalVolumeUsdWeiIncludingSystem: string;
-  totalSwapCount: number;
-  totalSwapCountIncludingSystem: number;
-  uniqueTraders: number;
-  uniqueTradersIncludingSystem: number;
-};
-
-/** Wire shape of today's partial trader-day rows. v3 and v2 share this
- *  minimal subset (we only need volume + swap count + system flag). */
-export type LeaderboardTodayTraderRow = {
-  chainId: number;
-  trader: string;
-  volumeUsdWei: string;
-  swapCount: number;
-  isSystemAddress: boolean;
-};
-
-export type HeroSnapshotTotals = {
-  totalVolumeUsdWei: bigint;
-  totalSwapCount: number;
-  uniqueTraders: number;
-};
-
-/**
- * Sum hero-tile totals across all chains, combining the pre-rolled
- * [windowStart, yesterday] snapshot with today's partial.
- *
- * `showSystem` selects between the snapshot's primary fields (system
- * excluded — matches the dashboard's default view and the table's
- * filter) and the *IncludingSystem variants. Today's rows are
- * pre-filtered by the `isSystemAddressIn` query variable, so the
- * showSystem branch only filters out anything that snuck through.
- *
- * The unique-trader count adds the snapshot's count to today's
- * distinct-trader count without de-duplicating across the two sources.
- * A trader active both in the snapshot range AND today is counted twice.
- * Acceptable for the hero tile (today's distinct count is small — usually
- * <50 — and the overcount is at most that). Follow-up if precision is
- * needed: ship a `distinctTraders: [String!]!` array on the snapshot.
- */
-export function mergeHeroSnapshot(args: {
-  snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
-  todayRows: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
-  showSystem: boolean;
-}): HeroSnapshotTotals {
-  let totalVolumeUsdWei = BigInt(0);
-  let totalSwapCount = 0;
-  let uniqueFromSnapshot = 0;
-  for (const row of args.snapshotRows ?? []) {
-    if (args.showSystem) {
-      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWeiIncludingSystem);
-      totalSwapCount += row.totalSwapCountIncludingSystem;
-      uniqueFromSnapshot += row.uniqueTradersIncludingSystem;
-    } else {
-      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWei);
-      totalSwapCount += row.totalSwapCount;
-      uniqueFromSnapshot += row.uniqueTraders;
-    }
-  }
-  // Today's rows: sum volume / swaps and count distinct traders.
-  const todayTraders = new Set<string>();
-  for (const row of args.todayRows ?? []) {
-    if (!args.showSystem && row.isSystemAddress) continue;
-    totalVolumeUsdWei += BigInt(row.volumeUsdWei);
-    totalSwapCount += row.swapCount;
-    todayTraders.add(`${row.chainId}-${row.trader}`);
-  }
-  return {
-    totalVolumeUsdWei,
-    totalSwapCount,
-    uniqueTraders: uniqueFromSnapshot + todayTraders.size,
-  };
-}
+// Hero KPI rollup (mergeHeroSnapshot, top10Concentration, related types)
+// is in `lib/leaderboard-hero.ts` to keep this file under the 600-line
+// soft cap. Re-exported below so existing imports keep working.
+export {
+  mergeHeroSnapshot,
+  top10Concentration,
+  type HeroSnapshotTotals,
+  type LeaderboardTodayTraderRow,
+  type LeaderboardWindowRow,
+} from "@/lib/leaderboard-hero";

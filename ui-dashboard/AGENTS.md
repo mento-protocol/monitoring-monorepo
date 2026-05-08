@@ -89,6 +89,7 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 
 - Toasts and any dynamically-changing status text MUST live inside an element with `role="status"` (polite) or `role="alert"` (assertive)
 - Sortable table headers expose `aria-sort` (already enforced by the stateful-data-ui checklist)
+- High-signal axe-core checks live under `src/__tests__/a11y/` (badges, sortable tables, controls, skeletons). They run as part of `pnpm test`. Add a test there for any new shared semantic component (badge / pill / radiogroup / tablist / labelled control) so a refactor that drops the accessible name fails CI deterministically. Plotly internals are explicitly out of scope.
 
 ### URL state in client-only tables / filters
 
