@@ -100,6 +100,15 @@ type Props = {
    * modal doesn't need this — its key is stable across opens.
    */
   onSavingChange?: (saving: boolean) => void;
+  /**
+   * Same as `onSavingChange` but for the delete flow. `deleteEntry`'s
+   * optimistic update REMOVES the entry, transitioning the page key from
+   * `custom:<updatedAt>` → `new`. Without this latch, a fresh form
+   * (`deleting=false`) mounts mid-DELETE and a save typed into it can
+   * race the in-flight DELETE — if the DELETE completes last it wipes
+   * out the just-saved label.
+   */
+  onDeletingChange?: (deleting: boolean) => void;
 };
 
 export function AddressLabelForm({
@@ -111,6 +120,7 @@ export function AddressLabelForm({
   onCancel,
   firstFieldRef,
   onSavingChange,
+  onDeletingChange,
 }: Props) {
   const {
     upsertEntry,
@@ -190,6 +200,7 @@ export function AddressLabelForm({
   // are display aliases.
   async function handleDelete() {
     setDeleting(true);
+    onDeletingChange?.(true);
     setError(null);
     try {
       await deleteEntry(address);
@@ -198,6 +209,7 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to delete label.");
     } finally {
       setDeleting(false);
+      onDeletingChange?.(false);
     }
   }
 

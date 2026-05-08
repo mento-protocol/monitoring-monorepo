@@ -318,4 +318,68 @@ describe("AddressLabelForm — delete flow", () => {
     expect(mockDeleteEntry).toHaveBeenCalledWith(VALID_ADDR);
     expect(onDeleted).toHaveBeenCalledTimes(1);
   });
+
+  it("fires onDeletingChange(true) before delete and onDeletingChange(false) after — pins the detail-page latch during in-flight deletes", async () => {
+    // Codex round 6 P2: optimistic delete removes `entry` from SWR
+    // state, the page's form key flips from `custom:<updatedAt>` →
+    // `new`, the form remounts with `deleting=false`, and a quick save
+    // typed into it can race the in-flight DELETE. The page latches on
+    // formMutating = formSaving || formDeleting; this test pins the
+    // contract that the delete callback feeds the latch.
+    mockIsCustom.mockReturnValue(true);
+    let resolveDelete: () => void = () => undefined;
+    mockDeleteEntry.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+    const onDeletingChange = vi.fn();
+    render({
+      address: VALID_ADDR,
+      initial: {
+        name: "Existing",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      onDeletingChange,
+    });
+
+    act(() => {
+      clickByText("Remove label");
+    });
+    expect(onDeletingChange).toHaveBeenCalledWith(true);
+    expect(onDeletingChange).not.toHaveBeenCalledWith(false);
+
+    await act(async () => {
+      resolveDelete();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+  });
+
+  it("fires onDeletingChange(false) on delete failure — latch must release even on error", async () => {
+    mockIsCustom.mockReturnValue(true);
+    mockDeleteEntry.mockRejectedValueOnce(new Error("upstash down"));
+    const onDeletingChange = vi.fn();
+    render({
+      address: VALID_ADDR,
+      initial: {
+        name: "Existing",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      onDeletingChange,
+    });
+    await act(async () => {
+      clickByText("Remove label");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "upstash down",
+    );
+  });
 });

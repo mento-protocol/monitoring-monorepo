@@ -2,9 +2,17 @@ import type { Metadata } from "next";
 import { getLabel } from "@/lib/address-labels";
 import { isValidAddress, truncateAddress } from "@/lib/format";
 
-// 60s matches the labels SWR refresh; OG metadata that lags a label rename
-// by ≤1min is acceptable and avoids per-request Redis hits on shared links.
-export const revalidate = 60;
+// Disable ISR caching — `generateMetadata` reads the live label and
+// returns the fallback shape unless `isPublic === true`. With a
+// non-zero `revalidate`, an editor toggling `Visible to public` from
+// true → false would still see the prior (public) `<title>`/OG tags
+// served from the edge cache for up to the cache window, leaking the
+// label/tags/source after revocation. The privacy gate must be
+// honoured immediately; per-request Redis cost is bounded by
+// `withTimeout(METADATA_FETCH_TIMEOUT_MS)` and only fires when a
+// crawler / shared-link preview hits the URL (regular page loads
+// already read labels from the client-side SWR provider).
+export const revalidate = 0;
 
 const FALLBACK_TITLE = "Address — Address Book — Mento Analytics";
 const FALLBACK_DESCRIPTION = "Mento address book — labels and forensic reports";

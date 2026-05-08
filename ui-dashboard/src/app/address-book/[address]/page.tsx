@@ -50,7 +50,8 @@ export default function AddressDetailPage() {
   // edits the address bar) — same component instance, different hook
   // path otherwise crashes the rules-of-hooks check.
   const [formSaving, setFormSaving] = useState(false);
-  const latchedFormKeyRef = useRef<string>("");
+  const [formDeleting, setFormDeleting] = useState(false);
+  const latchedFormSuffixRef = useRef<string>("");
 
   if (!valid) return null;
 
@@ -63,29 +64,39 @@ export default function AddressDetailPage() {
   // modal flow in `AddressBookClient`.
   const formInitial = entry ?? findContractInitial(address);
 
-  // Pin the form's remount key during in-flight local saves. `upsertEntry`'s
-  // optimistic SWR update bumps `entry.updatedAt` synchronously, and the
-  // key includes that timestamp (so a teammate's remote edit forces a
-  // remount that prevents a stale-state overwrite — see codex round 4).
-  // Without this latch, the saving form unmounts mid-PUT and a fresh form
-  // mounts with `saving=false`, re-enabling the Save button for a window
-  // where a double-click could submit overlapping writes despite the
-  // form's local saving guard. The form drives `formSaving` via
-  // `onSavingChange`; the ref below snaps to the live key only when no
-  // save is in flight, so the cross-tab/teammate-edit remount path still
-  // fires the moment the local save settles. Using a ref (vs. effect-
-  // synced state) avoids the `setState`-in-`useEffect` derived-state
-  // anti-pattern — the conditional write is idempotent within a frame
-  // (always writes the current `liveFormKey` when `!formSaving`), so
-  // concurrent re-renders are safe. The ref is initialized to `""` and
-  // populated on the first valid render — that initial value is never
-  // observed because `formSaving` starts false, so `formKey` resolves to
-  // `liveFormKey` immediately.
-  const liveFormKey = `${address}:${entry ? `custom:${entry.updatedAt}` : formInitial ? "contract" : "new"}`;
-  if (!formSaving) {
-    latchedFormKeyRef.current = liveFormKey;
+  // Pin the form's remount key during any in-flight local mutation
+  // (save OR delete). Both `upsertEntry` and `deleteEntry` apply
+  // optimistic SWR updates that flip the entry shape — saves bump
+  // `entry.updatedAt`, deletes remove `entry` entirely — and the key
+  // includes both signals (so teammate-side remote edits force a
+  // remount that prevents a stale-state overwrite — codex round 4).
+  // Without this latch, the in-flight form unmounts mid-PUT/DELETE and
+  // a fresh one mounts with `saving=false`/`deleting=false`,
+  // re-enabling Save / Remove for a window where a double-click could
+  // submit overlapping writes despite the form's local guards.
+  //
+  // The latch is split: the address prefix always tracks the current
+  // URL param, so navigating to a different address mid-save still
+  // remounts the form (otherwise a wedged save on the previous
+  // address could keep the sidebar editing it indefinitely). Only the
+  // `entry`/`formInitial` suffix is latched. The ref is initialized to
+  // `""` and populated on the first valid render — the empty initial
+  // is never observed because `formSaving`/`formDeleting` both start
+  // false, so `formKey` resolves to `liveFormSuffix` on first render.
+  // Using a ref (vs. effect-synced state) avoids the
+  // `setState`-in-`useEffect` derived-state anti-pattern — the
+  // conditional write is idempotent within a frame, so concurrent
+  // re-renders are safe.
+  const formMutating = formSaving || formDeleting;
+  const liveFormSuffix = entry
+    ? `custom:${entry.updatedAt}`
+    : formInitial
+      ? "contract"
+      : "new";
+  if (!formMutating) {
+    latchedFormSuffixRef.current = liveFormSuffix;
   }
-  const formKey = formSaving ? latchedFormKeyRef.current : liveFormKey;
+  const formKey = `${address}:${formMutating ? latchedFormSuffixRef.current : liveFormSuffix}`;
 
   return (
     <div className="space-y-6">
@@ -161,6 +172,7 @@ export default function AddressDetailPage() {
               address={address}
               initial={formInitial}
               onSavingChange={setFormSaving}
+              onDeletingChange={setFormDeleting}
               // No onSaved/onDeleted callbacks — the provider's optimistic
               // update + SWR revalidate already refresh the page data. No
               // navigation on save; users stay on the page to keep editing.
