@@ -9,6 +9,7 @@ import {
   getFlatLabels,
   getLabelsByAddress,
   importLabels,
+  mergeEntries,
   readLegacyScopes,
 } from "@/lib/address-labels";
 
@@ -95,10 +96,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(body);
     }
 
-    // Build the flat merged map. Seed with pre-existing flat entries first
-    // so user PUTs made during the dual-read transition window aren't
-    // silently overwritten by stale legacy data; mergeEntries' updatedAt
-    // tiebreaker still picks the freshest scalar fields per address.
+    // Build the flat merged map.
+    //
+    // Pre-existing flat entries are AUTHORITATIVE — a user PUT during the
+    // deploy → migration window already inherited legacy provenance via
+    // `derivePreservedSource(getLabel(...))`, so the flat row IS the
+    // intended state for that address. If we merged legacy back in,
+    // `mergeEntries`' tag-union would resurrect tags the user just removed
+    // and the `notes ?? older.notes` fallback would resurrect notes the
+    // user just cleared. Skip the legacy walk for any address with a flat
+    // entry and surface the per-address source list as a single-element
+    // `["labels"]` for the response payload.
+    //
+    // Multi-legacy collisions (the same address in two legacy scopes, e.g.
+    // `labels:global` + `labels:42220`) still go through `mergeEntries` —
+    // there's no flat entry to defer to and the tag-union semantics are
+    // the right call there.
     const merged: Record<string, AddressEntry> = {};
     const sourcesByAddress = new Map<string, string[]>();
 
@@ -111,10 +124,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     for (const { key, entries } of scopes) {
       for (const [address, entry] of Object.entries(entries)) {
         const lower = address.toLowerCase();
+        const sources = sourcesByAddress.get(lower);
+        // Flat entry already authoritative — record the legacy source for
+        // visibility but don't merge.
+        if (sources?.[0] === "labels") {
+          sources.push(key);
+          continue;
+        }
         const prior = merged[lower];
         if (prior) {
           merged[lower] = mergeEntries(prior, entry);
-          sourcesByAddress.get(lower)?.push(key);
+          sources?.push(key);
         } else {
           merged[lower] = entry;
           sourcesByAddress.set(lower, [key]);
@@ -146,10 +166,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Always back up before mutating Redis. Snapshot uses the importable
-    // shape (`{exportedAt, global, chains}`) so the backup can round-trip
-    // through `/api/address-labels/import` if rollback is needed. Blob is
-    // private so it doesn't leak via dashboard download.
-    const backupPathname = await writeBackup(scopes);
+    // shape (`{exportedAt, addresses, global, chains}`) so the backup can
+    // round-trip through `/api/address-labels/import` if rollback is
+    // needed. Blob is private so it doesn't leak via dashboard download.
+    const backupPathname = await writeBackup(scopes, preExistingFlat);
 
     await importLabels(merged);
 
@@ -194,68 +214,53 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Merge a prior entry with an incoming one. Resolution: union tags
- * (case-insensitive dedup), prefer the more recently updated entry's
- * scalar fields, take the earliest createdAt. Ties on `updatedAt` resolve
- * in favour of `incoming`.
- *
- * `name` is taken from `newer` directly — empty-name tag-only entries are
- * meaningful in this codebase, so a truthiness fallback (`newer.name ||
- * older.name`) would resurrect a stale older name when the newer write
- * intentionally cleared it.
- */
-function mergeEntries(
-  prior: AddressEntry,
-  incoming: AddressEntry,
-): AddressEntry {
-  const incomingLater = (incoming.updatedAt ?? "") >= (prior.updatedAt ?? "");
-  const newer = incomingLater ? incoming : prior;
-  const older = incomingLater ? prior : incoming;
-
-  const tagSet = new Map<string, string>();
-  for (const t of [...older.tags, ...newer.tags]) {
-    const key = t.toLowerCase();
-    if (!tagSet.has(key)) tagSet.set(key, t);
-  }
-
-  const createdCandidates = [prior.createdAt, incoming.createdAt].filter(
-    (s): s is string => typeof s === "string" && s.length > 0,
-  );
-  const createdAt = createdCandidates.sort()[0];
-
-  return {
-    name: newer.name,
-    tags: Array.from(tagSet.values()),
-    notes: newer.notes ?? older.notes,
-    isPublic: newer.isPublic ?? older.isPublic,
-    source: newer.source ?? older.source,
-    ...(createdAt ? { createdAt } : {}),
-    updatedAt: newer.updatedAt,
-  };
-}
-
-/**
  * Write a pre-migration snapshot to Vercel Blob using the same shape the
- * `/api/address-labels/import` route accepts (`{exportedAt, global,
- * chains}`). If rollback is ever needed, the operator can download the
- * blob and POST it back through the import endpoint without translation.
+ * `/api/address-labels/import` route accepts (`{exportedAt, addresses,
+ * global, chains}`). If rollback is ever needed, the operator can download
+ * the blob and POST it back through the import endpoint without
+ * translation.
+ *
+ * Pre-existing flat entries (user PUTs during the deploy → migration
+ * window) land in `addresses` so they survive a rollback round-trip.
+ * Legacy scope entries land in `global` / `chains`. To avoid the
+ * snapshot-import overwrite footgun (handleSnapshot iterates `addresses`
+ * → `global` → `chains` and last-write-wins), an address present in
+ * `addresses` is excluded from `global` / `chains` here.
  */
 async function writeBackup(
   scopes: Array<{ key: string; entries: Record<string, AddressEntry> }>,
+  preExistingFlat: Record<string, AddressEntry>,
 ): Promise<string> {
   const date = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `address-labels-pre-migrate-flat-${date}.json`;
   const snapshot: AddressLabelsSnapshot = {
     exportedAt: new Date().toISOString(),
   };
+  const flatAddresses = new Set(
+    Object.keys(preExistingFlat).map((a) => a.toLowerCase()),
+  );
+  if (flatAddresses.size > 0) snapshot.addresses = preExistingFlat;
+
+  function withoutFlat(
+    entries: Record<string, AddressEntry>,
+  ): Record<string, AddressEntry> {
+    const out: Record<string, AddressEntry> = {};
+    for (const [addr, entry] of Object.entries(entries)) {
+      if (!flatAddresses.has(addr.toLowerCase())) out[addr] = entry;
+    }
+    return out;
+  }
+
   const chains: Record<string, Record<string, AddressEntry>> = {};
   for (const { key, entries } of scopes) {
+    const filtered = withoutFlat(entries);
+    if (Object.keys(filtered).length === 0) continue;
     if (key === "labels:global") {
-      snapshot.global = entries;
+      snapshot.global = filtered;
       continue;
     }
     const chainId = key.slice("labels:".length);
-    if (/^\d+$/.test(chainId)) chains[chainId] = entries;
+    if (/^\d+$/.test(chainId)) chains[chainId] = filtered;
   }
   if (Object.keys(chains).length > 0) snapshot.chains = chains;
 

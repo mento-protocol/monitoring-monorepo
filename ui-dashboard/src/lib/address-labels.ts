@@ -15,6 +15,7 @@ export {
   derivePreservedSource,
   isArkhamSourced,
   isMiniPaySourced,
+  mergeEntries,
   upgradeEntry,
   upgradeEntries,
   sanitizeEntry,
@@ -153,7 +154,17 @@ export async function upsertEntry(
 
 export async function deleteLabel(address: string): Promise<void> {
   const redis = getRedis();
-  await redis.hdel(LABELS_KEY, address.toLowerCase());
+  const lower = address.toLowerCase();
+  // Delete from the flat hash AND from every legacy scope. Without the
+  // legacy half, a delete during the deploy → migration window would only
+  // remove the flat copy; the legacy scope still has the entry, so the
+  // dual-read in `getLabels()` resurrects it on the next refetch and the
+  // migration later copies it back into the flat hash. After the migration
+  // drops the legacy keys, the legacy HDELs are no-ops.
+  await Promise.all([
+    redis.hdel(LABELS_KEY, lower),
+    ...KNOWN_LEGACY_KEYS.map((key) => redis.hdel(key, lower)),
+  ]);
 }
 
 /**

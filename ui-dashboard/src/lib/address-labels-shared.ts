@@ -97,6 +97,53 @@ export function derivePreservedSource(
 }
 
 /**
+ * Merge a prior entry with an incoming one. Resolution: union tags
+ * (case-insensitive dedup), prefer the more recently updated entry's
+ * scalar fields, take the earliest createdAt. Ties on `updatedAt` resolve
+ * in favour of `incoming`.
+ *
+ * `name` is taken from `newer` directly — empty-name tag-only entries are
+ * meaningful, so a truthiness fallback (`newer.name || older.name`) would
+ * resurrect a stale older name when the newer write intentionally cleared
+ * it.
+ *
+ * Used by:
+ *   - the migration route, when an address appears in two legacy scope
+ *     hashes (e.g. both `labels:42220` and `labels:global`)
+ *   - the snapshot import path, when a backup contains the same address in
+ *     `addresses` + `global` + `chains` (rollback-from-conflicted-backup)
+ */
+export function mergeEntries(
+  prior: AddressEntry,
+  incoming: AddressEntry,
+): AddressEntry {
+  const incomingLater = (incoming.updatedAt ?? "") >= (prior.updatedAt ?? "");
+  const newer = incomingLater ? incoming : prior;
+  const older = incomingLater ? prior : incoming;
+
+  const tagSet = new Map<string, string>();
+  for (const t of [...older.tags, ...newer.tags]) {
+    const key = t.toLowerCase();
+    if (!tagSet.has(key)) tagSet.set(key, t);
+  }
+
+  const createdCandidates = [prior.createdAt, incoming.createdAt].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  const createdAt = createdCandidates.sort()[0];
+
+  return {
+    name: newer.name,
+    tags: Array.from(tagSet.values()),
+    notes: newer.notes ?? older.notes,
+    isPublic: newer.isPublic ?? older.isPublic,
+    source: newer.source ?? older.source,
+    ...(createdAt ? { createdAt } : {}),
+    updatedAt: newer.updatedAt,
+  };
+}
+
+/**
  * Normalise a legacy-shaped entry (`tags` carries the `ARKHAM_TAG` sentinel,
  * no `source` field) into the new shape (`source: "arkham"`, sentinel removed
  * from tags). New-shape entries pass through untouched.

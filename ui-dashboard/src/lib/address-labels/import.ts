@@ -20,6 +20,7 @@ import * as Sentry from "@sentry/nextjs";
 import {
   importLabels,
   getLabels,
+  mergeEntries,
   upgradeEntries,
   sanitizeEntry,
   ARKHAM_TAG,
@@ -112,14 +113,24 @@ export async function handleGnosisSafe(
 export async function handleSnapshot(
   body: AddressLabelsSnapshot,
 ): Promise<NextResponse> {
-  // Merge every entry from {addresses, global, chains} into a single map.
-  // Old backups carry `global` + `chains`; new backups carry `addresses`.
-  // For an address present in multiple legacy scopes (shouldn't happen
-  // post-migration, but possible in old snapshots), last write wins per
-  // iteration order: chains[chainId] > global > addresses. The choice is
-  // arbitrary — same-address-different-scope already lost meaning under
-  // the new model.
+  // Merge every entry from {addresses, global, chains} into a single
+  // address-keyed map. Old backups carry `global` + `chains`; new backups
+  // carry `addresses` (plus `global`/`chains` if the migration captured a
+  // pre-existing flat hash alongside legacy scopes).
+  //
+  // When the same address appears in multiple sources, use `mergeEntries`
+  // (union tags + updatedAt-newer-wins on scalars) instead of
+  // `Object.assign`'s last-write-wins. Otherwise importing a backup that
+  // captured both flat + legacy entries for the same address would silently
+  // drop tags / notes / source from one of them.
   const merged: Record<string, AddressEntry> = {};
+  function mergeIn(source: Record<string, AddressEntry>): void {
+    for (const [addr, entry] of Object.entries(source)) {
+      const lower = addr.toLowerCase();
+      const prior = merged[lower];
+      merged[lower] = prior ? mergeEntries(prior, entry) : entry;
+    }
+  }
 
   if (body.addresses !== undefined) {
     if (!isEntriesMap(body.addresses)) {
@@ -128,10 +139,7 @@ export async function handleSnapshot(
         { status: 400 },
       );
     }
-    Object.assign(
-      merged,
-      upgradeEntries(body.addresses as Record<string, unknown>),
-    );
+    mergeIn(upgradeEntries(body.addresses as Record<string, unknown>));
   }
   if (body.global !== undefined) {
     if (!isEntriesMap(body.global)) {
@@ -140,10 +148,7 @@ export async function handleSnapshot(
         { status: 400 },
       );
     }
-    Object.assign(
-      merged,
-      upgradeEntries(body.global as Record<string, unknown>),
-    );
+    mergeIn(upgradeEntries(body.global as Record<string, unknown>));
   }
   if (body.chains !== undefined) {
     if (typeof body.chains !== "object" || body.chains === null) {
@@ -159,7 +164,7 @@ export async function handleSnapshot(
           { status: 400 },
         );
       }
-      Object.assign(merged, upgradeEntries(labels as Record<string, unknown>));
+      mergeIn(upgradeEntries(labels as Record<string, unknown>));
     }
   }
 

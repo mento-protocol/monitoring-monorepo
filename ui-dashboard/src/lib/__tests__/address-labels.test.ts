@@ -159,9 +159,17 @@ describe("upsertEntry", () => {
 });
 
 describe("deleteLabel", () => {
-  it("HDEL removes the address from the flat hash, lowercasing", async () => {
+  it("HDELs the flat hash AND every legacy scope (transition window safety)", async () => {
+    // During the dual-read window, deleting only the flat copy would let
+    // the legacy entry resurrect on the next refetch and get migrated back
+    // into the flat hash. After migration the legacy HDELs are no-ops.
     await deleteLabel("0xABC");
     expect(mocks.hdel).toHaveBeenCalledWith("labels", "0xabc");
+    expect(mocks.hdel).toHaveBeenCalledWith("labels:global", "0xabc");
+    expect(mocks.hdel).toHaveBeenCalledWith("labels:42220", "0xabc");
+    // Each legacy scope key from KNOWN_LEGACY_KEYS should get its own HDEL.
+    // 6 known keys (global + 2 retired + 3 NETWORKS) + 1 flat = 7 total.
+    expect(mocks.hdel).toHaveBeenCalledTimes(7);
   });
 });
 
@@ -325,18 +333,38 @@ describe("getLabel — single-address HGET with legacy fallback", () => {
 });
 
 describe("getLabelsByAddress — HMGET batch", () => {
-  it("returns an array aligned with the input addresses (null for missing)", async () => {
+  // Codex flagged this with a P1 claim that Upstash returns a positional
+  // array, but `@upstash/redis`'s HMGetCommand wraps the raw array via
+  // `deserialize4(fields, result)` which builds `{[fieldName]: value | null}`.
+  // The tests below pin both shapes — Upstash's actual object output and
+  // the `null` outer return — so a future client upgrade that drops the
+  // wrapper would fail loudly here instead of silently breaking the
+  // migration's verification step.
+
+  it("returns an array aligned with the input addresses (null for missing fields)", async () => {
+    // Upstash's `hmget` deserializer returns an object keyed by field name,
+    // with `null` for missing fields. Asserting the helper handles that.
     mocks.hmget.mockResolvedValueOnce({
       "0xaaa": {
         name: "A",
         tags: [],
         updatedAt: "2026-01-01T00:00:00Z",
       },
+      "0xbbb": null,
     });
     const result = await getLabelsByAddress(["0xAAA", "0xBBB"]);
     expect(mocks.hmget).toHaveBeenCalledWith("labels", "0xaaa", "0xbbb");
     expect(result[0]?.name).toBe("A");
     expect(result[1]).toBeNull();
+  });
+
+  it("returns all-null when every requested field is missing (Upstash returns null)", async () => {
+    // When EVERY requested field is missing, Upstash's deserializer returns
+    // `null` (not an object). The helper must convert that to a same-length
+    // null array so the migration's verification step doesn't blow up.
+    mocks.hmget.mockResolvedValueOnce(null);
+    const result = await getLabelsByAddress(["0xAAA", "0xBBB"]);
+    expect(result).toEqual([null, null]);
   });
 
   it("returns an empty array for an empty input (no Redis call)", async () => {

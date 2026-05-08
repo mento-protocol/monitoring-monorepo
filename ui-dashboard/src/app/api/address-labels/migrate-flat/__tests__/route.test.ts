@@ -263,6 +263,59 @@ describe("POST /api/address-labels/migrate-flat — live success", () => {
     expect(snapshot.exportedAt).toBeTruthy();
     expect(snapshot.global["0xggg"].name).toBe("Global");
     expect(snapshot.chains["42220"]["0xaaa"].name).toBe("Celo");
+    expect(snapshot.addresses).toBeUndefined(); // no pre-existing flat
+  });
+
+  it("backup includes pre-existing flat entries under `addresses`, deduped against legacy", async () => {
+    // Pre-existing flat entry for 0xaaa AND the same address in legacy.
+    // The backup must round-trip cleanly through `/api/address-labels/import`,
+    // which iterates addresses → global → chains. Putting 0xaaa in BOTH
+    // `addresses` and `chains` would let the legacy entry overwrite the
+    // flat one on rollback. Filter the flat-overlap out of legacy entries
+    // so each address appears exactly once.
+    mockGetFlatLabels.mockResolvedValue({
+      "0xaaa": {
+        name: "Flat-edited",
+        tags: ["custom"],
+        updatedAt: "2026-04-30T00:00:00Z",
+      },
+    });
+    mockReadLegacyScopes.mockResolvedValue({
+      legacyKeys: ["labels:42220"],
+      scopes: [
+        {
+          key: "labels:42220",
+          entries: {
+            "0xaaa": {
+              name: "Stale",
+              tags: [],
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+            "0xbbb": {
+              name: "Legacy-only",
+              tags: [],
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          },
+        },
+      ],
+    });
+    mockGetLabelsByAddress.mockResolvedValue([
+      {
+        name: "Flat-edited",
+        tags: ["custom"],
+        updatedAt: "2026-04-30T00:00:00Z",
+      },
+      { name: "Legacy-only", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+    ]);
+
+    await POST(makeReq({ bearer: "cron-secret" }));
+    const [, content] = mockPut.mock.calls[0];
+    const snapshot = JSON.parse(content as string);
+    expect(snapshot.addresses["0xaaa"].name).toBe("Flat-edited");
+    // 0xaaa should NOT appear in chains.42220 — only the legacy-only address.
+    expect(snapshot.chains["42220"]["0xaaa"]).toBeUndefined();
+    expect(snapshot.chains["42220"]["0xbbb"].name).toBe("Legacy-only");
   });
 });
 
@@ -350,17 +403,26 @@ describe("POST /api/address-labels/migrate-flat — conflict resolution", () => 
     expect(merged.tags.sort()).toEqual(["new", "old"]);
   });
 
-  it("preserves user PUT edits made during the dual-read transition window", async () => {
-    // Regression for the second cursor finding: 8d9978a's rewrite dropped
-    // the flat-hash read, so a user edit written via the UI before the
-    // migration ran would be silently overwritten by stale legacy data.
-    // The migration must merge the pre-existing flat entry with the
-    // legacy entry; updatedAt-newer-wins keeps the user edit on top.
+  it("preserves user PUT edits made during the dual-read transition window — flat is authoritative, legacy is skipped", async () => {
+    // Regression for two related codex/cursor findings:
+    //   - 8d9978a dropped the flat-hash read, so user edits would be
+    //     silently overwritten by stale legacy data.
+    //   - The first fix (merge flat + legacy via mergeEntries) had its own
+    //     bug: tag union resurrected tags the user just removed, and the
+    //     `notes ?? older.notes` fallback resurrected cleared notes.
+    //
+    // The PUT handler already copies legacy provenance into the flat row
+    // via `derivePreservedSource(getLabel(...))`, so a flat entry IS the
+    // intended state. Migration must skip merging legacy back in for any
+    // address that has a flat entry.
     mockGetFlatLabels.mockResolvedValue({
       "0xaaa": {
-        name: "User edit during transition",
+        // User intentionally removed the legacy "arkham" tag and cleared
+        // notes; provenance was already preserved during the PUT.
+        name: "Edited",
         tags: ["custom"],
-        notes: "user notes",
+        notes: undefined,
+        source: "arkham",
         updatedAt: "2026-04-30T00:00:00Z",
       },
     });
@@ -372,7 +434,8 @@ describe("POST /api/address-labels/migrate-flat — conflict resolution", () => 
           entries: {
             "0xaaa": {
               name: "Stale legacy name",
-              tags: ["arkham"],
+              tags: ["arkham", "stale-tag"],
+              notes: "stale notes the user cleared",
               source: "arkham",
               updatedAt: "2026-01-01T00:00:00Z",
             },
@@ -382,8 +445,9 @@ describe("POST /api/address-labels/migrate-flat — conflict resolution", () => 
     });
     mockGetLabelsByAddress.mockResolvedValue([
       {
-        name: "User edit during transition",
-        tags: [],
+        name: "Edited",
+        tags: ["custom"],
+        source: "arkham",
         updatedAt: "2026-04-30T00:00:00Z",
       },
     ]);
@@ -397,14 +461,19 @@ describe("POST /api/address-labels/migrate-flat — conflict resolution", () => 
         { name: string; tags: string[]; notes?: string; source?: string }
       >
     )["0xaaa"];
-    // User edit is newer → its scalars win.
-    expect(merged.name).toBe("User edit during transition");
-    expect(merged.notes).toBe("user notes");
-    // Tag union (case-insensitive dedup) preserves both.
-    expect(merged.tags.sort()).toEqual(["arkham", "custom"]);
-    // Provenance carries forward from legacy (older has source set; newer
-    // doesn't, so newer.source ?? older.source = "arkham").
+    // Flat entry wins COMPLETELY — the user's removals stick.
+    expect(merged.name).toBe("Edited");
+    expect(merged.tags).toEqual(["custom"]);
+    expect(merged.notes).toBeUndefined();
+    // Provenance is from the flat entry directly (preserved during PUT).
     expect(merged.source).toBe("arkham");
+
+    // Conflict list still records that legacy had the address — for human
+    // visibility — even though no merge happened.
+    const body = (await res.json()) as {
+      conflicts: Array<{ address: string; sources: string[] }>;
+    };
+    expect(body.conflicts[0]?.sources).toEqual(["labels", "labels:42220"]);
   });
 
   it("tag-only newer entry preserves empty name (does not resurrect older name)", async () => {
