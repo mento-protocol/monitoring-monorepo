@@ -65,7 +65,22 @@ commands: [["HGET", "labels", "<addrLower>"]];
 Use the `arkham` skill (project-scoped). Arkham doesn't cover Celo or Monad, so the play is:
 
 1. Run `address_enriched/all` on the target address — gets every chain Arkham DOES cover. Often returns zero hits for a Celo-native contract; that's a signal, not a failure.
-2. Walk inbound funders on the target chain. Use `dune sim evm activity <addr> --activity-type receive` (the `sim` skill is user-scoped) to find the FIRST funder. That funder is usually the operator EOA.
+2. Walk inbound funders on the target chain. Two pitfalls to handle explicitly:
+   - **Sim's Activity API returns NEWEST first**, not oldest. Don't take the top result and call it the FIRST funder — paginate to the tail (or use a `block_time ASC` DuneSQL query) before treating any counterparty as the original funder. A recent counterparty mistaken for the original funder permanently mis-attributes the report.
+   - **Sim's `--chain-ids` defaults to all configured chains** when omitted. For an EVM address that's been used on Ethereum / Base / Arbitrum / etc., the "first receive" without a chain filter can come from a totally different chain than the target. Always pass `--chain-ids $CHAIN_ID` so the funder graph is scoped to the chain the contract actually lives on.
+
+   Example — first inbound transfer on Celo, oldest first via DuneSQL (Sim CLI doesn't expose an `--asc` flag at the time of writing):
+
+   ```sql
+   SELECT block_time, "from", value, hash
+   FROM celo.transactions
+   WHERE "to" = LOWER('<addr>')
+   ORDER BY block_time ASC
+   LIMIT 5;
+   ```
+
+   That funder is usually the operator EOA.
+
 3. Run `address_enriched/all` on the operator EOA across all chains — this is where personas like ENS / opensea / multichain footprint usually surface.
 4. Trace one more hop back: who funded the operator? If it's a bridge (Stargate, LayerZero, Hop, Across), name the bridge in the table.
 5. For contracts: also pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table.
@@ -96,10 +111,10 @@ Note the revert rate. For arb / MEV: ~30–50% reverts is normal (failed sniping
 
 ### Step 5 — Capital and scale
 
-Pass the chain hint through to Sim — Mento is on Celo (`42220`) but the skill also runs against Monad (`10143`) and any future chain. Hardcoding `--chain-ids 42220` would return empty / unrelated holdings for a Monad principal:
+Pass the chain hint through to Sim — Mento is on Celo (`42220`) but the skill also runs against Monad (`143`) and any future chain. Hardcoding `--chain-ids 42220` would return empty / unrelated holdings for a Monad principal:
 
 ```bash
-CHAIN_ID=42220   # Celo. Use 10143 for Monad. Map other chains as needed.
+CHAIN_ID=42220   # Celo mainnet. Monad mainnet is 143 (testnet is 10143 — use mainnet for prod investigations). Map other chains by their canonical mainnet chain id.
 dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data | length'
 dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data[] | {symbol, amount, value_usd}'
 ```
@@ -135,6 +150,8 @@ if [ -z "$AUTHOR_EMAIL" ]; then
   exit 1
 fi
 ```
+
+`git config user.email` is local + unauthenticated — a teammate with a stale or impersonated config could persist wrong audit metadata. The dashboard's editor route stamps `authorEmail` from the Google-Workspace-authenticated session for that reason; the skill bypasses the route to keep atomicity (see Lua section below) and so loses the session-auth check. Mitigation: **always show the derived email and ask the user to confirm it matches their workspace identity before sending the EVAL**. If the email is wrong, abort and tell them to fix `git config user.email` (or upload via the editor UI). For a stricter audit trail, route the upload through the editor instead.
 
 **Build the partial payload** (Lua script stamps `createdAt` / `updatedAt` / `version`):
 

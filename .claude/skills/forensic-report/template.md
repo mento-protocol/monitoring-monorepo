@@ -74,11 +74,13 @@ What did Arkham return / not return? Run `address_enriched/all` for cross-chain.
 
 ## Bottom line
 
-- **Who**: a sophisticated solo searcher / small team operating under the persona `idontloseiwin.eth`.
-- **What**: a permissioned, custom on-chain arb executor.
-- **Where**: Celo, integrating Mento + Uniswap V3 + Sushi V2 + Ubeswap V2 + Curve + a Velodrome-style Slipstream DEX + Moola.
-- **How much**: ~$95k working capital, ~3.4M atomic attempts, ~1 every 8.5s, ~40% revert rate.
-- **Goal**: extract MEV/arbitrage profit from price dislocations between Mento's oracle-priced stablepool and the rest of Celo's DEX ecosystem.
+Five bullets, one sentence each. The LITERAL placeholder text is below — replace every value with what you actually found. Do NOT ship the placeholders. The skill's worked-example section (`SKILL.md` → "Worked example") points at the seed report's real bottom line for tone calibration; this template stays placeholder-only so a fresh investigation that copy-pastes blindly doesn't accidentally persist seed facts about a different address.
+
+- **Who**: <persona / entity, one sentence — who's behind this address>
+- **What**: <contract type / behavioural class, one sentence — what does it do>
+- **Where**: <chain + venues, one sentence — which chain, which contracts/pools/protocols it interacts with>
+- **How much**: <capital + op rate, one sentence — working-capital USD, tx volume, time period>
+- **Goal**: <economic objective, one sentence — what's the strategy capturing>
 
 ---
 
