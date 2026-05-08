@@ -249,7 +249,7 @@ function VirtualPoolHeaderTiles({
       <Stat
         label="Wrapper Swaps"
         value={(pool.swapCount ?? 0).toLocaleString()}
-        title="Swaps that flowed through the v3 Router → VirtualPool wrapper. Direct v2-broker swaps on the same pair are tracked separately and shown in the activity panel below."
+        title="Swaps that flowed through the v3 Router → VirtualPool wrapper. Direct v2-broker swaps on the same pair are tracked separately (combined-activity panel ships in Phase 2)."
         mono
       />
       <Stat

@@ -17,6 +17,7 @@
  */
 import { ContractFunctionRevertedError, BaseError, type Hex } from "viem";
 import { BiPoolManager } from "@mento-protocol/contracts/BiPoolManager";
+import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
 import { getViemClient } from "./rpc-client";
 
 export type V2ExchangeConfig = {
@@ -55,11 +56,36 @@ export type ResolveV2Result =
       reason: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
     };
 
-// Known pricing modules (extend as new ones get deployed). Avoids an
-// extra `name()` RPC call on every page load.
-const PRICING_MODULE_NAMES: Record<string, string> = {
-  "0xdebed1f6f6ce9f6e73aa25f95acbffe2397550fb": "ConstantSum",
+// Map a deployed pricing-module address to a display label per chain.
+// Source of truth is `@mento-protocol/contracts/contracts.json` (via
+// `contractEntries`) so adding a new chain or new module rolls in
+// automatically — we don't need to maintain a hand-edited list. Mainnet's
+// ConstantSum at `0xdebed1f6...` and Sepolia's at `0x3b199d9e...` both
+// resolve here.
+const PRICING_MODULE_LABEL: Record<string, string> = {
+  ConstantSumPricingModule: "ConstantSum",
 };
+
+const PRICING_MODULE_INDEX = new Map<string, string>();
+function lookupPricingModuleName(
+  chainId: number,
+  address: string,
+): string | null {
+  const key = `${chainId}:${address.toLowerCase()}`;
+  if (PRICING_MODULE_INDEX.has(key)) {
+    return PRICING_MODULE_INDEX.get(key) ?? null;
+  }
+  for (const entry of contractEntries(chainId)) {
+    if (entry.type !== "contract") continue;
+    const label = PRICING_MODULE_LABEL[entry.rawName];
+    if (!label) continue;
+    PRICING_MODULE_INDEX.set(
+      `${chainId}:${entry.address.toLowerCase()}`,
+      label,
+    );
+  }
+  return PRICING_MODULE_INDEX.get(key) ?? null;
+}
 
 /**
  * Resolve a VirtualPool address to its underlying v2 exchange.
@@ -70,6 +96,7 @@ const PRICING_MODULE_NAMES: Record<string, string> = {
 export async function resolveV2ExchangeConfig(
   poolAddress: string,
   rpcUrl: string,
+  chainId: number,
 ): Promise<ResolveV2Result> {
   const client = getViemClient(rpcUrl);
   const code = await client.getCode({
@@ -119,8 +146,7 @@ export async function resolveV2ExchangeConfig(
       asset0: result.asset0,
       asset1: result.asset1,
       pricingModule: result.pricingModule,
-      pricingModuleName:
-        PRICING_MODULE_NAMES[result.pricingModule.toLowerCase()] ?? null,
+      pricingModuleName: lookupPricingModuleName(chainId, result.pricingModule),
       spread: result.config.spread.value,
       referenceRateFeedID: result.config.referenceRateFeedID,
       referenceRateResetFrequency: result.config.referenceRateResetFrequency,

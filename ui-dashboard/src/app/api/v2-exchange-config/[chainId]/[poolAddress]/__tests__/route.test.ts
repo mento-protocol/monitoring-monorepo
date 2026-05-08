@@ -164,7 +164,11 @@ describe("GET /api/v2-exchange-config — routing", () => {
     const req = new NextRequest(buildUrl(MAINNET_CHAIN_ID, POOL));
     const res = await GET(req, ctxFor(MAINNET_CHAIN_ID, POOL));
     expect(res.status).toBe(200);
-    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledWith(POOL, MAINNET_RPC);
+    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledWith(
+      POOL,
+      MAINNET_RPC,
+      MAINNET_CHAIN_ID,
+    );
   });
 
   it("uses the explicit ?network's RPC URL even when a canonical exists", async () => {
@@ -178,7 +182,11 @@ describe("GET /api/v2-exchange-config — routing", () => {
     );
     const res = await GET(req, ctxFor(LOCAL_CHAIN_ID, POOL));
     expect(res.status).toBe(200);
-    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledWith(POOL, LOCAL_RPC);
+    expect(mockResolveV2ExchangeConfig).toHaveBeenCalledWith(
+      POOL,
+      LOCAL_RPC,
+      LOCAL_CHAIN_ID,
+    );
   });
 });
 
@@ -280,11 +288,13 @@ describe("GET /api/v2-exchange-config — caching + failure semantics", () => {
       1,
       POOL,
       MAINNET_RPC,
+      MAINNET_CHAIN_ID,
     );
     expect(mockResolveV2ExchangeConfig).toHaveBeenNthCalledWith(
       2,
       POOL,
       LOCAL_RPC,
+      LOCAL_CHAIN_ID,
     );
   });
 

@@ -19,6 +19,7 @@ import {
 
 const RPC_URL = "https://forno.celo.org";
 const POOL = "0x1111111111111111111111111111111111111111";
+const CHAIN_ID = 42220;
 
 // Mainnet BiPoolManager + a known exchangeId, padded to 32 bytes each as the
 // VirtualPool bytecode emits them. The opcode separator
@@ -80,7 +81,7 @@ describe("resolveV2ExchangeConfig", () => {
   it("returns no_bytecode when getCode is empty", async () => {
     mockGetCode.mockResolvedValueOnce("0x");
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result).toEqual({ ok: false, reason: "no_bytecode" });
     expect(mockReadContract).not.toHaveBeenCalled();
@@ -89,7 +90,7 @@ describe("resolveV2ExchangeConfig", () => {
   it("returns no_bytecode when getCode returns undefined", async () => {
     mockGetCode.mockResolvedValueOnce(undefined);
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result).toEqual({ ok: false, reason: "no_bytecode" });
     expect(mockReadContract).not.toHaveBeenCalled();
@@ -101,7 +102,7 @@ describe("resolveV2ExchangeConfig", () => {
     // separator sequence.
     mockGetCode.mockResolvedValueOnce("0x6080604052348015600f57600080fd");
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result).toEqual({ ok: false, reason: "not_a_virtual_pool" });
     expect(mockReadContract).not.toHaveBeenCalled();
@@ -113,7 +114,7 @@ describe("resolveV2ExchangeConfig", () => {
     );
     mockReadContract.mockResolvedValueOnce(ACTIVE_STRUCT);
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return; // narrowing
@@ -153,7 +154,7 @@ describe("resolveV2ExchangeConfig", () => {
     });
     mockReadContract.mockRejectedValueOnce(wrapper);
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -173,7 +174,7 @@ describe("resolveV2ExchangeConfig", () => {
     );
     mockReadContract.mockRejectedValueOnce(new Error("connection reset"));
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result).toEqual({ ok: false, reason: "rpc_failed" });
   });
@@ -184,7 +185,7 @@ describe("resolveV2ExchangeConfig", () => {
     );
     mockReadContract.mockResolvedValueOnce(ZERO_STRUCT);
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -201,7 +202,7 @@ describe("resolveV2ExchangeConfig", () => {
       pricingModule: "0x9999999999999999999999999999999999999999",
     });
 
-    const result = await resolveV2ExchangeConfig(POOL, RPC_URL);
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

@@ -127,7 +127,7 @@ export async function GET(
     if (inFlight.size >= INFLIGHT_MAX_ENTRIES) {
       return NextResponse.json({ error: "Server busy" }, { status: 503 });
     }
-    pending = resolveV2ExchangeConfig(poolAddress, rpcUrl)
+    pending = resolveV2ExchangeConfig(poolAddress, rpcUrl, chainId)
       .then((result) => {
         // Only cache stable outcomes (ok:true or ok:false with a non-transient
         // reason). Transient transport failures (`rpc_failed`) propagate to
