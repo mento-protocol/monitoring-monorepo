@@ -80,7 +80,7 @@ export async function GET(
   // 42220). Fall back to the canonical mapping when omitted, so inbound URLs
   // from the previous chainId-only contract still resolve to the prod RPC.
   const networkParam = req.nextUrl.searchParams.get("network");
-  let networkId: string | null = null;
+  let networkId: string;
   if (networkParam) {
     if (!isConfiguredNetworkId(networkParam)) {
       return NextResponse.json({ error: "Invalid network" }, { status: 400 });
