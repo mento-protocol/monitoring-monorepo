@@ -180,7 +180,7 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 
 ## Follow-ups deferred from PR #339 (stale-snapshot detection)
 
-- [ ] **`page-client.tsx` structural split.** The leaderboard page client is 633 lines (was 620 pre-PR; PR #339 nudged it up by 13 after the banner extraction reversed most of the growth). Still over the 600-line soft cap. The page glues together `useGQL` queries, `useMemo` aggregations across v3/v2 venues, hero tiles, banners, and several tabs — a thoughtful per-section split (e.g. extract the v2 producer panel and the per-pool chart view-model into their own client components) is the right move, but bigger than a feedback-PR can absorb. Track separately.
+- [x] ~~**`page-client.tsx` structural split.**~~ Done: extracted `useHeroRollup()` to `_lib/use-hero-rollup.ts` (owns the snapshot/today queries, `mergeHeroSnapshot`, and `top10Concentration`) and the v2 producer + aggregator JSX panel to `_components/v2-leaderboard-section.tsx`. Page-client lands at 525 lines (well under the 600-line soft cap, within the 520–580 target range).
 - [ ] **Catch up the missing closed UTC day instead of just flagging it.** The current "DEGRADED" banner tells the user yesterday's data isn't yet in the snapshot for chains in the pre-first-swap-of-day state. A better UX: the dashboard could fetch yesterday's closed-day rows directly from `TraderDailySnapshot` and merge them client-side, eliminating the gap entirely. Rough cost: one extra GraphQL query gated on `degradedChains.length > 0` plus a second pass through `mergeHeroSnapshot`. Source: codex review on PR #339 (`#3207495777`'s "fetch the missing closed day" alternative).
 
 ## Follow-ups deferred from PR #342 (axe-core a11y test infra)
