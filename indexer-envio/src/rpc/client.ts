@@ -48,6 +48,12 @@ export function sanitizeErrorMessage(msg: string): string {
 const KNOWN_REVERT_SIGNATURES: Record<string, string> = {
   "0xa407143a":
     "OracleStaleOrExpired — oracle data is stale or expired, getRebalancingState cannot compute",
+  // Observed in Monad mainnet `getRebalancingState` reverts. Not in 4byte
+  // and not matched against any common Mento error variant we tried.
+  // Tagged here so it routes to debug instead of warn until someone with
+  // the contract source labels it correctly.
+  "0xeb0d3e81":
+    "Unknown stale-state revert — observed on Monad getRebalancingState; treated as expected",
 };
 
 /** Extract a 4-byte revert selector from an error message, if present. */

@@ -106,9 +106,10 @@ const breakerFeedStateShape = S.schema({
 
 // ---------------------------------------------------------------------------
 // Group A — immutable / governance-rare, address-keyed.
-// `cache: false` initially; safe to flip to `true` on medium tier (the
-// fetched values are immutable per (chainId, address) for the indexer's
-// timescales — a governance change would re-deploy and re-index anyway).
+// `cache: true` on medium tier — these values are per-(chainId, address)
+// and don't change at the indexer's timescales. Postgres-backed cache
+// survives re-syncs and skips the RPC entirely on the second touch.
+// A governance change would re-deploy the contract and re-index anyway.
 // ---------------------------------------------------------------------------
 
 export const erc20DecimalsEffect = createEffect(
@@ -117,7 +118,7 @@ export const erc20DecimalsEffect = createEffect(
     input: { chainId: S.int32, tokenAddress: S.string },
     output: S.nullable(S.int32),
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input, context }) =>
     (await fetchErc20Decimals(
@@ -133,7 +134,7 @@ export const referenceRateFeedIDEffect = createEffect(
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.nullable(S.string),
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input, context }) =>
     (await fetchReferenceRateFeedID(
@@ -153,7 +154,7 @@ export const invertRateFeedEffect = createEffect(
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.nullable(S.boolean),
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input, context }) =>
     (await fetchInvertRateFeed(
@@ -169,7 +170,7 @@ export const rebalanceThresholdEffect = createEffect(
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.int32,
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input, context }) =>
     fetchRebalanceThreshold(input.chainId, input.poolAddress, context.log),
@@ -191,7 +192,7 @@ export const tokenDecimalsScalingEffect = createEffect(
     },
     output: S.nullable(S.bigint),
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   // Effect-calls-effect: when the FPMM-direct read fails, route the ERC20
   // fallback through `erc20DecimalsEffect` rather than calling
@@ -218,9 +219,9 @@ export const tokenDecimalsScalingEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group B — fee config (per-pool, governance-rare).
-// `cache: false` initially; safe to flip on medium. Per-getter mock
-// granularity (`FetchFeesMock` rejection semantics) lives inside `fetchFees`
-// itself, which the effect handler delegates to.
+// `cache: true` on medium — per-getter mock granularity
+// (`FetchFeesMock` rejection semantics) lives inside `fetchFees` itself,
+// which the effect handler delegates to.
 //
 // Rate limit matches Group A's 200/s ceiling so it isn't artificially tighter
 // than peers; `fetchFees` internally fans out 3 readContract calls per
@@ -235,7 +236,7 @@ export const feesEffect = createEffect(
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.nullable(feesShape),
     rateLimit: { calls: 200, per: "second" },
-    cache: false,
+    cache: true,
   },
   // Schema's `S.optional(S.int32)` outputs `number | undefined` with the key
   // always present; the fetcher returns `Partial<>` (key may be missing).
@@ -434,15 +435,16 @@ export const tradingLimitsEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group F — circuit breakers (per-chain governance state).
-// `cache: false` initially. On a medium-tier upgrade:
-//   - `breakerListEffect` and `breakerKindEffect` are address-keyed (no
-//     blockNumber input), so `cache: true` produces durable per-address
-//     dedup that survives across re-indexes — biggest win.
-//   - `breakerDefaultsEffect` is block-keyed (blockNumber is part of the
-//     input). `cache: true` is safe (governance-rare), but each block gets
-//     its own cache row — re-indexing N blocks creates N entries per
-//     breaker, so the persistent-cache benefit collapses to in-batch dedup.
-//   - `breakerFeedStateEffect` is block-scoped state and stays `cache: false`.
+//   - `breakerKindEffect`: address-keyed (no blockNumber input). `cache: true`
+//     on medium gives durable per-address dedup that survives re-indexes.
+//   - `breakerListEffect`: block-keyed in the input shape, so caching by
+//     (chainId, blockNumber) only dedups within a single block range.
+//     Stays `cache: false` — flipping would create one cache row per block
+//     for a value that's nearly invariant, with no real re-sync benefit
+//     unless we also drop blockNumber from the cache key (separate change).
+//   - `breakerDefaultsEffect` and `breakerFeedStateEffect`: block-scoped
+//     state. Stay `cache: false` permanently — reorg risk + per-block
+//     entries make persistent caching counter-productive.
 // ---------------------------------------------------------------------------
 
 export const breakerListEffect = createEffect(
@@ -465,7 +467,7 @@ export const breakerKindEffect = createEffect(
     // BreakerKindRpc is a string union; ride as S.string and cast at call site.
     output: S.nullable(S.string),
     rateLimit: { calls: 50, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input }) =>
     (await fetchBreakerKind(input.chainId, input.breakerAddress)) ?? undefined,
