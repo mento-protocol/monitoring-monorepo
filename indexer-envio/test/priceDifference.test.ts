@@ -20,26 +20,28 @@ function pool(opts: {
   reserves1: bigint;
   oraclePrice: bigint;
   invertRateFeed?: boolean;
+  invertRateFeedKnown?: boolean;
   token0Decimals?: number;
   token1Decimals?: number;
   rebalanceThresholdAbove?: number;
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
   lastMedianPrice?: bigint;
+  lastMedianAt?: bigint;
   oracleOk?: boolean;
-  oracleTimestamp?: bigint;
   oracleExpiry?: bigint;
 }) {
   return {
     token0Decimals: 18,
     token1Decimals: 18,
     invertRateFeed: false,
+    invertRateFeedKnown: true,
     rebalanceThresholdAbove: 100,
     rebalanceThresholdBelow: 100,
     rebalanceThresholdsKnown: true,
     lastMedianPrice: opts.oraclePrice,
+    lastMedianAt: 1_000_000n,
     oracleOk: true,
-    oracleTimestamp: 1_000_000n,
     oracleExpiry: 3_600n,
     ...opts,
   };
@@ -457,8 +459,8 @@ describe("tryDeriveRebalanceState", () => {
     );
   });
 
-  it("returns null when oracle is stale (timestamp + expiry <= eventTimestamp)", () => {
-    // oracleTimestamp 1_000_000n + expiry 3_600n = 1_003_600n.
+  it("returns null when median is stale (lastMedianAt + expiry <= eventTimestamp)", () => {
+    // lastMedianAt 1_000_000n + expiry 3_600n = 1_003_600n.
     // eventTimestamp 1_003_700n is past the expiry → contract reverts.
     assert.equal(
       tryDeriveRebalanceState(ausdPool(), { eventTimestamp: 1_003_700n }),
@@ -466,14 +468,50 @@ describe("tryDeriveRebalanceState", () => {
     );
   });
 
-  it("does NOT gate on freshness when oracleExpiry is 0 (unknown window)", () => {
-    // oracleExpiry === 0 means we haven't seeded the window yet. Skip the
-    // freshness check; caller's RPC fallback handles edge cases. Otherwise
-    // pre-seed events would never derive.
-    const derived = tryDeriveRebalanceState(ausdPool({ oracleExpiry: 0n }), {
-      eventTimestamp: 999_999_999n,
-    });
-    assert.ok(derived != null);
+  it("returns null when oracleExpiry is 0 (unseeded window — fall through to RPC)", () => {
+    // Without a known expiry the freshness gate can't be evaluated. Falling
+    // through to RPC is safer than letting a potentially-expired median
+    // through (cf. codex G10 — once a cached median is reused, no later
+    // fallback can save us).
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ oracleExpiry: 0n }), FRESH),
+      null,
+    );
+  });
+
+  it("returns null when invertRateFeedKnown is false (unseeded direction flag)", () => {
+    // Caller runs `selfHealInvertRateFeed` first, so reaching derive with
+    // `Known=false` means the heal also failed. Inverted pools would compute
+    // priceDifference / threshold direction in the wrong frame — fall through
+    // to RPC, which still supplies a correct priceDifference even when the
+    // local flip is unknown.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ invertRateFeedKnown: false }), FRESH),
+      null,
+    );
+  });
+
+  it("returns null during a zero-median outage even when lastMedianPrice retained the prior value", () => {
+    // `MedianUpdated` with value 0 keeps lastMedianPrice at the prior
+    // non-zero value (per computeMedianLineageNext), but oraclePrice goes
+    // to 0. The contract treats the feed as down — derive must mirror.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ oraclePrice: 0n }), FRESH),
+      null,
+    );
+  });
+
+  it("staleness uses lastMedianAt only (cursor's stale-oracle finding)", () => {
+    // Confirm the gate evaluates against `lastMedianAt`, not against any
+    // other "last touched at" timestamp. Old lastMedianAt + recent event →
+    // stale.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ lastMedianAt: 0n }), {
+        eventTimestamp: 1_000_500n,
+      }),
+      null,
+      "lastMedianAt=0 + expiry=3600 → expiresAt=3600 which is before event 1_000_500 → stale",
+    );
   });
 
   it("derives priceDifference matching computePriceDifference (3325 bps)", () => {

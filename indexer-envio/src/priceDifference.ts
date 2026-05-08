@@ -152,19 +152,32 @@ export function scaleRpcRebalanceState(
  * falls back to RPC.
  *
  * Required inputs:
- *   - `lastMedianPrice > 0`: at least one `MedianUpdated` for the rate
- *     feed has been indexed. We deliberately gate on the median rather
- *     than `oraclePrice` because `OracleReported` overwrites `oraclePrice`
- *     with individual reporter quotes, which is NOT what the on-chain
- *     `getRebalancingState` reads (the contract uses the median).
- *   - `rebalanceThresholdsKnown`: factory's `rebalanceThresholdsEffect`
- *     seed succeeded, or a `RebalanceThresholdUpdated` event has been
- *     seen. Both fields can legitimately be 0 ("configured to never
- *     rebalance"); the boolean distinguishes that from "not yet read".
- *   - `oracleOk` and oracle freshness: the contract reverts on stale
- *     oracle, so derive must mirror that — when stale, fall through to
- *     RPC (which will also fail and the caller will preserve stale
- *     state, matching the legacy code path).
+ *   - `lastMedianPrice > 0`: at least one non-zero `MedianUpdated` for
+ *     the rate feed has been indexed. Gates on the median rather than
+ *     `oraclePrice` because `OracleReported` overwrites `oraclePrice`
+ *     with individual reporter quotes (not what `getRebalancingState`
+ *     reads on chain — the contract uses the median).
+ *   - `oraclePrice > 0`: the current oracle value is live. During a
+ *     `MedianUpdated` outage (event emits 0), `lastMedianPrice` retains
+ *     the prior non-zero value but the contract would treat the feed as
+ *     down. Gating on the current `oraclePrice` matches contract
+ *     behaviour during outages.
+ *   - `rebalanceThresholdsKnown`: factory seed succeeded or a
+ *     `RebalanceThresholdUpdated` event has been seen. Both fields can
+ *     legitimately be 0 ("configured to never rebalance"); the boolean
+ *     distinguishes that from "not yet read".
+ *   - `invertRateFeedKnown`: the orientation has been read on chain.
+ *     Without this, an inverted pool deployed during an RPC blip would
+ *     compute priceDifference / direction in the wrong frame. Caller
+ *     runs `selfHealInvertRateFeed` first; if that's still null we must
+ *     fall through to RPC.
+ *   - `oracleOk` AND `oracleExpiry > 0` AND
+ *     `lastMedianAt + oracleExpiry > eventTimestamp`: the on-chain
+ *     `getRebalancingState` reverts on stale oracle, so derive must
+ *     mirror that. Use `lastMedianAt` (timestamp of most recent
+ *     `MedianUpdated`) — NOT `oracleTimestamp`, which is also written
+ *     by `OracleReported` and by every state-sync write so it tracks
+ *     "last entity touch" rather than "last on-chain median report".
  *
  * `reservesOverride` lets UpdateReserves pass the event's new reserves
  * (the contract's `getRebalancingState` reads post-event state); Rebalanced
@@ -175,11 +188,13 @@ export function tryDeriveRebalanceState(
   pool: {
     reserves0: bigint;
     reserves1: bigint;
+    oraclePrice: bigint;
     lastMedianPrice: bigint;
+    lastMedianAt: bigint;
     oracleOk: boolean;
-    oracleTimestamp: bigint;
     oracleExpiry: bigint;
     invertRateFeed: boolean;
+    invertRateFeedKnown: boolean;
     rebalanceThresholdAbove: number;
     rebalanceThresholdBelow: number;
     rebalanceThresholdsKnown: boolean;
@@ -192,16 +207,24 @@ export function tryDeriveRebalanceState(
   },
 ): ResolvedRebalanceState | null {
   if (!pool.rebalanceThresholdsKnown) return null;
+  if (!pool.invertRateFeedKnown) return null;
   if (pool.lastMedianPrice <= 0n) return null;
+  // Zero-median outage: `MedianUpdated` event with value 0 keeps
+  // `lastMedianPrice` at the prior non-zero value (per
+  // `computeMedianLineageNext`) but `oraclePrice` goes to 0. The
+  // contract treats the feed as down during the outage.
+  if (pool.oraclePrice <= 0n) return null;
   if (!pool.oracleOk) return null;
-  // Mirror the contract's stale-oracle revert: if the oracle hasn't
-  // reported within `oracleExpiry`, `getRebalancingState()` would fail.
-  // `oracleExpiry === 0n` means we don't yet know the window; conservatively
-  // skip the freshness check in that case (caller's RPC fallback will handle it).
-  if (pool.oracleExpiry > 0n) {
-    const expiresAt = pool.oracleTimestamp + pool.oracleExpiry;
-    if (expiresAt <= ctx.eventTimestamp) return null;
-  }
+  // Stale-oracle revert mirror: require a known expiry window (zero =
+  // pre-seed; without it we can't know if the median is stale, so fall
+  // through to RPC) AND the most recent on-chain `MedianUpdated` to be
+  // within that window. `lastMedianAt` is the only field that tracks
+  // actual median-report time — `oracleTimestamp` is also bumped by
+  // `OracleReported` and by state-sync writes, so it'd extend the
+  // window perpetually across non-median events.
+  if (pool.oracleExpiry <= 0n) return null;
+  const expiresAt = pool.lastMedianAt + pool.oracleExpiry;
+  if (expiresAt <= ctx.eventTimestamp) return null;
   const reserves = ctx.reservesOverride
     ? {
         reserves0: ctx.reservesOverride.reserve0,

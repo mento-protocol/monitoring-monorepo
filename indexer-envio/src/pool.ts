@@ -199,6 +199,10 @@ const SOURCE_PRIORITY = {
   fpmm_factory: 90,
   fpmm_rebalanced: 50,
   fpmm_update_reserves: 40,
+  // Below state-sync events: a threshold update doesn't change reserves
+  // or oracle, so the legacy "preferred-source" stickiness should keep
+  // whichever live event source wrote last.
+  fpmm_threshold_updated: 35,
   fpmm_swap: 30,
   fpmm_mint: 20,
   fpmm_burn: 20,

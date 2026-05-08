@@ -13,13 +13,12 @@ import {
 } from "../../tradingLimits";
 import { tradingLimitsEffect } from "../../rpc/effects";
 import {
-  computeHealthStatus,
   maybePreloadPool,
-  nextDeviationBreachStartedAt,
+  selfHealInvertRateFeed,
+  upsertPool,
+  upsertSnapshot,
 } from "../../pool";
 import { pickActiveThreshold } from "../../priceDifference";
-import { recordBreachTransition } from "../../deviationBreach";
-import { recordHealthSample } from "../../healthScore";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -167,25 +166,35 @@ FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
 
 // A governance threshold change can by itself open or close a breach
 // (e.g. tightening from 300 to 100 makes a previously-healthy pool
-// breached). Routing through the same breach/health pipeline that
-// MedianUpdated/OracleReported use (compute new active threshold from
-// `lastMedianPrice` direction, recompute breach anchor + health,
-// `recordBreachTransition`, `recordHealthSample`) ensures the
-// dependent state lands in the same event rather than waiting for the
-// next reserve/oracle event. Falls back to `above` for degenerate pools
-// (zero reserves / no median yet); the next state-sync event re-picks
-// once those land.
+// breached). Route through `upsertPool` so this event runs the same
+// breach/health pipeline that state-sync handlers do — including
+// `currentOpenBreachPeak` / `currentOpenBreachEntryThreshold` denorm
+// maintenance, `selfHealInvertRateFeed` for the direction calc, and
+// the `DeviationThresholdBreach` history row write. Then call
+// `upsertSnapshot` to refresh the daily rollup, mirroring the oracle
+// handlers — without it, threshold-only health transitions on a quiet
+// pool can leave `PoolDailySnapshot.cumulativeHealth*` stale until the
+// next reserve / oracle event.
 FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   const poolId = makePoolId(event.chainId, event.srcAddress);
-  const existing = await context.Pool.get(poolId);
-  if (!existing) return;
+  // Same preload-bail rationale as state-sync handlers: with
+  // `preload_handlers: true` we'd otherwise run `recordBreachTransition`
+  // (inside `upsertPool`) twice per event.
+  if (await maybePreloadPool(context, poolId)) return;
+  const initial = await context.Pool.get(poolId);
+  if (!initial) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
+  // Self-heal invertRateFeed before pickActiveThreshold reads it. Without
+  // this, an inverted pool whose deploy-time invert read failed and which
+  // gets a threshold update before any state-sync event would persist
+  // the wrong-side active threshold.
+  const existing = await selfHealInvertRateFeed(context, initial);
   const above = Number(event.params.newThresholdAbove);
   const below = Number(event.params.newThresholdBelow);
   // Direction is determined by reservePrice vs. on-chain median; pass a
   // synthetic pool view that uses `lastMedianPrice` as the oracle source
-  // so reporter-quote contamination of `oraclePrice` doesn't flip direction.
+  // so reporter-quote contamination of `oraclePrice` can't flip direction.
   const active = pickActiveThreshold(
     {
       reserves0: existing.reserves0,
@@ -197,47 +206,26 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     },
     { above, below },
   );
-  const updatedPool: Pool = {
-    ...existing,
-    rebalanceThresholdAbove: above,
-    rebalanceThresholdBelow: below,
-    rebalanceThreshold: active,
-    rebalanceThresholdsKnown: true,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
-  // priceDifference is reserves+oracle-derived, not threshold-derived, so
-  // we don't recompute it here — but breach/health predicates ARE
-  // threshold-derived, so they must run with the new active value.
-  const deviationBreachStartedAt = nextDeviationBreachStartedAt(
-    existing,
-    updatedPool,
-    blockTimestamp,
-  );
-  const withBreach: Pool = { ...updatedPool, deviationBreachStartedAt };
-  const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
-  const finalPool: Pool = { ...withBreach, healthStatus };
-
-  const breachPoolUpdate = await recordBreachTransition(
+  const pool = await upsertPool({
     context,
-    existing,
-    finalPool,
-    {
-      blockTimestamp,
-      blockNumber,
-      txHash: event.transaction.hash,
-      source: "fpmm_threshold_updated",
-    },
-  );
-  const { poolUpdate } = recordHealthSample(
-    finalPool,
-    finalPool.priceDifference,
-    active,
+    chainId: event.chainId,
+    poolId,
+    source: "fpmm_threshold_updated",
+    blockNumber,
     blockTimestamp,
-  );
-  context.Pool.set({
-    ...finalPool,
-    ...poolUpdate,
-    ...breachPoolUpdate,
+    txHash: event.transaction.hash,
+    oracleDelta: {
+      rebalanceThresholdAbove: above,
+      rebalanceThresholdBelow: below,
+      rebalanceThreshold: active,
+      rebalanceThresholdsKnown: true,
+    },
+    existing: { pool: existing },
+  });
+  await upsertSnapshot({
+    context,
+    pool,
+    blockTimestamp,
+    blockNumber,
   });
 });

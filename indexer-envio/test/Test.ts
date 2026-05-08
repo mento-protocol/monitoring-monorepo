@@ -378,6 +378,8 @@ type PoolEntity = {
   rebalanceThresholdAbove: number;
   rebalanceThresholdBelow: number;
   rebalanceThresholdsKnown: boolean;
+  invertRateFeedKnown: boolean;
+  lastMedianAt: bigint;
   lastRebalancedAt: bigint;
   healthStatus: string;
   limitStatus: string;
@@ -1788,12 +1790,13 @@ describe("Envio Celo indexer handlers", () => {
       token0Decimals: 18,
       token1Decimals: 18,
       invertRateFeed: false,
+      invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
       rebalanceThresholdBelow: 200,
       rebalanceThresholdsKnown: true,
       lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
+      lastMedianAt: 1_700_007_000n,
       oracleOk: true,
-      oracleTimestamp: 1_700_007_000n,
       oracleExpiry: 3_600n,
       source: "fpmm_update_reserves",
     });
@@ -1860,10 +1863,14 @@ describe("Envio Celo indexer handlers", () => {
       reserves0: 60_000_000_000_000_000_000_000n,
       reserves1: 40_000_000_000_000_000_000_000n,
       lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
+      lastMedianAt: 1_700_008_000n,
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
+      oracleOk: true,
+      oracleExpiry: 3_600n,
       token0Decimals: 18,
       token1Decimals: 18,
       invertRateFeed: false,
+      invertRateFeedKnown: true,
     });
 
     const thresholdEvent = (
