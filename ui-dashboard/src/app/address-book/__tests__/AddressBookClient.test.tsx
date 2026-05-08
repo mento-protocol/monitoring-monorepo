@@ -58,6 +58,10 @@ const mockUseAddressLabels = vi.fn(() => ({
   revalidate: mockRevalidate,
   isLoading: false as boolean,
   error: undefined as Error | undefined,
+  markPendingMutation: () => () => undefined,
+  isMutationPending: () => false,
+  markPendingReportMutation: () => () => undefined,
+  isReportMutationPending: () => false,
 }));
 
 vi.mock("@/components/address-labels-provider", () => ({
@@ -196,6 +200,10 @@ beforeEach(() => {
     revalidate: mockRevalidate,
     isLoading: false as boolean,
     error: undefined as Error | undefined,
+    markPendingMutation: () => () => undefined,
+    isMutationPending: () => false,
+    markPendingReportMutation: () => () => undefined,
+    isReportMutationPending: () => false,
   }));
 
   capturedEditor = null;
@@ -395,6 +403,10 @@ describe("AddressBookClient — initial render", () => {
       revalidate: mockRevalidate,
       isLoading: true,
       error: undefined,
+      markPendingMutation: () => () => undefined,
+      isMutationPending: () => false,
+      markPendingReportMutation: () => () => undefined,
+      isReportMutationPending: () => false,
     });
     render();
     expect(container.textContent).toContain("Loading labels…");
@@ -410,6 +422,10 @@ describe("AddressBookClient — initial render", () => {
       revalidate: mockRevalidate,
       isLoading: false,
       error: new Error("hasura is down"),
+      markPendingMutation: () => () => undefined,
+      isMutationPending: () => false,
+      markPendingReportMutation: () => () => undefined,
+      isReportMutationPending: () => false,
     });
     render();
     const alert = container.querySelector('[role="alert"]');
@@ -560,6 +576,77 @@ describe("AddressBookClient — search filter", () => {
 });
 
 // ---- 3. Edit modal ---------------------------------------------------------
+
+describe("AddressBookClient — row navigation", () => {
+  it("renders an absolute-positioned <Link> overlay per row pointing at /address-book/{address}", () => {
+    mockCustomEntries = [
+      customEntry({
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    ];
+    render();
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows.length).toBeGreaterThan(0);
+    // Each row contains exactly one overlay Link with absolute positioning
+    // and an href to the detail route. The Link sits inside the first <td>
+    // (HTML doesn't allow <a> as a direct child of <tr>) but its absolute
+    // positioning resolves to the <tr>'s `position: relative` context so
+    // it spans the whole row visually.
+    let foundCustomOverlay = false;
+    for (const row of Array.from(rows)) {
+      const link = row.querySelector<HTMLAnchorElement>(
+        'a[href^="/address-book/"]',
+      );
+      if (
+        link?.getAttribute("href") ===
+        `/address-book/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+      ) {
+        foundCustomOverlay = true;
+        expect(link.className).toContain("absolute");
+        expect(link.className).toContain("inset-0");
+        // Sanity: link is inside a <td>, not a direct child of <tr>.
+        expect(link.parentElement?.tagName).toBe("TD");
+      }
+    }
+    expect(foundCustomOverlay).toBe(true);
+  });
+
+  it("renders the overlay link for every row, including contract rows", () => {
+    // Contract rows from the mocked NETWORKS should also be navigable.
+    mockCustomEntries = [];
+    render();
+    const rows = container.querySelectorAll("tbody tr");
+    for (const row of Array.from(rows)) {
+      const link = row.querySelector<HTMLAnchorElement>(
+        'a[href^="/address-book/"]',
+      );
+      expect(link).not.toBeNull();
+    }
+  });
+
+  it("clicking Edit on a row still opens the modal (does not navigate via overlay)", () => {
+    // The Edit button sits at z-10 above the overlay link with default
+    // pointer-events; its onClick handler runs and the absolute Link does
+    // not. This pins the regression where a tweak to the z-index would let
+    // the overlay swallow the click.
+    mockCustomEntries = [
+      customEntry({
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    ];
+    mockGetEntry.mockReturnValue({
+      entry: {
+        name: "Editable",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    render();
+    expect(capturedEditor).toBeNull();
+    clickByText("Edit");
+    expect(capturedEditor).not.toBeNull();
+  });
+});
 
 describe("AddressBookClient — edit modal", () => {
   it("opens the editor with the row's address when 'Edit' is clicked on a custom row", () => {

@@ -5,6 +5,8 @@ import {
   use,
   useCallback,
   useMemo,
+  useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useSession } from "next-auth/react";
@@ -68,7 +70,48 @@ type AddressLabelsContextValue = {
    */
   revalidate: () => Promise<void>;
   isLoading: boolean;
+  /**
+   * True iff the labels SWR has resolved a real response. Distinguishes
+   * "successfully empty" from "still loading / not yet authenticated" —
+   * `customEntries` is always `[]` until data lands, so without this flag
+   * a deep-link page can't tell whether `getEntry(address)` returning
+   * undefined means "no such label" or "haven't fetched yet". Save flows
+   * that need to avoid stomping an existing entry should gate on this.
+   */
+  hasLoaded: boolean;
   error: Error | undefined;
+  /**
+   * Mark a label save/delete as pending against `address`. Returns an
+   * "unmark" function the caller MUST invoke when the request settles
+   * (success or failure). The provider tracks pending mutations
+   * globally — surviving the detail page's mount/unmount lifecycle —
+   * so a user who saves on `/address-book/[A]`, leaves to
+   * `/address-book` index, then re-enters `[A]` before the original
+   * request settles still sees the in-flight state and the form keeps
+   * Save/Remove disabled. Both modal and detail surfaces share this
+   * ledger so a save kicked off in one surface blocks a competing
+   * second write in the other.
+   */
+  markPendingMutation: (address: string) => () => void;
+  /**
+   * True when at least one label save/delete is in flight for
+   * `address`. Re-renders when the count flips between 0 and >0.
+   */
+  isMutationPending: (address: string | null) => boolean;
+  /**
+   * Same as `markPendingMutation` but for forensic-report writes.
+   * Tracked separately from label mutations because the two are
+   * independent operations on the same address — a label save
+   * shouldn't block a report save against the same address (or vice
+   * versa). Same surfaces share this ledger so detail-page report
+   * edits and modal-tab report edits can't race each other.
+   */
+  markPendingReportMutation: (address: string) => () => void;
+  /**
+   * True when at least one report save/delete is in flight for
+   * `address`. Independent of `isMutationPending` (label).
+   */
+  isReportMutationPending: (address: string | null) => boolean;
 };
 
 const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
@@ -101,12 +144,56 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // Labels are private — only fetch when the user is signed in. For
   // unauthenticated views, the provider returns empty state and the UI falls
   // back to truncated addresses / contract registry names.
+  //
+  // `hasLoaded` tracks REAL fetch completion via `onSuccess` instead of
+  // `data !== undefined`. With `fallbackData`, SWR populates `data` from
+  // the fallback immediately on first render — before any network fetch
+  // resolves — so a `data !== undefined` check would flip to "loaded"
+  // while the auth/SWR machinery is still warming up. A page that gates
+  // its save UI on `hasLoaded` could otherwise let a fast save PUT empty
+  // defaults over an existing label during that window.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  // Reset `hasLoaded` when the auth status leaves "authenticated" using
+  // the React-blessed "store information from previous renders" pattern
+  // (https://react.dev/reference/react/useState#storing-information-from-previous-renders)
+  // — comparing prev vs. current state DURING render avoids the
+  // `setState`-in-`useEffect` derived-state anti-pattern.
+  //
+  // Without this, a sign-out → sign-in round-trip with the detail page
+  // mounted would leave `hasLoaded` stuck at the prior session's `true`
+  // value, so the page would render a writable form on the new
+  // session's stale fallback data before the new authenticated
+  // `/api/address-labels` read lands.
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (prevStatus !== status) {
+    setPrevStatus(status);
+    if (status !== "authenticated" && hasLoaded) {
+      setHasLoaded(false);
+    }
+  }
+  // Mirror status into a ref so SWR's onSuccess (which fires
+  // asynchronously, potentially after status has flipped) can read the
+  // CURRENT value rather than the closure-captured one. Without this,
+  // a fetch started while authenticated that resolves AFTER sign-out
+  // would set hasLoaded back to true, defeating the render-time reset
+  // — and the next page render would treat fallback/stale data as
+  // "loaded" and put up a writable form.
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const { data, error, isLoading } = useSWR<EntriesState>(
     status === "authenticated" ? SWR_KEY : null,
     fetchAllLabels,
     {
       refreshInterval: 30_000,
       fallbackData: emptyState(),
+      // Fires after every successful fetch. Setting state to the same
+      // value (`true`) after the first fetch is a React no-op so this
+      // doesn't trigger extra renders on the 30s refresh cadence. Gate
+      // on `statusRef` so a fetch resolving after sign-out doesn't
+      // flip the flag back to true against a stale session.
+      onSuccess: () => {
+        if (statusRef.current === "authenticated") setHasLoaded(true);
+      },
     },
   );
 
@@ -287,6 +374,69 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     await mutate(SWR_KEY);
   }, [mutate]);
 
+  // Pending-mutations ledgers. Tracks address → in-flight count so
+  // surfaces (modal, detail page) can read it to disable competing
+  // writes against the same address. State (not a ref) because
+  // consumers gate render output on it. Lives in the provider rather
+  // than the detail page so a user who navigates away from the
+  // detail route mid-write and re-enters the same address still
+  // sees the in-flight state — the page would otherwise unmount and
+  // rebuild a fresh, empty ledger. Label and report ledgers are
+  // SEPARATE: a label save shouldn't block a report save against the
+  // same address (or vice versa) — they're independent operations.
+  const [pendingLabelMutations, setPendingLabelMutations] = useState<
+    Record<string, number>
+  >({});
+  const [pendingReportMutations, setPendingReportMutations] = useState<
+    Record<string, number>
+  >({});
+  // Single helper factory keeps the two ledgers' implementations in
+  // lock-step. Returns `mark(address) → unmark` — `unmark` is
+  // idempotent (a caller who defensively unmarks twice can't decrement
+  // past zero and unblock a subsequent write).
+  const buildMarker = useCallback(
+    (setLedger: React.Dispatch<React.SetStateAction<Record<string, number>>>) =>
+      (address: string): (() => void) => {
+        const lower = address.toLowerCase();
+        setLedger((m) => ({ ...m, [lower]: (m[lower] ?? 0) + 1 }));
+        let unmarked = false;
+        return () => {
+          if (unmarked) return;
+          unmarked = true;
+          setLedger((m) => {
+            const next = { ...m };
+            const c = (next[lower] ?? 0) - 1;
+            if (c <= 0) delete next[lower];
+            else next[lower] = c;
+            return next;
+          });
+        };
+      },
+    [],
+  );
+  const markPendingMutation = useMemo(
+    () => buildMarker(setPendingLabelMutations),
+    [buildMarker],
+  );
+  const markPendingReportMutation = useMemo(
+    () => buildMarker(setPendingReportMutations),
+    [buildMarker],
+  );
+  const isMutationPending = useCallback(
+    (address: string | null): boolean => {
+      if (!address) return false;
+      return (pendingLabelMutations[address.toLowerCase()] ?? 0) > 0;
+    },
+    [pendingLabelMutations],
+  );
+  const isReportMutationPending = useCallback(
+    (address: string | null): boolean => {
+      if (!address) return false;
+      return (pendingReportMutations[address.toLowerCase()] ?? 0) > 0;
+    },
+    [pendingReportMutations],
+  );
+
   const value: AddressLabelsContextValue = {
     getName,
     getTags,
@@ -298,7 +448,12 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     deleteEntry,
     revalidate,
     isLoading,
+    hasLoaded,
     error: error as Error | undefined,
+    markPendingMutation,
+    isMutationPending,
+    markPendingReportMutation,
+    isReportMutationPending,
   };
 
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;

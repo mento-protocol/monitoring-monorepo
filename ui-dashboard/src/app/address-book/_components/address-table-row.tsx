@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
 import { truncateAddress } from "@/lib/format";
@@ -37,6 +38,10 @@ type AddressRowProps = {
    * per row — see AddressBookClient. */
   reportPresent: boolean;
   explorerUrl: string | null;
+  /** When set, the whole row becomes a link to this href via an
+   * absolutely-positioned overlay <Link>. Inner interactive elements
+   * (explorer link, Edit button) take pointer events back via z-10. */
+  detailHref?: string;
   onEdit: () => void;
 };
 
@@ -54,6 +59,7 @@ export function AddressTableRow({
   canEdit,
   reportPresent,
   explorerUrl,
+  detailHref,
   onEdit,
 }: AddressRowProps) {
   const arkhamSourced = isArkhamSourced({ source, tags });
@@ -64,22 +70,40 @@ export function AddressTableRow({
     (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
   );
   return (
-    <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
+    <tr className="relative border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
+      {/* Card-link overlay: absolutely positions a <Link> against the
+          row's `position: relative` context so cmd-click / middle-click /
+          keyboard focus all behave like a real row-link. The <Link> sits
+          inside the first <td> (HTML doesn't allow <a> as a direct child
+          of <tr>) — its absolute positioning still resolves to the <tr>
+          because the host <td> uses default static positioning. Visible
+          cell contents stack above via `relative z-10`; pointer-events
+          fall through to the link from text-only cells but are taken
+          back by interactive children (explorer link, Edit button). */}
       <td className="px-4 py-3 whitespace-nowrap">
-        {isCustom ? (
-          <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
-            All chains
-          </span>
-        ) : (
-          <div className="flex items-center gap-2">
-            <ChainIcon network={network} />
-            <span className="text-xs text-slate-400 whitespace-nowrap">
-              {network.label.replace(/ \(.*\)$/, "")}
-            </span>
-          </div>
+        {detailHref && (
+          <Link
+            href={detailHref}
+            aria-label={`Open ${name || address}`}
+            className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+          />
         )}
+        <div className="relative z-10 pointer-events-none">
+          {isCustom ? (
+            <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
+              All chains
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              <ChainIcon network={network} />
+              <span className="text-xs text-slate-400 whitespace-nowrap">
+                {network.label.replace(/ \(.*\)$/, "")}
+              </span>
+            </div>
+          )}
+        </div>
       </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      <td className="relative z-10 px-4 py-3 whitespace-nowrap pointer-events-none">
         <div className="flex items-center gap-1.5">
           {explorerUrl ? (
             <a
@@ -87,7 +111,7 @@ export function AddressTableRow({
               target="_blank"
               rel="noopener noreferrer"
               title={address}
-              className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
+              className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors pointer-events-auto"
             >
               {truncateAddress(address)}
               <span className="ml-1 text-slate-600" aria-hidden="true">
@@ -111,7 +135,7 @@ export function AddressTableRow({
           )}
         </div>
       </td>
-      <td className="px-4 py-3 max-w-[180px]">
+      <td className="relative z-10 px-4 py-3 max-w-[180px] pointer-events-none">
         <span
           title={name}
           className={`block truncate text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
@@ -119,17 +143,17 @@ export function AddressTableRow({
           {name || <span className="text-slate-600">—</span>}
         </span>
       </td>
-      <td className="px-4 py-3">
+      <td className="relative z-10 px-4 py-3 pointer-events-none">
         {displayTags.length > 0 ? (
           <TagPills tags={displayTags} />
         ) : (
           <span className="text-xs text-slate-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-slate-400 max-w-[180px] truncate">
+      <td className="relative z-10 px-4 py-3 text-xs text-slate-400 max-w-[180px] truncate pointer-events-none">
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
-      <td className="px-4 py-3">
+      <td className="relative z-10 px-4 py-3 pointer-events-none">
         {isCustom && arkhamSourced ? (
           <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
             arkham
@@ -148,7 +172,7 @@ export function AddressTableRow({
           </span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="relative z-10 px-4 py-3 pointer-events-none">
         {isCustom &&
           (isPublic === true ? (
             <span className="inline-flex items-center rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-800">
@@ -160,7 +184,7 @@ export function AddressTableRow({
             </span>
           ))}
       </td>
-      <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
+      <td className="relative z-10 px-4 py-3 text-xs text-slate-400 whitespace-nowrap pointer-events-none">
         {createdAt ? (
           <time dateTime={createdAt} title={createdAt}>
             {formatCreatedAt(createdAt)}
@@ -169,7 +193,7 @@ export function AddressTableRow({
           <span className="text-slate-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3 text-xs whitespace-nowrap">
+      <td className="relative z-10 px-4 py-3 text-xs whitespace-nowrap pointer-events-none">
         {updatedAt ? (
           // Highlight when we can confirm the row has been edited since
           // creation; render plain when `createdAt` is absent (legacy rows
@@ -200,7 +224,7 @@ export function AddressTableRow({
           <span className="text-slate-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="relative z-10 px-4 py-3">
         {!canEdit ? null : isCustom ? (
           <button
             type="button"

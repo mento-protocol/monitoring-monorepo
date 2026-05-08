@@ -399,4 +399,30 @@ describe("upgradeEntry — backward compat", () => {
     expect(entry.name).toBe("");
     expect(entry.tags).toEqual([]);
   });
+
+  it("substitutes a stable empty-string `updatedAt` for legacy rows missing the timestamp (codex round 7)", () => {
+    // Codex flagged that synthesizing `new Date().toISOString()` here makes
+    // `entry.updatedAt` change on every 30s SWR poll for legacy rows, so
+    // the detail page (which keys the form mount on `updatedAt`) would
+    // remount and discard in-progress edits every poll. Pin the stable
+    // sentinel: two upgrades of the same legacy entry must yield the same
+    // `updatedAt`.
+    const legacy = { label: "Old", category: "CEX" };
+    const a = upgradeEntry({ ...legacy });
+    const b = upgradeEntry({ ...legacy });
+    expect(a.updatedAt).toBe("");
+    expect(b.updatedAt).toBe("");
+
+    // V2 entries with a persisted timestamp pass through unchanged.
+    const v2 = upgradeEntry({
+      name: "New",
+      tags: [],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(v2.updatedAt).toBe("2026-01-01T00:00:00Z");
+
+    // Tag-only legacy entries also get the stable sentinel.
+    const tagOnly = upgradeEntry({ tags: ["mev"] });
+    expect(tagOnly.updatedAt).toBe("");
+  });
 });

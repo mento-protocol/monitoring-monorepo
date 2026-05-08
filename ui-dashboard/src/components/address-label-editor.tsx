@@ -25,9 +25,71 @@ type Props = {
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
   onClose: () => void;
+  /**
+   * Forwarded to the inner form. Forces an explicit name when set —
+   * used when the address is registered as a contract under multiple
+   * disagreeing names so a tag-only save can't persist an empty
+   * global label that suppresses every contract row in the index.
+   */
+  requireExplicitName?: boolean;
+  // Forwarded to the label form. Hosts (e.g. `AddressBookClient`)
+  // wire these into the provider's pending-mutation ledger so a
+  // save started in one surface (modal) blocks competing writes
+  // from another (detail page) for the same address. The third
+  // argument is the form's CURRENT address state (which the user
+  // may have just typed in the new-address flow), so the host
+  // marks pending against the correct address — not against
+  // `editTarget.address` which is `""` for the add-new modal.
+  onLabelSavingChange?: (
+    saving: boolean,
+    formId: string,
+    address: string,
+  ) => void;
+  onLabelDeletingChange?: (
+    deleting: boolean,
+    formId: string,
+    address: string,
+  ) => void;
+  /** Disable the entire label form (inputs + buttons). */
+  externallyDisabledLabel?: boolean;
+  // Same callbacks but for the forensic-report editor inside the
+  // Report tab. Tracked separately so a label save doesn't block a
+  // report save against the same address (or vice versa).
+  onReportSavingChange?: (
+    saving: boolean,
+    editorId: string,
+    address: string,
+  ) => void;
+  onReportDeletingChange?: (
+    deleting: boolean,
+    editorId: string,
+    address: string,
+  ) => void;
+  /** Disable the entire forensic-report editor. */
+  externallyDisabledReport?: boolean;
+  /**
+   * Bubbles the form's current address state up to the host. Used by
+   * `AddressBookClient` in the add-new flow to evaluate
+   * `requireExplicitName` and pending-ledger state against the
+   * address the user is typing (the modal's `address` prop is `""`
+   * on mount and never updates until close).
+   */
+  onDraftAddressChange?: (next: string) => void;
 };
 
-export function AddressLabelEditor({ address, initial, onClose }: Props) {
+export function AddressLabelEditor({
+  address,
+  initial,
+  onClose,
+  requireExplicitName,
+  onLabelSavingChange,
+  onLabelDeletingChange,
+  externallyDisabledLabel,
+  onReportSavingChange,
+  onReportDeletingChange,
+  externallyDisabledReport,
+  onDraftAddressChange,
+}: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
@@ -166,11 +228,18 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
         <AddressLabelForm
           address={address}
           initial={initial}
-          onAddressChange={setDraftAddress}
+          onAddressChange={(next) => {
+            setDraftAddress(next);
+            onDraftAddressChange?.(next);
+          }}
           onSaved={onClose}
           onDeleted={onClose}
           onCancel={onClose}
           firstFieldRef={firstInputRef}
+          requireExplicitName={requireExplicitName}
+          onSavingChange={onLabelSavingChange}
+          onDeletingChange={onLabelDeletingChange}
+          externallyDisabled={externallyDisabledLabel}
         />
       </div>
       <div
@@ -179,7 +248,12 @@ export function AddressLabelEditor({ address, initial, onClose }: Props) {
         aria-labelledby="al-tab-report"
         hidden={activeTab !== "report"}
       >
-        <AddressReportEditor address={draftAddress} />
+        <AddressReportEditor
+          address={draftAddress}
+          onSavingChange={onReportSavingChange}
+          onDeletingChange={onReportDeletingChange}
+          externallyDisabled={externallyDisabledReport}
+        />
       </div>
     </dialog>
   );

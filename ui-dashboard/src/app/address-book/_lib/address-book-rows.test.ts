@@ -74,6 +74,7 @@ import {
   buildContractRows,
   buildCustomRows,
   filterRows,
+  findContractInitial,
   type AddressRow,
 } from "@/app/address-book/_lib/address-book-rows";
 import { NETWORKS } from "@/lib/networks";
@@ -315,5 +316,35 @@ describe("filterRows", () => {
   it("returns an empty array when no row matches", () => {
     const result = filterRows(all, "nonexistent-substring-zzz");
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findContractInitial
+// ---------------------------------------------------------------------------
+
+describe("findContractInitial", () => {
+  it("returns a pre-filled entry for a registered contract address", () => {
+    const initial = findContractInitial(
+      "0xcccccccccccccccccccccccccccccccccccccccc",
+    );
+    expect(initial).toBeDefined();
+    expect(initial?.name).toBe("ContractC");
+    expect(initial?.tags).toEqual([]);
+    expect(typeof initial?.updatedAt).toBe("string");
+  });
+
+  it("matches case-insensitively against the registry", () => {
+    const initial = findContractInitial(
+      "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+    );
+    expect(initial?.name).toBe("ContractC");
+  });
+
+  it("returns undefined for an address that isn't in any registry", () => {
+    const initial = findContractInitial(
+      "0xfffffffffffffffffffffffffffffffffffffffe",
+    );
+    expect(initial).toBeUndefined();
   });
 });

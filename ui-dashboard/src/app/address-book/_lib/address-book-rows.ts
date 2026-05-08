@@ -4,11 +4,76 @@ import {
   isConfiguredNetworkId,
   type Network,
 } from "@/lib/networks";
-import { isArkhamSourced, isMiniPaySourced } from "@/lib/address-labels-shared";
+import {
+  isArkhamSourced,
+  isMiniPaySourced,
+  type AddressEntry,
+} from "@/lib/address-labels-shared";
 import type { AddressBookRow } from "@/lib/address-book";
 import type { AddressEntryRow } from "@/components/address-labels-provider";
 
 export type AddressRow = AddressBookRow;
+
+/**
+ * Look up a contract-name pre-fill for the address-label form. Walks every
+ * configured network's static `addressLabels` registry case-insensitively.
+ *
+ * Returns `undefined` when:
+ *   - no configured network has a label for this address, OR
+ *   - configured networks DISAGREE on the name (e.g.
+ *     `0x0dd57f6f...` is `Yield Split` on Celo and `ProtocolFeeRecipient`
+ *     on Monad). The detail URL is chain-agnostic so we can't tell which
+ *     chain the user clicked from. Pre-filling with first-match-wins
+ *     would let a save on the Monad row persist `Yield Split` as the
+ *     GLOBAL custom name — suppressing the Monad contract row in the
+ *     index under Celo's label. Better to render an empty form and let
+ *     the user type the right name for their context.
+ *
+ * Shared between the modal flow (`AddressBookClient`) and the detail page
+ * (`/address-book/[address]`) so both surfaces preserve contract names when a
+ * user opens the form for a known contract row that doesn't yet have a custom
+ * label.
+ */
+export function findContractInitial(address: string): AddressEntry | undefined {
+  const matched = collectContractMatches(address);
+  if (matched.size !== 1) return undefined;
+  const [name] = matched;
+  return {
+    name,
+    tags: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * True when `address` is registered as a contract under TWO OR MORE
+ * different names across configured networks. The detail URL is
+ * chain-agnostic, so we can't infer which row the user clicked from —
+ * the form must require an explicit name to avoid persisting a
+ * tag-only / blank-name custom label that would suppress every
+ * disagreeing contract row in the index under the wrong (or empty)
+ * display name.
+ */
+export function hasAmbiguousContractMatches(address: string): boolean {
+  return collectContractMatches(address).size > 1;
+}
+
+function collectContractMatches(address: string): Set<string> {
+  // Filter to the same `isConfiguredNetworkId` set `buildContractRows`
+  // uses — devnet / local-only registries carry deployer addresses that
+  // are inappropriate to surface on the prod detail page.
+  const lower = address.toLowerCase();
+  const matchedNames = new Set<string>();
+  for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
+    const net = NETWORKS[id];
+    for (const [registered, name] of Object.entries(net.addressLabels)) {
+      if (registered.toLowerCase() === lower) {
+        matchedNames.add(name);
+      }
+    }
+  }
+  return matchedNames;
+}
 
 // ---------------------------------------------------------------------------
 // Row builders

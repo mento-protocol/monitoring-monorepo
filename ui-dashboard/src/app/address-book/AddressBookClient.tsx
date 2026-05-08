@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
+import { isValidAddress } from "@/lib/format";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { buildAddressBookRows } from "@/lib/address-book";
@@ -13,6 +14,8 @@ import {
   buildContractRows,
   buildCustomRows,
   filterRows,
+  findContractInitial,
+  hasAmbiguousContractMatches,
   type AddressRow,
 } from "./_lib/address-book-rows";
 import { importFile, exportLabels } from "./_lib/address-book-import-export";
@@ -24,8 +27,17 @@ export default function AddressBookPage({
 }: {
   canEdit?: boolean;
 }) {
-  const { customEntries, getEntry, revalidate, isLoading, error } =
-    useAddressLabels();
+  const {
+    customEntries,
+    getEntry,
+    revalidate,
+    isLoading,
+    error,
+    markPendingMutation,
+    isMutationPending,
+    markPendingReportMutation,
+    isReportMutationPending,
+  } = useAddressLabels();
   // Hook lifted from AddressTableRow so the SWR subscription, useSession
   // call, and per-render Set construction happen ONCE per table render
   // instead of N times (one per row). Cursor flagged the per-row pattern
@@ -60,6 +72,73 @@ export default function AddressBookPage({
   const allRows = useMemo<AddressRow[]>(
     () => filterRows(buildAddressBookRows(contractRows, customRows), search),
     [customRows, contractRows, search],
+  );
+
+  // Pending-ledger wiring for both modal flows (edit + add-new) —
+  // mirrors the detail page's pattern (see `[address]/page.tsx`).
+  // The address parameter comes from the form's current state
+  // (passed via the callback), so the add-new modal — where
+  // `editTarget` is null and the user types the address inside the
+  // form — still marks pending against the right address. Keys by
+  // `formId:op` so save and delete on the same mount don't
+  // overwrite each other's unmark closure (codex round 13).
+  // Track add-new draft for `requireExplicitName` evaluation as the
+  // user types — needs to flip live on each keystroke since
+  // `hasAmbiguousContractMatches` only matters for valid addresses.
+  const [addNewDraftAddress, setAddNewDraftAddress] = useState("");
+  const labelUnmarkRef = useRef<Map<string, () => void>>(new Map());
+  const reportUnmarkRef = useRef<Map<string, () => void>>(new Map());
+  const handleLabelSavingChange = useCallback(
+    (saving: boolean, formId: string, address: string) => {
+      const key = `${formId}:save`;
+      if (saving) {
+        labelUnmarkRef.current.set(key, markPendingMutation(address));
+      } else {
+        const u = labelUnmarkRef.current.get(key);
+        labelUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingMutation],
+  );
+  const handleLabelDeletingChange = useCallback(
+    (deleting: boolean, formId: string, address: string) => {
+      const key = `${formId}:delete`;
+      if (deleting) {
+        labelUnmarkRef.current.set(key, markPendingMutation(address));
+      } else {
+        const u = labelUnmarkRef.current.get(key);
+        labelUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingMutation],
+  );
+  const handleReportSavingChange = useCallback(
+    (saving: boolean, editorId: string, address: string) => {
+      const key = `${editorId}:save`;
+      if (saving) {
+        reportUnmarkRef.current.set(key, markPendingReportMutation(address));
+      } else {
+        const u = reportUnmarkRef.current.get(key);
+        reportUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
+  );
+  const handleReportDeletingChange = useCallback(
+    (deleting: boolean, editorId: string, address: string) => {
+      const key = `${editorId}:delete`;
+      if (deleting) {
+        reportUnmarkRef.current.set(key, markPendingReportMutation(address));
+      } else {
+        const u = reportUnmarkRef.current.get(key);
+        reportUnmarkRef.current.delete(key);
+        u?.();
+      }
+    },
+    [markPendingReportMutation],
   );
 
   const handleExport = useCallback(() => {
@@ -231,6 +310,16 @@ export default function AddressBookPage({
                         : explorerAddressUrl(row.network, row.address)
                     }
                     onEdit={() => setEditTarget({ address: row.address })}
+                    // The detail page renders the writable label form +
+                    // forensic report editor unconditionally. Read-only
+                    // surfaces (e.g. embedded views with `canEdit=false`)
+                    // hide the inline Edit / +Tag actions; we must also
+                    // skip the row overlay link, otherwise a row click
+                    // would round-trip into an editable detail page and
+                    // bypass the read-only mode entirely.
+                    detailHref={
+                      userCanEdit ? `/address-book/${row.address}` : undefined
+                    }
                   />
                 );
               })}
@@ -240,7 +329,36 @@ export default function AddressBookPage({
       )}
 
       {userCanEdit && addingNew && (
-        <AddressLabelEditor address="" onClose={() => setAddingNew(false)} />
+        <AddressLabelEditor
+          address=""
+          onClose={() => {
+            setAddingNew(false);
+            setAddNewDraftAddress("");
+          }}
+          onDraftAddressChange={setAddNewDraftAddress}
+          // Same ambig-contract guard as the edit / detail flows:
+          // when the user types an address that's registered as a
+          // contract under multiple disagreeing names, force an
+          // explicit name so a tag-only save can't persist
+          // `name: ""` and suppress every contract row in the index.
+          requireExplicitName={
+            isValidAddress(addNewDraftAddress) &&
+            !getEntry(addNewDraftAddress)?.entry &&
+            hasAmbiguousContractMatches(addNewDraftAddress)
+          }
+          // Pending-ledger wiring — a save kicked off in the add-new
+          // modal contributes to the same global ledger as edit /
+          // detail-page saves. Disable when there's a pending
+          // mutation against THIS draft address (rare but real if
+          // the user types an address that's mid-save somewhere
+          // else).
+          onLabelSavingChange={handleLabelSavingChange}
+          onLabelDeletingChange={handleLabelDeletingChange}
+          externallyDisabledLabel={isMutationPending(addNewDraftAddress)}
+          onReportSavingChange={handleReportSavingChange}
+          onReportDeletingChange={handleReportDeletingChange}
+          externallyDisabledReport={isReportMutationPending(addNewDraftAddress)}
+        />
       )}
 
       {userCanEdit && editTarget && (
@@ -248,33 +366,34 @@ export default function AddressBookPage({
           address={editTarget.address}
           initial={
             getEntry(editTarget.address)?.entry ??
-            contractInitial(editTarget.address)
+            findContractInitial(editTarget.address)
           }
           onClose={() => setEditTarget(null)}
+          // Mirror of the detail page's `requireExplicitName` gate.
+          // When the address is registered as a contract under
+          // multiple disagreeing names AND there's no custom entry
+          // yet, force the user to type the right name — otherwise a
+          // tag-only save persists `name: ""` and `buildAddressBookRows`
+          // suppresses every contract row for that address under a
+          // nameless custom row.
+          requireExplicitName={
+            !getEntry(editTarget.address)?.entry &&
+            hasAmbiguousContractMatches(editTarget.address)
+          }
+          // Pending-ledger wiring — modal saves count toward the same
+          // global ledger as detail-page saves. Disable label/report
+          // editors when there's a pending mutation against this
+          // address from any other surface (detail page, prior
+          // modal). Once the original request settles, both ledgers
+          // decrement and the disabled state lifts automatically.
+          onLabelSavingChange={handleLabelSavingChange}
+          onLabelDeletingChange={handleLabelDeletingChange}
+          externallyDisabledLabel={isMutationPending(editTarget.address)}
+          onReportSavingChange={handleReportSavingChange}
+          onReportDeletingChange={handleReportDeletingChange}
+          externallyDisabledReport={isReportMutationPending(editTarget.address)}
         />
       )}
     </div>
   );
-}
-
-function contractInitial(address: string) {
-  // Walk every network's static contract registry case-insensitively —
-  // `@mento-protocol/contracts` exports checksummed mixed-case keys, but
-  // callers may pass either casing. Same address on multiple chains
-  // generally has the same contract name (deterministic deploys); if names
-  // diverge we use the first hit, which is fine for editor pre-fill since
-  // the user can override.
-  const lower = address.toLowerCase();
-  for (const net of Object.values(NETWORKS)) {
-    for (const [registered, name] of Object.entries(net.addressLabels)) {
-      if (registered.toLowerCase() === lower) {
-        return {
-          name,
-          tags: [],
-          updatedAt: new Date().toISOString(),
-        };
-      }
-    }
-  }
-  return undefined;
 }

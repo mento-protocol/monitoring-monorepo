@@ -44,6 +44,11 @@ export function resolveEffectiveName(
  * Returns an error string or null when valid.
  *
  * Relaxed validation: name is not required if tags are present.
+ *
+ * `requireExplicitName` overrides the relaxed branch — used by the
+ * detail page when the address is registered as a contract under
+ * multiple disagreeing names (saving a tag-only entry would persist
+ * an empty global name, suppressing every contract row in the index).
  */
 export function validateEntryForm(opts: {
   isNewAddress: boolean;
@@ -51,9 +56,13 @@ export function validateEntryForm(opts: {
   name: string;
   tags?: string[];
   isContractRow: boolean;
+  requireExplicitName?: boolean;
 }): string | null {
   if (opts.isNewAddress && !isValidAddress(opts.address.trim())) {
     return "Enter a valid 0x address.";
+  }
+  if (opts.requireExplicitName && !opts.name.trim()) {
+    return "Enter a name (this address is registered as a contract under multiple names — pick the one for the chain you're labeling).";
   }
   const hasTags = opts.tags && opts.tags.length > 0;
   if (!opts.isContractRow && !opts.name.trim() && !hasTags) {
@@ -90,6 +99,57 @@ type Props = {
    * and land focus on the dialog's close button instead of the field.
    */
   firstFieldRef?: RefObject<HTMLInputElement | null>;
+  /**
+   * Fires whenever an in-flight save begins / ends. The detail page uses
+   * this to pin its remount key during the save: `upsertEntry`'s optimistic
+   * SWR update bumps `entry.updatedAt` immediately, and a key that includes
+   * `updatedAt` would otherwise unmount the saving form and remount a fresh
+   * one (`saving=false`) while the PUT is still in flight, re-enabling Save
+   * for a window where a double-click can submit overlapping writes. The
+   * `formId` argument is a per-mount identifier — the detail page records
+   * the owner on the leading-edge `true` call and ignores trailing
+   * `false` calls from other instances, so a save that resolves AFTER
+   * the user navigated to a different address can't release the latch
+   * held by the new form. `address` is the form's current address state
+   * — for the add-new modal flow this is the user's typed value (not
+   * `""` from the initial prop), so the host can mark pending against
+   * the right address in the provider's ledger.
+   */
+  onSavingChange?: (saving: boolean, formId: string, address: string) => void;
+  /**
+   * Same as `onSavingChange` but for the delete flow. `deleteEntry`'s
+   * optimistic update REMOVES the entry, transitioning the page key from
+   * `custom:<updatedAt>` → `new`. Without this latch, a fresh form
+   * (`deleting=false`) mounts mid-DELETE and a save typed into it can
+   * race the in-flight DELETE — if the DELETE completes last it wipes
+   * out the just-saved label. `formId` and `address` carry the same
+   * scoping as `onSavingChange`.
+   */
+  onDeletingChange?: (
+    deleting: boolean,
+    formId: string,
+    address: string,
+  ) => void;
+  /**
+   * When true, the form requires an explicit name regardless of tags
+   * (the relaxed "name OR tags" rule is suspended). Used on the detail
+   * page when the address is registered as a contract under multiple
+   * disagreeing names — without this, a tag-only save persists an
+   * empty global name and suppresses every contract row in the index.
+   */
+  requireExplicitName?: boolean;
+  /**
+   * Forces the entire form (inputs + Save/Remove buttons) read-only
+   * regardless of internal saving / deleting state. Used by surfaces
+   * (modal, detail page) when a pending mutation already exists for
+   * the same address — without this, the inputs would still be
+   * editable while Save was disabled, and edits typed in that window
+   * would be discarded the moment the in-flight request settled and
+   * remounted the form (formKey flips on the optimistic→settled
+   * `updatedAt` transition). Disabling inputs makes the read-only
+   * state visible and stops users from losing typed data.
+   */
+  externallyDisabled?: boolean;
 };
 
 export function AddressLabelForm({
@@ -100,6 +160,10 @@ export function AddressLabelForm({
   onDeleted,
   onCancel,
   firstFieldRef,
+  onSavingChange,
+  onDeletingChange,
+  requireExplicitName,
+  externallyDisabled,
 }: Props) {
   const {
     upsertEntry,
@@ -107,6 +171,33 @@ export function AddressLabelForm({
     isCustom: isCustomLabel,
     customEntries,
   } = useAddressLabels();
+  // Per-mount identity used to scope `onSavingChange` / `onDeletingChange`
+  // callbacks at the page level. Stable for the lifetime of this mount;
+  // remounting (e.g. after the page key flips on address change) gets a
+  // fresh ID, so a stale `finally` from a prior mount cannot release the
+  // latch on the new mount's mid-flight write.
+  //
+  // Why not `useId`: it returns a value derived from the component's
+  // position in the React tree, which is stable across remounts at the
+  // same slot. If a save was in flight on the old mount and the user
+  // remounted at the same key path, the new mount would receive the
+  // SAME `useId` and the page's identity check would falsely accept
+  // the old mount's trailing `false` callback. A counter-backed ref
+  // initialized at first render gives a real per-mount token instead.
+  const formInstanceIdRef = useRef<string | null>(null);
+  if (formInstanceIdRef.current === null) {
+    formInstanceIdRef.current = `form-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  const formInstanceId = formInstanceIdRef.current;
+  // Synchronous guards against double-click. React's `setSaving(true)`
+  // is async — between two rapid clicks both submit handlers can pass
+  // through the form's `disabled` check and fire `onSavingChange(true,
+  // formId)` twice with the same id. The host's `${formId}:save`
+  // unmark slot would then be overwritten after incrementing the
+  // provider ledger twice; only one decrement runs and the address
+  // stays permanently pending. Refs flip synchronously inside the
+  // handler so a second call returns immediately.
+  const inFlightRef = useRef({ saving: false, deleting: false });
   const internalFirstInputRef = useRef<HTMLInputElement>(null);
   // Use the parent's ref when provided (modal); otherwise an internal ref
   // exists so the JSX still has a stable target.
@@ -145,6 +236,7 @@ export function AddressLabelForm({
       name,
       tags,
       isContractRow,
+      requireExplicitName,
     });
     if (validationError) {
       setError(validationError);
@@ -155,7 +247,15 @@ export function AddressLabelForm({
       isContractRow,
       initial?.name,
     );
+    // Cross-op gate: a fast Save-then-Remove (or vice versa) would
+    // otherwise start the second op before React commits the first
+    // op's `disabled` state. Both `saving` and `deleting` flip
+    // synchronously here so either-side-already-in-flight aborts
+    // the other.
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
+    inFlightRef.current.saving = true;
     setSaving(true);
+    onSavingChange?.(true, formInstanceId, address);
     setError(null);
     try {
       await upsertEntry(address, {
@@ -169,6 +269,8 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to save label.");
     } finally {
       setSaving(false);
+      onSavingChange?.(false, formInstanceId, address);
+      inFlightRef.current.saving = false;
     }
   }
 
@@ -176,7 +278,10 @@ export function AddressLabelForm({
   // by design. Reports are evidence/history attached to the address; labels
   // are display aliases.
   async function handleDelete() {
+    if (inFlightRef.current.saving || inFlightRef.current.deleting) return;
+    inFlightRef.current.deleting = true;
     setDeleting(true);
+    onDeletingChange?.(true, formInstanceId, address);
     setError(null);
     try {
       await deleteEntry(address);
@@ -185,6 +290,8 @@ export function AddressLabelForm({
       setError(err instanceof Error ? err.message : "Failed to delete label.");
     } finally {
       setDeleting(false);
+      onDeletingChange?.(false, formInstanceId, address);
+      inFlightRef.current.deleting = false;
     }
   }
 
@@ -192,167 +299,184 @@ export function AddressLabelForm({
 
   return (
     <form onSubmit={handleSave} noValidate>
-      <div className="px-5 py-4 space-y-4">
-        {/* Address */}
-        <div>
-          <label
-            htmlFor="al-address"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Address {isNewAddress && <span className="text-indigo-400">*</span>}
-          </label>
-          {isNewAddress ? (
+      {/* `<fieldset disabled>` cascades to every form control inside —
+          input, textarea, button — so the user can't type into the
+          inputs while either (a) a prior mutation against this
+          address is pending (`externallyDisabled`) OR (b) THIS form
+          is mid-save/mid-delete (`saving || deleting`). Both
+          scenarios end with a remount that discards local edits
+          (the optimistic→settled `updatedAt` flip changes the page
+          key). Disabling inputs covers the data-loss footgun on
+          both paths. */}
+      <fieldset
+        disabled={externallyDisabled || saving || deleting}
+        className="border-0 p-0 m-0 disabled:opacity-60"
+      >
+        <div className="px-5 py-4 space-y-4">
+          {/* Address */}
+          <div>
+            <label
+              htmlFor="al-address"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Address{" "}
+              {isNewAddress && <span className="text-indigo-400">*</span>}
+            </label>
+            {isNewAddress ? (
+              <input
+                ref={firstInputRef}
+                id="al-address"
+                type="text"
+                value={address}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  onAddressChange?.(e.target.value);
+                }}
+                placeholder="0x…"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            ) : (
+              <p className="font-mono text-xs text-slate-300 break-all select-all">
+                {address}
+              </p>
+            )}
+          </div>
+
+          {/* Name */}
+          <div>
+            <label
+              htmlFor="al-name"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Name{" "}
+              {requireExplicitName ? (
+                <span className="text-indigo-400">*</span>
+              ) : isContractRow ? (
+                <span className="text-slate-500">(optional)</span>
+              ) : (
+                <span className="text-slate-500">(optional if tags added)</span>
+              )}
+            </label>
             <input
-              ref={firstInputRef}
-              id="al-address"
+              ref={isNewAddress ? undefined : firstInputRef}
+              id="al-name"
               type="text"
-              value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                onAddressChange?.(e.target.value);
-              }}
-              placeholder="0x…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={
+                isContractRow
+                  ? "Leave blank to keep contract name"
+                  : "e.g. Binance Hot Wallet"
+              }
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
-          ) : (
-            <p className="font-mono text-xs text-slate-300 break-all select-all">
-              {address}
+          </div>
+
+          {/* Tags */}
+          <div>
+            <span
+              id="al-tags-label"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Tags <span className="text-slate-500">(optional)</span>
+            </span>
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              suggestions={tagSuggestions}
+              aria-labelledby="al-tags-label"
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label
+              htmlFor="al-notes"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
+              Notes <span className="text-slate-500">(optional)</span>
+            </label>
+            <textarea
+              id="al-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="Any context about this address…"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+            />
+          </div>
+
+          {/* Visibility toggle */}
+          <div className="flex items-center gap-3">
+            <label
+              htmlFor="al-public"
+              className="text-xs font-medium text-slate-400"
+            >
+              Visible to public
+            </label>
+            <button
+              type="button"
+              id="al-public"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={() => setIsPublic(!isPublic)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                isPublic ? "bg-indigo-600" : "bg-slate-700"
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  isPublic ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+            <span className="text-xs text-slate-500">
+              {isPublic
+                ? "Anyone can see this label"
+                : "Only team members can see this label"}
+            </span>
+          </div>
+
+          {error && (
+            <p role="alert" className="text-xs text-red-400">
+              {error}
             </p>
           )}
         </div>
 
-        {/* Name */}
-        <div>
-          <label
-            htmlFor="al-name"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Name{" "}
-            {isContractRow ? (
-              <span className="text-slate-500">(optional)</span>
-            ) : (
-              <span className="text-slate-500">(optional if tags added)</span>
+        <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
+          <div>
+            {hasExistingCustomEntry && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || saving || externallyDisabled}
+                className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+              >
+                {deleting ? "Removing…" : "Remove label"}
+              </button>
             )}
-          </label>
-          <input
-            ref={isNewAddress ? undefined : firstInputRef}
-            id="al-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={
-              isContractRow
-                ? "Leave blank to keep contract name"
-                : "e.g. Binance Hot Wallet"
-            }
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-        </div>
-
-        {/* Tags */}
-        <div>
-          <span
-            id="al-tags-label"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Tags <span className="text-slate-500">(optional)</span>
-          </span>
-          <TagInput
-            tags={tags}
-            onChange={setTags}
-            suggestions={tagSuggestions}
-            aria-labelledby="al-tags-label"
-          />
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label
-            htmlFor="al-notes"
-            className="block text-xs font-medium text-slate-400 mb-1"
-          >
-            Notes <span className="text-slate-500">(optional)</span>
-          </label>
-          <textarea
-            id="al-notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="Any context about this address…"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
-          />
-        </div>
-
-        {/* Visibility toggle */}
-        <div className="flex items-center gap-3">
-          <label
-            htmlFor="al-public"
-            className="text-xs font-medium text-slate-400"
-          >
-            Visible to public
-          </label>
-          <button
-            type="button"
-            id="al-public"
-            role="switch"
-            aria-checked={isPublic}
-            onClick={() => setIsPublic(!isPublic)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              isPublic ? "bg-indigo-600" : "bg-slate-700"
-            }`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                isPublic ? "translate-x-4" : "translate-x-0.5"
-              }`}
-            />
-          </button>
-          <span className="text-xs text-slate-500">
-            {isPublic
-              ? "Anyone can see this label"
-              : "Only team members can see this label"}
-          </span>
-        </div>
-
-        {error && (
-          <p role="alert" className="text-xs text-red-400">
-            {error}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
-        <div>
-          {hasExistingCustomEntry && (
+          </div>
+          <div className="flex gap-2">
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+            )}
             <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || saving}
-              className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+              type="submit"
+              disabled={saving || deleting || externallyDisabled}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
             >
-              {deleting ? "Removing…" : "Remove label"}
+              {saving ? "Saving…" : "Save"}
             </button>
-          )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-          <button
-            type="submit"
-            disabled={saving || deleting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
+      </fieldset>
     </form>
   );
 }

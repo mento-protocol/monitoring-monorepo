@@ -210,6 +210,72 @@ describe("AddressLabelForm — save flow", () => {
     const [, calledEntry] = mockUpsertEntry.mock.calls[0];
     expect(calledEntry.notes).toBeUndefined();
   });
+
+  it("fires onSavingChange(true) before upsert and onSavingChange(false) after — used by the detail page to pin its remount key during in-flight optimistic updates", async () => {
+    // Codex P2 race: the detail page's form key includes `entry.updatedAt`,
+    // and `upsertEntry` bumps `updatedAt` optimistically before the PUT
+    // resolves. Without onSavingChange the page can't suppress the remount,
+    // and a double-click during the in-flight window can submit overlapping
+    // writes. Pin the contract: callback fires true → resolve → false.
+    let resolveUpsert: () => void = () => undefined;
+    mockUpsertEntry.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpsert = resolve;
+        }),
+    );
+    const onSavingChange = vi.fn();
+    render({ address: VALID_ADDR, onSavingChange });
+    setInputValue("al-name", "Alice");
+
+    // Submit but do NOT await — we need to inspect state mid-flight.
+    const form = container.querySelector("form")!;
+    act(() => {
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    // Fired before the await — page sees `true` while the PUT is in flight.
+    // (Callback now receives (saving, formId); page uses formId to ignore
+    // stale callbacks from prior mounts after an address change.)
+    expect(onSavingChange).toHaveBeenCalledWith(
+      true,
+      expect.any(String),
+      expect.any(String),
+    );
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true]);
+
+    // Resolve the upsert and drain microtasks so the finally block runs.
+    await act(async () => {
+      resolveUpsert();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // After resolve, the false signal lets the page snap its key to the
+    // post-save updatedAt. The formId on `false` must equal the formId on
+    // `true` — the page checks identity to discard stale callbacks.
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    const [trueCall, falseCall] = onSavingChange.mock.calls;
+    expect(trueCall[1]).toBe(falseCall[1]);
+    expect(typeof trueCall[1]).toBe("string");
+  });
+
+  it("fires onSavingChange(false) on save failure so the page key unfreezes even when the PUT throws", async () => {
+    // Without the finally branch, a failed save would leave the page key
+    // pinned forever — subsequent successful saves on the same address
+    // wouldn't remount on remote refresh, defeating the cross-tab guard.
+    mockUpsertEntry.mockRejectedValueOnce(new Error("boom"));
+    const onSavingChange = vi.fn();
+    render({ address: VALID_ADDR, onSavingChange });
+    setInputValue("al-name", "Alice");
+    await submit();
+    expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    // Error surfaced to the user too.
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("boom");
+  });
 });
 
 describe("AddressLabelForm — delete flow", () => {
@@ -260,5 +326,76 @@ describe("AddressLabelForm — delete flow", () => {
     });
     expect(mockDeleteEntry).toHaveBeenCalledWith(VALID_ADDR);
     expect(onDeleted).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onDeletingChange(true) before delete and onDeletingChange(false) after — pins the detail-page latch during in-flight deletes", async () => {
+    // Codex round 6 P2: optimistic delete removes `entry` from SWR
+    // state, the page's form key flips from `custom:<updatedAt>` →
+    // `new`, the form remounts with `deleting=false`, and a quick save
+    // typed into it can race the in-flight DELETE. The page latches on
+    // formMutating = formSaving || formDeleting; this test pins the
+    // contract that the delete callback feeds the latch.
+    mockIsCustom.mockReturnValue(true);
+    let resolveDelete: () => void = () => undefined;
+    mockDeleteEntry.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+    const onDeletingChange = vi.fn();
+    render({
+      address: VALID_ADDR,
+      initial: {
+        name: "Existing",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      onDeletingChange,
+    });
+
+    act(() => {
+      clickByText("Remove label");
+    });
+    expect(onDeletingChange).toHaveBeenCalledWith(
+      true,
+      expect.any(String),
+      expect.any(String),
+    );
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true]);
+
+    await act(async () => {
+      resolveDelete();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    const [trueCall, falseCall] = onDeletingChange.mock.calls;
+    // formId stable across the (true → false) pair
+    expect(trueCall[1]).toBe(falseCall[1]);
+  });
+
+  it("fires onDeletingChange(false) on delete failure — latch must release even on error", async () => {
+    mockIsCustom.mockReturnValue(true);
+    mockDeleteEntry.mockRejectedValueOnce(new Error("upstash down"));
+    const onDeletingChange = vi.fn();
+    render({
+      address: VALID_ADDR,
+      initial: {
+        name: "Existing",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      onDeletingChange,
+    });
+    await act(async () => {
+      clickByText("Remove label");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "upstash down",
+    );
   });
 });

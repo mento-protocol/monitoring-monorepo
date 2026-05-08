@@ -47,6 +47,14 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   "src/lib/address-labels/import.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
+  // Dedicated metadata helper for `/address-book/[address]`. The layout
+  // imports this helper from its `generateMetadata`; label data flows
+  // into <title>/<meta> for crawler unfurls, never into HTML serialised
+  // to the wire as RSC payload, so the leak posture is the same as a
+  // route handler. Allowlisting EXACTLY this file (rather than the
+  // layout) ensures any future edit that adds Redis usage in the
+  // layout's default render path correctly trips the guard.
+  "src/app/address-book/[address]/_lib/og-metadata.ts",
 ]);
 
 /** Recursively walks `dir` and yields source file paths under `src/`. */
