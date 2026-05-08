@@ -8,7 +8,6 @@ import {
   MINIPAY_SOURCE,
   isArkhamSourced,
   isMiniPaySourced,
-  type Scope,
 } from "@/lib/address-labels-shared";
 import type { Network } from "@/lib/networks";
 
@@ -26,7 +25,6 @@ type AddressRowProps = {
   address: string;
   name: string;
   tags: string[];
-  scope: Scope;
   network: Network;
   notes?: string;
   isPublic?: boolean;
@@ -46,7 +44,6 @@ export function AddressTableRow({
   address,
   name,
   tags,
-  scope,
   network,
   notes,
   isPublic,
@@ -69,7 +66,7 @@ export function AddressTableRow({
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3 whitespace-nowrap">
-        {scope === "global" ? (
+        {isCustom ? (
           <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
             All chains
           </span>

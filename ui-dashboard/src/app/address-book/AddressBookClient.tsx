@@ -1,13 +1,11 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo } from "react";
-import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
 import { explorerAddressUrl } from "@/lib/tokens";
-import { NETWORKS, DEFAULT_NETWORK, networkForChainId } from "@/lib/networks";
-import { type Scope } from "@/lib/address-labels-shared";
+import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { buildAddressBookRows } from "@/lib/address-book";
 import { AddressTableRow } from "./_components/address-table-row";
 import { ImportDialog } from "./_components/import-dialog";
@@ -19,14 +17,13 @@ import {
 } from "./_lib/address-book-rows";
 import { importFile, exportLabels } from "./_lib/address-book-import-export";
 
-type EditTarget = { address: string; scope: Scope; chainId: number };
+type EditTarget = { address: string };
 
 export default function AddressBookPage({
   canEdit: userCanEdit = false,
 }: {
   canEdit?: boolean;
 }) {
-  const { network: currentNetwork } = useNetwork();
   const { customEntries, getEntry, revalidate, isLoading, error } =
     useAddressLabels();
   // Hook lifted from AddressTableRow so the SWR subscription, useSession
@@ -205,7 +202,7 @@ export default function AddressBookPage({
             <tbody>
               {allRows.map((row) => {
                 const resolved = row.isCustom
-                  ? getEntry(row.address, row.network.chainId)
+                  ? getEntry(row.address)
                   : undefined;
                 return (
                   <AddressTableRow
@@ -213,7 +210,6 @@ export default function AddressBookPage({
                     address={row.address}
                     name={row.name}
                     tags={row.tags}
-                    scope={row.scope}
                     network={row.network}
                     notes={resolved?.entry.notes}
                     isPublic={resolved?.entry.isPublic}
@@ -224,33 +220,17 @@ export default function AddressBookPage({
                     canEdit={userCanEdit}
                     reportPresent={hasReport(row.address)}
                     explorerUrl={
-                      row.network.explorerBaseUrl
-                        ? explorerAddressUrl(row.network, row.address)
-                        : null
+                      // Custom rows are chainless (the `network` is just the
+                      // display placeholder for "All chains"), so a
+                      // chain-specific explorer link would be wrong — e.g.
+                      // a Monad-only address would open CeloScan. Suppress
+                      // the link entirely; users can still edit, copy, or
+                      // open via the inline AddressLink in other tables.
+                      row.isCustom || !row.network.explorerBaseUrl
+                        ? null
+                        : explorerAddressUrl(row.network, row.address)
                     }
-                    onEdit={() =>
-                      setEditTarget({
-                        address: row.address,
-                        // For custom rows, scope is authoritative. For
-                        // contract rows (no custom entry yet), default to
-                        // "global" so new labels are cross-chain by
-                        // default — and so editing a contract row whose
-                        // address has a global label doesn't silently
-                        // migrate it to the row's chain on save (codex
-                        // finding from PR #330). Reports are no longer
-                        // scope-bound (single global hash), so this
-                        // doesn't affect report lookup.
-                        scope: row.isCustom ? row.scope : "global",
-                        // Chain context for the editor's "Only on X" option.
-                        // Global-scope rows use the current network (user's
-                        // active view) so "Only on X" means "demote to the
-                        // chain I'm currently looking at".
-                        chainId:
-                          row.scope === "global"
-                            ? currentNetwork.chainId
-                            : row.network.chainId,
-                      })
-                    }
+                    onEdit={() => setEditTarget({ address: row.address })}
                   />
                 );
               })}
@@ -266,11 +246,9 @@ export default function AddressBookPage({
       {userCanEdit && editTarget && (
         <AddressLabelEditor
           address={editTarget.address}
-          chainId={editTarget.chainId}
-          scope={editTarget.scope}
           initial={
-            getEntry(editTarget.address, editTarget.chainId)?.entry ??
-            contractInitial(editTarget.address, editTarget.chainId)
+            getEntry(editTarget.address)?.entry ??
+            contractInitial(editTarget.address)
           }
           onClose={() => setEditTarget(null)}
         />
@@ -279,13 +257,24 @@ export default function AddressBookPage({
   );
 }
 
-function contractInitial(address: string, chainId: number) {
-  const net = networkForChainId(chainId);
-  const name = net?.addressLabels[address];
-  if (!name) return undefined;
-  return {
-    name,
-    tags: [],
-    updatedAt: new Date().toISOString(),
-  };
+function contractInitial(address: string) {
+  // Walk every network's static contract registry case-insensitively —
+  // `@mento-protocol/contracts` exports checksummed mixed-case keys, but
+  // callers may pass either casing. Same address on multiple chains
+  // generally has the same contract name (deterministic deploys); if names
+  // diverge we use the first hit, which is fine for editor pre-fill since
+  // the user can override.
+  const lower = address.toLowerCase();
+  for (const net of Object.values(NETWORKS)) {
+    for (const [registered, name] of Object.entries(net.addressLabels)) {
+      if (registered.toLowerCase() === lower) {
+        return {
+          name,
+          tags: [],
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+  }
+  return undefined;
 }

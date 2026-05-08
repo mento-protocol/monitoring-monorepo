@@ -6,7 +6,7 @@ vi.mock("@/auth", () => ({
 }));
 
 vi.mock("@/lib/address-labels", () => ({
-  getAllLabels: vi.fn(),
+  getLabels: vi.fn(),
   importLabels: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -34,7 +34,7 @@ vi.mock("@sentry/nextjs", () => ({
 import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { getAuthSession } from "@/auth";
-import { getAllLabels, importLabels } from "@/lib/address-labels";
+import { getLabels, importLabels } from "@/lib/address-labels";
 import {
   ARKHAM_TAG,
   ArkhamAuthError,
@@ -44,17 +44,19 @@ import {
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
-const mockGetAllLabels = vi.mocked(getAllLabels);
+const mockGetLabels = vi.mocked(getLabels);
 const mockImportLabels = vi.mocked(importLabels);
 const mockFetchHealth = vi.mocked(fetchHealth);
 const mockEnrichBatch = vi.mocked(enrichBatch);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
 
-function emptyLabels() {
-  return { global: {}, chains: {} };
+function emptyLabels(): Record<string, AddressEntry> {
+  return {};
 }
-function celoLabels(entries: Record<string, AddressEntry>) {
-  return { global: {}, chains: { "42220": entries } };
+function existingLabels(
+  entries: Record<string, AddressEntry>,
+): Record<string, AddressEntry> {
+  return entries;
 }
 
 beforeEach(() => {
@@ -96,7 +98,7 @@ describe("GET /api/arkham/enrich — auth", () => {
 
   it("accepts Bearer CRON_SECRET", async () => {
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
@@ -145,7 +147,7 @@ describe("GET /api/arkham/enrich — config", () => {
   it("502s on auth error from Arkham", async () => {
     mockFetchHealth.mockRejectedValueOnce(new ArkhamAuthError());
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(502);
   });
@@ -157,8 +159,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xnew", "0xmanual", "0xark"],
       perEntity: [{ table: "SwapEvent", field: "sender", count: 3 }],
     });
-    mockGetAllLabels.mockResolvedValue(
-      celoLabels({
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
         "0xmanual": {
           name: "Treasury",
           tags: ["mento"],
@@ -195,7 +197,6 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       expect.objectContaining({ apiKey: "ak-test" }),
     );
     expect(mockImportLabels).toHaveBeenCalledWith(
-      "global",
       expect.objectContaining({
         "0xnew": expect.objectContaining({
           name: "Coinbase",
@@ -212,8 +213,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xark"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(
-      celoLabels({
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
         "0xark": {
           name: "Binance",
           tags: [ARKHAM_TAG],
@@ -244,7 +245,6 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     // mergeRefreshEntry: name takes Arkham's update; user notes + isPublic
     // survive; sentinel tag stripped; source upgraded.
     expect(mockImportLabels).toHaveBeenCalledWith(
-      "global",
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
@@ -261,8 +261,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xark"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(
-      celoLabels({
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
         "0xark": {
           name: "Binance",
           tags: ["exchange"],
@@ -289,7 +289,6 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(res.status).toBe(200);
     expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
     expect(mockImportLabels).toHaveBeenCalledWith(
-      "global",
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
@@ -304,7 +303,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xnew"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([
       {
         address: "0xnew",
@@ -332,7 +331,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xa", "0xb", "0xc", "0xd"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
     await GET(makeReq({ bearer: "cron-secret", searchParams: { limit: "2" } }));
@@ -342,24 +341,20 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     );
   });
 
-  it("protects global-scope manual labels from being overwritten", async () => {
-    // importLabels Lua HDELs the address from every other `labels:*` scope.
-    // A global manual label for `0xguardian` MUST NOT show up in `toWrite`
-    // even though Arkham knows it — otherwise the chain-scope write would
-    // silently delete the global entry.
+  it("filters out manually-labeled addresses from `mode=new`", async () => {
+    // mode=new only enriches addresses with no existing label. A manual label
+    // for `0xguardian` must keep it out of the candidate set even though
+    // Arkham would attribute it.
     mockDiscover.mockResolvedValue({
       addresses: ["0xguardian"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue({
-      global: {
-        "0xguardian": {
-          name: "Mento Guardian (cross-chain)",
-          tags: ["mento", "core"],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
+    mockGetLabels.mockResolvedValue({
+      "0xguardian": {
+        name: "Mento Guardian",
+        tags: ["mento", "core"],
+        updatedAt: "2026-01-01T00:00:00Z",
       },
-      chains: {},
     });
     mockEnrichBatch.mockResolvedValue([]);
 
@@ -373,7 +368,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
     await GET(makeReq({ bearer: "cron-secret", searchParams: { limit: "0" } }));
@@ -390,7 +385,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       addresses: ["0xa", "0xb"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
+    mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([
       { address: "0xa", entry: null, error: "5xx" },
       {

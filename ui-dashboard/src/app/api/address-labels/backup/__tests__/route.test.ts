@@ -7,19 +7,13 @@ vi.mock("@/auth", () => ({
 }));
 
 vi.mock("@/lib/address-labels", () => ({
-  getAllLabels: vi.fn().mockResolvedValue({
-    global: {
-      "0xggg": {
-        name: "Cross-chain",
-        tags: [],
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
+  getLabels: vi.fn().mockResolvedValue({
+    "0xggg": {
+      name: "Cross-chain",
+      tags: [],
+      updatedAt: "2026-01-01T00:00:00Z",
     },
-    chains: {
-      "42220": {
-        "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      },
-    },
+    "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
   }),
 }));
 
@@ -83,7 +77,7 @@ describe("GET /api/address-labels/backup", () => {
     expect(res.status).toBe(401);
   });
 
-  it("stores backup as private Vercel Blob in snapshot format", async () => {
+  it("stores backup as private Vercel Blob in flat snapshot format", async () => {
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
       headers: { Authorization: "Bearer test-cron-secret" },
@@ -98,12 +92,12 @@ describe("GET /api/address-labels/backup", () => {
 
     const stored = JSON.parse(content as string);
     expect(stored).toHaveProperty("exportedAt");
-    expect(stored).toHaveProperty("global");
-    expect(stored).toHaveProperty("chains");
-    expect(stored.global["0xggg"].name).toBe("Cross-chain");
-    expect(stored.chains).toHaveProperty("42220");
-    expect(stored.chains["42220"]["0xabc"].name).toBe("Test");
-    expect(stored.chains["42220"]["0xabc"].tags).toEqual([]);
+    expect(stored).toHaveProperty("addresses");
+    expect(stored.addresses["0xggg"].name).toBe("Cross-chain");
+    expect(stored.addresses["0xabc"].name).toBe("Test");
+    // Legacy snapshot fields no longer emitted.
+    expect(stored.global).toBeUndefined();
+    expect(stored.chains).toBeUndefined();
   });
 
   it("overwrites same-day backup (deterministic filename)", async () => {

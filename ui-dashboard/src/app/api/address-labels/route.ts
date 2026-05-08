@@ -2,18 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
-  getLabels,
-  getAllLabels,
-  upsertEntry,
+  ARKHAM_TAG,
+  MINIPAY_SOURCE,
+  derivePreservedSource,
   deleteLabel,
-  isArkhamSourced,
-  isMiniPaySourced,
-  type Scope,
+  getLabel,
+  getLabels,
+  upsertEntry,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
-import { NETWORKS } from "@/lib/networks";
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
+// Reserved server-provenance tag names. Letting users set these via the
+// editor either clobbers manually-curated entries on the next cron run
+// (arkham) or causes UI confusion where the badge says "custom" but the
+// Tags column shows "minipay". Provenance lives on `source`, not tags.
+const RESERVED_SOURCE_TAGS = new Set<string>([ARKHAM_TAG, MINIPAY_SOURCE]);
+
+export async function GET(): Promise<NextResponse> {
   const session = await getAuthSession();
   if (!session) {
     return NextResponse.json(
@@ -22,29 +27,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const scopeParam = req.nextUrl.searchParams.get("scope");
-  const chainIdParam = req.nextUrl.searchParams.get("chainId");
-
-  // Narrow read: ?scope=global or ?chainId=42220
-  if (scopeParam !== null || chainIdParam !== null) {
-    const scope = parseScopeParam(scopeParam, chainIdParam);
-    if (scope === null) {
-      return NextResponse.json(
-        { error: "Invalid scope or chainId" },
-        { status: 400 },
-      );
-    }
-    try {
-      const labels = await getLabels(scope);
-      return NextResponse.json(labels);
-    } catch (err) {
-      return serverError(err, "read");
-    }
-  }
-
-  // Full read: { global, chains }. Session-gated — no public filter.
+  // Single endpoint: return every label as a flat address → entry map.
+  // Labels are no longer chain-scoped, so there's no narrow-read or
+  // chains-vs-global split.
   try {
-    return NextResponse.json(await getAllLabels());
+    const labels = await getLabels();
+    return NextResponse.json(labels);
   } catch (err) {
     return serverError(err, "read");
   }
@@ -66,25 +54,11 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const {
-    scope: scopeBody,
-    chainId: chainIdBody,
-    address,
-    name,
-    tags,
-    notes,
-    isPublic,
-  } = body as Record<string, unknown>;
+  const { address, name, tags, notes, isPublic } = body as Record<
+    string,
+    unknown
+  >;
 
-  const scope = parseScope(scopeBody, chainIdBody);
-  if (scope === null) {
-    return NextResponse.json(
-      {
-        error: "Invalid scope (must be 'global' or a positive integer chainId)",
-      },
-      { status: 400 },
-    );
-  }
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
   }
@@ -102,7 +76,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // DoS guards: cap input sizes (#4)
+  // DoS guards: cap input sizes
   if (trimmedName.length > 200) {
     return NextResponse.json(
       { error: "name must be 200 characters or fewer" },
@@ -131,14 +105,8 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Deduplicate tags: case-insensitive, preserve first-occurrence casing (#6).
-  // Strip reserved server-provenance tags ("arkham", "minipay") — these
-  // mark an entry as written by a server-side cron. Letting users set them
-  // via the label editor would either clobber manually-curated entries on
-  // the next cron run (arkham) or cause UI confusion where the badge says
-  // "custom" but the Tags column shows "minipay" (minipay). Provenance is
-  // authoritative through `source`, not tags.
-  const RESERVED_SOURCE_TAGS = new Set(["arkham", "minipay"]);
+  // Deduplicate tags case-insensitively (preserve first-occurrence casing)
+  // and strip reserved server-provenance tags.
   const seenTags = new Set<string>();
   const deduplicatedTags = parsedTags
     .map((t) => t.trim())
@@ -151,45 +119,21 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
 
   try {
-    // Preserve server-controlled provenance across edits. A user editing
-    // notes/tags on an Arkham-sourced row must NOT silently demote it to
-    // `custom` — that would drop it out of future refresh cron runs and
-    // lose the entity attribution. The user-supplied body never gets to
-    // SET source (no `source` in the destructure above); it's read here
-    // from the prior entry only.
-    //
-    // Cross-scope lookup: strict either/or means the address lives in
-    // exactly one scope at a time; if the user is also changing scope
-    // (global ↔ chain), the prior row is in the OLD scope, not the new
-    // one. Search both so provenance survives the move. (Codex P2 catch.)
-    const all = await getAllLabels();
-    const addrLower = address.toLowerCase();
-    const prior =
-      all.global[addrLower] ??
-      Object.values(all.chains).find((c) => c[addrLower] !== undefined)?.[
-        addrLower
-      ];
-    // Preserve server-controlled provenance across user edits. PUT strips
-    // any user-supplied `source` (line 141), so any source we see on the
-    // prior entry was written by a server cron and must survive the edit.
-    // Dual-check on `isArkhamSourced` catches legacy pre-migration rows
-    // that carry the `arkham` tag but no `source` field.
-    const preservedSource = !prior
-      ? undefined
-      : isArkhamSourced(prior)
-        ? "arkham"
-        : isMiniPaySourced(prior)
-          ? "minipay"
-          : undefined;
+    // Read only the prior entry, not the entire hash — `getLabel` does an
+    // HGET vs HGETALL. Source is preserved across edits so user changes
+    // don't silently demote an Arkham/MiniPay entry to `custom` and drop
+    // it out of future refresh runs.
+    const prior = await getLabel(address);
+    const preservedSource = derivePreservedSource(prior);
 
-    await upsertEntry(scope, address, {
+    await upsertEntry(address, {
       name: trimmedName,
       tags: deduplicatedTags,
       notes: trimmedNotes,
       isPublic: isPublic === true,
       ...(preservedSource ? { source: preservedSource } : {}),
-      // Preserve first-write timestamp across edits + scope-change moves;
-      // upsertEntry defaults to `now` when this is undefined (new row).
+      // Preserve first-write timestamp; `upsertEntry` defaults to `now`
+      // when undefined (new row).
       createdAt: prior?.createdAt,
     });
     return NextResponse.json({ ok: true });
@@ -214,77 +158,18 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const {
-    scope: scopeBody,
-    chainId: chainIdBody,
-    address,
-  } = body as Record<string, unknown>;
+  const { address } = body as Record<string, unknown>;
 
-  const scope = parseScope(scopeBody, chainIdBody);
-  if (scope === null) {
-    return NextResponse.json(
-      {
-        error: "Invalid scope (must be 'global' or a positive integer chainId)",
-      },
-      { status: 400 },
-    );
-  }
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
   }
 
   try {
-    await deleteLabel(scope, address);
+    await deleteLabel(address);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError(err, "delete");
   }
-}
-
-function isPositiveInt(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
-}
-
-// The strict-either-or Lua script in `address-labels.ts` iterates a STATIC
-// list of scope keys derived from `NETWORKS` (KEYS[2..]). If a write here
-// lets through a chainId that isn't in NETWORKS, that scope's
-// `labels:{chainId}` key would never participate in the cross-scope HDEL,
-// silently breaking the strict either/or invariant for any future move
-// involving it. Validate at the boundary instead: any chainId we accept
-// MUST be present in `NETWORKS` so the script's static list covers it.
-const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
-  Object.values(NETWORKS).map((n) => n.chainId),
-);
-
-// Accepts { scope } or legacy { chainId } alias; returns null on invalid.
-function parseScope(scopeValue: unknown, chainIdValue: unknown): Scope | null {
-  if (scopeValue === "global") return "global";
-  if (isPositiveInt(scopeValue)) {
-    return SUPPORTED_CHAIN_IDS.has(scopeValue) ? scopeValue : null;
-  }
-  if (scopeValue !== undefined) return null;
-  // Legacy fallback: { chainId: number } (remove in a follow-up)
-  if (isPositiveInt(chainIdValue)) {
-    return SUPPORTED_CHAIN_IDS.has(chainIdValue) ? chainIdValue : null;
-  }
-  return null;
-}
-
-// Narrow-read variant: scope as a string query param, chainId as numeric
-// string. Strict decimal-only parse so `?chainId=1e3` doesn't silently
-// resolve to chainId 1000 (matches the import-route guards).
-function parseScopeParam(
-  scopeParam: string | null,
-  chainIdParam: string | null,
-): Scope | null {
-  if (scopeParam === "global") return "global";
-  if (scopeParam !== null) return null;
-  if (chainIdParam === null) return null;
-  if (!/^\d+$/.test(chainIdParam)) return null;
-  const n = Number(chainIdParam);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  // Same NETWORKS guard as parseScope above — keep the surfaces aligned.
-  return SUPPORTED_CHAIN_IDS.has(n) ? n : null;
 }
 
 // op distinguishes which handler failed (read/save/delete) so the Sentry

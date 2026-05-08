@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getAllLabels, importLabels } from "@/lib/address-labels";
-import type { AddressEntry } from "@/lib/address-labels-shared";
+import { getLabels, importLabels } from "@/lib/address-labels";
 import {
   ArkhamAuthError,
   enrichBatch,
@@ -32,10 +31,6 @@ type EnrichMode = "new" | "refresh" | "dryRun";
 
 type EnrichResponse = {
   ok: boolean;
-  /** Scope written to. Defaults to "global" since EVM addresses are
-   *  chain-agnostic — a Binance hot-wallet labelled by Arkham applies to
-   *  every chain it appears on. */
-  scope: "global";
   /** Chain we discovered candidate addresses on (always Celo). */
   discoveryChainId: number;
   discovered: number;
@@ -110,15 +105,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // Pre-flight: health check, address discovery, and existing-label
         // read have no data dependency on each other — run concurrently so
         // we don't pay 3× the round-trip latency before Arkham work begins.
-        // `getAllLabels` reads BOTH global and chain scopes: importLabels'
-        // Lua script HDELs the address from every other `labels:*` scope, so
-        // a write to chain 42220 deletes the address from `labels:global` if
-        // it lived there. Filtering against the global scope too prevents
-        // silent loss of cross-chain manual labels.
-        const [healthy, discovery, allLabels] = await Promise.all([
+        const [healthy, discovery, existing] = await Promise.all([
           fetchHealth(apiKey),
           discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-          getAllLabels(),
+          getLabels(),
         ]);
 
         if (!healthy) {
@@ -126,16 +116,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         const { addresses, perEntity } = discovery;
-        // Flatten every scope into one map for filtering. The strict
-        // either/or invariant (an address lives in exactly one scope) means
-        // there are no key collisions. We write to "global" but legacy rows
-        // may still live in chain scopes — the importLabels Lua HDELs them
-        // from those scopes when the global write happens, so they migrate
-        // naturally on next refresh.
-        const existing: Record<string, AddressEntry> = { ...allLabels.global };
-        for (const chainEntries of Object.values(allLabels.chains)) {
-          Object.assign(existing, chainEntries);
-        }
         const filterMode = mode === "dryRun" ? "new" : mode;
         let candidates = filterCandidates(addresses, existing, filterMode);
 
@@ -146,9 +126,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // post-write `updatedAt` rolls them to the end of the queue, giving
         // round-robin coverage across runs.
         if (mode === "refresh") {
-          // Sort against `existing` (merged global + chain) so the rotation
-          // matches the filter's view; using chain-only would mis-order if a
-          // candidate happened to live in global scope.
           candidates = candidates.sort((a, b) => {
             const ua = existing[a]?.updatedAt ?? "";
             const ub = existing[b]?.updatedAt ?? "";
@@ -176,12 +153,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-          // Write to global scope — Arkham's attribution is inherently
-          // cross-chain (EVM addresses are chain-agnostic). The strict
-          // either/or Lua script HDELs these addresses from chain scopes
-          // if they were previously chain-scoped, migrating legacy rows
-          // automatically.
-          await importLabels("global", toWrite);
+          // Single labels hash — Arkham's attribution is inherently
+          // cross-chain (EVM addresses are chain-agnostic), which matches
+          // the address-keyed model.
+          await importLabels(toWrite);
         }
 
         const enrichedCount = Object.keys(toWrite).length;
@@ -202,7 +177,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
         const body: EnrichResponse = {
           ok: true,
-          scope: "global",
           discoveryChainId: CELO_CHAIN_ID,
           discovered: addresses.length,
           candidates: candidates.length,

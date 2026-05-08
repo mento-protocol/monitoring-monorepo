@@ -25,32 +25,30 @@ export type AddressEntry = {
   updatedAt: string;
 };
 
-/**
- * Where a label lives. `"global"` means cross-chain — the label applies to
- * every chain unless a chain-specific entry exists for that address. A
- * numeric value is a chainId, meaning the label applies only on that chain.
- * Per-address, exactly one scope holds the entry (strict either/or).
- */
-export type Scope = "global" | number;
-
 /** Full record as returned from the API -- includes the address itself. */
 export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
 
-/** Shape of a full export/backup snapshot. */
+/** Shape of a full export/backup snapshot.
+ *
+ * The `chains` field is retained as an OPTIONAL READ for backward compat
+ * with older snapshots that predate the global-only refactor — old backups
+ * with `labels:{chainId}` entries can still be imported. New writes always
+ * produce `addresses` only. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
-  /** Cross-chain entries. Optional for back-compat with older snapshots. */
+  /** Flat per-address entries — current shape. */
+  addresses?: Record<string, AddressEntry>;
+  /** Legacy: cross-chain entries from pre-flat snapshots. Read-only. */
   global?: Record<string, AddressEntry>;
-  /** chainId → address (lower) → entry */
-  chains: Record<string, Record<string, AddressEntry>>;
+  /** Legacy: chainId → address → entry. Read-only; merged into addresses on import. */
+  chains?: Record<string, Record<string, AddressEntry>>;
 };
 
-/** Per-scope tally of newly-imported labels returned by the import API. */
+/** Tally of newly-imported labels returned by the import API. */
 export type ImportedCounts = {
-  global: number;
-  chains: Record<string, number>;
+  addresses: number;
 };
 
 /**
@@ -80,6 +78,69 @@ export function isArkhamSourced(entry: {
 /** True when an existing entry was written by the MiniPay tagging cron. */
 export function isMiniPaySourced(entry: { source?: string }): boolean {
   return entry.source === MINIPAY_SOURCE;
+}
+
+/**
+ * Map a prior entry (or its absence) to the `source` field that should be
+ * carried into a write. User edits MUST NOT silently demote a server-tagged
+ * entry to `custom` — that would drop it out of future refresh runs and
+ * lose entity attribution. Returns `undefined` for fresh writes and for
+ * priors that never had a server provenance.
+ */
+export function derivePreservedSource(
+  prior: { source?: string; tags?: string[] } | null | undefined,
+): "arkham" | "minipay" | undefined {
+  if (!prior) return undefined;
+  if (isArkhamSourced(prior)) return "arkham";
+  if (isMiniPaySourced(prior)) return "minipay";
+  return undefined;
+}
+
+/**
+ * Merge a prior entry with an incoming one. Resolution: union tags
+ * (case-insensitive dedup), prefer the more recently updated entry's
+ * scalar fields, take the earliest createdAt. Ties on `updatedAt` resolve
+ * in favour of `incoming`.
+ *
+ * `name` is taken from `newer` directly — empty-name tag-only entries are
+ * meaningful, so a truthiness fallback (`newer.name || older.name`) would
+ * resurrect a stale older name when the newer write intentionally cleared
+ * it.
+ *
+ * Used by:
+ *   - the migration route, when an address appears in two legacy scope
+ *     hashes (e.g. both `labels:42220` and `labels:global`)
+ *   - the snapshot import path, when a backup contains the same address in
+ *     `addresses` + `global` + `chains` (rollback-from-conflicted-backup)
+ */
+export function mergeEntries(
+  prior: AddressEntry,
+  incoming: AddressEntry,
+): AddressEntry {
+  const incomingLater = (incoming.updatedAt ?? "") >= (prior.updatedAt ?? "");
+  const newer = incomingLater ? incoming : prior;
+  const older = incomingLater ? prior : incoming;
+
+  const tagSet = new Map<string, string>();
+  for (const t of [...older.tags, ...newer.tags]) {
+    const key = t.toLowerCase();
+    if (!tagSet.has(key)) tagSet.set(key, t);
+  }
+
+  const createdCandidates = [prior.createdAt, incoming.createdAt].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  const createdAt = createdCandidates.sort()[0];
+
+  return {
+    name: newer.name,
+    tags: Array.from(tagSet.values()),
+    notes: newer.notes ?? older.notes,
+    isPublic: newer.isPublic ?? older.isPublic,
+    source: newer.source ?? older.source,
+    ...(createdAt ? { createdAt } : {}),
+    updatedAt: newer.updatedAt,
+  };
 }
 
 /**
