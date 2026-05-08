@@ -376,12 +376,16 @@ export async function fetchInvertRateFeed(
 
 /** Fetch the pool's rebalance threshold using standalone getters that do NOT
  * require the oracle to be live (unlike getRebalancingState which reverts when
- * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or 0. */
+ * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or
+ * `null` on transient RPC failure. The pool entity treats absence /
+ * `<= 0` as "not yet known" (defaults to the 10000 fallback in `pool.ts`),
+ * so callers can persist 0 for "configured to never rebalance" and
+ * `undefined`/null for "retry next event" without ambiguity. */
 export async function fetchRebalanceThreshold(
   chainId: number,
   poolAddress: string,
   log: RpcLogger = consoleLogger,
-): Promise<number> {
+): Promise<number | null> {
   try {
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
@@ -419,7 +423,7 @@ export async function fetchRebalanceThreshold(
       undefined,
       log,
     );
-    return 0;
+    return null;
   }
 }
 

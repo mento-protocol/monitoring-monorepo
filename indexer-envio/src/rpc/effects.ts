@@ -110,6 +110,14 @@ const breakerFeedStateShape = S.schema({
 // and don't change at the indexer's timescales. Postgres-backed cache
 // survives re-syncs and skips the RPC entirely on the second touch.
 // A governance change would re-deploy the contract and re-index anyway.
+//
+// IMPORTANT: every handler in this group sets `context.cache = false` on
+// transient-RPC-failure paths. Without that opt-out, a single failed read
+// during the first touch would persist `null`/`undefined` in Postgres and
+// every subsequent self-heal call would receive the cached miss instead
+// of retrying the RPC after the network recovered. The pattern is:
+// fetcher returns null on failure → handler sets cache=false → returns
+// undefined → caller skips the entity write → next event re-fetches.
 // ---------------------------------------------------------------------------
 
 export const erc20DecimalsEffect = createEffect(
@@ -120,12 +128,18 @@ export const erc20DecimalsEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
-  async ({ input, context }) =>
-    (await fetchErc20Decimals(
+  async ({ input, context }) => {
+    const result = await fetchErc20Decimals(
       input.chainId,
       input.tokenAddress,
       context.log,
-    )) ?? undefined,
+    );
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    return result;
+  },
 );
 
 export const referenceRateFeedIDEffect = createEffect(
@@ -136,12 +150,18 @@ export const referenceRateFeedIDEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
-  async ({ input, context }) =>
-    (await fetchReferenceRateFeedID(
+  async ({ input, context }) => {
+    const result = await fetchReferenceRateFeedID(
       input.chainId,
       input.poolAddress,
       context.log,
-    )) ?? undefined,
+    );
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    return result;
+  },
 );
 
 // Output is nullable: with `preload_handlers: true` an effect that fabricated
@@ -156,24 +176,46 @@ export const invertRateFeedEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
-  async ({ input, context }) =>
-    (await fetchInvertRateFeed(
+  async ({ input, context }) => {
+    const result = await fetchInvertRateFeed(
       input.chainId,
       input.poolAddress,
       context.log,
-    )) ?? undefined,
+    );
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    return result;
+  },
 );
 
+// Output nullable so transient RPC failures (`fetchRebalanceThreshold`
+// returns `null`) can opt out of caching. Without this, a single failed
+// read during the first touch would persist a sentinel in Postgres and
+// every subsequent self-heal call would receive the cached miss instead
+// of retrying. Callers (factory.ts) already handle `undefined` via the
+// `> 0` gate that doubles for "not yet known".
 export const rebalanceThresholdEffect = createEffect(
   {
     name: "rebalanceThreshold",
     input: { chainId: S.int32, poolAddress: S.string },
-    output: S.int32,
+    output: S.nullable(S.int32),
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
-  async ({ input, context }) =>
-    fetchRebalanceThreshold(input.chainId, input.poolAddress, context.log),
+  async ({ input, context }) => {
+    const result = await fetchRebalanceThreshold(
+      input.chainId,
+      input.poolAddress,
+      context.log,
+    );
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    return result;
+  },
 );
 
 export const tokenDecimalsScalingEffect = createEffect(
@@ -208,12 +250,23 @@ export const tokenDecimalsScalingEffect = createEffect(
       context.log,
     );
     if (direct !== null) return direct;
-    if (!input.fallbackTokenAddress) return undefined;
+    // From here every "no result" path is a transient miss that we don't
+    // want to persist — without the cache opt-out a single failed
+    // deployment-time read would pin every later self-heal call on the
+    // wrong (default 18) decimals.
+    if (!input.fallbackTokenAddress) {
+      context.cache = false;
+      return undefined;
+    }
     const decimals = await context.effect(erc20DecimalsEffect, {
       chainId: input.chainId,
       tokenAddress: input.fallbackTokenAddress,
     });
-    return decimals === undefined ? undefined : 10n ** BigInt(decimals);
+    if (decimals === undefined) {
+      context.cache = false;
+      return undefined;
+    }
+    return 10n ** BigInt(decimals);
   },
 );
 
@@ -241,13 +294,31 @@ export const feesEffect = createEffect(
   // Schema's `S.optional(S.int32)` outputs `number | undefined` with the key
   // always present; the fetcher returns `Partial<>` (key may be missing).
   // Spread to materialize all keys with explicit undefined where missing.
+  //
+  // Cache-poisoning guard: `fetchFees` returns null on full RPC failure
+  // and a partial object when ANY of the three getters transiently fail
+  // (the missing field stays undefined → upsertPool keeps `-1` for retry).
+  // Caching either case would freeze the failure forever, so set
+  // `context.cache = false` whenever the result isn't fully populated.
+  // Real `-2` ("getter unsupported on this contract") values are
+  // permanent and DO get cached — only undefined is treated as transient.
   async ({ input, context }) => {
     const result = await fetchFees(
       input.chainId,
       input.poolAddress,
       context.log,
     );
-    if (result === null) return undefined;
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    if (
+      result.lpFee === undefined ||
+      result.protocolFee === undefined ||
+      result.rebalanceReward === undefined
+    ) {
+      context.cache = false;
+    }
     return {
       lpFee: result.lpFee,
       protocolFee: result.protocolFee,
@@ -469,8 +540,18 @@ export const breakerKindEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: true,
   },
-  async ({ input }) =>
-    (await fetchBreakerKind(input.chainId, input.breakerAddress)) ?? undefined,
+  // `fetchBreakerKind` returns null only on transient probe failure;
+  // MEDIAN_DELTA / VALUE_DELTA / MARKET_HOURS are all permanent
+  // classifications and safe to cache. Skip the cache only on null
+  // so a flaky probe doesn't poison every later breaker bootstrap.
+  async ({ input, context }) => {
+    const result = await fetchBreakerKind(input.chainId, input.breakerAddress);
+    if (result === null) {
+      context.cache = false;
+      return undefined;
+    }
+    return result;
+  },
 );
 
 export const breakerDefaultsEffect = createEffect(
