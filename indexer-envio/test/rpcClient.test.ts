@@ -130,10 +130,13 @@ describe("isRateLimitError", () => {
     ["rate limit exceeded", true],
     ["Rate Limit Exceeded", true],
     ["request limit reached", true],
+    ["125/second request limit reached", true], // QuickNode
     ["too many requests", true],
     ["429 Too Many Requests", true],
     ["throttled by provider", true],
     ["throttle: backoff and retry", true],
+    ["Request exceeds defined limit.", true], // rpc2.monad.xyz
+    ["Request exceeds defined limit", true],
     ["execution reverted: OracleStaleOrExpired", false],
     ["network unreachable", false],
     ["timeout while reading block", false],
