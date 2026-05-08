@@ -105,7 +105,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   if (isSnapshot(body)) {
-    return handleSnapshot(body);
+    // Importer's email is server-controlled provenance for any forensic
+    // reports in the snapshot. Falls back to "import@unknown" only if the
+    // session somehow lacks an email (the auth gate above guarantees a
+    // session, but session.user.email can technically be null per the
+    // NextAuth type — should not happen with our Google-only flow).
+    const importerEmail = session.user?.email ?? "import@unknown";
+    return handleSnapshot(body, { importerEmail });
   }
 
   return handleSimpleFormat(body);

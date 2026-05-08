@@ -30,7 +30,6 @@ import {
 } from "@/lib/address-labels";
 import {
   importReports,
-  upgradeReports,
   MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
   MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
   type AddressReport,
@@ -117,8 +116,28 @@ export async function handleGnosisSafe(
   }
 }
 
+/**
+ * Snapshot import options.
+ *
+ * `importerEmail` becomes the authoritative `authorEmail` on every restored
+ * report — server-controlled metadata (`authorEmail`, `source`,
+ * `createdAt`, `updatedAt`, `version`) is NOT trusted from the snapshot
+ * payload. The verbatim restore that preserved the original snapshot's
+ * provenance was a footgun: any session-authenticated user could POST a
+ * crafted snapshot forging another user's authorship in the forensic
+ * trail. A cron-driven restore-from-Blob endpoint (BACKLOG follow-up)
+ * would be the right place to allow verbatim restore — gated by
+ * cron-secret instead of session auth — but until that ships, the
+ * import route always re-stamps.
+ */
+export type SnapshotImportOptions = {
+  /** Email of the authenticated user driving the import. */
+  importerEmail: string;
+};
+
 export async function handleSnapshot(
   body: AddressLabelsSnapshot,
+  options: SnapshotImportOptions,
 ): Promise<NextResponse> {
   // Merge every entry from {addresses, global, chains} into a single
   // address-keyed map. Old backups carry `global` + `chains`; new backups
@@ -193,16 +212,20 @@ export async function handleSnapshot(
   }
 
   // Reports are decoupled from the labels merge — they have their own
-  // Redis hash with no conflict semantics shared with labels. Restore them
-  // verbatim from the snapshot when present (keeping the snapshot's
-  // version/createdAt/updatedAt instead of bumping via the Lua upsert).
+  // Redis hash with no conflict semantics shared with labels.
   //
-  // Apply the SAME content invariants the live editor enforces
-  // (`sanitizeReportInput`): non-empty string body, body ≤ MAX_BODY_LENGTH,
-  // title ≤ MAX_TITLE_LENGTH. Without this, a hand-edited / corrupted blob
-  // could write records the editor + API would otherwise reject — silently
-  // breaking the documented 50KB body invariant.
-  const reportsValidation = validateSnapshotReports(body.reports);
+  // User-controlled content (body, title) is validated against the SAME
+  // invariants the live editor enforces (`sanitizeReportInput`): non-empty
+  // string body, body ≤ MAX_BODY_LENGTH, title ≤ MAX_TITLE_LENGTH.
+  //
+  // Server-controlled metadata (authorEmail, source, createdAt, updatedAt,
+  // version) is NOT trusted from the payload — it's re-stamped with the
+  // importer's email + `"import"` source + `now()` + version 1. Otherwise
+  // any session-authenticated user could forge another user's authorship
+  // in the forensic-report audit trail.
+  const reportsValidation = validateSnapshotReports(body.reports, {
+    importerEmail: options.importerEmail,
+  });
   if ("error" in reportsValidation) {
     return NextResponse.json(
       { error: reportsValidation.error },
@@ -352,24 +375,31 @@ export function isGnosisSafeFormat(
 }
 
 /**
- * Validate the `reports` half of a snapshot before restoring. Mirrors the
- * live editor's `sanitizeReportInput` (non-empty string body, body length
- * cap, title length cap). The live atomic-upsert path enforces these on
- * normal writes; the restore path bypasses that path (it writes records
- * verbatim to keep the snapshot's `version`/`createdAt`/`updatedAt`), so
- * the cap has to be re-applied here.
+ * Validate the `reports` half of a snapshot before restoring.
+ *
+ * Validates user-controlled fields (`body`, `title`) against the same
+ * invariants the live editor enforces via `sanitizeReportInput`:
+ * non-empty string body, body ≤ MAX_BODY_LENGTH, title ≤ MAX_TITLE_LENGTH.
+ *
+ * Re-stamps server-controlled fields (`authorEmail`, `source`, `createdAt`,
+ * `updatedAt`, `version`) with the importer's email + `"import"` source +
+ * `now()` + version 1. Trusting the snapshot's values would let any
+ * session-authenticated user forge another user's authorship in the
+ * forensic-report audit trail.
  *
  * Returns either `{ reports }` ready to write, or `{ error }` for the route
  * to surface as a 400.
  */
 export function validateSnapshotReports(
   raw: unknown,
+  options: { importerEmail: string },
 ): { reports: Record<string, AddressReport> } | { error: string } {
   if (raw === undefined) return { reports: {} };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { error: "Invalid reports map" };
   }
-  const validated: Record<string, unknown> = {};
+  const now = new Date().toISOString();
+  const result: Record<string, AddressReport> = {};
   for (const [addr, payload] of Object.entries(
     raw as Record<string, unknown>,
   )) {
@@ -392,24 +422,34 @@ export function validateSnapshotReports(
         error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
       };
     }
+    let title: string | undefined;
     if (p.title !== undefined && p.title !== null) {
       if (typeof p.title !== "string") {
-        return {
-          error: `Report for ${addr} title is not a string`,
-        };
+        return { error: `Report for ${addr} title is not a string` };
       }
       if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
         return {
           error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
         };
       }
+      // Match `sanitizeReportInput`: trim + drop if empty.
+      const trimmed = p.title.trim();
+      if (trimmed) title = trimmed;
     }
-    validated[addr.toLowerCase()] = p;
+    // Re-stamp server-controlled metadata. Importer's email + `"import"`
+    // source identifies the restore round; `version: 1` resets the
+    // monotonic counter (any subsequent live edit will bump from 1 → 2).
+    result[addr.toLowerCase()] = {
+      body: p.body,
+      ...(title ? { title } : {}),
+      authorEmail: options.importerEmail,
+      source: "import",
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    };
   }
-  // upgradeReports coerces falsy titles (empty/whitespace) to undefined —
-  // matching sanitizeReportInput's drop-on-empty behavior — so a payload
-  // with `title: ""` lands in Redis as if no title were ever set.
-  return { reports: upgradeReports(validated) };
+  return { reports: result };
 }
 
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {

@@ -489,30 +489,30 @@ describe("isSnapshot", () => {
 });
 
 describe("validateSnapshotReports", () => {
+  const opts = { importerEmail: "alice@mentolabs.xyz" };
+
   it("returns an empty record when reports is undefined", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    const result = validateSnapshotReports(undefined);
-    expect(result).toEqual({ reports: {} });
+    expect(validateSnapshotReports(undefined, opts)).toEqual({ reports: {} });
   });
 
   it("returns an empty record when reports is an empty object", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    const result = validateSnapshotReports({});
-    expect(result).toEqual({ reports: {} });
+    expect(validateSnapshotReports({}, opts)).toEqual({ reports: {} });
   });
 
   it("rejects non-object / array / null", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    expect(validateSnapshotReports("nope")).toEqual({
+    expect(validateSnapshotReports("nope", opts)).toEqual({
       error: "Invalid reports map",
     });
-    expect(validateSnapshotReports([])).toEqual({
+    expect(validateSnapshotReports([], opts)).toEqual({
       error: "Invalid reports map",
     });
-    expect(validateSnapshotReports(null)).toEqual({
+    expect(validateSnapshotReports(null, opts)).toEqual({
       error: "Invalid reports map",
     });
   });
@@ -520,66 +520,80 @@ describe("validateSnapshotReports", () => {
   it("rejects empty body, missing body, oversized body, oversized title", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    // empty body
     expect(
-      validateSnapshotReports({
-        [ADDR_A]: { body: "" },
-      }),
+      validateSnapshotReports({ [ADDR_A]: { body: "" } }, opts),
     ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
-    // missing body
     expect(
-      validateSnapshotReports({
-        [ADDR_A]: { version: 1 },
-      }),
+      validateSnapshotReports({ [ADDR_A]: { version: 1 } }, opts),
     ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
-    // oversized body
     expect(
-      validateSnapshotReports({
-        [ADDR_A]: { body: "x".repeat(50_001) },
-      }),
+      validateSnapshotReports({ [ADDR_A]: { body: "x".repeat(50_001) } }, opts),
     ).toMatchObject({ error: expect.stringMatching(/exceeds 50000/) });
-    // oversized title
     expect(
-      validateSnapshotReports({
-        [ADDR_A]: { body: "ok", title: "t".repeat(201) },
-      }),
+      validateSnapshotReports(
+        { [ADDR_A]: { body: "ok", title: "t".repeat(201) } },
+        opts,
+      ),
     ).toMatchObject({ error: expect.stringMatching(/exceeds 200/) });
+  });
+
+  it("re-stamps server-controlled metadata with importer's email + import source", async () => {
+    // Cursor flagged that the verbatim-restore design let any session-
+    // authenticated user forge another user's authorEmail/source/version
+    // /timestamps via a crafted snapshot. Restore now treats only `body`
+    // and `title` as user-controlled — everything else is server-set.
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports(
+      {
+        [ADDR_A]: {
+          body: "investigation",
+          title: "Counterparty",
+          // These are the spoof-attempt fields — must be ignored:
+          authorEmail: "victim@mentolabs.xyz",
+          source: "claude",
+          createdAt: "2020-01-01T00:00:00Z",
+          updatedAt: "2020-01-01T00:00:00Z",
+          version: 99,
+        },
+      },
+      { importerEmail: "alice@mentolabs.xyz" },
+    );
+    if ("error" in result) throw new Error("expected ok");
+    const r = result.reports[ADDR_A];
+    expect(r.body).toBe("investigation");
+    expect(r.title).toBe("Counterparty");
+    expect(r.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(r.source).toBe("import");
+    expect(r.version).toBe(1);
+    // createdAt/updatedAt re-stamped to "now" — must not be the spoof value.
+    expect(r.createdAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(r.updatedAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(typeof r.createdAt).toBe("string");
   });
 
   it("accepts valid input and lower-cases addresses", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
     const upper = ADDR_A.toUpperCase().replace("0X", "0x");
-    const result = validateSnapshotReports({
-      [upper]: {
-        body: "ok",
-        title: "T",
-        createdAt: "2026-04-01T00:00:00Z",
-        updatedAt: "2026-04-01T00:00:00Z",
-        version: 1,
+    const result = validateSnapshotReports(
+      {
+        [upper]: { body: "ok", title: "T" },
       },
-    });
+      opts,
+    );
     if ("error" in result) throw new Error("expected ok");
     expect(Object.keys(result.reports)).toEqual([upper.toLowerCase()]);
     expect(result.reports[upper.toLowerCase()].body).toBe("ok");
   });
 
-  it("silently drops empty titles (matches sanitizeReportInput drop-on-empty)", async () => {
-    // upgradeReport's truthiness check on `raw.title` coerces empty string
-    // to undefined. validateSnapshotReports now lets empty titles through
-    // unchanged so the behavior matches the live editor — the validator
-    // and the persistence layer agree, and a hand-edited blob with
-    // `title: ""` lands as a titleless record (not an invisible-but-stored
-    // field).
+  it("trims and drops whitespace-only titles (matches sanitizeReportInput)", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    const result = validateSnapshotReports({
-      [ADDR_A]: {
-        body: "ok",
-        title: "",
-        version: 1,
-      },
-    });
+    const result = validateSnapshotReports(
+      { [ADDR_A]: { body: "ok", title: "   " } },
+      opts,
+    );
     if ("error" in result) throw new Error("expected ok");
     expect(result.reports[ADDR_A].title).toBeUndefined();
   });
@@ -587,14 +601,9 @@ describe("validateSnapshotReports", () => {
   it("rejects non-string title (defensive: type coercion shouldn't happen)", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
-    const result = validateSnapshotReports({
-      [ADDR_A]: {
-        body: "ok",
-        title: 123,
-        version: 1,
-      },
-    });
-    expect(result).toMatchObject({
+    expect(
+      validateSnapshotReports({ [ADDR_A]: { body: "ok", title: 123 } }, opts),
+    ).toMatchObject({
       error: expect.stringMatching(/title is not a string/),
     });
   });

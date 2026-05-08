@@ -212,8 +212,45 @@ describe("POST /api/address-labels/import", () => {
     expect(importReports).toHaveBeenCalledTimes(1);
     const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
       .calls[0];
-    expect(reportArg[validAddress.toLowerCase()].body).toBe("Investigation");
-    expect(reportArg[validAddress.toLowerCase()].version).toBe(2);
+    const restored = reportArg[validAddress.toLowerCase()];
+    expect(restored.body).toBe("Investigation");
+    // Server-controlled metadata is re-stamped: importer's email becomes
+    // the authoritative authorEmail, source is "import", version resets to 1.
+    // The snapshot's spoof attempts (alice@... at v2) must NOT survive.
+    expect(restored.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(restored.source).toBe("import");
+    expect(restored.version).toBe(1);
+  });
+
+  it("re-stamps server-controlled report metadata with the importer's session email", async () => {
+    // A session-authenticated user must NOT be able to forge another
+    // user's authorEmail/source/version/timestamps via a crafted
+    // snapshot. Restore re-stamps those fields with the session's email
+    // + "import" source + version 1 + now(). Originally flagged by
+    // cursor[bot] (CHANGES_REQUESTED on 45384a0).
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "x",
+            authorEmail: "victim@mentolabs.xyz",
+            source: "claude",
+            createdAt: "2020-01-01T00:00:00Z",
+            updatedAt: "2020-01-01T00:00:00Z",
+            version: 99,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    const restored = reportArg[validAddress.toLowerCase()];
+    expect(restored.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(restored.source).toBe("import");
+    expect(restored.version).toBe(1);
+    expect(restored.createdAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(restored.updatedAt).not.toBe("2020-01-01T00:00:00Z");
   });
 
   it("snapshot with ONLY `reports` (no labels) still restores reports", async () => {
