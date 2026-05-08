@@ -1,5 +1,6 @@
 import { ERC20_DECIMALS_ABI } from "./abis";
 import { getRpcClient } from "./rpc";
+import { consoleLogger, type RpcLogger } from "./rpc/log";
 import _contractsJson from "@mento-protocol/contracts/contracts.json";
 import _namespaces from "../config/deployment-namespaces.json";
 
@@ -141,6 +142,7 @@ export function isKnownFeeToken(
 export async function resolveFeeTokenMeta(
   chainId: number,
   tokenAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<{ symbol: string; decimals: number }> {
   const lower = tokenAddress.toLowerCase();
   const cacheKey = `${chainId}:${lower}`;
@@ -175,14 +177,14 @@ export async function resolveFeeTokenMeta(
     // Try static fallback before giving up
     const staticMeta = KNOWN_TOKEN_META.get(cacheKey);
     if (staticMeta) {
-      console.warn(
+      log.warn(
         `[ERC20FeeToken] RPC failed for ${tokenAddress} on chain ${chainId}. ` +
           `Using static fallback: ${staticMeta.symbol} (${staticMeta.decimals}dp).`,
       );
       feeTokenMetaCache.set(cacheKey, staticMeta);
       return staticMeta;
     }
-    console.warn(
+    log.warn(
       `[ERC20FeeToken] Failed to read decimals/symbol for ${tokenAddress} on chain ${chainId}. ` +
         `No static fallback available. Using (18dp / UNKNOWN) for this event only — will retry on next transfer.`,
     );

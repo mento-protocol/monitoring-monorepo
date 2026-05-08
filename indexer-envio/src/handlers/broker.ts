@@ -54,8 +54,8 @@ Broker.Swap.handler(async ({ event, context }) => {
   // and tokens already touched by an earlier ProtocolFeeTransfer don't pay
   // a second-hit RPC here either.
   const [tokenInMeta, tokenOutMeta] = await Promise.all([
-    resolveFeeTokenMeta(event.chainId, tokenIn),
-    resolveFeeTokenMeta(event.chainId, tokenOut),
+    resolveFeeTokenMeta(event.chainId, tokenIn, context.log),
+    resolveFeeTokenMeta(event.chainId, tokenOut, context.log),
   ]);
 
   // computeSwapUsdWei is built around the FPMM `(token0, token1,

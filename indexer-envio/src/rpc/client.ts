@@ -7,6 +7,8 @@
 
 import { createPublicClient, http } from "viem";
 
+import { consoleLogger, type RpcLogger } from "./log";
+
 // ---------------------------------------------------------------------------
 // RPC failure logging
 // ---------------------------------------------------------------------------
@@ -73,6 +75,7 @@ export function logRpcFailure(
   target: string,
   err: unknown,
   block?: bigint,
+  log: RpcLogger = consoleLogger,
 ): void {
   const message =
     err instanceof Error
@@ -86,11 +89,11 @@ export function logRpcFailure(
     : undefined;
 
   if (knownRevert) {
-    console.debug(
+    log.debug(
       `[CONTRACT_REVERT] chainId=${chainId} fn=${fn} target=${target}${blockStr} — ${knownRevert}`,
     );
   } else {
-    console.warn(
+    log.warn(
       `[RPC_FAILURE] chainId=${chainId} fn=${fn} target=${target}${blockStr} error=${message}`,
     );
   }
@@ -100,7 +103,7 @@ export function logRpcFailure(
   _rpcFailureCounts.set(burstKey, count);
   if (count % RPC_BURST_INTERVAL === 0) {
     const tag = knownRevert ? "CONTRACT_REVERT_BURST" : "RPC_FAILURE_BURST";
-    console.warn(`[${tag}] chainId=${chainId} fn=${fn} failureCount=${count}`);
+    log.warn(`[${tag}] chainId=${chainId} fn=${fn} failureCount=${count}`);
   }
 }
 

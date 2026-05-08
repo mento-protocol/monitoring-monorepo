@@ -11,6 +11,7 @@ import {
 import type { TradingLimitData } from "../tradingLimits";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
 import { readContractWithBlockFallback } from "./block-fallback";
+import { consoleLogger, type RpcLogger } from "./log";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
@@ -91,6 +92,7 @@ export function _clearMockERC20Decimals(): void {
 export async function fetchErc20Decimals(
   chainId: number,
   tokenAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<number | null> {
   const key = `${chainId}:${tokenAddress.toLowerCase()}`;
   const mocked = _testERC20Decimals.get(key);
@@ -106,7 +108,7 @@ export async function fetchErc20Decimals(
     if (d < 0 || d > 36) return null;
     return d;
   } catch (err) {
-    logRpcFailure(chainId, "erc20Decimals", tokenAddress, err);
+    logRpcFailure(chainId, "erc20Decimals", tokenAddress, err, undefined, log);
     return null;
   }
 }
@@ -245,6 +247,7 @@ export async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<RebalancingState | null> {
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testRebalancingStates.has(testKey)) {
@@ -261,6 +264,7 @@ export async function fetchRebalancingState(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     if (usedLatestFallback) return null;
     return parseRebalancingState(result);
@@ -271,6 +275,7 @@ export async function fetchRebalancingState(
       poolAddress,
       err,
       blockNumber,
+      log,
     );
     return null;
   }
@@ -292,6 +297,7 @@ export async function fetchReserves(
   chainId: number,
   poolAddress: string,
   blockNumber?: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<{ reserve0: bigint; reserve1: bigint } | null> {
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testReserves.has(testKey)) {
@@ -309,6 +315,7 @@ export async function fetchReserves(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     // Only the `latest`-block fallback breaks the historical-accuracy
     // guarantee callers rely on. Secondary-RPC fallback still queries
@@ -319,7 +326,7 @@ export async function fetchReserves(
     const r = result as readonly [bigint, bigint, bigint];
     return { reserve0: r[0], reserve1: r[1] };
   } catch (err) {
-    logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber);
+    logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber, log);
     return null;
   }
 }
@@ -335,6 +342,7 @@ export async function fetchReserves(
 export async function fetchInvertRateFeed(
   chainId: number,
   poolAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<boolean | null> {
   try {
     const client = getRpcClient(chainId);
@@ -345,7 +353,7 @@ export async function fetchInvertRateFeed(
     });
     return result as boolean;
   } catch (err) {
-    logRpcFailure(chainId, "invertRateFeed", poolAddress, err);
+    logRpcFailure(chainId, "invertRateFeed", poolAddress, err, undefined, log);
     return null;
   }
 }
@@ -356,6 +364,7 @@ export async function fetchInvertRateFeed(
 export async function fetchRebalanceThreshold(
   chainId: number,
   poolAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<number> {
   try {
     const client = getRpcClient(chainId);
@@ -373,7 +382,14 @@ export async function fetchRebalanceThreshold(
     ]);
     return Math.max(Number(above), Number(below));
   } catch (err) {
-    logRpcFailure(chainId, "rebalanceThreshold", poolAddress, err);
+    logRpcFailure(
+      chainId,
+      "rebalanceThreshold",
+      poolAddress,
+      err,
+      undefined,
+      log,
+    );
     return 0;
   }
 }
@@ -381,6 +397,7 @@ export async function fetchRebalanceThreshold(
 export async function fetchReferenceRateFeedID(
   chainId: number,
   poolAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<string | null> {
   const mockKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testRateFeedIDs.has(mockKey))
@@ -395,7 +412,14 @@ export async function fetchReferenceRateFeedID(
     });
     return (result as string).toLowerCase();
   } catch (err) {
-    logRpcFailure(chainId, "referenceRateFeedID", poolAddress, err);
+    logRpcFailure(
+      chainId,
+      "referenceRateFeedID",
+      poolAddress,
+      err,
+      undefined,
+      log,
+    );
     return null;
   }
 }
@@ -407,6 +431,7 @@ export async function fetchNumReporters(
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<number | null> {
   let address: `0x${string}`;
   try {
@@ -426,6 +451,7 @@ export async function fetchNumReporters(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     // numRates can change with governance (reporter allowlist updates), so
     // a `latest`-block fallback is NOT a valid stand-in for the requested
@@ -433,7 +459,7 @@ export async function fetchNumReporters(
     if (usedLatestFallback) return null;
     return Number(result);
   } catch (err) {
-    logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
+    logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber, log);
     return null;
   }
 }
@@ -448,6 +474,7 @@ export async function fetchReportExpiry(
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
   const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
   if (_testReportExpiry.has(mockKey))
@@ -471,6 +498,7 @@ export async function fetchReportExpiry(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     // Report expiry can change via governance (TokenReportExpirySet /
     // ReportExpirySet events); a `latest`-block fallback isn't valid for
@@ -490,6 +518,7 @@ export async function fetchReportExpiry(
         },
         blockNumber,
         getFallbackRpcClient(chainId),
+        log,
       );
       if (globalRes.usedLatestFallback) return null;
       expiry = globalRes.result as bigint;
@@ -497,7 +526,7 @@ export async function fetchReportExpiry(
     if (expiry <= 0n) return null;
     return expiry;
   } catch (err) {
-    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
+    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber, log);
     return null;
   }
 }
@@ -511,6 +540,7 @@ export async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
   fn: "decimals0" | "decimals1",
+  log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
   try {
     const client = getRpcClient(chainId);
@@ -521,7 +551,7 @@ export async function fetchTokenDecimalsScaling(
     });
     return result as bigint;
   } catch (err) {
-    logRpcFailure(chainId, fn, poolAddress, err);
+    logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
     return null;
   }
 }
@@ -531,6 +561,7 @@ export async function fetchTradingLimits(
   poolAddress: string,
   token: string,
   blockNumber?: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<TradingLimitData | null> {
   try {
     const client = getRpcClient(chainId);
@@ -545,6 +576,7 @@ export async function fetchTradingLimits(
         },
         blockNumber,
         getFallbackRpcClient(chainId),
+        log,
       );
     // Trading limit `state` (netflow0/1, lastUpdated0/1) accumulates with
     // each swap, so a `latest`-block fallback is fundamentally non-
@@ -565,7 +597,14 @@ export async function fetchTradingLimits(
     const [config, state] = result;
     return { config, state };
   } catch (err) {
-    logRpcFailure(chainId, "getTradingLimits", poolAddress, err, blockNumber);
+    logRpcFailure(
+      chainId,
+      "getTradingLimits",
+      poolAddress,
+      err,
+      blockNumber,
+      log,
+    );
     return null;
   }
 }
@@ -638,6 +677,7 @@ export async function fetchRebalanceIncentiveAtBlock(
   chainId: number,
   poolAddress: string,
   blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
 ): Promise<number | null> {
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testIncentiveAtBlock.has(testKey)) {
@@ -654,6 +694,7 @@ export async function fetchRebalanceIncentiveAtBlock(
       },
       blockNumber,
       getFallbackRpcClient(chainId),
+      log,
     );
     // Only `latest`-block fallback breaks block-scoping; secondary-RPC
     // fallback still queries the requested block, so its result is fine.
@@ -661,7 +702,14 @@ export async function fetchRebalanceIncentiveAtBlock(
     return Number(result as bigint);
   } catch (err) {
     if (isUnsupportedGetterError(err)) return -2;
-    logRpcFailure(chainId, "rebalanceIncentive", poolAddress, err, blockNumber);
+    logRpcFailure(
+      chainId,
+      "rebalanceIncentive",
+      poolAddress,
+      err,
+      blockNumber,
+      log,
+    );
     return null;
   }
 }
@@ -675,6 +723,7 @@ export async function fetchRebalanceIncentiveAtBlock(
 export async function fetchFees(
   chainId: number,
   poolAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<Partial<{
   lpFee: number;
   protocolFee: number;
@@ -706,7 +755,14 @@ export async function fetchFees(
       protocolFeeR.status === "rejected" &&
       rebalanceRewardR.status === "rejected"
     ) {
-      logRpcFailure(chainId, "fetchFees", poolAddress, lpFeeR.reason);
+      logRpcFailure(
+        chainId,
+        "fetchFees",
+        poolAddress,
+        lpFeeR.reason,
+        undefined,
+        log,
+      );
       return null;
     }
     const fees: Partial<{
@@ -731,7 +787,7 @@ export async function fetchFees(
     }
     return fees;
   } catch (err) {
-    logRpcFailure(chainId, "fetchFees", poolAddress, err);
+    logRpcFailure(chainId, "fetchFees", poolAddress, err, undefined, log);
     return null;
   }
 }

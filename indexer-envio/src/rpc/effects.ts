@@ -119,8 +119,12 @@ export const erc20DecimalsEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    (await fetchErc20Decimals(input.chainId, input.tokenAddress)) ?? undefined,
+  async ({ input, context }) =>
+    (await fetchErc20Decimals(
+      input.chainId,
+      input.tokenAddress,
+      context.log,
+    )) ?? undefined,
 );
 
 export const referenceRateFeedIDEffect = createEffect(
@@ -131,9 +135,12 @@ export const referenceRateFeedIDEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    (await fetchReferenceRateFeedID(input.chainId, input.poolAddress)) ??
-    undefined,
+  async ({ input, context }) =>
+    (await fetchReferenceRateFeedID(
+      input.chainId,
+      input.poolAddress,
+      context.log,
+    )) ?? undefined,
 );
 
 // Output is nullable: with `preload_handlers: true` an effect that fabricated
@@ -148,8 +155,12 @@ export const invertRateFeedEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    (await fetchInvertRateFeed(input.chainId, input.poolAddress)) ?? undefined,
+  async ({ input, context }) =>
+    (await fetchInvertRateFeed(
+      input.chainId,
+      input.poolAddress,
+      context.log,
+    )) ?? undefined,
 );
 
 export const rebalanceThresholdEffect = createEffect(
@@ -160,8 +171,8 @@ export const rebalanceThresholdEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    fetchRebalanceThreshold(input.chainId, input.poolAddress),
+  async ({ input, context }) =>
+    fetchRebalanceThreshold(input.chainId, input.poolAddress, context.log),
 );
 
 export const tokenDecimalsScalingEffect = createEffect(
@@ -193,6 +204,7 @@ export const tokenDecimalsScalingEffect = createEffect(
       input.chainId,
       input.poolAddress,
       input.fn as "decimals0" | "decimals1",
+      context.log,
     );
     if (direct !== null) return direct;
     if (!input.fallbackTokenAddress) return undefined;
@@ -228,8 +240,12 @@ export const feesEffect = createEffect(
   // Schema's `S.optional(S.int32)` outputs `number | undefined` with the key
   // always present; the fetcher returns `Partial<>` (key may be missing).
   // Spread to materialize all keys with explicit undefined where missing.
-  async ({ input }) => {
-    const result = await fetchFees(input.chainId, input.poolAddress);
+  async ({ input, context }) => {
+    const result = await fetchFees(
+      input.chainId,
+      input.poolAddress,
+      context.log,
+    );
     if (result === null) return undefined;
     return {
       lpFee: result.lpFee,
@@ -283,11 +299,12 @@ export const reservesEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchReserves(
       input.chainId,
       input.poolAddress,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -303,11 +320,12 @@ export const rebalancingStateEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchRebalancingState(
       input.chainId,
       input.poolAddress,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -323,11 +341,12 @@ export const rebalanceIncentiveAtBlockEffect = createEffect(
     rateLimit: { calls: 100, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchRebalanceIncentiveAtBlock(
       input.chainId,
       input.poolAddress,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -348,11 +367,12 @@ export const numReportersEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchNumReporters(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -368,11 +388,12 @@ export const reportExpiryEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchReportExpiry(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -401,12 +422,13 @@ export const tradingLimitsEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchTradingLimits(
       input.chainId,
       input.poolAddress,
       input.token,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -431,8 +453,9 @@ export const breakerListEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    (await fetchBreakerList(input.chainId, input.blockNumber)) ?? undefined,
+  async ({ input, context }) =>
+    (await fetchBreakerList(input.chainId, input.blockNumber, context.log)) ??
+    undefined,
 );
 
 export const breakerKindEffect = createEffect(
@@ -461,12 +484,13 @@ export const breakerDefaultsEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
+  async ({ input, context }) =>
     (await fetchBreakerDefaults(
       input.chainId,
       input.breakerAddress,
       input.kind as BreakerKindRpc,
       input.blockNumber,
+      context.log,
     )) ?? undefined,
 );
 
@@ -484,13 +508,14 @@ export const breakerFeedStateEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: false,
   },
-  async ({ input }) => {
+  async ({ input, context }) => {
     const result = await fetchBreakerFeedState(
       input.chainId,
       input.breakerAddress,
       input.kind as BreakerKindRpc,
       input.rateFeedID,
       input.blockNumber,
+      context.log,
     );
     if (result === null) return undefined;
     // The schema's nullable inner fields output `T | undefined`, but the
