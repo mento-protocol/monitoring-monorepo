@@ -614,3 +614,44 @@ export function mergeHeroSnapshot(args: {
     staleChains,
   };
 }
+
+/**
+ * Top-10 concentration ratio (top-10 traders' window-volume ÷ total
+ * window-volume), as a percent (0–100, rounded to 1 dp at the call site).
+ *
+ * Stale-chain consistency: `totalVolumeUsdWei` (the denominator) is the
+ * post-filter total from `mergeHeroSnapshot` — stale chains' snapshot
+ * volume is already excluded. The numerator must apply the same chain
+ * mask, otherwise a stale chain's pre-silence trader-day rows count
+ * toward the top-10 sum while its window-volume is dropped from the
+ * total, producing ratios that can exceed 100%, or 0.0% over a zero
+ * denominator while the table still has volume. We pick the top-10
+ * traders ON FRESH CHAINS (skipping any row whose `chainId` is in
+ * `staleChains`), so the numerator and denominator describe the same
+ * effective population.
+ *
+ * Returns 0 when there are no rows or the denominator is zero — the
+ * caller (the Top-10 tile) renders a `—` for empty/error/loading states
+ * separately, so 0 here means "computed, but nothing to concentrate".
+ */
+export function top10Concentration(args: {
+  rowsByVolumeDesc: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+  totalVolumeUsdWei: bigint;
+  staleChains: ReadonlyArray<number>;
+}): number {
+  if (
+    args.rowsByVolumeDesc.length === 0 ||
+    args.totalVolumeUsdWei === BigInt(0)
+  )
+    return 0;
+  const staleChainSet = new Set(args.staleChains);
+  let top10 = BigInt(0);
+  let consumed = 0;
+  for (const row of args.rowsByVolumeDesc) {
+    if (staleChainSet.has(row.chainId)) continue;
+    top10 += row.volumeUsdWei;
+    consumed += 1;
+    if (consumed >= 10) break;
+  }
+  return Number((top10 * BigInt(10000)) / args.totalVolumeUsdWei) / 100;
+}

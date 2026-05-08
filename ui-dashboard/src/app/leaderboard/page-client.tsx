@@ -26,6 +26,7 @@ import {
   aggregateTradersByWindow,
   mergeHeroSnapshot,
   rangeDays,
+  top10Concentration,
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
@@ -258,17 +259,20 @@ export function LeaderboardClient() {
   const totalSwaps = heroTotals.totalSwapCount;
 
   // Source list for top-10 concentration's numerator (top-50 paginated
-  // per-day query). Denominator is the exact snapshot total above.
+  // per-day query). Denominator is the exact snapshot total above. The
+  // helper applies the same stale-chain mask to numerator AND denominator
+  // so the ratio stays coherent when a chain is silent — see
+  // `top10Concentration` JSDoc in `lib/leaderboard.ts` for the rationale.
   const kpiSource = venue === "v3" ? aggregated : v2Aggregated;
-  const top10Concentration = useMemo(() => {
-    if (kpiSource.length === 0 || heroTotals.totalVolumeUsdWei === BigInt(0))
-      return 0;
-    let top10 = BigInt(0);
-    for (let i = 0; i < kpiSource.length && i < 10; i += 1) {
-      top10 += kpiSource[i]!.volumeUsdWei;
-    }
-    return Number((top10 * BigInt(10000)) / heroTotals.totalVolumeUsdWei) / 100;
-  }, [kpiSource, heroTotals.totalVolumeUsdWei]);
+  const concentration = useMemo(
+    () =>
+      top10Concentration({
+        rowsByVolumeDesc: kpiSource,
+        totalVolumeUsdWei: heroTotals.totalVolumeUsdWei,
+        staleChains: heroTotals.staleChains,
+      }),
+    [kpiSource, heroTotals.totalVolumeUsdWei, heroTotals.staleChains],
+  );
 
   // Leaderboard ranges include `24h` (used by v3 single-line + v2
   // single-line charts via `range !== "24h"` gate elsewhere) and `7d`,
@@ -492,7 +496,7 @@ export function LeaderboardClient() {
               ? "…"
               : heroHasError || tableHasError
                 ? "—"
-                : `${isTableCapHit ? "≈ " : ""}${top10Concentration.toFixed(1)}%`
+                : `${isTableCapHit ? "≈ " : ""}${concentration.toFixed(1)}%`
           }
           subtitle={
             isTableCapHit

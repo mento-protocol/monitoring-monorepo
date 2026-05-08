@@ -9,6 +9,7 @@ import {
   computeFlow,
   mergeHeroSnapshot,
   rangeCutoffSeconds,
+  top10Concentration,
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
@@ -1178,5 +1179,115 @@ describe("mergeHeroSnapshot", () => {
     expect(out.totalSwapCount).toBe(2);
     expect(out.uniqueTraders).toBe(1);
     expect(out.staleChains).toEqual([10143]);
+  });
+});
+
+describe("top10Concentration", () => {
+  // Use the same kpiSource shape as the page passes — only the two
+  // fields the helper reads matter (`chainId`, `volumeUsdWei`).
+  const row = (chainId: number, usd: number) => ({
+    chainId,
+    volumeUsdWei: BigInt(USD(usd)),
+  });
+
+  it("returns 0 when there are no rows", () => {
+    expect(
+      top10Concentration({
+        rowsByVolumeDesc: [],
+        totalVolumeUsdWei: BigInt(USD(1000)),
+        staleChains: [],
+      }),
+    ).toBe(0);
+  });
+
+  it("returns 0 when the denominator is zero (avoids divide-by-zero)", () => {
+    expect(
+      top10Concentration({
+        rowsByVolumeDesc: [row(42220, 100)],
+        totalVolumeUsdWei: BigInt(0),
+        staleChains: [],
+      }),
+    ).toBe(0);
+  });
+
+  it("sums top-10 by volume descending when no chain is stale", () => {
+    // 12 rows; only the first 10 contribute to the numerator.
+    const rows = Array.from({ length: 12 }, (_, i) => row(42220, 100 - i));
+    // Top 10 = 100 + 99 + 98 + ... + 91 = 955
+    // Denominator (set to top-10 sum + tail) = 955 + 90 + 89 = 1134
+    const total = BigInt(USD(1134));
+    const out = top10Concentration({
+      rowsByVolumeDesc: rows,
+      totalVolumeUsdWei: total,
+      staleChains: [],
+    });
+    expect(out).toBeCloseTo((955 / 1134) * 100, 1);
+  });
+
+  it("excludes stale-chain rows from the numerator (matches denominator scope)", () => {
+    // Mixed-chain population: Celo (fresh) and Monad (stale). The
+    // denominator already excludes Monad's snapshot via mergeHeroSnapshot;
+    // the numerator must also drop Monad's per-trader rows or the ratio
+    // becomes incoherent (can exceed 100% or hide concentration).
+    const out = top10Concentration({
+      rowsByVolumeDesc: [
+        row(10143, 800), // Monad — stale, must be skipped
+        row(42220, 600), // Celo — counted
+        row(42220, 300), // Celo — counted
+      ],
+      // Denominator excludes Monad's $800 (consistent with the new
+      // mergeHeroSnapshot behavior): only Celo's $900 contributes.
+      totalVolumeUsdWei: BigInt(USD(900)),
+      staleChains: [10143],
+    });
+    // Celo top-2 = $900; ratio = 900 / 900 = 100%.
+    expect(out).toBeCloseTo(100, 1);
+  });
+
+  it("never exceeds 100% when a stale chain dominates the numerator pool", () => {
+    // Pre-fix repro: stale chain contributes $800 to the unfiltered
+    // numerator, denominator drops to $300. Without filtering: 800/300 =
+    // 266%. With filtering: 200/300 = 66.7%.
+    const out = top10Concentration({
+      rowsByVolumeDesc: [row(10143, 800), row(42220, 200)],
+      totalVolumeUsdWei: BigInt(USD(300)), // denominator after stale-chain drop
+      staleChains: [10143],
+    });
+    expect(out).toBeLessThanOrEqual(100);
+    // Sanity: only Celo's $200 contributes to numerator.
+    expect(out).toBeCloseTo((200 / 300) * 100, 1);
+  });
+
+  it("walks past stale-chain rows to fill the top-10 with fresh-chain entries", () => {
+    // 15-row source with stale-chain rows interleaved at positions 0–4
+    // (highest volumes). Without `consumed` tracking, the early-skips
+    // would prematurely close the top-10 window and undercount.
+    const rows = [
+      row(10143, 1000), // skip
+      row(10143, 990), // skip
+      row(10143, 980), // skip
+      row(10143, 970), // skip
+      row(10143, 960), // skip
+      ...Array.from({ length: 10 }, (_, i) => row(42220, 100 - i)), // 10 fresh rows
+    ];
+    // Numerator = 100 + 99 + 98 + ... + 91 = 955
+    const out = top10Concentration({
+      rowsByVolumeDesc: rows,
+      totalVolumeUsdWei: BigInt(USD(955)),
+      staleChains: [10143],
+    });
+    expect(out).toBeCloseTo(100, 1);
+  });
+
+  it("returns 0 when EVERY row is on a stale chain (all-stale cold path)", () => {
+    // If the only data is from stale chains, the denominator is 0 (no
+    // fresh-chain volume) and the helper should short-circuit cleanly
+    // rather than dividing by an empty population.
+    const out = top10Concentration({
+      rowsByVolumeDesc: [row(10143, 500), row(10143, 300)],
+      totalVolumeUsdWei: BigInt(0), // mergeHeroSnapshot returns 0 when all stale
+      staleChains: [10143],
+    });
+    expect(out).toBe(0);
   });
 });
