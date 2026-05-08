@@ -1,39 +1,18 @@
 "use client";
 
 import useSWR from "swr";
+import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
-import type { Pool } from "@/lib/types";
-import { isVirtualPool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
+import type {
+  V2ExchangeConfigDTO,
+  V2ExchangeConfigResponse,
+} from "@/lib/v2-exchange-config";
 
-// Mirrors the route's serialized response — bigints come over the wire as
-// decimal strings. Components convert to BigInt where they need arithmetic.
-export type V2ExchangeConfigDTO = {
-  exchangeId: string;
-  exchangeProvider: string;
-  asset0: string;
-  asset1: string;
-  pricingModule: string;
-  pricingModuleName: string;
-  spread: string;
-  referenceRateFeedID: string;
-  referenceRateResetFrequency: string;
-  minimumReports: string;
-  stablePoolResetSize: string;
-  bucket0: string;
-  bucket1: string;
-  lastBucketUpdate: string;
-  isDeprecated: boolean;
-};
-
-export type V2ExchangeConfigResponse =
-  | { ok: true; config: V2ExchangeConfigDTO }
-  | {
-      ok: false;
-      reason: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
-    };
+export type { V2ExchangeConfigDTO, V2ExchangeConfigResponse };
 
 /**
- * Resolve the v2 BiPoolManager exchange that backs a VirtualPool. Server-side
+ * Resolve the v2 BiPoolManager exchange that backs a VirtualPool. Server
  * route extracts exchangeId from the VP's bytecode + reads live state from
  * BiPoolManager. Returns null on non-virtual pools (the hook is a no-op so
  * callers can call it unconditionally without manual gating).
@@ -54,7 +33,8 @@ export function useV2ExchangeConfig(pool: Pool | null): {
 
   const { data, error, isLoading } = useSWR<V2ExchangeConfigResponse>(
     key,
-    fetchV2ExchangeConfig,
+    (url) =>
+      fetchJsonOrThrow<V2ExchangeConfigResponse>(url, "V2 exchange config"),
     {
       // Bucket cadence on Celo is 360s. 60s revalidation keeps the
       // "lastBucketUpdate" stale-pill within ~1 reset cycle without
@@ -71,19 +51,4 @@ export function useV2ExchangeConfig(pool: Pool | null): {
     isLoading: shouldFetch && isLoading,
     error,
   };
-}
-
-async function fetchV2ExchangeConfig(
-  url: string,
-): Promise<V2ExchangeConfigResponse> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(
-      body?.error ?? `V2 exchange config failed (HTTP ${res.status})`,
-    );
-  }
-  return (await res.json()) as V2ExchangeConfigResponse;
 }

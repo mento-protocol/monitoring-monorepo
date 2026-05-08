@@ -5,6 +5,7 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
+import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 
 /**
@@ -39,7 +40,7 @@ export function useRebalanceCheck(
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
     key,
-    fetchRebalanceCheck,
+    (url) => fetchJsonOrThrow<RebalanceCheckResult>(url, "Rebalance check"),
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,
@@ -53,19 +54,6 @@ export function useRebalanceCheck(
     isLoading: shouldCheck && isLoading,
     error,
   };
-}
-
-async function fetchRebalanceCheck(url: string): Promise<RebalanceCheckResult> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(
-      body?.error ?? `Rebalance check failed (HTTP ${res.status})`,
-    );
-  }
-  return (await res.json()) as RebalanceCheckResult;
 }
 
 function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {

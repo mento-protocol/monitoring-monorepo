@@ -1,5 +1,6 @@
 "use client";
 
+import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
@@ -7,10 +8,7 @@ import { relativeTime, truncateAddress } from "@/lib/format";
 import { tokenSymbol } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
-import {
-  useV2ExchangeConfig,
-  type V2ExchangeConfigDTO,
-} from "@/hooks/use-v2-exchange-config";
+import type { V2ExchangeConfigDTO } from "@/hooks/use-v2-exchange-config";
 
 /**
  * Live v2 BiPoolManager exchange config + reserves panel for VirtualPools.
@@ -21,42 +19,33 @@ import {
 export function V2ExchangePanel({
   pool,
   network,
+  v2Config,
+  isLoading,
 }: {
   pool: Pool;
   network: Network;
+  v2Config: V2ExchangeConfigDTO | null;
+  isLoading: boolean;
 }) {
-  const { data, isLoading, error } = useV2ExchangeConfig(pool);
-
-  // Skeleton until first response. Errors fall back to a one-line note —
-  // the panel is informational, not load-bearing for the rest of the page.
+  // Skeleton until first response. The panel is informational, not
+  // load-bearing for the rest of the page — null v2Config after load
+  // means the bytecode pattern didn't match (very old VP variant or a
+  // non-VP contract reused at this URL); render nothing rather than
+  // assert "not a virtual pool" against UI that already classified it.
   if (isLoading) return <Skeleton />;
-  if (error) {
+  if (!v2Config) return null;
+
+  if (v2Config.isDeprecated) {
     return (
-      <p className="text-sm text-slate-500">
-        v2 exchange details unavailable: {error.message}
-      </p>
+      <DeprecatedExchangeNote pool={pool} network={network} config={v2Config} />
     );
-  }
-  if (!data) return null;
-  if (!data.ok) {
-    // The address looked like a VP route but the bytecode pattern didn't
-    // match (e.g. very old VP variant or a non-VP contract reused at this
-    // URL). Render nothing — we don't want to assert "not a virtual pool"
-    // against UI that already classified it as one.
-    return null;
-  }
-
-  const c = data.config;
-
-  if (c.isDeprecated) {
-    return <DeprecatedExchangeNote pool={pool} network={network} config={c} />;
   }
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
   // FixidityLib uses 1e24 precision — 5e21 = 0.5% = 50 bps.
-  const spreadBps = (Number(c.spread) / 1e24) * 10000;
-  const resetMins = Number(c.referenceRateResetFrequency) / 60;
+  const spreadBps = (Number(v2Config.spread) / 1e24) * 10000;
+  const resetMins = Number(v2Config.referenceRateResetFrequency) / 60;
 
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
@@ -71,7 +60,7 @@ export function V2ExchangePanel({
           </span>
         }
         value={`${spreadBps.toFixed(0)} bps`}
-        title={`spread = ${c.spread} (FixidityLib 1e24)`}
+        title={`spread = ${v2Config.spread} (FixidityLib 1e24)`}
         mono
       />
       <Stat
@@ -84,7 +73,7 @@ export function V2ExchangePanel({
             />
           </span>
         }
-        value={c.pricingModuleName}
+        value={v2Config.pricingModuleName ?? "—"}
       />
       <Stat
         label={
@@ -99,26 +88,26 @@ export function V2ExchangePanel({
         value={
           resetMins >= 1
             ? `${resetMins} min`
-            : `${c.referenceRateResetFrequency}s`
+            : `${v2Config.referenceRateResetFrequency}s`
         }
         mono
       />
       <Stat
         label={`Bucket — ${sym0}`}
-        value={formatBucket(c.bucket0, pool.token0Decimals ?? 18)}
-        title={`raw bucket0 = ${c.bucket0} (${pool.token0Decimals}d)`}
+        value={formatBucket(v2Config.bucket0, pool.token0Decimals ?? 18)}
+        title={`raw bucket0 = ${v2Config.bucket0} (${pool.token0Decimals}d)`}
         mono
       />
       <Stat
         label={`Bucket — ${sym1}`}
-        value={formatBucket(c.bucket1, pool.token1Decimals ?? 18)}
-        title={`raw bucket1 = ${c.bucket1} (${pool.token1Decimals}d)`}
+        value={formatBucket(v2Config.bucket1, pool.token1Decimals ?? 18)}
+        title={`raw bucket1 = ${v2Config.bucket1} (${pool.token1Decimals}d)`}
         mono
       />
       <Stat
         label="Last Reset"
-        value={relativeTime(c.lastBucketUpdate)}
-        title={c.lastBucketUpdate}
+        value={relativeTime(v2Config.lastBucketUpdate)}
+        title={v2Config.lastBucketUpdate}
       />
       <Stat
         label={
@@ -132,7 +121,7 @@ export function V2ExchangePanel({
         }
         value={
           <AddressLink
-            address={c.referenceRateFeedID}
+            address={v2Config.referenceRateFeedID}
             readOnly
             chainId={pool.chainId}
           />
@@ -141,8 +130,8 @@ export function V2ExchangePanel({
       <Stat
         label="Exchange ID"
         value={
-          <span title={c.exchangeId} className="font-mono">
-            {truncateAddress(c.exchangeId)}
+          <span title={v2Config.exchangeId} className="font-mono">
+            {truncateAddress(v2Config.exchangeId)}
           </span>
         }
       />
@@ -150,7 +139,7 @@ export function V2ExchangePanel({
         label="BiPoolManager"
         value={
           <AddressLink
-            address={c.exchangeProvider}
+            address={v2Config.exchangeProvider}
             readOnly
             chainId={pool.chainId}
           />
@@ -160,15 +149,14 @@ export function V2ExchangePanel({
   );
 }
 
-/** Compact bucket reserves: whole tokens with thousands separators. We
- *  drop the fractional part entirely — bucket sizes are quoted in millions
- *  in practice, so two decimal places of token-wei is just noise. */
+/** Whole-token bucket display with thousands separators. Uses
+ *  `toHumanUnits` (BigInt-safe) rather than naive `Number / 10**decimals`
+ *  — buckets routinely sit above 9M tokens at 18 decimals where the
+ *  Number conversion starts losing precision. */
 function formatBucket(rawWei: string, decimals: number): string {
   if (!rawWei || rawWei === "0") return "0";
-  const whole = Number(rawWei) / 10 ** decimals;
-  return whole.toLocaleString(undefined, {
-    maximumFractionDigits: 0,
-  });
+  const whole = toHumanUnits(BigInt(rawWei), decimals);
+  return whole.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
 function Skeleton() {

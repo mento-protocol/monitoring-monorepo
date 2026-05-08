@@ -19,8 +19,11 @@ import { Stat } from "@/components/stat";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
-import type { Pool, TradingLimit } from "@/lib/types";
-import { useV2ExchangeConfig } from "@/hooks/use-v2-exchange-config";
+import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
+import {
+  useV2ExchangeConfig,
+  type V2ExchangeConfigDTO,
+} from "@/hooks/use-v2-exchange-config";
 import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
 import { V2ExchangePanel } from "./v2-exchange-panel";
 
@@ -36,12 +39,11 @@ export function PoolHeader({
   tradingLimitsError?: boolean;
 }) {
   const { network } = useNetwork();
-  const isVirtual = pool.source?.includes("virtual");
-  // Live v2 BiPoolManager exchange state (only fired for virtual pools —
-  // hook gates internally so the call is a no-op for FPMM).
-  const { data: v2Data } = useV2ExchangeConfig(pool);
+  const isVirtual = isVirtualPool(pool);
+  // Single subscription point for v2 exchange state — children consume via
+  // props so SWR has one subscriber, not three.
+  const { data: v2Data, isLoading: v2Loading } = useV2ExchangeConfig(pool);
   const v2Config = v2Data?.ok ? v2Data.config : null;
-  const v2Deprecated = v2Config?.isDeprecated ?? false;
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -85,7 +87,7 @@ export function PoolHeader({
           <AddressLink address={poolContractAddress} readOnly />
         </span>
         <SourceBadge source={pool.source} />
-        {v2Deprecated && (
+        {v2Config?.isDeprecated && (
           <span className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-300">
             Deprecated
           </span>
@@ -109,7 +111,7 @@ export function PoolHeader({
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         {isVirtual ? (
-          <VirtualPoolHeaderTiles pool={pool} />
+          <VirtualPoolHeaderTiles pool={pool} v2Config={v2Config} />
         ) : (
           <>
             <Stat
@@ -156,7 +158,12 @@ export function PoolHeader({
       {isVirtual ? (
         <>
           <div className="my-5 h-px bg-slate-800" />
-          <V2ExchangePanel pool={pool} network={network} />
+          <V2ExchangePanel
+            pool={pool}
+            network={network}
+            v2Config={v2Config}
+            isLoading={v2Loading}
+          />
           <div className="my-5 h-px bg-slate-800" />
           <PoolLifecyclePanel pool={pool} />
         </>
@@ -171,6 +178,23 @@ export function PoolHeader({
   );
 }
 
+// Status pill style — keyed off the resolved exchange state so the same
+// table drives label + color consistently. `null` v2Config means "still
+// loading" (treated as "—" so the badge doesn't briefly flash "Active"
+// for a deprecated pool while SWR is fetching).
+const STATUS_TILE = {
+  loading: { label: "—", color: "text-slate-500" },
+  active: { label: "Active", color: "text-emerald-300" },
+  deprecated: { label: "Deprecated", color: "text-amber-300" },
+} as const;
+
+function statusKey(
+  v2Config: V2ExchangeConfigDTO | null,
+): keyof typeof STATUS_TILE {
+  if (!v2Config) return "loading";
+  return v2Config.isDeprecated ? "deprecated" : "active";
+}
+
 /**
  * Header KPIs for VirtualPools. The v3 metrics (uptime, oracle, deviation,
  * trading limits, rebalance) are FPMM-only — virtual pools wrap a v2
@@ -178,24 +202,19 @@ export function PoolHeader({
  * activity instead: lifetime swap count via the wrapper, age, and the
  * underlying exchange status (active/deprecated).
  */
-function VirtualPoolHeaderTiles({ pool }: { pool: Pool }) {
-  const { data: v2 } = useV2ExchangeConfig(pool);
-  const v2Config = v2?.ok ? v2.config : null;
-  const status = v2Config?.isDeprecated
-    ? "Deprecated"
-    : v2Config
-      ? "Active"
-      : "—";
-  const statusColor = v2Config?.isDeprecated
-    ? "text-amber-300"
-    : v2Config
-      ? "text-emerald-300"
-      : "text-slate-500";
+function VirtualPoolHeaderTiles({
+  pool,
+  v2Config,
+}: {
+  pool: Pool;
+  v2Config: V2ExchangeConfigDTO | null;
+}) {
+  const status = STATUS_TILE[statusKey(v2Config)];
   return (
     <>
       <Stat
         label="v2 Exchange Status"
-        value={<span className={statusColor}>{status}</span>}
+        value={<span className={status.color}>{status.label}</span>}
       />
       <Stat
         label="Wrapper Swaps"

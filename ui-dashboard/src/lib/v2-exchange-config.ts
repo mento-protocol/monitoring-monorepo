@@ -26,9 +26,10 @@ export type V2ExchangeConfig = {
   asset0: `0x${string}`;
   asset1: `0x${string}`;
   pricingModule: `0x${string}`;
-  /** Friendly name for the pricing module. "Unknown" when the address
-   *  isn't in our hardcoded map. */
-  pricingModuleName: string;
+  /** Friendly name for the pricing module, or null when the address isn't
+   *  in our hardcoded map. The UI renders the null case as an em-dash —
+   *  keeping that as a presentation concern, not data. */
+  pricingModuleName: string | null;
   /** FixidityLib value (1e24 unit). Divide by 1e24 for the swap fee
    *  fraction (e.g. 5e21 = 0.005 = 50 bps). */
   spread: bigint;
@@ -119,7 +120,7 @@ export async function resolveV2ExchangeConfig(
       asset1: result.asset1,
       pricingModule: result.pricingModule,
       pricingModuleName:
-        PRICING_MODULE_NAMES[result.pricingModule.toLowerCase()] ?? "Unknown",
+        PRICING_MODULE_NAMES[result.pricingModule.toLowerCase()] ?? null,
       spread: result.config.spread.value,
       referenceRateFeedID: result.config.referenceRateFeedID,
       referenceRateResetFrequency: result.config.referenceRateResetFrequency,
@@ -179,6 +180,60 @@ function isExchangeNotFoundRevert(err: unknown): boolean {
   return reverted?.reason?.includes("does not exist") ?? false;
 }
 
+// ---------------------------------------------------------------------------
+// Wire DTO — shared by the API route + the SWR client hook so a field add
+// can't drift between server and client. BigInts can't go through
+// JSON.stringify, so we send them as decimal strings; the client converts
+// back where it needs arithmetic.
+// ---------------------------------------------------------------------------
+
+export type V2ExchangeConfigDTO = {
+  exchangeId: string;
+  exchangeProvider: string;
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
+  pricingModuleName: string | null;
+  spread: string;
+  referenceRateFeedID: string;
+  referenceRateResetFrequency: string;
+  minimumReports: string;
+  stablePoolResetSize: string;
+  bucket0: string;
+  bucket1: string;
+  lastBucketUpdate: string;
+  isDeprecated: boolean;
+};
+
+export type V2ExchangeConfigResponse =
+  | { ok: true; config: V2ExchangeConfigDTO }
+  | {
+      ok: false;
+      reason: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
+    };
+
+export function serializeV2ExchangeConfig(
+  c: V2ExchangeConfig,
+): V2ExchangeConfigDTO {
+  return {
+    exchangeId: c.exchangeId,
+    exchangeProvider: c.exchangeProvider,
+    asset0: c.asset0,
+    asset1: c.asset1,
+    pricingModule: c.pricingModule,
+    pricingModuleName: c.pricingModuleName,
+    spread: c.spread.toString(),
+    referenceRateFeedID: c.referenceRateFeedID,
+    referenceRateResetFrequency: c.referenceRateResetFrequency.toString(),
+    minimumReports: c.minimumReports.toString(),
+    stablePoolResetSize: c.stablePoolResetSize.toString(),
+    bucket0: c.bucket0.toString(),
+    bucket1: c.bucket1.toString(),
+    lastBucketUpdate: c.lastBucketUpdate.toString(),
+    isDeprecated: c.isDeprecated,
+  };
+}
+
 function deprecatedConfig(
   exchangeProvider: `0x${string}`,
   exchangeId: Hex,
@@ -189,7 +244,7 @@ function deprecatedConfig(
     asset0: ZERO_ADDRESS as `0x${string}`,
     asset1: ZERO_ADDRESS as `0x${string}`,
     pricingModule: ZERO_ADDRESS as `0x${string}`,
-    pricingModuleName: "—",
+    pricingModuleName: null,
     spread: BigInt(0),
     referenceRateFeedID: ZERO_ADDRESS as `0x${string}`,
     referenceRateResetFrequency: BigInt(0),

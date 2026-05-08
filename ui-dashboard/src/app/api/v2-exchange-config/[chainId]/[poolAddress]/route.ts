@@ -1,19 +1,18 @@
 /**
  * Resolves a VirtualPool address to its underlying v2 BiPoolManager exchange
- * config. The caller (the pool detail page) uses this to render reserves,
- * bucket cadence, oracle feed, and deprecation status without needing to
- * touch RPC from the browser.
- *
- * Cache TTL: 30s. The bucket reset cadence is 6 minutes on Celo, so 30s is
- * plenty fresh while keeping pageloads fast under traffic spikes. Mirrors
- * the rebalance-check route's caching/in-flight pattern.
+ * config. The pool detail page calls this to render reserves, bucket cadence,
+ * oracle feed, and deprecation status without needing to touch RPC from the
+ * browser. Cache TTL: 30s — bucket cadence on Celo is 6 minutes, so we're
+ * stale by at most one cycle. Mirrors the rebalance-check route's caching
+ * pattern.
  */
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import {
   resolveV2ExchangeConfig,
+  serializeV2ExchangeConfig,
   type ResolveV2Result,
-  type V2ExchangeConfig,
+  type V2ExchangeConfigResponse,
 } from "@/lib/v2-exchange-config";
 import { networkForChainId } from "@/lib/networks";
 import { isValidAddress } from "@/lib/format";
@@ -21,28 +20,6 @@ import { isValidAddress } from "@/lib/format";
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 1024;
 const INFLIGHT_MAX_ENTRIES = 64;
-
-type SerializedConfig = {
-  exchangeId: string;
-  exchangeProvider: string;
-  asset0: string;
-  asset1: string;
-  pricingModule: string;
-  pricingModuleName: string;
-  spread: string;
-  referenceRateFeedID: string;
-  referenceRateResetFrequency: string;
-  minimumReports: string;
-  stablePoolResetSize: string;
-  bucket0: string;
-  bucket1: string;
-  lastBucketUpdate: string;
-  isDeprecated: boolean;
-};
-
-export type V2ExchangeConfigResponse =
-  | { ok: true; config: SerializedConfig }
-  | { ok: false; reason: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed" };
 
 type CacheEntry = {
   result: ResolveV2Result;
@@ -126,33 +103,8 @@ export async function GET(
   }
 }
 
-// BigInts can't go through JSON.stringify — serialize as decimal strings.
-// The client converts back to BigInt where needed.
-function serializeResult(result: ResolveV2Result): {
-  ok: boolean;
-  config?: SerializedConfig;
-  reason?: string;
-} {
-  if (!result.ok) return { ok: false, reason: result.reason };
-  return { ok: true, config: serializeConfig(result.config) };
-}
-
-function serializeConfig(c: V2ExchangeConfig): SerializedConfig {
-  return {
-    exchangeId: c.exchangeId,
-    exchangeProvider: c.exchangeProvider,
-    asset0: c.asset0,
-    asset1: c.asset1,
-    pricingModule: c.pricingModule,
-    pricingModuleName: c.pricingModuleName,
-    spread: c.spread.toString(),
-    referenceRateFeedID: c.referenceRateFeedID,
-    referenceRateResetFrequency: c.referenceRateResetFrequency.toString(),
-    minimumReports: c.minimumReports.toString(),
-    stablePoolResetSize: c.stablePoolResetSize.toString(),
-    bucket0: c.bucket0.toString(),
-    bucket1: c.bucket1.toString(),
-    lastBucketUpdate: c.lastBucketUpdate.toString(),
-    isDeprecated: c.isDeprecated,
-  };
+function serializeResult(result: ResolveV2Result): V2ExchangeConfigResponse {
+  return result.ok
+    ? { ok: true, config: serializeV2ExchangeConfig(result.config) }
+    : { ok: false, reason: result.reason };
 }
