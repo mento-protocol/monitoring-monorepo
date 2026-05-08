@@ -28,6 +28,12 @@ import {
   type AddressLabelsSnapshot,
   type ImportedCounts,
 } from "@/lib/address-labels";
+import {
+  importReports,
+  MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
+  MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
+  type AddressReport,
+} from "@/lib/address-reports";
 import { isValidAddress } from "@/lib/format";
 
 /**
@@ -110,8 +116,28 @@ export async function handleGnosisSafe(
   }
 }
 
+/**
+ * Snapshot import options.
+ *
+ * `importerEmail` becomes the authoritative `authorEmail` on every restored
+ * report — server-controlled metadata (`authorEmail`, `source`,
+ * `createdAt`, `updatedAt`, `version`) is NOT trusted from the snapshot
+ * payload. The verbatim restore that preserved the original snapshot's
+ * provenance was a footgun: any session-authenticated user could POST a
+ * crafted snapshot forging another user's authorship in the forensic
+ * trail. A cron-driven restore-from-Blob endpoint (BACKLOG follow-up)
+ * would be the right place to allow verbatim restore — gated by
+ * cron-secret instead of session auth — but until that ships, the
+ * import route always re-stamps.
+ */
+export type SnapshotImportOptions = {
+  /** Email of the authenticated user driving the import. */
+  importerEmail: string;
+};
+
 export async function handleSnapshot(
   body: AddressLabelsSnapshot,
+  options: SnapshotImportOptions,
 ): Promise<NextResponse> {
   // Merge every entry from {addresses, global, chains} into a single
   // address-keyed map. Old backups carry `global` + `chains`; new backups
@@ -130,6 +156,23 @@ export async function handleSnapshot(
       const prior = merged[lower];
       merged[lower] = prior ? mergeEntries(prior, entry) : entry;
     }
+  }
+
+  // Reject the mixed `{ labels, reports }` shape explicitly. The simple
+  // format uses `labels` (not `addresses`), and `isSnapshot` now matches
+  // anything with a `reports` key — so a legacy `{ labels, reports }`
+  // payload routes here instead of to `handleSimpleFormat`. Without this
+  // guard, the labels would be silently ignored (handleSnapshot only reads
+  // `addresses`/`global`/`chains`) and the caller would see a 200 with
+  // `imported.addresses = 0`. Surface the contradiction instead.
+  if ((body as { labels?: unknown }).labels !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          "Snapshot must use `addresses` (not `labels`); a payload with both `labels` and `reports` is ambiguous — pick the simple format ({labels}) or the snapshot format ({addresses, reports}).",
+      },
+      { status: 400 },
+    );
   }
 
   if (body.addresses !== undefined) {
@@ -168,22 +211,58 @@ export async function handleSnapshot(
     }
   }
 
-  if (Object.keys(merged).length === 0) {
+  // Reports are decoupled from the labels merge — they have their own
+  // Redis hash with no conflict semantics shared with labels.
+  //
+  // User-controlled content (body, title) is validated against the SAME
+  // invariants the live editor enforces (`sanitizeReportInput`): non-empty
+  // string body, body ≤ MAX_BODY_LENGTH, title ≤ MAX_TITLE_LENGTH.
+  //
+  // Server-controlled metadata (authorEmail, source, createdAt, updatedAt,
+  // version) is NOT trusted from the payload — it's re-stamped with the
+  // importer's email + `"import"` source + `now()` + version 1. Otherwise
+  // any session-authenticated user could forge another user's authorship
+  // in the forensic-report audit trail.
+  const reportsValidation = validateSnapshotReports(body.reports, {
+    importerEmail: options.importerEmail,
+  });
+  if ("error" in reportsValidation) {
+    return NextResponse.json(
+      { error: reportsValidation.error },
+      { status: 400 },
+    );
+  }
+  const reportsToImport: Record<string, AddressReport> =
+    reportsValidation.reports;
+
+  if (
+    Object.keys(merged).length === 0 &&
+    Object.keys(reportsToImport).length === 0
+  ) {
     return NextResponse.json({ ok: true, imported: emptyCounts() });
   }
 
   try {
-    let existing: Record<string, AddressEntry>;
-    try {
-      existing = await getLabels();
-    } catch (err) {
-      return serverError(err);
+    let importedAddresses = 0;
+    if (Object.keys(merged).length > 0) {
+      let existing: Record<string, AddressEntry>;
+      try {
+        existing = await getLabels();
+      } catch (err) {
+        return serverError(err);
+      }
+      const finalLabels = sanitizeAndFilter(
+        mergeWithExisting(merged, existing),
+      );
+      await importLabels(finalLabels);
+      importedAddresses = Object.keys(finalLabels).length;
     }
-    const finalLabels = sanitizeAndFilter(mergeWithExisting(merged, existing));
-    await importLabels(finalLabels);
+    if (Object.keys(reportsToImport).length > 0) {
+      await importReports(reportsToImport);
+    }
     return NextResponse.json({
       ok: true,
-      imported: { addresses: Object.keys(finalLabels).length },
+      imported: { addresses: importedAddresses },
     });
   } catch (err) {
     return serverError(err);
@@ -295,11 +374,91 @@ export function isGnosisSafeFormat(
   );
 }
 
+/**
+ * Validate the `reports` half of a snapshot before restoring.
+ *
+ * Validates user-controlled fields (`body`, `title`) against the same
+ * invariants the live editor enforces via `sanitizeReportInput`:
+ * non-empty string body, body ≤ MAX_BODY_LENGTH, title ≤ MAX_TITLE_LENGTH.
+ *
+ * Re-stamps server-controlled fields (`authorEmail`, `source`, `createdAt`,
+ * `updatedAt`, `version`) with the importer's email + `"import"` source +
+ * `now()` + version 1. Trusting the snapshot's values would let any
+ * session-authenticated user forge another user's authorship in the
+ * forensic-report audit trail.
+ *
+ * Returns either `{ reports }` ready to write, or `{ error }` for the route
+ * to surface as a 400.
+ */
+export function validateSnapshotReports(
+  raw: unknown,
+  options: { importerEmail: string },
+): { reports: Record<string, AddressReport> } | { error: string } {
+  if (raw === undefined) return { reports: {} };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { error: "Invalid reports map" };
+  }
+  const now = new Date().toISOString();
+  const result: Record<string, AddressReport> = {};
+  for (const [addr, payload] of Object.entries(
+    raw as Record<string, unknown>,
+  )) {
+    if (!isValidAddress(addr)) {
+      return { error: `Invalid report address: ${addr}` };
+    }
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      return { error: `Invalid report payload for ${addr}` };
+    }
+    const p = payload as Record<string, unknown>;
+    if (typeof p.body !== "string" || p.body.trim() === "") {
+      return { error: `Report for ${addr} has an empty or non-string body` };
+    }
+    if (p.body.length > MAX_REPORT_BODY_LENGTH) {
+      return {
+        error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
+      };
+    }
+    let title: string | undefined;
+    if (p.title !== undefined && p.title !== null) {
+      if (typeof p.title !== "string") {
+        return { error: `Report for ${addr} title is not a string` };
+      }
+      if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
+        return {
+          error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
+        };
+      }
+      // Match `sanitizeReportInput`: trim + drop if empty.
+      const trimmed = p.title.trim();
+      if (trimmed) title = trimmed;
+    }
+    // Re-stamp server-controlled metadata. Importer's email + `"import"`
+    // source identifies the restore round; `version: 1` resets the
+    // monotonic counter (any subsequent live edit will bump from 1 → 2).
+    result[addr.toLowerCase()] = {
+      body: p.body,
+      ...(title ? { title } : {}),
+      authorEmail: options.importerEmail,
+      source: "import",
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    };
+  }
+  return { reports: result };
+}
+
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
   if (typeof v !== "object" || v === null) return false;
-  // A snapshot has at least one of `addresses`, `global`, `chains`.
+  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`.
   const obj = v as Record<string, unknown>;
-  return "addresses" in obj || "global" in obj || "chains" in obj;
+  return (
+    "addresses" in obj || "global" in obj || "chains" in obj || "reports" in obj
+  );
 }
 
 /**

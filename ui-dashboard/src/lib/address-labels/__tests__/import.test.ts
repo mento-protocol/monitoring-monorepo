@@ -20,6 +20,18 @@ vi.mock("@/lib/address-labels", async () => {
   };
 });
 
+vi.mock("@/lib/address-reports", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-reports-shared")
+  >("@/lib/address-reports-shared");
+  return {
+    importReports: vi.fn().mockResolvedValue(undefined),
+    upgradeReports: shared.upgradeReports,
+    MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
+    MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,
+  };
+});
+
 import type { AddressEntry } from "@/lib/address-labels";
 import { getLabels } from "@/lib/address-labels";
 
@@ -458,7 +470,14 @@ describe("isSnapshot", () => {
     expect(isSnapshot({ global: {} })).toBe(true);
   });
 
-  it("returns false when none of addresses/global/chains are present", () => {
+  it("returns true for a payload with only the new `reports` key", () => {
+    // Reports-only snapshot — recognised so that a backup with reports but
+    // no labels still routes to handleSnapshot (instead of falling through
+    // to handleSimpleFormat and erroring out).
+    expect(isSnapshot({ reports: {} })).toBe(true);
+  });
+
+  it("returns false when none of addresses/global/chains/reports are present", () => {
     expect(isSnapshot({ exportedAt: "2026-01-01T00:00:00Z" })).toBe(false);
   });
 
@@ -466,6 +485,127 @@ describe("isSnapshot", () => {
     expect(isSnapshot(null)).toBe(false);
     expect(isSnapshot("snapshot")).toBe(false);
     expect(isSnapshot(42220)).toBe(false);
+  });
+});
+
+describe("validateSnapshotReports", () => {
+  const opts = { importerEmail: "alice@mentolabs.xyz" };
+
+  it("returns an empty record when reports is undefined", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(validateSnapshotReports(undefined, opts)).toEqual({ reports: {} });
+  });
+
+  it("returns an empty record when reports is an empty object", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(validateSnapshotReports({}, opts)).toEqual({ reports: {} });
+  });
+
+  it("rejects non-object / array / null", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(validateSnapshotReports("nope", opts)).toEqual({
+      error: "Invalid reports map",
+    });
+    expect(validateSnapshotReports([], opts)).toEqual({
+      error: "Invalid reports map",
+    });
+    expect(validateSnapshotReports(null, opts)).toEqual({
+      error: "Invalid reports map",
+    });
+  });
+
+  it("rejects empty body, missing body, oversized body, oversized title", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(
+      validateSnapshotReports({ [ADDR_A]: { body: "" } }, opts),
+    ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
+    expect(
+      validateSnapshotReports({ [ADDR_A]: { version: 1 } }, opts),
+    ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
+    expect(
+      validateSnapshotReports({ [ADDR_A]: { body: "x".repeat(50_001) } }, opts),
+    ).toMatchObject({ error: expect.stringMatching(/exceeds 50000/) });
+    expect(
+      validateSnapshotReports(
+        { [ADDR_A]: { body: "ok", title: "t".repeat(201) } },
+        opts,
+      ),
+    ).toMatchObject({ error: expect.stringMatching(/exceeds 200/) });
+  });
+
+  it("re-stamps server-controlled metadata with importer's email + import source", async () => {
+    // Cursor flagged that the verbatim-restore design let any session-
+    // authenticated user forge another user's authorEmail/source/version
+    // /timestamps via a crafted snapshot. Restore now treats only `body`
+    // and `title` as user-controlled — everything else is server-set.
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports(
+      {
+        [ADDR_A]: {
+          body: "investigation",
+          title: "Counterparty",
+          // These are the spoof-attempt fields — must be ignored:
+          authorEmail: "victim@mentolabs.xyz",
+          source: "claude",
+          createdAt: "2020-01-01T00:00:00Z",
+          updatedAt: "2020-01-01T00:00:00Z",
+          version: 99,
+        },
+      },
+      { importerEmail: "alice@mentolabs.xyz" },
+    );
+    if ("error" in result) throw new Error("expected ok");
+    const r = result.reports[ADDR_A];
+    expect(r.body).toBe("investigation");
+    expect(r.title).toBe("Counterparty");
+    expect(r.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(r.source).toBe("import");
+    expect(r.version).toBe(1);
+    // createdAt/updatedAt re-stamped to "now" — must not be the spoof value.
+    expect(r.createdAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(r.updatedAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(typeof r.createdAt).toBe("string");
+  });
+
+  it("accepts valid input and lower-cases addresses", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const upper = ADDR_A.toUpperCase().replace("0X", "0x");
+    const result = validateSnapshotReports(
+      {
+        [upper]: { body: "ok", title: "T" },
+      },
+      opts,
+    );
+    if ("error" in result) throw new Error("expected ok");
+    expect(Object.keys(result.reports)).toEqual([upper.toLowerCase()]);
+    expect(result.reports[upper.toLowerCase()].body).toBe("ok");
+  });
+
+  it("trims and drops whitespace-only titles (matches sanitizeReportInput)", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports(
+      { [ADDR_A]: { body: "ok", title: "   " } },
+      opts,
+    );
+    if ("error" in result) throw new Error("expected ok");
+    expect(result.reports[ADDR_A].title).toBeUndefined();
+  });
+
+  it("rejects non-string title (defensive: type coercion shouldn't happen)", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(
+      validateSnapshotReports({ [ADDR_A]: { body: "ok", title: 123 } }, opts),
+    ).toMatchObject({
+      error: expect.stringMatching(/title is not a string/),
+    });
   });
 });
 

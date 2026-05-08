@@ -16,6 +16,7 @@ vi.mock("@/lib/address-labels", async () => {
   return {
     importLabels: vi.fn().mockResolvedValue(undefined),
     getLabels: vi.fn().mockResolvedValue({}),
+    mergeEntries: shared.mergeEntries,
     upgradeEntries: shared.upgradeEntries,
     upgradeEntry: shared.upgradeEntry,
     sanitizeEntry: shared.sanitizeEntry,
@@ -23,8 +24,21 @@ vi.mock("@/lib/address-labels", async () => {
   };
 });
 
+vi.mock("@/lib/address-reports", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-reports-shared")
+  >("@/lib/address-reports-shared");
+  return {
+    importReports: vi.fn().mockResolvedValue(undefined),
+    upgradeReports: shared.upgradeReports,
+    MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
+    MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,
+  };
+});
+
 import { getAuthSession } from "@/auth";
 import { importLabels, getLabels } from "@/lib/address-labels";
+import { importReports } from "@/lib/address-reports";
 
 type ImportedCounts = { addresses: number };
 
@@ -58,6 +72,7 @@ beforeEach(() => {
   });
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 });
 
 describe("POST /api/address-labels/import", () => {
@@ -149,6 +164,267 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(200);
     const counts = await getImported(res);
     expect(counts.addresses).toBe(2);
+  });
+
+  it("snapshot WITHOUT `reports` parses without error (back-compat for old backups)", async () => {
+    // Acceptance criterion: restoring a pre-#339 snapshot must not throw.
+    // The labels-only path is the canonical old-snapshot shape.
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-03-01T00:00:00Z",
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-03-01T00:00:00Z",
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("snapshot WITH `reports` restores both labels and reports", async () => {
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-05-01T00:00:00Z",
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-05-01T00:00:00Z",
+          },
+        },
+        reports: {
+          [validAddress]: {
+            body: "Investigation",
+            authorEmail: "alice@mentolabs.xyz",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-30T00:00:00Z",
+            version: 2,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledTimes(1);
+    expect(importReports).toHaveBeenCalledTimes(1);
+    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    const restored = reportArg[validAddress.toLowerCase()];
+    expect(restored.body).toBe("Investigation");
+    // Server-controlled metadata is re-stamped: importer's email becomes
+    // the authoritative authorEmail, source is "import", version resets to 1.
+    // The snapshot's spoof attempts (alice@... at v2) must NOT survive.
+    expect(restored.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(restored.source).toBe("import");
+    expect(restored.version).toBe(1);
+  });
+
+  it("re-stamps server-controlled report metadata with the importer's session email", async () => {
+    // A session-authenticated user must NOT be able to forge another
+    // user's authorEmail/source/version/timestamps via a crafted
+    // snapshot. Restore re-stamps those fields with the session's email
+    // + "import" source + version 1 + now(). Originally flagged by
+    // cursor[bot] (CHANGES_REQUESTED on 45384a0).
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "x",
+            authorEmail: "victim@mentolabs.xyz",
+            source: "claude",
+            createdAt: "2020-01-01T00:00:00Z",
+            updatedAt: "2020-01-01T00:00:00Z",
+            version: 99,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    const restored = reportArg[validAddress.toLowerCase()];
+    expect(restored.authorEmail).toBe("alice@mentolabs.xyz");
+    expect(restored.source).toBe("import");
+    expect(restored.version).toBe(1);
+    expect(restored.createdAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(restored.updatedAt).not.toBe("2020-01-01T00:00:00Z");
+  });
+
+  it("snapshot with ONLY `reports` (no labels) still restores reports", async () => {
+    // Routes through handleSnapshot via the reports-key recognition in
+    // isSnapshot — without it the body would fall through to
+    // handleSimpleFormat and 400 on the missing `labels` field.
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-05-01T00:00:00Z",
+        reports: {
+          [validAddress]: {
+            body: "Investigation only",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-30T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a snapshot whose `reports` key is not a plain object", async () => {
+    const res = await POST(
+      jsonReq({
+        addresses: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        reports: "not an object",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose `reports` key has an invalid address", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          "not-an-address": {
+            body: "x",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an empty body (live editor invariant)", async () => {
+    // Restore must enforce the same invariants as live edits — a corrupted
+    // / hand-edited blob with `body: ""` would otherwise persist a record
+    // the editor and live API would never accept.
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has a missing/non-string body", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report exceeds MAX_BODY_LENGTH", async () => {
+    // 50,001 chars → over the documented 50KB cap that the live editor
+    // enforces. Restore path must enforce the same cap.
+    const oversized = "x".repeat(50_001);
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: oversized,
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an array payload", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: ["not an object"],
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an oversized title", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "ok",
+            title: "t".repeat(201),
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects the ambiguous `{ labels, reports }` mixed shape with 400", async () => {
+    // After widening `isSnapshot` to recognise reports-only payloads, a
+    // legacy simple-format shape with reports tagged on (`{ labels: {...},
+    // reports: {...} }`) routes to handleSnapshot. handleSnapshot reads
+    // `addresses`, not `labels` — so without an explicit guard the labels
+    // would be silently dropped and the caller would see 200 / addresses=0.
+    // The route now returns 400 to surface the contradiction.
+    const res = await POST(
+      jsonReq({
+        labels: {
+          [validAddress]: {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        reports: {
+          [validAddress]: {
+            body: "x",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
   });
 
   it("imports the Gnosis Safe format (chainId field is ignored)", async () => {

@@ -13,7 +13,11 @@ export {
   upgradeReports,
 } from "./address-reports-shared";
 
-import { upgradeReport, type AddressReport } from "./address-reports-shared";
+import {
+  upgradeReport,
+  upgradeReports,
+  type AddressReport,
+} from "./address-reports-shared";
 
 // Redis layout: a single `reports` hash keyed by lowercase address. Reports
 // are not chain-scoped — same EVM address means same entity (same private
@@ -138,4 +142,44 @@ export async function getReportsIndex(): Promise<{ addresses: string[] }> {
   const redis = getRedis();
   const fields = await redis.hkeys(REPORTS_KEY);
   return { addresses: (fields ?? []).map((f) => f.toLowerCase()) };
+}
+
+/**
+ * Read every report as an address → report record map. HGETALL pulls the
+ * full bodies, so unlike `getReportsIndex` this is bandwidth-heavy — only
+ * call it from cron contexts (e.g. the daily backup) where you actually
+ * need the full payloads.
+ *
+ * Returns an empty record (not throws) when the hash is missing or empty,
+ * so a fresh Upstash with zero reports still yields a clean snapshot.
+ */
+export async function getAllReports(): Promise<Record<string, AddressReport>> {
+  const redis = getRedis();
+  const raw =
+    await redis.hgetall<Record<string, Record<string, unknown>>>(REPORTS_KEY);
+  if (!raw) return {};
+  return upgradeReports(raw as Record<string, unknown>);
+}
+
+/**
+ * Bulk-write a batch of reports as a single HSET. Preserves the snapshot's
+ * stored `version` / `createdAt` / `updatedAt` verbatim so a backup
+ * restore reproduces the prior state exactly — the atomic Lua upsert
+ * deliberately bumps the version on every call, which is the wrong shape
+ * for a restore.
+ *
+ * Caller is responsible for upgrading raw records via `upgradeReports`
+ * before calling. No-op on an empty record.
+ */
+export async function importReports(
+  reports: Record<string, AddressReport>,
+): Promise<void> {
+  const entries = Object.entries(reports);
+  if (entries.length === 0) return;
+  const redis = getRedis();
+  const fields: Record<string, string> = {};
+  for (const [addr, report] of entries) {
+    fields[addr.toLowerCase()] = JSON.stringify(report);
+  }
+  await redis.hset(REPORTS_KEY, fields);
 }

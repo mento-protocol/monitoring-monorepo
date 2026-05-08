@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
 import { getLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
+import { getAllReports } from "@/lib/address-reports";
 import { requireCronAuth } from "@/lib/cron-auth";
 
 // Vercel cron jobs invoke with GET, not POST. Read-only handler taking no
@@ -16,11 +17,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // monitored — recovery is by spot-checking the Blob store for a missing
   // date file.
   try {
-    const labels = await getLabels();
+    // Labels and forensic reports both live in the same Upstash instance
+    // (separate hashes — `labels` and `reports`). Snapshot both into the
+    // same daily JSON blob so a Redis flush restores both halves from one
+    // file. A separate cron would consume an additional team-plan slot
+    // and create the risk of one half restoring without the other.
+    const [labels, reports] = await Promise.all([getLabels(), getAllReports()]);
     const now = new Date();
     const snapshot: AddressLabelsSnapshot = {
       exportedAt: now.toISOString(),
       addresses: labels,
+      reports,
     };
 
     const date = now.toISOString().slice(0, 10);

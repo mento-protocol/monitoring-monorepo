@@ -11,6 +11,8 @@ const mockEval = vi.fn();
 const mockHget = vi.fn();
 const mockHkeys = vi.fn();
 const mockHdel = vi.fn();
+const mockHgetall = vi.fn();
+const mockHset = vi.fn();
 
 vi.mock("@upstash/redis", () => ({
   // Constructor mock — vitest-mock-quirks rule: must be a real `function`
@@ -22,6 +24,8 @@ vi.mock("@upstash/redis", () => ({
       hget: mockHget,
       hkeys: mockHkeys,
       hdel: mockHdel,
+      hgetall: mockHgetall,
+      hset: mockHset,
     };
   },
 }));
@@ -150,5 +154,97 @@ describe("getReportsIndex — addresses-only", () => {
     // only. If a future change switches to HGETALL the 60s poll loop would
     // ship every 50KB body.
     expect(mockHkeys).toHaveBeenCalledWith("reports");
+  });
+});
+
+describe("getAllReports — full hash for backup snapshots", () => {
+  it("returns every report as an address → record map", async () => {
+    mockHgetall.mockResolvedValueOnce({
+      "0xaaa": {
+        body: "Investigation A",
+        createdAt: "2026-05-01T00:00:00Z",
+        updatedAt: "2026-05-02T00:00:00Z",
+        version: 2,
+      },
+      "0xbbb": {
+        body: "Investigation B",
+        title: "Counterparty",
+        source: "claude",
+        createdAt: "2026-04-15T00:00:00Z",
+        updatedAt: "2026-04-15T00:00:00Z",
+        version: 1,
+      },
+    });
+
+    const { getAllReports } = await import("@/lib/address-reports");
+    const reports = await getAllReports();
+    expect(Object.keys(reports)).toEqual(["0xaaa", "0xbbb"]);
+    expect(reports["0xaaa"].body).toBe("Investigation A");
+    expect(reports["0xbbb"].title).toBe("Counterparty");
+    expect(reports["0xbbb"].source).toBe("claude");
+    expect(mockHgetall).toHaveBeenCalledWith("reports");
+  });
+
+  it("returns an empty record (does NOT throw) when the hash is empty", async () => {
+    // Restore parity acceptance: a fresh Upstash with zero reports must
+    // produce an empty `reports: {}` in the snapshot, not a runtime error.
+    mockHgetall.mockResolvedValueOnce(null);
+    const { getAllReports } = await import("@/lib/address-reports");
+    const reports = await getAllReports();
+    expect(reports).toEqual({});
+  });
+
+  it("normalizes legacy/partial shapes via upgradeReports", async () => {
+    // A row missing version / timestamps must default through upgradeReport
+    // rather than land in the snapshot half-formed.
+    mockHgetall.mockResolvedValueOnce({
+      "0xccc": { body: "legacy" },
+    });
+    const { getAllReports } = await import("@/lib/address-reports");
+    const reports = await getAllReports();
+    expect(reports["0xccc"].body).toBe("legacy");
+    expect(reports["0xccc"].version).toBe(1);
+    expect(typeof reports["0xccc"].createdAt).toBe("string");
+    expect(typeof reports["0xccc"].updatedAt).toBe("string");
+  });
+});
+
+describe("importReports — restore-from-snapshot bulk write", () => {
+  it("HSETs every record verbatim (preserves snapshot version/timestamps)", async () => {
+    mockHset.mockResolvedValueOnce(2);
+    const reports = {
+      "0xaaa": {
+        body: "A",
+        createdAt: "2026-05-01T00:00:00Z",
+        updatedAt: "2026-05-02T00:00:00Z",
+        version: 5,
+      },
+      "0xBBB": {
+        body: "B",
+        createdAt: "2026-04-15T00:00:00Z",
+        updatedAt: "2026-04-15T00:00:00Z",
+        version: 1,
+      },
+    };
+    const { importReports } = await import("@/lib/address-reports");
+    await importReports(reports);
+    expect(mockHset).toHaveBeenCalledTimes(1);
+    const [key, fields] = mockHset.mock.calls[0]!;
+    expect(key).toBe("reports");
+    // Keys lowercased; values are JSON-encoded so the on-disk shape matches
+    // what the live upsert script writes.
+    expect(Object.keys(fields)).toEqual(["0xaaa", "0xbbb"]);
+    expect(JSON.parse((fields as Record<string, string>)["0xaaa"])).toEqual({
+      body: "A",
+      createdAt: "2026-05-01T00:00:00Z",
+      updatedAt: "2026-05-02T00:00:00Z",
+      version: 5,
+    });
+  });
+
+  it("is a no-op for an empty input (does not call HSET)", async () => {
+    const { importReports } = await import("@/lib/address-reports");
+    await importReports({});
+    expect(mockHset).not.toHaveBeenCalled();
   });
 });
