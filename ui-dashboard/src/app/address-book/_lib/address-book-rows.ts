@@ -35,13 +35,34 @@ export type AddressRow = AddressBookRow;
  * label.
  */
 export function findContractInitial(address: string): AddressEntry | undefined {
-  const lower = address.toLowerCase();
+  const matched = collectContractMatches(address);
+  if (matched.size !== 1) return undefined;
+  const [name] = matched;
+  return {
+    name,
+    tags: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * True when `address` is registered as a contract under TWO OR MORE
+ * different names across configured networks. The detail URL is
+ * chain-agnostic, so we can't infer which row the user clicked from —
+ * the form must require an explicit name to avoid persisting a
+ * tag-only / blank-name custom label that would suppress every
+ * disagreeing contract row in the index under the wrong (or empty)
+ * display name.
+ */
+export function hasAmbiguousContractMatches(address: string): boolean {
+  return collectContractMatches(address).size > 1;
+}
+
+function collectContractMatches(address: string): Set<string> {
   // Filter to the same `isConfiguredNetworkId` set `buildContractRows`
   // uses — devnet / local-only registries carry deployer addresses that
-  // are inappropriate to surface on the prod detail page. Without this,
-  // a deep-link to an address that only exists in the devnet registry
-  // would seed the form with a devnet-only contract name and a save
-  // would persist that as a global custom label.
+  // are inappropriate to surface on the prod detail page.
+  const lower = address.toLowerCase();
   const matchedNames = new Set<string>();
   for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
     const net = NETWORKS[id];
@@ -51,13 +72,7 @@ export function findContractInitial(address: string): AddressEntry | undefined {
       }
     }
   }
-  if (matchedNames.size !== 1) return undefined;
-  const [name] = matchedNames;
-  return {
-    name,
-    tags: [],
-    updatedAt: new Date().toISOString(),
-  };
+  return matchedNames;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,10 @@ import { AddressLabelForm } from "@/components/address-label-form";
 import { AddressReportEditor } from "@/components/address-report-editor";
 import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
 import { isValidAddress } from "@/lib/format";
-import { findContractInitial } from "../_lib/address-book-rows";
+import {
+  findContractInitial,
+  hasAmbiguousContractMatches,
+} from "../_lib/address-book-rows";
 import { AddressDetailHeader } from "./_components/address-detail-header";
 
 export default function AddressDetailPage() {
@@ -52,6 +55,22 @@ export default function AddressDetailPage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formDeleting, setFormDeleting] = useState(false);
   const latchedFormSuffixRef = useRef<string>("");
+  // Pending mutations BY ADDRESS (not by current mount). Address-change
+  // resets clear `formSaving` / `formDeleting` for the CURRENT mount,
+  // but if a save started on form A is still in flight after the user
+  // navigates B → A, the freshly mounted form A would otherwise enable
+  // Save (its internal `saving=false`) and a second click could fire
+  // an overlapping PUT/DELETE. Track pending by address so a remount
+  // for the same address sees the prior request and stays disabled
+  // until it settles. The ref maps formInstanceId → originating
+  // address so we can decrement the right bucket when the request
+  // resolves.
+  const formIdToAddressRef = useRef<Map<string, string>>(new Map());
+  const [pendingByAddress, setPendingByAddress] = useState<
+    Record<string, number>
+  >({});
+  const addressRef = useRef(address);
+  addressRef.current = address;
   // Scope each latch to the *currently mounted* form instance, with
   // SEPARATE owner refs per flow. When the user navigates to another
   // `/address-book/<addr>` mid-write, the old form unmounts but its
@@ -66,26 +85,63 @@ export default function AddressDetailPage() {
   // stuck true and the latch permanently held.
   const savingOwnerRef = useRef<string | null>(null);
   const deletingOwnerRef = useRef<string | null>(null);
-  const handleSavingChange = useCallback((saving: boolean, formId: string) => {
-    if (saving) {
-      savingOwnerRef.current = formId;
-      setFormSaving(true);
-    } else if (formId === savingOwnerRef.current) {
-      savingOwnerRef.current = null;
-      setFormSaving(false);
-    }
+  // Helpers update the pending-by-address ledger AND the per-flow latch
+  // owner. The latch owner is checked for stale-callback dedup
+  // (round 7); the pending ledger is checked on form mount for the
+  // round-trip race (codex round 11). Both must update on every
+  // begin/end so the two views stay coherent.
+  const incPending = useCallback((formId: string) => {
+    formIdToAddressRef.current.set(formId, addressRef.current);
+    setPendingByAddress((m) => ({
+      ...m,
+      [addressRef.current]: (m[addressRef.current] ?? 0) + 1,
+    }));
   }, []);
+  const decPending = useCallback((formId: string) => {
+    const addr = formIdToAddressRef.current.get(formId);
+    formIdToAddressRef.current.delete(formId);
+    if (!addr) return;
+    setPendingByAddress((m) => {
+      const next = { ...m };
+      const c = (next[addr] ?? 0) - 1;
+      if (c <= 0) delete next[addr];
+      else next[addr] = c;
+      return next;
+    });
+  }, []);
+  const handleSavingChange = useCallback(
+    (saving: boolean, formId: string) => {
+      if (saving) {
+        savingOwnerRef.current = formId;
+        setFormSaving(true);
+        incPending(formId);
+      } else {
+        // Always decrement pending — the request settled regardless of
+        // whether the current latch owner matches.
+        decPending(formId);
+        if (formId === savingOwnerRef.current) {
+          savingOwnerRef.current = null;
+          setFormSaving(false);
+        }
+      }
+    },
+    [incPending, decPending],
+  );
   const handleDeletingChange = useCallback(
     (deleting: boolean, formId: string) => {
       if (deleting) {
         deletingOwnerRef.current = formId;
         setFormDeleting(true);
-      } else if (formId === deletingOwnerRef.current) {
-        deletingOwnerRef.current = null;
-        setFormDeleting(false);
+        incPending(formId);
+      } else {
+        decPending(formId);
+        if (formId === deletingOwnerRef.current) {
+          deletingOwnerRef.current = null;
+          setFormDeleting(false);
+        }
       }
     },
-    [],
+    [incPending, decPending],
   );
 
   // Reset the latch when the URL address changes. Prior round scoped
@@ -120,6 +176,17 @@ export default function AddressDetailPage() {
   // accidentally drop the registry-supplied display name. Mirrors the
   // modal flow in `AddressBookClient`.
   const formInitial = entry ?? findContractInitial(address);
+  // When the address is registered under multiple disagreeing contract
+  // names, `findContractInitial` returns undefined (skipping pre-fill),
+  // but the form would otherwise treat the address as a non-contract
+  // custom row and let the user save with only tags / notes — persisting
+  // an empty global name that suppresses every disagreeing contract row
+  // in the index. Force an explicit name for that case.
+  const requireExplicitName = !entry && hasAmbiguousContractMatches(address);
+  // Disable Save/Remove on this mount when there's a pending mutation
+  // for THIS address from any prior mount — see `pendingByAddress`
+  // declaration above for the round-trip-race rationale.
+  const hasPendingForThisAddress = (pendingByAddress[address] ?? 0) > 0;
 
   // Pin the form's remount key during any in-flight local mutation
   // (save OR delete). Both `upsertEntry` and `deleteEntry` apply
@@ -152,12 +219,12 @@ export default function AddressDetailPage() {
   // — otherwise a teammate's import / migration that changes a
   // legacy row but preserves `updatedAt: ""` would leave THIS form
   // mounted with stale fields, and a save would overwrite the
-  // imported data. The fingerprint is a `|`-joined concat of the
-  // user-visible fields; collisions would require two rows on the
-  // same address to share name + tags + notes + isPublic, which is
-  // a no-op change to the form anyway.
+  // imported data. Use `JSON.stringify` for the fingerprint so the
+  // delimiter is unambiguous: a free-form `|`/`,` concat could
+  // collide for content that contained those characters (e.g.
+  // tags `['a,b','c']` vs `['a','b,c']` both serialise to `a,b,c`).
   const liveFormSuffix = entry
-    ? `custom:${entry.updatedAt || `legacy:${entry.name}|${entry.tags.join(",")}|${entry.notes ?? ""}|${entry.isPublic ? "1" : "0"}`}`
+    ? `custom:${entry.updatedAt || `legacy:${JSON.stringify([entry.name, entry.tags, entry.notes ?? "", entry.isPublic ?? false])}`}`
     : formInitial
       ? "contract"
       : "new";
@@ -259,6 +326,16 @@ export default function AddressDetailPage() {
                 initial={formInitial}
                 onSavingChange={handleSavingChange}
                 onDeletingChange={handleDeletingChange}
+                requireExplicitName={requireExplicitName}
+                externallyDisabled={
+                  // True when this address has a pending mutation from
+                  // a prior mount (e.g. user saved → navigated → came
+                  // back). Holds Save / Remove disabled until that
+                  // request settles, so a second click can't race the
+                  // first. Once `pendingByAddress[address]` decrements
+                  // to 0 the buttons re-enable automatically.
+                  !formSaving && !formDeleting && hasPendingForThisAddress
+                }
                 // No onSaved/onDeleted callbacks — the provider's optimistic
                 // update + SWR revalidate already refresh the page data. No
                 // navigation on save; users stay on the page to keep editing.

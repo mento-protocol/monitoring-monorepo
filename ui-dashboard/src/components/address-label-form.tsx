@@ -44,6 +44,11 @@ export function resolveEffectiveName(
  * Returns an error string or null when valid.
  *
  * Relaxed validation: name is not required if tags are present.
+ *
+ * `requireExplicitName` overrides the relaxed branch — used by the
+ * detail page when the address is registered as a contract under
+ * multiple disagreeing names (saving a tag-only entry would persist
+ * an empty global name, suppressing every contract row in the index).
  */
 export function validateEntryForm(opts: {
   isNewAddress: boolean;
@@ -51,9 +56,13 @@ export function validateEntryForm(opts: {
   name: string;
   tags?: string[];
   isContractRow: boolean;
+  requireExplicitName?: boolean;
 }): string | null {
   if (opts.isNewAddress && !isValidAddress(opts.address.trim())) {
     return "Enter a valid 0x address.";
+  }
+  if (opts.requireExplicitName && !opts.name.trim()) {
+    return "Enter a name (this address is registered as a contract under multiple names — pick the one for the chain you're labeling).";
   }
   const hasTags = opts.tags && opts.tags.length > 0;
   if (!opts.isContractRow && !opts.name.trim() && !hasTags) {
@@ -115,6 +124,24 @@ type Props = {
    * scoping as `onSavingChange`.
    */
   onDeletingChange?: (deleting: boolean, formId: string) => void;
+  /**
+   * When true, the form requires an explicit name regardless of tags
+   * (the relaxed "name OR tags" rule is suspended). Used on the detail
+   * page when the address is registered as a contract under multiple
+   * disagreeing names — without this, a tag-only save persists an
+   * empty global name and suppresses every contract row in the index.
+   */
+  requireExplicitName?: boolean;
+  /**
+   * Forces Save / Remove buttons disabled regardless of internal
+   * saving / deleting state. Used by the detail page when there's a
+   * pending mutation against the same address from a prior mount: a
+   * user who saved on form A, navigated away, and came back would
+   * otherwise see an enabled Save button (the new mount has its own
+   * `saving=false`) and could fire a SECOND PUT before the first
+   * resolves. Held until the prior request settles, then released.
+   */
+  externallyDisabled?: boolean;
 };
 
 export function AddressLabelForm({
@@ -127,6 +154,8 @@ export function AddressLabelForm({
   firstFieldRef,
   onSavingChange,
   onDeletingChange,
+  requireExplicitName,
+  externallyDisabled,
 }: Props) {
   const {
     upsertEntry,
@@ -190,6 +219,7 @@ export function AddressLabelForm({
       name,
       tags,
       isContractRow,
+      requireExplicitName,
     });
     if (validationError) {
       setError(validationError);
@@ -376,7 +406,7 @@ export function AddressLabelForm({
             <button
               type="button"
               onClick={handleDelete}
-              disabled={deleting || saving}
+              disabled={deleting || saving || externallyDisabled}
               className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
             >
               {deleting ? "Removing…" : "Remove label"}
@@ -395,7 +425,7 @@ export function AddressLabelForm({
           )}
           <button
             type="submit"
-            disabled={saving || deleting}
+            disabled={saving || deleting || externallyDisabled}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving…" : "Save"}
