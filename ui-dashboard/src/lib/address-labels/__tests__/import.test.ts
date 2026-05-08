@@ -20,6 +20,18 @@ vi.mock("@/lib/address-labels", async () => {
   };
 });
 
+vi.mock("@/lib/address-reports", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-reports-shared")
+  >("@/lib/address-reports-shared");
+  return {
+    importReports: vi.fn().mockResolvedValue(undefined),
+    upgradeReports: shared.upgradeReports,
+    MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
+    MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,
+  };
+});
+
 import type { AddressEntry } from "@/lib/address-labels";
 import { getLabels } from "@/lib/address-labels";
 
@@ -473,6 +485,83 @@ describe("isSnapshot", () => {
     expect(isSnapshot(null)).toBe(false);
     expect(isSnapshot("snapshot")).toBe(false);
     expect(isSnapshot(42220)).toBe(false);
+  });
+});
+
+describe("validateSnapshotReports", () => {
+  it("returns an empty record when reports is undefined", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports(undefined);
+    expect(result).toEqual({ reports: {} });
+  });
+
+  it("returns an empty record when reports is an empty object", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports({});
+    expect(result).toEqual({ reports: {} });
+  });
+
+  it("rejects non-object / array / null", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(validateSnapshotReports("nope")).toEqual({
+      error: "Invalid reports map",
+    });
+    expect(validateSnapshotReports([])).toEqual({
+      error: "Invalid reports map",
+    });
+    expect(validateSnapshotReports(null)).toEqual({
+      error: "Invalid reports map",
+    });
+  });
+
+  it("rejects empty body, missing body, oversized body, oversized title", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    // empty body
+    expect(
+      validateSnapshotReports({
+        [ADDR_A]: { body: "" },
+      }),
+    ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
+    // missing body
+    expect(
+      validateSnapshotReports({
+        [ADDR_A]: { version: 1 },
+      }),
+    ).toMatchObject({ error: expect.stringMatching(/empty or non-string/) });
+    // oversized body
+    expect(
+      validateSnapshotReports({
+        [ADDR_A]: { body: "x".repeat(50_001) },
+      }),
+    ).toMatchObject({ error: expect.stringMatching(/exceeds 50000/) });
+    // oversized title
+    expect(
+      validateSnapshotReports({
+        [ADDR_A]: { body: "ok", title: "t".repeat(201) },
+      }),
+    ).toMatchObject({ error: expect.stringMatching(/exceeds 200/) });
+  });
+
+  it("accepts valid input and lower-cases addresses", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const upper = ADDR_A.toUpperCase().replace("0X", "0x");
+    const result = validateSnapshotReports({
+      [upper]: {
+        body: "ok",
+        title: "T",
+        createdAt: "2026-04-01T00:00:00Z",
+        updatedAt: "2026-04-01T00:00:00Z",
+        version: 1,
+      },
+    });
+    if ("error" in result) throw new Error("expected ok");
+    expect(Object.keys(result.reports)).toEqual([upper.toLowerCase()]);
+    expect(result.reports[upper.toLowerCase()].body).toBe("ok");
   });
 });
 

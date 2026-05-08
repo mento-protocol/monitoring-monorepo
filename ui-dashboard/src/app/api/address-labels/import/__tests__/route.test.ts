@@ -31,6 +31,8 @@ vi.mock("@/lib/address-reports", async () => {
   return {
     importReports: vi.fn().mockResolvedValue(undefined),
     upgradeReports: shared.upgradeReports,
+    MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
+    MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,
   };
 });
 
@@ -260,6 +262,92 @@ describe("POST /api/address-labels/import", () => {
         reports: {
           "not-an-address": {
             body: "x",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an empty body (live editor invariant)", async () => {
+    // Restore must enforce the same invariants as live edits — a corrupted
+    // / hand-edited blob with `body: ""` would otherwise persist a record
+    // the editor and live API would never accept.
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "",
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has a missing/non-string body", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report exceeds MAX_BODY_LENGTH", async () => {
+    // 50,001 chars → over the documented 50KB cap that the live editor
+    // enforces. Restore path must enforce the same cap.
+    const oversized = "x".repeat(50_001);
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: oversized,
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an array payload", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: ["not an object"],
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snapshot whose report has an oversized title", async () => {
+    const res = await POST(
+      jsonReq({
+        reports: {
+          [validAddress]: {
+            body: "ok",
+            title: "t".repeat(201),
             createdAt: "2026-04-01T00:00:00Z",
             updatedAt: "2026-04-01T00:00:00Z",
             version: 1,
