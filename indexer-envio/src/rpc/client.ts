@@ -112,9 +112,11 @@ export function logRpcFailure(
 // ---------------------------------------------------------------------------
 
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
+// Stores `null` explicitly when no fallback applies for a chain — `has()`
+// then short-circuits the env-var + URL recomputation on every call.
 const fallbackRpcClients = new Map<
   number,
-  ReturnType<typeof createPublicClient>
+  ReturnType<typeof createPublicClient> | null
 >();
 
 /** @internal Test-only: clear the cached RPC clients so getRpcClient()
@@ -276,27 +278,50 @@ export function getFallbackRpcClient(
   chainId: number,
 ): ReturnType<typeof createPublicClient> | null {
   if (fallbackRpcClients.has(chainId)) {
-    return fallbackRpcClients.get(chainId) ?? null;
+    return fallbackRpcClients.get(chainId)!;
   }
   const config = RPC_CONFIG_BY_CHAIN[chainId];
-  if (!config) return null;
+  if (!config) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
   const fallbackOverride = process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`];
   const fallbackRawUrl = fallbackOverride ?? config.default;
   const fallbackUrl = withHyperRpcToken(fallbackRawUrl);
-  if (isBareHyperRpcUrl(fallbackUrl)) return null;
+  if (isBareHyperRpcUrl(fallbackUrl)) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
   const perChainOverride = process.env[config.envVar];
   const legacyGlobal = process.env.ENVIO_RPC_URL;
   const primaryRawUrl = perChainOverride ?? legacyGlobal ?? config.default;
   const primaryUrl = withHyperRpcToken(primaryRawUrl);
-  if (fallbackUrl === primaryUrl) return null;
+  if (sameUrl(fallbackUrl, primaryUrl)) {
+    fallbackRpcClients.set(chainId, null);
+    return null;
+  }
 
   const client = createPublicClient({
     transport: http(fallbackUrl, { batch: true }),
   });
   fallbackRpcClients.set(chainId, client);
   return client;
+}
+
+/** Compare two URLs by their normalized `URL.href`, so e.g.
+ * `"https://rpc2.monad.xyz"` and `"https://rpc2.monad.xyz/"` (with vs without
+ * trailing slash) collapse to equal — which keeps `getFallbackRpcClient` from
+ * spinning up a self-referencing fallback when the user types one variant in
+ * the env var and the hardcoded default uses the other. Falls back to raw
+ * string equality if either input fails to parse. */
+function sameUrl(a: string, b: string): boolean {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return a === b;
+  }
 }
 
 // ---------------------------------------------------------------------------

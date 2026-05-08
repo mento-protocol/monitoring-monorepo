@@ -15,7 +15,9 @@ const ENV_KEYS = [
   "ENVIO_RPC_URL_143",
   "ENVIO_RPC_URL_10143",
   "ENVIO_RPC_FALLBACK_URL_42220",
+  "ENVIO_RPC_FALLBACK_URL_11142220",
   "ENVIO_RPC_FALLBACK_URL_143",
+  "ENVIO_RPC_FALLBACK_URL_10143",
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -349,6 +351,14 @@ describe("getFallbackRpcClient", () => {
 
   it("returns null when the fallback override resolves to the same URL as primary", () => {
     process.env.ENVIO_RPC_URL_143 = "https://same.example.org/";
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "https://same.example.org/";
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
+  it("normalizes trailing-slash differences when comparing primary and fallback URLs", () => {
+    // Without `URL.href` normalization, `"https://x"` !== `"https://x/"` and
+    // we'd spin up a useless self-referencing fallback client.
+    process.env.ENVIO_RPC_URL_143 = "https://same.example.org";
     process.env.ENVIO_RPC_FALLBACK_URL_143 = "https://same.example.org/";
     assert.equal(getFallbackRpcClient(143), null);
   });
