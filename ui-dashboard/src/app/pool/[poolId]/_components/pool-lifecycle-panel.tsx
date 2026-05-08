@@ -14,12 +14,23 @@ import type { Pool, VirtualPoolLifecycle } from "@/lib/types";
  */
 export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
   const { network } = useNetwork();
-  const { data, isLoading } = useGQL<{
+  const { data, isLoading, error } = useGQL<{
     VirtualPoolLifecycle: VirtualPoolLifecycle[];
   }>(VIRTUAL_POOL_LIFECYCLE, { poolId: pool.id });
 
   if (isLoading) {
     return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
+  }
+  // Surface fetch failure explicitly. Without this, a Hasura schema lag /
+  // transient outage collapses to `rows = []` and the whole lifecycle
+  // section disappears as if the pool had no records — operators can't
+  // tell "no data yet" from "fetch failed."
+  if (error !== undefined) {
+    return (
+      <p className="text-sm text-slate-500">
+        Lifecycle unavailable: {error.message}
+      </p>
+    );
   }
   const rows = data?.VirtualPoolLifecycle ?? [];
   const deployed = rows.find((r) => r.action === "DEPLOYED");

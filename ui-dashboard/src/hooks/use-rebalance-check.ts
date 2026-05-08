@@ -44,6 +44,7 @@ export function useRebalanceCheck(
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,
+      revalidateOnReconnect: false,
       dedupingInterval: 15_000,
       shouldRetryOnError: false,
     },

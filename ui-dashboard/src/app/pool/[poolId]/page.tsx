@@ -258,6 +258,25 @@ function PoolDetail() {
     : (visibleTabs[0] ?? "providers");
   const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
+  // Canonicalize the URL when the requested tab was filtered out (e.g.
+  // ?tab=breaches on a virtual pool, where the breaches tab is hidden).
+  // Without this, refresh / share / back-forward render `tab` while the
+  // address bar still says `requestedTab`, so users can't reproduce the
+  // visible state. Same pattern as the legacy-poolId redirect above.
+  useEffect(() => {
+    if (
+      pool &&
+      tab !== requestedTab &&
+      // Only rewrite when the requestedTab IS a valid Tab string but isn't
+      // currently visible; bare missing/unknown tab params can stay as-is
+      // because they always fall through to the default already.
+      TABS.includes(rawTab as Tab) &&
+      !visibleTabs.includes(rawTab as Tab)
+    ) {
+      setURL(tab, limit);
+    }
+  }, [pool, tab, requestedTab, rawTab, visibleTabs, limit, setURL]);
+
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">

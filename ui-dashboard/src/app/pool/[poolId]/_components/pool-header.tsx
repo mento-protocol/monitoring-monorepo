@@ -3,6 +3,7 @@
 import { AddressLink } from "@/components/address-link";
 import { BreakerPanel } from "@/components/breaker-panel";
 import { ChainIcon } from "@/components/chain-icon";
+import { InfoPopover } from "@/components/info-popover";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import { useNetwork } from "@/components/network-provider";
 import { PoolConfigPanel } from "@/components/pool-config-panel";
@@ -247,9 +248,16 @@ function VirtualPoolHeaderTiles({
         }
       />
       <Stat
-        label="Wrapper Swaps"
+        label={
+          <span className="inline-flex items-center gap-1">
+            Wrapper Swaps
+            <InfoPopover
+              label="Wrapper Swaps"
+              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in Phase 2."
+            />
+          </span>
+        }
         value={(pool.swapCount ?? 0).toLocaleString()}
-        title="Swaps that flowed through the v3 Router → VirtualPool wrapper. Direct v2-broker swaps on the same pair are tracked separately (combined-activity panel ships in Phase 2)."
         mono
       />
       <Stat
