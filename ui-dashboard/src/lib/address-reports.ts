@@ -64,7 +64,19 @@ end
 
 payload.createdAt = (prior and prior.createdAt) or now
 payload.updatedAt = now
-payload.version = ((prior and prior.version) or 0) + 1
+
+-- Coerce non-numeric prior versions to 0 before incrementing. Lua's
+-- 'or' short-circuits on falsy, but cjson.decode maps JSON null to
+-- cjson.null (truthy in Lua) — without the type check, a stored
+-- {"version": null} (which an earlier split-write path could have
+-- produced for legacy/partial records) would propagate cjson.null
+-- into the arithmetic and crash the EVAL. The dashboard's
+-- upgradeReport() reader already defaults missing version to 1; this
+-- mirrors that defensiveness on the writer side so the upsert always
+-- succeeds and yields a valid monotonic version.
+local priorVersion = prior and prior.version
+if type(priorVersion) ~= 'number' then priorVersion = 0 end
+payload.version = priorVersion + 1
 
 local encoded = cjson.encode(payload)
 redis.call('HSET', key, addr, encoded)
