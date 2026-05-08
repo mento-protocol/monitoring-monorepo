@@ -10,6 +10,30 @@ export const revalidate = 60;
 const FALLBACK_TITLE = "Address — Address Book — Mento Analytics";
 const FALLBACK_DESCRIPTION = "Mento address book — labels and forensic reports";
 
+// Per-request timeout for upstream Redis calls. Without this a hung
+// Upstash REST endpoint would block metadata generation until Vercel's
+// function timeout (300s) fires, stalling crawler unfurls and shared-link
+// previews. Mirrors the `AbortSignal.timeout(5000)` pattern in
+// `bridge-flows-og.ts`. The Upstash SDK doesn't expose a per-call signal
+// so we wrap each promise; the upstream still completes in the
+// background but the wrapped promise resolves to `null` after 5s and
+// `generateMetadata` falls through to the fallback shape.
+const METADATA_FETCH_TIMEOUT_MS = 5000;
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | null> {
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    handle = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return (await Promise.race([promise, timeout])) ?? null;
+  } finally {
+    if (handle) clearTimeout(handle);
+  }
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -37,10 +61,13 @@ export async function generateMetadata({
 
   // Both helpers tolerate `null` for missing entries — return fallback
   // metadata when neither label nor report exists rather than 404ing the
-  // page (the empty page is a valid input surface).
+  // page (the empty page is a valid input surface). Each call is also
+  // bounded by `withTimeout` so a hung Upstash can't stall the build.
   const [label, report] = await Promise.all([
-    getLabel(address).catch(() => null),
-    findReport(address).catch(() => null),
+    withTimeout(getLabel(address), METADATA_FETCH_TIMEOUT_MS).catch(() => null),
+    withTimeout(findReport(address), METADATA_FETCH_TIMEOUT_MS).catch(
+      () => null,
+    ),
   ]);
 
   const displayName = label?.name?.trim() || truncateAddress(address);
