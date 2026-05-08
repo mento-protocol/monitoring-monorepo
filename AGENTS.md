@@ -46,6 +46,13 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - FX-pool metrics use trading-seconds (FX weekend subtracted). Live "open breach" math MUST use the same unit as stored values — call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), never `now - start` directly
 - Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, not from the live mutable `pool.rebalanceThreshold`
 
+### Keyboard a11y on controlled widgets — `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`
+
+- Roving `tabIndex={0}` MUST follow the FOCUSED option, not the `selected` / `active` prop. Tying it to the prop desyncs from focus under URL render-lag — `Tab` from a focused-but-not-selected option re-traps to the stale tab stop instead of leaving the group. Track `focusedIndex` locally with `onFocus` updates; re-sync to the prop only when focus is outside the group, via a render-time ref check (NOT `useEffect` — trips `@eslint-react/hooks-extra/no-direct-set-state-in-use-effect` for legitimate prop-derived state)
+- For tablists where `onSelect` triggers `router.replace` / RSC refetch / network fetch, use **manual activation** per WAI-ARIA APG: arrows move focus only, Enter/Space activates via the native `<button>`'s `onClick`. Automatic activation on URL-backed widgets fires `router.replace` per arrow keystroke (navigation storm) and races stale-prop reads
+- Do NOT gate keyboard `onChange` / `onSelect` against the `selected` prop (`if (newValue !== selected) onChange(newValue)`). Same-URL `router.replace` is deduped by Next; the equality check is racy under URL render-lag and silently swallows legitimate activations. Codex flagged each of these on PR #350 across 3 review rounds
+- `role="tablist"` MUST contain ONLY `role="tab"` children (axe critical: `aria-required-children`). Wrap LimitSelect / page-size dropdowns / search inputs as siblings under a shared flex container, NOT inside the tablist
+
 ### Indexer entity IDs
 
 - Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
