@@ -68,8 +68,10 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
 }
 
 /** Throttled Sentry capture. Returns `true` when capture fired so callers
- *  can branch (e.g. log to console only on the throttled path). Bounded by
- *  the 1024-entry cache via the same key set, so memory stays flat. */
+ *  can branch (e.g. log to console only on the throttled path). Capped at
+ *  CACHE_MAX_ENTRIES with FIFO eviction — mirrors setCacheEntry but is a
+ *  separate map because failures (rpc_failed) are never cached, so the two
+ *  key sets are mutually exclusive and the cache's eviction can't clean it. */
 function maybeCaptureSentry(
   key: string,
   fire: () => void,
@@ -77,6 +79,10 @@ function maybeCaptureSentry(
 ): boolean {
   const last = lastSentryAt.get(key) ?? 0;
   if (now - last < SENTRY_MIN_INTERVAL_MS) return false;
+  if (lastSentryAt.size >= CACHE_MAX_ENTRIES && !lastSentryAt.has(key)) {
+    const oldest = lastSentryAt.keys().next().value;
+    if (oldest !== undefined) lastSentryAt.delete(oldest);
+  }
   lastSentryAt.set(key, now);
   fire();
   return true;
