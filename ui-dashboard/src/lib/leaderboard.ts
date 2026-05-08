@@ -530,6 +530,13 @@ export type HeroSnapshotTotals = {
   totalVolumeUsdWei: bigint;
   totalSwapCount: number;
   uniqueTraders: number;
+  /** Chain IDs whose latest snapshot's `snapshotDay` is older than
+   * `today - 1 UTC day` — meaning the chain has been silent for ≥1 full
+   * UTC day and the heartbeat-driven flush hasn't run. Their snapshots
+   * are EXCLUDED from the totals above; the page surfaces a banner so
+   * users know the hero KPIs are missing those chains' historical
+   * volume. Empty array when every chain is fresh. */
+  staleChains: number[];
 };
 
 /**
@@ -548,16 +555,39 @@ export type HeroSnapshotTotals = {
  * Acceptable for the hero tile (today's distinct count is small — usually
  * <50 — and the overcount is at most that). Follow-up if precision is
  * needed: ship a `distinctTraders: [String!]!` array on the snapshot.
+ *
+ * `todayMidnightSeconds` is the UTC midnight of "today" in Unix seconds
+ * (must match the unit `snapshotDay` is stored in — see
+ * `indexer-envio/schema.graphql` LeaderboardWindowSnapshot.snapshotDay
+ * and `leaderboardWindowFlush.ts:dayBucket`). A snapshot is considered
+ * stale when `snapshotDay < todayMidnightSeconds - 86400`, i.e. the
+ * snapshot is older than yesterday. Yesterday and today both pass —
+ * yesterday is the normal heartbeat cadence (the indexer doesn't write
+ * "today" itself, that's filled in client-side from `todayRows`).
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
   todayRows: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
   showSystem: boolean;
+  todayMidnightSeconds: number;
 }): HeroSnapshotTotals {
+  // Cutoff: snapshots strictly older than yesterday's UTC midnight are
+  // stale. `todayMidnightSeconds` is today's UTC midnight; subtracting
+  // SECONDS_PER_DAY gives yesterday's UTC midnight. The comparison is
+  // `< cutoff`, so a snapshotDay that equals yesterday's midnight is
+  // INCLUDED — that's the normal heartbeat output.
+  const staleCutoffSeconds = args.todayMidnightSeconds - SECONDS_PER_DAY;
   let totalVolumeUsdWei = BigInt(0);
   let totalSwapCount = 0;
   let uniqueFromSnapshot = 0;
+  const staleChains: number[] = [];
   for (const row of args.snapshotRows ?? []) {
+    if (Number(row.snapshotDay) < staleCutoffSeconds) {
+      // Skip stale rows entirely — applies to both showSystem branches
+      // because staleness is independent of system-address filtering.
+      staleChains.push(row.chainId);
+      continue;
+    }
     if (args.showSystem) {
       totalVolumeUsdWei += BigInt(row.totalVolumeUsdWeiIncludingSystem);
       totalSwapCount += row.totalSwapCountIncludingSystem;
@@ -580,5 +610,6 @@ export function mergeHeroSnapshot(args: {
     totalVolumeUsdWei,
     totalSwapCount,
     uniqueTraders: uniqueFromSnapshot + todayTraders.size,
+    staleChains,
   };
 }

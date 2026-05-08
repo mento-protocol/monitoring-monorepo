@@ -803,17 +803,30 @@ describe("aggregateDailyVolume (BrokerTraderDailyRow)", () => {
 });
 
 describe("mergeHeroSnapshot", () => {
+  // Anchored at a real recent UTC midnight so unit semantics match the
+  // live wire format: `snapshotDay` is Unix-seconds at UTC midnight. Day
+  // arithmetic uses 86400-second steps. The exact anchor date doesn't
+  // matter — only the relative-to-`TODAY_MIDNIGHT` deltas do.
+  const SECONDS_PER_DAY = 86400;
+  const TODAY_MIDNIGHT = 1778198400; // 2026-05-08 00:00:00 UTC
+  const YESTERDAY_MIDNIGHT = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+  const TWO_DAYS_AGO_MIDNIGHT = TODAY_MIDNIGHT - 2 * SECONDS_PER_DAY;
+
   function snap(
     overrides: Partial<LeaderboardWindowRow> & {
       chainId: number;
       totalVolumeUsdWei: string;
     },
   ): LeaderboardWindowRow {
+    // Default `snapshotDay` to YESTERDAY — that's the heartbeat-cadence
+    // freshness boundary (the indexer flushes the prior closed UTC day).
+    // Tests that exercise staleness override `snapshotDay` explicitly.
+    const snapshotDay = overrides.snapshotDay ?? String(YESTERDAY_MIDNIGHT);
     return {
-      id: `${overrides.chainId}-7d-1`,
+      id: `${overrides.chainId}-7d-${snapshotDay}`,
       windowKey: "7d",
-      snapshotDay: "1",
-      windowStartDay: "0",
+      snapshotDay,
+      windowStartDay: String(Number(snapshotDay) - 6 * SECONDS_PER_DAY),
       // Default the *IncludingSystem siblings to match the primary fields
       // — most tests don't exercise the toggle, so picking either branch
       // yields the same numbers.
@@ -841,17 +854,19 @@ describe("mergeHeroSnapshot", () => {
     };
   }
 
-  it("returns zeros when both inputs are empty/undefined", () => {
+  it("returns zeros (and empty staleChains) when both inputs are empty/undefined", () => {
     expect(
       mergeHeroSnapshot({
         snapshotRows: undefined,
         todayRows: undefined,
         showSystem: false,
+        todayMidnightSeconds: TODAY_MIDNIGHT,
       }),
     ).toEqual({
       totalVolumeUsdWei: BigInt(0),
       totalSwapCount: 0,
       uniqueTraders: 0,
+      staleChains: [],
     });
   });
 
@@ -867,10 +882,12 @@ describe("mergeHeroSnapshot", () => {
       ],
       todayRows: [],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
     expect(out.totalSwapCount).toBe(50);
     expect(out.uniqueTraders).toBe(10);
+    expect(out.staleChains).toEqual([]);
   });
 
   it("today-only (cold start): returns today's totals", () => {
@@ -891,10 +908,12 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(150)));
     expect(out.totalSwapCount).toBe(5);
     expect(out.uniqueTraders).toBe(2);
+    expect(out.staleChains).toEqual([]);
   });
 
   it("snapshot + today: sums totals; counts today's distinct traders separately", () => {
@@ -916,6 +935,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1050)));
     expect(out.totalSwapCount).toBe(52);
@@ -937,11 +957,13 @@ describe("mergeHeroSnapshot", () => {
       snapshotRows: [row],
       todayRows: [],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     const on = mergeHeroSnapshot({
       snapshotRows: [row],
       todayRows: [],
       showSystem: true,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(off.totalVolumeUsdWei).toBe(BigInt(USD(100)));
     expect(off.totalSwapCount).toBe(5);
@@ -969,6 +991,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(100)));
     expect(out.uniqueTraders).toBe(1);
@@ -992,9 +1015,168 @@ describe("mergeHeroSnapshot", () => {
       ],
       todayRows: [],
       showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1500)));
     expect(out.totalSwapCount).toBe(70);
     expect(out.uniqueTraders).toBe(14);
+    expect(out.staleChains).toEqual([]);
+  });
+
+  // ─── Stale-snapshot detection ───────────────────────────────────────
+  // The heartbeat-driven flush only fires on the first swap of a new
+  // UTC day. If a chain is silent through day N, no snapshot is written
+  // for day N-1 until the next swap arrives. The `distinct_on: [chainId]`
+  // hosted query returns the latest snapshot regardless of staleness, so
+  // we filter client-side in `mergeHeroSnapshot`.
+
+  it("includes today's snapshot in totals (boundary: snapshotDay === today)", () => {
+    // Edge case: the indexer doesn't normally write today's snapshot
+    // (it flushes the prior closed day), but a test-data injection or
+    // a re-sync could produce one. It must be treated as fresh.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(TODAY_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
+    expect(out.totalSwapCount).toBe(50);
+    expect(out.uniqueTraders).toBe(10);
+    expect(out.staleChains).toEqual([]);
+  });
+
+  it("includes yesterday's snapshot in totals (boundary: heartbeat cadence is fresh)", () => {
+    // Yesterday is the normal heartbeat cadence — the indexer flushes
+    // the prior closed UTC day at the first swap of today. This is
+    // the canonical fresh case and must NOT be flagged stale.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(YESTERDAY_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
+    expect(out.staleChains).toEqual([]);
+  });
+
+  it("excludes a stale snapshot (snapshotDay = today - 2 days) and reports the chainId", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143, // Monad — silent for ≥1 UTC day
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Stale row's totals must not contribute to hero numbers.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(0));
+    expect(out.totalSwapCount).toBe(0);
+    expect(out.uniqueTraders).toBe(0);
+    expect(out.staleChains).toEqual([10143]);
+  });
+
+  it("mixed staleness: drops stale chain, keeps fresh chain, populates staleChains", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220, // Celo — fresh
+          snapshotDay: String(YESTERDAY_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+        snap({
+          chainId: 10143, // Monad — stale
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
+    expect(out.totalSwapCount).toBe(50);
+    expect(out.uniqueTraders).toBe(10);
+    expect(out.staleChains).toEqual([10143]);
+  });
+
+  it("staleness filter applies under showSystem=true (uses *IncludingSystem fields, still skips stale)", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalVolumeUsdWeiIncludingSystem: USD(800),
+          totalSwapCount: 20,
+          totalSwapCountIncludingSystem: 35,
+          uniqueTraders: 4,
+          uniqueTradersIncludingSystem: 8,
+        }),
+      ],
+      todayRows: [],
+      showSystem: true,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(0));
+    expect(out.totalSwapCount).toBe(0);
+    expect(out.uniqueTraders).toBe(0);
+    expect(out.staleChains).toEqual([10143]);
+  });
+
+  it("today's partial still contributes when the chain's snapshot is stale", () => {
+    // A chain might have a stale snapshot AND today's swap — the stale
+    // snapshot drops out of totals, but today's volume still counts.
+    // (The chain's day-N-1 volume is the lost data; day-N is fine.)
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+        }),
+      ],
+      todayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(50),
+          swapCount: 2,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Snapshot's $500 is dropped; today's $50 remains.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(50)));
+    expect(out.totalSwapCount).toBe(2);
+    expect(out.uniqueTraders).toBe(1);
+    expect(out.staleChains).toEqual([10143]);
   });
 });

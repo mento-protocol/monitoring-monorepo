@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { chainLabel } from "@mento-protocol/monitoring-config/chains";
 import { useGQL } from "@/lib/graphql";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { Tile } from "@/components/feedback";
@@ -245,8 +246,9 @@ export function LeaderboardClient() {
         snapshotRows: heroSnapshotRows,
         todayRows: todayPartialRows,
         showSystem,
+        todayMidnightSeconds: todayMidnight,
       }),
-    [heroSnapshotRows, todayPartialRows, showSystem],
+    [heroSnapshotRows, todayPartialRows, showSystem, todayMidnight],
   );
   const totalVolume = useMemo(
     () => weiToUsd(heroTotals.totalVolumeUsdWei),
@@ -354,6 +356,23 @@ export function LeaderboardClient() {
   // if the range is ≥7d, otherwise null (24h has no meaningful WoW peer).
   const headline = heroIsLoading || heroHasError ? "" : formatUSD(totalVolume);
 
+  // Stale-snapshot banner: surface the chains whose latest snapshot's
+  // `snapshotDay` is older than yesterday (heartbeat hasn't run because
+  // the chain has been silent). Only shown once data has loaded — during
+  // loading/error the tiles already show "…" / "—" so a banner would be
+  // redundant noise. `chainLabel` falls back to the chain ID slug if the
+  // chainId isn't in `chain-metadata.json` — fine, the banner is still
+  // useful (just less pretty for unrecognised chains).
+  const staleChainLabels = useMemo(
+    () =>
+      heroIsLoading || heroHasError
+        ? []
+        : Array.from(new Set(heroTotals.staleChains)).map((id) =>
+            chainLabel(id),
+          ),
+    [heroIsLoading, heroHasError, heroTotals.staleChains],
+  );
+
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -429,6 +448,21 @@ export function LeaderboardClient() {
           </label>
         </div>
       </header>
+
+      {staleChainLabels.length > 0 && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90"
+        >
+          <strong className="font-medium">Hero KPIs missing data.</strong>{" "}
+          {staleChainLabels.join(", ")}{" "}
+          {staleChainLabels.length === 1 ? "has" : "have"} had no swaps for ≥1
+          UTC day. The pre-rolled window snapshot is heartbeat-driven, so the
+          last full day&apos;s volume for{" "}
+          {staleChainLabels.length === 1 ? "that chain" : "those chains"} is
+          excluded from the totals below until the next swap arrives.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Tile
