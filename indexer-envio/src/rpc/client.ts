@@ -344,6 +344,55 @@ function sameUrl(a: string, b: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Fallback archive-depth tracking
+// ---------------------------------------------------------------------------
+
+/** Per-chain deepest blockNumber where the fallback RPC has been seen to fail
+ *  with archive-depth or invalid-block errors. Subsequent rate-limit fallback
+ *  attempts skip the secondary when the requested block is older than this
+ *  threshold — pointless to send the call, and worse, it surfaces a confusing
+ *  "Invalid parameters" error that masks the underlying rate-limit cause.
+ *
+ *  This learns the fallback's archive horizon at runtime instead of
+ *  requiring per-chain config. Reset by the test hook below. */
+const _fallbackKnownArchiveDepth = new Map<number, bigint>();
+
+/** @internal Test-only: clear the learned per-chain archive horizons. */
+export function _resetFallbackArchiveDepth(): void {
+  _fallbackKnownArchiveDepth.clear();
+}
+
+/** Record that the fallback RPC for `chainId` lacks archive coverage at
+ *  `blockNumber`. Bumps the per-chain threshold to the deepest known miss. */
+export function recordFallbackArchiveMiss(
+  chainId: number,
+  blockNumber: bigint,
+): void {
+  const existing = _fallbackKnownArchiveDepth.get(chainId);
+  if (existing === undefined || blockNumber > existing) {
+    _fallbackKnownArchiveDepth.set(chainId, blockNumber);
+  }
+}
+
+/** True when the fallback RPC for `chainId` is likely to have archive
+ *  coverage for `blockNumber` — i.e. `blockNumber` is strictly newer than
+ *  the deepest miss we've recorded. With no recorded miss, returns true.
+ *
+ *  Block-scoped callers use this to skip the rate-limit fallback when the
+ *  secondary's archive window definitely doesn't cover the requested block,
+ *  preventing the rate-limit-then-archive-miss leak the `block-fallback`
+ *  comment block describes. */
+export function fallbackLikelyHasBlock(
+  chainId: number,
+  blockNumber: bigint | undefined,
+): boolean {
+  if (blockNumber === undefined) return true;
+  const knownMissBlock = _fallbackKnownArchiveDepth.get(chainId);
+  if (knownMissBlock === undefined) return true;
+  return blockNumber > knownMissBlock;
+}
+
+// ---------------------------------------------------------------------------
 // Rate limit detection & retry
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,16 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { readContractWithBlockFallback, _testHooks } from "../src/rpc";
+import {
+  _resetFallbackArchiveDepth,
+  fallbackLikelyHasBlock,
+  recordFallbackArchiveMiss,
+} from "../src/rpc/client";
+
+// Most tests don't care which chainId they use — they just need a stable,
+// distinct value so the per-chain archive-horizon Map doesn't bleed state
+// across tests with unrelated fixtures.
+const TEST_CHAIN_ID = 999_001;
 
 // ---------------------------------------------------------------------------
 // Mock client factory
@@ -45,7 +55,12 @@ describe("readContractWithBlockFallback", () => {
       calls.push(args);
       return "ok";
     });
-    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      baseArgs,
+      100n,
+    );
     assert.equal(res.result, "ok");
     assert.equal(res.usedFallback, false);
     assert.equal(calls.length, 1);
@@ -59,6 +74,7 @@ describe("readContractWithBlockFallback", () => {
       return "ok";
     });
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       client,
       baseArgs,
       undefined,
@@ -82,7 +98,12 @@ describe("readContractWithBlockFallback", () => {
       }
       return "fallback-ok";
     });
-    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      baseArgs,
+      100n,
+    );
     assert.equal(res.result, "fallback-ok");
     assert.equal(res.usedFallback, true);
     // 1 initial + 3 retries + 1 fallback (latest) = 5
@@ -98,7 +119,12 @@ describe("readContractWithBlockFallback", () => {
       }
       return "retry-ok";
     });
-    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      baseArgs,
+      100n,
+    );
     assert.equal(res.result, "retry-ok");
     assert.equal(res.usedFallback, false);
     // 1 initial + 1 failed retry + 1 successful retry = 3
@@ -114,7 +140,12 @@ describe("readContractWithBlockFallback", () => {
       }
       return "retry-ok";
     });
-    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      baseArgs,
+      100n,
+    );
     assert.equal(res.result, "retry-ok");
     assert.equal(res.usedFallback, false);
     // 1 initial + 1 successful retry = 2
@@ -133,7 +164,12 @@ describe("readContractWithBlockFallback", () => {
         }
         return "ok";
       });
-      await readContractWithBlockFallback(client, baseArgs, 100n);
+      await readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        client,
+        baseArgs,
+        100n,
+      );
       assert.deepEqual(delays, [500, 1000, 2000]);
     } finally {
       _testHooks.delayFn = async () => {};
@@ -160,7 +196,12 @@ describe("readContractWithBlockFallback", () => {
         }
         return "ok";
       });
-      const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+      const res = await readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        client,
+        baseArgs,
+        100n,
+      );
       assert.equal(res.result, "ok");
       assert.equal(res.usedFallback, true);
       // 1 initial + 3 retries + 1 fallback = 5
@@ -179,7 +220,13 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("block is out of range");
     });
     await assert.rejects(
-      () => readContractWithBlockFallback(client, baseArgs, undefined),
+      () =>
+        readContractWithBlockFallback(
+          TEST_CHAIN_ID,
+          client,
+          baseArgs,
+          undefined,
+        ),
       { message: "block is out of range" },
     );
     assert.equal(callCount, 1);
@@ -192,7 +239,8 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("execution reverted");
     });
     await assert.rejects(
-      () => readContractWithBlockFallback(client, baseArgs, 100n),
+      () =>
+        readContractWithBlockFallback(TEST_CHAIN_ID, client, baseArgs, 100n),
       { message: "execution reverted" },
     );
     assert.equal(callCount, 1);
@@ -205,7 +253,7 @@ describe("readContractWithBlockFallback", () => {
       throw "string error";
     });
     await assert.rejects(() =>
-      readContractWithBlockFallback(client, baseArgs, 100n),
+      readContractWithBlockFallback(TEST_CHAIN_ID, client, baseArgs, 100n),
     );
     assert.equal(callCount, 1);
   });
@@ -224,7 +272,8 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("node is down");
     });
     await assert.rejects(
-      () => readContractWithBlockFallback(client, baseArgs, 100n),
+      () =>
+        readContractWithBlockFallback(TEST_CHAIN_ID, client, baseArgs, 100n),
       { message: "node is down" },
     );
     // 1 initial + 3 retries + 1 fallback (fails) = 5
@@ -242,7 +291,8 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("execution reverted");
     });
     await assert.rejects(
-      () => readContractWithBlockFallback(client, baseArgs, 100n),
+      () =>
+        readContractWithBlockFallback(TEST_CHAIN_ID, client, baseArgs, 100n),
       { message: "execution reverted" },
     );
     // 1 initial + 1 retry that throws different error = 2
@@ -268,7 +318,12 @@ describe("readContractWithBlockFallback", () => {
       }
       return "ok";
     });
-    await readContractWithBlockFallback(client, argsWithExtra, 42n);
+    await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      argsWithExtra,
+      42n,
+    );
     // 1 initial + 3 retries (all with blockNumber) + 1 fallback (no blockNumber) = 5
     assert.equal(calls.length, 5);
     // First 4 calls: has blockNumber
@@ -305,6 +360,7 @@ describe("readContractWithBlockFallback", () => {
       return "deep-archive-result";
     });
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       primary,
       baseArgs,
       68202836n,
@@ -334,6 +390,7 @@ describe("readContractWithBlockFallback", () => {
     });
     const fallback = mockClient(async () => "ok");
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       primary,
       baseArgs,
       100n,
@@ -359,7 +416,13 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("rate limit"); // Secondary itself rate-limits
     });
     await assert.rejects(
-      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        100n,
+        fallback,
+      ),
       /rate limit/,
       "should propagate the secondary error, not swallow it into a latest read",
     );
@@ -378,7 +441,13 @@ describe("readContractWithBlockFallback", () => {
       throw new Error('The contract function "x" returned no data ("0x").');
     });
     await assert.rejects(
-      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        100n,
+        fallback,
+      ),
       /returned no data/,
       "should propagate the 'returned no data' error so the caller can stamp the -2 sentinel",
     );
@@ -393,7 +462,13 @@ describe("readContractWithBlockFallback", () => {
       );
     });
     await assert.rejects(
-      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        100n,
+        null,
+      ),
       /querying historical state/,
       "no fallback → must throw, not silently use latest",
     );
@@ -420,6 +495,7 @@ describe("readContractWithBlockFallback", () => {
     });
     const fallback = mockClient(async () => "secondary-block-scoped");
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       primary,
       baseArgs,
       100n,
@@ -454,7 +530,13 @@ describe("readContractWithBlockFallback", () => {
         );
       });
       await assert.rejects(
-        readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+        readContractWithBlockFallback(
+          TEST_CHAIN_ID,
+          primary,
+          baseArgs,
+          100n,
+          fallback,
+        ),
       );
       const fallbackFailedLine = captured.find((l) =>
         l.includes("RPC_ARCHIVE_FALLBACK_FAILED"),
@@ -492,6 +574,7 @@ describe("readContractWithBlockFallback", () => {
       return "latest-result";
     });
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       primary,
       baseArgs,
       100n,
@@ -523,7 +606,13 @@ describe("readContractWithBlockFallback", () => {
       throw new Error("header not found"); // block-miss after retry
     });
     await assert.rejects(
-      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        100n,
+        null,
+      ),
       /header not found/,
       "post-rate-limit-retry block-miss must throw — caller's try/catch returns null",
     );
@@ -541,6 +630,7 @@ describe("readContractWithBlockFallback", () => {
     });
     const fallback = mockClient(async () => "secondary-block-scoped");
     const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
       primary,
       baseArgs,
       100n,
@@ -549,5 +639,144 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.result, "secondary-block-scoped");
     assert.equal(res.usedFallback, true);
     assert.equal(res.usedLatestFallback, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Block-depth-aware rate-limit fallback
+// ---------------------------------------------------------------------------
+
+describe("rate-limit fallback skips secondary below known archive horizon", () => {
+  const baseArgs = {
+    address: "0xtest",
+    abi: [],
+    functionName: "foo",
+  };
+  const HORIZON_CHAIN = 999_777;
+
+  let originalDelayFn: typeof _testHooks.delayFn;
+  before(() => {
+    originalDelayFn = _testHooks.delayFn;
+    _testHooks.delayFn = async () => {};
+  });
+  after(() => {
+    _testHooks.delayFn = originalDelayFn;
+  });
+
+  beforeEach(() => {
+    _resetFallbackArchiveDepth();
+  });
+
+  it("first archive-depth fallback failure records the horizon", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => {
+      throw new Error("Invalid parameters were provided to the RPC method.");
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        HORIZON_CHAIN,
+        primary,
+        baseArgs,
+        500n,
+        fallback,
+      ),
+    );
+    // Horizon now records 500 — a deeper block (200) should be considered
+    // "lacks coverage" while a newer block (600) should not.
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 200n), false);
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 500n), false);
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 600n), true);
+  });
+
+  it("rate-limit on a block below the recorded horizon skips the fallback entirely", async () => {
+    // Pre-seed the horizon at block 500.
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 500n);
+
+    let fallbackCalls = 0;
+    const primary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const fallback = mockClient(async () => {
+      fallbackCalls++;
+      return "should-not-reach-here";
+    });
+
+    // Block 200 is below the horizon → fallback must NOT be called.
+    await assert.rejects(
+      () =>
+        readContractWithBlockFallback(
+          HORIZON_CHAIN,
+          primary,
+          baseArgs,
+          200n,
+          fallback,
+        ),
+      /rate limit/,
+      "rate-limit error must propagate when fallback is gated",
+    );
+    assert.equal(
+      fallbackCalls,
+      0,
+      "fallback must not be called for blocks below horizon",
+    );
+  });
+
+  it("rate-limit on a block above the horizon still uses the fallback", async () => {
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 500n);
+
+    let fallbackCalls = 0;
+    const primary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const fallback = mockClient(async () => {
+      fallbackCalls++;
+      return "secondary-served";
+    });
+
+    const res = await readContractWithBlockFallback(
+      HORIZON_CHAIN,
+      primary,
+      baseArgs,
+      900n,
+      fallback,
+    );
+    assert.equal(res.result, "secondary-served");
+    assert.equal(res.usedFallback, true);
+    assert.equal(fallbackCalls, 1);
+  });
+
+  it("rate-limit fallback that fails archive-depth records a deeper horizon", async () => {
+    // Start at horizon 300; a fallback call at block 700 fails archive-
+    // depth → horizon should bump to 700.
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 300n);
+
+    const primary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const fallback = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method. Double check.",
+      );
+    });
+
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        HORIZON_CHAIN,
+        primary,
+        baseArgs,
+        700n,
+        fallback,
+      ),
+    );
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 700n), false);
+    // 800 is above the new 700 horizon — should be "likely has".
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 800n), true);
+  });
+
+  it("undefined blockNumber always passes the gate (latest reads)", () => {
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 1_000_000n);
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, undefined), true);
   });
 });
