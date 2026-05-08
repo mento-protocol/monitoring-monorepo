@@ -231,6 +231,7 @@ export default function AddressBookPage({
                         : explorerAddressUrl(row.network, row.address)
                     }
                     onEdit={() => setEditTarget({ address: row.address })}
+                    detailHref={`/address-book/${row.address}`}
                   />
                 );
               })}

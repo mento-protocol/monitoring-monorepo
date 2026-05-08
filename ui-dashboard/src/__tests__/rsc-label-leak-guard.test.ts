@@ -47,6 +47,12 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   "src/lib/address-labels/import.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
+  // Server component (RSC) layout — calls `getLabel` + `findReport` only
+  // inside `generateMetadata`, which renders OG tags, never the page body.
+  // Label data flows into <title>/<meta>, not into HTML serialised to the
+  // wire as RSC payload, so the leak posture is the same as a route
+  // handler.
+  "src/app/address-book/[address]/layout.tsx",
 ]);
 
 /** Recursively walks `dir` and yields source file paths under `src/`. */
