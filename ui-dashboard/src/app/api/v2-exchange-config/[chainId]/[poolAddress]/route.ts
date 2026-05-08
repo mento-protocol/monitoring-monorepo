@@ -5,6 +5,13 @@
  * browser. Cache TTL: 30s — bucket cadence on Celo is 6 minutes, so we're
  * stale by at most one cycle. Mirrors the rebalance-check route's caching
  * pattern.
+ *
+ * Routing keys on `network` (a configured network id like `celo-mainnet`),
+ * not on chainId, because multiple networks can share a chainId (e.g.
+ * `celo-mainnet` and `celo-mainnet-local` both resolve 42220 but talk to
+ * different RPCs). The path-segment chainId is kept as a sanity check —
+ * it must agree with the network's chainId — so existing inbound URLs that
+ * include only the chainId can be migrated incrementally.
  */
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
@@ -14,15 +21,30 @@ import {
   type ResolveV2Result,
   type V2ExchangeConfigResponse,
 } from "@/lib/v2-exchange-config";
-import { networkForChainId } from "@/lib/networks";
+import {
+  NETWORKS,
+  isConfiguredNetworkId,
+  networkForChainId,
+} from "@/lib/networks";
 import { isValidAddress } from "@/lib/format";
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 1024;
 const INFLIGHT_MAX_ENTRIES = 64;
 
+// Cacheable degraded outcomes: reflect immutable on-chain truth (no contract,
+// not a VP, governance-removed exchange). Transient `rpc_failed` is NOT
+// cached — it would mask provider outages as "permanent" misses for 30s and
+// silently bypass Sentry, hiding real upstream incidents.
+type CacheableResult =
+  | Extract<ResolveV2Result, { ok: true }>
+  | {
+      ok: false;
+      reason: "no_bytecode" | "not_a_virtual_pool";
+    };
+
 type CacheEntry = {
-  result: ResolveV2Result;
+  result: CacheableResult;
   expiresAt: number;
 };
 
@@ -38,7 +60,7 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ chainId: string; poolAddress: string }> },
 ): Promise<NextResponse> {
   const { chainId: chainIdStr, poolAddress } = await ctx.params;
@@ -53,16 +75,47 @@ export async function GET(
     );
   }
 
-  const network = networkForChainId(chainId);
+  // Prefer ?network= so the caller selects which configured network's RPC to
+  // use (multiple networks can share a chainId — e.g. devnet vs mainnet on
+  // 42220). Fall back to the canonical mapping when omitted, so inbound URLs
+  // from the previous chainId-only contract still resolve to the prod RPC.
+  const networkParam = req.nextUrl.searchParams.get("network");
+  let networkId: string | null = null;
+  if (networkParam) {
+    if (!isConfiguredNetworkId(networkParam)) {
+      return NextResponse.json({ error: "Invalid network" }, { status: 400 });
+    }
+    if (NETWORKS[networkParam].chainId !== chainId) {
+      return NextResponse.json(
+        { error: "network does not match chainId" },
+        { status: 400 },
+      );
+    }
+    networkId = networkParam;
+  } else {
+    const fallback = networkForChainId(chainId);
+    if (!fallback) {
+      return NextResponse.json(
+        { error: `No network configured for chain ${chainId}` },
+        { status: 400 },
+      );
+    }
+    networkId = fallback.id;
+  }
+
+  const network = NETWORKS[networkId as keyof typeof NETWORKS];
   const rpcUrl = network?.rpcUrl;
-  if (!network || !rpcUrl) {
+  if (!rpcUrl) {
     return NextResponse.json(
-      { error: `No RPC URL configured for chain ${chainId}` },
+      { error: `No RPC URL configured for ${networkId}` },
       { status: 400 },
     );
   }
 
-  const key = `${chainId}:${poolAddress.toLowerCase()}`;
+  // Key on networkId so devnet/local variants don't share cache entries with
+  // mainnet — the same chainId+address might resolve to different bytecode
+  // on different RPCs.
+  const key = `${networkId}:${poolAddress.toLowerCase()}`;
   const now = Date.now();
   const cached = cache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -76,10 +129,16 @@ export async function GET(
     }
     pending = resolveV2ExchangeConfig(poolAddress, rpcUrl)
       .then((result) => {
-        setCacheEntry(key, {
-          result,
-          expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+        // Only cache stable outcomes (ok:true or ok:false with a non-transient
+        // reason). Transient transport failures (`rpc_failed`) propagate to
+        // the catch block below and surface as 502 — caching them would mask
+        // provider outages.
+        if (isCacheable(result)) {
+          setCacheEntry(key, {
+            result,
+            expiresAt: Date.now() + CACHE_TTL_MS,
+          });
+        }
         return result;
       })
       .finally(() => {
@@ -90,17 +149,37 @@ export async function GET(
 
   try {
     const result = await pending;
+    if (!result.ok && result.reason === "rpc_failed") {
+      // Surface as 502 with the same redaction discipline as the
+      // rebalance-check route would once it has redaction. Forno (today's
+      // only RPC for VirtualPool chains) doesn't embed secrets, so we don't
+      // need redaction yet — but Sentry capture must still happen so
+      // operators see real upstream incidents instead of cached degraded UI.
+      Sentry.captureMessage("v2-exchange-config: upstream RPC failure", {
+        tags: { route: "v2-exchange-config", network: networkId },
+        extra: { poolAddress },
+      });
+      return NextResponse.json(
+        { error: "Upstream RPC error" },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(serializeResult(result));
   } catch (err) {
-    // Forno doesn't embed secrets in URLs; if other RPC providers (with
-    // path-embedded API keys) are added later, we'll need to redact like
-    // rebalance-check/route.ts does.
+    // Catches anything `resolveV2ExchangeConfig` throws outside its
+    // try/catch (programmer error, viem internal). Forno doesn't embed
+    // secrets; if other RPC providers (with path-embedded API keys) are
+    // added, redact here like rebalance-check/route.ts does.
     Sentry.captureException(err, {
-      tags: { route: "v2-exchange-config", chainId: String(chainId) },
+      tags: { route: "v2-exchange-config", network: networkId },
     });
-    console.error("[v2-exchange-config]", chainId, poolAddress, err);
+    console.error("[v2-exchange-config]", networkId, poolAddress, err);
     return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }
+}
+
+function isCacheable(result: ResolveV2Result): result is CacheableResult {
+  return result.ok || result.reason !== "rpc_failed";
 }
 
 function serializeResult(result: ResolveV2Result): V2ExchangeConfigResponse {

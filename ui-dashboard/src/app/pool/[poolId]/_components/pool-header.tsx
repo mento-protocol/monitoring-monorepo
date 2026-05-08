@@ -42,8 +42,17 @@ export function PoolHeader({
   const isVirtual = isVirtualPool(pool);
   // Single subscription point for v2 exchange state — children consume via
   // props so SWR has one subscriber, not three.
-  const { data: v2Data, isLoading: v2Loading } = useV2ExchangeConfig(pool);
+  const {
+    data: v2Data,
+    isLoading: v2Loading,
+    error: v2Error,
+  } = useV2ExchangeConfig(pool, network);
   const v2Config = v2Data?.ok ? v2Data.config : null;
+  // Distinguish "no v2 config available" from "config fetch failed". We treat
+  // an `ok: false` response (e.g. `not_a_virtual_pool` for an unknown VP
+  // variant) the same as a thrown fetcher error — both surface a degraded
+  // panel below instead of silently rendering nothing.
+  const v2HasError = v2Error !== undefined || (v2Data != null && !v2Data.ok);
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -111,7 +120,11 @@ export function PoolHeader({
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         {isVirtual ? (
-          <VirtualPoolHeaderTiles pool={pool} v2Config={v2Config} />
+          <VirtualPoolHeaderTiles
+            pool={pool}
+            v2Config={v2Config}
+            hasError={v2HasError}
+          />
         ) : (
           <>
             <Stat
@@ -163,6 +176,8 @@ export function PoolHeader({
             network={network}
             v2Config={v2Config}
             isLoading={v2Loading}
+            hasError={v2HasError}
+            errorReason={v2Data?.ok === false ? v2Data.reason : undefined}
           />
           <div className="my-5 h-px bg-slate-800" />
           <PoolLifecyclePanel pool={pool} />
@@ -181,16 +196,22 @@ export function PoolHeader({
 // Status pill style — keyed off the resolved exchange state so the same
 // table drives label + color consistently. `null` v2Config means "still
 // loading" (treated as "—" so the badge doesn't briefly flash "Active"
-// for a deprecated pool while SWR is fetching).
+// for a deprecated pool while SWR is fetching). `error` covers both
+// hook-level fetch failures and structured `ok:false` responses from the
+// route — operators see a distinct "—" + tooltip rather than a perpetual
+// loading state.
 const STATUS_TILE = {
   loading: { label: "—", color: "text-slate-500" },
   active: { label: "Active", color: "text-emerald-300" },
   deprecated: { label: "Deprecated", color: "text-amber-300" },
+  error: { label: "—", color: "text-rose-400" },
 } as const;
 
 function statusKey(
   v2Config: V2ExchangeConfigDTO | null,
+  hasError: boolean,
 ): keyof typeof STATUS_TILE {
+  if (hasError) return "error";
   if (!v2Config) return "loading";
   return v2Config.isDeprecated ? "deprecated" : "active";
 }
@@ -200,21 +221,30 @@ function statusKey(
  * trading limits, rebalance) are FPMM-only — virtual pools wrap a v2
  * BiPoolManager exchange where those concepts don't apply. Show pair
  * activity instead: lifetime swap count via the wrapper, age, and the
- * underlying exchange status (active/deprecated).
+ * underlying exchange status (active/deprecated/error).
  */
 function VirtualPoolHeaderTiles({
   pool,
   v2Config,
+  hasError,
 }: {
   pool: Pool;
   v2Config: V2ExchangeConfigDTO | null;
+  hasError: boolean;
 }) {
-  const status = STATUS_TILE[statusKey(v2Config)];
+  const status = STATUS_TILE[statusKey(v2Config, hasError)];
   return (
     <>
       <Stat
         label="v2 Exchange Status"
-        value={<span className={status.color}>{status.label}</span>}
+        value={
+          <span
+            className={status.color}
+            title={hasError ? "Failed to load v2 exchange config" : undefined}
+          >
+            {status.label}
+          </span>
+        }
       />
       <Stat
         label="Wrapper Swaps"
@@ -225,7 +255,9 @@ function VirtualPoolHeaderTiles({
       <Stat
         label="Last Bucket Reset"
         value={
-          v2Config?.isDeprecated ? (
+          hasError ? (
+            <span className="text-slate-500">—</span>
+          ) : v2Config?.isDeprecated ? (
             <span className="text-slate-500">—</span>
           ) : v2Config ? (
             relativeTime(v2Config.lastBucketUpdate)

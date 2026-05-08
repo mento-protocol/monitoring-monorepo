@@ -21,18 +21,27 @@ export function V2ExchangePanel({
   network,
   v2Config,
   isLoading,
+  hasError = false,
+  errorReason,
 }: {
   pool: Pool;
   network: Network;
   v2Config: V2ExchangeConfigDTO | null;
   isLoading: boolean;
+  /** True when the route returned 502, threw, or returned `ok: false`. */
+  hasError?: boolean;
+  /** When the route returned `ok: false`, the structured reason string. */
+  errorReason?: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
 }) {
-  // Skeleton until first response. The panel is informational, not
-  // load-bearing for the rest of the page — null v2Config after load
-  // means the bytecode pattern didn't match (very old VP variant or a
-  // non-VP contract reused at this URL); render nothing rather than
-  // assert "not a virtual pool" against UI that already classified it.
+  // Skeleton until first response.
   if (isLoading) return <Skeleton />;
+  // Surface failure explicitly. Without this, an upstream RPC outage or a VP
+  // variant whose bytecode the resolver doesn't recognize would render nothing
+  // — operators can't distinguish "no data yet" from "fetch failed", and
+  // critical state like deprecation/buckets goes silently absent.
+  if (hasError) {
+    return <V2ExchangeErrorNote reason={errorReason} />;
+  }
   if (!v2Config) return null;
 
   if (v2Config.isDeprecated) {
@@ -161,6 +170,27 @@ function formatBucket(rawWei: string, decimals: number): string {
 
 function Skeleton() {
   return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
+}
+
+function V2ExchangeErrorNote({
+  reason,
+}: {
+  reason?: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
+}) {
+  const message =
+    reason === "no_bytecode"
+      ? "No contract code at this address."
+      : reason === "not_a_virtual_pool"
+        ? "Contract bytecode doesn't match a known VirtualPool layout."
+        : "Couldn't load v2 exchange config — upstream RPC error.";
+  return (
+    <div className="rounded-md border border-rose-700/40 bg-rose-900/10 p-3 text-sm">
+      <div className="mb-1 font-medium text-rose-300">
+        v2 exchange config unavailable
+      </div>
+      <p className="text-slate-300">{message}</p>
+    </div>
+  );
 }
 
 function DeprecatedExchangeNote({

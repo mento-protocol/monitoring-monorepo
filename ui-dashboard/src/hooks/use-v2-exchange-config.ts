@@ -3,6 +3,7 @@
 import useSWR from "swr";
 import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import type { Network } from "@/lib/networks";
 import { isVirtualPool, type Pool } from "@/lib/types";
 import type {
   V2ExchangeConfigDTO,
@@ -17,10 +18,17 @@ export type { V2ExchangeConfigDTO, V2ExchangeConfigResponse };
  * BiPoolManager. Returns null on non-virtual pools (the hook is a no-op so
  * callers can call it unconditionally without manual gating).
  *
+ * `network` is required because multiple configured networks can share a
+ * chainId (e.g. `celo-mainnet` and `celo-mainnet-local` both resolve 42220);
+ * without it, devnet/local virtual pools would silently route to mainnet RPC.
+ *
  * The route caches 30s — bucket reset cadence is 6 min, so 30s is fresh
  * enough to track resets while keeping requests cheap.
  */
-export function useV2ExchangeConfig(pool: Pool | null): {
+export function useV2ExchangeConfig(
+  pool: Pool | null,
+  network: Network,
+): {
   data: V2ExchangeConfigResponse | null;
   isLoading: boolean;
   error: Error | undefined;
@@ -28,7 +36,7 @@ export function useV2ExchangeConfig(pool: Pool | null): {
   const shouldFetch = pool != null && isVirtualPool(pool);
   const address = pool ? stripChainIdFromPoolId(pool.id) : null;
   const key = shouldFetch
-    ? `/api/v2-exchange-config/${pool.chainId}/${address}`
+    ? `/api/v2-exchange-config/${pool.chainId}/${address}?network=${encodeURIComponent(network.id)}`
     : null;
 
   const { data, error, isLoading } = useSWR<V2ExchangeConfigResponse>(
