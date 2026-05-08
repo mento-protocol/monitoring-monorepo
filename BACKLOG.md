@@ -4,19 +4,13 @@
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`. These are the Radar recommendations we want to pursue now: **1, 2, 3, 5, and 6**. DORA metrics (#4), CodeScene (#7), and Dev Containers (#8) are intentionally excluded for now.
 
-### 1. `axe-core` accessibility checks for dashboard UI
+### 1. `axe-core` accessibility checks for dashboard UI ✅
 
-Why: the dashboard communicates operational risk through badges, tabs, tables, empty/error states, and chart-adjacent labels. We need deterministic feedback that those states remain perceivable and usable, not just visually plausible.
+Done. `vitest-axe@1.0.0-pre.5` + `axe-core` wired in `ui-dashboard/package.json`; 26 tests across 4 consolidated files under `ui-dashboard/src/__tests__/a11y/` (badges, sortable tables + empty/error/loading shells, controls — labelled `<select>`, `radiogroup`, `tablist` — and skeletons). Per-variant label assertions on every badge family catch silent label-drift refactors that pure axe runs miss. Pool tablist test imports the real `TABS` source so it can't drift behind the page. Total runtime ~1.5s, well under the 30s budget. No broad suppressions, no Plotly certification. See `ui-dashboard/AGENTS.md` "Dynamic content accessibility" for the maintenance contract.
 
-Lightweight plan:
+Follow-up (deferred from PR review):
 
-- [ ] Add an `axe-core`-based Vitest helper (`jest-axe` or `vitest-axe`, whichever is cleaner with React 19 / Vitest 4).
-- [ ] Add 5–10 high-signal tests around health/severity badges, network selection, pool tabs, tables, and Hasura empty/loading/error states.
-- [ ] Scope checks to our semantics/wrappers; do not attempt to certify Plotly internals.
-- [ ] Keep the tests under the existing dashboard test command if runtime stays low.
-- [ ] Document the command only if it differs from `pnpm --filter @mento-protocol/ui-dashboard test`.
-
-Acceptance: CI/local test runtime increases by <30s, with no broad a11y suppressions.
+- [ ] **Roving `tabIndex` on `BridgeStatusFilter` radio group.** The component documents itself as implementing the WAI-ARIA radio-button keyboard contract (it has arrow-key handlers in `bridge-status-filter.tsx:26-47`) but every `role="radio"` button is in the tab order — the WAI-ARIA pattern wants only the active option tabbable, with arrow keys moving focus. Component-side fix: add `tabIndex={selected === ... ? 0 : -1}` and assert it in `controls.a11y.test.tsx`. Flagged by codex during PR #339 review.
 
 ### 2. Browser-based component/interaction testing pilot
 

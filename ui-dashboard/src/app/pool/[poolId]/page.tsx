@@ -2,7 +2,6 @@
 
 import { AddressLink } from "@/components/address-link";
 import { BreachHistoryPanel } from "@/components/breach-history-panel";
-import { LimitSelect } from "@/components/controls";
 import { ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
@@ -36,11 +35,11 @@ import { Suspense, useCallback, useEffect, useMemo } from "react";
 import { OlsLiquidityTable } from "./_components/ols-liquidity-table";
 import { OlsStatusPanel } from "./_components/ols-status-panel";
 import { PoolHeader } from "./_components/pool-header";
+import { PoolTablist } from "./_components/pool-tablist";
 import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "./_lib/constants";
 import {
   decodePoolId,
   getDebtTokenSideLabel,
-  getTabLabel,
   parseTabLimit,
   selectActiveOlsPool,
 } from "./_lib/helpers";
@@ -355,39 +354,13 @@ function PoolDetail() {
         </>
       )}
 
-      <div
-        className="flex gap-1 border-b border-slate-800"
-        role="tablist"
-        aria-label="Pool data tabs"
-      >
-        {visibleTabs.map((t) => (
-          <button
-            key={t}
-            role="tab"
-            id={`tab-${t}`}
-            aria-selected={tab === t}
-            aria-controls={`panel-${t}`}
-            onClick={() => setURL(t, limit)}
-            className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium capitalize transition-colors ${
-              tab === t
-                ? "border-b-2 border-indigo-500 text-white"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            {getTabLabel(t)}
-          </button>
-        ))}
-        {/* Oracle tab manages its own page size; Limits has no paginated data */}
-        {tab !== "oracle" && tab !== "limits" && (
-          <div className="ml-auto hidden sm:flex items-center">
-            <LimitSelect
-              id="tab-limit"
-              value={limit}
-              onChange={(l) => setURL(tab, l)}
-            />
-          </div>
-        )}
-      </div>
+      <PoolTablist
+        visibleTabs={visibleTabs}
+        active={tab}
+        onSelect={(t) => setURL(t, limit)}
+        limit={limit}
+        onLimitChange={(l) => setURL(tab, l)}
+      />
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "swaps" && (
