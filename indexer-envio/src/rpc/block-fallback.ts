@@ -41,8 +41,10 @@ const BLOCK_NOT_AVAILABLE_RE =
  *   historical state`.
  * - QuickNode (alternate): `"Invalid parameters were provided to the RPC
  *   method. Double check you have provided the correct parameters."` — fires
- *   when the requested block is below the pruning window. Match on the full
- *   phrase to avoid false positives on legitimate parameter errors.
+ *   when the requested block is below the pruning window. Match the full
+ *   two-sentence form so unrelated "Invalid parameters" errors (malformed
+ *   address, wrong ABI selector, future provider-specific tweaks) don't
+ *   trigger archive-depth handling and poison the runtime horizon.
  *
  * The bare `Block requested not found` phrase by itself can also mean
  * "transient lag — node hasn't seen this block yet" on some providers,
@@ -60,7 +62,7 @@ const BLOCK_NOT_AVAILABLE_RE =
  * preserves the prior known-good value (or schema default) until the
  * indexer reaches a block whose state the primary can serve. */
 const ARCHIVE_DEPTH_RE =
-  /querying historical state|Invalid parameters were provided to the RPC method/i;
+  /querying historical state|Invalid parameters were provided to the RPC method\. Double check you have provided the correct parameters/i;
 
 export type BlockFallbackResult = {
   result: unknown;

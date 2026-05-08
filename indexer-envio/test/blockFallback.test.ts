@@ -672,7 +672,9 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
       throw new Error("querying historical state");
     });
     const fallback = mockClient(async () => {
-      throw new Error("Invalid parameters were provided to the RPC method.");
+      throw new Error(
+        "Invalid parameters were provided to the RPC method. Double check you have provided the correct parameters.",
+      );
     });
     await assert.rejects(() =>
       readContractWithBlockFallback(
@@ -757,7 +759,7 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
     });
     const fallback = mockClient(async () => {
       throw new Error(
-        "Invalid parameters were provided to the RPC method. Double check.",
+        "Invalid parameters were provided to the RPC method. Double check you have provided the correct parameters.",
       );
     });
 
@@ -778,5 +780,21 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
   it("undefined blockNumber always passes the gate (latest reads)", () => {
     recordFallbackArchiveMiss(HORIZON_CHAIN, 1_000_000n);
     assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, undefined), true);
+  });
+
+  it("recordFallbackArchiveMiss does not reduce an already-higher horizon", () => {
+    // Higher block first, lower block after — second call must be a no-op
+    // so the horizon only ever moves toward head, never backwards. Without
+    // this invariant, two concurrent rate-limit fallbacks ordering reverse
+    // could shrink the horizon and re-admit blocks the secondary already
+    // told us it can't serve.
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 800n);
+    recordFallbackArchiveMiss(HORIZON_CHAIN, 300n);
+    assert.equal(
+      fallbackLikelyHasBlock(HORIZON_CHAIN, 500n),
+      false,
+      "block above the discarded 300 floor but below the 800 horizon must still be gated",
+    );
+    assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 900n), true);
   });
 });
