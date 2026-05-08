@@ -286,7 +286,15 @@ export function getFallbackRpcClient(
     return null;
   }
 
-  const fallbackOverride = process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`];
+  // Treat empty-string env var as unset. Hosted secret platforms sometimes
+  // surface a blank value when an env var is created but not yet filled in;
+  // an empty URL would crash `createPublicClient({ transport: http("") })`
+  // with `UrlRequiredError` and silently disable the fallback path.
+  const fallbackOverrideRaw = process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`];
+  const fallbackOverride =
+    fallbackOverrideRaw && fallbackOverrideRaw.length > 0
+      ? fallbackOverrideRaw
+      : undefined;
   const fallbackRawUrl = fallbackOverride ?? config.default;
   const fallbackUrl = withHyperRpcToken(fallbackRawUrl);
   if (isBareHyperRpcUrl(fallbackUrl)) {

@@ -363,6 +363,17 @@ describe("getFallbackRpcClient", () => {
     assert.equal(getFallbackRpcClient(143), null);
   });
 
+  it("treats an empty ENVIO_RPC_FALLBACK_URL_<chainId> as unset", () => {
+    // Hosted secret platforms sometimes surface blank values; falling
+    // through to `http("")` would crash with UrlRequiredError. Behaviour
+    // must match "unset entirely": fall back to the hardcoded default,
+    // which (for chain 143) equals the primary when ENVIO_RPC_URL_143 is
+    // also unset → null fallback.
+    delete process.env.ENVIO_RPC_URL_143;
+    process.env.ENVIO_RPC_FALLBACK_URL_143 = "";
+    assert.equal(getFallbackRpcClient(143), null);
+  });
+
   it("returns null for an unknown chainId", () => {
     assert.equal(getFallbackRpcClient(999999), null);
   });
