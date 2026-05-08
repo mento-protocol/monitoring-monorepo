@@ -20,13 +20,12 @@
  *    default ("All") and a status-active state, since axe alone doesn't
  *    flag the "two radios checked" anti-pattern.
  *
- * 3. Pool tabs structural fragment — a `role="tablist"` containing
- *    `role="tab"` buttons with `aria-selected` and `aria-controls`. The
- *    fragment is driven by the **real** `TABS` source from
- *    `_lib/constants.ts` (and `getTabLabel`), so it can't drift behind
- *    the page when a tab is added/removed. Mounting the real page is
- *    deferred — would need mocks for Hasura, network provider, ~10
- *    hooks; not worth the complexity for one tablist test.
+ * 3. `PoolTablist` — the real production component (extracted from
+ *    `pool/[poolId]/page.tsx` so the test mounts the actual JSX, not a
+ *    re-implementation). Pins the `role="tablist"` + `role="tab"` +
+ *    `aria-selected` + `aria-controls` contract. If the page-side
+ *    rendering drops `role="tablist"` or breaks `aria-controls`, this
+ *    test now catches it (Cursor finding on PR #342).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -35,8 +34,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
 import { LimitSelect } from "@/components/controls";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
-import { TABS, type Tab } from "@/app/pool/[poolId]/_lib/constants";
-import { getTabLabel } from "@/app/pool/[poolId]/_lib/helpers";
+import { PoolTablist } from "@/app/pool/[poolId]/_components/pool-tablist";
+import { TABS } from "@/app/pool/[poolId]/_lib/constants";
 import type { BridgeStatus } from "@/lib/types";
 
 let container: HTMLDivElement;
@@ -131,58 +130,56 @@ describe("BridgeStatusFilter a11y", () => {
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
+
+  // Known gap (tracked in BACKLOG): WAI-ARIA radiogroup keyboard
+  // pattern — exactly one radio in the group should be tabbable
+  // (`tabIndex={0}` on the selected pill, `tabIndex={-1}` on the
+  // others) with arrow keys moving focus. The current production
+  // widget makes every pill tabbable. When the prod fix lands,
+  // replace this todo with the real assertion.
+  it.todo(
+    "BridgeStatusFilter: keyboard contract — single tab stop with arrow-key focus movement",
+  );
 });
 
 // ---------------------------------------------------------------------------
-// Pool tablist — structural fragment driven by the real `TABS` source
+// PoolTablist — real production component
 // ---------------------------------------------------------------------------
 //
-// We can't mount the real pool page here (it pulls in Hasura, network
-// provider, ~10 hooks). But the tablist's role contract is what we want
-// to pin: `role="tablist"` + N `role="tab"` buttons with `aria-selected`
-// and `aria-controls` linking to a `role="tabpanel"`. By importing the
-// real `TABS` (and `getTabLabel`) the test fails the moment the canonical
-// list grows or shrinks — it can't drift behind the page silently.
+// Mounts the actual `<PoolTablist>` from `pool/[poolId]/_components/`,
+// not a re-implementation. The page passes the same component the same
+// props, so a regression on `role="tablist"` / `aria-controls` /
+// button ordering / `LimitSelect` placement now fails this test.
 //
-// The page hides `breaches` for virtual pools and `ols` when no OLS pool
-// is active; this test just checks the structural contract for the
-// always-visible majority. A future PR that mocks the heavy hooks can
-// promote this to a real-page render.
+// We don't render a sibling `<tabpanel>` — that's the page's
+// responsibility, separate from the tablist component. The tablist's
+// `aria-controls` wiring is asserted by id-string, which is enough to
+// catch the contract regression Cursor flagged.
 
-describe("Pool tablist a11y", () => {
-  function renderTablist(active: Tab) {
+describe("PoolTablist a11y (real component)", () => {
+  it("renders one button per `visibleTabs` entry with exactly one aria-selected=true", async () => {
     render(
       <>
-        <div role="tablist" aria-label="Pool data tabs">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              role="tab"
-              type="button"
-              id={`tab-${t}`}
-              aria-selected={active === t}
-              aria-controls={`panel-${t}`}
-            >
-              {getTabLabel(t)}
-            </button>
-          ))}
-        </div>
+        <PoolTablist
+          visibleTabs={TABS}
+          active="rebalances"
+          onSelect={() => undefined}
+          limit={50}
+          onLimitChange={() => undefined}
+        />
+        {/* Stub panel so the tab buttons' `aria-controls` references
+            resolve. The page renders this; here we render a minimal
+            stand-in so axe's `aria-valid-attr-value` passes. */}
         <div
           role="tabpanel"
-          id={`panel-${active}`}
-          aria-labelledby={`tab-${active}`}
+          id="panel-rebalances"
+          aria-labelledby="tab-rebalances"
         >
-          <p>{getTabLabel(active)} content</p>
+          <p>rebalances</p>
         </div>
       </>,
     );
-  }
-
-  it("renders one button per canonical tab and emits exactly one aria-selected=true", async () => {
-    renderTablist("rebalances");
     const tabs = container.querySelectorAll('[role="tab"]');
-    // Pin against the real source — if `TABS` grows, this test demands a
-    // visit to revisit the page-level wiring for the new entry.
     expect(tabs).toHaveLength(TABS.length);
     const selected = Array.from(tabs).filter(
       (t) => t.getAttribute("aria-selected") === "true",
@@ -190,7 +187,65 @@ describe("Pool tablist a11y", () => {
     expect(selected).toHaveLength(1);
     expect(selected[0].id).toBe("tab-rebalances");
     expect(selected[0].getAttribute("aria-controls")).toBe("panel-rebalances");
+    const tablist = container.querySelector('[role="tablist"]');
+    expect(tablist?.getAttribute("aria-label")).toBe("Pool data tabs");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
+
+  it("hides the inline LimitSelect when the active tab manages its own pagination", async () => {
+    // `oracle` is in `TABS_WITHOUT_LIMIT_SELECT` — the LimitSelect's
+    // `<select id="tab-limit">` should not be in the DOM.
+    render(
+      <>
+        <PoolTablist
+          visibleTabs={TABS}
+          active="oracle"
+          onSelect={() => undefined}
+          limit={50}
+          onLimitChange={() => undefined}
+        />
+        <div role="tabpanel" id="panel-oracle" aria-labelledby="tab-oracle">
+          <p>oracle</p>
+        </div>
+      </>,
+    );
+    expect(container.querySelector("#tab-limit")).toBeNull();
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
+
+  it("renders the inline LimitSelect for paginated tabs", async () => {
+    render(
+      <>
+        <PoolTablist
+          visibleTabs={TABS}
+          active="swaps"
+          onSelect={() => undefined}
+          limit={50}
+          onLimitChange={() => undefined}
+        />
+        <div role="tabpanel" id="panel-swaps" aria-labelledby="tab-swaps">
+          <p>swaps</p>
+        </div>
+      </>,
+    );
+    expect(container.querySelector("#tab-limit")).not.toBeNull();
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
+
+  // Each test renders a stub `<tabpanel>` with the same id pattern the
+  // page uses (`panel-${tab}`) so the active tab's `aria-controls`
+  // resolves cleanly under axe's `aria-valid-attr-value` check. The
+  // role contract for the tablist itself is pinned above.
+
+  // Known gap (tracked in BACKLOG): the WAI-ARIA tablist keyboard
+  // pattern — single tab stop with arrow-key focus movement — is NOT
+  // enforced. Every `role="tab"` button is naturally tabbable. When
+  // the keyboard contract lands, replace this todo with a real
+  // assertion (tabIndex distribution + key-event focus moves).
+  it.todo(
+    "PoolTablist: keyboard contract — single tab stop with arrow-key focus movement",
+  );
 });

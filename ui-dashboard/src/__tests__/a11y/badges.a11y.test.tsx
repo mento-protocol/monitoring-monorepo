@@ -100,12 +100,24 @@ describe("HealthBadge a11y", () => {
     }
   });
 
-  it("CRITICAL status renders its dot inside an aria-hidden subtree (color signalled but not announced)", () => {
-    render(<HealthBadge status="CRITICAL" />);
-    // The accessible-name path strips aria-hidden subtrees, so the badge's
-    // accessible text is "CRITICAL" — never just color.
-    const dot = container.querySelector('[aria-hidden="true"]');
-    expect(dot).not.toBeNull();
+  it("dot is aria-hidden across every status variant (color signalled but not announced)", () => {
+    // The assertion is a general property of HealthBadge, not specific to
+    // CRITICAL. Render every variant in a single tree, then assert each
+    // badge wraps its dot in an `aria-hidden="true"` subtree so the
+    // accessible name path strips it (claude[bot] PR #342 finding).
+    render(
+      <ul>
+        {HEALTH_VARIANTS.map(([status]) => (
+          <li key={status} data-testid={`dot-${status}`}>
+            <HealthBadge status={status} />
+          </li>
+        ))}
+      </ul>,
+    );
+    for (const [status] of HEALTH_VARIANTS) {
+      const li = container.querySelector(`[data-testid="dot-${status}"]`);
+      expect(li?.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    }
   });
 });
 

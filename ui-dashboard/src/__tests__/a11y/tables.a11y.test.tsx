@@ -283,4 +283,37 @@ describe("RevenueByPoolTable a11y — degraded states", () => {
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
+
+  it("partial-data shell (some chains errored, others have rows) renders the warning + table together", async () => {
+    // Production scenario: one chain's fee query failed but others
+    // succeeded. The page passes `hasError={true}` (because at least
+    // one chain hit an error) AND has surviving rows from the
+    // healthy chains. The warning banner above the table is the
+    // signal to the user — Cursor flagged this branch as
+    // a11y-untested in PR #342 review.
+    const healthyChain = networkData([feeSnapshot()]);
+    const erroredChain = networkData([]);
+    erroredChain.feeSnapshotsError = new Error("rate limited");
+    render(
+      <RevenueByPoolTable
+        networkData={[healthyChain, erroredChain]}
+        isLoading={false}
+        hasError={true}
+      />,
+    );
+    // Warning banner is present.
+    expect(container.textContent).toContain(
+      "One or more chains failed to load — showing partial data",
+    );
+    // Surviving rows still render in a real <table>.
+    const table = container.querySelector("table");
+    expect(table).not.toBeNull();
+    expect(container.querySelectorAll("th[aria-sort]").length).toBe(6);
+    // The empty-error shell text must NOT appear — that's a different branch.
+    expect(container.textContent).not.toContain(
+      "Couldn't load per-pool revenue",
+    );
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
 });
