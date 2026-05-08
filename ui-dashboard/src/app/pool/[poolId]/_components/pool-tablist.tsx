@@ -43,18 +43,6 @@ export function PoolTablist({
   // the tab buttons (defensive — shouldn't happen via Tab focus).
   const activeIndex = Math.max(0, visibleTabs.indexOf(active));
 
-  function focusAndActivate(container: HTMLElement, nextIndex: number) {
-    const tabs = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-    );
-    if (tabs.length === 0) return;
-    const safeIndex =
-      nextIndex >= 0 && nextIndex < tabs.length ? nextIndex : activeIndex;
-    tabs[safeIndex]?.focus();
-    const nextTab = visibleTabs[safeIndex];
-    if (nextTab !== undefined && nextTab !== active) onSelect(nextTab);
-  }
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
     if (
@@ -66,9 +54,8 @@ export function PoolTablist({
       return;
     }
     e.preventDefault();
-    const container = e.currentTarget;
     const tabs = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
     );
     if (tabs.length === 0) return;
     const currentIndex = tabs.indexOf(e.target as HTMLButtonElement);
@@ -86,7 +73,9 @@ export function PoolTablist({
       nextIndex = (fromIndex - 1 + tabs.length) % tabs.length;
     }
 
-    focusAndActivate(container, nextIndex);
+    tabs[nextIndex]?.focus();
+    const nextTab = visibleTabs[nextIndex];
+    if (nextTab !== undefined && nextTab !== active) onSelect(nextTab);
   }
 
   return (

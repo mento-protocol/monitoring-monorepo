@@ -189,6 +189,7 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 
 - [x] ~~**`BridgeStatusFilter` keyboard contract.**~~ Done: roving tabindex (`tabIndex={0}` on the selected pill, `-1` elsewhere), `ArrowLeft/Right/Up/Down` move focus + selection (radiogroup convention), `Home/End` jump to first/last. Wrapper carries `tabIndex={-1}` for the `interactive-supports-focus` lint rule without polluting the natural tab order.
 - [x] ~~**Pool tablist keyboard contract.**~~ Done: same roving-tabindex pattern on `<PoolTablist>`. `ArrowLeft/Right` move focus + activate (automatic activation per APG tabs pattern), `Home/End` jump to first/last. Test uses `act()` + native `KeyboardEvent` dispatches via `bubbles: true` so React's synthetic event delegation picks up the keydown on the tablist wrapper.
+- [ ] **`BucketFilter` keyboard contract + shared roving-tabindex helper.** `ui-dashboard/src/components/breach-history/bucket-filter.tsx` is the third radiogroup with the same incomplete keyboard handling (Arrow keys only, no Home/End, no `tabIndex` distribution). Bring it up to the same WAI-ARIA contract as the two widgets above. With three call sites the abstraction is finally worth extracting — a `useRovingTabIndex(activeIndex, onChange)` hook that returns a `keydown` handler + the `tabIndex` props for each child would let all three widgets drop ~30 lines of duplicated math.
 
 ## Follow-ups deferred from PR #335 (sign-in callback preservation)
 

@@ -42,22 +42,6 @@ export function BridgeStatusFilter({
     return index === 0 ? null : (options[index - 1] ?? null);
   }
 
-  function focusAndSelect(
-    container: HTMLElement,
-    nextIndex: number,
-    fallbackIndex: number,
-  ) {
-    const radios = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
-    );
-    if (radios.length === 0) return;
-    const safeIndex =
-      nextIndex >= 0 && nextIndex < radios.length ? nextIndex : fallbackIndex;
-    radios[safeIndex]?.focus();
-    const newValue = valueAt(safeIndex);
-    if (newValue !== selected) onChange(newValue);
-  }
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
     if (
@@ -71,9 +55,8 @@ export function BridgeStatusFilter({
       return;
     }
     e.preventDefault();
-    const container = e.currentTarget;
     const radios = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
     );
     if (radios.length === 0) return;
     const currentIndex = radios.indexOf(e.target as HTMLButtonElement);
@@ -93,7 +76,9 @@ export function BridgeStatusFilter({
       nextIndex = (fromIndex - 1 + radios.length) % radios.length;
     }
 
-    focusAndSelect(container, nextIndex, activeIndex);
+    radios[nextIndex]?.focus();
+    const newValue = valueAt(nextIndex);
+    if (newValue !== selected) onChange(newValue);
   }
 
   return (
