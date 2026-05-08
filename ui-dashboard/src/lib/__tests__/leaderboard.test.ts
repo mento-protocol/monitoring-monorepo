@@ -864,7 +864,7 @@ describe("mergeHeroSnapshot", () => {
     };
   }
 
-  it("returns zeros (and empty staleChains) when both inputs are empty/undefined", () => {
+  it("returns zeros (and empty staleChains/degradedChains) when both inputs are empty/undefined", () => {
     expect(
       mergeHeroSnapshot({
         snapshotRows: undefined,
@@ -877,6 +877,7 @@ describe("mergeHeroSnapshot", () => {
       totalSwapCount: 0,
       uniqueTraders: 0,
       staleChains: [],
+      degradedChains: [],
     });
   });
 
@@ -1272,10 +1273,14 @@ describe("mergeHeroSnapshot", () => {
     expect(out.staleChains).toEqual([42220, 10143]);
   });
 
-  it("today's partial still contributes when the chain's snapshot is stale", () => {
-    // A chain might have a stale snapshot AND today's swap — the stale
-    // snapshot drops out of totals, but today's volume still counts.
-    // (The chain's day-N-1 volume is the lost data; day-N is fine.)
+  it("stale chain: today's partial is also dropped (concentration-mask consistency)", () => {
+    // Both halves of a stale chain are excluded from the rollup so
+    // top10Concentration's same-mask invariant holds: a stale chain
+    // whose today's partial leaked into `totalVolumeUsdWei` would put
+    // volume in the denominator while the numerator (built from
+    // top-50 trader rows) skips that chainId, distorting the ratio.
+    // The banner naming the chain still surfaces the data gap to the
+    // user.
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1295,11 +1300,108 @@ describe("mergeHeroSnapshot", () => {
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // Snapshot's $500 is dropped; today's $50 remains.
-    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(50)));
+    expect(out.totalVolumeUsdWei).toBe(BigInt(0));
+    expect(out.totalSwapCount).toBe(0);
+    expect(out.uniqueTraders).toBe(0);
+    expect(out.staleChains).toEqual([10143]);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("degraded chain: snapshotDay = today - 2 days marks chain degraded but keeps it in totals", () => {
+    // The canonical pre-first-swap-of-day state for an active chain.
+    // Yesterday's data isn't in the snapshot (it ends at T-2) and
+    // isn't in todayRows (no swap today yet), so hero KPIs are
+    // recent-incomplete — but the snapshot's cumulative volume up to
+    // T-2 is still useful and should not be dropped. Caller surfaces
+    // a lighter banner.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
+    expect(out.totalSwapCount).toBe(20);
+    expect(out.uniqueTraders).toBe(4);
+    expect(out.staleChains).toEqual([]);
+    expect(out.degradedChains).toEqual([10143]);
+  });
+
+  it("degraded chain: today's partial is included (only stale chains drop today's rows)", () => {
+    // A chain may briefly be in the degraded state (snapshotDay =
+    // T-2) yet still have a today's-partial row if the heartbeat read
+    // raced the today's-partial read. Today's volume should be
+    // included in the rollup; only `staleChains` triggers today-row
+    // exclusion.
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 10143,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(500),
+        }),
+      ],
+      todayRows: [
+        today({
+          chainId: 10143,
+          trader: "0xa",
+          volumeUsdWei: USD(50),
+          swapCount: 2,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(550)));
     expect(out.totalSwapCount).toBe(2);
     expect(out.uniqueTraders).toBe(1);
-    expect(out.staleChains).toEqual([10143]);
+    expect(out.staleChains).toEqual([]);
+    expect(out.degradedChains).toEqual([10143]);
+  });
+
+  it("mixed: fresh + degraded + stale chains populate the right lists with correct totals", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220, // Celo — fresh (yesterday)
+          snapshotDay: String(YESTERDAY_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+        snap({
+          chainId: 10143, // Monad — degraded (T-2)
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(300),
+          totalSwapCount: 12,
+          uniqueTraders: 3,
+        }),
+        snap({
+          chainId: 11155111, // Sepolia — stale (T-3)
+          snapshotDay: String(THREE_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(700),
+          totalSwapCount: 30,
+          uniqueTraders: 5,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    // Fresh + degraded snapshot volumes contribute; stale dropped.
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1300)));
+    expect(out.totalSwapCount).toBe(62);
+    expect(out.uniqueTraders).toBe(13);
+    expect(out.staleChains).toEqual([11155111]);
+    expect(out.degradedChains).toEqual([10143]);
   });
 });
 
