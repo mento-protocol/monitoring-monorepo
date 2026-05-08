@@ -31,6 +31,8 @@ import {
 import {
   importReports,
   upgradeReports,
+  MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
+  MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
   type AddressReport,
 } from "@/lib/address-reports";
 import { isValidAddress } from "@/lib/format";
@@ -177,42 +179,21 @@ export async function handleSnapshot(
   // Redis hash with no conflict semantics shared with labels. Restore them
   // verbatim from the snapshot when present (keeping the snapshot's
   // version/createdAt/updatedAt instead of bumping via the Lua upsert).
-  let reportsToImport: Record<string, AddressReport> = {};
-  if (body.reports !== undefined) {
-    if (
-      typeof body.reports !== "object" ||
-      body.reports === null ||
-      Array.isArray(body.reports)
-    ) {
-      return NextResponse.json(
-        { error: "Invalid reports map" },
-        { status: 400 },
-      );
-    }
-    // Reject junk keys / payloads with 400 (matches handleGnosisSafe). The
-    // labels path is more lenient because old snapshots can carry tag-only
-    // entries; reports always have a body, so a malformed payload is a
-    // real error worth surfacing.
-    const filtered: Record<string, unknown> = {};
-    for (const [addr, raw] of Object.entries(
-      body.reports as Record<string, unknown>,
-    )) {
-      if (!isValidAddress(addr)) {
-        return NextResponse.json(
-          { error: `Invalid report address: ${addr}` },
-          { status: 400 },
-        );
-      }
-      if (typeof raw !== "object" || raw === null) {
-        return NextResponse.json(
-          { error: `Invalid report payload for ${addr}` },
-          { status: 400 },
-        );
-      }
-      filtered[addr.toLowerCase()] = raw;
-    }
-    reportsToImport = upgradeReports(filtered);
+  //
+  // Apply the SAME content invariants the live editor enforces
+  // (`sanitizeReportInput`): non-empty string body, body ≤ MAX_BODY_LENGTH,
+  // title ≤ MAX_TITLE_LENGTH. Without this, a hand-edited / corrupted blob
+  // could write records the editor + API would otherwise reject — silently
+  // breaking the documented 50KB body invariant.
+  const reportsValidation = validateSnapshotReports(body.reports);
+  if ("error" in reportsValidation) {
+    return NextResponse.json(
+      { error: reportsValidation.error },
+      { status: 400 },
+    );
   }
+  const reportsToImport: Record<string, AddressReport> =
+    reportsValidation.reports;
 
   if (
     Object.keys(merged).length === 0 &&
@@ -351,6 +332,61 @@ export function isGnosisSafeFormat(
       ((entry as Record<string, unknown>).chainId === undefined ||
         typeof (entry as Record<string, unknown>).chainId === "string"),
   );
+}
+
+/**
+ * Validate the `reports` half of a snapshot before restoring. Mirrors the
+ * live editor's `sanitizeReportInput` (non-empty string body, body length
+ * cap, title length cap). The live atomic-upsert path enforces these on
+ * normal writes; the restore path bypasses that path (it writes records
+ * verbatim to keep the snapshot's `version`/`createdAt`/`updatedAt`), so
+ * the cap has to be re-applied here.
+ *
+ * Returns either `{ reports }` ready to write, or `{ error }` for the route
+ * to surface as a 400.
+ */
+export function validateSnapshotReports(
+  raw: unknown,
+): { reports: Record<string, AddressReport> } | { error: string } {
+  if (raw === undefined) return { reports: {} };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { error: "Invalid reports map" };
+  }
+  const validated: Record<string, unknown> = {};
+  for (const [addr, payload] of Object.entries(
+    raw as Record<string, unknown>,
+  )) {
+    if (!isValidAddress(addr)) {
+      return { error: `Invalid report address: ${addr}` };
+    }
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      return { error: `Invalid report payload for ${addr}` };
+    }
+    const p = payload as Record<string, unknown>;
+    if (typeof p.body !== "string" || p.body.trim() === "") {
+      return { error: `Report for ${addr} has an empty or non-string body` };
+    }
+    if (p.body.length > MAX_REPORT_BODY_LENGTH) {
+      return {
+        error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
+      };
+    }
+    if (
+      p.title !== undefined &&
+      p.title !== null &&
+      (typeof p.title !== "string" || p.title.length > MAX_REPORT_TITLE_LENGTH)
+    ) {
+      return {
+        error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters or is not a string`,
+      };
+    }
+    validated[addr.toLowerCase()] = p;
+  }
+  return { reports: upgradeReports(validated) };
 }
 
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {

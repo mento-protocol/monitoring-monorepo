@@ -10,13 +10,22 @@ import {
   isSnapshot,
 } from "@/lib/address-labels/import";
 
+// Body size cap for import payloads. Bumped from 2MB → 4MB to fit a daily
+// snapshot that now embeds forensic-report bodies (50KB cap × N reports +
+// labels overhead). 4MB ≈ 80 max-size reports + labels — comfortable
+// headroom against current usage (handful of investigations) and stays
+// inside Vercel's 4.5MB serverless body limit. If usage ever pushes past
+// this, the right fix is a server-side restore-from-Blob endpoint (no
+// body upload — pulls the snapshot by pathname). Tracked in BACKLOG.md.
+const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;
+
 /**
  * Thin HTTP wrapper for address-labels import. The actual parsing,
  * validation, and Redis writes live in `@/lib/address-labels/import`.
  *
  * Responsibilities:
  *   - auth gate (401 if no session)
- *   - 2MB body-size guard (Content-Length pre-check + post-read recheck)
+ *   - 4MB body-size guard (Content-Length pre-check + post-read recheck)
  *   - content-type / sniff dispatch to the right `handle*` function
  *   - 400 for malformed JSON
  */
@@ -29,14 +38,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Body size guard: reject payloads > 2MB before reading into memory (#5)
+  // Body size guard: reject oversize payloads before reading into memory.
   const contentLengthHeader = req.headers.get("content-length");
   if (
     contentLengthHeader !== null &&
-    Number(contentLengthHeader) > 2 * 1024 * 1024
+    Number(contentLengthHeader) > MAX_IMPORT_BODY_BYTES
   ) {
     return NextResponse.json(
-      { error: "Request body too large (max 2MB)" },
+      { error: "Request body too large (max 4MB)" },
       { status: 413 },
     );
   }
@@ -55,9 +64,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const text = await req.text();
     // Post-read size check for requests without Content-Length header
-    if (Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) {
+    if (Buffer.byteLength(text, "utf8") > MAX_IMPORT_BODY_BYTES) {
       return NextResponse.json(
-        { error: "Request body too large (max 2MB)" },
+        { error: "Request body too large (max 4MB)" },
         { status: 413 },
       );
     }

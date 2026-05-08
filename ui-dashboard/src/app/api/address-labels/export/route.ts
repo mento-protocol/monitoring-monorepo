@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import { getLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
+import { getAllReports } from "@/lib/address-reports";
 
 export async function GET(): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -17,10 +18,15 @@ export async function GET(): Promise<NextResponse> {
     // legacy `?chainId=` filter has no meaning. Old snapshots with
     // `chains` / `global` fields stay readable on the import side via
     // the AddressLabelsSnapshot back-compat shape.
-    const labels = await getLabels();
+    //
+    // Forensic reports ride along under `reports` so the user-facing
+    // export is symmetric with the daily backup — a maintainer-driven
+    // export-then-reimport cycle preserves both halves.
+    const [labels, reports] = await Promise.all([getLabels(), getAllReports()]);
     const snapshot: AddressLabelsSnapshot = {
       exportedAt: new Date().toISOString(),
       addresses: labels,
+      reports,
     };
     const filename = `address-labels-${new Date().toISOString().slice(0, 10)}.json`;
 
