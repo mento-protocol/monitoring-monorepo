@@ -378,17 +378,17 @@ export async function fetchInvertRateFeed(
   }
 }
 
-/** Fetch the pool's rebalance thresholds (above and below) using standalone
- * getters that do NOT require the oracle to be live (unlike
+/** Fetch the pool's rebalance thresholds (above and below) at a specific
+ * block. Standalone getters do NOT require the oracle to be live (unlike
  * getRebalancingState which reverts on stale/expired oracle data). Returns
- * `{above, below}` or `null` on transient RPC failure. Callers that want a
- * single representative value can take `max(above, below)` (broadest band).
- * The pool entity treats `<= 0` as "not yet known" so callers can persist
- * 0 for "configured to never rebalance" and `null` for "retry next event"
- * without ambiguity. */
+ * `{above, below}` or `null` on transient RPC failure. Block-scoped because
+ * thresholds are governance-mutable via `RebalanceThresholdUpdated`; reading
+ * at chain head would corrupt historical replay (factory at block N would
+ * persist post-update values for pools whose thresholds changed at N+M). */
 export async function fetchRebalanceThresholds(
   chainId: number,
   poolAddress: string,
+  blockNumber: bigint,
   log: RpcLogger = consoleLogger,
 ): Promise<{ above: number; below: number } | null> {
   try {
@@ -403,7 +403,7 @@ export async function fetchRebalanceThresholds(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdAbove",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
@@ -415,11 +415,16 @@ export async function fetchRebalanceThresholds(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdBelow",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
     ]);
+    // `latest`-fallback would silently return chain-head thresholds, which
+    // would re-introduce the historical-corruption bug this block-scoped
+    // signature was added to prevent. Reject the read in that case so the
+    // caller's null-handling path runs.
+    if (aboveRes.usedLatestFallback || belowRes.usedLatestFallback) return null;
     return {
       above: Number(aboveRes.result),
       below: Number(belowRes.result),
@@ -430,7 +435,7 @@ export async function fetchRebalanceThresholds(
       "rebalanceThreshold",
       poolAddress,
       err,
-      undefined,
+      blockNumber,
       log,
     );
     return null;

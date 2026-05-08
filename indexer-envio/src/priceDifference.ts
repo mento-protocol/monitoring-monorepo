@@ -152,11 +152,19 @@ export function scaleRpcRebalanceState(
  * falls back to RPC.
  *
  * Required inputs:
- *   - `oraclePrice > 0`: at least one `MedianUpdated` for the rate feed
- *     has been indexed (or factory's `getRebalancingState` seed succeeded).
- *   - At least one of `rebalanceThresholdAbove` / `rebalanceThresholdBelow`
- *     is > 0: factory's `rebalanceThresholdsEffect` seed succeeded, or a
- *     `RebalanceThresholdUpdated` event has been seen.
+ *   - `lastMedianPrice > 0`: at least one `MedianUpdated` for the rate
+ *     feed has been indexed. We deliberately gate on the median rather
+ *     than `oraclePrice` because `OracleReported` overwrites `oraclePrice`
+ *     with individual reporter quotes, which is NOT what the on-chain
+ *     `getRebalancingState` reads (the contract uses the median).
+ *   - `rebalanceThresholdsKnown`: factory's `rebalanceThresholdsEffect`
+ *     seed succeeded, or a `RebalanceThresholdUpdated` event has been
+ *     seen. Both fields can legitimately be 0 ("configured to never
+ *     rebalance"); the boolean distinguishes that from "not yet read".
+ *   - `oracleOk` and oracle freshness: the contract reverts on stale
+ *     oracle, so derive must mirror that — when stale, fall through to
+ *     RPC (which will also fail and the caller will preserve stale
+ *     state, matching the legacy code path).
  *
  * `reservesOverride` lets UpdateReserves pass the event's new reserves
  * (the contract's `getRebalancingState` reads post-event state); Rebalanced
@@ -164,25 +172,52 @@ export function scaleRpcRebalanceState(
  * tx have already written post-rebalance reserves to the entity.
  */
 export function tryDeriveRebalanceState(
-  pool: RatioInputs & {
+  pool: {
+    reserves0: bigint;
+    reserves1: bigint;
+    lastMedianPrice: bigint;
+    oracleOk: boolean;
+    oracleTimestamp: bigint;
+    oracleExpiry: bigint;
+    invertRateFeed: boolean;
     rebalanceThresholdAbove: number;
     rebalanceThresholdBelow: number;
+    rebalanceThresholdsKnown: boolean;
+    token0Decimals: number;
+    token1Decimals: number;
   },
-  reservesOverride?: { reserve0: bigint; reserve1: bigint },
+  ctx: {
+    eventTimestamp: bigint;
+    reservesOverride?: { reserve0: bigint; reserve1: bigint };
+  },
 ): ResolvedRebalanceState | null {
-  if (pool.oraclePrice <= 0n) return null;
-  if (pool.rebalanceThresholdAbove <= 0 && pool.rebalanceThresholdBelow <= 0) {
-    return null;
+  if (!pool.rebalanceThresholdsKnown) return null;
+  if (pool.lastMedianPrice <= 0n) return null;
+  if (!pool.oracleOk) return null;
+  // Mirror the contract's stale-oracle revert: if the oracle hasn't
+  // reported within `oracleExpiry`, `getRebalancingState()` would fail.
+  // `oracleExpiry === 0n` means we don't yet know the window; conservatively
+  // skip the freshness check in that case (caller's RPC fallback will handle it).
+  if (pool.oracleExpiry > 0n) {
+    const expiresAt = pool.oracleTimestamp + pool.oracleExpiry;
+    if (expiresAt <= ctx.eventTimestamp) return null;
   }
-  const reserves = reservesOverride
+  const reserves = ctx.reservesOverride
     ? {
-        reserves0: reservesOverride.reserve0,
-        reserves1: reservesOverride.reserve1,
+        reserves0: ctx.reservesOverride.reserve0,
+        reserves1: ctx.reservesOverride.reserve1,
       }
     : { reserves0: pool.reserves0, reserves1: pool.reserves1 };
+  // Build the math-input view: use `lastMedianPrice` (clean, only set by
+  // MedianUpdated) as the oracle source so derive matches what the
+  // contract's `getRebalancingState()` would compute. `oraclePrice` on
+  // the entity may be a reporter quote (OracleReported overwrites it).
   const poolForCalc = {
-    ...pool,
     ...reserves,
+    oraclePrice: pool.lastMedianPrice,
+    invertRateFeed: pool.invertRateFeed,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
   };
   const priceDifference = computePriceDifference(poolForCalc);
   const rebalanceThreshold = pickActiveThreshold(poolForCalc, {
@@ -190,7 +225,7 @@ export function tryDeriveRebalanceState(
     below: pool.rebalanceThresholdBelow,
   });
   return {
-    oraclePrice: pool.oraclePrice,
+    oraclePrice: pool.lastMedianPrice,
     rebalanceThreshold,
     priceDifference,
   };

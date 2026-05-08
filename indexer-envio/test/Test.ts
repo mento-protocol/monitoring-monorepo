@@ -1790,6 +1790,11 @@ describe("Envio Celo indexer handlers", () => {
       invertRateFeed: false,
       rebalanceThresholdAbove: 200,
       rebalanceThresholdBelow: 200,
+      rebalanceThresholdsKnown: true,
+      lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
+      oracleOk: true,
+      oracleTimestamp: 1_700_007_000n,
+      oracleExpiry: 3_600n,
       source: "fpmm_update_reserves",
     });
 
@@ -1843,15 +1848,18 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    // Seed reserves + oraclePrice so the handler can compute direction.
-    // 60k/40k reserves with oracle ≈ 1.0 → reservePrice (norm1/norm0) ≈ 0.667
-    // < oracle → below side is active. Asymmetric thresholds (above=250,
+    // Seed reserves + lastMedianPrice so the handler can compute direction.
+    // The handler uses `lastMedianPrice` (clean median) for the comparison,
+    // not `oraclePrice` (which OracleReported overwrites with reporter
+    // quotes). 60k/40k reserves with median ≈ 1.0 → reservePrice ≈ 0.667
+    // < median → below side is active. Asymmetric thresholds (above=250,
     // below=175) verify the handler picks 175, not max(250, 175) = 250.
     const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       reserves0: 60_000_000_000_000_000_000_000n,
       reserves1: 40_000_000_000_000_000_000_000n,
+      lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
       token0Decimals: 18,
       token1Decimals: 18,

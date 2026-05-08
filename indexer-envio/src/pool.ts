@@ -315,13 +315,13 @@ export async function selfHealInvertRateFeed(
 /** Self-heal `rebalanceThresholdAbove/Below` when the factory's
  * `rebalanceThresholdsEffect` failed at deploy. Without this, a transient
  * RPC blip would permanently leave both split fields at 0 → derive returns
- * null forever → the entity-derived path is dead for that pool. Mirrors
- * `selfHealInvertRateFeed`: cached effect (Group A `cache: true`) means
- * one RPC at most per pool per resync, then pure object-identity returns.
- * The caller's own Pool.set persists the healed values. */
+ * null forever → the entity-derived path is dead for that pool. Block-
+ * scoped read (effect is `cache: false` because thresholds are governance-
+ * mutable). The caller's own Pool.set persists the healed values. */
 export async function selfHealRebalanceThresholds(
   context: { effect: EffectCaller },
   pool: Pool,
+  blockNumber: bigint,
 ): Promise<Pool> {
   if (
     pool.rebalanceThresholdsKnown ||
@@ -334,6 +334,7 @@ export async function selfHealRebalanceThresholds(
   const thresholds = await context.effect(rebalanceThresholdsEffect, {
     chainId: pool.chainId,
     poolAddress: poolAddr,
+    blockNumber,
   });
   if (thresholds === undefined) return pool;
   // Refresh the legacy `rebalanceThreshold` only when at least one side is

@@ -12,8 +12,14 @@ import {
   computeLimitStatus,
 } from "../../tradingLimits";
 import { tradingLimitsEffect } from "../../rpc/effects";
-import { maybePreloadPool } from "../../pool";
+import {
+  computeHealthStatus,
+  maybePreloadPool,
+  nextDeviationBreachStartedAt,
+} from "../../pool";
 import { pickActiveThreshold } from "../../priceDifference";
+import { recordBreachTransition } from "../../deviationBreach";
+import { recordHealthSample } from "../../healthScore";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -159,26 +165,79 @@ FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
 // FPMM.RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-// `rebalanceThreshold` is refreshed to the direction-correct active value
-// using the pool's current reserves + oracle. `max(above, below)` would be
-// wrong when thresholds are asymmetric: if reservePrice is on the side
-// with the smaller threshold, max() would understate breach. Falls back
-// to `above` when reserves are uninitialized (degenerate pool); the next
-// state-sync event re-picks once reserves land.
+// A governance threshold change can by itself open or close a breach
+// (e.g. tightening from 300 to 100 makes a previously-healthy pool
+// breached). Routing through the same breach/health pipeline that
+// MedianUpdated/OracleReported use (compute new active threshold from
+// `lastMedianPrice` direction, recompute breach anchor + health,
+// `recordBreachTransition`, `recordHealthSample`) ensures the
+// dependent state lands in the same event rather than waiting for the
+// next reserve/oracle event. Falls back to `above` for degenerate pools
+// (zero reserves / no median yet); the next state-sync event re-picks
+// once those land.
 FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   const poolId = makePoolId(event.chainId, event.srcAddress);
-  const pool = await context.Pool.get(poolId);
-  if (!pool) return;
+  const existing = await context.Pool.get(poolId);
+  if (!existing) return;
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
   const above = Number(event.params.newThresholdAbove);
   const below = Number(event.params.newThresholdBelow);
-  const active = pickActiveThreshold(pool, { above, below });
-  context.Pool.set({
-    ...pool,
+  // Direction is determined by reservePrice vs. on-chain median; pass a
+  // synthetic pool view that uses `lastMedianPrice` as the oracle source
+  // so reporter-quote contamination of `oraclePrice` doesn't flip direction.
+  const active = pickActiveThreshold(
+    {
+      reserves0: existing.reserves0,
+      reserves1: existing.reserves1,
+      oraclePrice: existing.lastMedianPrice,
+      invertRateFeed: existing.invertRateFeed,
+      token0Decimals: existing.token0Decimals,
+      token1Decimals: existing.token1Decimals,
+    },
+    { above, below },
+  );
+  const updatedPool: Pool = {
+    ...existing,
     rebalanceThresholdAbove: above,
     rebalanceThresholdBelow: below,
     rebalanceThreshold: active,
     rebalanceThresholdsKnown: true,
-    updatedAtBlock: asBigInt(event.block.number),
-    updatedAtTimestamp: asBigInt(event.block.timestamp),
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  };
+  // priceDifference is reserves+oracle-derived, not threshold-derived, so
+  // we don't recompute it here — but breach/health predicates ARE
+  // threshold-derived, so they must run with the new active value.
+  const deviationBreachStartedAt = nextDeviationBreachStartedAt(
+    existing,
+    updatedPool,
+    blockTimestamp,
+  );
+  const withBreach: Pool = { ...updatedPool, deviationBreachStartedAt };
+  const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
+  const finalPool: Pool = { ...withBreach, healthStatus };
+
+  const breachPoolUpdate = await recordBreachTransition(
+    context,
+    existing,
+    finalPool,
+    {
+      blockTimestamp,
+      blockNumber,
+      txHash: event.transaction.hash,
+      source: "fpmm_threshold_updated",
+    },
+  );
+  const { poolUpdate } = recordHealthSample(
+    finalPool,
+    finalPool.priceDifference,
+    active,
+    blockTimestamp,
+  );
+  context.Pool.set({
+    ...finalPool,
+    ...poolUpdate,
+    ...breachPoolUpdate,
   });
 });

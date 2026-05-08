@@ -4,7 +4,10 @@
 
 import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
-import { computePriceDifference } from "../priceDifference";
+import {
+  computePriceDifference,
+  pickActiveThreshold,
+} from "../priceDifference";
 import {
   computeHealthStatus,
   maybePreloadPool,
@@ -229,11 +232,23 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };
+      // The median itself can flip reservePrice from one side of the
+      // oracle to the other, switching which threshold the contract uses.
+      // Re-pick the active threshold here so breach/health predicates
+      // (`effectiveThreshold(pool)`) see the direction-correct value
+      // until the next state-sync event re-confirms.
+      const rebalanceThreshold = updatedPool.rebalanceThresholdsKnown
+        ? pickActiveThreshold(updatedPool, {
+            above: updatedPool.rebalanceThresholdAbove,
+            below: updatedPool.rebalanceThresholdBelow,
+          })
+        : updatedPool.rebalanceThreshold;
+      const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
       const priceDifference =
-        !updatedPool.source?.includes("virtual") && oraclePrice > 0n
-          ? computePriceDifference(updatedPool)
-          : updatedPool.priceDifference;
-      const withDev = { ...updatedPool, priceDifference };
+        !withThreshold.source?.includes("virtual") && oraclePrice > 0n
+          ? computePriceDifference(withThreshold)
+          : withThreshold.priceDifference;
+      const withDev = { ...withThreshold, priceDifference };
       const deviationBreachStartedAt = nextDeviationBreachStartedAt(
         existing,
         withDev,
@@ -259,7 +274,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
-        existing.rebalanceThreshold,
+        rebalanceThreshold,
         blockTimestamp,
       );
       const persistedPool: Pool = {
@@ -280,7 +295,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleOk: true,
         numReporters: existing.oracleNumReporters,
         priceDifference,
-        rebalanceThreshold: existing.rebalanceThreshold,
+        rebalanceThreshold,
         source: "oracle_median_updated",
         blockNumber,
         txHash: event.transaction.hash,

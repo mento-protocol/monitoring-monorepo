@@ -10,9 +10,11 @@ import {
 const SCALE = 10n ** 24n;
 
 // Helper: build a pool input for computePriceDifference / tryDeriveRebalanceState.
-// Threshold fields default to 100 (live, symmetric) so the fixture is usable
-// from either consumer without per-test setup; computePriceDifference ignores
-// the extra fields via TypeScript structural typing.
+// Threshold fields default to 100 (live, symmetric); oracle freshness fields
+// default to "fresh and known" so the fixture is usable from either consumer
+// without per-test setup. `lastMedianPrice` defaults to `oraclePrice` so
+// derive sees a valid median; tests can override either independently to
+// model contaminated `oraclePrice` (reporter quote) vs. clean median.
 function pool(opts: {
   reserves0: bigint;
   reserves1: bigint;
@@ -22,6 +24,11 @@ function pool(opts: {
   token1Decimals?: number;
   rebalanceThresholdAbove?: number;
   rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+  lastMedianPrice?: bigint;
+  oracleOk?: boolean;
+  oracleTimestamp?: bigint;
+  oracleExpiry?: bigint;
 }) {
   return {
     token0Decimals: 18,
@@ -29,9 +36,16 @@ function pool(opts: {
     invertRateFeed: false,
     rebalanceThresholdAbove: 100,
     rebalanceThresholdBelow: 100,
+    rebalanceThresholdsKnown: true,
+    lastMedianPrice: opts.oraclePrice,
+    oracleOk: true,
+    oracleTimestamp: 1_000_000n,
+    oracleExpiry: 3_600n,
     ...opts,
   };
 }
+
+const FRESH = { eventTimestamp: 1_000_500n };
 
 describe("computePriceDifference", () => {
   // -----------------------------------------------------------------------
@@ -407,51 +421,108 @@ describe("tryDeriveRebalanceState", () => {
       ...opts,
     });
 
-  it("returns null when oraclePrice is 0 (pre-MedianUpdated)", () => {
-    assert.equal(tryDeriveRebalanceState(ausdPool({ oraclePrice: 0n })), null);
+  it("returns null when lastMedianPrice is 0 (pre-MedianUpdated)", () => {
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ lastMedianPrice: 0n }), FRESH),
+      null,
+    );
   });
 
-  it("returns null when both thresholds are 0 (pre-FPMMDeployed seed)", () => {
+  it("returns null when rebalanceThresholdsKnown is false", () => {
     assert.equal(
       tryDeriveRebalanceState(
-        ausdPool({ rebalanceThresholdAbove: 0, rebalanceThresholdBelow: 0 }),
+        ausdPool({ rebalanceThresholdsKnown: false }),
+        FRESH,
       ),
       null,
     );
   });
 
+  it("derives when known 0/0 thresholds (legitimate 'never rebalance')", () => {
+    // Schema-level invariant: `rebalanceThresholdsKnown=true` + 0/0 means
+    // governance configured the pool to never rebalance. Derive should
+    // succeed, not fall back to RPC.
+    const derived = tryDeriveRebalanceState(
+      ausdPool({ rebalanceThresholdAbove: 0, rebalanceThresholdBelow: 0 }),
+      FRESH,
+    );
+    assert.ok(derived != null, "known 0/0 should still derive");
+    assert.equal(derived.rebalanceThreshold, 0);
+  });
+
+  it("returns null when oracleOk is false", () => {
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ oracleOk: false }), FRESH),
+      null,
+    );
+  });
+
+  it("returns null when oracle is stale (timestamp + expiry <= eventTimestamp)", () => {
+    // oracleTimestamp 1_000_000n + expiry 3_600n = 1_003_600n.
+    // eventTimestamp 1_003_700n is past the expiry → contract reverts.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool(), { eventTimestamp: 1_003_700n }),
+      null,
+    );
+  });
+
+  it("does NOT gate on freshness when oracleExpiry is 0 (unknown window)", () => {
+    // oracleExpiry === 0 means we haven't seeded the window yet. Skip the
+    // freshness check; caller's RPC fallback handles edge cases. Otherwise
+    // pre-seed events would never derive.
+    const derived = tryDeriveRebalanceState(ausdPool({ oracleExpiry: 0n }), {
+      eventTimestamp: 999_999_999n,
+    });
+    assert.ok(derived != null);
+  });
+
   it("derives priceDifference matching computePriceDifference (3325 bps)", () => {
-    const derived = tryDeriveRebalanceState(ausdPool());
+    const derived = tryDeriveRebalanceState(ausdPool(), FRESH);
     assert.ok(derived != null, "expected non-null derive result");
     assert.equal(derived.priceDifference, 3325n);
     assert.equal(derived.oraclePrice, ORACLE);
   });
 
-  it("picks `below` threshold when reservePrice <= oraclePrice", () => {
-    // AUSD/USDm: reservePrice (norm1/norm0) ≈ 0.667 < oracle 0.999931 → below.
+  it("uses lastMedianPrice (not oraclePrice) for the math", () => {
+    // OracleReported overwrites pool.oraclePrice with reporter quote;
+    // contract's getRebalancingState uses median. Derive must follow contract.
+    // Pass a contaminated oraclePrice (very different from median) and
+    // verify the result tracks lastMedianPrice.
+    const derived = tryDeriveRebalanceState(
+      ausdPool({
+        oraclePrice: 5n * 10n ** 24n, // contaminated (5×) — should be ignored
+        lastMedianPrice: ORACLE,
+      }),
+      FRESH,
+    );
+    assert.equal(derived?.priceDifference, 3325n);
+    assert.equal(derived?.oraclePrice, ORACLE);
+  });
+
+  it("picks `below` threshold when reservePrice <= median", () => {
+    // AUSD/USDm: reservePrice (norm1/norm0) ≈ 0.667 < median 0.999931 → below.
     const derived = tryDeriveRebalanceState(
       ausdPool({ rebalanceThresholdAbove: 50, rebalanceThresholdBelow: 200 }),
+      FRESH,
     );
     assert.equal(derived?.rebalanceThreshold, 200);
   });
 
-  it("picks `above` threshold when reservePrice > oraclePrice", () => {
+  it("picks `above` threshold when reservePrice > median", () => {
     const derived = tryDeriveRebalanceState(
       ausdPool({
-        reserves1: R1 * 10n, // bumps norm1 → reservePrice well above oracle
+        reserves1: R1 * 10n,
         rebalanceThresholdAbove: 50,
         rebalanceThresholdBelow: 200,
       }),
+      FRESH,
     );
     assert.equal(derived?.rebalanceThreshold, 50);
   });
 
   it("invertRateFeed flag flips the direction comparison", () => {
-    // Fixture that triggers the flip:
-    //   reserveRatio = SCALE (norm0 == norm1), oraclePrice = 2 * SCALE.
-    //   un-inverted: reserveRatio (1) < oraclePrice (2) -> below
-    //   inverted:    oracleRef = SCALE^2/oraclePrice = 0.5*SCALE
-    //                reserveRatio (1) > oracleRef (0.5) -> above
+    // reserveRatio = SCALE, lastMedianPrice = 2*SCALE.
+    // un-inverted: 1 < 2 -> below. inverted: oracleRef = 0.5, 1 > 0.5 -> above.
     const flipOpts = {
       reserves0: 1_000n * 10n ** 18n,
       reserves1: 1_000n * 10n ** 18n,
@@ -459,20 +530,22 @@ describe("tryDeriveRebalanceState", () => {
       rebalanceThresholdAbove: 50,
       rebalanceThresholdBelow: 200,
     };
-    const noInv = tryDeriveRebalanceState(pool(flipOpts));
+    const noInv = tryDeriveRebalanceState(pool(flipOpts), FRESH);
     const inv = tryDeriveRebalanceState(
       pool({ ...flipOpts, invertRateFeed: true }),
+      FRESH,
     );
     assert.equal(noInv?.rebalanceThreshold, 200, "below side un-inverted");
     assert.equal(inv?.rebalanceThreshold, 50, "above side after invert");
   });
 
   it("uses reservesOverride when caller passes pre-write reserves (UpdateReserves path)", () => {
-    // Pool persists stale reserves at handler time; caller passes event
-    // params as override so derive sees post-event state.
     const derived = tryDeriveRebalanceState(
       ausdPool({ reserves0: 1n, reserves1: 1n }),
-      { reserve0: R0, reserve1: R1 },
+      {
+        eventTimestamp: 1_000_500n,
+        reservesOverride: { reserve0: R0, reserve1: R1 },
+      },
     );
     assert.ok(derived != null);
     assert.equal(derived.priceDifference, 3325n);
@@ -481,16 +554,16 @@ describe("tryDeriveRebalanceState", () => {
   it("returns 0 priceDifference when reserves are 0 (degenerate pool)", () => {
     const derived = tryDeriveRebalanceState(
       ausdPool({ reserves0: 0n, reserves1: 0n }),
+      FRESH,
     );
     assert.ok(derived != null);
     assert.equal(derived.priceDifference, 0n);
   });
 
   it("works with only one of the two thresholds set (asymmetric governance)", () => {
-    // above = 0 means "no rebalance when reservePrice is above oracle".
-    // AUSD/USDm has reservePrice < oracle -> below side wins.
     const derived = tryDeriveRebalanceState(
       ausdPool({ rebalanceThresholdAbove: 0, rebalanceThresholdBelow: 150 }),
+      FRESH,
     );
     assert.equal(derived?.rebalanceThreshold, 150);
   });

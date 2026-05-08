@@ -164,9 +164,12 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     }),
     // Use standalone getters — they work even when the oracle is stale,
     // unlike getRebalancingState() which reverts on stale/expired oracle data.
+    // Read at the deploy block so historical replay sees the deploy-time
+    // configuration, not whatever governance has changed it to since.
     context.effect(rebalanceThresholdsEffect, {
       chainId: event.chainId,
       poolAddress: poolAddr,
+      blockNumber,
     }),
     // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
     context.effect(tokenDecimalsScalingEffect, {

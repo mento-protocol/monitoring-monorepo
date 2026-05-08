@@ -65,6 +65,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     ? await selfHealRebalanceThresholds(
         context,
         await selfHealInvertRateFeed(context, fetched),
+        blockNumber,
       )
     : undefined;
 
@@ -73,8 +74,11 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   // until `upsertPool` runs below.
   let resolved: ResolvedRebalanceState | null = existing
     ? tryDeriveRebalanceState(existing, {
-        reserve0: event.params.reserve0,
-        reserve1: event.params.reserve1,
+        eventTimestamp: blockTimestamp,
+        reservesOverride: {
+          reserve0: event.params.reserve0,
+          reserve1: event.params.reserve1,
+        },
       })
     : null;
   if (!resolved) {
@@ -202,6 +206,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     ? await selfHealRebalanceThresholds(
         context,
         await selfHealInvertRateFeed(context, initial),
+        blockNumber,
       )
     : undefined;
   const incentiveGetterMissing = initial?.rebalanceReward === -2;
@@ -210,7 +215,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // entity. So `existing.reserves0/1` matches what `getRebalancingState`
   // sees on chain — no override needed.
   const derivedRebalanceState = existing
-    ? tryDeriveRebalanceState(existing)
+    ? tryDeriveRebalanceState(existing, { eventTimestamp: blockTimestamp })
     : null;
 
   // `preReserves` is sampled at `blockNumber - 1` so subtracting from the

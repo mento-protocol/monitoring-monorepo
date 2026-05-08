@@ -55,7 +55,8 @@ export function classifyBreachEvent(source: string): BreachEventCategory {
   if (source === "fpmm_rebalanced") return "rebalance";
   if (source === "fpmm_swap") return "swap";
   if (source === "fpmm_mint" || source === "fpmm_burn") return "liquidity";
-  if (source === "fpmm_factory") return "threshold_change";
+  if (source === "fpmm_factory" || source === "fpmm_threshold_updated")
+    return "threshold_change";
   if (source === "oracle_reported" || source === "median_updated")
     return "oracle_update";
   // `fpmm_update_reserves` intentionally maps to "unknown": the FPMM
