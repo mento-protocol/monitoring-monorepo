@@ -255,14 +255,22 @@ export function getRpcClient(
 }
 
 /**
- * @internal Exported only so rpc.ts's fetchers can wire it into
- * `readContractWithBlockFallback` calls. Not part of the stable public API
- * — was a private function in the pre-PR-S6 rpc.ts.
+ * Returns a fallback viem public client for the given chainId, or null when
+ * no useful fallback is available.
  *
- * Returns a fallback viem public client for the given chainId.
- * Uses the hardcoded default RPC (public endpoint) — only created when the
- * primary client is a different URL (env-var override). Returns null if the
- * primary already IS the default (no point falling back to the same endpoint).
+ * Resolution:
+ * 1. `ENVIO_RPC_FALLBACK_URL_{chainId}` — explicit per-chain fallback
+ *    override. Use this when the primary you want to swap to (via
+ *    `ENVIO_RPC_URL_{chainId}` unset → hardcoded default) doesn't already
+ *    cover both backfill and live: e.g. set primary to `rpc2.monad.xyz`
+ *    (deeper archive) and fallback to a tokenized QuickNode URL (higher
+ *    rate limit at head).
+ * 2. Hardcoded default in RPC_CONFIG_BY_CHAIN — used when the primary is
+ *    set via env-var override and the default is a different URL.
+ *
+ * Returns null when the resolved fallback URL equals the primary URL (no
+ * point falling back to the same endpoint), or when the resolved URL is a
+ * bare HyperRPC endpoint (HyperRPC doesn't support eth_call).
  */
 export function getFallbackRpcClient(
   chainId: number,
@@ -273,12 +281,16 @@ export function getFallbackRpcClient(
   const config = RPC_CONFIG_BY_CHAIN[chainId];
   if (!config) return null;
 
-  const fallbackUrl = withHyperRpcToken(config.default);
+  const fallbackOverride = process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`];
+  const fallbackRawUrl = fallbackOverride ?? config.default;
+  const fallbackUrl = withHyperRpcToken(fallbackRawUrl);
   if (isBareHyperRpcUrl(fallbackUrl)) return null;
 
   const perChainOverride = process.env[config.envVar];
   const legacyGlobal = process.env.ENVIO_RPC_URL;
-  if (!perChainOverride && !legacyGlobal) return null;
+  const primaryRawUrl = perChainOverride ?? legacyGlobal ?? config.default;
+  const primaryUrl = withHyperRpcToken(primaryRawUrl);
+  if (fallbackUrl === primaryUrl) return null;
 
   const client = createPublicClient({
     transport: http(fallbackUrl, { batch: true }),

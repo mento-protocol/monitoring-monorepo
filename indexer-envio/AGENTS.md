@@ -60,9 +60,10 @@ pnpm test      # Run tests (mocha + chai)
 Copy `.env.example` → `.env` and set:
 
 - `ENVIO_API_TOKEN` — required only for chains that default to HyperRPC (currently only Monad Testnet 10143). Not needed for mainnet if using the full-node defaults. ([create token](https://envio.dev/app/api-tokens))
-- `ENVIO_RPC_URL_42220` — (optional) Celo Mainnet RPC override (default: `https://forno.celo.org`)
-- `ENVIO_RPC_URL_143` — (optional) Monad Mainnet RPC override (default: `https://rpc2.monad.xyz`)
-- `ENVIO_RPC_URL_10143` — (optional) Monad Testnet RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
+- `ENVIO_RPC_URL_42220` — (optional) Celo Mainnet primary RPC override (default: `https://forno.celo.org`)
+- `ENVIO_RPC_URL_143` — (optional) Monad Mainnet primary RPC override (default: `https://rpc2.monad.xyz`)
+- `ENVIO_RPC_URL_10143` — (optional) Monad Testnet primary RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
+- `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Use when neither the primary's archive depth nor its rate limit covers the full sync window — e.g. on Monad set primary to `rpc2.monad.xyz` (deeper archive, lower rate limit) and fallback to a tokenized QuickNode URL (shallower archive, higher rate limit). When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
 
