@@ -68,11 +68,6 @@ function extractRevertSignature(msg: string): string | undefined {
  * level with a human-readable explanation; unexpected failures are logged at
  * warn level. A burst-summary line is emitted every `RPC_BURST_INTERVAL`
  * failures for the same chain+function combination regardless of level.
- *
- * `log` is optional so existing tests + non-effect callers continue working;
- * pass `context.log` from inside an effect/handler to land tagged entries
- * (`level=warn` / `level=debug`) in the Envio dashboard. When omitted, lines
- * fall back to the unleveled console path.
  */
 export function logRpcFailure(
   chainId: number,

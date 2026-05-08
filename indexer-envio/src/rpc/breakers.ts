@@ -214,11 +214,6 @@ async function probeFunction(
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
-  // Reserved for future use — fetchBreakerKind currently uses probeFunction
-  // which doesn't go through readContractWithBlockFallback. Kept on the
-  // signature so the effect handler can pass `context.log` uniformly.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";

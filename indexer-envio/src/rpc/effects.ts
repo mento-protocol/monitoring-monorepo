@@ -467,12 +467,8 @@ export const breakerKindEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: false,
   },
-  async ({ input, context }) =>
-    (await fetchBreakerKind(
-      input.chainId,
-      input.breakerAddress,
-      context.log,
-    )) ?? undefined,
+  async ({ input }) =>
+    (await fetchBreakerKind(input.chainId, input.breakerAddress)) ?? undefined,
 );
 
 export const breakerDefaultsEffect = createEffect(
