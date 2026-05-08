@@ -185,10 +185,11 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 
 ## Follow-ups deferred from PR #342 (axe-core a11y test infra)
 
-Currently captured as `it.todo` blocks in `ui-dashboard/src/__tests__/a11y/controls.a11y.test.tsx`; un-skip when the prod widget fixes land.
+Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/a11y/controls.a11y.test.tsx` replaced with real assertions covering tabIndex distribution + arrow / Home / End key behavior, and the prod widgets now implement the WAI-ARIA roving-tabindex pattern.
 
-- [ ] **`BridgeStatusFilter` keyboard contract.** WAI-ARIA `radiogroup` should expose a single tab stop — `tabIndex={0}` on the selected pill, `tabIndex={-1}` on the others, with arrow keys moving focus. The current widget makes every `role="radio"` pill independently tabbable. Replace the matching `it.todo` with a real assertion covering tabIndex distribution + arrow-key focus moves once the prod fix lands.
-- [ ] **Pool tablist keyboard contract.** Same WAI-ARIA pattern as above, applied to `<PoolTablist>` (`pool/[poolId]/_components/pool-tablist.tsx`). Single tab stop on the selected `role="tab"` button + arrow-key focus movement. Also currently held by `it.todo`.
+- [x] ~~**`BridgeStatusFilter` keyboard contract.**~~ Done: roving tabindex (`tabIndex={0}` on the selected pill, `-1` elsewhere), `ArrowLeft/Right/Up/Down` move focus + selection (radiogroup convention), `Home/End` jump to first/last. Wrapper carries `tabIndex={-1}` for the `interactive-supports-focus` lint rule without polluting the natural tab order.
+- [x] ~~**Pool tablist keyboard contract.**~~ Done: same roving-tabindex pattern on `<PoolTablist>`. `ArrowLeft/Right` move focus + activate (automatic activation per APG tabs pattern), `Home/End` jump to first/last. Test uses `act()` + native `KeyboardEvent` dispatches via `bubbles: true` so React's synthetic event delegation picks up the keydown on the tablist wrapper.
+- [ ] **`BucketFilter` keyboard contract + shared roving-tabindex helper.** `ui-dashboard/src/components/breach-history/bucket-filter.tsx` is the third radiogroup with the same incomplete keyboard handling (Arrow keys only, no Home/End, no `tabIndex` distribution). Bring it up to the same WAI-ARIA contract as the two widgets above. With three call sites the abstraction is finally worth extracting — a `useRovingTabIndex(activeIndex, onChange)` hook that returns a `keydown` handler + the `tabIndex` props for each child would let all three widgets drop ~30 lines of duplicated math.
 
 ## Follow-ups deferred from PR #335 (sign-in callback preservation)
 

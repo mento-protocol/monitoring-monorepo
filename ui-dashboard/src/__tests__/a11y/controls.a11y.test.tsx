@@ -28,14 +28,14 @@
  *    test now catches it (Cursor finding on PR #342).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
 import { LimitSelect } from "@/components/controls";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import { PoolTablist } from "@/app/pool/[poolId]/_components/pool-tablist";
-import { TABS } from "@/app/pool/[poolId]/_lib/constants";
+import { TABS, type Tab } from "@/app/pool/[poolId]/_lib/constants";
 import type { BridgeStatus } from "@/lib/types";
 
 let container: HTMLDivElement;
@@ -131,15 +131,199 @@ describe("BridgeStatusFilter a11y", () => {
     expect(results.violations).toEqual([]);
   });
 
-  // Known gap (tracked in BACKLOG): WAI-ARIA radiogroup keyboard
-  // pattern — exactly one radio in the group should be tabbable
-  // (`tabIndex={0}` on the selected pill, `tabIndex={-1}` on the
-  // others) with arrow keys moving focus. The current production
-  // widget makes every pill tabbable. When the prod fix lands,
-  // replace this todo with the real assertion.
-  it.todo(
-    "BridgeStatusFilter: keyboard contract — single tab stop with arrow-key focus movement",
-  );
+  // WAI-ARIA radiogroup keyboard contract — single tab stop with arrow
+  // keys moving focus AND selection together (radiogroup convention).
+  // See https://www.w3.org/WAI/ARIA/apg/patterns/radio/.
+  describe("BridgeStatusFilter: keyboard contract", () => {
+    function radios(): HTMLButtonElement[] {
+      return Array.from(
+        container.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+      );
+    }
+
+    function pillByLabel(label: string): HTMLButtonElement {
+      const match = radios().find((r) => r.textContent?.trim() === label);
+      if (!match) throw new Error(`No radio pill with label ${label}`);
+      return match;
+    }
+
+    function dispatch(el: HTMLElement, key: string) {
+      act(() => {
+        el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    }
+
+    it("single tab stop: exactly one tabIndex=0 (selected pill); the rest are tabIndex=-1", () => {
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected="ATTESTED"
+          onChange={() => undefined}
+        />,
+      );
+      const tabbable = radios().filter((r) => r.tabIndex === 0);
+      const untabbable = radios().filter((r) => r.tabIndex === -1);
+      expect(tabbable).toHaveLength(1);
+      expect(untabbable).toHaveLength(STATUS_OPTIONS.length); // (N+1) - 1
+      expect(tabbable[0].textContent).toContain("Attested");
+    });
+
+    it("when selected=null, the 'All' pill holds the single tab stop", () => {
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={() => undefined}
+        />,
+      );
+      const tabbable = radios().filter((r) => r.tabIndex === 0);
+      expect(tabbable).toHaveLength(1);
+      expect(tabbable[0].textContent?.trim()).toBe("All");
+    });
+
+    it("ArrowRight moves focus to the next pill AND fires onChange with that value", () => {
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "ArrowRight");
+      // Index 1 → first status option ("PENDING" → "Pending")
+      expect(document.activeElement).toBe(pillByLabel("Pending"));
+      expect(onChange).toHaveBeenCalledWith("PENDING");
+    });
+
+    it("ArrowLeft from 'All' wraps focus AND selection to the last pill", () => {
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "ArrowLeft");
+      const last = STATUS_OPTIONS[STATUS_OPTIONS.length - 1];
+      expect(onChange).toHaveBeenCalledWith(last);
+      // Last pill in STATUS_OPTIONS is "DELIVERED" → label "Delivered"
+      expect(document.activeElement).toBe(pillByLabel("Delivered"));
+    });
+
+    it("ArrowDown behaves like ArrowRight (radiogroup convention)", () => {
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "ArrowDown");
+      expect(onChange).toHaveBeenCalledWith("PENDING");
+      expect(document.activeElement).toBe(pillByLabel("Pending"));
+    });
+
+    it("ArrowUp behaves like ArrowLeft (radiogroup convention)", () => {
+      // Render with a non-null `selected` so ArrowUp (which moves to a
+      // different value) actually triggers `onChange`. Controlled-component
+      // semantics: `onChange` only fires when the new value differs from
+      // the current `selected` prop.
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected="PENDING"
+          onChange={onChange}
+        />,
+      );
+      const pending = pillByLabel("Pending");
+      pending.focus();
+      dispatch(pending, "ArrowUp");
+      expect(onChange).toHaveBeenCalledWith(null);
+      expect(document.activeElement).toBe(pillByLabel("All"));
+    });
+
+    it("Home jumps focus + selection to the first pill ('All')", () => {
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected="DELIVERED"
+          onChange={onChange}
+        />,
+      );
+      const last = pillByLabel("Delivered");
+      last.focus();
+      dispatch(last, "Home");
+      expect(document.activeElement).toBe(pillByLabel("All"));
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it("End jumps focus + selection to the last pill", () => {
+      const onChange = vi.fn();
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "End");
+      const last = STATUS_OPTIONS[STATUS_OPTIONS.length - 1];
+      expect(onChange).toHaveBeenCalledWith(last);
+      expect(document.activeElement).toBe(pillByLabel("Delivered"));
+    });
+
+    it("roving tabindex: arrow-key focus moves the single tab stop to the focused pill", () => {
+      // Codex finding on PR #350: under URL-backed `selected`,
+      // tying `tabIndex={0}` to the selected pill leaves a stale tab
+      // stop while focus is on the newly arrived pill, breaking the
+      // single-tab-stop contract for Tab/Shift+Tab navigation. The
+      // local roving tabindex must follow focus.
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected={null}
+          onChange={() => undefined}
+        />,
+      );
+      // Initial: "All" holds the tab stop.
+      expect(pillByLabel("All").tabIndex).toBe(0);
+      // ArrowRight from "All" → focus moves to "Pending"; tab stop moves with it.
+      const all = pillByLabel("All");
+      all.focus();
+      dispatch(all, "ArrowRight");
+      expect(document.activeElement).toBe(pillByLabel("Pending"));
+      expect(pillByLabel("Pending").tabIndex).toBe(0);
+      // Tab stop is now exclusively on "Pending"; "All" and the rest are -1.
+      const tabbable = radios().filter((r) => r.tabIndex === 0);
+      expect(tabbable).toHaveLength(1);
+      expect(tabbable[0].textContent?.trim()).toBe("Pending");
+    });
+
+    it("axe still passes after the keyboard contract is in place", async () => {
+      render(
+        <BridgeStatusFilter
+          options={STATUS_OPTIONS}
+          selected="SENT"
+          onChange={() => undefined}
+        />,
+      );
+      const results = await axe(container);
+      expect(results.violations).toEqual([]);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -240,12 +424,180 @@ describe("PoolTablist a11y (real component)", () => {
   // resolves cleanly under axe's `aria-valid-attr-value` check. The
   // role contract for the tablist itself is pinned above.
 
-  // Known gap (tracked in BACKLOG): the WAI-ARIA tablist keyboard
-  // pattern — single tab stop with arrow-key focus movement — is NOT
-  // enforced. Every `role="tab"` button is naturally tabbable. When
-  // the keyboard contract lands, replace this todo with a real
-  // assertion (tabIndex distribution + key-event focus moves).
-  it.todo(
-    "PoolTablist: keyboard contract — single tab stop with arrow-key focus movement",
-  );
+  // WAI-ARIA tablist keyboard contract — single tab stop with arrow
+  // keys moving focus only; activation requires Enter/Space (manual
+  // activation). The pool page's `onSelect` is wired to a router URL
+  // change, which makes automatic activation a navigation-storm risk
+  // and creates stale-prop races between keystrokes (codex flagged
+  // both on PR #350). Manual activation is the WAI-ARIA-spec-supported
+  // variant for this case.
+  // See https://www.w3.org/WAI/ARIA/apg/patterns/tabs/.
+  describe("PoolTablist: keyboard contract (manual activation)", () => {
+    function tabs(): HTMLButtonElement[] {
+      return Array.from(
+        container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+      );
+    }
+
+    function tabById(id: string): HTMLButtonElement {
+      const match = tabs().find((t) => t.id === id);
+      if (!match) throw new Error(`No tab with id ${id}`);
+      return match;
+    }
+
+    function dispatch(el: HTMLElement, key: string) {
+      act(() => {
+        el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    }
+
+    function renderTablist(active: Tab, onSelect: (t: Tab) => void) {
+      render(
+        <>
+          <PoolTablist
+            visibleTabs={TABS}
+            active={active}
+            onSelect={onSelect}
+            limit={50}
+            onLimitChange={() => undefined}
+          />
+          <div
+            role="tabpanel"
+            id={`panel-${active}`}
+            aria-labelledby={`tab-${active}`}
+          >
+            <p>{active}</p>
+          </div>
+        </>,
+      );
+    }
+
+    it("single tab stop: exactly one tabIndex=0 (the selected tab); the rest are tabIndex=-1", () => {
+      renderTablist("rebalances", () => undefined);
+      const tabbable = tabs().filter((t) => t.tabIndex === 0);
+      const untabbable = tabs().filter((t) => t.tabIndex === -1);
+      expect(tabbable).toHaveLength(1);
+      expect(untabbable).toHaveLength(TABS.length - 1);
+      expect(tabbable[0].id).toBe("tab-rebalances");
+    });
+
+    it("ArrowRight moves focus to the next tab WITHOUT activating it", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowRight");
+      // TABS[3] = "rebalances"; next is TABS[4] = "liquidity"
+      expect(document.activeElement).toBe(tabById("tab-liquidity"));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("ArrowLeft moves focus to the previous tab WITHOUT activating it", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowLeft");
+      // TABS[3] = "rebalances"; previous is TABS[2] = "reserves"
+      expect(document.activeElement).toBe(tabById("tab-reserves"));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("ArrowLeft from the first tab wraps focus to the last tab (no activation)", () => {
+      const onSelect = vi.fn();
+      renderTablist("providers", onSelect);
+      const start = tabById("tab-providers");
+      start.focus();
+      dispatch(start, "ArrowLeft");
+      const last = TABS[TABS.length - 1];
+      expect(document.activeElement).toBe(tabById(`tab-${last}`));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("ArrowRight from the last tab wraps focus to the first tab (no activation)", () => {
+      const onSelect = vi.fn();
+      const last = TABS[TABS.length - 1];
+      renderTablist(last, onSelect);
+      const start = tabById(`tab-${last}`);
+      start.focus();
+      dispatch(start, "ArrowRight");
+      expect(document.activeElement).toBe(tabById(`tab-${TABS[0]}`));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("Home jumps focus to the first tab (no activation)", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "Home");
+      expect(document.activeElement).toBe(tabById(`tab-${TABS[0]}`));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("End jumps focus to the last tab (no activation)", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "End");
+      const last = TABS[TABS.length - 1];
+      expect(document.activeElement).toBe(tabById(`tab-${last}`));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("roving tabindex: arrow-key focus moves the single tab stop without changing `active`", () => {
+      // Codex finding on PR #350: with manual activation, focus can
+      // move to a non-selected tab without changing `active`. Tying
+      // `tabIndex={0}` to `active` would leave the user able to Tab
+      // back to the selected tab instead of leaving the group.
+      // Roving tabindex must follow focus.
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      // Initial: only "rebalances" is the tab stop.
+      const initialTabbable = tabs().filter((t) => t.tabIndex === 0);
+      expect(initialTabbable).toHaveLength(1);
+      expect(initialTabbable[0].id).toBe("tab-rebalances");
+      // ArrowLeft → focus moves to "reserves"; tab stop moves with it.
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowLeft");
+      const movedTabbable = tabs().filter((t) => t.tabIndex === 0);
+      expect(movedTabbable).toHaveLength(1);
+      expect(movedTabbable[0].id).toBe("tab-reserves");
+      expect(tabById("tab-rebalances").tabIndex).toBe(-1);
+      // `active` (and therefore `aria-selected`) is unchanged.
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(tabById("tab-rebalances").getAttribute("aria-selected")).toBe(
+        "true",
+      );
+      expect(tabById("tab-reserves").getAttribute("aria-selected")).toBe(
+        "false",
+      );
+    });
+
+    it("clicking the focused tab activates it (Enter/Space dispatch via native button onClick)", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      // Move focus with the keyboard, then commit with click — native
+      // <button> handles Space/Enter as a click, so this exercises the
+      // same activation path.
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowRight");
+      const focused = document.activeElement as HTMLButtonElement;
+      expect(focused.id).toBe("tab-liquidity");
+      act(() => {
+        focused.click();
+      });
+      expect(onSelect).toHaveBeenCalledWith("liquidity");
+      expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("axe still passes after the keyboard contract is in place", async () => {
+      renderTablist("swaps", () => undefined);
+      const results = await axe(container);
+      expect(results.violations).toEqual([]);
+    });
+  });
 });
