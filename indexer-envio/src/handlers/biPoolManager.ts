@@ -6,20 +6,21 @@
 // pool-detail page renders bucket reserves, swap fee, oracle feed, etc.
 // from the `BiPoolExchange` entity these handlers populate.
 //
-// Phase 2 wiring (this file): contract is registered + events are
-// recognized. ExchangeCreated handler stubs out the entity with what the
-// event provides directly; the full PoolConfig (spread, referenceRateFeedID,
-// reset frequency, …) lands in a follow-up commit that adds the
-// `getPoolExchange` RPC effect. BucketsUpdated / SpreadUpdated / Exchange-
-// Destroyed handlers carry real logic from this commit.
+// ExchangeCreated calls `getPoolExchange` via `poolExchangeEffect` to
+// backfill the full PoolConfig (spread, referenceRateFeedID, reset
+// frequency, etc.) at create time. BucketsUpdated / SpreadUpdated then
+// mutate fields incrementally as the contract emits update events.
 // ---------------------------------------------------------------------------
 
 import {
   BiPoolManager,
   type BiPoolExchange,
   type BucketUpdate,
+  type Pool,
 } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
+import { poolExchangeEffect } from "../rpc/effects";
+import { lookupPricingModuleName } from "../contractAddresses";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -30,36 +31,72 @@ function exchangeRowId(chainId: number, exchangeId: string): string {
 // ---------------------------------------------------------------------------
 // BiPoolManager.ExchangeCreated
 //
-// Minimal v1: persist what the event provides. Spread / referenceRateFeedID
-// / reset frequency / bucket targets land via SpreadUpdated + BucketsUpdated
-// + a follow-up RPC backfill. Until then the field is zero/empty — the
-// dashboard renders "—" for unknown values, same as the API-route path did.
+// Persist the full PoolExchange struct at create time. The event itself
+// carries asset0/asset1/pricingModule but NOT spread / referenceRateFeedID /
+// reset frequency / bucket targets — those would otherwise wait until later
+// SpreadUpdated + BucketsUpdated events. We RPC-backfill via
+// `poolExchangeEffect` (Envio dedups across the batch) so the dashboard's
+// fee/feed/reset tiles aren't all "—" between create and first update.
+//
+// If the VirtualPool wrapper was deployed BEFORE the underlying exchange
+// (rare ordering, but possible since the two registries are independent),
+// the VP handler stamped `Pool.wrappedExchangeId` already — we read it back
+// to set `BiPoolExchange.wrappedByPoolId` so the join works in both
+// directions without an explicit `.contractRegister` orchestration.
 // ---------------------------------------------------------------------------
 
 BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
   const id = exchangeRowId(event.chainId, event.params.exchangeId);
+  const exchangeId = event.params.exchangeId.toLowerCase();
+  const exchangeProvider = asAddress(event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
+
+  // RPC backfill — `undefined` on transient failure. Caller stamps zeros for
+  // the gap; the next SpreadUpdated / BucketsUpdated event still populates
+  // its own fields incrementally.
+  const struct = await context.effect(poolExchangeEffect, {
+    chainId: event.chainId,
+    exchangeProvider,
+    exchangeId,
+  });
+
+  // Reverse-join: a VP deployed BEFORE this exchange would have stamped its
+  // own `Pool.wrappedExchangeId` row. If we find one, populate the
+  // `wrappedByPoolId` back-reference so dashboard joins work in both
+  // directions. Single getWhere call — VP-first ordering is rare so the
+  // search hits 0 or 1 row in practice; we still chain-filter because
+  // Envio's getWhere is single-field-only.
+  const wrappingPools =
+    await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+  const wrappedByPoolId = wrappingPools.find(
+    (p: Pool) => p.chainId === event.chainId,
+  )?.id;
+
+  const pricingModule =
+    struct?.pricingModule ?? asAddress(event.params.pricingModule);
 
   const row: BiPoolExchange = {
     id,
     chainId: event.chainId,
-    exchangeId: event.params.exchangeId.toLowerCase(),
-    exchangeProvider: asAddress(event.srcAddress),
-    asset0: asAddress(event.params.asset0),
-    asset1: asAddress(event.params.asset1),
-    pricingModule: asAddress(event.params.pricingModule),
-    pricingModuleName: undefined,
-    spread: BigInt(0),
-    referenceRateFeedID: ZERO_ADDRESS,
-    referenceRateResetFrequency: BigInt(0),
-    minimumReports: BigInt(0),
-    stablePoolResetSize: BigInt(0),
-    bucket0: BigInt(0),
-    bucket1: BigInt(0),
-    lastBucketUpdate: BigInt(0),
+    exchangeId,
+    exchangeProvider,
+    asset0: struct?.asset0 ?? asAddress(event.params.asset0),
+    asset1: struct?.asset1 ?? asAddress(event.params.asset1),
+    pricingModule,
+    pricingModuleName:
+      lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
+    spread: struct?.spread ?? BigInt(0),
+    referenceRateFeedID: struct?.referenceRateFeedID ?? ZERO_ADDRESS,
+    referenceRateResetFrequency:
+      struct?.referenceRateResetFrequency ?? BigInt(0),
+    minimumReports: struct?.minimumReports ?? BigInt(0),
+    stablePoolResetSize: struct?.stablePoolResetSize ?? BigInt(0),
+    bucket0: struct?.bucket0 ?? BigInt(0),
+    bucket1: struct?.bucket1 ?? BigInt(0),
+    lastBucketUpdate: struct?.lastBucketUpdate ?? BigInt(0),
     isDeprecated: false,
-    wrappedByPoolId: undefined,
+    wrappedByPoolId,
     createdAtBlock: blockNumber,
     createdAtTimestamp: blockTimestamp,
     updatedAtBlock: blockNumber,
@@ -67,6 +104,27 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
   };
 
   context.BiPoolExchange.set(row);
+
+  // Reverse-link: if a VP wrapper deployed before this exchange, mirror the
+  // feedID onto its Pool so SortedOracles handlers find it naturally.
+  // Conditional gates (real feedID + matching pool exists) mirror the
+  // forward-link path in virtualPool.ts to keep the two directions
+  // semantically symmetric.
+  if (
+    wrappedByPoolId &&
+    row.referenceRateFeedID &&
+    row.referenceRateFeedID !== ZERO_ADDRESS
+  ) {
+    const pool = await context.Pool.get(wrappedByPoolId);
+    if (pool && pool.referenceRateFeedID !== row.referenceRateFeedID) {
+      context.Pool.set({
+        ...pool,
+        referenceRateFeedID: row.referenceRateFeedID,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -490,6 +490,7 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  wrappedExchangeId,
   existing: existingOverride,
 }: {
   context: PoolContext;
@@ -513,6 +514,12 @@ export const upsertPool = async ({
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  /** Wrapped v2 exchange ID for VirtualPools. Undefined for FPMM pools, or
+   * for VPs whose bytecode didn't yield a match (transient RPC failure).
+   * Only persisted on first successful read — never overwritten with
+   * undefined once set, so a one-time RPC failure on a re-sync doesn't
+   * blank a known value. */
+  wrappedExchangeId?: string;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -602,6 +609,11 @@ export const upsertPool = async ({
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    // Persist `wrappedExchangeId` once on first successful read — never
+    // overwrite a known value with undefined. Re-sync RPC blips would
+    // otherwise blank the link and the dashboard's pool→exchange join
+    // would intermittently fail.
+    wrappedExchangeId: wrappedExchangeId ?? existing.wrappedExchangeId,
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:

@@ -42,6 +42,10 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
   fetchRebalancingState,
   fetchReserves,
   fetchInvertRateFeed,
@@ -56,11 +60,16 @@ export {
   _clearMockRebalanceIncentivesAtBlock,
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
+  fetchPoolExchange,
+  fetchVirtualPoolExchangeId,
+  extractVpExchangeIdFromBytecode,
 } from "./rpc/pool-state";
 export type {
   RebalancingState,
   FeeGetterMock,
   FetchFeesMock,
+  PoolExchangeStruct,
+  VirtualPoolExchangeId,
 } from "./rpc/pool-state";
 
 // Re-export breaker RPC self-heal symbols so existing callers that import from

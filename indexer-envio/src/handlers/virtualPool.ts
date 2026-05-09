@@ -15,7 +15,7 @@ import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
-import { tokenDecimalsScalingEffect } from "../rpc/effects";
+import { tokenDecimalsScalingEffect, vpExchangeIdEffect } from "../rpc/effects";
 import {
   buildRebalanceOutcome,
   scalingFactorToDecimals,
@@ -42,11 +42,17 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const token1 = asAddress(event.params.token1);
   const poolAddr = asAddress(event.params.pool);
 
-  // Fetch token decimals so `Pool.token{0,1}Decimals` are correct from the
-  // start instead of inheriting the 18/18 default. Mirrors the FPMM factory
-  // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to scale
-  // correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is on a leg.
-  const [dec0Raw, dec1Raw] = await Promise.all([
+  // Fetch token decimals + extract the wrapped v2 exchangeId in parallel.
+  // Decimals: so `Pool.token{0,1}Decimals` are correct from the start
+  // instead of inheriting the 18/18 default. Mirrors the FPMM factory
+  // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to
+  // scale correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is
+  // on a leg.
+  // Exchange id: extracted from the VP's bytecode (PUSH32 immediates in
+  // swap() preamble — see `extractVpExchangeIdFromBytecode`). Persisting at
+  // deploy lets the dashboard's pool-detail page join Pool → BiPoolExchange
+  // in one GraphQL query instead of an HTTP/RPC round-trip per page load.
+  const [dec0Raw, dec1Raw, vpExchange] = await Promise.all([
     context.effect(tokenDecimalsScalingEffect, {
       chainId: event.chainId,
       poolAddress: poolAddr,
@@ -59,6 +65,10 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       fn: "decimals1",
       fallbackTokenAddress: token1,
     }),
+    context.effect(vpExchangeIdEffect, {
+      chainId: event.chainId,
+      vpAddress: poolAddr,
+    }),
   ]);
   const token0Decimals = dec0Raw
     ? (scalingFactorToDecimals(dec0Raw) ?? 18)
@@ -66,6 +76,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const token1Decimals = dec1Raw
     ? (scalingFactorToDecimals(dec1Raw) ?? 18)
     : 18;
+  const wrappedExchangeId = vpExchange?.exchangeId;
 
   await upsertPool({
     context,
@@ -78,11 +89,56 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     blockTimestamp: asBigInt(event.block.timestamp),
     txHash: event.transaction.hash,
     tokenDecimals: { token0Decimals, token1Decimals },
+    wrappedExchangeId,
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",
     },
   });
+
+  // Forward link: if the underlying BiPoolManager exchange was already
+  // created (the common ordering — exchanges register first, VPs wrap them
+  // later), stamp the back-reference now AND copy the v2 feed ID onto the
+  // Pool so the existing SortedOracles `getPoolsByFeed` lookup finds the
+  // VP naturally. The reverse case (VP-first) is handled in
+  // BiPoolManager.ExchangeCreated. Single get on a bytes32-keyed primary
+  // key — cheap.
+  if (wrappedExchangeId) {
+    const exchangeRowId = `${event.chainId}-${wrappedExchangeId}`;
+    const exchange = await context.BiPoolExchange.get(exchangeRowId);
+    if (exchange) {
+      if (exchange.wrappedByPoolId !== poolId) {
+        context.BiPoolExchange.set({
+          ...exchange,
+          wrappedByPoolId: poolId,
+          updatedAtBlock: asBigInt(event.block.number),
+          updatedAtTimestamp: asBigInt(event.block.timestamp),
+        });
+      }
+      // Copy the feedID onto the Pool so the existing SortedOracles
+      // handler finds the VP via `getPoolsByFeed`. ZERO_ADDRESS = the
+      // ExchangeCreated handler hasn't completed RPC backfill yet
+      // (transient blip); leave Pool.referenceRateFeedID empty and let
+      // the next FPMM-style touch carry it in. Only run when we have
+      // a real feedID to avoid clobbering a previously-set value with
+      // ZERO_ADDRESS during reorgs.
+      const ZERO_FEED = "0x0000000000000000000000000000000000000000";
+      if (
+        exchange.referenceRateFeedID &&
+        exchange.referenceRateFeedID !== ZERO_FEED
+      ) {
+        const pool = await context.Pool.get(poolId);
+        if (pool && pool.referenceRateFeedID !== exchange.referenceRateFeedID) {
+          context.Pool.set({
+            ...pool,
+            referenceRateFeedID: exchange.referenceRateFeedID,
+            updatedAtBlock: asBigInt(event.block.number),
+            updatedAtTimestamp: asBigInt(event.block.timestamp),
+          });
+        }
+      }
+    }
+  }
 
   const lifecycle: VirtualPoolLifecycle = {
     id,
