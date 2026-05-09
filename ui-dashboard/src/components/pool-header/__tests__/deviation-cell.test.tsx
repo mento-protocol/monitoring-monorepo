@@ -257,9 +257,7 @@ describe("DeviationCell — info popover", () => {
       <DeviationCell pool={pool} network={NETWORK} />,
     );
     expect(html).toContain("Never rebalances");
-    expect(html).toContain(
-      "Governance has disabled rebalancing for this pool",
-    );
+    expect(html).toContain("Governance has disabled rebalancing for this pool");
     expect(html).not.toMatch(/<dd><span[^>]*>—<\/span><\/dd>/);
   });
 });
