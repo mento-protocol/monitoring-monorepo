@@ -98,22 +98,26 @@ or the deployment record list.
 ## Phase 2 — Babysit the build + sync
 
 Invoke `babysit-indexer-deploy` via the Skill tool with `args: "<TARGET_COMMIT>"`.
-That skill handles its own poll loop (5m cron, 18-cycle / 90-min budget) and
-returns when:
+That command runs a persistent `Monitor` (45s internal poll, 30-min build
+deadline, 90-min sync deadline) that emits stdout lines on state change and
+exits when:
 
 - All chains' `timestamp_caught_up_to_head_or_endblock` is non-empty (success), OR
 - 30 min elapsed without the deployment registering (build failed; stop), OR
 - 90 min elapsed without full sync (stop and report last status), OR
-- The user cancels.
+- The user cancels via `TaskStop`.
 
-Do NOT poll status yourself in parallel — the skill is the single source of
-truth for sync state. Wait for it to return before continuing.
+Do NOT poll status yourself in parallel — the Monitor is the single source of
+truth for sync state. Wait for the terminal emit before continuing.
 
-Babysit returns one of:
+Babysit's terminal emits map to:
 
-- **"ready to promote"** — the new deployment is synced; continue to Phase 3.
-- **"already promoted"** — `TARGET_COMMIT` is already `prod_status=prod` (re-run case); continue to Phase 3, which will be a no-op, then through DNS wait + verify per the idempotency contract.
-- Anything else (build failed, sync stalled, user cancelled) — stop and surface the failure. **Never promote a non-synced deployment.**
+- `READY_TO_PROMOTE` — the new deployment is synced; continue to Phase 3.
+- `ALREADY_PROMOTED` — `TARGET_COMMIT` is already `prod_status=prod` (re-run case); continue to Phase 3, which will be a no-op, then through DNS wait + verify per the idempotency contract.
+- `BUILD_FAILED` / `SYNC_DEADLINE` — stop and surface the failure. **Never promote a non-synced deployment.**
+- User-cancelled (`TaskStop`) — stop, do not promote.
+
+Note: `ERROR <kind>` lines (e.g. `ERROR auth_or_network`) are **transient**, not terminal — the Monitor keeps polling after them. Don't stop on `ERROR` emits; the wall-clock deadline checks ensure a stuck error eventually escalates to `BUILD_FAILED` or `SYNC_DEADLINE`.
 
 **If `--no-promote` was passed, stop here.** Print a summary listing the
 synced commit and the paste-ready promote command for the user to run later
