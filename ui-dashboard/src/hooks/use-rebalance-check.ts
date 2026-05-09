@@ -5,6 +5,8 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
+import { fetchJsonOrThrow } from "@/lib/fetch-json";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 
 /**
@@ -39,12 +41,20 @@ export function useRebalanceCheck(
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
     key,
-    fetchRebalanceCheck,
+    (url) => fetchJsonOrThrow<RebalanceCheckResult>(url, "Rebalance check"),
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,
+      revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      shouldRetryOnError: false,
+      // Shared retry handler — SWR 2.x suppresses `refreshInterval`
+      // while the hook is in error state, so without an explicit retry
+      // path a transient 502 wedges "Diagnostics unavailable" until
+      // reload. `rateLimitAwareRetry` defers each retry via
+      // `scheduleWhenActive`, which checks `document.hidden` +
+      // `navigator.onLine` at both schedule and fire time (TOCTOU
+      // guard). Matches the convention `useGQL` / `useBridgeGQL` use.
+      onErrorRetry: rateLimitAwareRetry,
     },
   );
 
@@ -53,19 +63,6 @@ export function useRebalanceCheck(
     isLoading: shouldCheck && isLoading,
     error,
   };
-}
-
-async function fetchRebalanceCheck(url: string): Promise<RebalanceCheckResult> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(
-      body?.error ?? `Rebalance check failed (HTTP ${res.status})`,
-    );
-  }
-  return (await res.json()) as RebalanceCheckResult;
 }
 
 function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {

@@ -145,14 +145,17 @@ export const POOL_DAILY_VOLUME = /* GraphQL */ `
 `;
 
 /**
- * Top legacy-v2 trader-day rows by volume. Source: BrokerTraderDailySnapshot,
+ * Top legacy-v2 producer-day rows by volume. Source: BrokerTraderDailySnapshot,
  * which the broker handler only writes when `routedViaV3Router=false` — so
  * these are *broker-direct* swaps (Mento UI/SDK + third-party aggregators
  * still routing through the legacy Broker). The leaderboard's `venue=v2`
  * tab uses this to surface migration-outreach targets: who's still on v2.
  *
- * No `feesPaidUsdWei`/`uniquePools` (the v2 entity doesn't carry them — see
- * schema.graphql comment on BrokerTraderDailySnapshot for why).
+ * The entity is keyed by `caller` (tx.from / signer EOA) — aliased to
+ * `trader` in the response so the dashboard's row shape stays uniform with
+ * v3's TraderDailySnapshot. No `feesPaidUsdWei`/`uniquePools` (the v2 entity
+ * doesn't carry them — see schema.graphql comment on BrokerTraderDailySnapshot
+ * for why).
  */
 export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
   query BrokerTraderDailyTop(
@@ -170,7 +173,7 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
     ) {
       id
       chainId
-      trader
+      trader: caller
       timestamp
       swapCount
       volumeUsdWei
@@ -353,7 +356,7 @@ export const BROKER_LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
       limit: 1000
     ) {
       chainId
-      trader
+      trader: caller
       volumeUsdWei
       swapCount
       isSystemAddress
@@ -413,7 +416,7 @@ export const BROKER_LEADERBOARD_YESTERDAY_TRADERS = /* GraphQL */ `
       limit: 1000
     ) {
       chainId
-      trader
+      trader: caller
       volumeUsdWei
       swapCount
       isSystemAddress
