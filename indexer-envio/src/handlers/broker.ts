@@ -180,16 +180,22 @@ Broker.Swap.handler(async ({ event, context }) => {
   // aren't in the `Pool` table). The static contracts.json check still
   // catches Mento internal addresses.
   //
-  // Check BOTH `caller` (signer EOA) AND `brokerCaller` (msg.sender to
-  // Broker): protocol-internal contracts that call Broker — Reserve
-  // multisig (Gnosis Safe), governance proxies, internal rebalancers —
-  // appear as `brokerCaller`, not `caller`. Filtering only on `caller`
-  // would miss a Safe-initiated swap (where `caller` is one of the Safe
-  // owner EOAs, not the Safe address registered in system-addresses.json).
-  // Either match is enough to mark the row as system-originated.
-  const callerIsSystem =
-    isSystemAddress(event.chainId, caller) ||
-    isSystemAddress(event.chainId, brokerCaller);
+  // We deliberately check ONLY `caller` (signer EOA), not `brokerCaller`.
+  // Mento's `system-addresses` set includes both true protocol-internal
+  // contracts (Reserve, MigrationMultisig, ReserveLiquidityStrategy) AND
+  // user-facing routers that wrap normal swaps (MentoRouter v1/v2,
+  // Routerv300). OR-checking `brokerCaller` would correctly catch a
+  // hypothetical Safe-initiated treasury swap (where the Safe is the
+  // brokerCaller and the owner EOA is the caller) — but it would also
+  // wrongly hide every user who routes through MentoRouter, since the
+  // Router contract is in the same flat system-addresses list. The
+  // false-positive cost (hiding real users) outweighs the missed-Safe
+  // edge case; if the Safe-treasury path becomes load-bearing we can
+  // either split system-addresses into "internal" vs "router" tiers, or
+  // register the Safe owner EOAs in system-addresses directly. For now
+  // signer-EOA matching is the safer rule — codex flagged the OR-form
+  // as a P1 false-positive on PR #363.
+  const callerIsSystem = isSystemAddress(event.chainId, caller);
   const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
   const existingCallerDay =
     await context.BrokerTraderDailySnapshot.get(callerDayId);

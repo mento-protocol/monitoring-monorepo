@@ -341,34 +341,38 @@ describe("Broker.Swap handler", () => {
     assert.equal(row!.lastSeenTimestamp, 1_700_000_500n);
   });
 
-  it("flags isSystemAddress=true when brokerCaller is a Mento internal contract even if caller is a non-system EOA", async () => {
-    // Regression guard for the gap codex flagged on PR #363: a Mento Reserve
-    // multisig (Gnosis Safe) calling Broker has `brokerCaller = Safe address`
-    // (in system-addresses) but `caller = Safe owner EOA` (NOT in system-
-    // addresses). Filtering only on `caller` would surface those swaps as
-    // user-facing flow on the leaderboard. The handler now ORs both checks.
+  it("does NOT flag isSystemAddress on brokerCaller-side match (avoids hiding MentoRouter users as system volume)", async () => {
+    // Codex P1 finding on PR #363: an earlier draft of this PR OR-ed the
+    // `isSystemAddress` check across both `caller` and `brokerCaller`. That
+    // looks correct in isolation but it pulls double duty against the flat
+    // system-addresses set, which includes user-facing routers (MentoRouter
+    // v1/v2, Routerv300) alongside true protocol-internal addresses
+    // (Reserve, MigrationMultisig). For a normal user routing via
+    // MentoRouter, `brokerCaller = MentoRouter` (in system-addresses) while
+    // `caller = user EOA` (not). OR-checking would hide the user as system
+    // volume — false positive. The current rule is signer-EOA-only.
     const RESERVE = "0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9"; // Celo Reserve from @mento-protocol/contracts
-    const SAFE_OWNER_EOA = "0xc1cccccccccccccccccccccccccccccccccccccc";
+    const NORMAL_EOA = "0xc1cccccccccccccccccccccccccccccccccccccc";
     let mockDb = MockDb.createMockDb();
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
       blockTimestamp: 1_700_000_000,
       logIndex: 0,
-      brokerCaller: RESERVE, // Safe address, IS in system-addresses
-      txFrom: SAFE_OWNER_EOA, // owner EOA, NOT in system-addresses
+      brokerCaller: RESERVE, // IS in system-addresses
+      txFrom: NORMAL_EOA, // NOT in system-addresses
     });
 
     const dayTs = dayBucket(1_700_000_000n);
-    const id = `${CHAIN_CELO}-${SAFE_OWNER_EOA.toLowerCase()}-${dayTs}`;
+    const id = `${CHAIN_CELO}-${NORMAL_EOA.toLowerCase()}-${dayTs}`;
     const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
       | { caller: string; isSystemAddress: boolean }
       | undefined;
     assert.isOk(row, "BrokerTraderDailySnapshot row missing");
-    assert.equal(row!.caller, SAFE_OWNER_EOA.toLowerCase());
+    assert.equal(row!.caller, NORMAL_EOA.toLowerCase());
     assert.equal(
       row!.isSystemAddress,
-      true,
-      "brokerCaller in system-addresses should propagate isSystemAddress=true even when caller (signer EOA) is not registered",
+      false,
+      "isSystemAddress must check ONLY caller (signer EOA); checking brokerCaller too would wrongly hide MentoRouter users",
     );
   });
 
