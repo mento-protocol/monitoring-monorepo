@@ -209,11 +209,11 @@ or `--verbose` / `--explain <file:line>` for the live counts.
 Each bullet is one PR-shaped piece of work, rough priority order:
 
 - [ ] **`react-doctor/nextjs-no-side-effect-in-get-handler`** (1 error).
-  `ui-dashboard/src/app/api/rebalance-check/route.ts:46` calls `inFlight.delete(...)`
-  inside a GET handler — CSRF / unintended-prefetch risk. Move the side
-  effect to a POST handler (or accept it explicitly with a one-line
-  inline disable + rationale if the prefetch surface is already
-  mitigated and a POST is too disruptive).
+      `ui-dashboard/src/app/api/rebalance-check/route.ts:46` calls `inFlight.delete(...)`
+      inside a GET handler — CSRF / unintended-prefetch risk. Move the side
+      effect to a POST handler (or accept it explicitly with a one-line
+      inline disable + rationale if the prefetch surface is already
+      mitigated and a POST is too disruptive).
 - [ ] **Next.js correctness pass** (~13 warnings).
   - `nextjs-missing-metadata` ×7 — add `export const metadata` /
     `generateMetadata()` to the affected pages (SEO).
@@ -227,12 +227,12 @@ Each bullet is one PR-shaped piece of work, rough priority order:
     (breaks on reorder/filter).
   - `no-giant-component` ×11 — split files / extract subcomponents.
 - [ ] **Performance pass** (~50+ warnings, long tail).
-  Headline: `js-combine-iterations` ×24, `js-tosorted-immutable` ×14,
-  `async-await-in-loop` ×11, `js-flatmap-filter` ×5,
-  `rerender-state-only-in-handlers` ×4, plus a tail of single hits.
+      Headline: `js-combine-iterations` ×24, `js-tosorted-immutable` ×14,
+      `async-await-in-loop` ×11, `js-flatmap-filter` ×5,
+      `rerender-state-only-in-handlers` ×4, plus a tail of single hits.
 - [ ] **State & Effects pass** (~8 warnings).
-  `prefer-useReducer` ×4, `no-derived-useState` ×3,
-  `no-cascading-set-state` ×1.
+      `prefer-useReducer` ×4, `no-derived-useState` ×3,
+      `no-cascading-set-state` ×1.
 
 ### Ratchet phase (after the cleanup lands)
 
@@ -240,43 +240,43 @@ Tighten the gate by un-silencing rules in
 `ui-dashboard/react-doctor.config.json`:
 
 - [ ] **`react-doctor/design-no-default-tailwind-palette`** (714 hits,
-  silenced). Blocked on a brand-token / design-system migration —
-  remove from the silence list once `slate-*` / `gray-*` / `indigo-*`
-  are eradicated, or explicitly adopt them as the brand palette and
-  drop the rule via a custom oxlint config.
+      silenced). Blocked on a brand-token / design-system migration —
+      remove from the silence list once `slate-*` / `gray-*` / `indigo-*`
+      are eradicated, or explicitly adopt them as the brand palette and
+      drop the rule via a custom oxlint config.
 - [ ] **`react-doctor/design-no-em-dash-in-jsx-text`** (66 hits,
-  silenced). Em-dashes are legitimate punctuation in our copy. Either
-  standardize on a different separator and re-enable, or leave silenced
-  indefinitely.
+      silenced). Em-dashes are legitimate punctuation in our copy. Either
+      standardize on a different separator and re-enable, or leave silenced
+      indefinitely.
 - [ ] **`react-doctor/design-no-redundant-size-axes`** (12 hits) and
-  **`react-doctor/design-no-bold-heading`** (7 hits, both silenced).
-  Pure design opinions — fix all sites and re-enable, or accept as
-  project convention and leave silenced.
+      **`react-doctor/design-no-bold-heading`** (7 hits, both silenced).
+      Pure design opinions — fix all sites and re-enable, or accept as
+      project convention and leave silenced.
 - [ ] **Drop the test/script override block.** Currently silences
-  `react-doctor/no-secrets-in-client-code` (placeholder addresses in
-  test fixtures — probably stays silenced) and
-  `react-hooks/rules-of-hooks` (hook-shaped test mocks like
-  `useSWRMock`). The second could be tightened by renaming the mocks
-  (e.g. `swrMock`) instead of suppressing.
+      `react-doctor/no-secrets-in-client-code` (placeholder addresses in
+      test fixtures — probably stays silenced) and
+      `react-hooks/rules-of-hooks` (hook-shaped test mocks like
+      `useSWRMock`). The second could be tightened by renaming the mocks
+      (e.g. `swrMock`) instead of suppressing.
 
 ### Operational follow-ups
 
 - [ ] **Reconsider `--fail-on warning` if the boy-scout-rule tax is too
-  costly.** Switching to `--fail-on error` is a one-line change in
-  `.github/workflows/ci.yml`; would only block on the GET-handler
-  error above (which the first cleanup PR will fix anyway). Document
-  the choice in `ui-dashboard/AGENTS.md`.
+      costly.** Switching to `--fail-on error` is a one-line change in
+      `.github/workflows/ci.yml`; would only block on the GET-handler
+      error above (which the first cleanup PR will fix anyway). Document
+      the choice in `ui-dashboard/AGENTS.md`.
 - [ ] **Periodically bump `react-doctor` itself.** Pinned at `0.1.4`
-  as a workspace devDep so the full transitive graph (`oxlint`,
-  `knip`, …) is locked. New releases add rules; bumps should go
-  through a dedicated PR so the rule deltas can be reviewed and the
-  silence list re-evaluated.
+      as a workspace devDep so the full transitive graph (`oxlint`,
+      `knip`, …) is locked. New releases add rules; bumps should go
+      through a dedicated PR so the rule deltas can be reviewed and the
+      silence list re-evaluated.
 - [ ] **Score-floor CI job (optional).** Diff-mode catches new issues
-  per PR but doesn't prevent global score drift if backlog files are
-  deleted faster than warnings are fixed. A separate scheduled job
-  running `react-doctor --score` and failing on a ratchet floor would
-  close that gap. Probably not worth setting up until the backlog is
-  meaningfully reduced.
+      per PR but doesn't prevent global score drift if backlog files are
+      deleted faster than warnings are fixed. A separate scheduled job
+      running `react-doctor --score` and failing on a ratchet floor would
+      close that gap. Probably not worth setting up until the backlog is
+      meaningfully reduced.
 
 ## Follow-ups deferred from Phase 2 (BiPoolExchange indexer + dashboard refactor)
 
