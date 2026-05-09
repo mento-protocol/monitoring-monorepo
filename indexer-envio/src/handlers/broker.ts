@@ -101,36 +101,7 @@ Broker.Swap.handler(async ({ event, context }) => {
   };
   context.BrokerSwapEvent.set(swap);
 
-  // Daily rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`
-  // so the dashboard's `routedViaV3Router=false` filter reads from a single
-  // index without scanning the per-event table.
   const dayTs = dayBucket(blockTimestamp);
-  const routedKey = routedViaV3Router ? "router" : "direct";
-  const snapshotId = `${event.chainId}-${exchangeProvider}-${routedKey}-${dayTs}`;
-  const existing = await context.BrokerDailySnapshot.get(snapshotId);
-  context.BrokerDailySnapshot.set({
-    id: snapshotId,
-    chainId: event.chainId,
-    exchangeProvider,
-    routedViaV3Router,
-    timestamp: dayTs,
-    swapCount: (existing?.swapCount ?? 0) + 1,
-    volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    blockNumber,
-  });
-
-  // Heartbeat the v2 leaderboard window snapshot before any of the
-  // legacy-v2 producer early-returns below. Every broker.swap is a
-  // heartbeat opportunity: even routed/virtual-pool swaps advance the
-  // UTC-day cursor so a chain that only sees routed swaps for a stretch
-  // still gets snapshots flushed at midnight rather than waiting for the
-  // next direct-broker swap.
-  await maybeHeartbeatFlushV2({
-    context,
-    chainId: event.chainId,
-    blockTimestamp,
-    blockNumber,
-  });
 
   // VirtualPool-routed Broker.Swap detection. Mento's Broker emits
   // `event.params.trader = msg.sender` — we track this as `brokerCaller` on
@@ -141,12 +112,53 @@ Broker.Swap.handler(async ({ event, context }) => {
   // `applyLeaderboardSnapshots` (see handlers/virtualPool.ts:186); writing
   // v2 rollups for the same tx would attribute v3 flow as legacy-v2
   // producer activity.
+  //
+  // Detection runs BEFORE BrokerDailySnapshot is written so the daily
+  // volume series (consumed by the dashboard's v2 volume-over-time chart
+  // via `routedViaV3Router=false` filter) excludes these double-counted
+  // swaps too — the original schema flag `routedViaV3Router` only catches
+  // the `tx.to == Routerv300` path, not the aggregator → VirtualPool path.
   const brokerCallerPool = await context.Pool.get(
     makePoolId(event.chainId, brokerCaller),
   );
   const brokerCallerIsVirtualPool = brokerCallerPool
     ? isVirtualPool(brokerCallerPool)
     : false;
+
+  // Heartbeat the v2 leaderboard window snapshot before any of the
+  // legacy-v2 early-returns below. Every broker.swap is a heartbeat
+  // opportunity: even routed/virtual-pool swaps advance the UTC-day
+  // cursor so a chain that only sees routed swaps for a stretch still
+  // gets snapshots flushed at midnight rather than waiting for the next
+  // direct-broker swap.
+  await maybeHeartbeatFlushV2({
+    context,
+    chainId: event.chainId,
+    blockTimestamp,
+    blockNumber,
+  });
+
+  // Daily rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`
+  // so the dashboard's `routedViaV3Router=false` filter reads from a single
+  // index without scanning the per-event table. Skip the write entirely for
+  // VirtualPool-routed swaps — the v3 VirtualPool.Swap sibling already
+  // accounts for them in its own snapshot table; including them here under
+  // `routedViaV3Router=false` would inflate the legacy-v2 volume series.
+  if (!brokerCallerIsVirtualPool) {
+    const routedKey = routedViaV3Router ? "router" : "direct";
+    const snapshotId = `${event.chainId}-${exchangeProvider}-${routedKey}-${dayTs}`;
+    const existing = await context.BrokerDailySnapshot.get(snapshotId);
+    context.BrokerDailySnapshot.set({
+      id: snapshotId,
+      chainId: event.chainId,
+      exchangeProvider,
+      routedViaV3Router,
+      timestamp: dayTs,
+      swapCount: (existing?.swapCount ?? 0) + 1,
+      volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + volumeUsdWei,
+      blockNumber,
+    });
+  }
 
   // Legacy-v2 producer rollups. Skip when:
   //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap

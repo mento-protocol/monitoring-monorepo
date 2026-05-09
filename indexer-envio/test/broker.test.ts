@@ -468,15 +468,19 @@ describe("Broker.Swap handler", () => {
       "BrokerSwapEvent should still record the raw VirtualPool-routed swap",
     );
 
-    // BrokerDailySnapshot: still written (preserves the existing partition;
-    // any future Swaps-KPI consumer can decide how to filter VirtualPool
-    // siblings).
+    // BrokerDailySnapshot: NOT written either. The dashboard's v2
+    // volume-over-time chart consumes BrokerDailySnapshot rows filtered
+    // only by `routedViaV3Router=false`; if a VirtualPool-routed swap
+    // landed in that bucket it would inflate the legacy-v2 series, since
+    // the v3 VirtualPool.Swap sibling is already counted by
+    // applyLeaderboardSnapshots. Cursor flagged this specifically on
+    // PR #363 — see the deploy-ordering / handler scope discussion there.
     const dailyRow = mockDb.entities.BrokerDailySnapshot.get(
       `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
     );
-    assert.isOk(
+    assert.isUndefined(
       dailyRow,
-      "BrokerDailySnapshot should still record this swap in the legacy 'direct' partition",
+      "BrokerDailySnapshot should NOT record VirtualPool-routed Broker swaps — the v3 VirtualPool.Swap sibling already counts them",
     );
 
     // BrokerTraderDailySnapshot: NOT written (the whole point of the fix).
