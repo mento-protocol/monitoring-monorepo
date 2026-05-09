@@ -63,6 +63,10 @@ export {
   _setMockBreakerFeedState,
   _setMockBreakerList,
   _clearBreakerMocks,
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
 } from "./rpc";
 
 export { _clearBootstrapCaches } from "./breakers";
