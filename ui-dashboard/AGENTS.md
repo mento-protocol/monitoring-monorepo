@@ -25,11 +25,58 @@ This is mandatory for cross-layer/stateful UI work. The checklist exists because
 ## Commands
 
 ```bash
-pnpm dev    # Start dev server
-pnpm build  # Production build
-pnpm start  # Start production server
-pnpm lint   # Run ESLint
+pnpm dev     # Start dev server
+pnpm build   # Production build
+pnpm start   # Start production server
+pnpm lint    # Run ESLint
+pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
 ```
+
+## React Doctor
+
+CI runs `react-doctor --diff origin/<base> --fail-on warning` on every PR
+(see `.github/workflows/ci.yml` `ui` job). The CLI's `--diff` is
+**file-level, not line-level**: it scans every source file the PR
+touches in full, so editing a file that already has backlog warnings
+will fail CI even if your change isn't what triggered them. Two ways
+through:
+
+- Fix the warnings (preferred — chips at the cleanup backlog).
+- Add an inline `// react-doctor-disable-next-line <rule-id>` above the
+  offending line with a one-line rationale, if the warning isn't
+  actionable in your PR's scope.
+
+Run `pnpm react-doctor` locally for a full scan.
+
+Project-wide silences live in `react-doctor.config.json`. Current state:
+
+- **Silenced project-wide** (stylistic, ~805 noise hits): the four
+  `react-doctor/design-*` rules — `no-default-tailwind-palette`,
+  `no-em-dash-in-jsx-text`, `no-redundant-size-axes`, `no-bold-heading`.
+  `tailwind-palette` would require a brand-token migration; em-dashes
+  are legitimate punctuation in our copy.
+- **Silenced in tests/scripts only** (`__tests__`, `*.test.{ts,tsx}`,
+  `*.spec.{ts,tsx}`, `scripts/**`): `react-doctor/no-secrets-in-client-code`
+  (test fixtures use placeholder addresses) and `react-hooks/rules-of-hooks`
+  (legitimate when shimming hook-shaped mocks).
+
+### Cleanup backlog (un-silence later)
+
+After silencing, the codebase has 1 error and ~128 warnings. To re-tighten,
+chip away at these in dedicated PRs (rough priority):
+
+1. `react-doctor/nextjs-no-side-effect-in-get-handler` — 1 error in
+   `src/app/api/rebalance-check/route.ts:46` (CSRF/prefetch risk).
+2. Next.js correctness — `nextjs-missing-metadata` (×7),
+   `nextjs-no-use-search-params-without-suspense` (×3),
+   `nextjs-no-client-side-redirect` (×3).
+3. `react-doctor/no-array-index-as-key` (×8) and
+   `react-doctor/no-giant-component` (×11).
+4. Performance refactors — `js-combine-iterations` (×24),
+   `js-tosorted-immutable` (×14), `async-await-in-loop` (×11), etc.
+
+Once a category drops to zero, remove it from the config (or, if it was
+never silenced, leave it — the diff gate already keeps it at zero).
 
 ## Tech Stack
 
