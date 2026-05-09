@@ -42,6 +42,16 @@ export function V2ExchangePanel({
   // our window). Worth surfacing rather than rendering nothing — operators
   // shouldn't have to guess whether the panel is empty by design or broken.
   if (!v2Config) return <V2ExchangeSyncingNote />;
+  // Deprecated takes priority over the zero-feed syncing sentinel: an
+  // exchange that was destroyed before its config landed (or seeded only
+  // from the Destroyed event params) will have isDeprecated=true AND a
+  // zero feedID. The amber governance-removal callout is the right
+  // operator signal in that case, not "still syncing".
+  if (v2Config.isDeprecated) {
+    return (
+      <DeprecatedExchangeNote pool={pool} network={network} config={v2Config} />
+    );
+  }
   // ExchangeCreated wrote a stub row when `poolExchangeEffect` failed
   // (zero-feed sentinel). Indexer-side stub-retry kicks in on the next
   // bucket / spread event but until then the row would render as "0 bps,
@@ -53,12 +63,6 @@ export function V2ExchangePanel({
     "0x0000000000000000000000000000000000000000"
   ) {
     return <V2ExchangeSyncingNote />;
-  }
-
-  if (v2Config.isDeprecated) {
-    return (
-      <DeprecatedExchangeNote pool={pool} network={network} config={v2Config} />
-    );
   }
 
   const sym0 = tokenSymbol(network, pool.token0);

@@ -50,6 +50,9 @@ type ExchangeCreatedArgs = {
 
 type ExchangeDestroyedArgs = {
   exchangeId: string;
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
   mockEventData: MockEventData;
 };
 
@@ -279,6 +282,9 @@ describe("BiPoolManager handlers", () => {
 
       const destroy = BiPoolManager.ExchangeDestroyed.createMockEvent({
         exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
         mockEventData: mockEventData(1, 200, 1_700_001_000),
       });
       mockDb = await BiPoolManager.ExchangeDestroyed.processEvent({
@@ -294,22 +300,52 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.updatedAtBlock, 200n);
     });
 
-    it("returns silently when row does not exist", async function () {
+    it("seeds a deprecated row from event params when no existing row exists", async function () {
       this.timeout(10_000);
       const mockDb = MockDb.createMockDb();
       const event = BiPoolManager.ExchangeDestroyed.createMockEvent({
         exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
         mockEventData: mockEventData(0, 100, 1_700_000_000),
       });
       const next = await BiPoolManager.ExchangeDestroyed.processEvent({
         event,
         mockDb,
       });
-      assert.equal(
-        next.entities.BiPoolExchange.get(exchangeRowId(EXCHANGE_ID)),
-        undefined,
-        "Handler must not create a row from thin air",
+      const row = next.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as
+        | {
+            isDeprecated: boolean;
+            asset0: string;
+            asset1: string;
+            pricingModule: string;
+            pricingModuleName?: string;
+            referenceRateFeedID: string;
+            spread: bigint;
+            wrappedByPoolId?: string;
+          }
+        | undefined;
+      assert.ok(
+        row,
+        "ExchangeDestroyed should seed a deprecated row when ExchangeCreated fired pre-start_block",
       );
+      assert.equal(row!.isDeprecated, true);
+      assert.equal(row!.asset0, ASSET0);
+      assert.equal(row!.asset1, ASSET1);
+      assert.equal(row!.pricingModule, CONSTANT_SUM_MAINNET);
+      assert.equal(row!.pricingModuleName, "ConstantSum");
+      // Config sentinels (Destroyed event doesn't carry these and
+      // getPoolExchange reverts on a destroyed exchange).
+      assert.equal(
+        row!.referenceRateFeedID,
+        "0x0000000000000000000000000000000000000000",
+      );
+      assert.equal(row!.spread, 0n);
+      // No matching VP self-healed yet → wrappedByPoolId stays undefined.
+      assert.equal(row!.wrappedByPoolId, undefined);
     });
   });
 

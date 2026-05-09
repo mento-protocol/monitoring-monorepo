@@ -73,11 +73,19 @@ async function ensureBiPoolExchange(
         exchangeId,
       });
       if (struct && struct.pricingModule !== ZERO_ADDRESS) {
+        // Bucket fields: only fill from struct when no BucketsUpdated has
+        // landed yet (`lastBucketUpdate === 0n`). Once a BucketsUpdated
+        // event has moved them, those values are more authoritative than
+        // the struct's `latest`-block read. Without this, a stub retry
+        // triggered first by `SpreadUpdated` (before any BucketsUpdated)
+        // would leave buckets at zero even though the struct had real
+        // values, and the panel would render an active exchange with
+        // 0 buckets / 1970 reset.
+        const bucketsAlreadyMoved = current.lastBucketUpdate > BigInt(0);
         current = {
           ...current,
-          // Preserve bucket + spread fields — BucketsUpdated /
-          // SpreadUpdated may have already moved them past the struct's
-          // values; only fill the still-stubbed fields.
+          // Preserve fields that event-driven writes own; only fill the
+          // still-stubbed ones from the RPC struct.
           referenceRateFeedID: struct.referenceRateFeedID,
           referenceRateResetFrequency: struct.referenceRateResetFrequency,
           minimumReports: struct.minimumReports,
@@ -88,6 +96,13 @@ async function ensureBiPoolExchange(
           // spread: only fill if still at the stub default — don't
           // clobber a SpreadUpdated value with the struct's older spread.
           spread: current.spread === BigInt(0) ? struct.spread : current.spread,
+          // buckets: fill from struct only when no BucketsUpdated has
+          // landed; otherwise preserve event-driven values.
+          bucket0: bucketsAlreadyMoved ? current.bucket0 : struct.bucket0,
+          bucket1: bucketsAlreadyMoved ? current.bucket1 : struct.bucket1,
+          lastBucketUpdate: bucketsAlreadyMoved
+            ? current.lastBucketUpdate
+            : struct.lastBucketUpdate,
           updatedAtBlock: blockNumber,
           updatedAtTimestamp: blockTimestamp,
         };
@@ -302,14 +317,73 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
 
 BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
   const id = exchangeRowId(event.chainId, event.params.exchangeId);
+  const exchangeId = event.params.exchangeId.toLowerCase();
+  const exchangeProvider = asAddress(event.srcAddress);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
   const existing = await context.BiPoolExchange.get(id);
-  if (!existing) return; // race; ExchangeCreated was likely on a chain we don't index
-  context.BiPoolExchange.set({
-    ...existing,
+
+  // Re-run the wrapping-VP lookup at destroy time. If the row was seeded
+  // before any VP self-healed (or never seeded at all), `wrappedByPoolId`
+  // is null — and since the dashboard's `POOL_V2_EXCHANGE` query keys on
+  // `wrappedByPoolId`, an unlinked deprecated row stays invisible to
+  // operators forever (no later BiPoolManager events fire on a destroyed
+  // exchange to retry the link).
+  const wrappingPools =
+    await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+  const linkedPoolId = wrappingPools.find(
+    (p: Pool) => p.chainId === event.chainId,
+  )?.id;
+  // Existing row's wrappedByPoolId wins over the fresh getWhere if both
+  // resolve — the existing one is already a successful link, fresh
+  // lookup is a fallback.
+  const wrappedByPoolId = existing?.wrappedByPoolId ?? linkedPoolId;
+
+  if (existing) {
+    context.BiPoolExchange.set({
+      ...existing,
+      isDeprecated: true,
+      wrappedByPoolId,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+    return;
+  }
+
+  // Seed-from-destroy: ExchangeCreated fired pre-start_block (or on a
+  // chain we don't index) and Destroyed is the first BiPoolManager event
+  // we see. Without this branch the deprecated state is lost forever.
+  // The `ExchangeDestroyed` ABI carries asset0/asset1/pricingModule —
+  // enough to materialize a deprecated row with config sentinels for
+  // the still-missing fields. `getPoolExchange` reverts on a destroyed
+  // exchange so RPC backfill isn't an option for those.
+  const pricingModule = asAddress(event.params.pricingModule);
+  const seeded: BiPoolExchange = {
+    id,
+    chainId: event.chainId,
+    exchangeId,
+    exchangeProvider,
+    asset0: asAddress(event.params.asset0),
+    asset1: asAddress(event.params.asset1),
+    pricingModule,
+    pricingModuleName:
+      lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
+    spread: BigInt(0),
+    referenceRateFeedID: ZERO_ADDRESS,
+    referenceRateResetFrequency: BigInt(0),
+    minimumReports: BigInt(0),
+    stablePoolResetSize: BigInt(0),
+    bucket0: BigInt(0),
+    bucket1: BigInt(0),
+    lastBucketUpdate: BigInt(0),
     isDeprecated: true,
-    updatedAtBlock: asBigInt(event.block.number),
-    updatedAtTimestamp: asBigInt(event.block.timestamp),
-  });
+    wrappedByPoolId,
+    createdAtBlock: blockNumber,
+    createdAtTimestamp: blockTimestamp,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  };
+  context.BiPoolExchange.set(seeded);
 });
 
 // ---------------------------------------------------------------------------
