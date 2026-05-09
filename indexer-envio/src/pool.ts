@@ -299,6 +299,9 @@ export type PoolContext = {
     get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
     set: (entity: DeviationThresholdBreach) => void;
   };
+  // Used by `selfHealWrappedExchangeId` to patch the back-reference on the
+  // matching exchange row when a VP heals its `wrappedExchangeId`.
+  BiPoolExchange: HandlerContext["BiPoolExchange"];
 };
 
 /** Self-heal `invertRateFeed` when it was never successfully read at pool
@@ -380,13 +383,18 @@ export async function selfHealRebalanceThresholds(
  * extraction in the factory handler never ran). Reads the VP bytecode
  * once per address (the effect is `cache: true` — bytecode is immutable
  * for a deployed contract — so the actual RPC fires exactly once per VP
- * across the whole sync). Pure: returns the (possibly healed) Pool;
- * caller persists.
+ * across the whole sync). Returns the (possibly healed) Pool — caller
+ * persists. Also patches the matching `BiPoolExchange.wrappedByPoolId`
+ * back-reference if the exchange row already exists, so the dashboard's
+ * `wrappedByPoolId`-keyed GraphQL query finds the join after a heal that
+ * only the Pool side knew about.
  *
  * No-op on FPMM pools and on VPs that already have the field set. */
 export async function selfHealWrappedExchangeId(
-  context: { effect: EffectCaller },
+  context: PoolContext,
   pool: Pool,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
 ): Promise<Pool> {
   if (!isVirtualPool(pool) || pool.wrappedExchangeId) return pool;
   const poolAddr = extractAddressFromPoolId(pool.id);
@@ -395,6 +403,16 @@ export async function selfHealWrappedExchangeId(
     vpAddress: poolAddr,
   });
   if (!result) return pool;
+  const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
+  const exchange = await context.BiPoolExchange.get(exchangeRowId);
+  if (exchange && exchange.wrappedByPoolId !== pool.id) {
+    context.BiPoolExchange.set({
+      ...exchange,
+      wrappedByPoolId: pool.id,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+  }
   return {
     ...pool,
     wrappedExchangeId: result.exchangeId,
@@ -597,7 +615,12 @@ export const upsertPool = async ({
   const existing =
     invertHealed.wrappedExchangeId || !isVirtualPool(invertHealed)
       ? invertHealed
-      : await selfHealWrappedExchangeId(context, invertHealed);
+      : await selfHealWrappedExchangeId(
+          context,
+          invertHealed,
+          blockNumber,
+          blockTimestamp,
+        );
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.

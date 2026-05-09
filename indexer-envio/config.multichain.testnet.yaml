@@ -75,6 +75,21 @@ contracts:
       - event: ReportExpirySet
       - event: TokenReportExpirySet
 
+  # BiPoolManager — see config.multichain.mainnet.yaml for the full
+  # rationale. Mirrored here so testnet codegen + handler bindings stay
+  # aligned with mainnet (the BiPoolManager handlers in
+  # src/handlers/biPoolManager.ts always import from `generated`,
+  # regardless of which config is active). No deployment on testnet
+  # today — empty address list, dynamically registered if/when it lands.
+  - name: BiPoolManager
+    abi_file_path: abis/BiPoolManager.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ExchangeCreated
+      - event: ExchangeDestroyed
+      - event: BucketsUpdated
+      - event: SpreadUpdated
+
   - name: OpenLiquidityStrategy
     abi_file_path: abis/OpenLiquidityStrategy.json
     handler: src/EventHandlers.ts

@@ -55,7 +55,36 @@ async function ensureBiPoolExchange(
 ): Promise<BiPoolExchange | null> {
   const id = exchangeRowId(chainId, exchangeId);
   const existing = await context.BiPoolExchange.get(id);
-  if (existing) return existing;
+  if (existing) {
+    // The seed-time `Pool.getWhere.wrappedExchangeId.eq` may have returned
+    // 0 results because no VP had self-healed yet. Re-attempt the link
+    // here so a VP that heals AFTER the row is seeded still gets joined.
+    if (!existing.wrappedByPoolId) {
+      const wrappingPools =
+        await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+      const wrappedByPoolId = wrappingPools.find(
+        (p: Pool) => p.chainId === chainId,
+      )?.id;
+      if (wrappedByPoolId) {
+        const patched: BiPoolExchange = {
+          ...existing,
+          wrappedByPoolId,
+          updatedAtBlock: blockNumber,
+          updatedAtTimestamp: blockTimestamp,
+        };
+        context.BiPoolExchange.set(patched);
+        await mirrorFeedIdToPool(
+          context,
+          wrappedByPoolId,
+          existing.referenceRateFeedID,
+          blockNumber,
+          blockTimestamp,
+        );
+        return patched;
+      }
+    }
+    return existing;
+  }
 
   const struct = await context.effect(poolExchangeEffect, {
     chainId,
