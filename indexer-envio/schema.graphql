@@ -39,6 +39,21 @@ type Pool {
   # first-ever median). Sole consumer is the next MedianUpdated, which
   # captures it as `prevMedianAt` before overwrite.
   lastMedianAt: BigInt!
+  # True iff the most recent `MedianUpdated` for the feed had a non-zero
+  # value. Stays false during a zero-median outage even though
+  # `lastMedianPrice` retains the prior non-zero value (per
+  # `computeMedianLineageNext`). Gates `tryDeriveRebalanceState` so the
+  # entity-derive path doesn't keep using a stale median during outages —
+  # `oraclePrice` alone isn't enough since `OracleReported` writes reporter
+  # quotes to it.
+  medianLive: Boolean!
+  # Most recent `OracleReported` report time (from `event.params.timestamp`).
+  # Distinct from `oracleTimestamp` (also bumped by state-sync writes) and
+  # `lastMedianAt` (block timestamp of MedianUpdated). The on-chain
+  # `getRebalancingState` checks expiry via reporter `report.timestamp +
+  # oracleExpiry`; gating the entity-derive path on this field gives parity
+  # with that revert.
+  lastOracleReportAt: BigInt!
   # `lastMedianPrice` / `lastMedianAt` from the prior MedianUpdated, captured
   # before overwrite so the Oracle Jump alert can render "Previous Oracle
   # Price (Xm ago)". 0 until the second non-zero MedianUpdated.

@@ -16,6 +16,10 @@ export interface MedianLineageState {
   prevMedianAt: bigint;
   lastOracleJumpBps: string;
   lastOracleJumpAt: bigint;
+  /** True iff the most recent MedianUpdated emitted a non-zero value.
+   * False during a zero-median outage even though `lastMedianPrice` is
+   * frozen at the prior non-zero value. */
+  medianLive: boolean;
 }
 
 /**
@@ -49,6 +53,7 @@ export function computeMedianLineageNext(
     prevMedianAt: isTransition ? existing.lastMedianAt : existing.prevMedianAt,
     lastOracleJumpBps: jumpBps ?? existing.lastOracleJumpBps,
     lastOracleJumpAt: isTransition ? blockTimestamp : existing.lastOracleJumpAt,
+    medianLive: isLiveMedian,
   };
 }
 

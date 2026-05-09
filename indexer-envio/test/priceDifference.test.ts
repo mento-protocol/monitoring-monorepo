@@ -28,6 +28,8 @@ function pool(opts: {
   rebalanceThresholdsKnown?: boolean;
   lastMedianPrice?: bigint;
   lastMedianAt?: bigint;
+  lastOracleReportAt?: bigint;
+  medianLive?: boolean;
   oracleOk?: boolean;
   oracleExpiry?: bigint;
 }) {
@@ -41,6 +43,8 @@ function pool(opts: {
     rebalanceThresholdsKnown: true,
     lastMedianPrice: opts.oraclePrice,
     lastMedianAt: 1_000_000n,
+    lastOracleReportAt: 1_000_000n,
+    medianLive: true,
     oracleOk: true,
     oracleExpiry: 3_600n,
     ...opts,
@@ -459,11 +463,21 @@ describe("tryDeriveRebalanceState", () => {
     );
   });
 
-  it("returns null when median is stale (lastMedianAt + expiry <= eventTimestamp)", () => {
-    // lastMedianAt 1_000_000n + expiry 3_600n = 1_003_600n.
+  it("returns null when median is stale (lastOracleReportAt + expiry <= eventTimestamp)", () => {
+    // lastOracleReportAt 1_000_000n + expiry 3_600n = 1_003_600n.
     // eventTimestamp 1_003_700n is past the expiry → contract reverts.
     assert.equal(
       tryDeriveRebalanceState(ausdPool(), { eventTimestamp: 1_003_700n }),
+      null,
+    );
+  });
+
+  it("returns null when lastOracleReportAt is 0 (no OracleReported yet)", () => {
+    // Without a known reporter timestamp the freshness gate can't be
+    // evaluated. Falling through to RPC is safer than letting the median
+    // through with no provable freshness anchor.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ lastOracleReportAt: 0n }), FRESH),
       null,
     );
   });
@@ -491,26 +505,30 @@ describe("tryDeriveRebalanceState", () => {
     );
   });
 
-  it("returns null during a zero-median outage even when lastMedianPrice retained the prior value", () => {
+  it("returns null during a zero-median outage (medianLive=false even though lastMedianPrice retained)", () => {
     // `MedianUpdated` with value 0 keeps lastMedianPrice at the prior
-    // non-zero value (per computeMedianLineageNext), but oraclePrice goes
-    // to 0. The contract treats the feed as down — derive must mirror.
+    // non-zero value (per computeMedianLineageNext) and sets medianLive
+    // to false. Gating on `medianLive` (not `oraclePrice > 0`) is the
+    // right signal: a non-median OracleReported following the outage
+    // would write a reporter quote into oraclePrice, falsely passing the
+    // > 0 check while the on-chain median is still down.
     assert.equal(
-      tryDeriveRebalanceState(ausdPool({ oraclePrice: 0n }), FRESH),
+      tryDeriveRebalanceState(ausdPool({ medianLive: false }), FRESH),
       null,
     );
   });
 
-  it("staleness uses lastMedianAt only (cursor's stale-oracle finding)", () => {
-    // Confirm the gate evaluates against `lastMedianAt`, not against any
-    // other "last touched at" timestamp. Old lastMedianAt + recent event →
-    // stale.
+  it("staleness uses lastOracleReportAt (reporter time, not block time)", () => {
+    // Confirm the gate evaluates against `lastOracleReportAt`. A pool
+    // whose lastOracleReportAt has fallen behind oracleExpiry should fail
+    // the gate even if other "last touched at" fields are recent.
     assert.equal(
-      tryDeriveRebalanceState(ausdPool({ lastMedianAt: 0n }), {
-        eventTimestamp: 1_000_500n,
-      }),
+      tryDeriveRebalanceState(
+        ausdPool({ lastOracleReportAt: 1n, oracleExpiry: 3_600n }),
+        { eventTimestamp: 1_000_500n },
+      ),
       null,
-      "lastMedianAt=0 + expiry=3600 → expiresAt=3600 which is before event 1_000_500 → stale",
+      "lastOracleReportAt=1 + expiry=3600 → expiresAt=3601 which is before event 1_000_500 → stale",
     );
   });
 

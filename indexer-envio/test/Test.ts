@@ -380,6 +380,8 @@ type PoolEntity = {
   rebalanceThresholdsKnown: boolean;
   invertRateFeedKnown: boolean;
   lastMedianAt: bigint;
+  lastOracleReportAt: bigint;
+  medianLive: boolean;
   lastRebalancedAt: bigint;
   healthStatus: string;
   limitStatus: string;
@@ -1873,6 +1875,8 @@ describe("Envio Celo indexer handlers", () => {
       rebalanceThresholdsKnown: true,
       lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
       lastMedianAt: 1_700_007_000n,
+      lastOracleReportAt: 1_700_007_000n,
+      medianLive: true,
       oracleOk: true,
       oracleExpiry: 3_600n,
       source: "fpmm_update_reserves",

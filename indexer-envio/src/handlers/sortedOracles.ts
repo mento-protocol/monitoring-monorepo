@@ -75,6 +75,17 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
 
       const oraclePrice = event.params.value;
 
+      // Track the reporter's report timestamp (distinct from block time and
+      // from the contaminated `oracleTimestamp` that state-sync also writes).
+      // Used by `tryDeriveRebalanceState` to mirror the contract's
+      // `report.timestamp + oracleExpiry` revert. Monotonic: only advance
+      // forward so out-of-order historical OracleReported events can't
+      // backdate freshness (Envio processes events in block+log order, but
+      // a reporter can submit a stale report timestamp inside a fresh tx).
+      const lastOracleReportAt =
+        oracleTimestamp > existing.lastOracleReportAt
+          ? oracleTimestamp
+          : existing.lastOracleReportAt;
       const updatedPool: Pool = {
         ...existing,
         oracleTimestamp,
@@ -83,6 +94,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         oraclePrice,
         oracleExpiry,
         oracleNumReporters: existing.oracleNumReporters,
+        lastOracleReportAt,
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };
@@ -237,25 +249,31 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // Re-pick the active threshold here so breach/health predicates
       // (`effectiveThreshold(pool)`) see the direction-correct value
       // until the next state-sync event re-confirms.
-      const rebalanceThreshold = updatedPool.rebalanceThresholdsKnown
-        ? pickActiveThreshold(
-            {
-              reserves0: updatedPool.reserves0,
-              reserves1: updatedPool.reserves1,
-              // Zero medians freeze `lastMedianPrice`; threshold direction must
-              // keep following that frozen value rather than the transient 0
-              // event payload, or outages incorrectly flip to the `above` side.
-              oraclePrice: updatedPool.lastMedianPrice,
-              invertRateFeed: updatedPool.invertRateFeed,
-              token0Decimals: updatedPool.token0Decimals,
-              token1Decimals: updatedPool.token1Decimals,
-            },
-            {
-              above: updatedPool.rebalanceThresholdAbove,
-              below: updatedPool.rebalanceThresholdBelow,
-            },
-          )
-        : updatedPool.rebalanceThreshold;
+      //
+      // Gate on `invertRateFeedKnown`: an inverted pool whose deploy-time
+      // invert-read failed and whose self-heal also returned undefined would
+      // otherwise persist the wrong-side threshold from this re-pick. With
+      // the gate, we keep the prior threshold until the orientation lands.
+      const rebalanceThreshold =
+        updatedPool.rebalanceThresholdsKnown && updatedPool.invertRateFeedKnown
+          ? pickActiveThreshold(
+              {
+                reserves0: updatedPool.reserves0,
+                reserves1: updatedPool.reserves1,
+                // Zero medians freeze `lastMedianPrice`; threshold direction must
+                // keep following that frozen value rather than the transient 0
+                // event payload, or outages incorrectly flip to the `above` side.
+                oraclePrice: updatedPool.lastMedianPrice,
+                invertRateFeed: updatedPool.invertRateFeed,
+                token0Decimals: updatedPool.token0Decimals,
+                token1Decimals: updatedPool.token1Decimals,
+              },
+              {
+                above: updatedPool.rebalanceThresholdAbove,
+                below: updatedPool.rebalanceThresholdBelow,
+              },
+            )
+          : updatedPool.rebalanceThreshold;
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
       const priceDifference =
         !withThreshold.source?.includes("virtual") && oraclePrice > 0n

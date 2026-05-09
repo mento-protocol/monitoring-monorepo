@@ -188,9 +188,9 @@ export function tryDeriveRebalanceState(
   pool: {
     reserves0: bigint;
     reserves1: bigint;
-    oraclePrice: bigint;
     lastMedianPrice: bigint;
-    lastMedianAt: bigint;
+    lastOracleReportAt: bigint;
+    medianLive: boolean;
     oracleOk: boolean;
     oracleExpiry: bigint;
     invertRateFeed: boolean;
@@ -209,21 +209,26 @@ export function tryDeriveRebalanceState(
   if (!pool.rebalanceThresholdsKnown) return null;
   if (!pool.invertRateFeedKnown) return null;
   if (pool.lastMedianPrice <= 0n) return null;
-  // Zero-median outage: `MedianUpdated` event with value 0 keeps
-  // `lastMedianPrice` at the prior non-zero value (per
-  // `computeMedianLineageNext`) but `oraclePrice` goes to 0. The
-  // contract treats the feed as down during the outage.
-  if (pool.oraclePrice <= 0n) return null;
+  // Zero-median outage gate: only `medianLive` is reliable here.
+  // `oraclePrice > 0n` would also pass after a non-median `OracleReported`
+  // following a zero `MedianUpdated`, because the reporter quote gets
+  // written into `oraclePrice`. `medianLive` is set only by
+  // `MedianUpdated` (true on non-zero, false on zero) so it's the
+  // median-only signal we need for parity with the contract's outage
+  // behaviour.
+  if (!pool.medianLive) return null;
   if (!pool.oracleOk) return null;
   // Stale-oracle revert mirror: require a known expiry window (zero =
-  // pre-seed; without it we can't know if the median is stale, so fall
-  // through to RPC) AND the most recent on-chain `MedianUpdated` to be
-  // within that window. `lastMedianAt` is the only field that tracks
-  // actual median-report time — `oracleTimestamp` is also bumped by
-  // `OracleReported` and by state-sync writes, so it'd extend the
-  // window perpetually across non-median events.
+  // pre-seed; fall through to RPC) AND the most recent reporter
+  // `OracleReported.timestamp` to be within that window. Use
+  // `lastOracleReportAt` (only set by `OracleReported`) — NOT
+  // `lastMedianAt` (block timestamp of `MedianUpdated`) and NOT
+  // `oracleTimestamp` (also bumped by state-sync writes). The contract's
+  // `getRebalancingState` checks expiry via `report.timestamp +
+  // oracleExpiry`; the reporter's report time is the right anchor.
   if (pool.oracleExpiry <= 0n) return null;
-  const expiresAt = pool.lastMedianAt + pool.oracleExpiry;
+  if (pool.lastOracleReportAt <= 0n) return null;
+  const expiresAt = pool.lastOracleReportAt + pool.oracleExpiry;
   if (expiresAt <= ctx.eventTimestamp) return null;
   const reserves = ctx.reservesOverride
     ? {

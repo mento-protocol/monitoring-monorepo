@@ -18,7 +18,10 @@ import {
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
-import { pickActiveThreshold } from "../../priceDifference";
+import {
+  computePriceDifference,
+  pickActiveThreshold,
+} from "../../priceDifference";
 import { recordHealthSample } from "../../healthScore";
 
 // ---------------------------------------------------------------------------
@@ -196,17 +199,27 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   // Direction is determined by reservePrice vs. on-chain median; pass a
   // synthetic pool view that uses `lastMedianPrice` as the oracle source
   // so reporter-quote contamination of `oraclePrice` can't flip direction.
-  const active = pickActiveThreshold(
-    {
-      reserves0: existing.reserves0,
-      reserves1: existing.reserves1,
-      oraclePrice: existing.lastMedianPrice,
-      invertRateFeed: existing.invertRateFeed,
-      token0Decimals: existing.token0Decimals,
-      token1Decimals: existing.token1Decimals,
-    },
-    { above, below },
-  );
+  // Synthetic pool view using `lastMedianPrice` (clean median) for both
+  // direction-pick AND priceDifference. Without this, upsertPool's
+  // breach/health recompute would derive priceDifference from the
+  // reporter-tainted `oraclePrice` (set by OracleReported), so a
+  // governance threshold update following a non-median reporter event
+  // could open/close breaches and update health from a price the
+  // contract would not use. Pass the precomputed priceDifference in
+  // oracleDelta so upsertPool skips its own computePriceDifference.
+  const medianView = {
+    reserves0: existing.reserves0,
+    reserves1: existing.reserves1,
+    oraclePrice: existing.lastMedianPrice,
+    invertRateFeed: existing.invertRateFeed,
+    token0Decimals: existing.token0Decimals,
+    token1Decimals: existing.token1Decimals,
+  };
+  const active = pickActiveThreshold(medianView, { above, below });
+  const priceDifferenceFromMedian =
+    existing.lastMedianPrice > 0n
+      ? computePriceDifference(medianView)
+      : existing.priceDifference;
   const upserted = await upsertPool({
     context,
     chainId: event.chainId,
@@ -220,25 +233,29 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       rebalanceThresholdBelow: below,
       rebalanceThreshold: active,
       rebalanceThresholdsKnown: true,
+      priceDifference: priceDifferenceFromMedian,
     },
     existing: { pool: existing },
   });
   // Advance the health-time accumulators so the interval since the last
-  // sample is attributed against the pre-update deviationRatio. Without
-  // this the next oracle/reserve event would attribute it against the
-  // post-update ratio, inflating `healthBinarySeconds` for tightening
-  // events on quiet pools. We discard `snapshotFields` because no
-  // OracleSnapshot row is written for threshold-only events (the chart
-  // history covers oracle reports + median updates, not governance
-  // threshold changes).
-  const { poolUpdate } = recordHealthSample(
-    upserted,
-    upserted.priceDifference,
-    upserted.rebalanceThreshold,
-    blockTimestamp,
-  );
-  const pool = { ...upserted, ...poolUpdate };
-  context.Pool.set(pool);
+  // sample is attributed against the pre-update deviationRatio. Gate on
+  // `oracleOk` and `hasHealthData` so we don't seed accumulators from a
+  // pool that has no real oracle coverage yet (threshold-update is the
+  // first event after deploy, RPC misses left oracle state default).
+  // Otherwise the next real sample would accrue the intervening interval
+  // as healthy even though there was no oracle visibility. Discard
+  // snapshotFields — threshold-only events don't write OracleSnapshot.
+  let pool = upserted;
+  if (upserted.oracleOk && upserted.hasHealthData) {
+    const { poolUpdate } = recordHealthSample(
+      upserted,
+      upserted.priceDifference,
+      upserted.rebalanceThreshold,
+      blockTimestamp,
+    );
+    pool = { ...upserted, ...poolUpdate };
+    context.Pool.set(pool);
+  }
   await upsertSnapshot({
     context,
     pool,

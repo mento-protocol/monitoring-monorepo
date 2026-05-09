@@ -376,6 +376,8 @@ export const DEFAULT_ORACLE_FIELDS = {
   referenceRateFeedID: "",
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
+  medianLive: false,
+  lastOracleReportAt: 0n,
   prevMedianPrice: 0n,
   prevMedianAt: 0n,
   lastOracleJumpBps: "0.0000",
