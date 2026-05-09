@@ -12,7 +12,12 @@ import {
   type VirtualPoolLifecycle,
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
-import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
+import {
+  mirrorFeedIdToPool,
+  upsertPool,
+  upsertSnapshot,
+  DEFAULT_ORACLE_FIELDS,
+} from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
 import { tokenDecimalsScalingEffect, vpExchangeIdEffect } from "../rpc/effects";
@@ -76,8 +81,13 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const token1Decimals = dec1Raw
     ? (scalingFactorToDecimals(dec1Raw) ?? 18)
     : 18;
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
   const wrappedExchangeId = vpExchange?.exchangeId;
 
+  // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` in
+  // upsertPool — the VP-event hot path picks it up there too. Pass nothing
+  // here and let the heal pipeline carry the value.
   await upsertPool({
     context,
     chainId: event.chainId,
@@ -85,24 +95,19 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     token0,
     token1,
     source: "virtual_pool_factory",
-    blockNumber: asBigInt(event.block.number),
-    blockTimestamp: asBigInt(event.block.timestamp),
+    blockNumber,
+    blockTimestamp,
     txHash: event.transaction.hash,
     tokenDecimals: { token0Decimals, token1Decimals },
-    wrappedExchangeId,
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",
     },
   });
 
-  // Forward link: if the underlying BiPoolManager exchange was already
-  // created (the common ordering — exchanges register first, VPs wrap them
-  // later), stamp the back-reference now AND copy the v2 feed ID onto the
-  // Pool so the existing SortedOracles `getPoolsByFeed` lookup finds the
-  // VP naturally. The reverse case (VP-first) is handled in
-  // BiPoolManager.ExchangeCreated. Single get on a bytes32-keyed primary
-  // key — cheap.
+  // Forward link to a pre-existing exchange (common ordering: exchanges
+  // register first, VPs wrap them later). The reverse case (VP-first) is
+  // handled in BiPoolManager.ExchangeCreated.
   if (wrappedExchangeId) {
     const exchangeRowId = `${event.chainId}-${wrappedExchangeId}`;
     const exchange = await context.BiPoolExchange.get(exchangeRowId);
@@ -111,32 +116,17 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
         context.BiPoolExchange.set({
           ...exchange,
           wrappedByPoolId: poolId,
-          updatedAtBlock: asBigInt(event.block.number),
-          updatedAtTimestamp: asBigInt(event.block.timestamp),
+          updatedAtBlock: blockNumber,
+          updatedAtTimestamp: blockTimestamp,
         });
       }
-      // Copy the feedID onto the Pool so the existing SortedOracles
-      // handler finds the VP via `getPoolsByFeed`. ZERO_ADDRESS = the
-      // ExchangeCreated handler hasn't completed RPC backfill yet
-      // (transient blip); leave Pool.referenceRateFeedID empty and let
-      // the next FPMM-style touch carry it in. Only run when we have
-      // a real feedID to avoid clobbering a previously-set value with
-      // ZERO_ADDRESS during reorgs.
-      const ZERO_FEED = "0x0000000000000000000000000000000000000000";
-      if (
-        exchange.referenceRateFeedID &&
-        exchange.referenceRateFeedID !== ZERO_FEED
-      ) {
-        const pool = await context.Pool.get(poolId);
-        if (pool && pool.referenceRateFeedID !== exchange.referenceRateFeedID) {
-          context.Pool.set({
-            ...pool,
-            referenceRateFeedID: exchange.referenceRateFeedID,
-            updatedAtBlock: asBigInt(event.block.number),
-            updatedAtTimestamp: asBigInt(event.block.timestamp),
-          });
-        }
-      }
+      await mirrorFeedIdToPool(
+        context,
+        poolId,
+        exchange.referenceRateFeedID,
+        blockNumber,
+        blockTimestamp,
+      );
     }
   }
 

@@ -9,6 +9,8 @@ import type {
   PoolDailySnapshot,
   DeviationThresholdBreach,
 } from "generated";
+import type { HandlerContext } from "generated/src/Types";
+import { ZERO_ADDRESS } from "./constants";
 import {
   hourBucket,
   dayBucket,
@@ -399,6 +401,31 @@ export async function selfHealWrappedExchangeId(
   };
 }
 
+/** Mirror a v2 exchange's `referenceRateFeedID` onto its wrapping
+ * VirtualPool's Pool row so the existing SortedOracles `getPoolsByFeed`
+ * lookup picks up the VP naturally. Idempotent — no-op when already in
+ * sync. Skips zero/empty feedIDs (still pre-RPC-backfill or destroyed
+ * exchange) so a transient source value can't blank a previously-set
+ * link. Used from both directions of the VP↔BiPoolExchange linkage
+ * (VirtualPoolDeployed forward, BiPoolManager.ExchangeCreated reverse). */
+export async function mirrorFeedIdToPool(
+  context: HandlerContext,
+  poolId: string,
+  feedId: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  if (!feedId || feedId === ZERO_ADDRESS) return;
+  const pool = await context.Pool.get(poolId);
+  if (!pool || pool.referenceRateFeedID === feedId) return;
+  context.Pool.set({
+    ...pool,
+    referenceRateFeedID: feedId,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
+}
+
 export type SnapshotContext = {
   PoolSnapshot: {
     get: (id: string) => Promise<PoolSnapshot | undefined>;
@@ -451,9 +478,6 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceReward: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
-  // Set at VirtualPoolDeployed time via bytecode pattern extraction.
-  // FPMM pools never carry an exchangeId so this stays undefined for them.
-  wrappedExchangeId: undefined as string | undefined,
   token0Decimals: 18,
   token1Decimals: 18,
   // Health score accumulators
@@ -495,6 +519,9 @@ const defaultPool = (
   notionalVolume1: 0n,
   rebalanceCount: 0,
   ...DEFAULT_ORACLE_FIELDS,
+  // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
+  // (factory-direct value or bytecode read). FPMMs never set it.
+  wrappedExchangeId: undefined,
   createdAtBlock: 0n,
   createdAtTimestamp: 0n,
   updatedAtBlock: 0n,
@@ -517,7 +544,6 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
-  wrappedExchangeId,
   existing: existingOverride,
 }: {
   context: PoolContext;
@@ -541,12 +567,6 @@ export const upsertPool = async ({
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
-  /** Wrapped v2 exchange ID for VirtualPools. Undefined for FPMM pools, or
-   * for VPs whose bytecode didn't yield a match (transient RPC failure).
-   * Only persisted on first successful read — never overwritten with
-   * undefined once set, so a one-time RPC failure on a re-sync doesn't
-   * blank a known value. */
-  wrappedExchangeId?: string;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -554,10 +574,15 @@ export const upsertPool = async ({
    * from "not passed". When `undefined`, upsertPool does its own lookup. */
   existing?: { pool: Pool | undefined };
 }): Promise<Pool> => {
-  const existingInitial = existingOverride
+  const initialBase = existingOverride
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
+  // Carry the caller's intended source into the heal pipeline so the
+  // VP/FPMM-aware gates (`isVirtualPool`, `pool.source === ""`) behave
+  // correctly on first-touch upserts where the persisted source is still
+  // the "" defaultPool value.
+  const existingInitial: Pool = { ...initialBase, source };
   // Self-heal invertRateFeed up front so every downstream computation
   // (priceDifference, oraclePrice flip, breach status) sees the corrected
   // orientation. Same helper that handlers call before reading the field.
@@ -566,7 +591,13 @@ export const upsertPool = async ({
   // VirtualPoolDeployed event fired pre-start_block. Bytecode is immutable
   // and the effect is `cache: true` so the actual RPC fires once per VP
   // address across the whole sync regardless of how many events touch it.
-  const existing = await selfHealWrappedExchangeId(context, invertHealed);
+  // Inline gate on the hot path so FPMM events + already-healed VPs skip
+  // the await microtask hop; the helper itself early-returns on the same
+  // condition for off-hot-path callers.
+  const existing =
+    invertHealed.wrappedExchangeId || !isVirtualPool(invertHealed)
+      ? invertHealed
+      : await selfHealWrappedExchangeId(context, invertHealed);
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
@@ -641,11 +672,9 @@ export const upsertPool = async ({
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
-    // Persist `wrappedExchangeId` once on first successful read — never
-    // overwrite a known value with undefined. Re-sync RPC blips would
-    // otherwise blank the link and the dashboard's pool→exchange join
-    // would intermittently fail.
-    wrappedExchangeId: wrappedExchangeId ?? existing.wrappedExchangeId,
+    // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` above —
+    // the helper updates `existing` in place (returns a new object on
+    // healing, original on no-op) so the spread carries the field through.
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:

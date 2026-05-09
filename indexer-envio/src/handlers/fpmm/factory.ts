@@ -32,8 +32,7 @@ import {
   upsertPool,
 } from "../../pool";
 import { isKnownFeeToken } from "../../feeToken";
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+import { ZERO_ADDRESS } from "../../constants";
 
 export async function applyLiquidityPositionDelta({
   context,

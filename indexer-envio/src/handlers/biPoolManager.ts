@@ -20,10 +20,10 @@ import {
 } from "generated";
 import type { HandlerContext } from "generated/src/Types";
 import { eventId, asAddress, asBigInt } from "../helpers";
+import { ZERO_ADDRESS } from "../constants";
+import { mirrorFeedIdToPool } from "../pool";
 import { poolExchangeEffect } from "../rpc/effects";
 import { lookupPricingModuleName } from "../contractAddresses";
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function exchangeRowId(chainId: number, exchangeId: string): string {
   return `${chainId}-${exchangeId.toLowerCase()}`;
@@ -113,22 +113,14 @@ async function ensureBiPoolExchange(
   };
   context.BiPoolExchange.set(row);
 
-  // Mirror feedID onto the wrapped Pool if applicable (mirrors the
-  // forward/reverse link logic in the create handler + VP factory).
-  if (
-    wrappedByPoolId &&
-    row.referenceRateFeedID &&
-    row.referenceRateFeedID !== ZERO_ADDRESS
-  ) {
-    const pool = await context.Pool.get(wrappedByPoolId);
-    if (pool && pool.referenceRateFeedID !== row.referenceRateFeedID) {
-      context.Pool.set({
-        ...pool,
-        referenceRateFeedID: row.referenceRateFeedID,
-        updatedAtBlock: blockNumber,
-        updatedAtTimestamp: blockTimestamp,
-      });
-    }
+  if (wrappedByPoolId) {
+    await mirrorFeedIdToPool(
+      context,
+      wrappedByPoolId,
+      row.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
   }
   return row;
 }
@@ -210,25 +202,14 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
 
   context.BiPoolExchange.set(row);
 
-  // Reverse-link: if a VP wrapper deployed before this exchange, mirror the
-  // feedID onto its Pool so SortedOracles handlers find it naturally.
-  // Conditional gates (real feedID + matching pool exists) mirror the
-  // forward-link path in virtualPool.ts to keep the two directions
-  // semantically symmetric.
-  if (
-    wrappedByPoolId &&
-    row.referenceRateFeedID &&
-    row.referenceRateFeedID !== ZERO_ADDRESS
-  ) {
-    const pool = await context.Pool.get(wrappedByPoolId);
-    if (pool && pool.referenceRateFeedID !== row.referenceRateFeedID) {
-      context.Pool.set({
-        ...pool,
-        referenceRateFeedID: row.referenceRateFeedID,
-        updatedAtBlock: blockNumber,
-        updatedAtTimestamp: blockTimestamp,
-      });
-    }
+  if (wrappedByPoolId) {
+    await mirrorFeedIdToPool(
+      context,
+      wrappedByPoolId,
+      row.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
   }
 });
 

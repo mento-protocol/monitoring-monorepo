@@ -9,6 +9,9 @@ import { tokenSymbol } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { BiPoolExchangeRow, Pool } from "@/lib/types";
 
+const BUCKET_INFO_CONTENT =
+  "Per-side virtual reserve target on the v2 ConstantSum curve. Distinct from on-chain Reserve liquidity: buckets define the swap-curve sizing for the current reset cycle (refilled from SortedOracles every cycle), while actual settlement debits/credits the Mento Reserve. Bucket size caps the swap that can clear without a wait for the next reset.";
+
 /**
  * Live v2 BiPoolManager exchange config + reserves panel for VirtualPools.
  * Replaces PoolConfigPanel/BreakerPanel (which apply to FPMM only). Data
@@ -103,7 +106,7 @@ export function V2ExchangePanel({
             Bucket — {sym0}
             <InfoPopover
               label="Bucket reserves"
-              content="Per-side virtual reserve target on the v2 ConstantSum curve. Distinct from on-chain Reserve liquidity: buckets define the swap-curve sizing for the current reset cycle (refilled from SortedOracles every cycle), while actual settlement debits/credits the Mento Reserve. Bucket size caps the swap that can clear without a wait for the next reset."
+              content={BUCKET_INFO_CONTENT}
             />
           </span>
         }
@@ -117,7 +120,7 @@ export function V2ExchangePanel({
             Bucket — {sym1}
             <InfoPopover
               label="Bucket reserves"
-              content="Per-side virtual reserve target on the v2 ConstantSum curve. Distinct from on-chain Reserve liquidity: buckets define the swap-curve sizing for the current reset cycle (refilled from SortedOracles every cycle), while actual settlement debits/credits the Mento Reserve. Bucket size caps the swap that can clear without a wait for the next reset."
+              content={BUCKET_INFO_CONTENT}
             />
           </span>
         }
