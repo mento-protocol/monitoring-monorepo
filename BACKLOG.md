@@ -195,6 +195,63 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 
 - [ ] **Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.** PR #335 keeps the unmodified-click path on a live URL by recomputing `callbackUrl` from `window.location` inside the click handler, but the anchor `href` itself stays frozen at the render-time `useSearchParams()` snapshot — so cmd-click / middle-click / "open link in new tab" sends OAuth through the stale callback. Acceptable today: cmd-click is a deliberate "open in a side tab" gesture, the original tab still has the live URL state, and shared session means returning to the source tab works. To fix properly: monkeypatch `history.pushState`/`replaceState` once at the app root to dispatch a `'locationchange'` custom event, and have `AuthStatus` (and any future consumers) re-derive `href` via a `useSyncExternalStore` (or equivalent) that listens to `popstate` + `locationchange`. Cursor flagged this on PR #335 review.
 
+## Follow-ups deferred from Phase 2 (BiPoolExchange indexer + dashboard refactor)
+
+- [ ] **24h Volume tile for VPs.** Per-exchangeId 24h USD volume on the
+      VirtualPool header. Sourcing from `BrokerSwapEvent` by exchangeId would
+      hit Hasura's 1000-row cap for active pairs; the proper fix is a new
+      per-exchange daily-rollup entity (`BrokerExchangeDailySnapshot` keyed
+      by `chainId-exchangeId-day`) updated alongside `BrokerDailySnapshot` in
+      the broker handler. Requires a schema bump + full re-sync, so deferred
+      out of the Phase 2 PR which already ships one.
+
+- [ ] **`@index` on `BiPoolExchange.wrappedByPoolId`.** Dashboard's
+      `POOL_V2_EXCHANGE` filters on the field. At ~12 BiPoolExchange rows on
+      Celo today the scan is trivial; once exchange count grows on Monad / new
+      chains, the filter becomes O(N). Single-line schema change but triggers
+      a full re-sync — defer until either query latency degrades or the next
+      schema-touching PR rides it in. Flagged by claude[bot].
+
+- [ ] **Sentinel for orphan exchanges (`wrappedByPoolId` will-never-be-set).**
+      `ensureBiPoolExchange` re-runs `Pool.getWhere.wrappedExchangeId.eq()`
+      on every `BucketsUpdated` (every 360s) for any exchange that has no
+      wrapping VP. Negligible at current 12-exchange scale, but at
+      higher scale (or for v2-only exchanges that genuinely have no wrapper)
+      this is unbounded retry work. Fix: add a "checked, no wrapper" sentinel
+      (e.g. `wrappedByPoolIdChecked: Boolean!`) and short-circuit the retry.
+      Schema change + re-sync, so deferred. Flagged by claude[bot].
+
+- [ ] **Block-scoped `getPoolExchange` reads.** `fetchPoolExchange` reads at
+      `latest`, not the event block. For freshly-created exchanges during
+      steady-state sync, latest ≈ event block. For deep historical replay,
+      a future governance change to spread / feedID / reset frequency could
+      stamp a future config onto a past row. Currently safe because: (a) the
+      static-config triple is governance-rare in practice, (b) the all-zero
+      detection skips destroyed exchanges, (c) `BucketsUpdated` /
+      `SpreadUpdated` immediately overwrite. Real fix wires the BiPoolManager
+      fetchers through `readContractWithBlockFallback` (with archive-RPC
+      fallback) the same way `fetchReserves` does today. Flagged by codex.
+
+- [ ] **VP detail page: oracle-tile layout shift.** When `Pool.referenceRateFeedID`
+      self-heals, the header transitions from 2 → 3 tiles on the next page
+      load. Use a fixed-height invisible placeholder to hold the slot for VPs
+      where the field is empty. UX nit; not user-visible most of the time.
+      Flagged by claude[bot].
+
+- [ ] **VP self-heal source-gate (testnet-only edge case).** `selfHealWrappedExchangeId`
+      gates on `isVirtualPool(pool)` which checks `pool.source.includes("virtual")`.
+      For pre-start*block VPs whose first-seen event is `VirtualPool.Swap` /
+      `Mint` / `Burn`, those handlers reuse the `fpmm*\*`source keys (intentional —
+they share priority with FPMM events), so the pool source never gets the
+"virtual" substring → self-heal skipped →`wrappedExchangeId`never populates.
+Production has zero pre-start_block active VPs (verified — all 12 Celo
+VPs have createdAtBlock > 60664500), so this only bites the testnet
+static VP list. Real fix: drop the source gate and let`vpExchangeIdEffect`
+      (cache:true) be the authoritative VP-detector — the bytecode pattern is
+      definitive. Tradeoff: per-batch RPC for every FPMM-event heal until the
+      cache returns null. Defer until either the gate breaks production or
+      a separate refactor revisits the source-key reuse. Flagged by codex.
+
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
 Captured during the medium-tier benchmarking session that landed the

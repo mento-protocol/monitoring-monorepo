@@ -157,6 +157,15 @@ type Pool {
   # Rebalancer liveness (FPMM pools only)
   rebalancerAddress: String!
   rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
+  # Linkage to the underlying v2 BiPoolManager exchange for VirtualPools.
+  # Bytes32 hex (no `0x{chainId}-` prefix — `BiPoolExchange.id` is namespaced).
+  # Null for FPMM pools and for VPs we couldn't resolve at deploy time.
+  # Set once at VirtualPoolDeployed via bytecode pattern extraction (the
+  # exchangeId is an immutable PUSH32 in the swap() preamble).
+  # Indexed because `BiPoolManager.ExchangeCreated` does a reverse `getWhere`
+  # to pair pre-existing VP wrappers with their underlying exchange, and the
+  # dashboard's pool-detail GraphQL query joins Pool → BiPoolExchange on it.
+  wrappedExchangeId: String @index
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
@@ -404,6 +413,81 @@ type BrokerAggregatorDailySnapshot
 # signer EOAs per day, not distinct msg.sender contracts.
 type BrokerAggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
+}
+
+# ============================================================================
+# BiPoolManager exchanges (v2 backend that VirtualPools wrap)
+#
+# A VirtualPool is a thin v3-flavored wrapper over a BiPoolManager exchange:
+# its `swap()` calls `Broker.swapIn(exchangeProvider, exchangeId, ...)` and
+# its `getReserves()` reads the v2 exchange's bucket curve. Liquidity lives
+# in the Mento Reserve, the price curve is bucket-based with a periodic
+# oracle-driven reset.
+#
+# BiPoolExchange persists everything `BiPoolManager.getPoolExchange(exchangeId)`
+# returns (asset0/1, pricingModule, spread, referenceRateFeedID, reset
+# frequency, etc.) plus denormalized latest bucket values for cheap
+# rendering. The dashboard's pool-detail page reads this entity instead of
+# RPC-polling BiPoolManager every render.
+#
+# Linked from `Pool.wrappedExchangeId` (set at VirtualPoolDeployed time);
+# the dashboard joins poolId → exchangeId → BiPoolExchange.
+# ============================================================================
+type BiPoolExchange {
+  id: ID! # "{chainId}-{exchangeId}" — exchangeId is bytes32 hex
+  chainId: Int! @index
+  exchangeId: String! # raw bytes32 hex without chain prefix
+  exchangeProvider: String! # BiPoolManager contract address (lowercased)
+  asset0: String!
+  asset1: String!
+  pricingModule: String!
+  # Friendly name resolved via `contractEntries(chainId)` at write time
+  # (e.g. "ConstantSum"). Null when the deployed pricing module isn't in
+  # @mento-protocol/contracts — the UI renders "—" in that case.
+  pricingModuleName: String
+  # FixidityLib value (1e24 unit). Divide by 1e24 for the swap fee fraction.
+  # Updated on `SpreadUpdated` events.
+  spread: BigInt!
+  # SortedOracles feed used to recompute buckets on each reset. Indexed
+  # because the SortedOracles handler joins on this to write OracleSnapshot
+  # rows for v2-backed feeds (mirroring how it currently joins on
+  # `Pool.referenceRateFeedID`).
+  referenceRateFeedID: String! @index
+  referenceRateResetFrequency: BigInt! # seconds between bucket resets
+  minimumReports: BigInt!
+  stablePoolResetSize: BigInt!
+  # Latest bucket reserves, denormalized from BucketUpdate so the panel
+  # doesn't have to join the time series for the live tile. Updated on
+  # every `BucketsUpdated` event.
+  bucket0: BigInt!
+  bucket1: BigInt!
+  lastBucketUpdate: BigInt!
+  # True after `ExchangeDestroyed` fires. The wrapper VirtualPool stays
+  # deployed but routes nothing — the UI surfaces this prominently.
+  isDeprecated: Boolean!
+  # poolId of the VirtualPool that wraps this exchange, if any. Set when
+  # `VirtualPoolDeployed` fires AFTER the exchange. Null for v2 exchanges
+  # that don't have a v3 wrapper (they're still tradable via Broker).
+  wrappedByPoolId: String
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# Per-event time series of bucket-reserve resets. Captured from
+# `BucketsUpdated` events (cadence is per-exchange `referenceRateResetFrequency`,
+# typically 360s on Celo). Phase 4's spot-price chart consumes this to render
+# the bucket curve over time.
+type BucketUpdate @index(fields: ["exchangeId", "blockTimestamp"]) {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  exchangeId: String! @index
+  bucket0: BigInt!
+  bucket1: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
 }
 
 type FactoryDeployment {

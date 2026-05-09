@@ -276,3 +276,57 @@ export const ERC20_DECIMALS_ABI = [
     stateMutability: "view",
   },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// BiPoolManager — getPoolExchange backfill
+//
+// `BiPoolManager.ExchangeCreated` carries asset0/asset1/pricingModule but NOT
+// the rest of the PoolExchange struct (spread, referenceRateFeedID, reset
+// frequency, …). Those land via the BiPoolManager.PoolConfig sub-events
+// (SpreadUpdated, BucketsUpdated) AFTER ExchangeCreated, but governance can
+// also call `setExchangeConfig` between create and first bucket update —
+// leaving the indexer's row stubbed (zeros) for that gap. To populate fully
+// at create time we read the struct directly via `getPoolExchange` once.
+//
+// Inline minimal ABI rather than the vendored full ABI at indexer-envio/abis/
+// to mirror the FPMM_*_ABI pattern; keeps the read site type-safe without
+// importing 1000 lines of unrelated event signatures.
+// ---------------------------------------------------------------------------
+
+export const BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI = [
+  {
+    type: "function",
+    name: "getPoolExchange",
+    inputs: [{ name: "exchangeId", type: "bytes32" }],
+    outputs: [
+      {
+        name: "exchange",
+        type: "tuple",
+        components: [
+          { name: "asset0", type: "address" },
+          { name: "asset1", type: "address" },
+          { name: "pricingModule", type: "address" },
+          { name: "bucket0", type: "uint256" },
+          { name: "bucket1", type: "uint256" },
+          { name: "lastBucketUpdate", type: "uint256" },
+          {
+            name: "config",
+            type: "tuple",
+            components: [
+              {
+                name: "spread",
+                type: "tuple",
+                components: [{ name: "value", type: "uint256" }],
+              },
+              { name: "referenceRateFeedID", type: "address" },
+              { name: "referenceRateResetFrequency", type: "uint256" },
+              { name: "minimumReports", type: "uint256" },
+              { name: "stablePoolResetSize", type: "uint256" },
+            ],
+          },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+] as const;

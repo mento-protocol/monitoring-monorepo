@@ -75,6 +75,19 @@ contracts:
       - event: ReportExpirySet
       - event: TokenReportExpirySet
 
+  # BiPoolManager — see config.multichain.mainnet.yaml for the full
+  # rationale. Mirrored here so testnet codegen + handler bindings stay
+  # aligned with mainnet. Per-network address registered under each
+  # `networks:` entry below.
+  - name: BiPoolManager
+    abi_file_path: abis/BiPoolManager.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ExchangeCreated
+      - event: ExchangeDestroyed
+      - event: BucketsUpdated
+      - event: SpreadUpdated
+
   - name: OpenLiquidityStrategy
     abi_file_path: abis/OpenLiquidityStrategy.json
     handler: src/EventHandlers.ts
@@ -163,6 +176,9 @@ networks:
       - name: VirtualPoolFactory
         address:
           - 0x887955f28723B0e9Bddc358448CB5B1FDe692da4
+      - name: BiPoolManager
+        address:
+          - 0xeCB3C656C131fCd9bB8D1d80898716bD684feb78 # Proxy:BiPoolManager (Celo Sepolia)
       - name: SortedOracles
         address:
           - "0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20"

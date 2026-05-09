@@ -1,0 +1,212 @@
+// BiPoolManager + VirtualPool RPC fetchers — `getPoolExchange` struct read +
+// VP bytecode-pattern extraction. Split out of `pool-state.ts` to keep that
+// file under the repo's 1000-line cap.
+//
+// Both fetchers are wired through `rpc/effects.ts` (poolExchangeEffect /
+// vpExchangeIdEffect) so handler call sites get per-batch dedup +
+// optional persistent caching automatically. Test mocks live in this
+// module (re-exported via `rpc.ts`).
+
+import { BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI } from "../abis";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
+import { readContractWithBlockFallback } from "./block-fallback";
+import { consoleLogger, type RpcLogger } from "./log";
+
+// ---------------------------------------------------------------------------
+// BiPoolManager — getPoolExchange backfill
+//
+// `ExchangeCreated` carries asset0/asset1/pricingModule but the rest of the
+// PoolExchange struct (spread, referenceRateFeedID, reset frequency, …) only
+// arrives via the SpreadUpdated / BucketsUpdated sub-events AFTER create.
+// `fetchPoolExchange` is called once at ExchangeCreated time so the
+// `BiPoolExchange` row is fully populated immediately.
+//
+// Returns null on RPC failure. The handler skips the field overwrite on null
+// and the next SpreadUpdated / BucketsUpdated event still mutates incrementally.
+// ---------------------------------------------------------------------------
+
+export type PoolExchangeStruct = {
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
+  bucket0: bigint;
+  bucket1: bigint;
+  lastBucketUpdate: bigint;
+  spread: bigint;
+  referenceRateFeedID: string;
+  referenceRateResetFrequency: bigint;
+  minimumReports: bigint;
+  stablePoolResetSize: bigint;
+};
+
+const _testPoolExchanges = new Map<string, PoolExchangeStruct | null>();
+
+/** @internal Test-only: pre-set a mock PoolExchange struct keyed by
+ *  (chainId, exchangeProvider, exchangeId). Pass `null` to simulate RPC
+ *  failure. Call `_clearMockPoolExchanges()` to reset. */
+export function _setMockPoolExchange(
+  chainId: number,
+  exchangeProvider: string,
+  exchangeId: string,
+  struct: PoolExchangeStruct | null,
+): void {
+  const key = `${chainId}:${exchangeProvider.toLowerCase()}:${exchangeId.toLowerCase()}`;
+  _testPoolExchanges.set(key, struct);
+}
+
+/** @internal Test-only: clear all PoolExchange mocks. */
+export function _clearMockPoolExchanges(): void {
+  _testPoolExchanges.clear();
+}
+
+export async function fetchPoolExchange(
+  chainId: number,
+  exchangeProvider: string,
+  exchangeId: string,
+  log: RpcLogger = consoleLogger,
+): Promise<PoolExchangeStruct | null> {
+  const mockKey = `${chainId}:${exchangeProvider.toLowerCase()}:${exchangeId.toLowerCase()}`;
+  if (_testPoolExchanges.has(mockKey)) {
+    return _testPoolExchanges.get(mockKey) ?? null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    // Address-keyed read with no blockNumber — read at `latest`. The struct
+    // changes only on governance + bucket-reset events that we already index
+    // (SpreadUpdated, BucketsUpdated, etc.) so the latest read is fine for
+    // the one-time seed; subsequent events overwrite the relevant fields.
+    const { result } = await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address: exchangeProvider as `0x${string}`,
+        abi: BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
+        functionName: "getPoolExchange",
+        args: [exchangeId as `0x${string}`],
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    const r = result as {
+      asset0: string;
+      asset1: string;
+      pricingModule: string;
+      bucket0: bigint;
+      bucket1: bigint;
+      lastBucketUpdate: bigint;
+      config: {
+        spread: { value: bigint };
+        referenceRateFeedID: string;
+        referenceRateResetFrequency: bigint;
+        minimumReports: bigint;
+        stablePoolResetSize: bigint;
+      };
+    };
+    return {
+      asset0: r.asset0.toLowerCase(),
+      asset1: r.asset1.toLowerCase(),
+      pricingModule: r.pricingModule.toLowerCase(),
+      bucket0: r.bucket0,
+      bucket1: r.bucket1,
+      lastBucketUpdate: r.lastBucketUpdate,
+      spread: r.config.spread.value,
+      referenceRateFeedID: r.config.referenceRateFeedID.toLowerCase(),
+      referenceRateResetFrequency: r.config.referenceRateResetFrequency,
+      minimumReports: r.config.minimumReports,
+      stablePoolResetSize: r.config.stablePoolResetSize,
+    };
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "getPoolExchange",
+      `${exchangeProvider}:${exchangeId}`,
+      err,
+      undefined,
+      log,
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VirtualPool — extract wrapped exchangeId from bytecode
+//
+// Every VirtualPool's `swap()` preamble contains the BiPoolManager address +
+// exchangeId as PUSH32 immediates emitted by the compiler in a recognizable
+// opcode sequence. The pattern was validated against all 12 deployed Celo
+// VPs in PR #359. Extracting at index time means the dashboard's
+// VirtualPool→exchange join is a single GraphQL hop instead of an HTTP/RPC
+// round-trip per page load.
+//
+//   PUSH32 <32B mgrAddr>  — capture 1 (right-aligned in 32 bytes; bottom 20B is the address)
+//   DUP2 (81) AND (16) PUSH1 0x04 (6004) DUP4 (83) ADD (01) MSTORE (52)
+//   PUSH32 <32B exchangeId> — capture 2
+//
+// Returns null when the address has no bytecode (likely not yet deployed at
+// the requested block) or when the pattern doesn't match (not a VirtualPool —
+// shouldn't happen given how this is called, but defends against future
+// non-VP deployments routed through the same factory).
+// ---------------------------------------------------------------------------
+
+export type VirtualPoolExchangeId = {
+  exchangeProvider: string;
+  exchangeId: string;
+};
+
+const _testVpExchangeIds = new Map<string, VirtualPoolExchangeId | null>();
+
+/** @internal Test-only: pre-set a mock VirtualPool exchangeId extraction.
+ *  Pass `null` to simulate "not a VP" (no pattern match). */
+export function _setMockVpExchangeId(
+  chainId: number,
+  vpAddress: string,
+  result: VirtualPoolExchangeId | null,
+): void {
+  const key = `${chainId}:${vpAddress.toLowerCase()}`;
+  _testVpExchangeIds.set(key, result);
+}
+
+/** @internal Test-only: clear all VirtualPool exchangeId mocks. */
+export function _clearMockVpExchangeIds(): void {
+  _testVpExchangeIds.clear();
+}
+
+// Compiler-emitted opcode sequence between the two PUSH32 constants:
+// 81 (DUP2) 16 (AND) 6004 (PUSH1 0x04) 83 (DUP4) 01 (ADD) 52 (MSTORE) 7f (PUSH32).
+const VP_BYTECODE_PATTERN = /7f([0-9a-f]{64})811660048301527f([0-9a-f]{64})/;
+
+export function extractVpExchangeIdFromBytecode(
+  code: string,
+): VirtualPoolExchangeId | null {
+  const match = code.toLowerCase().match(VP_BYTECODE_PATTERN);
+  if (!match) return null;
+  // First match is the address right-aligned in 32 bytes — bottom 20 bytes
+  // is the actual address.
+  const mgrPadded = match[1]!;
+  const exchangeProvider = ("0x" + mgrPadded.slice(24)).toLowerCase();
+  const exchangeId = ("0x" + match[2]!).toLowerCase();
+  return { exchangeProvider, exchangeId };
+}
+
+export async function fetchVirtualPoolExchangeId(
+  chainId: number,
+  vpAddress: string,
+  log: RpcLogger = consoleLogger,
+): Promise<VirtualPoolExchangeId | null> {
+  const mockKey = `${chainId}:${vpAddress.toLowerCase()}`;
+  if (_testVpExchangeIds.has(mockKey)) {
+    return _testVpExchangeIds.get(mockKey) ?? null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const code = await client.getCode({
+      address: vpAddress as `0x${string}`,
+    });
+    if (!code || code === "0x") return null;
+    return extractVpExchangeIdFromBytecode(code);
+  } catch (err) {
+    logRpcFailure(chainId, "vpExchangeId", vpAddress, err, undefined, log);
+    return null;
+  }
+}

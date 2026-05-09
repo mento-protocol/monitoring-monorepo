@@ -396,6 +396,52 @@ export const POOL_CONFIG_EXT = `
   }
 `;
 
+// VirtualPool → BiPoolExchange reverse-join. Replaces the temporary
+// /api/v2-exchange-config route from PR #359; reads the indexer's
+// `BiPoolExchange` entity directly via the `wrappedByPoolId` back-reference
+// stamped at VirtualPoolDeployed (or in BiPoolManager.ExchangeCreated for
+// the rare exchange-after-VP ordering). Isolated query (same isolation
+// pattern as POOL_CONFIG_EXT / POOL_BREACH_ROLLUP) — the entity ships as
+// part of the Phase 2 indexer deploy, so during the build+resync window
+// hosted Hasura rejects the type as "field not found"; the rest of the
+// pool page keeps rendering and just the v2 panel degrades to "—".
+//
+// Reverse-key on poolId rather than forward-key on `Pool.wrappedExchangeId`
+// so the dashboard doesn't have to plumb `wrappedExchangeId` through the
+// big POOL_DETAIL_WITH_HEALTH query (one less field to add to the
+// deploy-window failure surface). Result set is always ≤1 row so the
+// non-indexed `wrappedByPoolId` filter is fine — small cardinality.
+export const POOL_V2_EXCHANGE = `
+  query PoolV2Exchange($poolId: String!, $chainId: Int!) {
+    BiPoolExchange(
+      where: {
+        wrappedByPoolId: { _eq: $poolId }
+        chainId: { _eq: $chainId }
+      }
+      limit: 1
+    ) {
+      id
+      chainId
+      exchangeId
+      exchangeProvider
+      asset0
+      asset1
+      pricingModule
+      pricingModuleName
+      spread
+      referenceRateFeedID
+      referenceRateResetFrequency
+      minimumReports
+      stablePoolResetSize
+      bucket0
+      bucket1
+      lastBucketUpdate
+      isDeprecated
+      wrappedByPoolId
+    }
+  }
+`;
+
 // Uptime / breach-count rollups. Isolated from POOL_DETAIL_WITH_HEALTH on
 // purpose: these fields are brand-new on the indexer side, so during the
 // deploy+resync window the hosted Hasura will reject them with "field not

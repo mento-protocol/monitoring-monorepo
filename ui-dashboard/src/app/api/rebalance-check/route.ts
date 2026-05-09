@@ -120,10 +120,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-// Lifted to `@/lib/redact-rpc-url` so the v2-exchange-config route can
-// reuse the same redaction discipline. Re-exported here for backwards-
-// compat with `__tests__/redact-rpc-url.test.ts` (which imports from this
-// module path).
+// Lifted to `@/lib/redact-rpc-url` so future routes that need the same
+// redaction discipline don't re-implement it. Re-exported here for
+// backwards-compat with `__tests__/redact-rpc-url.test.ts`.
 export { redactRpcUrl, containsRpcUrl } from "@/lib/redact-rpc-url";
 
 async function runWithRetry(

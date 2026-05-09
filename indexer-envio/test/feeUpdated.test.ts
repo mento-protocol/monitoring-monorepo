@@ -1,6 +1,10 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
 import generated from "generated";
+import {
+  _setMockERC20Decimals,
+  _clearMockERC20Decimals,
+} from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
 type MockDb = {
@@ -63,6 +67,12 @@ const TOKEN1 = "0x00000000000000000000000000000000000000b1";
 const FACTORY = "0x00000000000000000000000000000000000000cc";
 
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
+  // Mock the ERC20 decimals fallback so the FPMMDeployed handler doesn't
+  // hit real RPC during the decimals0/decimals1 fetcher fall-through.
+  // Without this, the test occasionally times out on slower CI runners
+  // waiting on Forno when the test addresses don't exist on-chain.
+  _setMockERC20Decimals(42220, TOKEN0, 18);
+  _setMockERC20Decimals(42220, TOKEN1, 18);
   const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
     token0: TOKEN0,
     token1: TOKEN1,
@@ -88,6 +98,10 @@ function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
 }
 
 describe("FPMM fee-config event handlers", () => {
+  beforeEach(() => {
+    _clearMockERC20Decimals();
+  });
+
   it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async function () {
     this.timeout(10_000);
     let mockDb = MockDb.createMockDb();

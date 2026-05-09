@@ -32,8 +32,7 @@ import {
   upsertPool,
 } from "../../pool";
 import { isKnownFeeToken } from "../../feeToken";
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+import { ZERO_ADDRESS } from "../../constants";
 
 export async function applyLiquidityPositionDelta({
   context,
@@ -196,7 +195,6 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
 
   if (rateFeedID) {
-    oracleDelta.referenceRateFeedID = rateFeedID;
     // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
     // handlers can read them from the DB without per-event RPC calls.
     const [oracleExpiry, numReporters] = await Promise.all([
@@ -218,6 +216,9 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       oracleDelta.oracleNumReporters = numReporters;
     }
   }
+  // `referenceRateFeedID` flows through the dedicated upsertPool param
+  // (not through oracleDelta) so it isn't clobbered by the spread chain
+  // — see DEFAULT_ORACLE_FIELDS doc.
 
   // Only persist invertRateFeed when the RPC actually succeeded, and stamp
   // `invertRateFeedKnown` so upsertPool's self-heal stops retrying. When the
@@ -259,6 +260,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     txHash: event.transaction.hash,
     oracleDelta,
     tokenDecimals,
+    referenceRateFeedID: rateFeedID ?? undefined,
   });
 
   // Persist fee config read at pool creation. `compactFees` strips

@@ -1,0 +1,24 @@
+{
+  "ignore": {
+    "rules": [
+      "react-doctor/design-no-default-tailwind-palette",
+      "react-doctor/design-no-em-dash-in-jsx-text",
+      "react-doctor/design-no-redundant-size-axes",
+      "react-doctor/design-no-bold-heading"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "**/*.test.{ts,tsx}",
+          "**/*.spec.{ts,tsx}",
+          "**/__tests__/**",
+          "scripts/**"
+        ],
+        "rules": [
+          "react-doctor/no-secrets-in-client-code",
+          "react-hooks/rules-of-hooks"
+        ]
+      }
+    ]
+  }
+}
