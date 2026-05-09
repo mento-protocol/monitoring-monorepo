@@ -607,13 +607,26 @@ describe("tryDeriveRebalanceState", () => {
     assert.equal(derived.priceDifference, 3325n);
   });
 
-  it("returns 0 priceDifference when reserves are 0 (degenerate pool)", () => {
-    const derived = tryDeriveRebalanceState(
-      ausdPool({ reserves0: 0n, reserves1: 0n }),
-      FRESH,
+  it("returns null when reserves are degenerate (would divide by zero on chain)", () => {
+    // With either reserve at 0 the FPMM `getRebalancingState` would divide
+    // by zero (reservePrice = norm1/norm0). The contract reverts; derive
+    // must mirror that and fall through to RPC instead of recording a
+    // fake-healthy zero-deviation snapshot.
+    assert.equal(
+      tryDeriveRebalanceState(
+        ausdPool({ reserves0: 0n, reserves1: 0n }),
+        FRESH,
+      ),
+      null,
     );
-    assert.ok(derived != null);
-    assert.equal(derived.priceDifference, 0n);
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ reserves0: 0n }), FRESH),
+      null,
+    );
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ reserves1: 0n }), FRESH),
+      null,
+    );
   });
 
   it("works with only one of the two thresholds set (asymmetric governance)", () => {

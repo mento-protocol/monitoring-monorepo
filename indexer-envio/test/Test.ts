@@ -2064,6 +2064,8 @@ describe("Envio Celo indexer handlers", () => {
       reserves1: 40_000_000_000_000_000_000_000n,
       lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
       lastMedianAt: 1_700_008_000n,
+      lastOracleReportAt: 1_700_008_000n,
+      medianLive: true,
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
       oracleOk: true,
       oracleExpiry: 3_600n,
@@ -2103,6 +2105,82 @@ describe("Envio Celo indexer handlers", () => {
       pool.rebalanceThresholdsKnown,
       true,
       "handler must mark thresholds known so state-sync's self-heal stops retrying",
+    );
+  });
+
+  it("RebalanceThresholdUpdated: skips breach/health recompute when median is not fresh-live", async () => {
+    // Codex round-4 finding (I1+I4): when the cached median has expired
+    // OR the pool has never seen a live MedianUpdated, the handler
+    // shouldn't recompute breach/health from `lastMedianPrice` (which
+    // may be stale or zero). Write the new threshold fields and
+    // preserve existing breach/health state until the next event with
+    // live oracle data.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c5";
+    let mockDb = MockDb.createMockDb();
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1200, timestamp: 1_700_010_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+    // Seed pool WITHOUT a live median (medianLive=false, lastMedianPrice=0).
+    // Pre-update priceDifference is 1234 — must be preserved.
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
+      lastMedianPrice: 0n, // no median yet
+      medianLive: false,
+      priceDifference: 1234n,
+      rebalanceThreshold: 999, // pre-update value
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: false,
+      invertRateFeedKnown: true,
+    });
+
+    const thresholdEvent = FPMM.RebalanceThresholdUpdated.createMockEvent({
+      oldThresholdAbove: 0n,
+      oldThresholdBelow: 0n,
+      newThresholdAbove: 250n,
+      newThresholdBelow: 175n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 1201, timestamp: 1_700_010_100 },
+      },
+    });
+    mockDb = await FPMM.RebalanceThresholdUpdated.processEvent({
+      event: thresholdEvent,
+      mockDb,
+    });
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    // Threshold split fields + Known flag landed.
+    assert.equal(pool.rebalanceThresholdAbove, 250);
+    assert.equal(pool.rebalanceThresholdBelow, 175);
+    assert.equal(pool.rebalanceThresholdsKnown, true);
+    // Active threshold + priceDifference preserved (no recompute).
+    assert.equal(
+      pool.rebalanceThreshold,
+      999,
+      "active threshold must stay at pre-update value when no live median",
+    );
+    assert.equal(
+      pool.priceDifference,
+      1234n,
+      "priceDifference must be preserved when no live median",
     );
   });
 

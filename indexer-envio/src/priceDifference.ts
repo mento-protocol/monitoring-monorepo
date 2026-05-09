@@ -236,6 +236,13 @@ export function tryDeriveRebalanceState(
         reserves1: ctx.reservesOverride.reserve1,
       }
     : { reserves0: pool.reserves0, reserves1: pool.reserves1 };
+  // Reject degenerate reserves: with either side at 0, the FPMM
+  // `getRebalancingState` would divide by zero (reservePrice =
+  // norm1/norm0). `computePriceDifference` returns 0n here and
+  // `pickActiveThreshold` falls back to the `above` side, both of which
+  // would silently record a healthy zero-deviation snapshot. Falling
+  // through to RPC matches what the contract would do: revert.
+  if (reserves.reserves0 <= 0n || reserves.reserves1 <= 0n) return null;
   // Build the math-input view: use `lastMedianPrice` (clean, only set by
   // MedianUpdated) as the oracle source so derive matches what the
   // contract's `getRebalancingState()` would compute. `oraclePrice` on
