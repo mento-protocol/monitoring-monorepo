@@ -176,10 +176,11 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     // health accumulators here. Safe because Envio is single-threaded, but
     // the double-write is intentional — health update must come after upsertPool
     // so we have the final pool state to accumulate against.
+    const effectiveBps = Number(effectiveThreshold(pool));
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      Number(effectiveThreshold(pool)),
+      effectiveBps,
       blockTimestamp,
       isNeverRebalance(pool),
     );
@@ -203,7 +204,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        rebalanceThreshold: pool.rebalanceThreshold,
+        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
+        // Asymmetric pools with active side=0 would otherwise render the chart
+        // at 0%/—. See sortedOracles handlers for full rationale.
+        rebalanceThreshold: effectiveBps,
         source: "update_reserves",
         blockNumber,
         txHash: event.transaction.hash,
@@ -398,10 +402,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     // health accumulators here. Safe because Envio is single-threaded, but
     // the double-write is intentional — health update must come after upsertPool
     // so we have the final pool state to accumulate against.
+    const effectiveBps = Number(effectiveThreshold(pool));
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      Number(effectiveThreshold(pool)),
+      effectiveBps,
       blockTimestamp,
       isNeverRebalance(pool),
     );
@@ -423,7 +428,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        rebalanceThreshold: pool.rebalanceThreshold,
+        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
+        // Asymmetric pools with active side=0 would otherwise render the chart
+        // at 0%/—. See sortedOracles handlers for full rationale.
+        rebalanceThreshold: effectiveBps,
         source: "rebalanced",
         blockNumber,
         txHash: event.transaction.hash,

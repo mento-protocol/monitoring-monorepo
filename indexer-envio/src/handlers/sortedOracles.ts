@@ -162,10 +162,11 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // 10000 fallback (raw `rebalanceThreshold` would route through the
       // no-data sentinel). `isNeverRebalance(finalPool)` short-circuits
       // governance-disabled pools to OK regardless.
+      const effectiveBps = Number(effectiveThreshold(finalPool));
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
-        Number(effectiveThreshold(finalPool)),
+        effectiveBps,
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
@@ -187,7 +188,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         oracleOk: true,
         numReporters: existing.oracleNumReporters,
         priceDifference,
-        rebalanceThreshold: existing.rebalanceThreshold,
+        // Persist the effective threshold (matches what `snapshotFields.deviationRatio`
+        // was computed against). For asymmetric pools with active side = 0, the
+        // raw `existing.rebalanceThreshold` would render the chart at 0%/—; the
+        // effective value (10000 fallback) keeps the rendered deviation in lockstep
+        // with the indexed health sample.
+        rebalanceThreshold: effectiveBps,
         source: "oracle_reported",
         blockNumber,
         txHash: event.transaction.hash,
@@ -414,10 +420,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // (The decimals-unknown short-circuit fired above before the
       // breach pipeline ran.) See OracleReported handler for the
       // `effectiveThreshold` + `isNeverRebalance` rationale.
+      const effectiveBps = Number(effectiveThreshold(finalPool));
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
-        Number(effectiveThreshold(finalPool)),
+        effectiveBps,
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
@@ -439,7 +446,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleOk: true,
         numReporters: existing.oracleNumReporters,
         priceDifference,
-        rebalanceThreshold,
+        // Persist the effective threshold (matches `snapshotFields.deviationRatio`).
+        // See OracleReported handler for asymmetric-pool rendering rationale.
+        rebalanceThreshold: effectiveBps,
         source: "oracle_median_updated",
         blockNumber,
         txHash: event.transaction.hash,

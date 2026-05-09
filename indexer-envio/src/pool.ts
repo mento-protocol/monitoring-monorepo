@@ -403,9 +403,14 @@ export async function selfHealTokenDecimals(
   context: { effect: EffectCaller },
   pool: Pool,
 ): Promise<Pool> {
-  // VirtualPools always use contract-provided priceDifference, so the local
-  // recompute path is skipped for them anyway — no need to heal decimals.
-  if (pool.tokenDecimalsKnown || pool.source === "" || isVirtualPool(pool)) {
+  // VPs were previously skipped because they don't go through the local
+  // priceDifference recompute path. But `buildSwapTraderFields` still uses
+  // `token0Decimals` / `token1Decimals` to compute `volumeUsdWei` and
+  // leaderboard snapshots — a non-18-decimal USD leg would stay mis-scaled
+  // for a VP with a deploy-time decimal blip. Cache:true effect, so the
+  // RPC pair fires once per VP across the run regardless of how many
+  // events touch it.
+  if (pool.tokenDecimalsKnown || pool.source === "") {
     return pool;
   }
   const poolAddr = extractAddressFromPoolId(pool.id);
@@ -914,6 +919,21 @@ export const upsertPool = async ({
     : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
+
+  // When priceDifference is frozen (no contract-provided value AND can't
+  // recompute), skip the breach pipeline entirely. Feeding the frozen
+  // value into `nextDeviationBreachStartedAt` / `recordBreachTransition`
+  // would let a same-block threshold update flip breach state from
+  // stale/default deviation data — corrupting `DeviationThresholdBreach`
+  // rows. VirtualPools always take this branch (canRecompute=false for
+  // them) but their breach state stays at default-zero anyway, so the
+  // skip is a no-op for them. Mirrors the SortedOracles handler guard.
+  const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
+  if (!priceDifferenceTrustworthy) {
+    const persistedNoBreach: Pool = { ...next, priceDifference };
+    context.Pool.set(persistedNoBreach);
+    return persistedNoBreach;
+  }
 
   const withDeviation = { ...next, priceDifference };
   // Compute breach-start BEFORE health, so computeHealthStatus reads the

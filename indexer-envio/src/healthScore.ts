@@ -109,20 +109,22 @@ export interface HealthSnapshotFields {
  *   stays "1.000000", hasHealthData accrues normally. Robust against the
  *   pathological `priceDifference > 1.01 * effectiveThresholdBps` case
  *   that the 1e12 cushion can't cover.
- * @param rebalanceThresholdsKnown — true once the indexer has read the
- *   on-chain threshold values (or governance has emitted a
- *   `RebalanceThresholdUpdated` event). When false the pool is in the
- *   "indexer hasn't read yet" state and we route through the no-data
- *   sentinel — accruing uptime against the 10000-bps under-bound here
- *   would silently extend the denominator across the entire pre-seed
- *   window of every freshly-deployed pool.
+ * @param dataAvailable — true when the indexer has either (a) read the
+ *   on-chain split-threshold values, OR (b) persisted a positive active
+ *   `rebalanceThreshold` (e.g. via the `getRebalancingState` RPC fallback
+ *   on UpdateReserves/Rebalanced — RPC-derived data is authoritative
+ *   even when the standalone split-side read is still missing). When
+ *   false the pool is in the "indexer has no usable threshold info" state
+ *   and we route through the no-data sentinel; accruing against the
+ *   10000-bps under-bound would silently extend the denominator across
+ *   every freshly-deployed pool's pre-seed window.
  * @returns health fields to merge into the OracleSnapshot entity
  */
 export function computeHealthSnapshotFields(
   priceDifference: bigint,
   effectiveThresholdBps: number,
   isNeverRebalance = false,
-  rebalanceThresholdsKnown = true,
+  dataAvailable = true,
 ): HealthSnapshotFields {
   if (isNeverRebalance) {
     return {
@@ -131,7 +133,7 @@ export function computeHealthSnapshotFields(
       hasHealthData: true,
     };
   }
-  if (!rebalanceThresholdsKnown || effectiveThresholdBps <= 0) {
+  if (!dataAvailable || effectiveThresholdBps <= 0) {
     // No-data sentinel: use "-1" for deviationRatio and "0.000000" for
     // healthBinaryValue so consumers can't accidentally treat this as healthy.
     // hasHealthData=false is the canonical gate — check it before using values.
@@ -309,11 +311,19 @@ export function recordHealthSample(
   blockTimestamp: bigint,
   isNeverRebalance = false,
 ): RecordHealthSampleResult {
+  // dataAvailable: pool has a usable threshold from EITHER a successful
+  // split-side read (`rebalanceThresholdsKnown`) OR a positive active
+  // threshold (RPC-derived via `getRebalancingState`, which is
+  // authoritative for the deviation math even before the split-side read
+  // succeeds). Without this, RPC-fallback state-sync events would be
+  // wrongly classified as no-data.
+  const dataAvailable =
+    pool.rebalanceThresholdsKnown || pool.rebalanceThreshold > 0;
   const snapshotFields = computeHealthSnapshotFields(
     priceDifference,
     effectiveThresholdBps,
     isNeverRebalance,
-    pool.rebalanceThresholdsKnown,
+    dataAvailable,
   );
 
   // If snapshot has no valid health data (e.g. rebalanceThreshold <= 0),
