@@ -19,6 +19,7 @@ import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
 import { formatTimestamp, relativeTime } from "@/lib/format";
+import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { POOL_V2_EXCHANGE } from "@/lib/queries";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
@@ -129,6 +130,7 @@ export function PoolHeader({
         {isVirtual ? (
           <VirtualPoolHeaderTiles
             pool={pool}
+            network={network}
             v2Config={v2Config}
             hasError={v2HasError}
           />
@@ -231,14 +233,26 @@ function statusKey(
  */
 function VirtualPoolHeaderTiles({
   pool,
+  network,
   v2Config,
   hasError,
 }: {
   pool: Pool;
+  network: Network;
   v2Config: BiPoolExchangeRow | null;
   hasError: boolean;
 }) {
   const status = STATUS_TILE[statusKey(v2Config, hasError)];
+  // Render Oracle Price for VPs only when the feedID is populated. The
+  // Phase 2 indexer mirrors `BiPoolExchange.referenceRateFeedID` onto the
+  // wrapped Pool's `referenceRateFeedID` (forward + reverse links from
+  // VirtualPoolDeployed and BiPoolManager.ExchangeCreated handlers), so
+  // SortedOracles writes `oraclePrice` / `oracleTimestamp` on every
+  // OracleReported / MedianUpdated event. Until the link lands the field
+  // is empty and the tile would render "—" — the empty-string gate hides
+  // the dead tile in that pre-link interval. `OraclePriceValue` itself
+  // renders the staleness color + tooltip the same as the FPMM path.
+  const hasOracleFeed = !!pool.referenceRateFeedID;
   return (
     <>
       <Stat
@@ -258,28 +272,19 @@ function VirtualPoolHeaderTiles({
             Wrapper Swaps
             <InfoPopover
               label="Wrapper Swaps"
-              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in Phase 2."
+              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in a follow-up."
             />
           </span>
         }
         value={(pool.swapCount ?? 0).toLocaleString()}
         mono
       />
-      <Stat
-        label="Last Bucket Reset"
-        value={
-          hasError ? (
-            <span className="text-slate-500">—</span>
-          ) : v2Config?.isDeprecated ? (
-            <span className="text-slate-500">—</span>
-          ) : v2Config ? (
-            relativeTime(v2Config.lastBucketUpdate)
-          ) : (
-            <span className="text-slate-500">…</span>
-          )
-        }
-        title={v2Config?.lastBucketUpdate}
-      />
+      {hasOracleFeed ? (
+        <Stat
+          label="Oracle Price"
+          value={<OraclePriceValue pool={pool} network={network} />}
+        />
+      ) : null}
     </>
   );
 }

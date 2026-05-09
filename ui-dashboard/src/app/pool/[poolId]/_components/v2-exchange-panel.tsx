@@ -31,7 +31,14 @@ export function V2ExchangePanel({
 }) {
   if (isLoading) return <Skeleton />;
   if (hasError) return <V2ExchangeErrorNote />;
-  if (!v2Config) return null;
+  // Distinguish "still loading" (skeleton above) from "indexer hasn't seen
+  // this VP's underlying exchange yet" (no row joined). At sync-tip every
+  // active VP self-heals on its first event after start_block, so this only
+  // shows transiently right after a VP is deployed (or for a pool whose
+  // wrapped exchange is destroyed without an `ExchangeDestroyed` event in
+  // our window). Worth surfacing rather than rendering nothing — operators
+  // shouldn't have to guess whether the panel is empty by design or broken.
+  if (!v2Config) return <V2ExchangeSyncingNote />;
 
   if (v2Config.isDeprecated) {
     return (
@@ -91,13 +98,29 @@ export function V2ExchangePanel({
         mono
       />
       <Stat
-        label={`Bucket — ${sym0}`}
+        label={
+          <span className="inline-flex items-center gap-1">
+            Bucket — {sym0}
+            <InfoPopover
+              label="Bucket reserves"
+              content="Per-side virtual reserve target on the v2 ConstantSum curve. Distinct from on-chain Reserve liquidity: buckets define the swap-curve sizing for the current reset cycle (refilled from SortedOracles every cycle), while actual settlement debits/credits the Mento Reserve. Bucket size caps the swap that can clear without a wait for the next reset."
+            />
+          </span>
+        }
         value={formatBucket(v2Config.bucket0, pool.token0Decimals ?? 18)}
         title={`raw bucket0 = ${v2Config.bucket0} (${pool.token0Decimals}d)`}
         mono
       />
       <Stat
-        label={`Bucket — ${sym1}`}
+        label={
+          <span className="inline-flex items-center gap-1">
+            Bucket — {sym1}
+            <InfoPopover
+              label="Bucket reserves"
+              content="Per-side virtual reserve target on the v2 ConstantSum curve. Distinct from on-chain Reserve liquidity: buckets define the swap-curve sizing for the current reset cycle (refilled from SortedOracles every cycle), while actual settlement debits/credits the Mento Reserve. Bucket size caps the swap that can clear without a wait for the next reset."
+            />
+          </span>
+        }
         value={formatBucket(v2Config.bucket1, pool.token1Decimals ?? 18)}
         title={`raw bucket1 = ${v2Config.bucket1} (${pool.token1Decimals}d)`}
         mono
@@ -159,6 +182,22 @@ function formatBucket(rawWei: string, decimals: number): string {
 
 function Skeleton() {
   return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
+}
+
+function V2ExchangeSyncingNote() {
+  return (
+    <div className="rounded-md border border-slate-700/40 bg-slate-900/40 p-3 text-sm">
+      <div className="mb-1 font-medium text-slate-300">
+        v2 exchange data syncing
+      </div>
+      <p className="text-slate-400">
+        The indexer has not yet linked this VirtualPool to its underlying v2
+        BiPoolManager exchange. Self-heal runs on the next bucket-update or swap
+        event for this pool — typically within ~6 minutes of catching up to
+        head.
+      </p>
+    </div>
+  );
 }
 
 function V2ExchangeErrorNote() {

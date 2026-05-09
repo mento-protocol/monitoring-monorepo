@@ -197,15 +197,13 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 
 ## Follow-ups deferred from Phase 2 (BiPoolExchange indexer + dashboard refactor)
 
-UI-only polish for the VirtualPool detail page. None block the indexer
-work; can ship as a small follow-up PR once Phase 2 is promoted and the
-dashboard reads from the new GraphQL surface.
-
-- [ ] **Dedupe "Last Reset".** The header tile (`VirtualPoolHeaderTiles` → `Last Bucket Reset`) and the `V2ExchangePanel` both render `relativeTime(v2Config.lastBucketUpdate)`. Pick one — leaning toward dropping the header version since the panel groups it with related bucket data. Cosmetic only.
-- [ ] **24h Volume tile for VPs.** Replace / supplement the lifetime "Wrapper Swaps" count with a USD-denominated 24h volume tile. Source from `BrokerSwapEvent` filtered to the wrapped exchangeId (since most v2 trading flows through Broker, not the wrapper). Needs a small daily-rollup query similar to the broker leaderboard.
-- [ ] **Bucket InfoPopover.** Add a popover to the `Bucket — {sym}` Stats explaining bucket reserves vs. the actual Reserve liquidity (people new to v2 confuse the two routinely).
-- [ ] **VP-aware empty states.** `V2ExchangePanel` already has the deprecated + error notes. Add a "syncing" state (the indexer hasn't filled the BiPoolExchange row yet — within the first ~10 min after VP deploy in the future). Today this collapses to the generic skeleton.
-- [ ] **Live oracle rate tile for VPs.** The Phase 2 indexer mirrors `BiPoolExchange.referenceRateFeedID` onto the wrapped Pool's `referenceRateFeedID` (forward + reverse link), so SortedOracles handlers populate `Pool.oraclePrice` / `oracleTimestamp` for VPs naturally. Add an `OraclePriceValue` tile in `VirtualPoolHeaderTiles` reading the same fields the FPMM tile uses. Gated on Pool.referenceRateFeedID being non-empty post-self-heal.
+- [ ] **24h Volume tile for VPs.** Per-exchangeId 24h USD volume on the
+      VirtualPool header. Sourcing from `BrokerSwapEvent` by exchangeId would
+      hit Hasura's 1000-row cap for active pairs; the proper fix is a new
+      per-exchange daily-rollup entity (`BrokerExchangeDailySnapshot` keyed
+      by `chainId-exchangeId-day`) updated alongside `BrokerDailySnapshot` in
+      the broker handler. Requires a schema bump + full re-sync, so deferred
+      out of the Phase 2 PR which already ships one.
 
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
