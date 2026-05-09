@@ -172,12 +172,16 @@ export function scaleRpcRebalanceState(
  *     runs `selfHealInvertRateFeed` first; if that's still null we must
  *     fall through to RPC.
  *   - `oracleOk` AND `oracleExpiry > 0` AND
- *     `lastMedianAt + oracleExpiry > eventTimestamp`: the on-chain
- *     `getRebalancingState` reverts on stale oracle, so derive must
- *     mirror that. Use `lastMedianAt` (timestamp of most recent
- *     `MedianUpdated`) — NOT `oracleTimestamp`, which is also written
- *     by `OracleReported` and by every state-sync write so it tracks
- *     "last entity touch" rather than "last on-chain median report".
+ *     `lastOracleReportAt + oracleExpiry > eventTimestamp`: the
+ *     on-chain `getRebalancingState` reverts on stale oracle, so
+ *     derive must mirror that. Use `lastOracleReportAt` (advanced
+ *     only inside `MedianUpdated` using `blockTimestamp`, frozen on
+ *     zero-median outages) — NOT `oracleTimestamp` (bumped by
+ *     `OracleReported` and state-sync writes, so it tracks "last
+ *     entity touch") and NOT `lastMedianAt` (jump-detection lineage
+ *     field, not gated for outages). This is an under-bound on the
+ *     contract's median-reporter expiry: when reporters refresh but
+ *     the median hasn't moved, derive falls through to RPC.
  *
  * `reservesOverride` lets UpdateReserves pass the event's new reserves
  * (the contract's `getRebalancingState` reads post-event state); Rebalanced
@@ -219,13 +223,17 @@ export function tryDeriveRebalanceState(
   if (!pool.medianLive) return null;
   if (!pool.oracleOk) return null;
   // Stale-oracle revert mirror: require a known expiry window (zero =
-  // pre-seed; fall through to RPC) AND the most recent reporter
-  // `OracleReported.timestamp` to be within that window. Use
-  // `lastOracleReportAt` (only set by `OracleReported`) — NOT
-  // `lastMedianAt` (block timestamp of `MedianUpdated`) and NOT
-  // `oracleTimestamp` (also bumped by state-sync writes). The contract's
-  // `getRebalancingState` checks expiry via `report.timestamp +
-  // oracleExpiry`; the reporter's report time is the right anchor.
+  // pre-seed; fall through to RPC) AND `lastOracleReportAt` to be
+  // within that window. `lastOracleReportAt` is advanced only inside
+  // `MedianUpdated` using `blockTimestamp` (and frozen on zero-median
+  // outages). NOT `oracleTimestamp` (bumped by `OracleReported` and
+  // state-sync writes — tracks last entity touch) and NOT
+  // `lastMedianAt` (jump-detection lineage field that doesn't freeze
+  // on outages). This is an under-bound on the contract's actual
+  // expiry (which uses the median reporter's own `report.timestamp`),
+  // safe by construction: when reporters refresh but the median hasn't
+  // moved recently, derive falls through to RPC instead of letting
+  // potentially-stale data through.
   if (pool.oracleExpiry <= 0n) return null;
   if (pool.lastOracleReportAt <= 0n) return null;
   const expiresAt = pool.lastOracleReportAt + pool.oracleExpiry;
