@@ -6,6 +6,7 @@ import type { Network } from "@/lib/networks";
 import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
 import { fetchJsonOrThrow } from "@/lib/fetch-json";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 
 /**
@@ -46,16 +47,14 @@ export function useRebalanceCheck(
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      // Custom retry — SWR 2.x suppresses `refreshInterval` while the
-      // hook is in error state, so without an explicit retry path a
-      // transient 502 wedges "Diagnostics unavailable" until reload.
-      // Retry indefinitely at the same 30s cadence as `refreshInterval`
-      // but only when the document is visible (background tabs don't
-      // pile up upstream calls during a long outage).
-      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (typeof document !== "undefined" && document.hidden) return;
-        setTimeout(() => revalidate({ retryCount }), 30_000);
-      },
+      // Shared retry handler — SWR 2.x suppresses `refreshInterval`
+      // while the hook is in error state, so without an explicit retry
+      // path a transient 502 wedges "Diagnostics unavailable" until
+      // reload. `rateLimitAwareRetry` defers each retry via
+      // `scheduleWhenActive`, which checks `document.hidden` +
+      // `navigator.onLine` at both schedule and fire time (TOCTOU
+      // guard). Matches the convention `useGQL` / `useBridgeGQL` use.
+      onErrorRetry: rateLimitAwareRetry,
     },
   );
 

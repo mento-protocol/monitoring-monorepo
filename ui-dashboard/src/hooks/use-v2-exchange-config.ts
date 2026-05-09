@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { fetchJsonOrThrow } from "@/lib/fetch-json";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import type { Network } from "@/lib/networks";
 import { isVirtualPool, type Pool } from "@/lib/types";
@@ -51,17 +52,17 @@ export function useV2ExchangeConfig(
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 15_000,
-      // Custom retry — SWR 2.x suppresses `refreshInterval` while the
-      // hook is in error state, so without an explicit retry path a
-      // single upstream 502 wedges the panel until the user reloads.
-      // Retry indefinitely at the same 60s cadence as `refreshInterval`
-      // (no exponential-backoff burst) but only when the document is
-      // visible, so background tabs don't pile up upstream calls during
-      // a long outage.
-      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (typeof document !== "undefined" && document.hidden) return;
-        setTimeout(() => revalidate({ retryCount }), 60_000);
-      },
+      // Reuse the codebase's shared retry helper. SWR 2.x suppresses
+      // `refreshInterval` while the hook is in error state, so without
+      // an explicit retry path a single upstream 502 would wedge the
+      // panel until the user reloads. `rateLimitAwareRetry` schedules
+      // each retry through `scheduleWhenActive` which checks BOTH
+      // `document.hidden` AND `navigator.onLine` at schedule time *and*
+      // re-checks both at fire time (TOCTOU guard) — closes the gap a
+      // hand-rolled `setTimeout` leaves open when the tab is backgrounded
+      // or the network drops during the delay. Same handler `useGQL` /
+      // `useBridgeGQL` use, so behavior matches the rest of the dashboard.
+      onErrorRetry: rateLimitAwareRetry,
     },
   );
 
