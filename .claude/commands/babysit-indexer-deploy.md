@@ -4,64 +4,147 @@ Monitor an in-flight Envio HyperIndex deployment for `mento-protocol/mento` unti
 
 Target commit: `$1` (default: derive from `git fetch origin envio && git rev-parse --short origin/envio`)
 
-Poll interval is implicit — use `/loop 5m` unless the user specified otherwise.
+## How this works (Monitor, not cron)
 
-## Preflight (run once, before entering the loop)
+This skill uses the `Monitor` tool to run a single long-running shell script that polls Envio internally at a tight cadence (45s) but **only emits stdout lines on state changes worth notifying** — deployment registered, all chains caught up, build deadline missed, sync deadline missed, or script-level error. Every emitted stdout line is a notification; silent no-op cycles produce zero notifications. A typical 30–60 min sync produces 2–3 notifications instead of the ~12 the previous `/loop 5m` cron version generated.
+
+If you find yourself reaching for `CronCreate` or `/loop` here, stop — Monitor is the right primitive.
+
+## Preflight (run once, before arming the Monitor)
 
 1. **Resolve the target commit.**
-   - If `$1` is set, use it verbatim (short SHA, 7–8 chars).
+   - If `$1` is set, use it verbatim (short SHA, 7–8 chars). Capture as `TARGET_COMMIT`.
    - Otherwise: `git fetch origin envio && git rev-parse --short origin/envio`.
    - Print the resolved commit so the user can sanity-check it.
 
-2. **Start a poll-count / wall-clock budget.** Max 18 cycles (≈90 min at 5m interval). Track cycle count in your running context.
+2. **No cycle counter needed.** Wall-clock budgets are enforced inside the Monitor script — see "Emit policy" below.
 
 ## Steps
 
-Use `/loop 5m` (or the user-specified interval) to repeat the following on each cycle:
+Arm a single Monitor with `persistent: true` and a `description` like `envio sync for <commit>`. The script body:
 
-### 1. Has the deployment registered yet?
+```bash
+set -uo pipefail
+TARGET="<TARGET_COMMIT>"               # interpolate the resolved short SHA
+ORG="mento-protocol"
+INDEXER="mento"
+START=$(date +%s)
+BUILD_DEADLINE=$((START + 1800))       # 30 min
+SYNC_DEADLINE=$((START + 5400))        # 90 min
+POLL_INTERVAL=45                       # seconds
 
+REGISTERED=0
+LAST_ERROR_KIND=""                     # debounce identical errors
+
+emit() { printf '%s\n' "$*"; }
+elapsed_min() { echo $(( ($(date +%s) - START) / 60 )); }
+
+while true; do
+  NOW=$(date +%s)
+
+  # --- Has the deployment registered yet? ---
+  IDX_JSON=$(npx -q envio-cloud indexer get "$INDEXER" "$ORG" -o json 2>/dev/null) || {
+    if [[ "$LAST_ERROR_KIND" != "auth_or_network" ]]; then
+      emit "ERROR auth_or_network: 'envio-cloud indexer get' failed — auth expired or network down. Try 'npx envio-cloud login'."
+      LAST_ERROR_KIND="auth_or_network"
+    fi
+    sleep "$POLL_INTERVAL"; continue
+  }
+  LAST_ERROR_KIND=""
+
+  DEPLOYMENT=$(echo "$IDX_JSON" | jq -r --arg t "$TARGET" \
+    '.data.deployments[]? | select(.commit_hash | startswith($t))' 2>/dev/null)
+
+  if [[ -z "$DEPLOYMENT" ]]; then
+    if (( NOW >= BUILD_DEADLINE )); then
+      emit "BUILD_FAILED elapsed=$(elapsed_min)m — deployment for $TARGET never registered. Try: pnpm deploy:indexer:logs --build"
+      exit 1
+    fi
+    sleep "$POLL_INTERVAL"; continue
+  fi
+
+  if (( REGISTERED == 0 )); then
+    PROD_STATUS=$(echo "$DEPLOYMENT" | jq -r '.prod_status // "unknown"')
+    emit "REGISTERED prod_status=$PROD_STATUS elapsed=$(elapsed_min)m"
+    REGISTERED=1
+    if [[ "$PROD_STATUS" == "prod" ]]; then
+      emit "ALREADY_PROMOTED commit=$TARGET — re-run case, no further action needed"
+      exit 0
+    fi
+  fi
+
+  # --- Per-chain sync status ---
+  STATUS_JSON=$(npx -q envio-cloud deployment status "$INDEXER" "$TARGET" "$ORG" -o json 2>/dev/null) || {
+    if [[ "$LAST_ERROR_KIND" != "status_fetch" ]]; then
+      emit "ERROR status_fetch: 'envio-cloud deployment status $TARGET' failed"
+      LAST_ERROR_KIND="status_fetch"
+    fi
+    sleep "$POLL_INTERVAL"; continue
+  }
+  LAST_ERROR_KIND=""
+
+  ALL_CAUGHT_UP=$(echo "$STATUS_JSON" | jq -r \
+    '[.data[]? | (.timestamp_caught_up_to_head_or_endblock // "") != ""] | all' 2>/dev/null)
+
+  if [[ "$ALL_CAUGHT_UP" == "true" ]]; then
+    PER_CHAIN=$(echo "$STATUS_JSON" | jq -r \
+      '.data[]? | "  \(.network // .chain_id): caught_up=\(.timestamp_caught_up_to_head_or_endblock)"')
+    emit "READY_TO_PROMOTE elapsed=$(elapsed_min)m commit=$TARGET"
+    emit "$PER_CHAIN"
+    emit "Run: pnpm deploy:indexer:promote $TARGET -y"
+    exit 0
+  fi
+
+  if (( NOW >= SYNC_DEADLINE )); then
+    SNAPSHOT=$(echo "$STATUS_JSON" | jq -r \
+      '.data[]? | "  \(.network // .chain_id): \(.latest_processed_block)/\(.block_height) caught_up=\(.timestamp_caught_up_to_head_or_endblock // "false")"')
+    emit "SYNC_DEADLINE elapsed=$(elapsed_min)m — last status:"
+    emit "$SNAPSHOT"
+    exit 1
+  fi
+
+  sleep "$POLL_INTERVAL"
+done
 ```
-npx envio-cloud indexer get mento mento-protocol -o json
-```
 
-Parse `.data.deployments[]` (NOT the top-level — the payload is wrapped in `{ok, data}`). Look for an entry whose `commit_hash` starts with the target commit.
+### Emit policy
 
-- **Not found, cycle ≤ 6 (~30 min):** Build is still pending. Keep waiting. On the first miss, suggest the user run `pnpm deploy:indexer:logs --build` in another terminal if they want to tail build progress — do not run it yourself unless the user asks.
-- **Not found, cycle > 6 (past 30 min):** Build most likely failed. Stop looping. Report: "Deployment for `<commit>` has not registered after 30 min — build likely failed. Run `pnpm deploy:indexer:logs --build` to check."
-- **Found with `prod_status: "prod"`:** Already promoted. Report success and stop looping.
-- **Found with `prod_status != "prod"`:** Built and syncing (or caught up). Continue to step 2.
+| Event                                             | Emit                                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------------------- |
+| Deployment first registers                        | `REGISTERED prod_status=<status> elapsed=<m>m`                         |
+| Found `prod_status: "prod"` (re-run / idempotent) | `ALREADY_PROMOTED commit=<sha>` then `exit 0`                          |
+| All chains caught up                              | `READY_TO_PROMOTE elapsed=<m>m commit=<sha>` + per-chain timestamps    |
+| Build not registered after 30 min                 | `BUILD_FAILED elapsed=30m+` then `exit 1`                              |
+| Sync not all-caught-up after 90 min               | `SYNC_DEADLINE elapsed=90m` + last snapshot then `exit 1`              |
+| Auth-expired / network failure                    | `ERROR auth_or_network: <msg>` (debounced — only emits on kind change) |
+| Status fetch failure                              | `ERROR status_fetch: <msg>` (debounced)                                |
+| All other progress (per-chain blocks ticking up)  | silent — internal poll only                                            |
 
-### 2. Per-chain sync status
+The emit-on-error rule preserves the visibility the cron version got implicitly from "the next cycle's network/auth failure surfaces loudly". Without it, a stuck Monitor with expired auth would sit silent until the wall-clock deadline. Kind-debouncing prevents a flapping outage from flooding the chat.
 
-```
-npx envio-cloud deployment status mento <commit> mento-protocol -o json
-```
+The script's natural exits (caught-up / build-failed / sync-deadline / already-promoted) close the Monitor cleanly. A `persistent: true` Monitor is required because typical syncs run 30–60 min — well past the default 5-min Monitor timeout.
 
-Use the raw `envio-cloud` call rather than the `pnpm deploy:indexer:status` wrapper — the wrapper auto-resolves the _latest_ deployment commit and only accepts `--watch`/`--json`, so a positional commit + `-o json` are silently ignored. Direct invocation guarantees we always poll the target commit.
+## Decision tree for the calling skill
 
-Parse `.data[]` (wrapped — chains are under `.data`, not top level). For each chain, extract:
-
-- `network` or chain id
-- `block_height` (head)
-- `latest_processed_block`
-- `timestamp_caught_up_to_head_or_endblock` (the primary "synced" signal)
-
-Compute `sync % = (latest_processed_block - start_block) / (block_height - start_block) * 100` when `block_height > start_block`. Print a compact one-line-per-chain table: chain, processed/head, sync %, caught-up flag.
-
-### 3. Decide
-
-- **All chains have a non-empty `timestamp_caught_up_to_head_or_endblock`:** Report ready-to-promote. Stop looping. Suggest exactly: `pnpm deploy:indexer:promote <commit>`. Do NOT run it — the user must confirm.
-- **Any chain still behind:** Wait for the next poll cycle.
-- **Cycle count hits 18 without all chains caught up:** Stop looping. Report the last status snapshot and note the 90-min budget was exhausted.
+When the Monitor emits `READY_TO_PROMOTE` or `ALREADY_PROMOTED`, treat it as the success terminal and proceed to the next phase (typically promote). When it emits `BUILD_FAILED`, `SYNC_DEADLINE`, or `ERROR <kind>` and exits, treat as failure and stop without promoting. The Monitor process exits cleanly on terminal events — no `TaskStop` needed for those paths. Call `TaskStop` only if the user asks to abort early.
 
 ## Rules
 
 - **Never auto-promote.** Surfacing `pnpm deploy:indexer:promote <commit>` to the user is the final step — they run it, not you.
 - **Prefer the `pnpm deploy:indexer:*` wrappers** over raw `envio-cloud` calls (they handle auth + repo defaults), with two exceptions:
   - `indexer get` — no wrapper exists.
-  - `deployment status <commit>` — wrapper auto-resolves _latest_ (we want explicit commit targeting, see step 2).
-- **Stop after 90 minutes** (18 cycles at 5m) without full sync. Typical sync is 15–40 min; 90 min means something is wrong — report last known status and stop.
-- **Stop after 30 minutes if the deployment still 404s** (step 1 miss past cycle 6). Direct the user to `pnpm deploy:indexer:logs --build`.
-- **Don't spam.** On no-op cycles (still syncing, no state change), output one compact status line, not a full report.
+  - `deployment status <commit>` — wrapper auto-resolves _latest_ (we want explicit commit targeting).
+- **Do not poll status yourself in parallel** while the Monitor is armed. The Monitor is the single source of truth for sync state.
+- **Stop after 90 minutes** (`SYNC_DEADLINE`) without full sync. Typical sync is 15–40 min; 90 min means something is wrong.
+- **Stop after 30 minutes if the deployment still 404s** (`BUILD_FAILED`). Direct the user to `pnpm deploy:indexer:logs --build`.
 - **`has_processed_to_end_block` is a red herring** for this indexer (`end_block: 0`). Ignore it — only `timestamp_caught_up_to_head_or_endblock` matters.
+
+## External contract
+
+Callers (notably the `deploy-indexer` skill, Phase 2) invoke this command with a target commit string and treat the Monitor's terminal emit as the result:
+
+- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success, continue
+- `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR …` → failure, stop, do not promote
+- User-cancelled (`TaskStop`) → stop, do not promote
+
+This contract matches the previous cron-based version's outputs verbatim, so `deploy-indexer` Phase 2 needs no changes.
