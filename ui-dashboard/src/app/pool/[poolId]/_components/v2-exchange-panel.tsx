@@ -51,8 +51,15 @@ export function V2ExchangePanel({
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  // FixidityLib uses 1e24 precision — 5e21 = 0.5% = 50 bps.
-  const spreadBps = (Number(v2Config.spread) / 1e24) * 10000;
+  // FixidityLib uses 1e24 precision — 5e21 = 0.5% = 50 bps. BigInt math
+  // before the Number conversion: production spreads (1e21–1e23) sit
+  // above Number.MAX_SAFE_INTEGER (~9e15), so naive `Number(spread)/1e24`
+  // would drop low-bit precision. Bps result fits in a safe Number.
+  // ES2017 tsconfig target → use BigInt() constructor instead of `Nn` literals.
+  const spreadBps = Number(
+    (BigInt(v2Config.spread) * BigInt(10000)) /
+      BigInt("1000000000000000000000000"),
+  );
   const resetMins = Number(v2Config.referenceRateResetFrequency) / 60;
 
   return (

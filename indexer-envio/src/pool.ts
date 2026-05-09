@@ -405,13 +405,27 @@ export async function selfHealWrappedExchangeId(
   if (!result) return pool;
   const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
   const exchange = await context.BiPoolExchange.get(exchangeRowId);
-  if (exchange && exchange.wrappedByPoolId !== pool.id) {
-    context.BiPoolExchange.set({
-      ...exchange,
-      wrappedByPoolId: pool.id,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
-    });
+  if (exchange) {
+    if (exchange.wrappedByPoolId !== pool.id) {
+      context.BiPoolExchange.set({
+        ...exchange,
+        wrappedByPoolId: pool.id,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
+    // Once we've set wrappedByPoolId, ensureBiPoolExchange's null-guarded
+    // retry path won't re-run the feedID mirror on subsequent BucketsUpdated
+    // events. Mirror it here too so the oracle-price tile lights up
+    // immediately on first self-heal — otherwise it'd stay "—" until the
+    // NEXT bucket reset (~360s), even though the feedID is in scope.
+    await mirrorFeedIdToPool(
+      context,
+      pool.id,
+      exchange.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
   }
   return {
     ...pool,
@@ -425,9 +439,13 @@ export async function selfHealWrappedExchangeId(
  * sync. Skips zero/empty feedIDs (still pre-RPC-backfill or destroyed
  * exchange) so a transient source value can't blank a previously-set
  * link. Used from both directions of the VP↔BiPoolExchange linkage
- * (VirtualPoolDeployed forward, BiPoolManager.ExchangeCreated reverse). */
+ * (VirtualPoolDeployed forward, BiPoolManager.ExchangeCreated reverse,
+ * plus `selfHealWrappedExchangeId` post-self-heal).
+ *
+ * Context narrowed to just `Pool` access — callers from both PoolContext
+ * (upsertPool path) and HandlerContext (event handlers) work. */
 export async function mirrorFeedIdToPool(
-  context: HandlerContext,
+  context: { Pool: PoolContext["Pool"] },
   poolId: string,
   feedId: string,
   blockNumber: bigint,
@@ -596,11 +614,16 @@ export const upsertPool = async ({
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
-  // Carry the caller's intended source into the heal pipeline so the
-  // VP/FPMM-aware gates (`isVirtualPool`, `pool.source === ""`) behave
-  // correctly on first-touch upserts where the persisted source is still
-  // the "" defaultPool value.
-  const existingInitial: Pool = { ...initialBase, source };
+  // Carry the caller's intended source into the heal pipeline ONLY when
+  // the persisted source is the empty defaultPool sentinel — otherwise
+  // the unconditional override defeats `pickPreferredSource` below by
+  // making `existing.source === source` regardless of priority. The
+  // VP/FPMM-aware gates (`isVirtualPool`, `pool.source === ""`) need the
+  // first-touch source-fill, but later events on a pool with an already-
+  // ranked source must keep the persisted value through this stage.
+  const existingInitial: Pool = initialBase.source
+    ? initialBase
+    : { ...initialBase, source };
   // Self-heal invertRateFeed up front so every downstream computation
   // (priceDifference, oraclePrice flip, breach status) sees the corrected
   // orientation. Same helper that handlers call before reading the field.
