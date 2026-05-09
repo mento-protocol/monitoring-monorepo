@@ -96,6 +96,18 @@ describe("resolveV2ExchangeConfig", () => {
     expect(mockReadContract).not.toHaveBeenCalled();
   });
 
+  it("returns rpc_failed when getCode throws (not unhandled)", async () => {
+    // Transport failure on the bytecode read must funnel through the same
+    // structured `rpc_failed` mapping `readContract` uses, so the route
+    // handler routes both legs through one Sentry capture path.
+    mockGetCode.mockRejectedValueOnce(new Error("network timeout"));
+
+    const result = await resolveV2ExchangeConfig(POOL, RPC_URL, CHAIN_ID);
+
+    expect(result).toEqual({ ok: false, reason: "rpc_failed" });
+    expect(mockReadContract).not.toHaveBeenCalled();
+  });
+
   it("returns not_a_virtual_pool when bytecode lacks the PUSH32 sequence", async () => {
     // Realistic non-VP runtime bytecode that doesn't include the
     // (PUSH32 mgr, DUP2, AND, PUSH1 0x04, DUP4, ADD, MSTORE, PUSH32 exId)

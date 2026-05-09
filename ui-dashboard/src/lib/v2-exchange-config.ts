@@ -106,9 +106,21 @@ export async function resolveV2ExchangeConfig(
   chainId: number,
 ): Promise<ResolveV2Result> {
   const client = getViemClient(rpcUrl, { timeoutMs: RPC_TIMEOUT_MS });
-  const code = await client.getCode({
-    address: poolAddress as `0x${string}`,
-  });
+  let code: string | undefined;
+  try {
+    code = await client.getCode({
+      address: poolAddress as `0x${string}`,
+    });
+  } catch {
+    // Transport failure (timeout, network error) — match the same
+    // structured `rpc_failed` mapping `readContract` uses below so the
+    // route handler routes both legs through one Sentry capture path.
+    // Without this, a `getCode` outage would throw out of the resolver
+    // and route handlers would split observability between
+    // `captureException` (for the unhandled throw) and `captureMessage`
+    // (for `rpc_failed`) on identical upstream incidents.
+    return { ok: false, reason: "rpc_failed" };
+  }
   if (!code || code === "0x") return { ok: false, reason: "no_bytecode" };
 
   const extracted = extractMgrAndExchangeId(code);
