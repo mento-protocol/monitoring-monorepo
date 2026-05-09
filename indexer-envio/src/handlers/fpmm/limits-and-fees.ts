@@ -288,20 +288,32 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     //
     // Special-case known-zero: when governance just configured the pool
     // to never rebalance (above == 0 && below == 0), also clear the
-    // active `rebalanceThreshold`. `effectiveThreshold` reads the
-    // active value first (before consulting `rebalanceThresholdsKnown`),
-    // so leaving the prior positive value here would let breach checks
-    // continue tripping against the old threshold even though the new
-    // configuration says "never rebalance". Setting `rebalanceThreshold`
-    // = 0 + Known=true makes `effectiveThreshold` return the
-    // never-trips sentinel.
+    // active `rebalanceThreshold` AND the open-breach denorms. The
+    // `isNeverRebalance` predicate (in `pool.ts`) short-circuits health
+    // / breach checks for known-zero pools, but the on-Pool denorms
+    // (`deviationBreachStartedAt`, `currentOpenBreachPeak`,
+    // `currentOpenBreachEntryThreshold`) would otherwise stay set from
+    // a prior threshold configuration. The fresh-median path goes through
+    // `upsertPool` → `recordBreachTransition` which closes the breach
+    // naturally; this direct-write path is the unknown-decimals fallback,
+    // so we mirror the breach-close explicitly. The `DeviationThresholdBreach`
+    // history row is closed on the next event with usable oracle data —
+    // not perfect but bounded, and the on-Pool denorms are what drives
+    // the live-uptime / badge UI, which is the user-visible concern.
     const isKnownZero = above === 0 && below === 0;
     context.Pool.set({
       ...existing,
       rebalanceThresholdAbove: above,
       rebalanceThresholdBelow: below,
       rebalanceThresholdsKnown: true,
-      ...(isKnownZero ? { rebalanceThreshold: 0 } : {}),
+      ...(isKnownZero
+        ? {
+            rebalanceThreshold: 0,
+            deviationBreachStartedAt: 0n,
+            currentOpenBreachPeak: 0n,
+            currentOpenBreachEntryThreshold: 0,
+          }
+        : {}),
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     });

@@ -147,6 +147,27 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         },
       );
 
+      // Skip health sample + OracleSnapshot when decimals aren't known —
+      // priceDifference is frozen at `existing.priceDifference`, which on a
+      // freshly-deployed non-18-decimal pool whose factory + self-heal both
+      // failed is the schema-default `0n`. Writing a snapshot row at that
+      // point would pollute the chart with a fake "0% deviation" sample
+      // and `recordHealthSample` would mark `hasHealthData=true` against
+      // an uncomputable deviation. Mirrors the two-cursor model in
+      // state-sync.ts: Pool entity advances (oraclePrice, oracleTimestamp
+      // are real), but health-bearing rows are skipped until decimals
+      // land. The next event after self-heal succeeds will write a real
+      // sample. `oracleTimestamp` advances regardless because it's used
+      // for the freshness gate, not the deviation chart.
+      if (!updatedPool.tokenDecimalsKnown) {
+        const persistedPoolNoHealth: Pool = {
+          ...finalPool,
+          ...breachPoolUpdate,
+        };
+        context.Pool.set(persistedPoolNoHealth);
+        return;
+      }
+
       // Health score: compute snapshot fields + update pool accumulators
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
@@ -386,6 +407,19 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
           source: "median_updated",
         },
       );
+
+      // Skip health sample + OracleSnapshot when decimals aren't known —
+      // same rationale as the OracleReported handler above. Pool entity
+      // still gets the new median lineage / oracle fields, but the
+      // health-bearing rows are skipped until self-heal lands.
+      if (!finalPool.tokenDecimalsKnown) {
+        const persistedPoolNoHealth: Pool = {
+          ...finalPool,
+          ...breachPoolUpdate,
+        };
+        context.Pool.set(persistedPoolNoHealth);
+        return;
+      }
 
       // Health score: compute snapshot fields + update pool accumulators
       const { snapshotFields, poolUpdate } = recordHealthSample(
