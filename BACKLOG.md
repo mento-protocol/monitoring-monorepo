@@ -205,6 +205,17 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
       the broker handler. Requires a schema bump + full re-sync, so deferred
       out of the Phase 2 PR which already ships one.
 
+- [ ] **`ExchangeDestroyed` for never-indexed exchanges.** If
+      `BiPoolManager.ExchangeDestroyed` fires post-start_block for an exchange
+      whose `BiPoolExchange` row was never seeded (no `BucketsUpdated` /
+      `SpreadUpdated` between start_block and Destroyed), the handler returns
+      silently and the deprecated state is lost. Codex flagged this in the
+      Phase 2 review. Fix needs asset0/asset1 from somewhere — `getPoolExchange`
+      reverts on destroyed exchanges, so the options are: (a) accept the gap,
+      (b) re-fetch from the Broker's historical event logs, (c) dedicated
+      reverse-lookup. Edge case unlikely to bite today (active VPs all emit
+      `BucketsUpdated` every 6 minutes), so deferred.
+
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
 Captured during the medium-tier benchmarking session that landed the
