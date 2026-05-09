@@ -48,6 +48,7 @@ import {
 import { computeRebalanceUsd, normalizeRewardBps } from "../../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
+  effectiveThreshold,
   isNeverRebalance,
   maybePreloadPool,
   selfHealInvertRateFeed,
@@ -178,7 +179,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      pool.rebalanceThreshold,
+      Number(effectiveThreshold(pool)),
       blockTimestamp,
       isNeverRebalance(pool),
     );
@@ -400,7 +401,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      pool.rebalanceThreshold,
+      Number(effectiveThreshold(pool)),
       blockTimestamp,
       isNeverRebalance(pool),
     );

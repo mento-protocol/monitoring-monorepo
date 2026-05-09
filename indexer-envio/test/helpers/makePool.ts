@@ -27,6 +27,14 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     ...DEFAULT_ORACLE_FIELDS,
     oracleOk: true,
     rebalanceThreshold: 5000,
+    // Default fixture is a "real, symmetric, fully-indexed" threshold so
+    // tests exercising the standard breach/health path don't have to
+    // populate four separate fields. Tests exercising never-rebalance
+    // (`above=below=0`), asymmetric (`above=0, below=300`), or unread
+    // (`rebalanceThresholdsKnown=false`) must override these explicitly.
+    rebalanceThresholdAbove: 5000,
+    rebalanceThresholdBelow: 5000,
+    rebalanceThresholdsKnown: true,
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,
     updatedAtBlock: 0n,

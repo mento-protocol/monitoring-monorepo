@@ -502,12 +502,21 @@ async function seedPoolWithFeed(
   // fall through to live RPC and slow / flake the suite). Tests that
   // exercise decimal self-heal explicitly should override the flag back to
   // false on the seeded entity.
+  //
+  // Also stamp `rebalanceThresholdsKnown: true` + symmetric split sides so
+  // health-sample paths route through the valid-threshold branch (default
+  // pool from FPMMDeployed has `rebalanceThresholdsKnown: false` because
+  // the mock RPC returns undefined for the fake fee-token addresses). Tests
+  // exercising the unread case should override on the seeded entity.
   nextDb = nextDb.entities.Pool.set({
     ...existingPool,
     referenceRateFeedID: feedId,
     oracleExpiry,
     oracleNumReporters,
     tokenDecimalsKnown: true,
+    rebalanceThresholdsKnown: true,
+    rebalanceThresholdAbove: existingPool.rebalanceThresholdAbove || 5000,
+    rebalanceThresholdBelow: existingPool.rebalanceThresholdBelow || 5000,
   });
 
   return nextDb;
@@ -3614,14 +3623,19 @@ describe("Health score handler integration", () => {
       hasHealthData: true,
     });
 
-    // Step 2: fire an oracle event with rebalanceThreshold=0 → no-data snapshot
-    // Manually set threshold to 0 to trigger hasHealthData=false path
+    // Step 2: fire an oracle event in the "indexer hasn't read thresholds yet"
+    // state — `rebalanceThresholdsKnown=false` is the canonical no-data
+    // signal (post-PR-1.5). The handler routes through the no-data sentinel
+    // because the helper can't trust the threshold value.
     const poolBeforeNoData = mockDb.entities.Pool.get(
       pid(POOL_ADDR),
     ) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...poolBeforeNoData,
-      rebalanceThreshold: 0, // triggers hasHealthData=false in recordHealthSample
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: false, // unread → no-data
     });
 
     const noDataEvent = SortedOracles.OracleReported.createMockEvent({
@@ -3843,10 +3857,14 @@ describe("Health score handler integration", () => {
       oraclePrice: ORACLE_PRICE,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
       rebalanceThreshold: REBALANCE_THRESHOLD,
+      rebalanceThresholdAbove: REBALANCE_THRESHOLD,
+      rebalanceThresholdBelow: REBALANCE_THRESHOLD,
+      rebalanceThresholdsKnown: true,
       lastOracleSnapshotTimestamp: 1_700_005_000n,
       lastDeviationRatio: "0.500000", // prior healthy state
       healthTotalSeconds: 0n,

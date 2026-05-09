@@ -18,6 +18,7 @@ import {
 } from "../../tradingLimits";
 import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
+  effectiveThreshold,
   isNeverRebalance,
   maybePreloadPool,
   selfHealInvertRateFeed,
@@ -282,6 +283,7 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   // correct live-oracle status.
   const rpcSucceeded = !medianFresh && priceDifferenceFromMedian !== null;
 
+  let upserted: Pool;
   if (priceDifferenceFromMedian === null || active === null) {
     // Neither local median nor RPC produced usable values.
     //
@@ -291,59 +293,62 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     // `Pool.healthStatus` (avoids a stale CRITICAL gauge on the
     // `metrics-bridge` export). `isNeverRebalance(next)` short-circuits
     // both predicates to false / OK respectively, so the falling-edge
-    // logic kicks in naturally.
+    // logic kicks in naturally. Falls through to the health-sample +
+    // upsertSnapshot block below so the disable transition gets recorded
+    // at this block's timestamp instead of waiting for the next oracle
+    // event (uptime accrual would otherwise lag — codex round-4 P2).
     //
     // Non-known-zero: preserve existing breach/health state — direct
     // write just the threshold split fields + Known flag so derive can
     // succeed once a live median lands.
     const isKnownZero = above === 0 && below === 0;
-    if (isKnownZero) {
-      await upsertPool({
-        context,
-        chainId: event.chainId,
-        poolId,
-        source: "fpmm_threshold_updated",
-        blockNumber,
-        blockTimestamp,
-        txHash: event.transaction.hash,
-        oracleDelta: {
-          rebalanceThreshold: 0,
-          rebalanceThresholdAbove: 0,
-          rebalanceThresholdBelow: 0,
-          rebalanceThresholdsKnown: true,
-        },
-        existing: { pool: existing },
+    if (!isKnownZero) {
+      context.Pool.set({
+        ...existing,
+        rebalanceThresholdAbove: above,
+        rebalanceThresholdBelow: below,
+        rebalanceThresholdsKnown: true,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
       });
       return;
     }
-    context.Pool.set({
-      ...existing,
-      rebalanceThresholdAbove: above,
-      rebalanceThresholdBelow: below,
-      rebalanceThresholdsKnown: true,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
+    upserted = await upsertPool({
+      context,
+      chainId: event.chainId,
+      poolId,
+      source: "fpmm_threshold_updated",
+      blockNumber,
+      blockTimestamp,
+      txHash: event.transaction.hash,
+      oracleDelta: {
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      },
+      existing: { pool: existing },
     });
-    return;
+  } else {
+    upserted = await upsertPool({
+      context,
+      chainId: event.chainId,
+      poolId,
+      source: "fpmm_threshold_updated",
+      blockNumber,
+      blockTimestamp,
+      txHash: event.transaction.hash,
+      oracleDelta: {
+        rebalanceThresholdAbove: above,
+        rebalanceThresholdBelow: below,
+        rebalanceThreshold: active,
+        rebalanceThresholdsKnown: true,
+        priceDifference: priceDifferenceFromMedian,
+        ...(rpcSucceeded ? { oracleOk: true } : {}),
+      },
+      existing: { pool: existing },
+    });
   }
-  const upserted = await upsertPool({
-    context,
-    chainId: event.chainId,
-    poolId,
-    source: "fpmm_threshold_updated",
-    blockNumber,
-    blockTimestamp,
-    txHash: event.transaction.hash,
-    oracleDelta: {
-      rebalanceThresholdAbove: above,
-      rebalanceThresholdBelow: below,
-      rebalanceThreshold: active,
-      rebalanceThresholdsKnown: true,
-      priceDifference: priceDifferenceFromMedian,
-      ...(rpcSucceeded ? { oracleOk: true } : {}),
-    },
-    existing: { pool: existing },
-  });
   // Advance the health-time accumulators. Gate on `oracleOk` only:
   // `hasHealthData` would skip pools whose previous threshold was 0 and
   // therefore never accrued health. A governance change to a positive
@@ -360,7 +365,7 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     const { snapshotFields, poolUpdate } = recordHealthSample(
       upserted,
       upserted.priceDifference,
-      upserted.rebalanceThreshold,
+      Number(effectiveThreshold(upserted)),
       blockTimestamp,
       isNeverRebalance(upserted),
     );

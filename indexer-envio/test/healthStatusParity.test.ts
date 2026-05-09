@@ -169,6 +169,8 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     const pool = makePool({
       priceDifference: 20_000n, // 200% — well past the unknown-zero 10000 fallback
       rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
       rebalanceThresholdsKnown: true,
     });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
@@ -184,6 +186,8 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     const pool = makePool({
       priceDifference: 2n * 10n ** 12n,
       rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
       rebalanceThresholdsKnown: true,
       deviationBreachStartedAt: NOW - 2n * 3600n,
     });

@@ -10,6 +10,7 @@ import {
 } from "../priceDifference";
 import {
   computeHealthStatus,
+  effectiveThreshold,
   isNeverRebalance,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
@@ -113,17 +114,24 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };
-      // `tokenDecimalsKnown` gate: `computePriceDifference` calls
-      // `normalizeTo18` against the on-entity decimals. When self-heal
-      // hasn't landed real values, those are the schema default 18/18
-      // and recomputing would silently skew the result by
-      // `10^(18 - real_dec)`. Preserve `existing.priceDifference` until
-      // self-heal succeeds — the next event with known decimals will
-      // refresh it. Same gate is applied in `upsertPool`.
+      // `tokenDecimalsKnown` gate: when decimals aren't known we cannot
+      // compute a trustworthy `priceDifference` (`normalizeTo18` would
+      // skew by `10^(18 - real_dec)`), and feeding the frozen-or-default
+      // `existing.priceDifference` into the breach pipeline would let
+      // `nextDeviationBreachStartedAt` / `recordBreachTransition` open or
+      // close `DeviationThresholdBreach` rows from stale data — corrupting
+      // breach durations and alert rollups. Skip the breach + health +
+      // snapshot pipeline entirely; Pool entity still advances oracle
+      // fields (oraclePrice, oracleTimestamp, oracleOk) for the freshness
+      // gate, but breach state stays as-is until self-heal lands.
+      // Mirrors the two-cursor model in state-sync.ts.
+      if (!updatedPool.tokenDecimalsKnown) {
+        context.Pool.set(updatedPool);
+        return;
+      }
+
       const priceDifference =
-        !updatedPool.source?.includes("virtual") &&
-        oraclePrice > 0n &&
-        updatedPool.tokenDecimalsKnown
+        !updatedPool.source?.includes("virtual") && oraclePrice > 0n
           ? computePriceDifference(updatedPool)
           : updatedPool.priceDifference;
       const withDev = { ...updatedPool, priceDifference };
@@ -148,34 +156,16 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         },
       );
 
-      // Skip health sample + OracleSnapshot when decimals aren't known —
-      // priceDifference is frozen at `existing.priceDifference`, which on a
-      // freshly-deployed non-18-decimal pool whose factory + self-heal both
-      // failed is the schema-default `0n`. Writing a snapshot row at that
-      // point would pollute the chart with a fake "0% deviation" sample
-      // and `recordHealthSample` would mark `hasHealthData=true` against
-      // an uncomputable deviation. Mirrors the two-cursor model in
-      // state-sync.ts: Pool entity advances (oraclePrice, oracleTimestamp
-      // are real), but health-bearing rows are skipped until decimals
-      // land. The next event after self-heal succeeds will write a real
-      // sample. `oracleTimestamp` advances regardless because it's used
-      // for the freshness gate, not the deviation chart.
-      if (!updatedPool.tokenDecimalsKnown) {
-        const persistedPoolNoHealth: Pool = {
-          ...finalPool,
-          ...breachPoolUpdate,
-        };
-        context.Pool.set(persistedPoolNoHealth);
-        return;
-      }
-
       // Health score: compute snapshot fields + update pool accumulators.
-      // Pass `isNeverRebalance(finalPool)` so governance-disabled pools
-      // accrue OK time instead of routing through the no-data sentinel.
+      // Pass `Number(effectiveThreshold(finalPool))` so asymmetric pools
+      // whose active side currently sits at 0 still accrue uptime via the
+      // 10000 fallback (raw `rebalanceThreshold` would route through the
+      // no-data sentinel). `isNeverRebalance(finalPool)` short-circuits
+      // governance-disabled pools to OK regardless.
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
-        existing.rebalanceThreshold,
+        Number(effectiveThreshold(finalPool)),
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
@@ -364,13 +354,21 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             )
           : updatedPool.rebalanceThreshold;
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
+
       // `tokenDecimalsKnown` gate — same rationale as the OracleReported
-      // handler above. Without real decimals, recomputing here would
-      // produce a priceDifference off by `10^(18 - real_dec)`.
+      // handler. When decimals aren't known we cannot compute a
+      // trustworthy priceDifference, so feeding the frozen value into the
+      // breach pipeline would corrupt `DeviationThresholdBreach` durations.
+      // Pool entity still advances oracle / median lineage fields (used
+      // for the freshness gate); breach state stays as-is until self-heal
+      // lands.
+      if (!withThreshold.tokenDecimalsKnown) {
+        context.Pool.set(withThreshold);
+        return;
+      }
+
       const priceDifference =
-        !withThreshold.source?.includes("virtual") &&
-        oraclePrice > 0n &&
-        withThreshold.tokenDecimalsKnown
+        !withThreshold.source?.includes("virtual") && oraclePrice > 0n
           ? computePriceDifference(withThreshold)
           : withThreshold.priceDifference;
       const withDev = { ...withThreshold, priceDifference };
@@ -412,25 +410,14 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         },
       );
 
-      // Skip health sample + OracleSnapshot when decimals aren't known —
-      // same rationale as the OracleReported handler above. Pool entity
-      // still gets the new median lineage / oracle fields, but the
-      // health-bearing rows are skipped until self-heal lands.
-      if (!finalPool.tokenDecimalsKnown) {
-        const persistedPoolNoHealth: Pool = {
-          ...finalPool,
-          ...breachPoolUpdate,
-        };
-        context.Pool.set(persistedPoolNoHealth);
-        return;
-      }
-
       // Health score: compute snapshot fields + update pool accumulators.
-      // See OracleReported handler for the `isNeverRebalance` rationale.
+      // (The decimals-unknown short-circuit fired above before the
+      // breach pipeline ran.) See OracleReported handler for the
+      // `effectiveThreshold` + `isNeverRebalance` rationale.
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
-        rebalanceThreshold,
+        Number(effectiveThreshold(finalPool)),
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
