@@ -6,13 +6,11 @@
  * so SWR's `error` field surfaces something the user can read.
  */
 
-/** Default per-request deadline. Both polling hooks consuming this fetcher
- *  (use-v2-exchange-config + use-rebalance-check) revalidate every 60s, and
- *  the SWR-polling Hasura PR checklist requires a deadline below the
- *  refresh interval — otherwise a wedged route can stall the loop and keep
- *  the request alive past the next refresh tick. 30s is the same number we
- *  use for upstream RPC timeouts in v2-exchange-config (15s upstream + a
- *  bit of headroom for serialization). */
+/** Default per-request deadline. SWR polling hooks revalidate on cadences
+ *  starting at 30s, and the polling-Hasura PR checklist requires a
+ *  deadline below the refresh interval — otherwise a wedged route can
+ *  stall the loop and keep the request alive past the next refresh tick.
+ *  Callers can override per-call via `opts.timeoutMs`. */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export async function fetchJsonOrThrow<T>(

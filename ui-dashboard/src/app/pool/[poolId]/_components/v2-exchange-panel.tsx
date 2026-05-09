@@ -7,14 +7,13 @@ import { Stat } from "@/components/stat";
 import { relativeTime, truncateAddress } from "@/lib/format";
 import { tokenSymbol } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
-import type { Pool } from "@/lib/types";
-import type { V2ExchangeConfigDTO } from "@/hooks/use-v2-exchange-config";
+import type { BiPoolExchangeRow, Pool } from "@/lib/types";
 
 /**
  * Live v2 BiPoolManager exchange config + reserves panel for VirtualPools.
  * Replaces PoolConfigPanel/BreakerPanel (which apply to FPMM only). Data
- * comes from `/api/v2-exchange-config/[chainId]/[poolAddress]` which extracts
- * the exchangeId from the VP's bytecode and reads BiPoolManager state.
+ * comes from the indexer's `BiPoolExchange` entity via POOL_V2_EXCHANGE
+ * (joined to this pool by `wrappedByPoolId`).
  */
 export function V2ExchangePanel({
   pool,
@@ -22,26 +21,16 @@ export function V2ExchangePanel({
   v2Config,
   isLoading,
   hasError = false,
-  errorReason,
 }: {
   pool: Pool;
   network: Network;
-  v2Config: V2ExchangeConfigDTO | null;
+  v2Config: BiPoolExchangeRow | null;
   isLoading: boolean;
-  /** True when the route returned 502, threw, or returned `ok: false`. */
+  /** True when the GraphQL query threw / returned an error. */
   hasError?: boolean;
-  /** When the route returned `ok: false`, the structured reason string. */
-  errorReason?: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
 }) {
-  // Skeleton until first response.
   if (isLoading) return <Skeleton />;
-  // Surface failure explicitly. Without this, an upstream RPC outage or a VP
-  // variant whose bytecode the resolver doesn't recognize would render nothing
-  // — operators can't distinguish "no data yet" from "fetch failed", and
-  // critical state like deprecation/buckets goes silently absent.
-  if (hasError) {
-    return <V2ExchangeErrorNote reason={errorReason} />;
-  }
+  if (hasError) return <V2ExchangeErrorNote />;
   if (!v2Config) return null;
 
   if (v2Config.isDeprecated) {
@@ -172,23 +161,17 @@ function Skeleton() {
   return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
 }
 
-function V2ExchangeErrorNote({
-  reason,
-}: {
-  reason?: "no_bytecode" | "not_a_virtual_pool" | "rpc_failed";
-}) {
-  const message =
-    reason === "no_bytecode"
-      ? "No contract code at this address."
-      : reason === "not_a_virtual_pool"
-        ? "Contract bytecode doesn't match a known VirtualPool layout."
-        : "Couldn't load v2 exchange config — upstream RPC error.";
+function V2ExchangeErrorNote() {
   return (
     <div className="rounded-md border border-rose-700/40 bg-rose-900/10 p-3 text-sm">
       <div className="mb-1 font-medium text-rose-300">
         v2 exchange config unavailable
       </div>
-      <p className="text-slate-300">{message}</p>
+      <p className="text-slate-300">
+        Couldn&apos;t load the v2 BiPoolManager exchange data for this
+        VirtualPool — upstream GraphQL error or the indexer hasn&apos;t synced
+        the BiPoolExchange entity yet.
+      </p>
     </div>
   );
 }
@@ -200,7 +183,7 @@ function DeprecatedExchangeNote({
 }: {
   pool: Pool;
   network: Network;
-  config: V2ExchangeConfigDTO;
+  config: BiPoolExchangeRow;
 }) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);

@@ -17,14 +17,17 @@ import {
 } from "@/components/pool-header/uptime-value";
 import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
+import { useGQL } from "@/lib/graphql";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { POOL_V2_EXCHANGE } from "@/lib/queries";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
-import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import {
-  useV2ExchangeConfig,
-  type V2ExchangeConfigDTO,
-} from "@/hooks/use-v2-exchange-config";
+  isVirtualPool,
+  type BiPoolExchangeRow,
+  type Pool,
+  type TradingLimit,
+} from "@/lib/types";
 import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
 import { V2ExchangePanel } from "./v2-exchange-panel";
 
@@ -42,18 +45,21 @@ export function PoolHeader({
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   // Single subscription point for v2 exchange state — children consume via
-  // props so SWR has one subscriber, not three.
+  // props so SWR (under useGQL) has one subscriber, not three. Skip the
+  // query entirely on FPMM pools to avoid a wasted round-trip.
   const {
     data: v2Data,
     isLoading: v2Loading,
     error: v2Error,
-  } = useV2ExchangeConfig(pool, network);
-  const v2Config = v2Data?.ok ? v2Data.config : null;
-  // Distinguish "no v2 config available" from "config fetch failed". We treat
-  // an `ok: false` response (e.g. `not_a_virtual_pool` for an unknown VP
-  // variant) the same as a thrown fetcher error — both surface a degraded
-  // panel below instead of silently rendering nothing.
-  const v2HasError = v2Error !== undefined || (v2Data != null && !v2Data.ok);
+  } = useGQL<{ BiPoolExchange: BiPoolExchangeRow[] }>(
+    isVirtual ? POOL_V2_EXCHANGE : null,
+    { poolId: pool.id, chainId: pool.chainId },
+  );
+  const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
+  // The Hasura "field not found" error during the indexer deploy+resync
+  // window collapses to `v2Error`; surface as a degraded panel rather
+  // than silently rendering nothing.
+  const v2HasError = v2Error !== undefined;
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -178,7 +184,6 @@ export function PoolHeader({
             v2Config={v2Config}
             isLoading={v2Loading}
             hasError={v2HasError}
-            errorReason={v2Data?.ok === false ? v2Data.reason : undefined}
           />
           <div className="my-5 h-px bg-slate-800" />
           <PoolLifecyclePanel pool={pool} />
@@ -209,7 +214,7 @@ const STATUS_TILE = {
 } as const;
 
 function statusKey(
-  v2Config: V2ExchangeConfigDTO | null,
+  v2Config: BiPoolExchangeRow | null,
   hasError: boolean,
 ): keyof typeof STATUS_TILE {
   if (hasError) return "error";
@@ -230,7 +235,7 @@ function VirtualPoolHeaderTiles({
   hasError,
 }: {
   pool: Pool;
-  v2Config: V2ExchangeConfigDTO | null;
+  v2Config: BiPoolExchangeRow | null;
   hasError: boolean;
 }) {
   const status = STATUS_TILE[statusKey(v2Config, hasError)];
