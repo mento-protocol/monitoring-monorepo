@@ -131,10 +131,22 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # react-doctor --diff needs the base ref's history to compute the
+          # changed-files set against origin/${{ github.base_ref }}.
+          fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
+      - name: React Doctor (diff vs base)
+        # PR-only: scans files changed vs the PR base and fails on any
+        # warning/error in the diff. Existing repo-wide debt (~129 warnings,
+        # 1 error) is tracked separately — see ui-dashboard/AGENTS.md
+        # "React Doctor" section. Project-wide rule silences live in
+        # ui-dashboard/react-doctor.config.json.
+        if: github.event_name == 'pull_request'
+        run: pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0

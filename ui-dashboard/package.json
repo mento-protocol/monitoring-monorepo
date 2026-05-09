@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "doctor": "npx -y react-doctor@latest ."
+    "react-doctor": "npx -y react-doctor@latest ."
   },
   "dependencies": {
     "@mento-protocol/contracts": "0.8.0",

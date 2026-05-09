@@ -6,7 +6,7 @@
     "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
     "dashboard:dev": "pnpm --filter @mento-protocol/ui-dashboard dev",
-    "dashboard:doctor": "pnpm --filter @mento-protocol/ui-dashboard doctor",
+    "dashboard:react-doctor": "pnpm --filter @mento-protocol/ui-dashboard react-doctor",
     "deploy:dashboard": "./scripts/deploy-dashboard.sh",
     "deploy:indexer": "./scripts/deploy-indexer.sh",
     "deploy:indexer:status": "./scripts/deploy-indexer-status.sh",
