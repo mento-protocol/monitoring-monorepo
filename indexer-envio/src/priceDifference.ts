@@ -36,6 +36,31 @@ export function scalingFactorToDecimals(scaling: bigint): number | null {
   return n === 1n ? d : null; // reject non-10^n values
 }
 
+/**
+ * Parse a (decimals0, decimals1) RPC pair into the Pool fields. Centralizes
+ * the both-or-neither rule: `tokenDecimalsKnown=true` only when both reads
+ * succeeded AND parsed to a valid power of ten. Partial healed states are
+ * indistinguishable from both-defaulted to downstream consumers, so we hold
+ * off on flipping the flag until the full pair lands. Used by FPMMFactory,
+ * virtualPool factory, and `selfHealTokenDecimals`.
+ */
+export function parseDecimalsPair(
+  dec0Raw: bigint | undefined,
+  dec1Raw: bigint | undefined,
+): {
+  token0Decimals: number;
+  token1Decimals: number;
+  tokenDecimalsKnown: boolean;
+} {
+  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
+  return {
+    token0Decimals: dec0Parsed ?? 18,
+    token1Decimals: dec1Parsed ?? 18,
+    tokenDecimalsKnown: dec0Parsed !== null && dec1Parsed !== null,
+  };
+}
+
 /** Shared inputs for `reservePriceVsOracleRef`, `computePriceDifference`,
  * and `pickActiveThreshold`. Identical fields to the FPMM `getRebalancingState`
  * contract reads but kept structural (no `Pool` type dependency) so callers

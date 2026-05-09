@@ -15,7 +15,7 @@ import {
   makePoolId,
   extractAddressFromPoolId,
 } from "../../helpers";
-import { scalingFactorToDecimals } from "../../priceDifference";
+import { parseDecimalsPair } from "../../priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -193,16 +193,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       poolAddress: poolAddr,
     }),
   ]);
-  // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.).
-  // `tokenDecimalsKnown=true` only when BOTH reads succeed AND parse to a
-  // valid power of ten — a partial success would leave one side at the
-  // schema default and the other at the real value, indistinguishable from
-  // both-defaulted by reads alone. Self-heal retries until both land.
-  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
-  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
-  const token0Decimals = dec0Parsed ?? 18;
-  const token1Decimals = dec1Parsed ?? 18;
-  const tokenDecimalsKnown = dec0Parsed !== null && dec1Parsed !== null;
+  const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
@@ -267,7 +258,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     oracleDelta,
-    tokenDecimals: { token0Decimals, token1Decimals, tokenDecimalsKnown },
+    tokenDecimals,
   });
 
   // Persist fee config read at pool creation. `compactFees` strips

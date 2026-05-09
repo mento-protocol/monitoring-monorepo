@@ -16,10 +16,7 @@ import {
   dailySnapshotId,
   extractAddressFromPoolId,
 } from "./helpers";
-import {
-  computePriceDifference,
-  scalingFactorToDecimals,
-} from "./priceDifference";
+import { computePriceDifference, parseDecimalsPair } from "./priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -355,13 +352,7 @@ export async function selfHealTokenDecimals(
   context: { effect: EffectCaller },
   pool: Pool,
 ): Promise<Pool> {
-  if (
-    pool.tokenDecimalsKnown ||
-    pool.source === "" ||
-    isVirtualPool(pool) ||
-    !pool.token0 ||
-    !pool.token1
-  ) {
+  if (pool.tokenDecimalsKnown || pool.source === "" || isVirtualPool(pool)) {
     return pool;
   }
   const poolAddr = extractAddressFromPoolId(pool.id);
@@ -379,19 +370,9 @@ export async function selfHealTokenDecimals(
       fallbackTokenAddress: pool.token1,
     }),
   ]);
-  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
-  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
-  // Only flip the flag when BOTH reads succeed — a partial healed state
-  // (one side real, the other at the default) is indistinguishable from
-  // both-defaulted to downstream consumers, so don't claim "known" until
-  // we have the full pair.
-  if (dec0Parsed === null || dec1Parsed === null) return pool;
-  return {
-    ...pool,
-    token0Decimals: dec0Parsed,
-    token1Decimals: dec1Parsed,
-    tokenDecimalsKnown: true,
-  };
+  const parsed = parseDecimalsPair(dec0Raw, dec1Raw);
+  if (!parsed.tokenDecimalsKnown) return pool;
+  return { ...pool, ...parsed };
 }
 
 /** Self-heal `rebalanceThresholdAbove/Below` when the factory's
@@ -674,17 +655,12 @@ export const upsertPool = async ({
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     ...(healedFees ?? {}),
-    // Persist token decimals if provided (set once at pool creation).
-    // `tokenDecimalsKnown=true` only when the caller asserts both reads
-    // succeeded; otherwise we may overwrite a self-healed `true` with a
-    // factory-blip `false` and re-trigger retries forever. Use OR rather
-    // than `?? existing.tokenDecimalsKnown` so a healed `true` sticks
-    // through any future caller passing `tokenDecimalsKnown=false`.
+    // OR-merge `tokenDecimalsKnown` so a self-healed `true` survives a
+    // later caller passing `false` (e.g. a factory replay that blipped).
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
     tokenDecimalsKnown:
-      (tokenDecimals?.tokenDecimalsKnown ?? false) ||
-      existing.tokenDecimalsKnown,
+      tokenDecimals?.tokenDecimalsKnown || existing.tokenDecimalsKnown,
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:

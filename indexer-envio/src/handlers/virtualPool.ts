@@ -16,10 +16,7 @@ import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
 import { tokenDecimalsScalingEffect } from "../rpc/effects";
-import {
-  buildRebalanceOutcome,
-  scalingFactorToDecimals,
-} from "../priceDifference";
+import { buildRebalanceOutcome, parseDecimalsPair } from "../priceDifference";
 
 // ---------------------------------------------------------------------------
 // VirtualPoolFactory.VirtualPoolDeployed
@@ -60,15 +57,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       fallbackTokenAddress: token1,
     }),
   ]);
-  // `tokenDecimalsKnown=true` only when BOTH reads succeed AND parse to a
-  // valid power of ten — same gate the FPMM factory uses. A partial success
-  // is indistinguishable from both-defaulted to downstream consumers, so
-  // hold off on flipping the flag until we have the full pair.
-  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
-  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
-  const token0Decimals = dec0Parsed ?? 18;
-  const token1Decimals = dec1Parsed ?? 18;
-  const tokenDecimalsKnown = dec0Parsed !== null && dec1Parsed !== null;
+  const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
 
   await upsertPool({
     context,
@@ -80,7 +69,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     blockNumber: asBigInt(event.block.number),
     blockTimestamp: asBigInt(event.block.timestamp),
     txHash: event.transaction.hash,
-    tokenDecimals: { token0Decimals, token1Decimals, tokenDecimalsKnown },
+    tokenDecimals,
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",

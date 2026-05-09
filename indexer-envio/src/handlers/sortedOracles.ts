@@ -94,12 +94,8 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // passes stale-median data through the freshness gate.
       //
       // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
-      // here. This is a diagnostic-only field — see schema.graphql for why
-      // it can't replace `lastOracleReportAt` as the gate. Surfaces the
-      // freshest known reporter timestamp for future per-reporter parity
-      // work (codex re-raised the gap on PR #358 across 3 rounds; this
-      // captures the data point it asked for without changing the
-      // safe-by-construction freshness semantic).
+      // here. Diagnostic-only field — see schema.graphql for why it can't
+      // replace `lastOracleReportAt` as the freshness gate.
       const lastFreshReporterAt =
         oracleTimestamp > existing.lastFreshReporterAt
           ? oracleTimestamp
