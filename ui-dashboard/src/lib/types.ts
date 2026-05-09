@@ -124,6 +124,35 @@ export type OracleSnapshot = {
   hasHealthData?: boolean;
 };
 
+export type VirtualPoolLifecycleAction = "DEPLOYED" | "DEPRECATED";
+
+export type VirtualPoolLifecycle = {
+  id: string;
+  action: VirtualPoolLifecycleAction;
+  factoryAddress: string;
+  txHash: string;
+  blockNumber: string;
+  blockTimestamp: string;
+};
+
+// Per-event Broker.Swap row scoped to a specific v2 exchangeId. Mirrors the
+// raw schema fields the dashboard's combined-volume chart consumes — the v2
+// "trading-pair view" of a VirtualPool wraps over this exchange.
+export type BrokerSwapEventRow = {
+  id: string;
+  trader: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  amountOut: string;
+  volumeUsdWei: string;
+  txTo: string;
+  routedViaV3Router: boolean;
+  txHash: string;
+  blockNumber: string;
+  blockTimestamp: string;
+};
+
 export type SwapEvent = {
   id: string;
   chainId: number;

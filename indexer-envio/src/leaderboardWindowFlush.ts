@@ -141,7 +141,23 @@ export async function flushV2LeaderboardWindowSnapshots(args: {
   const rows = await args.context.BrokerTraderDailySnapshot.getWhere.chainId.eq(
     args.chainId,
   );
-  const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
+  // BrokerTraderDailySnapshot keys by `caller` (tx.from / signer EOA), but
+  // the shared `aggregatePerWindow` helper expects a `trader` field on each
+  // row (named for v3's TraderDailySnapshot). Map `caller → trader` here so
+  // both venues feed identically structured rows into the aggregator.
+  const sharedRows = rows.map((r) => ({
+    chainId: r.chainId,
+    trader: r.caller,
+    timestamp: r.timestamp,
+    volumeUsdWei: r.volumeUsdWei,
+    swapCount: r.swapCount,
+    isSystemAddress: r.isSystemAddress,
+  }));
+  const grouped = aggregatePerWindow(
+    sharedRows,
+    args.chainId,
+    args.snapshotDay,
+  );
   for (const w of WINDOW_KEYS) {
     // BrokerLeaderboardWindowSnapshot is structurally identical to
     // LeaderboardWindowSnapshot — see schema.graphql.

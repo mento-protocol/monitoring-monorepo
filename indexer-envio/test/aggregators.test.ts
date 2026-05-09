@@ -90,10 +90,16 @@ describe("classifyAggregator", () => {
 });
 
 describe("_aggregatorAddressesForChain", () => {
-  it("Celo has 4 verified aggregators + 4 cluster-7dc08ec28f299c06 contracts", () => {
+  it("Celo has 5 verified aggregators (incl. OpenOcean executor) + 16 cluster-7dc08ec28f299c06 contracts", () => {
     const map = _aggregatorAddressesForChain(CHAIN_CELO);
-    assert.equal(map.size, 8);
+    assert.equal(map.size, 21);
     assert.equal(map.get(SQUID_CELO), "squid");
+    // OpenOcean per-leg executor classifies under the same `openocean` name
+    // as the user-facing Exchange Proxy that delegates to it.
+    assert.equal(
+      map.get("0xdec876911cbe9428265af0d12132c52ee8642a99"),
+      "openocean",
+    );
   });
 
   it("Monad has 3 verified aggregators (no Squid, no default LI.FI)", () => {
@@ -104,16 +110,30 @@ describe("_aggregatorAddressesForChain", () => {
 });
 
 describe("cluster classification", () => {
-  // The 4 contracts in cluster-7dc08ec28f299c06 (deployer 0x7dc08ec2…df8f022).
-  // Source: celoscan creator field on each contract, verified 2026-05-04.
+  // The 16 contracts in cluster-7dc08ec28f299c06 (deployer 0x7dc08ec2…df8f022),
+  // ordered by deploy time. Source: celoscan creator field on each contract,
+  // verified 2026-05-08. All share `owner() = 0x7dc08ec2…df8f022` and were
+  // deployed via the CREATE3 factory 0xba5Ed099…ba5Ed.
   const CLUSTER_CONTRACTS = [
-    "0xef6956414006e161fca5f048331d91e472077e9b",
-    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
-    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+    "0xf184a8498f4bad5ca6ef538b72142411588792a3",
+    "0xea99a75e309868a59074e9b0441c14ba62c6ea28",
+    "0x953b7173200229f255f83b6f4fa448d753b79301",
+    "0xf023c10a9adb0553ce07d37f367630e4e84a944e",
+    "0x187c35dbbc8055b267303dd7b351e708f4c5d3bf",
+    "0x9bfbcd07ea9c3cdc30057d7629beb589fe2d854d",
     "0xfe8237bcba52339d818c9c9c3c94481196e4b653",
+    "0x35f629410baffd35c482a1f77cfb0ec2f0a75c76",
+    "0x1bbcc3dad88fe33248a9ab6600fe72235c51d7ce",
+    "0x48d5be40f43fd70ed9329dc0e83b8c5d3a3364f4",
+    "0x93acb2d456edeffa2e2ea97efc4fa4d17c39d4b8",
+    "0xef6956414006e161fca5f048331d91e472077e9b",
+    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
+    "0x6f9fe2b0acf50874dcb49faefff62382381bf622",
+    "0xc2068e03ca948f54348899eeda1417a901d76285",
   ];
 
-  it("classifies all 4 fleet contracts under the same cluster name", () => {
+  it("classifies all 16 fleet contracts under the same cluster name", () => {
     for (const addr of CLUSTER_CONTRACTS) {
       assert.equal(
         classifyAggregator(CHAIN_CELO, addr),

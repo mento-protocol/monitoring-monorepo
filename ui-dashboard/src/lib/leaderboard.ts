@@ -128,10 +128,18 @@ export type TraderPoolWindowRow = {
 // Mirror of TraderDailyRow / TraderWindowRow but skinnier: BrokerSwapEvent
 // doesn't carry fee bps or pool metadata, so the v2 entity drops fees and
 // per-pool-uniques. See indexer-envio/schema.graphql BrokerTraderDailySnapshot.
+//
+// Note: the underlying entity field is `caller` (tx.from / signer EOA), but
+// the GraphQL queries alias it to `trader` so v2 and v3 row shapes stay
+// uniform — `aggregateBrokerTradersByWindow` / `aggregateDailyVolume` /
+// `mergeHeroSnapshot` can read `row.trader` regardless of venue.
 
 export type BrokerTraderDailyRow = {
   id: string;
   chainId: number;
+  /** Aliased from `caller` in the GraphQL query — semantically the signer
+   *  EOA (tx.from). Keeping the field name `trader` here so this row shape
+   *  stays interchangeable with `TraderDailyRow` for `aggregateDailyVolume`. */
   trader: string;
   timestamp: string;
   swapCount: number;
@@ -142,6 +150,7 @@ export type BrokerTraderDailyRow = {
 
 export type BrokerTraderWindowRow = {
   chainId: number;
+  /** Signer EOA (tx.from) — see `BrokerTraderDailyRow.trader`. */
   trader: string;
   swapCount: number;
   volumeUsdWei: bigint;
