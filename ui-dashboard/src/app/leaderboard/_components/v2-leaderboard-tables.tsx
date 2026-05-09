@@ -66,13 +66,13 @@ export function V2LeaderboardTraderTable({
 
   if (hasError) {
     return (
-      <ErrorBox message="Couldn't load the v2 producer leaderboard. Retrying automatically every 30 s." />
+      <ErrorBox message="Couldn't load the v2 trader leaderboard. Retrying automatically every 30 s." />
     );
   }
   if (isLoading) return <Skeleton rows={10} />;
   if (sorted.length === 0) {
     return (
-      <EmptyBox message="No legacy-v2 producers in this window. Either v2 volume has stopped — celebrate — or try widening the range / showing system addresses." />
+      <EmptyBox message="No legacy-v2 traders in this window. Either v2 volume has stopped — celebrate — or try widening the range / showing system addresses." />
     );
   }
 
@@ -81,7 +81,7 @@ export function V2LeaderboardTraderTable({
       <thead>
         <tr className="border-b border-slate-800">
           <Th align="right">#</Th>
-          <Th>Producer</Th>
+          <Th>Trader</Th>
           <SortableTh
             sortKey="volume"
             activeSortKey={sortKey}
