@@ -56,6 +56,12 @@ export type Pool = {
   healthBinarySeconds?: string;
   hasHealthData?: boolean;
   breachCount?: number;
+  // Set on VirtualPools at deploy time via bytecode extraction (PUSH32
+  // immediates in swap() preamble). Joins to BiPoolExchange.exchangeId in
+  // the POOL_V2_EXCHANGE query. Null on FPMM pools and on VPs whose
+  // deploy-time RPC failed (the next event's self-heal is not wired here —
+  // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
+  wrappedExchangeId?: string;
 };
 
 /**
@@ -133,6 +139,39 @@ export type VirtualPoolLifecycle = {
   txHash: string;
   blockNumber: string;
   blockTimestamp: string;
+};
+
+// Mento v2 BiPoolManager exchange row, returned by the POOL_V2_EXCHANGE
+// GraphQL query (joined to Pool via `Pool.wrappedExchangeId`). All BigInt
+// fields ride as decimal strings — that's how Hasura serializes
+// `precision:78` columns over JSON; convert with `BigInt(...)` at the use
+// site when arithmetic is needed.
+export type BiPoolExchangeRow = {
+  id: string;
+  chainId: number;
+  exchangeId: string;
+  exchangeProvider: string;
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
+  /** Friendly label resolved by the indexer at write time (e.g.
+   * "ConstantSum"). `null`/missing for pricing modules not in the
+   * `@mento-protocol/contracts` package — UI renders an em-dash. */
+  pricingModuleName: string | null;
+  /** FixidityLib 1e24 unit. Divide by 1e24 for the swap-fee fraction
+   * (e.g. `5e21 = 0.005 = 50 bps`). */
+  spread: string;
+  referenceRateFeedID: string;
+  referenceRateResetFrequency: string;
+  minimumReports: string;
+  stablePoolResetSize: string;
+  bucket0: string;
+  bucket1: string;
+  lastBucketUpdate: string;
+  isDeprecated: boolean;
+  /** poolId of the VirtualPool that wraps this exchange. `null` for v2-only
+   * exchanges (legacy direct trading via Broker, no v3 wrapper). */
+  wrappedByPoolId: string | null;
 };
 
 // Per-event Broker.Swap row scoped to a specific v2 exchangeId. Mirrors the

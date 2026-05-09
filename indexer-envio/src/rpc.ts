@@ -57,11 +57,24 @@ export {
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
 } from "./rpc/pool-state";
+export {
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
+  fetchPoolExchange,
+  fetchVirtualPoolExchangeId,
+  extractVpExchangeIdFromBytecode,
+} from "./rpc/biPoolManager";
 export type {
   RebalancingState,
   FeeGetterMock,
   FetchFeesMock,
 } from "./rpc/pool-state";
+export type {
+  PoolExchangeStruct,
+  VirtualPoolExchangeId,
+} from "./rpc/biPoolManager";
 
 // Re-export breaker RPC self-heal symbols so existing callers that import from
 // "./rpc" (breakers.ts handler and all breaker test files) keep working.

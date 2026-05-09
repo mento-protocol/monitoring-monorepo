@@ -46,6 +46,13 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   // start instead of inheriting the 18/18 default. Mirrors the FPMM factory
   // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to scale
   // correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is on a leg.
+  //
+  // `wrappedExchangeId` extraction + the BiPoolExchange forward-link
+  // (set wrappedByPoolId + mirror feedID into Pool) are handled inside
+  // upsertPool's heal pipeline via `selfHealWrappedExchangeId` — same
+  // `vpExchangeIdEffect` (cache:true), same `BiPoolExchange.get` +
+  // `mirrorFeedIdToPool` work. Doing it both here and there was a pure
+  // duplicate of DB reads + idempotent writes.
   const [dec0Raw, dec1Raw] = await Promise.all([
     context.effect(tokenDecimalsScalingEffect, {
       chainId: event.chainId,
@@ -66,6 +73,8 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const token1Decimals = dec1Raw
     ? (scalingFactorToDecimals(dec1Raw) ?? 18)
     : 18;
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
 
   await upsertPool({
     context,
@@ -74,8 +83,8 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     token0,
     token1,
     source: "virtual_pool_factory",
-    blockNumber: asBigInt(event.block.number),
-    blockTimestamp: asBigInt(event.block.timestamp),
+    blockNumber,
+    blockTimestamp,
     txHash: event.transaction.hash,
     tokenDecimals: { token0Decimals, token1Decimals },
     oracleDelta: {

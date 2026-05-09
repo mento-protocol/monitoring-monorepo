@@ -35,6 +35,7 @@ import {
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
 } from "./pool-state";
+import { fetchPoolExchange, fetchVirtualPoolExchangeId } from "./biPoolManager";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
@@ -102,6 +103,26 @@ const breakerFeedStateShape = S.schema({
   smoothingFactor: S.nullable(S.bigint),
   medianRatesEMA: S.nullable(S.bigint),
   referenceValue: S.nullable(S.bigint),
+});
+
+// BiPoolManager.getPoolExchange struct as flattened by `fetchPoolExchange`.
+const poolExchangeShape = S.schema({
+  asset0: S.string,
+  asset1: S.string,
+  pricingModule: S.string,
+  bucket0: S.bigint,
+  bucket1: S.bigint,
+  lastBucketUpdate: S.bigint,
+  spread: S.bigint,
+  referenceRateFeedID: S.string,
+  referenceRateResetFrequency: S.bigint,
+  minimumReports: S.bigint,
+  stablePoolResetSize: S.bigint,
+});
+
+const vpExchangeIdShape = S.schema({
+  exchangeProvider: S.string,
+  exchangeId: S.string,
 });
 
 // ---------------------------------------------------------------------------
@@ -613,5 +634,73 @@ export const breakerFeedStateEffect = createEffect(
       medianRatesEMA: result.medianRatesEMA ?? undefined,
       referenceValue: result.referenceValue ?? undefined,
     };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Group G — BiPoolManager / VirtualPool seed reads.
+//
+// Both effects fire ONCE per entity creation (ExchangeCreated /
+// VirtualPoolDeployed) — they're not on the per-event hot path. Caching:
+//   - `poolExchangeEffect`: `cache: false`. The struct includes bucket
+//     reserves which mutate every `referenceRateResetFrequency` (~360s),
+//     and we'd rather re-read on a re-sync than serve a stale cached
+//     snapshot whose bucket fields drift from the BucketsUpdated event
+//     stream that overwrites them.
+//   - `vpExchangeIdEffect`: `cache: true`. Bytecode is immutable for a
+//     deployed contract, so a cache row keyed by (chainId, vpAddress) is
+//     accurate forever and skips an RPC on every full re-sync.
+// ---------------------------------------------------------------------------
+
+export const poolExchangeEffect = createEffect(
+  {
+    name: "poolExchange",
+    input: {
+      chainId: S.int32,
+      exchangeProvider: S.string,
+      exchangeId: S.string,
+    },
+    output: S.nullable(poolExchangeShape),
+    rateLimit: { calls: 50, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchPoolExchange(
+      input.chainId,
+      input.exchangeProvider,
+      input.exchangeId,
+      context.log,
+    )) ?? undefined,
+);
+
+export const vpExchangeIdEffect = createEffect(
+  {
+    name: "vpExchangeId",
+    input: { chainId: S.int32, vpAddress: S.string },
+    output: S.nullable(vpExchangeIdShape),
+    rateLimit: { calls: 50, per: "second" },
+    cache: true,
+  },
+  // `fetchVirtualPoolExchangeId` returns null when the bytecode-pattern
+  // doesn't match (not a VirtualPool — shouldn't happen) OR on transient RPC
+  // failure. The first is a permanent classification (safe to cache); the
+  // second isn't. Without `context.cache = false` on the failure path, a
+  // single deployment-time RPC blip would persist `null` and every later
+  // self-heal would receive the cached miss.
+  async ({ input, context }) => {
+    const result = await fetchVirtualPoolExchangeId(
+      input.chainId,
+      input.vpAddress,
+      context.log,
+    );
+    if (result === null) {
+      // We can't distinguish "no bytecode / no pattern match" from "RPC
+      // failed" here — pool-state.ts catches both and returns null. Treat
+      // every null as transient: cost is one extra RPC per VP on next
+      // touch, which is negligible (12 VPs total today).
+      context.cache = false;
+      return undefined;
+    }
+    return result;
   },
 );

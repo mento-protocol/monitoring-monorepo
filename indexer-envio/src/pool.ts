@@ -9,6 +9,8 @@ import type {
   PoolDailySnapshot,
   DeviationThresholdBreach,
 } from "generated";
+import type { HandlerContext } from "generated/src/Types";
+import { ZERO_ADDRESS } from "./constants";
 import {
   hourBucket,
   dayBucket,
@@ -24,6 +26,7 @@ import {
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
+  vpExchangeIdEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
@@ -296,6 +299,9 @@ export type PoolContext = {
     get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
     set: (entity: DeviationThresholdBreach) => void;
   };
+  // Used by `selfHealWrappedExchangeId` to patch the back-reference on the
+  // matching exchange row when a VP heals its `wrappedExchangeId`.
+  BiPoolExchange: HandlerContext["BiPoolExchange"];
 };
 
 /** Self-heal `invertRateFeed` when it was never successfully read at pool
@@ -372,6 +378,105 @@ export async function selfHealRebalanceThresholds(
   };
 }
 
+/** Self-heal `Pool.wrappedExchangeId` for VirtualPools whose
+ * `VirtualPoolDeployed` event fired pre-start_block (and so the bytecode
+ * extraction in the factory handler never ran). Reads the VP bytecode
+ * once per address (the effect is `cache: true` — bytecode is immutable
+ * for a deployed contract — so the actual RPC fires exactly once per VP
+ * across the whole sync). Returns the (possibly healed) Pool — caller
+ * persists. Also patches the matching `BiPoolExchange.wrappedByPoolId`
+ * back-reference if the exchange row already exists, so the dashboard's
+ * `wrappedByPoolId`-keyed GraphQL query finds the join after a heal that
+ * only the Pool side knew about.
+ *
+ * No-op on FPMM pools and on VPs that already have the field set. */
+export async function selfHealWrappedExchangeId(
+  context: PoolContext,
+  pool: Pool,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<Pool> {
+  if (!isVirtualPool(pool) || pool.wrappedExchangeId) return pool;
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const result = await context.effect(vpExchangeIdEffect, {
+    chainId: pool.chainId,
+    vpAddress: poolAddr,
+  });
+  if (!result) return pool;
+  const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
+  const exchange = await context.BiPoolExchange.get(exchangeRowId);
+  let healedFeedId = pool.referenceRateFeedID;
+  if (exchange) {
+    if (exchange.wrappedByPoolId !== pool.id) {
+      context.BiPoolExchange.set({
+        ...exchange,
+        wrappedByPoolId: pool.id,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
+    // Once we've set wrappedByPoolId, ensureBiPoolExchange's null-guarded
+    // retry path won't re-run the feedID mirror on subsequent BucketsUpdated
+    // events. Mirror it here too so the oracle-price tile lights up
+    // immediately on first self-heal — otherwise it'd stay "—" until the
+    // NEXT bucket reset (~360s), even though the feedID is in scope.
+    await mirrorFeedIdToPool(
+      context,
+      pool.id,
+      exchange.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
+    // CRUCIAL: also flow the mirrored feedID back to the caller so
+    // `upsertPool`'s next spread doesn't overwrite the just-persisted
+    // value. `mirrorFeedIdToPool` does its own `Pool.set`, but the
+    // healed Pool returned from this function feeds into `next` in
+    // upsertPool which then persists again — without carrying the
+    // updated feedID here, that second write would blank the mirror
+    // that just landed.
+    if (
+      exchange.referenceRateFeedID &&
+      exchange.referenceRateFeedID !== ZERO_ADDRESS
+    ) {
+      healedFeedId = exchange.referenceRateFeedID;
+    }
+  }
+  return {
+    ...pool,
+    wrappedExchangeId: result.exchangeId,
+    referenceRateFeedID: healedFeedId,
+  };
+}
+
+/** Mirror a v2 exchange's `referenceRateFeedID` onto its wrapping
+ * VirtualPool's Pool row so the existing SortedOracles `getPoolsByFeed`
+ * lookup picks up the VP naturally. Idempotent — no-op when already in
+ * sync. Skips zero/empty feedIDs (still pre-RPC-backfill or destroyed
+ * exchange) so a transient source value can't blank a previously-set
+ * link. Used from both directions of the VP↔BiPoolExchange linkage
+ * (VirtualPoolDeployed forward, BiPoolManager.ExchangeCreated reverse,
+ * plus `selfHealWrappedExchangeId` post-self-heal).
+ *
+ * Context narrowed to just `Pool` access — callers from both PoolContext
+ * (upsertPool path) and HandlerContext (event handlers) work. */
+export async function mirrorFeedIdToPool(
+  context: { Pool: PoolContext["Pool"] },
+  poolId: string,
+  feedId: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  if (!feedId || feedId === ZERO_ADDRESS) return;
+  const pool = await context.Pool.get(poolId);
+  if (!pool || pool.referenceRateFeedID === feedId) return;
+  context.Pool.set({
+    ...pool,
+    referenceRateFeedID: feedId,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
+}
+
 export type SnapshotContext = {
   PoolSnapshot: {
     get: (id: string) => Promise<PoolSnapshot | undefined>;
@@ -383,7 +488,16 @@ export type SnapshotContext = {
   };
 };
 
-/** Default oracle field values (for VirtualPools or when RPC call fails) */
+/** Default oracle field values (for VirtualPools or when RPC call fails).
+ *
+ * Excludes `referenceRateFeedID` on purpose — that's a static-config field
+ * set ONCE at pool creation (factory `referenceRateFeedIDEffect`) or via
+ * the BiPoolExchange→Pool mirror (`mirrorFeedIdToPool`). Including it here
+ * would mean callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}`
+ * as `oracleDelta` would clobber a healed feedID back to "" via the
+ * `next` builder's spread order. `defaultPool` initializes the field
+ * directly below; persisted updates flow via the dedicated mirror /
+ * heal helpers. */
 export const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
@@ -391,7 +505,6 @@ export const DEFAULT_ORACLE_FIELDS = {
   oracleTxHash: "",
   oracleExpiry: 0n,
   oracleNumReporters: 0,
-  referenceRateFeedID: "",
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
   medianLive: false,
@@ -465,6 +578,13 @@ const defaultPool = (
   notionalVolume1: 0n,
   rebalanceCount: 0,
   ...DEFAULT_ORACLE_FIELDS,
+  // Static-config fields excluded from DEFAULT_ORACLE_FIELDS to avoid
+  // the spread-clobber bug — callers' `oracleDelta` must NOT carry the
+  // power to overwrite these on every event.
+  referenceRateFeedID: "",
+  // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
+  // (factory-direct value or bytecode read). FPMMs never set it.
+  wrappedExchangeId: undefined,
   createdAtBlock: 0n,
   createdAtTimestamp: 0n,
   updatedAtBlock: 0n,
@@ -487,6 +607,7 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  referenceRateFeedID,
   existing: existingOverride,
 }: {
   context: PoolContext;
@@ -510,6 +631,12 @@ export const upsertPool = async ({
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  /** Static-config field for the referenced rate feed; explicit param so
+   * callers can't accidentally clobber it via `oracleDelta` spread (see
+   * the doc on `DEFAULT_ORACLE_FIELDS`). Only the FPMM factory + the
+   * BiPoolExchange→Pool mirror set it; all other callers pass undefined
+   * and the persisted value flows through unchanged. */
+  referenceRateFeedID?: string;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -517,19 +644,50 @@ export const upsertPool = async ({
    * from "not passed". When `undefined`, upsertPool does its own lookup. */
   existing?: { pool: Pool | undefined };
 }): Promise<Pool> => {
-  const existingInitial = existingOverride
+  const initialBase = existingOverride
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
+  // Carry the caller's intended source into the heal pipeline ONLY when
+  // the persisted source is the empty defaultPool sentinel — otherwise
+  // the unconditional override defeats `pickPreferredSource` below by
+  // making `existing.source === source` regardless of priority. The
+  // VP/FPMM-aware gates (`isVirtualPool`, `pool.source === ""`) need the
+  // first-touch source-fill, but later events on a pool with an already-
+  // ranked source must keep the persisted value through this stage.
+  const existingInitial: Pool = initialBase.source
+    ? initialBase
+    : { ...initialBase, source };
   // Self-heal invertRateFeed up front so every downstream computation
   // (priceDifference, oraclePrice flip, breach status) sees the corrected
   // orientation. Same helper that handlers call before reading the field.
-  const existing = await selfHealInvertRateFeed(context, existingInitial);
+  const invertHealed = await selfHealInvertRateFeed(context, existingInitial);
+  // Self-heal `wrappedExchangeId` for VirtualPools whose
+  // VirtualPoolDeployed event fired pre-start_block. Bytecode is immutable
+  // and the effect is `cache: true` so the actual RPC fires once per VP
+  // address across the whole sync regardless of how many events touch it.
+  // Inline gate on the hot path so FPMM events + already-healed VPs skip
+  // the await microtask hop; the helper itself early-returns on the same
+  // condition for off-hot-path callers.
+  const existing =
+    invertHealed.wrappedExchangeId || !isVirtualPool(invertHealed)
+      ? invertHealed
+      : await selfHealWrappedExchangeId(
+          context,
+          invertHealed,
+          blockNumber,
+          blockTimestamp,
+        );
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
   // Use the raw address (not the namespaced poolId) for RPC calls.
   const poolAddr = extractAddressFromPoolId(poolId);
+  // `healedFeedId` is split from `healedOracleDelta` because
+  // `referenceRateFeedID` is no longer part of `DEFAULT_ORACLE_FIELDS`
+  // (extracted to avoid the spread-clobber bug — see DEFAULT_ORACLE_FIELDS
+  // doc above). Applied directly in the `next` builder below.
+  let healedFeedId: string | undefined;
   let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
   if (
     existing.referenceRateFeedID === "" &&
@@ -541,13 +699,15 @@ export const upsertPool = async ({
       poolAddress: poolAddr,
     });
     if (rateFeedID) {
-      healedOracleDelta = { referenceRateFeedID: rateFeedID };
+      healedFeedId = rateFeedID;
       const expiry = await context.effect(reportExpiryEffect, {
         chainId,
         rateFeedID,
         blockNumber,
       });
-      if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
+      if (expiry !== undefined) {
+        healedOracleDelta = { oracleExpiry: expiry };
+      }
     }
   }
 
@@ -596,9 +756,19 @@ export const upsertPool = async ({
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     ...(healedFees ?? {}),
+    // `referenceRateFeedID` is applied AFTER the spread chain so the
+    // value isn't clobbered by an oracleDelta that omits it (the field
+    // is no longer in DEFAULT_ORACLE_FIELDS — callers can't include it
+    // in the spread). Priority: caller-supplied param (FPMM factory) >
+    // self-heal > existing.
+    referenceRateFeedID:
+      referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID,
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` above —
+    // the helper updates `existing` in place (returns a new object on
+    // healing, original on no-op) so the spread carries the field through.
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:

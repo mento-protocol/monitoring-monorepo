@@ -17,14 +17,18 @@ import {
 } from "@/components/pool-header/uptime-value";
 import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
+import { useGQL } from "@/lib/graphql";
 import { formatTimestamp, relativeTime } from "@/lib/format";
+import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { POOL_V2_EXCHANGE } from "@/lib/queries";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
-import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import {
-  useV2ExchangeConfig,
-  type V2ExchangeConfigDTO,
-} from "@/hooks/use-v2-exchange-config";
+  isVirtualPool,
+  type BiPoolExchangeRow,
+  type Pool,
+  type TradingLimit,
+} from "@/lib/types";
 import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
 import { V2ExchangePanel } from "./v2-exchange-panel";
 
@@ -42,18 +46,21 @@ export function PoolHeader({
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   // Single subscription point for v2 exchange state — children consume via
-  // props so SWR has one subscriber, not three.
+  // props so SWR (under useGQL) has one subscriber, not three. Skip the
+  // query entirely on FPMM pools to avoid a wasted round-trip.
   const {
     data: v2Data,
     isLoading: v2Loading,
     error: v2Error,
-  } = useV2ExchangeConfig(pool, network);
-  const v2Config = v2Data?.ok ? v2Data.config : null;
-  // Distinguish "no v2 config available" from "config fetch failed". We treat
-  // an `ok: false` response (e.g. `not_a_virtual_pool` for an unknown VP
-  // variant) the same as a thrown fetcher error — both surface a degraded
-  // panel below instead of silently rendering nothing.
-  const v2HasError = v2Error !== undefined || (v2Data != null && !v2Data.ok);
+  } = useGQL<{ BiPoolExchange: BiPoolExchangeRow[] }>(
+    isVirtual ? POOL_V2_EXCHANGE : null,
+    { poolId: pool.id, chainId: pool.chainId },
+  );
+  const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
+  // The Hasura "field not found" error during the indexer deploy+resync
+  // window collapses to `v2Error`; surface as a degraded panel rather
+  // than silently rendering nothing.
+  const v2HasError = v2Error !== undefined;
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -123,6 +130,7 @@ export function PoolHeader({
         {isVirtual ? (
           <VirtualPoolHeaderTiles
             pool={pool}
+            network={network}
             v2Config={v2Config}
             hasError={v2HasError}
           />
@@ -178,7 +186,6 @@ export function PoolHeader({
             v2Config={v2Config}
             isLoading={v2Loading}
             hasError={v2HasError}
-            errorReason={v2Data?.ok === false ? v2Data.reason : undefined}
           />
           <div className="my-5 h-px bg-slate-800" />
           <PoolLifecyclePanel pool={pool} />
@@ -208,13 +215,22 @@ const STATUS_TILE = {
   error: { label: "—", color: "text-rose-400" },
 } as const;
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 function statusKey(
-  v2Config: V2ExchangeConfigDTO | null,
+  v2Config: BiPoolExchangeRow | null,
   hasError: boolean,
 ): keyof typeof STATUS_TILE {
   if (hasError) return "error";
   if (!v2Config) return "loading";
-  return v2Config.isDeprecated ? "deprecated" : "active";
+  if (v2Config.isDeprecated) return "deprecated";
+  // Zero-feed sentinel = stub row from a transient ExchangeCreated RPC
+  // miss; same "indexer hasn't fully linked the exchange yet" UX as the
+  // panel's `V2ExchangeSyncingNote`. Without this, the header tile would
+  // say "Active" while the panel renders the syncing note — confusing
+  // operators about whether the v2 exchange is actually live.
+  if (v2Config.referenceRateFeedID === ZERO_ADDRESS) return "loading";
+  return "active";
 }
 
 /**
@@ -226,14 +242,26 @@ function statusKey(
  */
 function VirtualPoolHeaderTiles({
   pool,
+  network,
   v2Config,
   hasError,
 }: {
   pool: Pool;
-  v2Config: V2ExchangeConfigDTO | null;
+  network: Network;
+  v2Config: BiPoolExchangeRow | null;
   hasError: boolean;
 }) {
   const status = STATUS_TILE[statusKey(v2Config, hasError)];
+  // Render Oracle Price for VPs only when the feedID is populated. The
+  // Phase 2 indexer mirrors `BiPoolExchange.referenceRateFeedID` onto the
+  // wrapped Pool's `referenceRateFeedID` (forward + reverse links from
+  // VirtualPoolDeployed and BiPoolManager.ExchangeCreated handlers), so
+  // SortedOracles writes `oraclePrice` / `oracleTimestamp` on every
+  // OracleReported / MedianUpdated event. Until the link lands the field
+  // is empty and the tile would render "—" — the empty-string gate hides
+  // the dead tile in that pre-link interval. `OraclePriceValue` itself
+  // renders the staleness color + tooltip the same as the FPMM path.
+  const hasOracleFeed = !!pool.referenceRateFeedID;
   return (
     <>
       <Stat
@@ -253,28 +281,19 @@ function VirtualPoolHeaderTiles({
             Wrapper Swaps
             <InfoPopover
               label="Wrapper Swaps"
-              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in Phase 2."
+              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in a follow-up."
             />
           </span>
         }
         value={(pool.swapCount ?? 0).toLocaleString()}
         mono
       />
-      <Stat
-        label="Last Bucket Reset"
-        value={
-          hasError ? (
-            <span className="text-slate-500">—</span>
-          ) : v2Config?.isDeprecated ? (
-            <span className="text-slate-500">—</span>
-          ) : v2Config ? (
-            relativeTime(v2Config.lastBucketUpdate)
-          ) : (
-            <span className="text-slate-500">…</span>
-          )
-        }
-        title={v2Config?.lastBucketUpdate}
-      />
+      {hasOracleFeed ? (
+        <Stat
+          label="Oracle Price"
+          value={<OraclePriceValue pool={pool} network={network} />}
+        />
+      ) : null}
     </>
   );
 }

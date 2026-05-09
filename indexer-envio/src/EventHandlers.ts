@@ -29,6 +29,7 @@ import "./handlers/fpmm/state-sync";
 import "./handlers/fpmm/limits-and-fees";
 import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
+import "./handlers/biPoolManager";
 import "./handlers/feeToken";
 import "./handlers/openLiquidityStrategy";
 import "./handlers/breakerBox";
@@ -62,6 +63,10 @@ export {
   _setMockBreakerFeedState,
   _setMockBreakerList,
   _clearBreakerMocks,
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
 } from "./rpc";
 
 export { _clearBootstrapCaches } from "./breakers";
