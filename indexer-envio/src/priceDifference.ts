@@ -52,8 +52,13 @@ export function parseDecimalsPair(
   token1Decimals: number;
   tokenDecimalsKnown: boolean;
 } {
-  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
-  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
+  // `!== undefined` rather than truthy check: `0n` is falsy in JS, and while
+  // `scalingFactorToDecimals(0n)` already returns null on its own guard, the
+  // explicit form makes the bigint-unaware reader's life easier.
+  const dec0Parsed =
+    dec0Raw !== undefined ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed =
+    dec1Raw !== undefined ? scalingFactorToDecimals(dec1Raw) : null;
   return {
     token0Decimals: dec0Parsed ?? 18,
     token1Decimals: dec1Parsed ?? 18,

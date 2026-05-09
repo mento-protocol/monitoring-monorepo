@@ -79,12 +79,28 @@ export {
   DEVIATION_CRITICAL_RATIO,
 } from "@mento-protocol/monitoring-config/thresholds";
 
+/** True iff governance has explicitly configured this pool to never
+ * rebalance. Mirrors `isNeverRebalance` in indexer `pool.ts`; used to
+ * short-circuit breach/health predicates without relying on the
+ * `effectiveThreshold` 1e12 cushion (which is unbounded-skew-tolerant in
+ * practice but not by construction).
+ */
+const isNeverRebalance = (pool: {
+  rebalanceThreshold?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): boolean =>
+  (pool.rebalanceThreshold ?? 0) === 0 &&
+  pool.rebalanceThresholdsKnown === true;
+
 /** Resolve the effective threshold in bps. Mirrors the indexer's `pool.ts`
  * `effectiveThreshold` (parity-tested via `healthStatusParity`). Three states:
  *  - `> 0`: the on-chain configured threshold (active side).
  *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
  *    to never rebalance. Treat as effectively infinite (1e12) so high deviation
  *    on a never-rebalance pool stays OK instead of false-tripping CRITICAL.
+ *    Callers should also short-circuit on `isNeverRebalance(pool)` — the 1e12
+ *    cushion handles realistic priceDifference magnitudes but not extreme
+ *    reserve-skew edges.
  *  - `0` AND `rebalanceThresholdsKnown=false` (or missing): indexer hasn't
  *    read the on-chain value yet (pre-resync, RPC blip, or pre-PR-1.5 schema).
  *    Fall back to 10000 (100%) so the predicate doesn't false-trip while
@@ -158,6 +174,9 @@ export function computeHealthStatus(
     if (isWeekend()) return "WEEKEND";
     return "CRITICAL";
   }
+  // Governance-configured "never rebalance" pools stay OK regardless of
+  // priceDifference magnitude. Mirrors indexer `computeHealthStatus`.
+  if (isNeverRebalance(pool)) return "OK";
   const diff = Number(pool.priceDifference ?? "0");
   const devRatio = diff / effectiveThreshold(pool);
   if (devRatio <= DEVIATION_TOLERANCE_RATIO) return "OK";
@@ -377,6 +396,10 @@ export function computeRebalancerLiveness(
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   if (age <= 86400) return "ACTIVE";
+  // Never-rebalance pools never have rebalance work to do — silence is
+  // expected by design, even past 24h. Mirrors `computeHealthStatus`'s
+  // short-circuit so liveness ↔ health stay aligned for these pools.
+  if (isNeverRebalance(pool)) return "ACTIVE";
   const diff = Number(pool.priceDifference ?? "0");
   // A rebalancer that hasn't fired in 24h is only actually stale if the
   // pool genuinely needs rebalancing — i.e. above the 1% tolerance line, in

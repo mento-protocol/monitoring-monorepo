@@ -300,9 +300,8 @@ describe("computeHealthStatus", () => {
 
   it("dual-sentinel: known-zero rebalanceThreshold stays OK at high deviation (mirrors indexer)", () => {
     // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` = governance
-    // configured to never rebalance. effectiveThreshold returns 1e12 so
-    // devRatio collapses to ~0 → OK. Otherwise the badge would CRITICAL-spam.
-    // Mirrored test in indexer-envio/test/healthStatusParity.test.ts.
+    // configured to never rebalance. Short-circuits to OK regardless of
+    // priceDifference. Mirrored test in indexer-envio/test/healthStatusParity.test.ts.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -311,6 +310,24 @@ describe("computeHealthStatus", () => {
         priceDifference: "20000", // 200%
         rebalanceThreshold: 0,
         rebalanceThresholdsKnown: true,
+      }),
+    ).toBe("OK");
+  });
+
+  it("dual-sentinel: known-zero short-circuits even past the 1e12 cushion", () => {
+    // Mirrored from healthStatusParity.test.ts. Pins the explicit short-
+    // circuit beats the 1e12 effectiveThreshold cushion at extreme magnitudes.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: String(2e12),
+        rebalanceThreshold: 0,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
       }),
     ).toBe("OK");
   });

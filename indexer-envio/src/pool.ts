@@ -61,11 +61,30 @@ export const DEVIATION_CRITICAL_DEN = 100n;
  */
 export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
+/** True iff governance has explicitly configured this pool to never
+ * rebalance (`rebalanceThreshold === 0` AND `rebalanceThresholdsKnown=true`).
+ * Distinct from the schema-default unknown case (`rebalanceThresholdsKnown=false`),
+ * where the breach predicate falls back to a 10000-bps under-bound until
+ * self-heal lands. Used to short-circuit breach/health predicates rather
+ * than relying on the `effectiveThreshold` 1e12 sentinel: explicit short-
+ * circuit means an extreme reserve-skew priceDifference > 1.01e12 still
+ * resolves to "no breach", as governance intended.
+ */
+export const isNeverRebalance = (pool: {
+  rebalanceThreshold: number;
+  rebalanceThresholdsKnown?: boolean;
+}): boolean =>
+  pool.rebalanceThreshold === 0 && pool.rebalanceThresholdsKnown === true;
+
 /** Resolve the effective threshold in bps. Three states:
  *  - `> 0`: the on-chain configured threshold (active side).
  *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
  *    to never rebalance. Treat as effectively infinite so the breach
- *    predicate never trips — the pool isn't supposed to rebalance.
+ *    predicate never trips — the pool isn't supposed to rebalance. Callers
+ *    that take a different code path on never-rebalance pools should also
+ *    check `isNeverRebalance(pool)` and short-circuit upstream rather than
+ *    relying on the 1e12 sentinel — that cushion is unbounded-skew-tolerant
+ *    in practice but not by construction.
  *  - `0` AND `rebalanceThresholdsKnown=false`: indexer hasn't read on-chain
  *    yet. Fall back to 10000 (100%) so the predicate doesn't false-trip
  *    while waiting for self-heal.
@@ -83,8 +102,6 @@ export const effectiveThreshold = (pool: {
   rebalanceThresholdsKnown?: boolean;
 }): bigint => {
   if (pool.rebalanceThreshold > 0) return BigInt(pool.rebalanceThreshold);
-  // 1e12 is well past any realistic priceDifference (which is bps,
-  // bounded by ~10000) so the breach math reliably evaluates to false.
   return pool.rebalanceThresholdsKnown ? 10n ** 12n : 10000n;
 };
 
@@ -119,6 +136,10 @@ export function computeHealthStatus(
 ): IndexerHealthStatus {
   if (isVirtualPool(pool)) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
+  // Governance-configured "never rebalance" pools stay OK regardless of
+  // priceDifference magnitude. Short-circuit explicitly so extreme reserve
+  // skew can't trip the predicate via the `effectiveThreshold` 1e12 cushion.
+  if (isNeverRebalance(pool)) return "OK";
   const threshold = effectiveThreshold(pool);
   const diff = pool.priceDifference;
   const aboveTolerance =
@@ -135,8 +156,11 @@ export function computeHealthStatus(
 
 // Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle
 // staleness is intentionally NOT counted — this tracks price action only.
+// Never-rebalance pools always short-circuit to false (mirrors
+// `computeHealthStatus`); see `isNeverRebalance` for why.
 export function isInDeviationBreach(pool: Pool): boolean {
   if (isVirtualPool(pool)) return false;
+  if (isNeverRebalance(pool)) return false;
   return (
     pool.priceDifference * DEVIATION_TOLERANCE_DEN >
     effectiveThreshold(pool) * DEVIATION_TOLERANCE_NUM
@@ -352,6 +376,8 @@ export async function selfHealTokenDecimals(
   context: { effect: EffectCaller },
   pool: Pool,
 ): Promise<Pool> {
+  // VirtualPools always use contract-provided priceDifference, so the local
+  // recompute path is skipped for them anyway — no need to heal decimals.
   if (pool.tokenDecimalsKnown || pool.source === "" || isVirtualPool(pool)) {
     return pool;
   }

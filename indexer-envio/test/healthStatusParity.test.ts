@@ -164,13 +164,28 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   it("dual-sentinel: known-zero rebalanceThreshold stays OK at any deviation", () => {
     // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` is governance
     // configuring the pool to never rebalance. A 200% priceDifference must
-    // still resolve to OK — the breach predicate uses 1e12 as effective
-    // threshold, so devRatio collapses to ~0. Otherwise a never-rebalance
-    // pool would CRITICAL-spam every event.
+    // still resolve to OK. Otherwise a never-rebalance pool would
+    // CRITICAL-spam every event.
     const pool = makePool({
       priceDifference: 20_000n, // 200% — well past the unknown-zero 10000 fallback
       rebalanceThreshold: 0,
       rebalanceThresholdsKnown: true,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: known-zero short-circuits even past the 1e12 effectiveThreshold cushion", () => {
+    // Past-grace anchor + priceDifference = 2e12 would trip the predicate
+    // if it relied on the 1e12 cushion alone (1e12 * 1.01 < 2e12). The
+    // explicit `isNeverRebalance` short-circuit must keep this OK regardless
+    // of magnitude. Extreme reserve skew can theoretically push
+    // priceDifference past the cushion; this pins that the short-circuit
+    // wins over the cushion at that boundary.
+    const pool = makePool({
+      priceDifference: 2n * 10n ** 12n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
     });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
   });

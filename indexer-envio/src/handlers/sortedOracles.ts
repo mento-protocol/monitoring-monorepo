@@ -306,9 +306,16 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // drained) would fall through to `pickActiveThreshold`'s
       // degenerate-reserve `above` fallback, overwriting the seeded
       // threshold from a reserve ratio that can't be evaluated.
+      // `tokenDecimalsKnown` gates `pickActiveThreshold` for the same reason
+      // it gates `computePriceDifference` below: both call paths run through
+      // `reservePriceVsOracleRef`, which normalizes reserves against the
+      // on-entity decimals. Without real decimals, the active-side pick is
+      // computed against the schema-default 18/18 pair and could flip to the
+      // wrong side on a non-18-decimal pool whose self-heal hasn't landed yet.
       const rebalanceThreshold =
         updatedPool.rebalanceThresholdsKnown &&
         updatedPool.invertRateFeedKnown &&
+        updatedPool.tokenDecimalsKnown &&
         updatedPool.lastMedianPrice > 0n &&
         updatedPool.medianLive &&
         updatedPool.reserves0 > 0n &&
