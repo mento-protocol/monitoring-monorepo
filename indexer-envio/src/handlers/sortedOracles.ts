@@ -12,6 +12,8 @@ import {
   computeHealthStatus,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
+  nextOpenBreachEntryThreshold,
+  nextOpenBreachPeak,
   selfHealInvertRateFeed,
   upsertDailySnapshot,
 } from "../pool";
@@ -285,7 +287,24 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         withDev,
         blockTimestamp,
       );
-      const withBreach = { ...withDev, deviationBreachStartedAt };
+      const provisional = { ...withDev, deviationBreachStartedAt };
+      // Maintain the open-breach denorms here so a median-driven
+      // threshold flip (asymmetric pools where reservePrice crosses the
+      // oracle and the active side switches) keeps `currentOpenBreachPeak`
+      // / `currentOpenBreachEntryThreshold` consistent with the
+      // `DeviationThresholdBreach` row that `recordBreachTransition`
+      // writes below. `upsertPool` runs the same maintenance on the
+      // FPMM-event paths.
+      const currentOpenBreachPeak = nextOpenBreachPeak(existing, provisional);
+      const currentOpenBreachEntryThreshold = nextOpenBreachEntryThreshold(
+        existing,
+        provisional,
+      );
+      const withBreach = {
+        ...provisional,
+        currentOpenBreachPeak,
+        currentOpenBreachEntryThreshold,
+      };
       const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
       const finalPool = { ...withBreach, healthStatus };
 

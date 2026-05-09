@@ -4,8 +4,13 @@
 // + RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-import { FPMM, type Pool, type TradingLimit } from "generated";
-import { asAddress, asBigInt, makePoolId } from "../../helpers";
+import {
+  FPMM,
+  type OracleSnapshot,
+  type Pool,
+  type TradingLimit,
+} from "generated";
+import { asAddress, asBigInt, eventId, makePoolId } from "../../helpers";
 import {
   TRADING_LIMITS_INTERNAL_DECIMALS,
   computeLimitPressures,
@@ -269,10 +274,15 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   // therefore never accrued health. A governance change to a positive
   // threshold is exactly the moment health tracking should start —
   // dropping the gate lets `recordHealthSample` initialize the cursor.
-  // Discard `snapshotFields` — threshold-only events don't write OracleSnapshot.
+  //
+  // Write an `OracleSnapshot` row for the cursor-advance so the chart
+  // history has an explicit entry at this block. Without it, the next
+  // OracleReported/MedianUpdated snapshot's covered-interval would
+  // appear to start from a phantom cursor advance and the chart-side
+  // gap-detection would mis-attribute a discontinuity.
   let pool = upserted;
   if (upserted.oracleOk) {
-    const { poolUpdate } = recordHealthSample(
+    const { snapshotFields, poolUpdate } = recordHealthSample(
       upserted,
       upserted.priceDifference,
       upserted.rebalanceThreshold,
@@ -280,6 +290,23 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     );
     pool = { ...upserted, ...poolUpdate };
     context.Pool.set(pool);
+
+    const snapshot: OracleSnapshot = {
+      id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
+      poolId,
+      timestamp: blockTimestamp,
+      oraclePrice: pool.oraclePrice,
+      oracleOk: pool.oracleOk,
+      numReporters: pool.oracleNumReporters,
+      priceDifference: pool.priceDifference,
+      rebalanceThreshold: pool.rebalanceThreshold,
+      source: "threshold_updated",
+      blockNumber,
+      txHash: event.transaction.hash,
+      ...snapshotFields,
+    };
+    context.OracleSnapshot.set(snapshot);
   }
   await upsertSnapshot({
     context,
