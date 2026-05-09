@@ -23,6 +23,7 @@ function pool(opts: {
   invertRateFeedKnown?: boolean;
   token0Decimals?: number;
   token1Decimals?: number;
+  tokenDecimalsKnown?: boolean;
   rebalanceThresholdAbove?: number;
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
@@ -36,6 +37,7 @@ function pool(opts: {
   return {
     token0Decimals: 18,
     token1Decimals: 18,
+    tokenDecimalsKnown: true,
     invertRateFeed: false,
     invertRateFeedKnown: true,
     rebalanceThresholdAbove: 100,
@@ -501,6 +503,19 @@ describe("tryDeriveRebalanceState", () => {
     // local flip is unknown.
     assert.equal(
       tryDeriveRebalanceState(ausdPool({ invertRateFeedKnown: false }), FRESH),
+      null,
+    );
+  });
+
+  it("returns null when tokenDecimalsKnown is false (unseeded decimals flag)", () => {
+    // Caller runs `selfHealTokenDecimals` first; reaching derive with
+    // `tokenDecimalsKnown=false` means the heal also failed. Without real
+    // decimals, `normalizeTo18` would silently use the schema-default
+    // 18/18 and produce a priceDifference off by `10^(18 - real_dec)`
+    // for non-18-decimal pools. Falling through to RPC is the safe path
+    // — the contract returns the real value at this block.
+    assert.equal(
+      tryDeriveRebalanceState(ausdPool({ tokenDecimalsKnown: false }), FRESH),
       null,
     );
   });

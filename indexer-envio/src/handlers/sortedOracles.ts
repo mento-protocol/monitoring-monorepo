@@ -112,8 +112,17 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };
+      // `tokenDecimalsKnown` gate: `computePriceDifference` calls
+      // `normalizeTo18` against the on-entity decimals. When self-heal
+      // hasn't landed real values, those are the schema default 18/18
+      // and recomputing would silently skew the result by
+      // `10^(18 - real_dec)`. Preserve `existing.priceDifference` until
+      // self-heal succeeds — the next event with known decimals will
+      // refresh it. Same gate is applied in `upsertPool`.
       const priceDifference =
-        !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        !updatedPool.source?.includes("virtual") &&
+        oraclePrice > 0n &&
+        updatedPool.tokenDecimalsKnown
           ? computePriceDifference(updatedPool)
           : updatedPool.priceDifference;
       const withDev = { ...updatedPool, priceDifference };
@@ -323,8 +332,13 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             )
           : updatedPool.rebalanceThreshold;
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
+      // `tokenDecimalsKnown` gate — same rationale as the OracleReported
+      // handler above. Without real decimals, recomputing here would
+      // produce a priceDifference off by `10^(18 - real_dec)`.
       const priceDifference =
-        !withThreshold.source?.includes("virtual") && oraclePrice > 0n
+        !withThreshold.source?.includes("virtual") &&
+        oraclePrice > 0n &&
+        withThreshold.tokenDecimalsKnown
           ? computePriceDifference(withThreshold)
           : withThreshold.priceDifference;
       const withDev = { ...withThreshold, priceDifference };

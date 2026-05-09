@@ -497,11 +497,17 @@ async function seedPoolWithFeed(
     throw new Error("Expected seeded pool entity to exist");
   }
 
+  // Stamp `tokenDecimalsKnown: true` so SortedOracles handlers don't fire
+  // `selfHealTokenDecimals` against the fixture's fake addresses (which would
+  // fall through to live RPC and slow / flake the suite). Tests that
+  // exercise decimal self-heal explicitly should override the flag back to
+  // false on the seeded entity.
   nextDb = nextDb.entities.Pool.set({
     ...existingPool,
     referenceRateFeedID: feedId,
     oracleExpiry,
     oracleNumReporters,
+    tokenDecimalsKnown: true,
   });
 
   return nextDb;
@@ -1350,6 +1356,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: ORACLE_PRICE_24DP,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       source: "fpmm_update_reserves",
     });
@@ -1697,6 +1704,7 @@ describe("Envio Celo indexer handlers", () => {
       lastMedianAt: 1_700_004_900n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       rebalanceThresholdAbove: 5000,
       rebalanceThresholdBelow: 3000,
@@ -1890,6 +1898,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n, // 24dp
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -1977,6 +1986,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -2075,6 +2085,7 @@ describe("Envio Celo indexer handlers", () => {
       oracleExpiry: 3_600n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
     });

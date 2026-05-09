@@ -221,6 +221,13 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     existing.lastMedianPrice > 0n &&
     existing.medianLive &&
     existing.invertRateFeedKnown &&
+    // `tokenDecimalsKnown` gate — without real decimals, the local-median
+    // path would compute `priceDifferenceFromMedian` via `normalizeTo18`
+    // against the schema-default 18/18 and produce a result off by
+    // `10^(18 - real_dec)`. Falls through to RPC, which is the right
+    // safe-by-construction fallback (contract `getRebalancingState`
+    // returns the real value).
+    existing.tokenDecimalsKnown &&
     existing.oracleOk &&
     existing.oracleExpiry > 0n &&
     existing.lastOracleReportAt > 0n &&

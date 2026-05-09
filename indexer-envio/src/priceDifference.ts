@@ -196,6 +196,12 @@ export function scaleRpcRebalanceState(
  *     compute priceDifference / direction in the wrong frame. Caller
  *     runs `selfHealInvertRateFeed` first; if that's still null we must
  *     fall through to RPC.
+ *   - `tokenDecimalsKnown`: both token decimals have been read on chain.
+ *     Without this, a non-18-decimal pool whose factory + self-heal RPC
+ *     blipped would compute `normalizeTo18` against the schema-default
+ *     18/18 — wrong by `10^(18 - real_dec)`. Falling through to RPC
+ *     here is safe-by-construction: contract `getRebalancingState`
+ *     returns the real priceDifference at this block.
  *   - `oracleOk` AND `oracleExpiry > 0` AND
  *     `lastOracleReportAt + oracleExpiry > eventTimestamp`: the
  *     on-chain `getRebalancingState` reverts on stale oracle, so
@@ -229,6 +235,7 @@ export function tryDeriveRebalanceState(
     rebalanceThresholdsKnown: boolean;
     token0Decimals: number;
     token1Decimals: number;
+    tokenDecimalsKnown: boolean;
   },
   ctx: {
     eventTimestamp: bigint;
@@ -237,6 +244,13 @@ export function tryDeriveRebalanceState(
 ): ResolvedRebalanceState | null {
   if (!pool.rebalanceThresholdsKnown) return null;
   if (!pool.invertRateFeedKnown) return null;
+  // Gate on `tokenDecimalsKnown` for the same reason as `invertRateFeedKnown`:
+  // `computePriceDifference` calls `normalizeTo18` against the on-entity
+  // decimals; if those are still at the schema default 18/18 because the
+  // factory + self-heal both blipped, derive would silently produce a
+  // priceDifference off by `10^(18 - real_dec)`. RPC fallback is the safe
+  // path — the contract carries the real value at this block.
+  if (!pool.tokenDecimalsKnown) return null;
   if (pool.lastMedianPrice <= 0n) return null;
   // Zero-median outage gate: only `medianLive` is reliable here.
   // `oraclePrice > 0n` would also pass after a non-median `OracleReported`

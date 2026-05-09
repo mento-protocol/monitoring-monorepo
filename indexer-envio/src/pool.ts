@@ -657,8 +657,23 @@ export const upsertPool = async ({
     ...(healedFees ?? {}),
     // OR-merge `tokenDecimalsKnown` so a self-healed `true` survives a
     // later caller passing `false` (e.g. a factory replay that blipped).
-    token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
-    token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    // Symmetrically, gate the decimal field writes: when the incoming pair
+    // is unknown but the existing pair is known, keep the known values.
+    // Without this gate, a known-6/18 pool getting a re-blipped factory
+    // payload `{18, 18, false}` would clobber the real decimals to 18/18
+    // while the OR-merge held the flag at `true` — locking in wrong scaling.
+    token0Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token0Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token0Decimals
+          : (tokenDecimals?.token0Decimals ?? existing.token0Decimals),
+    token1Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token1Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token1Decimals
+          : (tokenDecimals?.token1Decimals ?? existing.token1Decimals),
     tokenDecimalsKnown:
       tokenDecimals?.tokenDecimalsKnown || existing.tokenDecimalsKnown,
     createdAtBlock:
@@ -674,13 +689,20 @@ export const upsertPool = async ({
   // Use contract-provided priceDifference when available (passed via oracleDelta
   // from fetchRebalancingState). Only fall back to local recomputation when the
   // contract value was not supplied (e.g. oracle-only update events).
+  // `tokenDecimalsKnown=false` blocks the local recomputation: `normalizeTo18`
+  // would silently use the schema-default 18/18 and produce a priceDifference
+  // off by 10^(18 - real_dec) for non-18-decimal pools whose factory +
+  // self-heal both blipped. Preserve `existing.priceDifference` until
+  // self-heal lands real decimals.
   const hasContractPriceDiff =
     oracleDelta != null &&
     "priceDifference" in oracleDelta &&
     oracleDelta.priceDifference !== undefined;
+  const canRecompute =
+    !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !isVirtualPool(next) && next.oraclePrice > 0n
+    : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
 
