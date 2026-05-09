@@ -12,15 +12,10 @@ import {
   type VirtualPoolLifecycle,
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
-import {
-  mirrorFeedIdToPool,
-  upsertPool,
-  upsertSnapshot,
-  DEFAULT_ORACLE_FIELDS,
-} from "../pool";
+import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
-import { tokenDecimalsScalingEffect, vpExchangeIdEffect } from "../rpc/effects";
+import { tokenDecimalsScalingEffect } from "../rpc/effects";
 import {
   buildRebalanceOutcome,
   scalingFactorToDecimals,
@@ -47,17 +42,18 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const token1 = asAddress(event.params.token1);
   const poolAddr = asAddress(event.params.pool);
 
-  // Fetch token decimals + extract the wrapped v2 exchangeId in parallel.
-  // Decimals: so `Pool.token{0,1}Decimals` are correct from the start
-  // instead of inheriting the 18/18 default. Mirrors the FPMM factory
-  // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to
-  // scale correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is
-  // on a leg.
-  // Exchange id: extracted from the VP's bytecode (PUSH32 immediates in
-  // swap() preamble — see `extractVpExchangeIdFromBytecode`). Persisting at
-  // deploy lets the dashboard's pool-detail page join Pool → BiPoolExchange
-  // in one GraphQL query instead of an HTTP/RPC round-trip per page load.
-  const [dec0Raw, dec1Raw, vpExchange] = await Promise.all([
+  // Fetch token decimals so `Pool.token{0,1}Decimals` are correct from the
+  // start instead of inheriting the 18/18 default. Mirrors the FPMM factory
+  // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to scale
+  // correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is on a leg.
+  //
+  // `wrappedExchangeId` extraction + the BiPoolExchange forward-link
+  // (set wrappedByPoolId + mirror feedID into Pool) are handled inside
+  // upsertPool's heal pipeline via `selfHealWrappedExchangeId` — same
+  // `vpExchangeIdEffect` (cache:true), same `BiPoolExchange.get` +
+  // `mirrorFeedIdToPool` work. Doing it both here and there was a pure
+  // duplicate of DB reads + idempotent writes.
+  const [dec0Raw, dec1Raw] = await Promise.all([
     context.effect(tokenDecimalsScalingEffect, {
       chainId: event.chainId,
       poolAddress: poolAddr,
@@ -70,10 +66,6 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       fn: "decimals1",
       fallbackTokenAddress: token1,
     }),
-    context.effect(vpExchangeIdEffect, {
-      chainId: event.chainId,
-      vpAddress: poolAddr,
-    }),
   ]);
   const token0Decimals = dec0Raw
     ? (scalingFactorToDecimals(dec0Raw) ?? 18)
@@ -83,11 +75,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     : 18;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const wrappedExchangeId = vpExchange?.exchangeId;
 
-  // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` in
-  // upsertPool — the VP-event hot path picks it up there too. Pass nothing
-  // here and let the heal pipeline carry the value.
   await upsertPool({
     context,
     chainId: event.chainId,
@@ -104,31 +92,6 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       healthStatus: "N/A",
     },
   });
-
-  // Forward link to a pre-existing exchange (common ordering: exchanges
-  // register first, VPs wrap them later). The reverse case (VP-first) is
-  // handled in BiPoolManager.ExchangeCreated.
-  if (wrappedExchangeId) {
-    const exchangeRowId = `${event.chainId}-${wrappedExchangeId}`;
-    const exchange = await context.BiPoolExchange.get(exchangeRowId);
-    if (exchange) {
-      if (exchange.wrappedByPoolId !== poolId) {
-        context.BiPoolExchange.set({
-          ...exchange,
-          wrappedByPoolId: poolId,
-          updatedAtBlock: blockNumber,
-          updatedAtTimestamp: blockTimestamp,
-        });
-      }
-      await mirrorFeedIdToPool(
-        context,
-        poolId,
-        exchange.referenceRateFeedID,
-        blockNumber,
-        blockTimestamp,
-      );
-    }
-  }
 
   const lifecycle: VirtualPoolLifecycle = {
     id,

@@ -424,14 +424,20 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
 BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
+  const exchangeId = event.params.exchangeId.toLowerCase();
 
-  // Preload phase: warm the BiPoolExchange entity read; skip the RPC
-  // backfill in `ensureBiPoolExchange` (cache:false `poolExchangeEffect`
-  // would fire twice without this gate, see ExchangeCreated handler).
+  // Preload phase: warm BOTH entity reads `ensureBiPoolExchange` may use
+  // in the processing pass — the BiPoolExchange row itself AND the
+  // `Pool.getWhere.wrappedExchangeId` lookup that backfills
+  // `wrappedByPoolId` for orphan rows. Without warming the second one, a
+  // VP linked in the same processing batch could be missed by the cold
+  // getWhere read. The cache:false `poolExchangeEffect` is intentionally
+  // NOT called here (RPC stays in processing only).
   if (context.isPreload) {
-    await context.BiPoolExchange.get(
-      exchangeRowId(event.chainId, event.params.exchangeId),
-    );
+    await Promise.all([
+      context.BiPoolExchange.get(exchangeRowId(event.chainId, exchangeId)),
+      context.Pool.getWhere.wrappedExchangeId.eq(exchangeId),
+    ]);
     return;
   }
 
@@ -480,12 +486,14 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
 BiPoolManager.SpreadUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  // Preload phase: warm BiPoolExchange entity read; skip the RPC
-  // backfill in ensureBiPoolExchange (see ExchangeCreated handler).
+  const exchangeId = event.params.exchangeId.toLowerCase();
+  // Preload: warm both reads ensureBiPoolExchange may use — see
+  // BucketsUpdated for the full rationale.
   if (context.isPreload) {
-    await context.BiPoolExchange.get(
-      exchangeRowId(event.chainId, event.params.exchangeId),
-    );
+    await Promise.all([
+      context.BiPoolExchange.get(exchangeRowId(event.chainId, exchangeId)),
+      context.Pool.getWhere.wrappedExchangeId.eq(exchangeId),
+    ]);
     return;
   }
   // Self-heal — see BucketsUpdated for the full rationale.
