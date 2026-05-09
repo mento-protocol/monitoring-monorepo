@@ -22,6 +22,7 @@ import { getContractAddress } from "../contractAddresses";
 import { isSystemAddress } from "../system-addresses";
 import { classifyAggregator } from "../aggregators";
 import { maybeHeartbeatFlushV2 } from "../leaderboardWindowFlush";
+import { buildSwapAddressFields } from "../swap";
 
 // Per-chain cache of the v3 Router address. JSON lookup once per chain is
 // cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
@@ -42,10 +43,15 @@ Broker.Swap.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const exchangeProvider = asAddress(event.params.exchangeProvider);
-  const trader = asAddress(event.params.trader);
+  // `event.params.trader` from Broker.Swap = `msg.sender` to Broker. For
+  // routed swaps this is a router/aggregator/wrapper contract; for direct
+  // trades from a UI/SDK this equals tx.from. We track it as `brokerCaller`
+  // on the entity to keep that semantics explicit, and use `caller` (tx.from)
+  // for signer-EOA-level attribution in the rollups.
+  const brokerCaller = asAddress(event.params.trader);
+  const { caller, txTo } = buildSwapAddressFields(event);
   const tokenIn = asAddress(event.params.tokenIn);
   const tokenOut = asAddress(event.params.tokenOut);
-  const txTo = asAddress(event.transaction.to ?? "");
   const router = v3RouterAddress(event.chainId);
   const routedViaV3Router = router !== null && txTo === router;
 
@@ -80,7 +86,8 @@ Broker.Swap.handler(async ({ event, context }) => {
     chainId: event.chainId,
     exchangeProvider,
     exchangeId: event.params.exchangeId,
-    trader,
+    brokerCaller,
+    caller,
     tokenIn,
     tokenOut,
     amountIn: event.params.amountIn,
@@ -126,48 +133,57 @@ Broker.Swap.handler(async ({ event, context }) => {
   });
 
   // VirtualPool-routed Broker.Swap detection. Mento's Broker emits
-  // `event.params.trader = msg.sender`. When VirtualPool wraps the swap
-  // (typically a third-party aggregator → VirtualPool → Broker), the
-  // immediate Broker caller is the VirtualPool contract, so `trader`
-  // equals a registered VirtualPool address. The v3 path already counts
-  // the sibling `VirtualPool.Swap` via `applyLeaderboardSnapshots`
-  // (see handlers/virtualPool.ts:186); writing v2 rollups for the same
-  // tx would attribute v3 flow as legacy-v2 producer activity.
-  const traderPool = await context.Pool.get(makePoolId(event.chainId, trader));
-  const traderIsVirtualPool = traderPool ? isVirtualPool(traderPool) : false;
+  // `event.params.trader = msg.sender` — we track this as `brokerCaller` on
+  // the entity. When VirtualPool wraps the swap (typically a third-party
+  // aggregator → VirtualPool → Broker), the immediate Broker caller is the
+  // VirtualPool contract, so `brokerCaller` equals a registered VirtualPool
+  // address. The v3 path already counts the sibling `VirtualPool.Swap` via
+  // `applyLeaderboardSnapshots` (see handlers/virtualPool.ts:186); writing
+  // v2 rollups for the same tx would attribute v3 flow as legacy-v2
+  // producer activity.
+  const brokerCallerPool = await context.Pool.get(
+    makePoolId(event.chainId, brokerCaller),
+  );
+  const brokerCallerIsVirtualPool = brokerCallerPool
+    ? isVirtualPool(brokerCallerPool)
+    : false;
 
   // Legacy-v2 producer rollups. Skip when:
   //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap
   //     already counted by the v3 leaderboard. Including it here would
-  //     double-count the same trader/aggregator across both venues.
-  //   - traderIsVirtualPool: aggregator → VirtualPool → Broker — same
+  //     double-count the same caller/aggregator across both venues.
+  //   - brokerCallerIsVirtualPool: aggregator → VirtualPool → Broker — same
   //     double-count concern; `tx.to` is the aggregator router (not
   //     `Routerv300`), so the `routedViaV3Router` guard misses this path.
   //   - volumeUsdWei == 0n: USD value couldn't be derived (neither leg
   //     pegged). Same skip rule as applyLeaderboardSnapshots — writing 0n
   //     would conflate "uncomputable" with "real zero volume".
-  if (routedViaV3Router || traderIsVirtualPool || volumeUsdWei === 0n) return;
+  if (routedViaV3Router || brokerCallerIsVirtualPool || volumeUsdWei === 0n) {
+    return;
+  }
 
-  // No `pool` arg available here: BrokerSwapEvent doesn't have a Pool entity
-  // backing it (v2 exchanges aren't in the `Pool` table). The static
-  // contracts.json check still catches Mento internal addresses.
-  const traderIsSystem = isSystemAddress(event.chainId, trader);
-  const traderDayId = `${event.chainId}-${trader}-${dayTs}`;
-  const existingTraderDay =
-    await context.BrokerTraderDailySnapshot.get(traderDayId);
+  // Rollups key on `caller` (tx.from / signer EOA), mirroring v3's
+  // TraderDailySnapshot semantics. No `pool` arg available here:
+  // BrokerSwapEvent doesn't have a Pool entity backing it (v2 exchanges
+  // aren't in the `Pool` table). The static contracts.json check still
+  // catches Mento internal addresses.
+  const callerIsSystem = isSystemAddress(event.chainId, caller);
+  const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
+  const existingCallerDay =
+    await context.BrokerTraderDailySnapshot.get(callerDayId);
   context.BrokerTraderDailySnapshot.set({
-    id: traderDayId,
+    id: callerDayId,
     chainId: event.chainId,
-    trader,
+    caller,
     timestamp: dayTs,
-    swapCount: (existingTraderDay?.swapCount ?? 0) + 1,
-    volumeUsdWei: (existingTraderDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    swapCount: (existingCallerDay?.swapCount ?? 0) + 1,
+    volumeUsdWei: (existingCallerDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
     // Sticky-true once seen: matches TraderDailySnapshot's behaviour so a
     // sweep within a day where the address briefly didn't classify (shouldn't
     // happen for Broker swaps but mirrors v3 invariant) doesn't toggle.
-    isSystemAddress: existingTraderDay
-      ? existingTraderDay.isSystemAddress || traderIsSystem
-      : traderIsSystem,
+    isSystemAddress: existingCallerDay
+      ? existingCallerDay.isSystemAddress || callerIsSystem
+      : callerIsSystem,
     lastSeenTimestamp: blockTimestamp,
   });
 
@@ -176,12 +192,15 @@ Broker.Swap.handler(async ({ event, context }) => {
   // taxonomy for v2 entry-point analysis.
   const aggregator = classifyAggregator(event.chainId, txTo);
   const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
-  const aggTraderMarkerId = `${event.chainId}-${aggregator}-${trader}-${dayTs}`;
-  const existingAggTraderMarker =
-    await context.BrokerAggregatorTraderDayMarker.get(aggTraderMarkerId);
-  const aggTraderFirstTouch = existingAggTraderMarker === undefined;
-  if (aggTraderFirstTouch) {
-    context.BrokerAggregatorTraderDayMarker.set({ id: aggTraderMarkerId });
+  // Marker is keyed on `caller` (signer EOA), not `brokerCaller`, so
+  // uniqueTraders counts distinct EOAs per day rather than distinct
+  // msg.sender contracts (a router shows up once but routes for many EOAs).
+  const aggCallerMarkerId = `${event.chainId}-${aggregator}-${caller}-${dayTs}`;
+  const existingAggCallerMarker =
+    await context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId);
+  const aggCallerFirstTouch = existingAggCallerMarker === undefined;
+  if (aggCallerFirstTouch) {
+    context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
   }
   const existingAggDay =
     await context.BrokerAggregatorDailySnapshot.get(aggDayId);
@@ -193,7 +212,7 @@ Broker.Swap.handler(async ({ event, context }) => {
     timestamp: dayTs,
     swapCount: (existingAggDay?.swapCount ?? 0) + 1,
     uniqueTraders:
-      (existingAggDay?.uniqueTraders ?? 0) + (aggTraderFirstTouch ? 1 : 0),
+      (existingAggDay?.uniqueTraders ?? 0) + (aggCallerFirstTouch ? 1 : 0),
     volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
   });
 });

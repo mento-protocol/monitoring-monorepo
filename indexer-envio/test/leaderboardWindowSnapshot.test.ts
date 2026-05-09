@@ -885,15 +885,15 @@ function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
 }
 
 function fakeBrokerTraderDay(
-  trader: string,
+  caller: string,
   timestamp: bigint,
   volumeUsd: bigint,
   isSystem = false,
 ): BrokerTraderDailySnapshot {
   return {
-    id: `${CHAIN}-${trader}-${timestamp}`,
+    id: `${CHAIN}-${caller}-${timestamp}`,
     chainId: CHAIN,
-    trader,
+    caller,
     timestamp,
     swapCount: 1,
     volumeUsdWei: volumeUsd * ONE_USD,
