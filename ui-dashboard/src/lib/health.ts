@@ -396,13 +396,16 @@ export function computeRebalancerLiveness(
   nowSeconds: number,
 ): RebalancerStatus {
   if (pool.source?.includes("virtual")) return "N/A";
+  // Never-rebalance pools never have rebalance work to do — silence is
+  // expected by design. Short-circuit BEFORE the lastRebalancedAt
+  // check, otherwise a freshly-deployed never-rebalance pool (the most
+  // natural state — never rebalanced because it never should) would
+  // return NO_DATA instead of ACTIVE. Mirrors `computeHealthStatus`'s
+  // short-circuit so liveness ↔ health stay aligned for these pools.
+  if (isNeverRebalance(pool)) return "ACTIVE";
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   if (age <= 86400) return "ACTIVE";
-  // Never-rebalance pools never have rebalance work to do — silence is
-  // expected by design, even past 24h. Mirrors `computeHealthStatus`'s
-  // short-circuit so liveness ↔ health stay aligned for these pools.
-  if (isNeverRebalance(pool)) return "ACTIVE";
   const diff = Number(pool.priceDifference ?? "0");
   // A rebalancer that hasn't fired in 24h is only actually stale if the
   // pool genuinely needs rebalancing — i.e. above the 1% tolerance line, in
