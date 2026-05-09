@@ -16,7 +16,10 @@ import {
   dailySnapshotId,
   extractAddressFromPoolId,
 } from "./helpers";
-import { computePriceDifference } from "./priceDifference";
+import {
+  computePriceDifference,
+  scalingFactorToDecimals,
+} from "./priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -24,6 +27,7 @@ import {
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
+  tokenDecimalsScalingEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
@@ -334,6 +338,62 @@ export async function selfHealInvertRateFeed(
   };
 }
 
+/** Self-heal `token0Decimals` / `token1Decimals` when the factory's
+ * `tokenDecimalsScalingEffect` reads failed at deploy. Without this, a
+ * non-18-decimal pool whose factory RPC blipped would silently keep the
+ * schema default 18/18 forever — `normalizeTo18` would not scale the
+ * affected reserve, and every priceDifference computation downstream
+ * would be wrong by `10^(18 - real_dec)` factor.
+ *
+ * Cache-true effect: `tokenDecimalsScalingEffect` is per-(chain, pool, fn)
+ * and the on-chain decimals are immutable, so this is one RPC pair per
+ * unhealed pool across the entire run. Once `tokenDecimalsKnown` flips
+ * true, subsequent calls are pure object-identity returns.
+ *
+ * Caller's own `Pool.set` persists the healed values. */
+export async function selfHealTokenDecimals(
+  context: { effect: EffectCaller },
+  pool: Pool,
+): Promise<Pool> {
+  if (
+    pool.tokenDecimalsKnown ||
+    pool.source === "" ||
+    isVirtualPool(pool) ||
+    !pool.token0 ||
+    !pool.token1
+  ) {
+    return pool;
+  }
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const [dec0Raw, dec1Raw] = await Promise.all([
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals0",
+      fallbackTokenAddress: pool.token0,
+    }),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals1",
+      fallbackTokenAddress: pool.token1,
+    }),
+  ]);
+  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
+  // Only flip the flag when BOTH reads succeed — a partial healed state
+  // (one side real, the other at the default) is indistinguishable from
+  // both-defaulted to downstream consumers, so don't claim "known" until
+  // we have the full pair.
+  if (dec0Parsed === null || dec1Parsed === null) return pool;
+  return {
+    ...pool,
+    token0Decimals: dec0Parsed,
+    token1Decimals: dec1Parsed,
+    tokenDecimalsKnown: true,
+  };
+}
+
 /** Self-heal `rebalanceThresholdAbove/Below` when the factory's
  * `rebalanceThresholdsEffect` failed at deploy. Without this, a transient
  * RPC blip would permanently leave both split fields at 0 → derive returns
@@ -426,6 +486,14 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
   token1Decimals: 18,
+  // Mirrors `invertRateFeedKnown`: false until factory seeds real values
+  // (or `selfHealTokenDecimals` lands them); true once persisted. While
+  // false, `selfHealTokenDecimals` retries on every event that touches
+  // this pool so a deploy-time RPC blip doesn't permanently keep
+  // non-18-decimal pools at the schema default 18/18.
+  tokenDecimalsKnown: false,
+  // Diagnostic only — see schema.graphql comment. NOT a freshness signal.
+  lastFreshReporterAt: 0n,
   // Health score accumulators
   healthTotalSeconds: 0n,
   healthBinarySeconds: 0n,
@@ -509,7 +577,11 @@ export const upsertPool = async ({
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
-  tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  tokenDecimals?: {
+    token0Decimals: number;
+    token1Decimals: number;
+    tokenDecimalsKnown: boolean;
+  };
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -521,10 +593,16 @@ export const upsertPool = async ({
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
-  // Self-heal invertRateFeed up front so every downstream computation
-  // (priceDifference, oraclePrice flip, breach status) sees the corrected
-  // orientation. Same helper that handlers call before reading the field.
-  const existing = await selfHealInvertRateFeed(context, existingInitial);
+  // Self-heal invertRateFeed + tokenDecimals up front so every downstream
+  // computation (priceDifference, oraclePrice flip, breach status) sees the
+  // corrected orientation AND scaling. Same helpers that handlers call
+  // before reading these fields. Both effects are `cache: true`, so this
+  // is at most two RPC pairs per pool across the run regardless of how
+  // often we re-enter `upsertPool`.
+  const existing = await selfHealTokenDecimals(
+    context,
+    await selfHealInvertRateFeed(context, existingInitial),
+  );
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
@@ -596,9 +674,17 @@ export const upsertPool = async ({
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     ...(healedFees ?? {}),
-    // Persist token decimals if provided (set once at pool creation)
+    // Persist token decimals if provided (set once at pool creation).
+    // `tokenDecimalsKnown=true` only when the caller asserts both reads
+    // succeeded; otherwise we may overwrite a self-healed `true` with a
+    // factory-blip `false` and re-trigger retries forever. Use OR rather
+    // than `?? existing.tokenDecimalsKnown` so a healed `true` sticks
+    // through any future caller passing `tokenDecimalsKnown=false`.
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    tokenDecimalsKnown:
+      (tokenDecimals?.tokenDecimalsKnown ?? false) ||
+      existing.tokenDecimalsKnown,
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:

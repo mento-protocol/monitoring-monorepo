@@ -105,6 +105,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             oracleTxHash
             priceDifference
             rebalanceThreshold
+            rebalanceThresholdsKnown
             oracleNumReporters
             oracleExpiry
             lastRebalancedAt

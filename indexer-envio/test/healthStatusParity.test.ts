@@ -149,12 +149,43 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
-  it("falls back to 10000 bps threshold when rebalanceThreshold is 0", () => {
-    // 9000/10000 = 0.9 → still OK.
+  it("falls back to 10000 bps threshold when rebalanceThreshold is 0 and unknown", () => {
+    // 9000/10000 = 0.9 → still OK. `rebalanceThresholdsKnown=false` (default)
+    // means the indexer hasn't read the on-chain value yet, so we under-bound
+    // to keep breach detection safe.
     const pool = makePool({
       priceDifference: 9000n,
       rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: false,
     });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: known-zero rebalanceThreshold stays OK at any deviation", () => {
+    // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` is governance
+    // configuring the pool to never rebalance. A 200% priceDifference must
+    // still resolve to OK — the breach predicate uses 1e12 as effective
+    // threshold, so devRatio collapses to ~0. Otherwise a never-rebalance
+    // pool would CRITICAL-spam every event.
+    const pool = makePool({
+      priceDifference: 20_000n, // 200% — well past the unknown-zero 10000 fallback
+      rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: true,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: unknown-zero with high deviation flows into WARN/CRITICAL via 10000 fallback", () => {
+    // Same priceDifference as above, but unknown-zero — caller should NOT
+    // treat this as never-rebalance. 20000/10000 = 2.0, well above the 1.05
+    // critical magnitude line. Past the 1h grace → CRITICAL. Pinned so a
+    // regression that collapsed both branches to 1e12 would flip this to OK.
+    const pool = makePool({
+      priceDifference: 20_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: false,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
 });

@@ -15,6 +15,7 @@ import {
   nextOpenBreachEntryThreshold,
   nextOpenBreachPeak,
   selfHealInvertRateFeed,
+  selfHealTokenDecimals,
   upsertDailySnapshot,
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
@@ -62,7 +63,10 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // post-deploy is OracleReported would persist wrong-orientation
       // priceDifference / health / breach state until an FPMM event runs
       // upsertPool's heal.
-      const existing = await selfHealInvertRateFeed(context, initial);
+      const existing = await selfHealTokenDecimals(
+        context,
+        await selfHealInvertRateFeed(context, initial),
+      );
 
       // Resolve oracleExpiry from DB if already populated, otherwise fetch
       // via RPC (one-time seed — subsequent events use the DB value).
@@ -88,6 +92,18 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // under-bound — if reporters are fresh but the median hasn't moved
       // recently, derive falls through to RPC. Safe by construction: never
       // passes stale-median data through the freshness gate.
+      //
+      // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
+      // here. This is a diagnostic-only field — see schema.graphql for why
+      // it can't replace `lastOracleReportAt` as the gate. Surfaces the
+      // freshest known reporter timestamp for future per-reporter parity
+      // work (codex re-raised the gap on PR #358 across 3 rounds; this
+      // captures the data point it asked for without changing the
+      // safe-by-construction freshness semantic).
+      const lastFreshReporterAt =
+        oracleTimestamp > existing.lastFreshReporterAt
+          ? oracleTimestamp
+          : existing.lastFreshReporterAt;
       const updatedPool: Pool = {
         ...existing,
         oracleTimestamp,
@@ -96,6 +112,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         oraclePrice,
         oracleExpiry,
         oracleNumReporters: existing.oracleNumReporters,
+        lastFreshReporterAt,
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };
@@ -216,7 +233,10 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       if (!initial) return;
       // Self-heal invertRateFeed before computePriceDifference — same
       // rationale as the OracleReported handler above.
-      const existing = await selfHealInvertRateFeed(context, initial);
+      const existing = await selfHealTokenDecimals(
+        context,
+        await selfHealInvertRateFeed(context, initial),
+      );
 
       const oracleExpiry =
         existing.oracleExpiry > 0n

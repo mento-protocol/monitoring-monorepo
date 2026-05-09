@@ -46,6 +46,10 @@ interface PoolHealthState {
   oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  // True when the indexer has read the on-chain values for both above/below
+  // thresholds; false (or missing) when still at the schema default. Drives
+  // the dual-sentinel `effectiveThreshold` semantics — see that function.
+  rebalanceThresholdsKnown?: boolean;
   lastRebalancedAt?: string | null;
   deviationBreachStartedAt?: string | null;
 }
@@ -75,12 +79,31 @@ export {
   DEVIATION_CRITICAL_RATIO,
 } from "@mento-protocol/monitoring-config/thresholds";
 
-/** Resolve the effective threshold in bps. The schema-default of 0 means the
- * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
- * pools don't trip the breach predicate while we wait for the RPC self-heal.
+/** Resolve the effective threshold in bps. Mirrors the indexer's `pool.ts`
+ * `effectiveThreshold` (parity-tested via `healthStatusParity`). Three states:
+ *  - `> 0`: the on-chain configured threshold (active side).
+ *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
+ *    to never rebalance. Treat as effectively infinite (1e12) so high deviation
+ *    on a never-rebalance pool stays OK instead of false-tripping CRITICAL.
+ *  - `0` AND `rebalanceThresholdsKnown=false` (or missing): indexer hasn't
+ *    read the on-chain value yet (pre-resync, RPC blip, or pre-PR-1.5 schema).
+ *    Fall back to 10000 (100%) so the predicate doesn't false-trip while
+ *    waiting for the indexed flag.
+ *
+ * The schema-default unknown case must NOT collapse with the legitimate
+ * "never rebalance" case — both have `rebalanceThreshold === 0`, but only
+ * the latter has `rebalanceThresholdsKnown=true`. A missing `rebalanceThresholdsKnown`
+ * (older indexer schema or unmigrated query) defaults to the safe 10000
+ * under-bound. 1e12 fits in a JS number (≪ Number.MAX_SAFE_INTEGER).
  */
-const effectiveThreshold = (pool: { rebalanceThreshold?: number }): number =>
-  (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+const effectiveThreshold = (pool: {
+  rebalanceThreshold?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  const threshold = pool.rebalanceThreshold ?? 0;
+  if (threshold > 0) return threshold;
+  return pool.rebalanceThresholdsKnown ? 1e12 : 10000;
+};
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },
@@ -314,6 +337,7 @@ export function computeEffectiveStatus(
     oracleExpiry?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdsKnown?: boolean;
     deviationBreachStartedAt?: string | null;
     lastRebalancedAt?: string | null;
     limitStatus?: string;
@@ -345,6 +369,7 @@ export function computeRebalancerLiveness(
     lastRebalancedAt?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdsKnown?: boolean;
   },
   nowSeconds: number,
 ): RebalancerStatus {

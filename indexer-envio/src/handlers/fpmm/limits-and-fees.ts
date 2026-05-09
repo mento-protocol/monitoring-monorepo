@@ -20,6 +20,7 @@ import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
   maybePreloadPool,
   selfHealInvertRateFeed,
+  selfHealTokenDecimals,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -194,11 +195,17 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   if (!initial) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  // Self-heal invertRateFeed before pickActiveThreshold reads it. Without
-  // this, an inverted pool whose deploy-time invert read failed and which
-  // gets a threshold update before any state-sync event would persist
-  // the wrong-side active threshold.
-  const existing = await selfHealInvertRateFeed(context, initial);
+  // Self-heal invertRateFeed + tokenDecimals before pickActiveThreshold +
+  // computePriceDifference read them. Without invert healing, an inverted
+  // pool whose deploy-time invert read failed and which gets a threshold
+  // update before any state-sync event would persist the wrong-side active
+  // threshold; without decimals healing, a non-18-decimal pool whose
+  // deploy-time decimals read failed would compute `priceDifferenceFromMedian`
+  // off the wrong reserve scale, leaving a stale-by-magnitude breach state.
+  const existing = await selfHealTokenDecimals(
+    context,
+    await selfHealInvertRateFeed(context, initial),
+  );
   const above = Number(event.params.newThresholdAbove);
   const below = Number(event.params.newThresholdBelow);
   // Gate the breach/health recompute on a fresh live median AND

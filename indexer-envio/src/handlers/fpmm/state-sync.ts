@@ -1,6 +1,31 @@
 // ---------------------------------------------------------------------------
 // FPMM state-sync handlers: UpdateReserves + Rebalanced
 // ---------------------------------------------------------------------------
+//
+// Two-cursor model (PR 1.5 design decision):
+//
+// On orientation-unknown events (pool deployed during a deploy-time RPC blip
+// where `invertRateFeedKnown=false` survived self-heal):
+//
+//  1. Pool entity ADVANCES on every event — `priceDifference`,
+//     `rebalanceThreshold`, reserves, breach state. The contract values are
+//     authoritative regardless of our local `invertRateFeed` flag, so breach
+//     detection / health badges always read current state.
+//
+//  2. `oraclePrice` + `oracleTimestamp` HOLD on the prior values when
+//     orientation is unknown. Advancing them with a guess from the schema
+//     default would mark stale data as freshly updated under the
+//     `oracleTimestamp + oracleExpiry` freshness check.
+//
+//  3. OracleSnapshot row SKIPPED when orientation is unknown. A row whose
+//     displayed `oraclePrice` doesn't match its `priceDifference` would be
+//     worse than no row — chart history would show a fabricated sample.
+//
+// The cursor (Pool entity) and the snapshot stream (OracleSnapshot rows) are
+// allowed to drift here. It's a feature, not a bug: breach detection stays
+// current, chart history stays trustworthy. Cursor → invariants advance
+// freely; OracleSnapshot → only writes data we believe in.
+// ---------------------------------------------------------------------------
 
 import {
   FPMM,
@@ -26,6 +51,7 @@ import {
   maybePreloadPool,
   selfHealInvertRateFeed,
   selfHealRebalanceThresholds,
+  selfHealTokenDecimals,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -64,7 +90,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const existing = fetched
     ? await selfHealRebalanceThresholds(
         context,
-        await selfHealInvertRateFeed(context, fetched),
+        await selfHealTokenDecimals(
+          context,
+          await selfHealInvertRateFeed(context, fetched),
+        ),
         blockNumber,
       )
     : undefined;
@@ -231,7 +260,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const existing = initial
     ? await selfHealRebalanceThresholds(
         context,
-        await selfHealInvertRateFeed(context, initial),
+        await selfHealTokenDecimals(
+          context,
+          await selfHealInvertRateFeed(context, initial),
+        ),
         blockNumber,
       )
     : undefined;

@@ -193,13 +193,16 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       poolAddress: poolAddr,
     }),
   ]);
-  // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
-  const token0Decimals = dec0Raw
-    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
-    : 18;
-  const token1Decimals = dec1Raw
-    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
-    : 18;
+  // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.).
+  // `tokenDecimalsKnown=true` only when BOTH reads succeed AND parse to a
+  // valid power of ten — a partial success would leave one side at the
+  // schema default and the other at the real value, indistinguishable from
+  // both-defaulted by reads alone. Self-heal retries until both land.
+  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
+  const token0Decimals = dec0Parsed ?? 18;
+  const token1Decimals = dec1Parsed ?? 18;
+  const tokenDecimalsKnown = dec0Parsed !== null && dec1Parsed !== null;
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
@@ -264,7 +267,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     oracleDelta,
-    tokenDecimals: { token0Decimals, token1Decimals },
+    tokenDecimals: { token0Decimals, token1Decimals, tokenDecimalsKnown },
   });
 
   // Persist fee config read at pool creation. `compactFees` strips

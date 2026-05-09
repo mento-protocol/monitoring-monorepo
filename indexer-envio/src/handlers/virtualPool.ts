@@ -60,12 +60,15 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       fallbackTokenAddress: token1,
     }),
   ]);
-  const token0Decimals = dec0Raw
-    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
-    : 18;
-  const token1Decimals = dec1Raw
-    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
-    : 18;
+  // `tokenDecimalsKnown=true` only when BOTH reads succeed AND parse to a
+  // valid power of ten — same gate the FPMM factory uses. A partial success
+  // is indistinguishable from both-defaulted to downstream consumers, so
+  // hold off on flipping the flag until we have the full pair.
+  const dec0Parsed = dec0Raw ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw ? scalingFactorToDecimals(dec1Raw) : null;
+  const token0Decimals = dec0Parsed ?? 18;
+  const token1Decimals = dec1Parsed ?? 18;
+  const tokenDecimalsKnown = dec0Parsed !== null && dec1Parsed !== null;
 
   await upsertPool({
     context,
@@ -77,7 +80,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     blockNumber: asBigInt(event.block.number),
     blockTimestamp: asBigInt(event.block.timestamp),
     txHash: event.transaction.hash,
-    tokenDecimals: { token0Decimals, token1Decimals },
+    tokenDecimals: { token0Decimals, token1Decimals, tokenDecimalsKnown },
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",

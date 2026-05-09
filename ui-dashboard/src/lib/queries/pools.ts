@@ -26,6 +26,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleTxHash
       priceDifference
       rebalanceThreshold
+      rebalanceThresholdsKnown
       oracleNumReporters
       oracleExpiry
       lastRebalancedAt
@@ -322,6 +323,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       referenceRateFeedID
       priceDifference
       rebalanceThreshold
+      rebalanceThresholdsKnown
       lastRebalancedAt
       deviationBreachStartedAt
       lpFee
