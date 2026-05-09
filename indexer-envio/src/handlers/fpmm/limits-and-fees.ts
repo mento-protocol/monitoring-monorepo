@@ -201,13 +201,15 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   const existing = await selfHealInvertRateFeed(context, initial);
   const above = Number(event.params.newThresholdAbove);
   const below = Number(event.params.newThresholdBelow);
-  // Gate the breach/health recompute on a fresh live median: the
-  // direction-pick + priceDifference both depend on `lastMedianPrice`,
-  // so without a usable median the recompute would either pickActiveThreshold
-  // fall back to `above` (degenerate-reserve path) or pass through a
-  // stale/expired median. Same gates the entity-derive path uses,
-  // applied here so a governance threshold update doesn't open/close
-  // breaches from oracle data the contract would reject.
+  // Gate the breach/health recompute on a fresh live median AND
+  // non-degenerate reserves: the direction-pick + priceDifference both
+  // depend on `lastMedianPrice` AND `norm1/norm0`, so without a usable
+  // median the recompute would pass through a stale/expired median, and
+  // without usable reserves `pickActiveThreshold` would fall back to
+  // `above` (degenerate-reserve path) and `computePriceDifference` would
+  // return `0n`. Same gates the entity-derive path uses, applied here so
+  // a governance threshold update doesn't open/close breaches from
+  // oracle/reserve data the contract would reject.
   const medianFresh =
     existing.lastMedianPrice > 0n &&
     existing.medianLive &&
@@ -215,7 +217,9 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     existing.oracleOk &&
     existing.oracleExpiry > 0n &&
     existing.lastOracleReportAt > 0n &&
-    existing.lastOracleReportAt + existing.oracleExpiry > blockTimestamp;
+    existing.lastOracleReportAt + existing.oracleExpiry > blockTimestamp &&
+    existing.reserves0 > 0n &&
+    existing.reserves1 > 0n;
 
   if (!medianFresh) {
     // No usable median → write the new threshold fields directly,
@@ -296,7 +300,12 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: pool.oraclePrice,
+      // Use `lastMedianPrice` so the snapshot's displayed oracle price
+      // is consistent with the priceDifference / threshold fields,
+      // which were both computed from the median above. `pool.oraclePrice`
+      // would mix in a reporter quote (last OracleReported) and produce
+      // a row where the displayed price doesn't match the deviation.
+      oraclePrice: pool.lastMedianPrice,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,

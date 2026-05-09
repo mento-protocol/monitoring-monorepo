@@ -91,15 +91,17 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   }
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
-  // Only persist the scaled oraclePrice when we know the orientation.
-  // On the RPC-fallback path with `invertRateFeedKnown=false` (deploy
-  // blip + self-heal failure), `scaleRpcRebalanceState` would have
-  // chosen numerator vs denominator from the schema-default `false`, so
-  // the displayed oraclePrice could be backwards for actually-inverted
+  // Only persist the scaled oraclePrice + timestamp when we know the
+  // orientation. On the RPC-fallback path with `invertRateFeedKnown=false`
+  // (deploy blip + self-heal failure), `scaleRpcRebalanceState` would
+  // have chosen numerator vs denominator from the schema-default `false`,
+  // so the displayed oraclePrice could be backwards for actually-inverted
   // pools. The contract's threshold + priceDifference are authoritative
   // regardless of our local flag, so we still persist those. Preserve
-  // the existing `oraclePrice` (or schema default 0n) when orientation
-  // is unknown — OracleSnapshot then carries the preserved value too.
+  // the existing `oraclePrice` AND `oracleTimestamp` when orientation
+  // is unknown — advancing the timestamp without a usable price would
+  // mark stale data as freshly updated under the
+  // `oracleTimestamp + oracleExpiry` freshness check.
   const orientationKnown = existing?.invertRateFeedKnown === true;
   let updateReservesOraclePrice = 0n;
   if (resolved) {
@@ -109,8 +111,12 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     oracleDelta = {
       rebalanceThreshold: resolved.rebalanceThreshold,
       priceDifference: resolved.priceDifference,
-      oracleTimestamp: blockTimestamp,
-      ...(orientationKnown ? { oraclePrice: updateReservesOraclePrice } : {}),
+      ...(orientationKnown
+        ? {
+            oraclePrice: updateReservesOraclePrice,
+            oracleTimestamp: blockTimestamp,
+          }
+        : {}),
     };
   }
 
@@ -304,8 +310,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   // Same orientation gate as UpdateReserves: only persist scaled
-  // oraclePrice when `invertRateFeedKnown`. RPC fallback's scale calc
-  // can guess wrong if the deploy-time invert read failed.
+  // oraclePrice + timestamp when `invertRateFeedKnown`. RPC fallback's
+  // scale calc can guess wrong if the deploy-time invert read failed,
+  // and advancing the timestamp without a usable price would falsely
+  // mark stale data as fresh under the freshness gate.
   const rebalancedOrientationKnown = existing?.invertRateFeedKnown === true;
   let rebalancedOraclePrice = 0n;
   if (resolved) {
@@ -315,9 +323,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     oracleDelta = {
       ...oracleDelta,
       rebalanceThreshold: resolved.rebalanceThreshold,
-      oracleTimestamp: blockTimestamp,
       ...(rebalancedOrientationKnown
-        ? { oraclePrice: rebalancedOraclePrice }
+        ? {
+            oraclePrice: rebalancedOraclePrice,
+            oracleTimestamp: blockTimestamp,
+          }
         : {}),
     };
   }

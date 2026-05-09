@@ -256,8 +256,16 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // invert-read failed and whose self-heal also returned undefined would
       // otherwise persist the wrong-side threshold from this re-pick. With
       // the gate, we keep the prior threshold until the orientation lands.
+      //
+      // Also gate on `lastMedianPrice > 0n` so a zero-median outage at
+      // the first MedianUpdated for a pool doesn't fall through to
+      // `pickActiveThreshold`'s degenerate-reserve `above` fallback,
+      // overwriting the seeded broad threshold from a value the
+      // contract wouldn't trust.
       const rebalanceThreshold =
-        updatedPool.rebalanceThresholdsKnown && updatedPool.invertRateFeedKnown
+        updatedPool.rebalanceThresholdsKnown &&
+        updatedPool.invertRateFeedKnown &&
+        updatedPool.lastMedianPrice > 0n
           ? pickActiveThreshold(
               {
                 reserves0: updatedPool.reserves0,
