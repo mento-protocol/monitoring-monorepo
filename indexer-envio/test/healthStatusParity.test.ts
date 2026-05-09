@@ -203,4 +203,22 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     });
     assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
+
+  it("asymmetric (above=0, below>0) does NOT count as never-rebalance", () => {
+    // Active `rebalanceThreshold` alone can't disambiguate: an asymmetric
+    // pool whose reservePrice currently sits on the above side persists
+    // `rebalanceThreshold=0` but the pool DOES rebalance on the below
+    // side. A regression that classifies this as never-rebalance would
+    // suppress all deviation alerts. Pinned: high diff (12000bps,
+    // > 1.05 * 10000 fallback) past the 1h grace → CRITICAL.
+    const pool = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0, // active side picked above (=0)
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300, // configured below side — pool DOES rebalance
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
 });

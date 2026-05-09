@@ -62,19 +62,32 @@ export const DEVIATION_CRITICAL_DEN = 100n;
 export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
 /** True iff governance has explicitly configured this pool to never
- * rebalance (`rebalanceThreshold === 0` AND `rebalanceThresholdsKnown=true`).
+ * rebalance — BOTH `rebalanceThresholdAbove === 0` AND
+ * `rebalanceThresholdBelow === 0` AND `rebalanceThresholdsKnown=true`.
  * Distinct from the schema-default unknown case (`rebalanceThresholdsKnown=false`),
  * where the breach predicate falls back to a 10000-bps under-bound until
- * self-heal lands. Used to short-circuit breach/health predicates rather
- * than relying on the `effectiveThreshold` 1e12 sentinel: explicit short-
- * circuit means an extreme reserve-skew priceDifference > 1.01e12 still
- * resolves to "no breach", as governance intended.
+ * self-heal lands.
+ *
+ * Cannot infer from `rebalanceThreshold` alone: that's the ACTIVE side
+ * picked by `pickActiveThreshold` based on current reserve direction. An
+ * asymmetric pool with `above=0, below=300` legitimately persists
+ * `rebalanceThreshold=0` while reservePrice is on the above side, even
+ * though the pool DOES rebalance on the below side. Both split fields
+ * must be 0 for "never rebalance" to be the right semantic.
+ *
+ * Used to short-circuit breach/health predicates rather than relying on
+ * the `effectiveThreshold` 1e12 sentinel: explicit short-circuit means an
+ * extreme reserve-skew priceDifference > 1.01e12 still resolves to "no
+ * breach", as governance intended.
  */
 export const isNeverRebalance = (pool: {
-  rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
 }): boolean =>
-  pool.rebalanceThreshold === 0 && pool.rebalanceThresholdsKnown === true;
+  (pool.rebalanceThresholdAbove ?? 0) === 0 &&
+  (pool.rebalanceThresholdBelow ?? 0) === 0 &&
+  pool.rebalanceThresholdsKnown === true;
 
 /** Resolve the effective threshold in bps. Three states:
  *  - `> 0`: the on-chain configured threshold (active side).
@@ -95,6 +108,8 @@ export const isNeverRebalance = (pool: {
  */
 export const effectiveThreshold = (pool: {
   rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   // Optional: callers passing a synthetic threshold value (e.g.
   // `deviationBreach` healing from a captured entry threshold) may not
   // carry the Known flag. In that case we treat `0` as the unread
@@ -102,7 +117,13 @@ export const effectiveThreshold = (pool: {
   rebalanceThresholdsKnown?: boolean;
 }): bigint => {
   if (pool.rebalanceThreshold > 0) return BigInt(pool.rebalanceThreshold);
-  return pool.rebalanceThresholdsKnown ? 10n ** 12n : 10000n;
+  // Distinguish governance-disabled "never rebalance" (BOTH split sides
+  // 0 + Known) from an asymmetric pool whose active side just happens to
+  // be 0 right now. Otherwise an `above=0, below=300` pool with reserves
+  // currently picking the above side would suppress all deviation
+  // alerts via the 1e12 cushion even though the below side is real.
+  if (isNeverRebalance(pool)) return 10n ** 12n;
+  return 10000n;
 };
 
 /** True when `priceDifference` is strictly above the 5% critical-magnitude

@@ -46,6 +46,13 @@ interface PoolHealthState {
   oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  // Direction-split thresholds — populated by the isolated
+  // `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` / `POOL_THRESHOLDS_KNOWN_EXT`
+  // queries. Both must be 0 (with Known=true) for `isNeverRebalance` to
+  // hold; the active `rebalanceThreshold` alone can't be trusted because
+  // it's just the side `pickActiveThreshold` chose at index time.
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   // True when the indexer has read the on-chain values for both above/below
   // thresholds; false (or missing) when still at the schema default. Drives
   // the dual-sentinel `effectiveThreshold` semantics — see that function.
@@ -80,17 +87,34 @@ export {
 } from "@mento-protocol/monitoring-config/thresholds";
 
 /** True iff governance has explicitly configured this pool to never
- * rebalance. Mirrors `isNeverRebalance` in indexer `pool.ts`; used to
- * short-circuit breach/health predicates without relying on the
- * `effectiveThreshold` 1e12 cushion (which is unbounded-skew-tolerant in
- * practice but not by construction).
+ * rebalance — BOTH split sides 0 AND `rebalanceThresholdsKnown=true`.
+ * Mirrors `isNeverRebalance` in indexer `pool.ts` (parity test in
+ * `indexer-envio/test/healthStatusParity.test.ts`). Used to short-
+ * circuit breach/health predicates without relying on the
+ * `effectiveThreshold` 1e12 cushion.
+ *
+ * Cannot infer from `rebalanceThreshold` alone: that's the ACTIVE side
+ * picked at indexing time based on current reserves. An asymmetric pool
+ * with `above=0, below=300` legitimately persists `rebalanceThreshold=0`
+ * while reservePrice is on the above side, but the pool DOES rebalance
+ * on the below side — classifying it never-rebalance would suppress
+ * deviation alerts for the half of the time it should fire. Both split
+ * fields must be 0 for the predicate to hold.
+ *
+ * If `rebalanceThresholdAbove` / `rebalanceThresholdBelow` aren't
+ * fetched yet (older indexer schema or unmigrated query), the predicate
+ * returns false — safe under-bound. The split fields are populated by
+ * the isolated `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` /
+ * `POOL_THRESHOLDS_KNOWN_EXT` queries.
  */
 export function isNeverRebalance(pool: {
-  rebalanceThreshold?: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
 }): boolean {
   return (
-    (pool.rebalanceThreshold ?? 0) === 0 &&
+    (pool.rebalanceThresholdAbove ?? 0) === 0 &&
+    (pool.rebalanceThresholdBelow ?? 0) === 0 &&
     pool.rebalanceThresholdsKnown === true
   );
 }
@@ -117,11 +141,18 @@ export function isNeverRebalance(pool: {
  */
 const effectiveThreshold = (pool: {
   rebalanceThreshold?: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
 }): number => {
   const threshold = pool.rebalanceThreshold ?? 0;
   if (threshold > 0) return threshold;
-  return pool.rebalanceThresholdsKnown ? 1e12 : 10000;
+  // Same asymmetric-disambiguation as indexer `pool.ts:effectiveThreshold`:
+  // 1e12 cushion only applies when BOTH split sides are 0 (governance-
+  // disabled never-rebalance), not when the active side just happens to
+  // be 0 on a half-disabled pool.
+  if (isNeverRebalance(pool)) return 1e12;
+  return 10000;
 };
 
 export function getOracleStalenessThreshold(
@@ -359,6 +390,8 @@ export function computeEffectiveStatus(
     oracleExpiry?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
     rebalanceThresholdsKnown?: boolean;
     deviationBreachStartedAt?: string | null;
     lastRebalancedAt?: string | null;
@@ -391,6 +424,8 @@ export function computeRebalancerLiveness(
     lastRebalancedAt?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
     rebalanceThresholdsKnown?: boolean;
   },
   nowSeconds: number,

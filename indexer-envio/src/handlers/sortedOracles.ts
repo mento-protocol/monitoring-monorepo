@@ -10,6 +10,7 @@ import {
 } from "../priceDifference";
 import {
   computeHealthStatus,
+  isNeverRebalance,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
   nextOpenBreachEntryThreshold,
@@ -168,12 +169,15 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         return;
       }
 
-      // Health score: compute snapshot fields + update pool accumulators
+      // Health score: compute snapshot fields + update pool accumulators.
+      // Pass `isNeverRebalance(finalPool)` so governance-disabled pools
+      // accrue OK time instead of routing through the no-data sentinel.
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
         existing.rebalanceThreshold,
         blockTimestamp,
+        isNeverRebalance(finalPool),
       );
       const persistedPool: Pool = {
         ...finalPool,
@@ -421,12 +425,14 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         return;
       }
 
-      // Health score: compute snapshot fields + update pool accumulators
+      // Health score: compute snapshot fields + update pool accumulators.
+      // See OracleReported handler for the `isNeverRebalance` rationale.
       const { snapshotFields, poolUpdate } = recordHealthSample(
         finalPool,
         priceDifference,
         rebalanceThreshold,
         blockTimestamp,
+        isNeverRebalance(finalPool),
       );
       const persistedPool: Pool = {
         ...finalPool,

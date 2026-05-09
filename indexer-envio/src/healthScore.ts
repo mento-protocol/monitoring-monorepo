@@ -96,12 +96,27 @@ export interface HealthSnapshotFields {
  *
  * @param priceDifference — raw priceDifference from pool/event (BigInt)
  * @param rebalanceThreshold — pool's rebalanceThreshold (integer)
+ * @param isNeverRebalance — true iff governance configured the pool to
+ *   never rebalance (BOTH split sides 0 AND known). When true, every
+ *   sample is treated as healthy — devRatio collapses to 0, healthBinary
+ *   stays "1.000000", hasHealthData accrues normally. Without this gate,
+ *   a never-rebalance pool's `threshold===0` would route through the
+ *   no-data sentinel and the dashboard's DeviationCell would render
+ *   "no data" instead of the intended "Never rebalances" affordance.
  * @returns health fields to merge into the OracleSnapshot entity
  */
 export function computeHealthSnapshotFields(
   priceDifference: bigint,
   rebalanceThreshold: number,
+  isNeverRebalance = false,
 ): HealthSnapshotFields {
+  if (isNeverRebalance) {
+    return {
+      deviationRatio: "0.000000",
+      healthBinaryValue: "1.000000",
+      hasHealthData: true,
+    };
+  }
   if (rebalanceThreshold <= 0) {
     // No-data sentinel: use "-1" for deviationRatio and "0.000000" for
     // healthBinaryValue so consumers can't accidentally treat this as healthy.
@@ -264,16 +279,21 @@ export interface RecordHealthSampleResult {
  * @param priceDifference — from event/pool
  * @param rebalanceThreshold — from pool
  * @param blockTimestamp — block timestamp of the event
+ * @param isNeverRebalance — true iff governance configured the pool to
+ *   never rebalance (see `computeHealthSnapshotFields`). When true, the
+ *   sample accrues OK time even though `rebalanceThreshold === 0`.
  */
 export function recordHealthSample(
   pool: Pool,
   priceDifference: bigint,
   rebalanceThreshold: number,
   blockTimestamp: bigint,
+  isNeverRebalance = false,
 ): RecordHealthSampleResult {
   const snapshotFields = computeHealthSnapshotFields(
     priceDifference,
     rebalanceThreshold,
+    isNeverRebalance,
   );
 
   // If snapshot has no valid health data (e.g. rebalanceThreshold <= 0),

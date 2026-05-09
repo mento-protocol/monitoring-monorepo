@@ -18,6 +18,7 @@ import {
 } from "../../tradingLimits";
 import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
+  isNeverRebalance,
   maybePreloadPool,
   selfHealInvertRateFeed,
   selfHealTokenDecimals,
@@ -282,38 +283,44 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   const rpcSucceeded = !medianFresh && priceDifferenceFromMedian !== null;
 
   if (priceDifferenceFromMedian === null || active === null) {
-    // Neither local median nor RPC produced usable values. Write the
-    // new threshold split fields + Known flag so derive can succeed
-    // once a live median lands; preserve existing breach/health state.
+    // Neither local median nor RPC produced usable values.
     //
-    // Special-case known-zero: when governance just configured the pool
-    // to never rebalance (above == 0 && below == 0), also clear the
-    // active `rebalanceThreshold` AND the open-breach denorms. The
-    // `isNeverRebalance` predicate (in `pool.ts`) short-circuits health
-    // / breach checks for known-zero pools, but the on-Pool denorms
-    // (`deviationBreachStartedAt`, `currentOpenBreachPeak`,
-    // `currentOpenBreachEntryThreshold`) would otherwise stay set from
-    // a prior threshold configuration. The fresh-median path goes through
-    // `upsertPool` → `recordBreachTransition` which closes the breach
-    // naturally; this direct-write path is the unknown-decimals fallback,
-    // so we mirror the breach-close explicitly. The `DeviationThresholdBreach`
-    // history row is closed on the next event with usable oracle data —
-    // not perfect but bounded, and the on-Pool denorms are what drives
-    // the live-uptime / badge UI, which is the user-visible concern.
+    // Known-zero (above == 0 && below == 0 == "never rebalance"): route
+    // through `upsertPool` so `recordBreachTransition` closes any open
+    // `DeviationThresholdBreach` row AND `computeHealthStatus` refreshes
+    // `Pool.healthStatus` (avoids a stale CRITICAL gauge on the
+    // `metrics-bridge` export). `isNeverRebalance(next)` short-circuits
+    // both predicates to false / OK respectively, so the falling-edge
+    // logic kicks in naturally.
+    //
+    // Non-known-zero: preserve existing breach/health state — direct
+    // write just the threshold split fields + Known flag so derive can
+    // succeed once a live median lands.
     const isKnownZero = above === 0 && below === 0;
+    if (isKnownZero) {
+      await upsertPool({
+        context,
+        chainId: event.chainId,
+        poolId,
+        source: "fpmm_threshold_updated",
+        blockNumber,
+        blockTimestamp,
+        txHash: event.transaction.hash,
+        oracleDelta: {
+          rebalanceThreshold: 0,
+          rebalanceThresholdAbove: 0,
+          rebalanceThresholdBelow: 0,
+          rebalanceThresholdsKnown: true,
+        },
+        existing: { pool: existing },
+      });
+      return;
+    }
     context.Pool.set({
       ...existing,
       rebalanceThresholdAbove: above,
       rebalanceThresholdBelow: below,
       rebalanceThresholdsKnown: true,
-      ...(isKnownZero
-        ? {
-            rebalanceThreshold: 0,
-            deviationBreachStartedAt: 0n,
-            currentOpenBreachPeak: 0n,
-            currentOpenBreachEntryThreshold: 0,
-          }
-        : {}),
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     });
@@ -355,6 +362,7 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       upserted.priceDifference,
       upserted.rebalanceThreshold,
       blockTimestamp,
+      isNeverRebalance(upserted),
     );
     pool = { ...upserted, ...poolUpdate };
     context.Pool.set(pool);

@@ -332,6 +332,28 @@ describe("computeHealthStatus", () => {
     ).toBe("OK");
   });
 
+  it("asymmetric (above=0, below>0) does NOT count as never-rebalance (mirrors indexer)", () => {
+    // The active `rebalanceThreshold` alone can be 0 on a half-disabled
+    // pool. The predicate must require BOTH split sides to be 0; this
+    // fixture has below>0 so the pool DOES rebalance and the deviation
+    // path runs normally. 12000bps / 10000 fallback = 1.2 → CRITICAL.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "12000",
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 300,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("CRITICAL");
+  });
+
   it("dual-sentinel: unknown-zero with high deviation goes CRITICAL via 10000 fallback (mirrors indexer)", () => {
     // Same diff, unknown-zero. 20000/10000 = 2.0, past 1.05 critical magnitude
     // and past the 1h grace. Pinned so a regression collapsing both

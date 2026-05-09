@@ -430,13 +430,17 @@ export async function fetchNetworkData(
         healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
-    // `rebalanceThresholdsKnown` flag — isolated for the same schema-lag
-    // reason as the breach rollup above. Consumers (`isNeverRebalance`,
+    // `rebalanceThresholdsKnown` triple — isolated for the same schema-
+    // lag reason as the breach rollup above. Consumers (`isNeverRebalance`,
     // `effectiveThreshold`) degrade safely to the 10000-bps under-bound
-    // when the field is missing.
+    // when the fields are missing. Split sides included because the
+    // never-rebalance predicate requires BOTH above/below to be 0 (active
+    // `rebalanceThreshold` alone can't disambiguate).
     timed<{
       Pool: {
         id: string;
+        rebalanceThresholdAbove?: number;
+        rebalanceThresholdBelow?: number;
         rebalanceThresholdsKnown?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
@@ -470,8 +474,8 @@ export async function fetchNetworkData(
     });
   }
 
-  // Merge `rebalanceThresholdsKnown` into the pool objects. On failure
-  // (schema-lag during deploy), the field stays `undefined` and
+  // Merge `rebalanceThresholdsKnown` triple into the pool objects. On
+  // failure (schema-lag during deploy), the fields stay `undefined` and
   // `isNeverRebalance` / `effectiveThreshold` fall back to the safe
   // 10000-bps under-bound.
   if (rebalanceThresholdsKnownResult.status === "fulfilled") {
@@ -482,7 +486,12 @@ export async function fetchNetworkData(
       const r = knownById.get(p.id);
       return r == null
         ? p
-        : { ...p, rebalanceThresholdsKnown: r.rebalanceThresholdsKnown };
+        : {
+            ...p,
+            rebalanceThresholdAbove: r.rebalanceThresholdAbove,
+            rebalanceThresholdBelow: r.rebalanceThresholdBelow,
+            rebalanceThresholdsKnown: r.rebalanceThresholdsKnown,
+          };
     });
   }
 

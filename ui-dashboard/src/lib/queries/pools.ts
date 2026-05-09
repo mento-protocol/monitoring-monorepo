@@ -49,19 +49,29 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-// Per-pool `rebalanceThresholdsKnown` flag, scoped to a chain. Kept OFF
-// `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
+// Per-pool threshold-known flag + split sides, scoped to a chain. Kept
+// OFF `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
 // `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
-// the new field before the prod indexer has it would otherwise reject the
-// entire pools query. Isolating means consumers (`isNeverRebalance`,
+// the new fields before the prod indexer has them would otherwise reject
+// the entire pools query. Isolating means consumers (`isNeverRebalance`,
 // `effectiveThreshold` in `health.ts`) degrade safely to the 10000-bps
-// under-bound until the merge lands. Triggered by Cursor's learned rule
-// "Isolate new Envio/Hasura entity fields in separate queries for
-// schema-lag resilience".
+// under-bound until the merge lands.
+//
+// Includes `rebalanceThresholdAbove` / `rebalanceThresholdBelow`
+// alongside the Known flag because `isNeverRebalance` requires BOTH
+// split sides to be 0 (the active `rebalanceThreshold` field on the
+// main query is just the side `pickActiveThreshold` chose at index
+// time, so it can be 0 on an asymmetric `above=0, below>0` pool that
+// DOES rebalance — see indexer `pool.ts:isNeverRebalance` for the full
+// rationale). Triggered by Cursor's learned rule "Isolate new
+// Envio/Hasura entity fields in separate queries for schema-lag
+// resilience".
 export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
   query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
       rebalanceThresholdsKnown
     }
   }
@@ -340,7 +350,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       referenceRateFeedID
       priceDifference
       rebalanceThreshold
-      rebalanceThresholdsKnown
       lastRebalancedAt
       deviationBreachStartedAt
       lpFee
@@ -354,6 +363,23 @@ export const POOL_DETAIL_WITH_HEALTH = `
       swapCount
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Single-pool sibling of `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Same
+// isolation rationale: keeps the `rebalanceThresholdsKnown` /
+// `rebalanceThresholdAbove` / `rebalanceThresholdBelow` triple OFF the
+// page's primary `POOL_DETAIL_WITH_HEALTH` query so a schema-lag during
+// deploy degrades just the never-rebalance affordance instead of breaking
+// the entire pool detail page.
+export const POOL_THRESHOLDS_KNOWN_EXT = `
+  query PoolThresholdsKnownExt($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
+      rebalanceThresholdsKnown
     }
   }
 `;

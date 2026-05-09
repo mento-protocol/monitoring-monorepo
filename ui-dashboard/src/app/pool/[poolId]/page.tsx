@@ -18,6 +18,7 @@ import {
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
+  POOL_THRESHOLDS_KNOWN_EXT,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
@@ -143,7 +144,34 @@ function PoolDetail() {
     chainId: network.chainId,
   });
 
-  const pool = poolData?.Pool?.[0] ?? null;
+  // Threshold-known triple — isolated from POOL_DETAIL_WITH_HEALTH so a
+  // schema-lag during deploy degrades just `isNeverRebalance` to false
+  // (safe under-bound) instead of breaking the whole page. On failure
+  // the fields stay undefined and the predicate returns false.
+  const { data: thresholdsData } = useGQL<{
+    Pool: {
+      id: string;
+      rebalanceThresholdAbove?: number;
+      rebalanceThresholdBelow?: number;
+      rebalanceThresholdsKnown?: boolean;
+    }[];
+  }>(POOL_THRESHOLDS_KNOWN_EXT, {
+    id: normalizedPoolId,
+    chainId: network.chainId,
+  });
+
+  const rawPool = poolData?.Pool?.[0] ?? null;
+  const thresholdsExt = thresholdsData?.Pool?.[0] ?? null;
+  const pool = useMemo<Pool | null>(() => {
+    if (!rawPool) return null;
+    if (!thresholdsExt) return rawPool;
+    return {
+      ...rawPool,
+      rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+      rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+      rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+    };
+  }, [rawPool, thresholdsExt]);
 
   // Canonicalize legacy raw-address pool URLs onto namespaced multichain IDs,
   // but only after the pool resolves on the active network. That avoids

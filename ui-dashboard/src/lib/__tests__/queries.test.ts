@@ -22,6 +22,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_LIQUIDITY_PAGE",
   "POOL_LIQUIDITY_COUNT",
   "POOL_DETAIL_WITH_HEALTH",
+  "POOL_THRESHOLDS_KNOWN_EXT",
   "POOL_CONFIG_EXT",
   "POOL_BREACH_ROLLUP",
   "POOL_HEALTH_7D_ANCHOR",
@@ -135,6 +136,15 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
       "rebalanceThresholdsKnown",
     );
+    // Split sides accompany the Known flag because the never-rebalance
+    // predicate requires BOTH `above === 0 && below === 0` (active
+    // `rebalanceThreshold` alone can't disambiguate asymmetric pools).
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdAbove",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdBelow",
+    );
     // No heavy / unrelated fields piggybacking — isolation must stay tight
     // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
     // not the entire pools page.
@@ -144,9 +154,23 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
       "oraclePrice",
     );
-    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
-      "rebalanceThreshold ", // trailing space → matches the bare field, not "rebalanceThresholdsKnown"
+  });
+
+  it("POOL_THRESHOLDS_KNOWN_EXT mirrors the all-pools triple for single-pool fetches", () => {
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdsKnown",
     );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdAbove",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdBelow",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("healthStatus");
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("oraclePrice");
+    // Keyed by id + chainId — single-pool variant of the all-pools query.
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$id: String!");
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$chainId: Int!");
   });
 
   it("ALL_POOLS_BREACH_ROLLUP is isolated (rationale: phased schema rollout)", () => {
