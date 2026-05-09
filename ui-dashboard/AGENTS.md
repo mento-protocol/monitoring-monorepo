@@ -60,23 +60,14 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   (test fixtures use placeholder addresses) and `react-hooks/rules-of-hooks`
   (legitimate when shimming hook-shaped mocks).
 
-### Cleanup backlog (un-silence later)
+### Cleanup backlog
 
-After silencing, the codebase has 1 error and ~128 warnings. To re-tighten,
-chip away at these in dedicated PRs (rough priority):
-
-1. `react-doctor/nextjs-no-side-effect-in-get-handler` — 1 error in
-   `src/app/api/rebalance-check/route.ts:46` (CSRF/prefetch risk).
-2. Next.js correctness — `nextjs-missing-metadata` (×7),
-   `nextjs-no-use-search-params-without-suspense` (×3),
-   `nextjs-no-client-side-redirect` (×3).
-3. `react-doctor/no-array-index-as-key` (×8) and
-   `react-doctor/no-giant-component` (×11).
-4. Performance refactors — `js-combine-iterations` (×24),
-   `js-tosorted-immutable` (×14), `async-await-in-loop` (×11), etc.
-
-Once a category drops to zero, remove it from the config (or, if it was
-never silenced, leave it — the diff gate already keeps it at zero).
+After silencing, the codebase has 1 error and ~128 warnings. The
+prioritized cleanup list, ratchet plan (un-silence design rules), and
+operational follow-ups (bumping `react-doctor`, score-floor job, etc.)
+all live in `BACKLOG.md` under "Follow-ups deferred from PR #367
+(react-doctor diff gate)". Single source of truth — update there, not
+here.
 
 ## Tech Stack
 
