@@ -168,9 +168,9 @@ function V2ExchangeErrorNote() {
         v2 exchange config unavailable
       </div>
       <p className="text-slate-300">
-        Couldn&apos;t load the v2 BiPoolManager exchange data for this
-        VirtualPool — upstream GraphQL error or the indexer hasn&apos;t synced
-        the BiPoolExchange entity yet.
+        Could not load the v2 BiPoolManager exchange data for this VirtualPool —
+        upstream GraphQL error or the indexer has not synced the BiPoolExchange
+        entity yet.
       </p>
     </div>
   );
