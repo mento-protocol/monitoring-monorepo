@@ -1,6 +1,7 @@
 "use client";
 
 import { isVirtualPool, type Pool } from "@/lib/types";
+import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
@@ -34,6 +35,7 @@ function formatBps(bps: number | null | undefined): string {
 export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
+  const neverRebalances = isNeverRebalance(pool);
   const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(
     isVirtual ? null : POOL_CONFIG_EXT,
     { id: pool.id, chainId: pool.chainId },
@@ -107,14 +109,19 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
             Rebalance Threshold
             <InfoPopover
               label="Rebalance Threshold"
-              content="Internal pool price deviation from oracle price that must be exceeded before a rebalance is permitted on this pool."
+              content={
+                neverRebalances
+                  ? "Governance has disabled rebalancing for this pool. Deviation is still monitored, but no rebalance is permitted."
+                  : "Internal pool price deviation from oracle price that must be exceeded before a rebalance is permitted on this pool."
+              }
             />
           </span>
         }
-        // Indexer defaults rebalanceThreshold to 0 (not -1) and `health.ts`
-        // treats 0 as "unknown, fall back to 10000" — rendering "0.00%"
-        // would wrongly imply a 0-bps (always-breached) configuration.
-        value={formatBps(pool.rebalanceThreshold || null)}
+        // Distinguish the schema-default unknown-zero from governance's
+        // explicit never-rebalance configuration.
+        value={
+          neverRebalances ? "Never" : formatBps(pool.rebalanceThreshold || null)
+        }
         mono
       />
       <Stat

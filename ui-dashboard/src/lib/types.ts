@@ -35,6 +35,7 @@ export type Pool = {
   referenceRateFeedID?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  rebalanceThresholdsKnown?: boolean;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
   lpFee?: number;

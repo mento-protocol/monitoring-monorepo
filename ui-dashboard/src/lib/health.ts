@@ -85,12 +85,15 @@ export {
  * `effectiveThreshold` 1e12 cushion (which is unbounded-skew-tolerant in
  * practice but not by construction).
  */
-const isNeverRebalance = (pool: {
+export function isNeverRebalance(pool: {
   rebalanceThreshold?: number;
   rebalanceThresholdsKnown?: boolean;
-}): boolean =>
-  (pool.rebalanceThreshold ?? 0) === 0 &&
-  pool.rebalanceThresholdsKnown === true;
+}): boolean {
+  return (
+    (pool.rebalanceThreshold ?? 0) === 0 &&
+    pool.rebalanceThresholdsKnown === true
+  );
+}
 
 /** Resolve the effective threshold in bps. Mirrors the indexer's `pool.ts`
  * `effectiveThreshold` (parity-tested via `healthStatusParity`). Three states:
