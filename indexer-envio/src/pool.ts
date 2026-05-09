@@ -24,6 +24,7 @@ import {
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
+  vpExchangeIdEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
@@ -372,6 +373,32 @@ export async function selfHealRebalanceThresholds(
   };
 }
 
+/** Self-heal `Pool.wrappedExchangeId` for VirtualPools whose
+ * `VirtualPoolDeployed` event fired pre-start_block (and so the bytecode
+ * extraction in the factory handler never ran). Reads the VP bytecode
+ * once per address (the effect is `cache: true` — bytecode is immutable
+ * for a deployed contract — so the actual RPC fires exactly once per VP
+ * across the whole sync). Pure: returns the (possibly healed) Pool;
+ * caller persists.
+ *
+ * No-op on FPMM pools and on VPs that already have the field set. */
+export async function selfHealWrappedExchangeId(
+  context: { effect: EffectCaller },
+  pool: Pool,
+): Promise<Pool> {
+  if (!isVirtualPool(pool) || pool.wrappedExchangeId) return pool;
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const result = await context.effect(vpExchangeIdEffect, {
+    chainId: pool.chainId,
+    vpAddress: poolAddr,
+  });
+  if (!result) return pool;
+  return {
+    ...pool,
+    wrappedExchangeId: result.exchangeId,
+  };
+}
+
 export type SnapshotContext = {
   PoolSnapshot: {
     get: (id: string) => Promise<PoolSnapshot | undefined>;
@@ -534,7 +561,12 @@ export const upsertPool = async ({
   // Self-heal invertRateFeed up front so every downstream computation
   // (priceDifference, oraclePrice flip, breach status) sees the corrected
   // orientation. Same helper that handlers call before reading the field.
-  const existing = await selfHealInvertRateFeed(context, existingInitial);
+  const invertHealed = await selfHealInvertRateFeed(context, existingInitial);
+  // Self-heal `wrappedExchangeId` for VirtualPools whose
+  // VirtualPoolDeployed event fired pre-start_block. Bytecode is immutable
+  // and the effect is `cache: true` so the actual RPC fires once per VP
+  // address across the whole sync regardless of how many events touch it.
+  const existing = await selfHealWrappedExchangeId(context, invertHealed);
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.

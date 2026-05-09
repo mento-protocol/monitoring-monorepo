@@ -18,6 +18,7 @@ import {
   type BucketUpdate,
   type Pool,
 } from "generated";
+import type { HandlerContext } from "generated/src/Types";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { poolExchangeEffect } from "../rpc/effects";
 import { lookupPricingModuleName } from "../contractAddresses";
@@ -26,6 +27,110 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function exchangeRowId(chainId: number, exchangeId: string): string {
   return `${chainId}-${exchangeId.toLowerCase()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Self-heal: BiPoolExchange backfill for ExchangeCreated events that fired
+// pre-start_block. The active Mento v2 exchanges on Celo were registered
+// in 2022; the indexer's start_block currently begins much later. Without
+// this, no BiPoolExchange row exists for any pre-existing exchange and the
+// dashboard's pool-detail panel renders "—" forever even though the VP is
+// active.
+//
+// Strategy: in every BucketsUpdated / SpreadUpdated handler, if the row is
+// missing, RPC-backfill via `poolExchangeEffect` and seed the row before
+// applying the event-driven mutation. BucketsUpdated fires every 360s on
+// every active exchange, so the seed lands within ~6 minutes of catch-up.
+// On RPC failure the function returns null and the caller skips the
+// mutation; the next BucketsUpdated retries.
+// ---------------------------------------------------------------------------
+
+async function ensureBiPoolExchange(
+  context: HandlerContext,
+  chainId: number,
+  exchangeId: string,
+  exchangeProvider: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<BiPoolExchange | null> {
+  const id = exchangeRowId(chainId, exchangeId);
+  const existing = await context.BiPoolExchange.get(id);
+  if (existing) return existing;
+
+  const struct = await context.effect(poolExchangeEffect, {
+    chainId,
+    exchangeProvider,
+    exchangeId,
+  });
+  // RPC failure (or seed RPC actually returned a deprecated zero struct).
+  // The caller skips the mutation; next event re-fetches.
+  if (!struct) return null;
+  // All-zero struct = exchange was destroyed / never existed. Don't seed
+  // — the next BucketsUpdated wouldn't fire anyway, and a SpreadUpdated
+  // on a zombie exchange shouldn't materialize an empty row.
+  if (
+    struct.bucket0 === BigInt(0) &&
+    struct.bucket1 === BigInt(0) &&
+    struct.lastBucketUpdate === BigInt(0) &&
+    struct.pricingModule === ZERO_ADDRESS
+  ) {
+    return null;
+  }
+
+  // Look up an existing wrapping VP (forward link from VirtualPoolDeployed)
+  // so the seeded row knows which Pool wraps it.
+  const wrappingPools =
+    await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+  const wrappedByPoolId = wrappingPools.find(
+    (p: Pool) => p.chainId === chainId,
+  )?.id;
+
+  const row: BiPoolExchange = {
+    id,
+    chainId,
+    exchangeId,
+    exchangeProvider,
+    asset0: struct.asset0,
+    asset1: struct.asset1,
+    pricingModule: struct.pricingModule,
+    pricingModuleName:
+      lookupPricingModuleName(chainId, struct.pricingModule) ?? undefined,
+    spread: struct.spread,
+    referenceRateFeedID: struct.referenceRateFeedID,
+    referenceRateResetFrequency: struct.referenceRateResetFrequency,
+    minimumReports: struct.minimumReports,
+    stablePoolResetSize: struct.stablePoolResetSize,
+    bucket0: struct.bucket0,
+    bucket1: struct.bucket1,
+    lastBucketUpdate: struct.lastBucketUpdate,
+    isDeprecated: false,
+    wrappedByPoolId,
+    // Seed time = first event observed; ExchangeCreated block is unknown.
+    createdAtBlock: blockNumber,
+    createdAtTimestamp: blockTimestamp,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  };
+  context.BiPoolExchange.set(row);
+
+  // Mirror feedID onto the wrapped Pool if applicable (mirrors the
+  // forward/reverse link logic in the create handler + VP factory).
+  if (
+    wrappedByPoolId &&
+    row.referenceRateFeedID &&
+    row.referenceRateFeedID !== ZERO_ADDRESS
+  ) {
+    const pool = await context.Pool.get(wrappedByPoolId);
+    if (pool && pool.referenceRateFeedID !== row.referenceRateFeedID) {
+      context.Pool.set({
+        ...pool,
+        referenceRateFeedID: row.referenceRateFeedID,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
+  }
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,9 +280,19 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
   };
   context.BucketUpdate.set(update);
 
-  const id = exchangeRowId(event.chainId, event.params.exchangeId);
-  const existing = await context.BiPoolExchange.get(id);
-  if (!existing) return; // ExchangeCreated hasn't been processed yet
+  // Self-heal: pre-start_block ExchangeCreated events never fired, so this
+  // is the first time we're seeing the exchange in our index. ensureRow
+  // RPC-backfills via getPoolExchange + persists; on RPC failure returns
+  // null and we skip the snapshot mutation, retrying on the next event.
+  const existing = await ensureBiPoolExchange(
+    context,
+    event.chainId,
+    event.params.exchangeId.toLowerCase(),
+    asAddress(event.srcAddress),
+    blockNumber,
+    blockTimestamp,
+  );
+  if (!existing) return;
   context.BiPoolExchange.set({
     ...existing,
     bucket0: event.params.bucket0,
@@ -196,13 +311,22 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 BiPoolManager.SpreadUpdated.handler(async ({ event, context }) => {
-  const id = exchangeRowId(event.chainId, event.params.exchangeId);
-  const existing = await context.BiPoolExchange.get(id);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  // Self-heal — see BucketsUpdated for the full rationale.
+  const existing = await ensureBiPoolExchange(
+    context,
+    event.chainId,
+    event.params.exchangeId.toLowerCase(),
+    asAddress(event.srcAddress),
+    blockNumber,
+    blockTimestamp,
+  );
   if (!existing) return;
   context.BiPoolExchange.set({
     ...existing,
     spread: event.params.spread,
-    updatedAtBlock: asBigInt(event.block.number),
-    updatedAtTimestamp: asBigInt(event.block.timestamp),
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
   });
 });
