@@ -195,6 +195,18 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 
 - [ ] **Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.** PR #335 keeps the unmodified-click path on a live URL by recomputing `callbackUrl` from `window.location` inside the click handler, but the anchor `href` itself stays frozen at the render-time `useSearchParams()` snapshot — so cmd-click / middle-click / "open link in new tab" sends OAuth through the stale callback. Acceptable today: cmd-click is a deliberate "open in a side tab" gesture, the original tab still has the live URL state, and shared session means returning to the source tab works. To fix properly: monkeypatch `history.pushState`/`replaceState` once at the app root to dispatch a `'locationchange'` custom event, and have `AuthStatus` (and any future consumers) re-derive `href` via a `useSyncExternalStore` (or equivalent) that listens to `popstate` + `locationchange`. Cursor flagged this on PR #335 review.
 
+## Follow-ups deferred from Phase 2 (BiPoolExchange indexer + dashboard refactor)
+
+UI-only polish for the VirtualPool detail page. None block the indexer
+work; can ship as a small follow-up PR once Phase 2 is promoted and the
+dashboard reads from the new GraphQL surface.
+
+- [ ] **Dedupe "Last Reset".** The header tile (`VirtualPoolHeaderTiles` → `Last Bucket Reset`) and the `V2ExchangePanel` both render `relativeTime(v2Config.lastBucketUpdate)`. Pick one — leaning toward dropping the header version since the panel groups it with related bucket data. Cosmetic only.
+- [ ] **24h Volume tile for VPs.** Replace / supplement the lifetime "Wrapper Swaps" count with a USD-denominated 24h volume tile. Source from `BrokerSwapEvent` filtered to the wrapped exchangeId (since most v2 trading flows through Broker, not the wrapper). Needs a small daily-rollup query similar to the broker leaderboard.
+- [ ] **Bucket InfoPopover.** Add a popover to the `Bucket — {sym}` Stats explaining bucket reserves vs. the actual Reserve liquidity (people new to v2 confuse the two routinely).
+- [ ] **VP-aware empty states.** `V2ExchangePanel` already has the deprecated + error notes. Add a "syncing" state (the indexer hasn't filled the BiPoolExchange row yet — within the first ~10 min after VP deploy in the future). Today this collapses to the generic skeleton.
+- [ ] **Live oracle rate tile for VPs.** The Phase 2 indexer mirrors `BiPoolExchange.referenceRateFeedID` onto the wrapped Pool's `referenceRateFeedID` (forward + reverse link), so SortedOracles handlers populate `Pool.oraclePrice` / `oracleTimestamp` for VPs naturally. Add an `OraclePriceValue` tile in `VirtualPoolHeaderTiles` reading the same fields the FPMM tile uses. Gated on Pool.referenceRateFeedID being non-empty post-self-heal.
+
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
 Captured during the medium-tier benchmarking session that landed the
