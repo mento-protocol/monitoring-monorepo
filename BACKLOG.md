@@ -97,7 +97,7 @@ Sequence (each PR self-contained, deploy-able):
 
 The `cluster-<first-16-hex-of-deployer-EOA>` aggregator label (added 2026-05-04) flags contracts that share a deployer EOA but have no public project identity (typical MEV/MM operator pattern: one EOA deploys multiple unverified router contracts to shard volume). Currently labels:
 
-- `cluster-7dc08ec28f299c06` (Celo, deployer `0x7dc08ec28f299c062d2941de1f9cfb741df8f022`) — 4 contracts, ~$235k cumulative volume.
+- `cluster-7dc08ec28f299c06` (Celo, deployer `0x7dc08ec28f299c062d2941de1f9cfb741df8f022`) — 16 contracts, all deployed via the CREATE3 factory `0xba5Ed099…ba5Ed`, Binance-funded operator. Code iteration (one fresh build per address, unique bytecode hashes 18–26 KB) — NOT defensive rotation. Major refactor on 2026-03-29 took success rates from ~37% to >99.7% on Mento legs.
 
 Three Celo independents (`0x5dc3065e...`, `0x20216f30...`, `0x03637359...`) and two Monad addresses (`0xdb9b1e94...` MetaMask Delegation Manager, `0xf33cec38...` Gnosis Safe) were investigated 2026-05-04 but deliberately left as `unknown`:
 
