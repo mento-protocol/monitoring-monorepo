@@ -6,6 +6,7 @@ import {
 } from "@/lib/rebalance-check";
 import { NETWORKS, isConfiguredNetworkId } from "@/lib/networks";
 import { isValidAddress } from "@/lib/format";
+import { redactRpcUrl } from "@/lib/redact-rpc-url";
 
 const CACHE_TTL_MS = 30_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 500;
@@ -119,34 +120,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-/** Exported for testing. See redact-rpc-url.test.ts. */
-export function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
-  if (!(err instanceof Error)) {
-    if (typeof err === "string") return err.replaceAll(rpcUrl, "[RPC_URL]");
-    return err;
-  }
-  if (!containsRpcUrl(err, rpcUrl)) return err;
-  const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
-  // V8 stacks start with `Error: <message>\n    at …`, so the original
-  // URL is embedded in the stack's first line. Scrub the stack string too.
-  copy.stack = err.stack?.replaceAll(rpcUrl, "[RPC_URL]");
-  copy.name = err.name;
-  // viem / ethers wrap the transport error as `cause`; recurse so the URL
-  // can't leak through the cause chain (Sentry serializes `cause`).
-  if ("cause" in err && err.cause !== undefined) {
-    copy.cause = redactRpcUrl(err.cause, rpcUrl);
-  }
-  return copy;
-}
-
-/** Exported for testing. See redact-rpc-url.test.ts. */
-export function containsRpcUrl(err: Error, rpcUrl: string): boolean {
-  if (err.message.includes(rpcUrl)) return true;
-  if (err.stack?.includes(rpcUrl)) return true;
-  if (err.cause instanceof Error) return containsRpcUrl(err.cause, rpcUrl);
-  if (typeof err.cause === "string") return err.cause.includes(rpcUrl);
-  return false;
-}
+// Lifted to `@/lib/redact-rpc-url` so the v2-exchange-config route can
+// reuse the same redaction discipline. Re-exported here for backwards-
+// compat with `__tests__/redact-rpc-url.test.ts` (which imports from this
+// module path).
+export { redactRpcUrl, containsRpcUrl } from "@/lib/redact-rpc-url";
 
 async function runWithRetry(
   pool: string,

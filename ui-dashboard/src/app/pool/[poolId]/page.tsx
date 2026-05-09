@@ -239,12 +239,6 @@ function PoolDetail() {
     poolNeedsRates && ratePoolsData === undefined && !allPoolsError;
   const ratesError = allPoolsError !== undefined;
 
-  // Return null while redirect is pending to avoid a transient error flash
-  // and unnecessary error announcement for assistive tech. MUST sit below
-  // all hook declarations so React sees the same hook order every render —
-  // an early return above a hook violates the Rules of Hooks and throws
-  // "Rendered fewer hooks than expected" when the query resolves mid-page.
-  if (!poolLoading && !poolErr && !pool) return null;
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
   // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
@@ -257,6 +251,37 @@ function PoolDetail() {
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
   const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
+
+  // Canonicalize the URL when the requested tab was filtered out (e.g.
+  // ?tab=breaches on a virtual pool, where the breaches tab is hidden).
+  // Without this, refresh / share / back-forward render `tab` while the
+  // address bar still says `requestedTab`, so users can't reproduce the
+  // visible state. Same pattern as the legacy-poolId redirect above.
+  //
+  // MUST sit ABOVE the `!pool` early-return below — putting it after the
+  // return changes the hook count between the loading-render (effect
+  // fires) and the not-found-render (effect doesn't fire), which trips
+  // React's "rendered fewer hooks" guard.
+  useEffect(() => {
+    if (
+      pool &&
+      tab !== requestedTab &&
+      // Only rewrite when the requestedTab IS a valid Tab string but isn't
+      // currently visible; bare missing/unknown tab params can stay as-is
+      // because they always fall through to the default already.
+      TABS.includes(rawTab as Tab) &&
+      !visibleTabs.includes(rawTab as Tab)
+    ) {
+      setURL(tab, limit);
+    }
+  }, [pool, tab, requestedTab, rawTab, visibleTabs, limit, setURL]);
+
+  // Return null while redirect is pending to avoid a transient error flash
+  // and unnecessary error announcement for assistive tech. MUST sit below
+  // all hook declarations so React sees the same hook order every render —
+  // an early return above a hook violates the Rules of Hooks and throws
+  // "Rendered fewer hooks than expected" when the query resolves mid-page.
+  if (!poolLoading && !poolErr && !pool) return null;
 
   return (
     <div className="space-y-6">
@@ -289,68 +314,79 @@ function PoolDetail() {
             tradingLimitsError={tradingLimitsError}
           />
           <HealthPanel pool={pool} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <PoolTvlOverTimeChart
-              pool={pool}
-              network={network}
-              snapshots={dailySnapshots}
-              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
-              // pools skip both the snapshot and rate-map queries at the
-              // render layer — they go straight to the
-              // `historySupported={false}` branch, which shouldn't be
-              // masked by a loading skeleton or error copy driven by
-              // side queries that don't affect its output.
-              isLoading={
-                fpmmPool &&
-                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
-              }
-              // Rates-query failure only surfaces as chart error for pools
-              // that actually need the rate map (non-USD-pegged pairs) and
-              // that would render history if they could. USDm-leg pools
-              // keep rendering from the pool's own row without regard to
-              // the ORACLE_RATES cross-pool fetch.
-              hasError={
-                fpmmPool &&
-                (dailySnapshotError !== undefined ||
-                  (poolNeedsRates && ratesError))
-              }
-              rates={rates}
-              historySupported={fpmmPool}
-            />
-            <PoolVolumeOverTimeChart
-              pool={pool}
-              network={network}
-              snapshots={dailySnapshots}
-              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
-              // pools skip both the snapshot and rate-map queries at the
-              // render layer — they go straight to the
-              // `historySupported={false}` branch, which shouldn't be
-              // masked by a loading skeleton or error copy driven by
-              // side queries that don't affect its output.
-              isLoading={
-                fpmmPool &&
-                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
-              }
-              // Rates-query failure only surfaces as chart error for pools
-              // that actually need the rate map (non-USD-pegged pairs) and
-              // that would render history if they could. USDm-leg pools
-              // keep rendering from the pool's own row without regard to
-              // the ORACLE_RATES cross-pool fetch.
-              hasError={
-                fpmmPool &&
-                (dailySnapshotError !== undefined ||
-                  (poolNeedsRates && ratesError))
-              }
-              rates={rates}
-              historySupported={fpmmPool}
-            />
-            <ReservesPanel
-              pool={pool}
-              rates={rates}
-              ratesLoading={poolNeedsRates && ratesLoading}
-              ratesError={poolNeedsRates && ratesError}
-            />
-          </div>
+          {/*
+            TVL / Volume / Reserves panels render FPMM-only data — virtual
+            pools wrap a v2 BiPoolManager exchange where reserves live in
+            buckets surfaced in the V2ExchangePanel above. Hiding these
+            panels avoids three "History unavailable" / "Pool has no
+            reserves yet" empty states that the user can do nothing with.
+            Phase 2 of the plan adds a per-exchangeId activity chart here
+            for virtual pools.
+          */}
+          {fpmmPool && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <PoolTvlOverTimeChart
+                pool={pool}
+                network={network}
+                snapshots={dailySnapshots}
+                // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+                // pools skip both the snapshot and rate-map queries at the
+                // render layer — they go straight to the
+                // `historySupported={false}` branch, which shouldn't be
+                // masked by a loading skeleton or error copy driven by
+                // side queries that don't affect its output.
+                isLoading={
+                  fpmmPool &&
+                  (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+                }
+                // Rates-query failure only surfaces as chart error for pools
+                // that actually need the rate map (non-USD-pegged pairs) and
+                // that would render history if they could. USDm-leg pools
+                // keep rendering from the pool's own row without regard to
+                // the ORACLE_RATES cross-pool fetch.
+                hasError={
+                  fpmmPool &&
+                  (dailySnapshotError !== undefined ||
+                    (poolNeedsRates && ratesError))
+                }
+                rates={rates}
+                historySupported={fpmmPool}
+              />
+              <PoolVolumeOverTimeChart
+                pool={pool}
+                network={network}
+                snapshots={dailySnapshots}
+                // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+                // pools skip both the snapshot and rate-map queries at the
+                // render layer — they go straight to the
+                // `historySupported={false}` branch, which shouldn't be
+                // masked by a loading skeleton or error copy driven by
+                // side queries that don't affect its output.
+                isLoading={
+                  fpmmPool &&
+                  (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+                }
+                // Rates-query failure only surfaces as chart error for pools
+                // that actually need the rate map (non-USD-pegged pairs) and
+                // that would render history if they could. USDm-leg pools
+                // keep rendering from the pool's own row without regard to
+                // the ORACLE_RATES cross-pool fetch.
+                hasError={
+                  fpmmPool &&
+                  (dailySnapshotError !== undefined ||
+                    (poolNeedsRates && ratesError))
+                }
+                rates={rates}
+                historySupported={fpmmPool}
+              />
+              <ReservesPanel
+                pool={pool}
+                rates={rates}
+                ratesLoading={poolNeedsRates && ratesLoading}
+                ratesError={poolNeedsRates && ratesError}
+              />
+            </div>
+          )}
         </>
       )}
 
