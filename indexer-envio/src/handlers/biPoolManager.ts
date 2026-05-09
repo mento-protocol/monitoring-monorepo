@@ -56,34 +56,67 @@ async function ensureBiPoolExchange(
   const id = exchangeRowId(chainId, exchangeId);
   const existing = await context.BiPoolExchange.get(id);
   if (existing) {
+    let current: BiPoolExchange = existing;
+    // Stub-config retry: `ExchangeCreated` writes a partial row when
+    // `poolExchangeEffect` fails, leaving the config sentinel triple at
+    // zero. Detect and re-run the RPC so the v2 panel doesn't stay at
+    // "—" forever even though the exchange is actively emitting events.
+    if (
+      current.referenceRateFeedID === ZERO_ADDRESS &&
+      current.spread === BigInt(0) &&
+      current.referenceRateResetFrequency === BigInt(0)
+    ) {
+      const struct = await context.effect(poolExchangeEffect, {
+        chainId,
+        exchangeProvider,
+        exchangeId,
+      });
+      if (struct && struct.pricingModule !== ZERO_ADDRESS) {
+        current = {
+          ...current,
+          // Preserve bucket fields — BucketsUpdated may have updated them
+          // since ExchangeCreated; only fill the static config triple here.
+          spread: struct.spread,
+          referenceRateFeedID: struct.referenceRateFeedID,
+          referenceRateResetFrequency: struct.referenceRateResetFrequency,
+          minimumReports: struct.minimumReports,
+          stablePoolResetSize: struct.stablePoolResetSize,
+          pricingModule: struct.pricingModule,
+          pricingModuleName:
+            lookupPricingModuleName(chainId, struct.pricingModule) ?? undefined,
+          updatedAtBlock: blockNumber,
+          updatedAtTimestamp: blockTimestamp,
+        };
+        context.BiPoolExchange.set(current);
+      }
+    }
     // The seed-time `Pool.getWhere.wrappedExchangeId.eq` may have returned
     // 0 results because no VP had self-healed yet. Re-attempt the link
     // here so a VP that heals AFTER the row is seeded still gets joined.
-    if (!existing.wrappedByPoolId) {
+    if (!current.wrappedByPoolId) {
       const wrappingPools =
         await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
       const wrappedByPoolId = wrappingPools.find(
         (p: Pool) => p.chainId === chainId,
       )?.id;
       if (wrappedByPoolId) {
-        const patched: BiPoolExchange = {
-          ...existing,
+        current = {
+          ...current,
           wrappedByPoolId,
           updatedAtBlock: blockNumber,
           updatedAtTimestamp: blockTimestamp,
         };
-        context.BiPoolExchange.set(patched);
+        context.BiPoolExchange.set(current);
         await mirrorFeedIdToPool(
           context,
           wrappedByPoolId,
-          existing.referenceRateFeedID,
+          current.referenceRateFeedID,
           blockNumber,
           blockTimestamp,
         );
-        return patched;
       }
     }
-    return existing;
+    return current;
   }
 
   const struct = await context.effect(poolExchangeEffect, {
