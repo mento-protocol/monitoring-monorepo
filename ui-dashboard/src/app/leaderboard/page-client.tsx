@@ -221,12 +221,13 @@ export function LeaderboardClient() {
     [updateRange],
   );
 
-  // Page chrome / KPIs / chart / producer table all read from the
+  // Page chrome / KPIs / chart / trader table all read from the
   // trader-side query for the active venue. The v2 aggregator query is
   // independent — its loading/error feed only the aggregator table below
   // so a slow or erroring `BrokerAggregatorDailySnapshot` (e.g. during the
   // post-deploy resync window for that new entity) doesn't take down the
-  // producer view that's the actual outreach driver. Codex review:
+  // trader view (the aggregator panel is the migration-outreach surface;
+  // the trader table is a retention-metrics view). Codex review:
   // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
   const tableIsLoading =
     venue === "v3"
@@ -288,7 +289,7 @@ export function LeaderboardClient() {
           <p className="mt-1 text-sm text-slate-400">
             {venue === "v3"
               ? "Top traders on Mento by USD volume — system addresses hidden by default."
-              : "Top legacy-v2 producers — wallets and integrators we want to migrate to v3."}
+              : "Top legacy-v2 traders on Mento by USD volume — system addresses hidden by default."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
