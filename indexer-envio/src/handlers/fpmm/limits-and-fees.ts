@@ -260,16 +260,34 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       active = rpc.rebalanceThreshold;
     }
   }
+  // RPC fallback succeeded ⇒ contract had a live oracle at this block.
+  // If the local pool row still has `oracleOk=false` from deploy-time
+  // RPC misses or a prior stale state, lift it now so the upsertPool
+  // health/breach pipeline + the post-upsert `oracleOk` gate see the
+  // correct live-oracle status.
+  const rpcSucceeded = !medianFresh && priceDifferenceFromMedian !== null;
 
   if (priceDifferenceFromMedian === null || active === null) {
     // Neither local median nor RPC produced usable values. Write the
     // new threshold split fields + Known flag so derive can succeed
     // once a live median lands; preserve existing breach/health state.
+    //
+    // Special-case known-zero: when governance just configured the pool
+    // to never rebalance (above == 0 && below == 0), also clear the
+    // active `rebalanceThreshold`. `effectiveThreshold` reads the
+    // active value first (before consulting `rebalanceThresholdsKnown`),
+    // so leaving the prior positive value here would let breach checks
+    // continue tripping against the old threshold even though the new
+    // configuration says "never rebalance". Setting `rebalanceThreshold`
+    // = 0 + Known=true makes `effectiveThreshold` return the
+    // never-trips sentinel.
+    const isKnownZero = above === 0 && below === 0;
     context.Pool.set({
       ...existing,
       rebalanceThresholdAbove: above,
       rebalanceThresholdBelow: below,
       rebalanceThresholdsKnown: true,
+      ...(isKnownZero ? { rebalanceThreshold: 0 } : {}),
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     });
@@ -289,6 +307,7 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       rebalanceThreshold: active,
       rebalanceThresholdsKnown: true,
       priceDifference: priceDifferenceFromMedian,
+      ...(rpcSucceeded ? { oracleOk: true } : {}),
     },
     existing: { pool: existing },
   });
