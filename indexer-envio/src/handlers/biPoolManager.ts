@@ -58,14 +58,15 @@ async function ensureBiPoolExchange(
   if (existing) {
     let current: BiPoolExchange = existing;
     // Stub-config retry: `ExchangeCreated` writes a partial row when
-    // `poolExchangeEffect` fails, leaving the config sentinel triple at
-    // zero. Detect and re-run the RPC so the v2 panel doesn't stay at
-    // "—" forever even though the exchange is actively emitting events.
-    if (
-      current.referenceRateFeedID === ZERO_ADDRESS &&
-      current.spread === BigInt(0) &&
-      current.referenceRateResetFrequency === BigInt(0)
-    ) {
+    // `poolExchangeEffect` fails, leaving config sentinels at zero.
+    // Detect via `referenceRateFeedID === ZERO_ADDRESS` only — that's
+    // the most reliable single signal because no event-driven write
+    // in this handler ever touches the feedID (only RPC backfill
+    // fills it). Spread + buckets can be incrementally filled by
+    // `SpreadUpdated` / `BucketsUpdated` between ExchangeCreated
+    // and the first retry, so keying on those would let the stub
+    // hide as "partially filled" and never retry the rest.
+    if (current.referenceRateFeedID === ZERO_ADDRESS) {
       const struct = await context.effect(poolExchangeEffect, {
         chainId,
         exchangeProvider,
@@ -74,9 +75,9 @@ async function ensureBiPoolExchange(
       if (struct && struct.pricingModule !== ZERO_ADDRESS) {
         current = {
           ...current,
-          // Preserve bucket fields — BucketsUpdated may have updated them
-          // since ExchangeCreated; only fill the static config triple here.
-          spread: struct.spread,
+          // Preserve bucket + spread fields — BucketsUpdated /
+          // SpreadUpdated may have already moved them past the struct's
+          // values; only fill the still-stubbed fields.
           referenceRateFeedID: struct.referenceRateFeedID,
           referenceRateResetFrequency: struct.referenceRateResetFrequency,
           minimumReports: struct.minimumReports,
@@ -84,10 +85,26 @@ async function ensureBiPoolExchange(
           pricingModule: struct.pricingModule,
           pricingModuleName:
             lookupPricingModuleName(chainId, struct.pricingModule) ?? undefined,
+          // spread: only fill if still at the stub default — don't
+          // clobber a SpreadUpdated value with the struct's older spread.
+          spread: current.spread === BigInt(0) ? struct.spread : current.spread,
           updatedAtBlock: blockNumber,
           updatedAtTimestamp: blockTimestamp,
         };
         context.BiPoolExchange.set(current);
+        // If the wrapping VP is already linked (exchange-first → VP-link
+        // → bucket retry path), the stub fill JUST recovered the feedID
+        // — mirror it now so SortedOracles wakes the VP without waiting
+        // for the next BucketsUpdated event.
+        if (current.wrappedByPoolId) {
+          await mirrorFeedIdToPool(
+            context,
+            current.wrappedByPoolId,
+            current.referenceRateFeedID,
+            blockNumber,
+            blockTimestamp,
+          );
+        }
       }
     }
     // The seed-time `Pool.getWhere.wrappedExchangeId.eq` may have returned

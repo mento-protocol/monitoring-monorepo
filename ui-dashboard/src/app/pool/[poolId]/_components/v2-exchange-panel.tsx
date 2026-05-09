@@ -42,6 +42,18 @@ export function V2ExchangePanel({
   // our window). Worth surfacing rather than rendering nothing — operators
   // shouldn't have to guess whether the panel is empty by design or broken.
   if (!v2Config) return <V2ExchangeSyncingNote />;
+  // ExchangeCreated wrote a stub row when `poolExchangeEffect` failed
+  // (zero-feed sentinel). Indexer-side stub-retry kicks in on the next
+  // bucket / spread event but until then the row would render as "0 bps,
+  // 0 buckets, 1970 last reset" — misleading during the deploy/RPC window
+  // the new isolated GraphQL query is meant to degrade through. Treat the
+  // zero-feed signature as "syncing" same as a missing row.
+  if (
+    v2Config.referenceRateFeedID ===
+    "0x0000000000000000000000000000000000000000"
+  ) {
+    return <V2ExchangeSyncingNote />;
+  }
 
   if (v2Config.isDeprecated) {
     return (

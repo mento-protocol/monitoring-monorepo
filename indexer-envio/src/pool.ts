@@ -405,6 +405,7 @@ export async function selfHealWrappedExchangeId(
   if (!result) return pool;
   const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
   const exchange = await context.BiPoolExchange.get(exchangeRowId);
+  let healedFeedId = pool.referenceRateFeedID;
   if (exchange) {
     if (exchange.wrappedByPoolId !== pool.id) {
       context.BiPoolExchange.set({
@@ -426,10 +427,24 @@ export async function selfHealWrappedExchangeId(
       blockNumber,
       blockTimestamp,
     );
+    // CRUCIAL: also flow the mirrored feedID back to the caller so
+    // `upsertPool`'s next spread doesn't overwrite the just-persisted
+    // value. `mirrorFeedIdToPool` does its own `Pool.set`, but the
+    // healed Pool returned from this function feeds into `next` in
+    // upsertPool which then persists again — without carrying the
+    // updated feedID here, that second write would blank the mirror
+    // that just landed.
+    if (
+      exchange.referenceRateFeedID &&
+      exchange.referenceRateFeedID !== ZERO_ADDRESS
+    ) {
+      healedFeedId = exchange.referenceRateFeedID;
+    }
   }
   return {
     ...pool,
     wrappedExchangeId: result.exchangeId,
+    referenceRateFeedID: healedFeedId,
   };
 }
 
