@@ -29,6 +29,7 @@ import "./handlers/fpmm/state-sync";
 import "./handlers/fpmm/limits-and-fees";
 import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
+import "./handlers/biPoolManager";
 import "./handlers/feeToken";
 import "./handlers/openLiquidityStrategy";
 import "./handlers/breakerBox";

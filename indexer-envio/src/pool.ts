@@ -424,6 +424,9 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceReward: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
+  // Set at VirtualPoolDeployed time via bytecode pattern extraction.
+  // FPMM pools never carry an exchangeId so this stays undefined for them.
+  wrappedExchangeId: undefined as string | undefined,
   token0Decimals: 18,
   token1Decimals: 18,
   // Health score accumulators
