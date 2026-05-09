@@ -216,6 +216,39 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
       reverse-lookup. Edge case unlikely to bite today (active VPs all emit
       `BucketsUpdated` every 6 minutes), so deferred.
 
+- [ ] **`@index` on `BiPoolExchange.wrappedByPoolId`.** Dashboard's
+      `POOL_V2_EXCHANGE` filters on the field. At ~12 BiPoolExchange rows on
+      Celo today the scan is trivial; once exchange count grows on Monad / new
+      chains, the filter becomes O(N). Single-line schema change but triggers
+      a full re-sync — defer until either query latency degrades or the next
+      schema-touching PR rides it in. Flagged by claude[bot].
+
+- [ ] **Sentinel for orphan exchanges (`wrappedByPoolId` will-never-be-set).**
+      `ensureBiPoolExchange` re-runs `Pool.getWhere.wrappedExchangeId.eq()`
+      on every `BucketsUpdated` (every 360s) for any exchange that has no
+      wrapping VP. Negligible at current 12-exchange scale, but at
+      higher scale (or for v2-only exchanges that genuinely have no wrapper)
+      this is unbounded retry work. Fix: add a "checked, no wrapper" sentinel
+      (e.g. `wrappedByPoolIdChecked: Boolean!`) and short-circuit the retry.
+      Schema change + re-sync, so deferred. Flagged by claude[bot].
+
+- [ ] **Block-scoped `getPoolExchange` reads.** `fetchPoolExchange` reads at
+      `latest`, not the event block. For freshly-created exchanges during
+      steady-state sync, latest ≈ event block. For deep historical replay,
+      a future governance change to spread / feedID / reset frequency could
+      stamp a future config onto a past row. Currently safe because: (a) the
+      static-config triple is governance-rare in practice, (b) the all-zero
+      detection skips destroyed exchanges, (c) `BucketsUpdated` /
+      `SpreadUpdated` immediately overwrite. Real fix wires the BiPoolManager
+      fetchers through `readContractWithBlockFallback` (with archive-RPC
+      fallback) the same way `fetchReserves` does today. Flagged by codex.
+
+- [ ] **VP detail page: oracle-tile layout shift.** When `Pool.referenceRateFeedID`
+      self-heals, the header transitions from 2 → 3 tiles on the next page
+      load. Use a fixed-height invisible placeholder to hold the slot for VPs
+      where the field is empty. UX nit; not user-visible most of the time.
+      Flagged by claude[bot].
+
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
 Captured during the medium-tier benchmarking session that landed the
