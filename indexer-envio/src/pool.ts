@@ -380,23 +380,40 @@ export async function selfHealRebalanceThresholds(
 
 /** Self-heal `Pool.wrappedExchangeId` for VirtualPools whose
  * `VirtualPoolDeployed` event fired pre-start_block (and so the bytecode
- * extraction in the factory handler never ran). Reads the VP bytecode
- * once per address (the effect is `cache: true` — bytecode is immutable
- * for a deployed contract — so the actual RPC fires exactly once per VP
- * across the whole sync). Returns the (possibly healed) Pool — caller
- * persists. Also patches the matching `BiPoolExchange.wrappedByPoolId`
- * back-reference if the exchange row already exists, so the dashboard's
- * `wrappedByPoolId`-keyed GraphQL query finds the join after a heal that
- * only the Pool side knew about.
+ * extraction in the factory handler never ran).
  *
- * No-op on FPMM pools and on VPs that already have the field set. */
+ * Authoritative VP detector is `vpExchangeIdEffect` (bytecode pattern).
+ * The previous source-based gate (`isVirtualPool(pool)`) read
+ * `pool.source.includes("virtual")` — but VirtualPool.Swap / Mint / Burn
+ * handlers reuse the `fpmm_*` source keys (intentional: they share
+ * priority with FPMM events for `pickPreferredSource`), so a pre-
+ * start_block VP whose first observed event was one of those would
+ * never get the "virtual" substring and the heal would be skipped.
+ * The bytecode pattern is definitive — it returns null for FPMMs and
+ * `{exchangeProvider, exchangeId}` for VPs.
+ *
+ * The effect is `cache: true` and bytecode is immutable, so for actual
+ * VPs the cache fires the RPC once per address across the whole sync.
+ * For FPMM pools the bytecode pattern doesn't match → effect handler
+ * sets `context.cache = false` and returns undefined; this means each
+ * unhealed FPMM event triggers an `eth_getCode` (within a batch the
+ * load-layer memoizes by input key, so the cost is one RPC per FPMM
+ * address per batch). Acceptable cost in exchange for closing the
+ * testnet edge case — production has zero pre-start_block active VPs.
+ *
+ * Also patches the matching `BiPoolExchange.wrappedByPoolId` back-
+ * reference if the exchange row already exists, so the dashboard's
+ * `wrappedByPoolId`-keyed GraphQL query finds the join after a heal
+ * that only the Pool side knew about.
+ *
+ * No-op on pools that already have `wrappedExchangeId` set. */
 export async function selfHealWrappedExchangeId(
   context: PoolContext,
   pool: Pool,
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<Pool> {
-  if (!isVirtualPool(pool) || pool.wrappedExchangeId) return pool;
+  if (pool.wrappedExchangeId) return pool;
   const poolAddr = extractAddressFromPoolId(pool.id);
   const result = await context.effect(vpExchangeIdEffect, {
     chainId: pool.chainId,
@@ -662,22 +679,29 @@ export const upsertPool = async ({
   // (priceDifference, oraclePrice flip, breach status) sees the corrected
   // orientation. Same helper that handlers call before reading the field.
   const invertHealed = await selfHealInvertRateFeed(context, existingInitial);
-  // Self-heal `wrappedExchangeId` for VirtualPools whose
-  // VirtualPoolDeployed event fired pre-start_block. Bytecode is immutable
-  // and the effect is `cache: true` so the actual RPC fires once per VP
-  // address across the whole sync regardless of how many events touch it.
-  // Inline gate on the hot path so FPMM events + already-healed VPs skip
-  // the await microtask hop; the helper itself early-returns on the same
-  // condition for off-hot-path callers.
-  const existing =
-    invertHealed.wrappedExchangeId || !isVirtualPool(invertHealed)
-      ? invertHealed
-      : await selfHealWrappedExchangeId(
-          context,
-          invertHealed,
-          blockNumber,
-          blockTimestamp,
-        );
+  // Self-heal `wrappedExchangeId` using `vpExchangeIdEffect` (bytecode-
+  // pattern detector) as the authoritative VP test. The previous source-
+  // based gate (`isVirtualPool(pool)` checks `pool.source.includes("virtual")`)
+  // missed pre-start_block VPs whose first observed event is `VirtualPool.Swap`
+  // / `Mint` / `Burn` — those handlers reuse the `fpmm_*` source keys
+  // (intentional: they share priority with FPMM events for `pickPreferredSource`),
+  // so the pool source never gets the "virtual" substring → self-heal was
+  // skipped → `wrappedExchangeId` never populated. Bytecode is immutable
+  // and the effect is `cache: true`, so the per-VP RPC fires once per
+  // address across the whole sync; FPMM-event callers hit the bytecode
+  // pattern check, get a null result, and the effect falls through. The
+  // null path explicitly sets `context.cache = false` (see
+  // `vpExchangeIdEffect` in `src/rpc/effects.ts`) so a transient RPC
+  // failure won't be persisted; the cost is one `eth_getCode` per FPMM
+  // event whose pool isn't yet healed.
+  const existing = invertHealed.wrappedExchangeId
+    ? invertHealed
+    : await selfHealWrappedExchangeId(
+        context,
+        invertHealed,
+        blockNumber,
+        blockTimestamp,
+      );
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.

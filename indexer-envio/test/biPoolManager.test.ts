@@ -76,6 +76,16 @@ type VPDeployedArgs = {
   mockEventData: MockEventData;
 };
 
+type VPSwapArgs = {
+  sender: string;
+  amount0In: bigint;
+  amount1In: bigint;
+  amount0Out: bigint;
+  amount1Out: bigint;
+  to: string;
+  mockEventData: MockEventData;
+};
+
 type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
@@ -88,11 +98,14 @@ type GeneratedModule = {
     VirtualPoolFactory: {
       VirtualPoolDeployed: EventProcessor<VPDeployedArgs>;
     };
+    VirtualPool: {
+      Swap: EventProcessor<VPSwapArgs>;
+    };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, BiPoolManager, VirtualPoolFactory } = TestHelpers;
+const { MockDb, BiPoolManager, VirtualPoolFactory, VirtualPool } = TestHelpers;
 
 const CHAIN_ID = 42220; // Celo mainnet — pricingModule index resolves here.
 const BIPOOL_MANAGER_ADDRESS = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
@@ -526,6 +539,50 @@ describe("BiPoolManager handlers", () => {
         | undefined;
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
+    });
+
+    it("self-heals wrappedExchangeId when first event is VirtualPool.Swap (fpmm_* source override)", async function () {
+      this.timeout(10_000);
+      // Pre-start_block VP scenario: VirtualPoolDeployed fired before our
+      // start_block, so the factory handler never ran. The first event we
+      // observe for this VP is `VirtualPool.Swap`, which calls upsertPool
+      // with `source: "fpmm_swap"` (intentional reuse — VP swap shares
+      // priority with FPMM swap for `pickPreferredSource`).
+      //
+      // Before the source-gate refactor, `selfHealWrappedExchangeId` gated
+      // on `isVirtualPool(pool)` (which checks `pool.source.includes("virtual")`),
+      // so a VP with `source = "fpmm_swap"` would be treated as an FPMM
+      // and the heal would be skipped → `wrappedExchangeId` stayed empty
+      // forever. The bytecode-pattern detector (`vpExchangeIdEffect`) is
+      // now the authoritative VP test, so the heal runs regardless of
+      // the source string.
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+
+      let mockDb = MockDb.createMockDb();
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | { source: string; wrappedExchangeId?: string }
+        | undefined;
+      assert.ok(pool);
+      // Source stamps as fpmm_swap (the gate-bypass under test) — without
+      // the refactor, the next assertion would fail because the source
+      // gate would have skipped the heal.
+      assert.equal(pool!.source, "fpmm_swap");
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
     });
   });
 });
