@@ -26,7 +26,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleTxHash
       priceDifference
       rebalanceThreshold
-      rebalanceThresholdsKnown
       oracleNumReporters
       oracleExpiry
       lastRebalancedAt
@@ -46,6 +45,24 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves1
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Per-pool `rebalanceThresholdsKnown` flag, scoped to a chain. Kept OFF
+// `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
+// `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
+// the new field before the prod indexer has it would otherwise reject the
+// entire pools query. Isolating means consumers (`isNeverRebalance`,
+// `effectiveThreshold` in `health.ts`) degrade safely to the 10000-bps
+// under-bound until the merge lands. Triggered by Cursor's learned rule
+// "Isolate new Envio/Hasura entity fields in separate queries for
+// schema-lag resilience".
+export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
+  query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      rebalanceThresholdsKnown
     }
   }
 `;

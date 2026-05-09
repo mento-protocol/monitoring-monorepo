@@ -5,6 +5,7 @@ import * as queries from "@/lib/queries";
 const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_WITH_HEALTH",
   "ALL_POOLS_BREACH_ROLLUP",
+  "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ORACLE_RATES",
   "RECENT_SWAPS",
   "POOL_SWAPS",
@@ -105,7 +106,6 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             oracleTxHash
             priceDifference
             rebalanceThreshold
-            rebalanceThresholdsKnown
             oracleNumReporters
             oracleExpiry
             lastRebalancedAt
@@ -128,6 +128,24 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
           }
         }
       `),
+    );
+  });
+
+  it("ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN is isolated (rationale: schema-lag resilience)", () => {
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdsKnown",
+    );
+    // No heavy / unrelated fields piggybacking — isolation must stay tight
+    // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
+    // not the entire pools page.
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "healthStatus",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "oraclePrice",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "rebalanceThreshold ", // trailing space → matches the bare field, not "rebalanceThresholdsKnown"
     );
   });
 

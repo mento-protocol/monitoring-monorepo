@@ -13,6 +13,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_BREACH_ROLLUP,
+  ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
@@ -393,6 +394,7 @@ export async function fetchNetworkData(
     tradingLimitsResult,
     olsResult,
     breachRollupResult,
+    rebalanceThresholdsKnownResult,
     cdpPoolIdsResult,
   ] = await Promise.allSettled([
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
@@ -428,6 +430,16 @@ export async function fetchNetworkData(
         healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
+    // `rebalanceThresholdsKnown` flag — isolated for the same schema-lag
+    // reason as the breach rollup above. Consumers (`isNeverRebalance`,
+    // `effectiveThreshold`) degrade safely to the 10000-bps under-bound
+    // when the field is missing.
+    timed<{
+      Pool: {
+        id: string;
+        rebalanceThresholdsKnown?: boolean;
+      }[];
+    }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
     // RPC probe — no indexer entity for CDP strategy, so we detect by
     // calling `getCDPConfig` on each unique rebalancer contract. Cached at
     // module scope so the cost is ~1 call per deployed strategy per TTL.
@@ -455,6 +467,22 @@ export async function fetchNetworkData(
             // pair counters captured at different polling cycles.
             healthTotalSeconds: r.healthTotalSeconds,
           };
+    });
+  }
+
+  // Merge `rebalanceThresholdsKnown` into the pool objects. On failure
+  // (schema-lag during deploy), the field stays `undefined` and
+  // `isNeverRebalance` / `effectiveThreshold` fall back to the safe
+  // 10000-bps under-bound.
+  if (rebalanceThresholdsKnownResult.status === "fulfilled") {
+    const knownById = new Map(
+      (rebalanceThresholdsKnownResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const r = knownById.get(p.id);
+      return r == null
+        ? p
+        : { ...p, rebalanceThresholdsKnown: r.rebalanceThresholdsKnown };
     });
   }
 
