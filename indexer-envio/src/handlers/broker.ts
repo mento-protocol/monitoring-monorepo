@@ -167,7 +167,17 @@ Broker.Swap.handler(async ({ event, context }) => {
   // BrokerSwapEvent doesn't have a Pool entity backing it (v2 exchanges
   // aren't in the `Pool` table). The static contracts.json check still
   // catches Mento internal addresses.
-  const callerIsSystem = isSystemAddress(event.chainId, caller);
+  //
+  // Check BOTH `caller` (signer EOA) AND `brokerCaller` (msg.sender to
+  // Broker): protocol-internal contracts that call Broker — Reserve
+  // multisig (Gnosis Safe), governance proxies, internal rebalancers —
+  // appear as `brokerCaller`, not `caller`. Filtering only on `caller`
+  // would miss a Safe-initiated swap (where `caller` is one of the Safe
+  // owner EOAs, not the Safe address registered in system-addresses.json).
+  // Either match is enough to mark the row as system-originated.
+  const callerIsSystem =
+    isSystemAddress(event.chainId, caller) ||
+    isSystemAddress(event.chainId, brokerCaller);
   const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
   const existingCallerDay =
     await context.BrokerTraderDailySnapshot.get(callerDayId);

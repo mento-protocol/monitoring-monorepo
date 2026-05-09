@@ -341,6 +341,37 @@ describe("Broker.Swap handler", () => {
     assert.equal(row!.lastSeenTimestamp, 1_700_000_500n);
   });
 
+  it("flags isSystemAddress=true when brokerCaller is a Mento internal contract even if caller is a non-system EOA", async () => {
+    // Regression guard for the gap codex flagged on PR #363: a Mento Reserve
+    // multisig (Gnosis Safe) calling Broker has `brokerCaller = Safe address`
+    // (in system-addresses) but `caller = Safe owner EOA` (NOT in system-
+    // addresses). Filtering only on `caller` would surface those swaps as
+    // user-facing flow on the leaderboard. The handler now ORs both checks.
+    const RESERVE = "0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9"; // Celo Reserve from @mento-protocol/contracts
+    const SAFE_OWNER_EOA = "0xc1cccccccccccccccccccccccccccccccccccccc";
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      brokerCaller: RESERVE, // Safe address, IS in system-addresses
+      txFrom: SAFE_OWNER_EOA, // owner EOA, NOT in system-addresses
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const id = `${CHAIN_CELO}-${SAFE_OWNER_EOA.toLowerCase()}-${dayTs}`;
+    const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
+      | { caller: string; isSystemAddress: boolean }
+      | undefined;
+    assert.isOk(row, "BrokerTraderDailySnapshot row missing");
+    assert.equal(row!.caller, SAFE_OWNER_EOA.toLowerCase());
+    assert.equal(
+      row!.isSystemAddress,
+      true,
+      "brokerCaller in system-addresses should propagate isSystemAddress=true even when caller (signer EOA) is not registered",
+    );
+  });
+
   it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {
     // Same caller, two swaps: one direct, one via the v3 Router. Only the
     // direct row should land in the v2 trader rollup; the router-driven row
