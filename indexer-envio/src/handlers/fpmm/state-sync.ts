@@ -155,22 +155,30 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     // health counters, not the pre-recordHealthSample values.
     pool = { ...pool, ...poolUpdate };
     context.Pool.set(pool);
-    const snapshot: OracleSnapshot = {
-      id,
-      chainId: event.chainId,
-      poolId,
-      timestamp: blockTimestamp,
-      oraclePrice: updateReservesOraclePrice,
-      oracleOk: pool.oracleOk,
-      numReporters: pool.oracleNumReporters,
-      priceDifference: pool.priceDifference,
-      rebalanceThreshold: pool.rebalanceThreshold,
-      source: "update_reserves",
-      blockNumber,
-      txHash: event.transaction.hash,
-      ...snapshotFields,
-    };
-    context.OracleSnapshot.set(snapshot);
+    // Skip the OracleSnapshot row when orientation is unknown: we'd be
+    // writing a fresh deviation alongside a stale (often zero) oraclePrice
+    // because of the orientation gate above. A row whose displayed price
+    // doesn't match the deviation is worse than no row — the chart
+    // history would show a fake sample. Pool entity still gets updated;
+    // the next event with known orientation will write the snapshot.
+    if (orientationKnown) {
+      const snapshot: OracleSnapshot = {
+        id,
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        oraclePrice: updateReservesOraclePrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "update_reserves",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
   }
 
   await upsertSnapshot({
@@ -366,22 +374,27 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     pool = { ...pool, ...poolUpdate };
     context.Pool.set(pool);
 
-    const snapshot: OracleSnapshot = {
-      id,
-      chainId: event.chainId,
-      poolId,
-      timestamp: blockTimestamp,
-      oraclePrice: rebalancedOraclePrice,
-      oracleOk: pool.oracleOk,
-      numReporters: pool.oracleNumReporters,
-      priceDifference: pool.priceDifference,
-      rebalanceThreshold: pool.rebalanceThreshold,
-      source: "rebalanced",
-      blockNumber,
-      txHash: event.transaction.hash,
-      ...snapshotFields,
-    };
-    context.OracleSnapshot.set(snapshot);
+    // Skip OracleSnapshot when orientation is unknown — see UpdateReserves
+    // handler for the rationale (avoid mixing fresh deviation with a
+    // stale/preserved oraclePrice in the chart history).
+    if (rebalancedOrientationKnown) {
+      const snapshot: OracleSnapshot = {
+        id,
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        oraclePrice: rebalancedOraclePrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "rebalanced",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
   }
 
   await upsertSnapshot({

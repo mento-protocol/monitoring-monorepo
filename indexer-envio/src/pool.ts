@@ -60,14 +60,32 @@ export const DEVIATION_CRITICAL_DEN = 100n;
  */
 export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
-/** Resolve the effective threshold in bps. The schema-default of 0 means the
- * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
- * pools don't trip the breach predicate while we wait for the RPC self-heal.
+/** Resolve the effective threshold in bps. Three states:
+ *  - `> 0`: the on-chain configured threshold (active side).
+ *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
+ *    to never rebalance. Treat as effectively infinite so the breach
+ *    predicate never trips — the pool isn't supposed to rebalance.
+ *  - `0` AND `rebalanceThresholdsKnown=false`: indexer hasn't read on-chain
+ *    yet. Fall back to 10000 (100%) so the predicate doesn't false-trip
+ *    while waiting for self-heal.
+ *
+ * The schema-default unknown case must NOT collapse with the legitimate
+ * "never rebalance" case — both have `rebalanceThreshold === 0`, but only
+ * the latter has `rebalanceThresholdsKnown=true`.
  */
-export const effectiveThreshold = (
-  pool: Pick<Pool, "rebalanceThreshold">,
-): bigint =>
-  BigInt(pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000);
+export const effectiveThreshold = (pool: {
+  rebalanceThreshold: number;
+  // Optional: callers passing a synthetic threshold value (e.g.
+  // `deviationBreach` healing from a captured entry threshold) may not
+  // carry the Known flag. In that case we treat `0` as the unread
+  // sentinel and fall back to 10000 — matches pre-Lever-4 behaviour.
+  rebalanceThresholdsKnown?: boolean;
+}): bigint => {
+  if (pool.rebalanceThreshold > 0) return BigInt(pool.rebalanceThreshold);
+  // 1e12 is well past any realistic priceDifference (which is bps,
+  // bounded by ~10000) so the breach math reliably evaluates to false.
+  return pool.rebalanceThresholdsKnown ? 10n ** 12n : 10000n;
+};
 
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
  * line, integer-safe. Used by both the live status branch (here) and the

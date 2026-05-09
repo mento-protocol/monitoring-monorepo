@@ -1792,6 +1792,10 @@ describe("Envio Celo indexer handlers", () => {
       token0Decimals: 18,
       token1Decimals: 18,
       invertRateFeed: false,
+      // Required for OracleSnapshot to be written: M4 fix gates the
+      // snapshot on `invertRateFeedKnown` to avoid mixing fresh
+      // deviation with stale oraclePrice when orientation is unknown.
+      invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
     });
 
@@ -2336,6 +2340,7 @@ describe("Envio Celo indexer handlers", () => {
       token0Decimals: 18,
       token1Decimals: 18,
       invertRateFeed: false,
+      invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
     });
 
@@ -3828,6 +3833,7 @@ describe("Health score handler integration", () => {
       token0Decimals: 18,
       token1Decimals: 18,
       invertRateFeed: false,
+      invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
       rebalanceThreshold: REBALANCE_THRESHOLD,
       lastOracleSnapshotTimestamp: 1_700_005_000n,

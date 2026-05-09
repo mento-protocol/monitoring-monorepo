@@ -16,7 +16,7 @@ import {
   computeLimitPressures,
   computeLimitStatus,
 } from "../../tradingLimits";
-import { tradingLimitsEffect } from "../../rpc/effects";
+import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
   maybePreloadPool,
   selfHealInvertRateFeed,
@@ -221,12 +221,50 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     existing.reserves0 > 0n &&
     existing.reserves1 > 0n;
 
-  if (!medianFresh) {
-    // No usable median → write the new threshold fields directly,
-    // preserve the existing breach/health/priceDifference state, and
-    // let the next state-sync or oracle event run the recompute when
-    // a live median is available. We still mark `rebalanceThresholdsKnown:
-    // true` so derive can succeed once the median lands.
+  // Resolve the threshold-event's recompute inputs, preferring local
+  // median when fresh (cheap, no RPC) and falling back to the contract's
+  // `getRebalancingState` otherwise (covers quiet pools where local
+  // median anchors stale even though the contract's median is fresh —
+  // codex M1). `null` means neither path could produce a usable
+  // priceDifference; the handler then writes only the threshold split
+  // fields and preserves existing breach/health state.
+  let priceDifferenceFromMedian: bigint | null = null;
+  let active: number | null = null;
+  if (medianFresh) {
+    // Synthetic pool view using `lastMedianPrice` (clean median) for both
+    // direction-pick AND priceDifference. Without this, upsertPool's
+    // breach/health recompute would derive priceDifference from the
+    // reporter-tainted `oraclePrice` (set by OracleReported).
+    const medianView = {
+      reserves0: existing.reserves0,
+      reserves1: existing.reserves1,
+      oraclePrice: existing.lastMedianPrice,
+      invertRateFeed: existing.invertRateFeed,
+      token0Decimals: existing.token0Decimals,
+      token1Decimals: existing.token1Decimals,
+    };
+    active = pickActiveThreshold(medianView, { above, below });
+    priceDifferenceFromMedian = computePriceDifference(medianView);
+  } else {
+    // Local median not usable — try the contract's authoritative state.
+    // Threshold updates are rare governance events so the extra RPC is
+    // acceptable. The contract's `getRebalancingState` returns the
+    // direction-correct active threshold + priceDifference at this block.
+    const rpc = await context.effect(rebalancingStateEffect, {
+      chainId: event.chainId,
+      poolAddress: asAddress(event.srcAddress),
+      blockNumber,
+    });
+    if (rpc) {
+      priceDifferenceFromMedian = rpc.priceDifference;
+      active = rpc.rebalanceThreshold;
+    }
+  }
+
+  if (priceDifferenceFromMedian === null || active === null) {
+    // Neither local median nor RPC produced usable values. Write the
+    // new threshold split fields + Known flag so derive can succeed
+    // once a live median lands; preserve existing breach/health state.
     context.Pool.set({
       ...existing,
       rebalanceThresholdAbove: above,
@@ -237,25 +275,6 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     });
     return;
   }
-
-  // Synthetic pool view using `lastMedianPrice` (clean median) for both
-  // direction-pick AND priceDifference. Without this, upsertPool's
-  // breach/health recompute would derive priceDifference from the
-  // reporter-tainted `oraclePrice` (set by OracleReported), so a
-  // governance threshold update following a non-median reporter event
-  // could open/close breaches and update health from a price the
-  // contract would not use. Pass the precomputed priceDifference in
-  // oracleDelta so upsertPool skips its own computePriceDifference.
-  const medianView = {
-    reserves0: existing.reserves0,
-    reserves1: existing.reserves1,
-    oraclePrice: existing.lastMedianPrice,
-    invertRateFeed: existing.invertRateFeed,
-    token0Decimals: existing.token0Decimals,
-    token1Decimals: existing.token1Decimals,
-  };
-  const active = pickActiveThreshold(medianView, { above, below });
-  const priceDifferenceFromMedian = computePriceDifference(medianView);
   const upserted = await upsertPool({
     context,
     chainId: event.chainId,
@@ -295,27 +314,31 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
     pool = { ...upserted, ...poolUpdate };
     context.Pool.set(pool);
 
-    const snapshot: OracleSnapshot = {
-      id: eventId(event.chainId, event.block.number, event.logIndex),
-      chainId: event.chainId,
-      poolId,
-      timestamp: blockTimestamp,
-      // Use `lastMedianPrice` so the snapshot's displayed oracle price
-      // is consistent with the priceDifference / threshold fields,
-      // which were both computed from the median above. `pool.oraclePrice`
-      // would mix in a reporter quote (last OracleReported) and produce
-      // a row where the displayed price doesn't match the deviation.
-      oraclePrice: pool.lastMedianPrice,
-      oracleOk: pool.oracleOk,
-      numReporters: pool.oracleNumReporters,
-      priceDifference: pool.priceDifference,
-      rebalanceThreshold: pool.rebalanceThreshold,
-      source: "threshold_updated",
-      blockNumber,
-      txHash: event.transaction.hash,
-      ...snapshotFields,
-    };
-    context.OracleSnapshot.set(snapshot);
+    // Only write the OracleSnapshot row when we used the local median
+    // (`medianFresh` path). On the RPC-fallback path `pool.lastMedianPrice`
+    // may be 0 / stale, so the row would mix a fresh deviation with an
+    // unrelated displayed oracle price.
+    if (medianFresh) {
+      const snapshot: OracleSnapshot = {
+        id: eventId(event.chainId, event.block.number, event.logIndex),
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        // Use `lastMedianPrice` so the snapshot's displayed oracle price
+        // is consistent with the priceDifference / threshold fields,
+        // which were both computed from the median above.
+        oraclePrice: pool.lastMedianPrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "threshold_updated",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
   }
   await upsertSnapshot({
     context,
