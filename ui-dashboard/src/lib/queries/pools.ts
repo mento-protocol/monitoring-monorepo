@@ -332,6 +332,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       rebalancerAddress
       reserves0
       reserves1
+      swapCount
       healthTotalSeconds
       hasHealthData
     }
@@ -540,6 +541,70 @@ export const POOL_DAILY_SNAPSHOTS_ALL = `
       swapCount
       swapVolume0
       swapVolume1
+    }
+  }
+`;
+
+// VirtualPool deploy/deprecate timeline. The DEPLOYED row exists for every
+// pool (factory always emits it); DEPRECATED is appended when governance
+// removes the underlying v2 exchange. Sorted asc so the UI can show
+// "Deployed → Deprecated" in chronological order without resorting.
+export const VIRTUAL_POOL_LIFECYCLE = `
+  query VirtualPoolLifecycle($poolId: String!) {
+    VirtualPoolLifecycle(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { blockTimestamp: asc }
+    ) {
+      id
+      action
+      factoryAddress
+      txHash
+      blockNumber
+      blockTimestamp
+    }
+  }
+`;
+
+// Per-event Broker.Swap rows for the v2 exchange backing a VirtualPool.
+// Includes both v3-router-routed swaps (VirtualPool wrapper sibling rows)
+// and v2-direct swaps — the dashboard chart renders them as two stacked
+// series so users see the *full* trading-pair activity, not just the
+// (small) v3-wrapper slice.
+//
+// We don't have a per-(chainId, exchangeId, day) snapshot entity yet
+// (Phase 2 of the plan); for now the chart paginates the raw events and
+// buckets them client-side. exchangeId is rare enough per chain that
+// total row count stays well under Hasura's 1000-row cap for active
+// exchanges. Order: timestamp desc + id desc so offset pagination is
+// stable under concurrent inserts.
+export const BROKER_SWAPS_BY_EXCHANGE_ID_PAGE = `
+  query BrokerSwapsByExchangeId(
+    $chainId: Int!
+    $exchangeId: String!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    BrokerSwapEvent(
+      where: {
+        chainId: { _eq: $chainId }
+        exchangeId: { _eq: $exchangeId }
+      }
+      order_by: [{ blockTimestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id
+      trader
+      tokenIn
+      tokenOut
+      amountIn
+      amountOut
+      volumeUsdWei
+      txTo
+      routedViaV3Router
+      txHash
+      blockNumber
+      blockTimestamp
     }
   }
 `;

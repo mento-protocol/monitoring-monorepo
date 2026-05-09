@@ -47,6 +47,8 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_OLS_POOLS",
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
+  "VIRTUAL_POOL_LIFECYCLE",
+  "BROKER_SWAPS_BY_EXCHANGE_ID_PAGE",
 ] as const;
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
