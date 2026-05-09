@@ -12,7 +12,7 @@ import {
 import {
   extractVpExchangeIdFromBytecode,
   type PoolExchangeStruct,
-} from "../src/rpc/pool-state.ts";
+} from "../src/rpc/biPoolManager.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { makePoolId } from "../src/helpers.ts";
 

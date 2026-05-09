@@ -42,10 +42,6 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
-  _setMockPoolExchange,
-  _clearMockPoolExchanges,
-  _setMockVpExchangeId,
-  _clearMockVpExchangeIds,
   fetchRebalancingState,
   fetchReserves,
   fetchInvertRateFeed,
@@ -60,17 +56,25 @@ export {
   _clearMockRebalanceIncentivesAtBlock,
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
+} from "./rpc/pool-state";
+export {
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
   fetchPoolExchange,
   fetchVirtualPoolExchangeId,
   extractVpExchangeIdFromBytecode,
-} from "./rpc/pool-state";
+} from "./rpc/biPoolManager";
 export type {
   RebalancingState,
   FeeGetterMock,
   FetchFeesMock,
+} from "./rpc/pool-state";
+export type {
   PoolExchangeStruct,
   VirtualPoolExchangeId,
-} from "./rpc/pool-state";
+} from "./rpc/biPoolManager";
 
 // Re-export breaker RPC self-heal symbols so existing callers that import from
 // "./rpc" (breakers.ts handler and all breaker test files) keep working.

@@ -243,6 +243,19 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // Preload phase: warm entity reads only. With `preload_handlers: true`
+  // the same event runs twice (preload + processing); without this guard
+  // the non-cached `poolExchangeEffect` would fire on both passes,
+  // doubling RPC pressure exactly during the transient-RPC window the
+  // backfill is trying to survive.
+  if (context.isPreload) {
+    await Promise.all([
+      context.BiPoolExchange.get(id),
+      context.Pool.getWhere.wrappedExchangeId.eq(exchangeId),
+    ]);
+    return;
+  }
+
   // RPC backfill — `undefined` on transient failure. Caller stamps zeros for
   // the gap; the next SpreadUpdated / BucketsUpdated event still populates
   // its own fields incrementally.
@@ -321,6 +334,16 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
   const exchangeProvider = asAddress(event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
+
+  // Preload: warm both entity reads we'll need in the processing pass.
+  if (context.isPreload) {
+    await Promise.all([
+      context.BiPoolExchange.get(id),
+      context.Pool.getWhere.wrappedExchangeId.eq(exchangeId),
+    ]);
+    return;
+  }
+
   const existing = await context.BiPoolExchange.get(id);
 
   // Re-run the wrapping-VP lookup at destroy time. If the row was seeded
@@ -402,6 +425,16 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // Preload phase: warm the BiPoolExchange entity read; skip the RPC
+  // backfill in `ensureBiPoolExchange` (cache:false `poolExchangeEffect`
+  // would fire twice without this gate, see ExchangeCreated handler).
+  if (context.isPreload) {
+    await context.BiPoolExchange.get(
+      exchangeRowId(event.chainId, event.params.exchangeId),
+    );
+    return;
+  }
+
   const update: BucketUpdate = {
     id: eventId(event.chainId, event.block.number, event.logIndex),
     chainId: event.chainId,
@@ -447,6 +480,14 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
 BiPoolManager.SpreadUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
+  // Preload phase: warm BiPoolExchange entity read; skip the RPC
+  // backfill in ensureBiPoolExchange (see ExchangeCreated handler).
+  if (context.isPreload) {
+    await context.BiPoolExchange.get(
+      exchangeRowId(event.chainId, event.params.exchangeId),
+    );
+    return;
+  }
   // Self-heal — see BucketsUpdated for the full rationale.
   const existing = await ensureBiPoolExchange(
     context,

@@ -26,7 +26,6 @@ import {
   fetchFees,
   fetchInvertRateFeed,
   fetchNumReporters,
-  fetchPoolExchange,
   fetchRebalanceIncentiveAtBlock,
   fetchRebalanceThresholds,
   fetchRebalancingState,
@@ -35,8 +34,8 @@ import {
   fetchReserves,
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
-  fetchVirtualPoolExchangeId,
 } from "./pool-state";
+import { fetchPoolExchange, fetchVirtualPoolExchangeId } from "./biPoolManager";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,

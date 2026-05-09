@@ -488,7 +488,16 @@ export type SnapshotContext = {
   };
 };
 
-/** Default oracle field values (for VirtualPools or when RPC call fails) */
+/** Default oracle field values (for VirtualPools or when RPC call fails).
+ *
+ * Excludes `referenceRateFeedID` on purpose — that's a static-config field
+ * set ONCE at pool creation (factory `referenceRateFeedIDEffect`) or via
+ * the BiPoolExchange→Pool mirror (`mirrorFeedIdToPool`). Including it here
+ * would mean callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}`
+ * as `oracleDelta` would clobber a healed feedID back to "" via the
+ * `next` builder's spread order. `defaultPool` initializes the field
+ * directly below; persisted updates flow via the dedicated mirror /
+ * heal helpers. */
 export const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
@@ -496,7 +505,6 @@ export const DEFAULT_ORACLE_FIELDS = {
   oracleTxHash: "",
   oracleExpiry: 0n,
   oracleNumReporters: 0,
-  referenceRateFeedID: "",
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
   medianLive: false,
@@ -570,6 +578,10 @@ const defaultPool = (
   notionalVolume1: 0n,
   rebalanceCount: 0,
   ...DEFAULT_ORACLE_FIELDS,
+  // Static-config fields excluded from DEFAULT_ORACLE_FIELDS to avoid
+  // the spread-clobber bug — callers' `oracleDelta` must NOT carry the
+  // power to overwrite these on every event.
+  referenceRateFeedID: "",
   // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
   // (factory-direct value or bytecode read). FPMMs never set it.
   wrappedExchangeId: undefined,
@@ -595,6 +607,7 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  referenceRateFeedID,
   existing: existingOverride,
 }: {
   context: PoolContext;
@@ -618,6 +631,12 @@ export const upsertPool = async ({
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  /** Static-config field for the referenced rate feed; explicit param so
+   * callers can't accidentally clobber it via `oracleDelta` spread (see
+   * the doc on `DEFAULT_ORACLE_FIELDS`). Only the FPMM factory + the
+   * BiPoolExchange→Pool mirror set it; all other callers pass undefined
+   * and the persisted value flows through unchanged. */
+  referenceRateFeedID?: string;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -664,6 +683,11 @@ export const upsertPool = async ({
   // pool creation), retry now so oracle events can start flowing.
   // Use the raw address (not the namespaced poolId) for RPC calls.
   const poolAddr = extractAddressFromPoolId(poolId);
+  // `healedFeedId` is split from `healedOracleDelta` because
+  // `referenceRateFeedID` is no longer part of `DEFAULT_ORACLE_FIELDS`
+  // (extracted to avoid the spread-clobber bug — see DEFAULT_ORACLE_FIELDS
+  // doc above). Applied directly in the `next` builder below.
+  let healedFeedId: string | undefined;
   let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
   if (
     existing.referenceRateFeedID === "" &&
@@ -675,13 +699,15 @@ export const upsertPool = async ({
       poolAddress: poolAddr,
     });
     if (rateFeedID) {
-      healedOracleDelta = { referenceRateFeedID: rateFeedID };
+      healedFeedId = rateFeedID;
       const expiry = await context.effect(reportExpiryEffect, {
         chainId,
         rateFeedID,
         blockNumber,
       });
-      if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
+      if (expiry !== undefined) {
+        healedOracleDelta = { oracleExpiry: expiry };
+      }
     }
   }
 
@@ -730,6 +756,13 @@ export const upsertPool = async ({
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     ...(healedFees ?? {}),
+    // `referenceRateFeedID` is applied AFTER the spread chain so the
+    // value isn't clobbered by an oracleDelta that omits it (the field
+    // is no longer in DEFAULT_ORACLE_FIELDS — callers can't include it
+    // in the spread). Priority: caller-supplied param (FPMM factory) >
+    // self-heal > existing.
+    referenceRateFeedID:
+      referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID,
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,

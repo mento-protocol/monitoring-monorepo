@@ -215,13 +215,22 @@ const STATUS_TILE = {
   error: { label: "—", color: "text-rose-400" },
 } as const;
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 function statusKey(
   v2Config: BiPoolExchangeRow | null,
   hasError: boolean,
 ): keyof typeof STATUS_TILE {
   if (hasError) return "error";
   if (!v2Config) return "loading";
-  return v2Config.isDeprecated ? "deprecated" : "active";
+  if (v2Config.isDeprecated) return "deprecated";
+  // Zero-feed sentinel = stub row from a transient ExchangeCreated RPC
+  // miss; same "indexer hasn't fully linked the exchange yet" UX as the
+  // panel's `V2ExchangeSyncingNote`. Without this, the header tile would
+  // say "Active" while the panel renders the syncing note — confusing
+  // operators about whether the v2 exchange is actually live.
+  if (v2Config.referenceRateFeedID === ZERO_ADDRESS) return "loading";
+  return "active";
 }
 
 /**
