@@ -210,10 +210,18 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       )
     : undefined;
   const incentiveGetterMissing = initial?.rebalanceReward === -2;
-  // By the time Rebalanced fires, the 2× UpdateReserves handlers in the
-  // same tx have already written post-rebalance reserves to the Pool
-  // entity. So `existing.reserves0/1` matches what `getRebalancingState`
-  // sees on chain — no override needed.
+  // Load-bearing invariant: FPMM.rebalance() emits 2× UpdateReserves +
+  // 1× Rebalanced in the SAME tx, with Rebalanced at a higher logIndex.
+  // Envio processes events in ascending (block, logIndex) order, so by
+  // the time this handler runs the prior UR handlers in the same tx
+  // have already written post-rebalance reserves to the Pool entity.
+  // `existing.reserves0/1` therefore matches what the contract's
+  // `getRebalancingState` sees on chain — no override needed. If a
+  // future Envio version changes batch semantics or a chain emits
+  // Rebalanced before its sibling URs (no known case), the derive
+  // would silently use stale reserves; the caller would still fall
+  // back to RPC only when derive returns null, so the fix would be to
+  // add an `existing.lastReserveUpdateBlock < blockNumber` guard here.
   const derivedRebalanceState = existing
     ? tryDeriveRebalanceState(existing, { eventTimestamp: blockTimestamp })
     : null;

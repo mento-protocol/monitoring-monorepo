@@ -327,6 +327,24 @@ type GeneratedModule = {
           mockDb: MockDb;
         }) => Promise<MockDb>;
       };
+      RebalanceThresholdUpdated: {
+        createMockEvent: (args: {
+          oldThresholdAbove: bigint;
+          oldThresholdBelow: bigint;
+          newThresholdAbove: bigint;
+          newThresholdBelow: bigint;
+          mockEventData: {
+            chainId: number;
+            logIndex: number;
+            srcAddress: string;
+            block: { number: number; timestamp: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
     };
   };
 };
@@ -1911,6 +1929,107 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
+  it("Rebalanced: derives priceDifference from entity when oraclePrice + thresholds are populated", async () => {
+    // Symmetric to the UpdateReserves test above — verify the Rebalanced
+    // handler also skips the getRebalancingState RPC when the entity
+    // has all derive inputs. Wrong-on-purpose RPC mock; if the handler
+    // ever falls back to RPC, pool.priceDifference would be 999 instead
+    // of the entity-derived ~3333 bps. (This anchors the wiring;
+    // priceDifference.test.ts covers the derive logic itself.)
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c4";
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: 1_000_000_000_000_000_000n,
+      oraclePriceDenominator: 1_000_000_000_000_000_000n,
+      rebalanceThreshold: 999,
+      priceDifference: 999n,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1100, timestamp: 1_700_009_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Seed entity with all derive inputs + post-rebalance reserves
+    // (the prior 2× UR handlers in the same tx would have written these
+    // before Rebalanced fires).
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
+      oraclePrice: 1_000_000_000_000_000_000_000_000n,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      invertRateFeedKnown: true,
+      rebalanceThresholdAbove: 200,
+      rebalanceThresholdBelow: 200,
+      rebalanceThresholdsKnown: true,
+      lastMedianPrice: 1_000_000_000_000_000_000_000_000n,
+      lastMedianAt: 1_700_009_000n,
+      lastOracleReportAt: 1_700_009_000n,
+      medianLive: true,
+      oracleOk: true,
+      oracleExpiry: 3_600n,
+      source: "fpmm_update_reserves",
+    });
+
+    const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
+      sender: "0x00000000000000000000000000000000000000aa",
+      priceDifferenceBefore: 3500n,
+      priceDifferenceAfter: 50n, // event-authoritative post value
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 12,
+        srcAddress: POOL_ADDR,
+        block: { number: 1101, timestamp: 1_700_009_100 },
+      },
+    });
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent,
+      mockDb,
+    });
+
+    // The pool's `rebalanceThreshold` should reflect the entity-derived
+    // direction (above==below==200), not the wrong RPC mock (999).
+    // priceDifference itself is overwritten by event.params.priceDifferenceAfter
+    // (the contract's authoritative post-rebalance value, asserted in the
+    // test "Rebalanced: uses event.params.priceDifferenceAfter…"), so we
+    // can't gate on pool.priceDifference here — the threshold is the
+    // load-bearing signal that proves derive ran.
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.ok(pool, "Pool must exist after Rebalanced");
+    assert.equal(
+      pool.rebalanceThreshold,
+      200,
+      "active threshold must come from entity, not RPC mock (999)",
+    );
+    // OracleSnapshot for this Rebalanced should also carry the
+    // entity-derived threshold (mirrors pool.rebalanceThreshold).
+    const snapshot = mockDb.entities.OracleSnapshot.get(`42220_1101_12`) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(snapshot, "OracleSnapshot must be written for Rebalanced");
+    assert.equal(
+      snapshot!.rebalanceThreshold,
+      200,
+      "snapshot threshold must come from entity, not RPC mock (999)",
+    );
+  });
+
   it("RebalanceThresholdUpdated: picks direction-correct active threshold (asymmetric, reservePrice<oraclePrice → below side)", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c3";
     let mockDb = MockDb.createMockDb();
@@ -1954,9 +2073,7 @@ describe("Envio Celo indexer handlers", () => {
       invertRateFeedKnown: true,
     });
 
-    const thresholdEvent = (
-      FPMM as any
-    ).RebalanceThresholdUpdated.createMockEvent({
+    const thresholdEvent = FPMM.RebalanceThresholdUpdated.createMockEvent({
       oldThresholdAbove: 100n,
       oldThresholdBelow: 100n,
       newThresholdAbove: 250n,
@@ -1968,7 +2085,7 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 1001, timestamp: 1_700_008_100 },
       },
     });
-    mockDb = await (FPMM as any).RebalanceThresholdUpdated.processEvent({
+    mockDb = await FPMM.RebalanceThresholdUpdated.processEvent({
       event: thresholdEvent,
       mockDb,
     });
