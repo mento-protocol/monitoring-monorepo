@@ -35,9 +35,18 @@ pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor`
 ## React Doctor
 
 CI runs `react-doctor --diff origin/<base> --fail-on warning` on every PR
-(see `.github/workflows/ci.yml` `ui` job). It blocks when a warning or
-error appears in any file the PR touches; existing repo-wide debt does
-not block. Run `pnpm react-doctor` locally for a full scan.
+(see `.github/workflows/ci.yml` `ui` job). The CLI's `--diff` is
+**file-level, not line-level**: it scans every source file the PR
+touches in full, so editing a file that already has backlog warnings
+will fail CI even if your change isn't what triggered them. Two ways
+through:
+
+- Fix the warnings (preferred — chips at the cleanup backlog).
+- Add an inline `// react-doctor-disable-next-line <rule-id>` above the
+  offending line with a one-line rationale, if the warning isn't
+  actionable in your PR's scope.
+
+Run `pnpm react-doctor` locally for a full scan.
 
 Project-wide silences live in `react-doctor.config.json`. Current state:
 

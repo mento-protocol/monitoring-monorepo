@@ -145,8 +145,16 @@ jobs:
         # 1 error) is tracked separately — see ui-dashboard/AGENTS.md
         # "React Doctor" section. Project-wide rule silences live in
         # ui-dashboard/react-doctor.config.json.
+        #
+        # `git switch -c` reattaches HEAD to a named branch:
+        # actions/checkout for PRs leaves us on a detached merge commit, and
+        # react-doctor's `getDiffInfo` returns null when
+        # `git rev-parse --abbrev-ref HEAD` is "HEAD", silently falling back
+        # to a full scan that would surface the entire backlog.
         if: github.event_name == 'pull_request'
-        run: pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
+        run: |
+          git switch -c __react_doctor_scan
+          pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
