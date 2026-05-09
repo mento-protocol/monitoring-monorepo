@@ -21,7 +21,7 @@ import {
   feesEffect,
   invertRateFeedEffect,
   numReportersEffect,
-  rebalanceThresholdEffect,
+  rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
   tokenDecimalsScalingEffect,
@@ -152,7 +152,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   const [
     rateFeedID,
-    rebalanceThreshold,
+    rebalanceThresholds,
     dec0Raw,
     dec1Raw,
     invertRateFeed,
@@ -164,9 +164,12 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     }),
     // Use standalone getters — they work even when the oracle is stale,
     // unlike getRebalancingState() which reverts on stale/expired oracle data.
-    context.effect(rebalanceThresholdEffect, {
+    // Read at the deploy block so historical replay sees the deploy-time
+    // configuration, not whatever governance has changed it to since.
+    context.effect(rebalanceThresholdsEffect, {
       chainId: event.chainId,
       poolAddress: poolAddr,
+      blockNumber,
     }),
     // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
     context.effect(tokenDecimalsScalingEffect, {
@@ -231,8 +234,23 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     oracleDelta.invertRateFeedKnown = true;
   }
 
-  if (rebalanceThreshold !== undefined && rebalanceThreshold > 0) {
-    oracleDelta.rebalanceThreshold = rebalanceThreshold;
+  if (rebalanceThresholds !== undefined) {
+    const { above, below } = rebalanceThresholds;
+    oracleDelta.rebalanceThresholdAbove = above;
+    oracleDelta.rebalanceThresholdBelow = below;
+    oracleDelta.rebalanceThresholdsKnown = true;
+    // Active threshold seed: the contract picks above OR below at evaluation
+    // time based on reservePriceAboveOraclePrice. Pre-first-event we don't
+    // know the direction, so seed with `max(above, below)` (the broadest
+    // band) — the next UpdateReserves/Rebalanced will refresh with the
+    // direction-correct value via `tryDeriveRebalanceState`. Skip when both
+    // are 0 (configured to never rebalance) so the legacy field stays at
+    // its 0 default; the `rebalanceThresholdsKnown: true` flag distinguishes
+    // this legitimate state from "RPC failed".
+    const broadest = Math.max(above, below);
+    if (broadest > 0) {
+      oracleDelta.rebalanceThreshold = broadest;
+    }
   }
 
   const pool = await upsertPool({

@@ -10,8 +10,10 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers";
 import {
-  ORACLE_ADAPTER_SCALE_FACTOR,
   buildRebalanceOutcome,
+  scaleRpcRebalanceState,
+  tryDeriveRebalanceState,
+  type ResolvedRebalanceState,
 } from "../../priceDifference";
 import {
   rebalanceIncentiveAtBlockEffect,
@@ -23,6 +25,7 @@ import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
   selfHealInvertRateFeed,
+  selfHealRebalanceThresholds,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -47,42 +50,73 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // RPC and Pool.get are independent — fire in parallel to eliminate the
-  // serial RTT. `context.Pool.get` only matters on the rebalancingState
-  // success path (to read invertRateFeed), so the "waste" on the RPC-null
-  // path is tolerable and already cached by Envio's in-batch store.
-  // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  const [rebalancingState, fetched] = await Promise.all([
-    context.effect(rebalancingStateEffect, {
+  // Try to derive {oraclePrice, rebalanceThreshold, priceDifference} from
+  // the entity store before reaching for the RPC. Pool.get must come first
+  // so the derive attempt can run; the RPC fires only when the entity
+  // isn't yet seeded (cold-start: pre-MedianUpdated for the feed, or
+  // pre-RebalanceThresholdUpdated seed).
+  const fetched = await context.Pool.get(poolId);
+  // Self-heal invertRateFeed and split thresholds before reading either.
+  // invertRateFeed gates oraclePrice direction; split thresholds gate the
+  // entity-derived path. A factory-time RPC blip that left either at the
+  // schema default would otherwise persist wrong-side oraclePrice or
+  // permanently disable derive (forcing every event back to RPC).
+  const existing = fetched
+    ? await selfHealRebalanceThresholds(
+        context,
+        await selfHealInvertRateFeed(context, fetched),
+        blockNumber,
+      )
+    : undefined;
+
+  // Override reserves: `getRebalancingState` reads post-event state on
+  // chain, but `existing.reserves0/1` still hold the prior block's value
+  // until `upsertPool` runs below.
+  let resolved: ResolvedRebalanceState | null = existing
+    ? tryDeriveRebalanceState(existing, {
+        eventTimestamp: blockTimestamp,
+        reservesOverride: {
+          reserve0: event.params.reserve0,
+          reserve1: event.params.reserve1,
+        },
+      })
+    : null;
+  if (!resolved) {
+    const rs = await context.effect(rebalancingStateEffect, {
       chainId: event.chainId,
       poolAddress: asAddress(event.srcAddress),
       blockNumber,
-    }),
-    context.Pool.get(poolId),
-  ]);
-  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
-  // Without this, a pool deployed during an RPC blip whose first event is
-  // an UpdateReserves would persist wrong-side oraclePrice on its
-  // OracleSnapshot until the next FPMM event triggers upsertPool's heal.
-  const existing = fetched
-    ? await selfHealInvertRateFeed(context, fetched)
-    : undefined;
+    });
+    resolved = rs ? scaleRpcRebalanceState(rs, existing) : null;
+  }
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
-  // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
-  // construction without a non-null assertion on oracleDelta.oraclePrice.
+  // Only persist the scaled oraclePrice + timestamp when we know the
+  // orientation. On the RPC-fallback path with `invertRateFeedKnown=false`
+  // (deploy blip + self-heal failure), `scaleRpcRebalanceState` would
+  // have chosen numerator vs denominator from the schema-default `false`,
+  // so the displayed oraclePrice could be backwards for actually-inverted
+  // pools. The contract's threshold + priceDifference are authoritative
+  // regardless of our local flag, so we still persist those. Preserve
+  // the existing `oraclePrice` AND `oracleTimestamp` when orientation
+  // is unknown — advancing the timestamp without a usable price would
+  // mark stale data as freshly updated under the
+  // `oracleTimestamp + oracleExpiry` freshness check.
+  const orientationKnown = existing?.invertRateFeedKnown === true;
   let updateReservesOraclePrice = 0n;
-  if (rebalancingState) {
-    const isInverted = existing?.invertRateFeed ?? false;
-    updateReservesOraclePrice = isInverted
-      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
-
+  if (resolved) {
+    updateReservesOraclePrice = orientationKnown
+      ? resolved.oraclePrice
+      : (existing?.oraclePrice ?? 0n);
     oracleDelta = {
-      oraclePrice: updateReservesOraclePrice,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      priceDifference: rebalancingState.priceDifference,
-      oracleTimestamp: blockTimestamp,
+      rebalanceThreshold: resolved.rebalanceThreshold,
+      priceDifference: resolved.priceDifference,
+      ...(orientationKnown
+        ? {
+            oraclePrice: updateReservesOraclePrice,
+            oracleTimestamp: blockTimestamp,
+          }
+        : {}),
     };
   }
 
@@ -99,12 +133,12 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       reserve1: event.params.reserve1,
     },
     oracleDelta,
-    // Reuse the Pool read from the concurrent Promise.all above — avoids
-    // a second context.Pool.get inside getOrCreatePool.
+    // Reuse the Pool read from above — avoids a second context.Pool.get
+    // inside getOrCreatePool.
     existing: { pool: existing },
   });
 
-  if (rebalancingState) {
+  if (resolved) {
     // Health score: compute snapshot fields + update pool accumulators.
     // Note: upsertPool above calls context.Pool.set(pool) internally with
     // default health fields. We immediately overwrite with the correct
@@ -121,22 +155,30 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     // health counters, not the pre-recordHealthSample values.
     pool = { ...pool, ...poolUpdate };
     context.Pool.set(pool);
-    const snapshot: OracleSnapshot = {
-      id,
-      chainId: event.chainId,
-      poolId,
-      timestamp: blockTimestamp,
-      oraclePrice: updateReservesOraclePrice,
-      oracleOk: pool.oracleOk,
-      numReporters: pool.oracleNumReporters,
-      priceDifference: pool.priceDifference,
-      rebalanceThreshold: pool.rebalanceThreshold,
-      source: "update_reserves",
-      blockNumber,
-      txHash: event.transaction.hash,
-      ...snapshotFields,
-    };
-    context.OracleSnapshot.set(snapshot);
+    // Skip the OracleSnapshot row when orientation is unknown: we'd be
+    // writing a fresh deviation alongside a stale (often zero) oraclePrice
+    // because of the orientation gate above. A row whose displayed price
+    // doesn't match the deviation is worse than no row — the chart
+    // history would show a fake sample. Pool entity still gets updated;
+    // the next event with known orientation will write the snapshot.
+    if (orientationKnown) {
+      const snapshot: OracleSnapshot = {
+        id,
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        oraclePrice: updateReservesOraclePrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "update_reserves",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
   }
 
   await upsertSnapshot({
@@ -176,28 +218,53 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
-  // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  // `preReserves` is sampled at `blockNumber - 1` so that subtracting from
-  // the post-rebalance reserves on `pool` (after `upsertPool` below) gives
-  // the rebalance's swap notional. Sibling Swap events are not emitted by
-  // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
-  // handlers in the same tx have already overwritten the entity by the
-  // time we run — RPC at the previous block is the cleanest source.
-  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
-  // skip `fetchRebalanceIncentiveAtBlock` for pools whose `rebalanceIncentive()`
-  // getter is already known missing (-2 sentinel from PR #222) — otherwise
-  // every rebalance on an old FPMM would trigger an RPC that's guaranteed
-  // to fail with `isUnsupportedGetterError`.
+  // Sequence Pool.get first (cheap local lookup, no RPC) so we can
+  // (a) attempt the entity-derived rebalanceState and skip the
+  //     `getRebalancingState` RPC entirely when the entity has the data,
+  // (b) skip `fetchRebalanceIncentiveAtBlock` for pools whose
+  //     `rebalanceIncentive()` getter is already known missing (-2 sentinel
+  //     from PR #222) — otherwise every rebalance on an old FPMM would
+  //     trigger an RPC that's guaranteed to fail with `isUnsupportedGetterError`.
   const initial = await context.Pool.get(poolId);
-  const incentiveGetterMissing = initial?.rebalanceReward === -2;
-  const [rebalancingState, preReserves, blockScopedIncentive] =
-    await Promise.all([
-      context.effect(rebalancingStateEffect, {
-        chainId: event.chainId,
-        poolAddress: asAddress(event.srcAddress),
+  // Self-heal invertRateFeed + split thresholds before reading either.
+  // Same rationale as the UpdateReserves handler.
+  const existing = initial
+    ? await selfHealRebalanceThresholds(
+        context,
+        await selfHealInvertRateFeed(context, initial),
         blockNumber,
-      }),
+      )
+    : undefined;
+  const incentiveGetterMissing = initial?.rebalanceReward === -2;
+  // Load-bearing invariant: FPMM.rebalance() emits 2× UpdateReserves +
+  // 1× Rebalanced in the SAME tx, with Rebalanced at a higher logIndex.
+  // Envio processes events in ascending (block, logIndex) order, so by
+  // the time this handler runs the prior UR handlers in the same tx
+  // have already written post-rebalance reserves to the Pool entity.
+  // `existing.reserves0/1` therefore matches what the contract's
+  // `getRebalancingState` sees on chain — no override needed. If a
+  // future Envio version changes batch semantics or a chain emits
+  // Rebalanced before its sibling URs (no known case), the derive
+  // would silently use stale reserves; the caller would still fall
+  // back to RPC only when derive returns null, so the fix would be to
+  // add an `existing.lastReserveUpdateBlock < blockNumber` guard here.
+  const derivedRebalanceState = existing
+    ? tryDeriveRebalanceState(existing, { eventTimestamp: blockTimestamp })
+    : null;
+
+  // `preReserves` is sampled at `blockNumber - 1` so subtracting from the
+  // post-rebalance reserves on `pool` (after `upsertPool` below) gives the
+  // rebalance's swap notional. Sibling Swap events are not emitted by
+  // FPMM.rebalance() (separate code path).
+  const [rebalancingStateRpc, preReserves, blockScopedIncentive] =
+    await Promise.all([
+      derivedRebalanceState
+        ? Promise.resolve(undefined)
+        : context.effect(rebalancingStateEffect, {
+            chainId: event.chainId,
+            poolAddress: asAddress(event.srcAddress),
+            blockNumber,
+          }),
       context.effect(reservesEffect, {
         chainId: event.chainId,
         poolAddress: asAddress(event.srcAddress),
@@ -217,18 +284,20 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
             blockNumber,
           }),
     ]);
-  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
-  // Same rationale as the UpdateReserves handler.
-  const existing = initial
-    ? await selfHealInvertRateFeed(context, initial)
-    : undefined;
+
+  const resolved: ResolvedRebalanceState | null =
+    derivedRebalanceState ??
+    (rebalancingStateRpc
+      ? scaleRpcRebalanceState(rebalancingStateRpc, existing)
+      : null);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
-  // Prefer the RPC-read threshold (matches what the contract just used);
-  // fall back to the persisted Pool row if the RPC failed.
+  // Prefer the resolved threshold (whether entity-derived or RPC-read —
+  // both reflect the direction-correct active threshold for this block).
+  // Fall back to the persisted Pool row if both paths failed.
   const rebalanceThresholdForEvent =
-    rebalancingState?.rebalanceThreshold ?? existing?.rebalanceThreshold ?? 0;
+    resolved?.rebalanceThreshold ?? existing?.rebalanceThreshold ?? 0;
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
   const { improvement, lastEffectivenessRatio, eventEffectivenessRatio } =
@@ -248,18 +317,26 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
   // construction without a non-null assertion on oracleDelta.oraclePrice.
+  // Same orientation gate as UpdateReserves: only persist scaled
+  // oraclePrice + timestamp when `invertRateFeedKnown`. RPC fallback's
+  // scale calc can guess wrong if the deploy-time invert read failed,
+  // and advancing the timestamp without a usable price would falsely
+  // mark stale data as fresh under the freshness gate.
+  const rebalancedOrientationKnown = existing?.invertRateFeedKnown === true;
   let rebalancedOraclePrice = 0n;
-  if (rebalancingState) {
-    const isInverted = existing?.invertRateFeed ?? false;
-    rebalancedOraclePrice = isInverted
-      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
-
+  if (resolved) {
+    rebalancedOraclePrice = rebalancedOrientationKnown
+      ? resolved.oraclePrice
+      : (existing?.oraclePrice ?? 0n);
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice: rebalancedOraclePrice,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      oracleTimestamp: blockTimestamp,
+      rebalanceThreshold: resolved.rebalanceThreshold,
+      ...(rebalancedOrientationKnown
+        ? {
+            oraclePrice: rebalancedOraclePrice,
+            oracleTimestamp: blockTimestamp,
+          }
+        : {}),
     };
   }
 
@@ -274,11 +351,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
-    // Reuse the Pool read from the concurrent Promise.all above.
+    // Reuse the Pool read from above — avoids a second context.Pool.get
+    // inside getOrCreatePool.
     existing: { pool: existing },
   });
 
-  if (rebalancingState) {
+  if (resolved) {
     // Health score: compute snapshot fields + update pool accumulators.
     // Note: upsertPool above calls context.Pool.set(pool) internally with
     // default health fields. We immediately overwrite with the correct
@@ -296,22 +374,27 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     pool = { ...pool, ...poolUpdate };
     context.Pool.set(pool);
 
-    const snapshot: OracleSnapshot = {
-      id,
-      chainId: event.chainId,
-      poolId,
-      timestamp: blockTimestamp,
-      oraclePrice: rebalancedOraclePrice,
-      oracleOk: pool.oracleOk,
-      numReporters: pool.oracleNumReporters,
-      priceDifference: pool.priceDifference,
-      rebalanceThreshold: pool.rebalanceThreshold,
-      source: "rebalanced",
-      blockNumber,
-      txHash: event.transaction.hash,
-      ...snapshotFields,
-    };
-    context.OracleSnapshot.set(snapshot);
+    // Skip OracleSnapshot when orientation is unknown — see UpdateReserves
+    // handler for the rationale (avoid mixing fresh deviation with a
+    // stale/preserved oraclePrice in the chart history).
+    if (rebalancedOrientationKnown) {
+      const snapshot: OracleSnapshot = {
+        id,
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        oraclePrice: rebalancedOraclePrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "rebalanced",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
   }
 
   await upsertSnapshot({

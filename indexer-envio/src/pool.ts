@@ -21,6 +21,7 @@ import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
+  rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
 } from "./rpc/effects";
@@ -59,14 +60,32 @@ export const DEVIATION_CRITICAL_DEN = 100n;
  */
 export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
-/** Resolve the effective threshold in bps. The schema-default of 0 means the
- * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
- * pools don't trip the breach predicate while we wait for the RPC self-heal.
+/** Resolve the effective threshold in bps. Three states:
+ *  - `> 0`: the on-chain configured threshold (active side).
+ *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
+ *    to never rebalance. Treat as effectively infinite so the breach
+ *    predicate never trips — the pool isn't supposed to rebalance.
+ *  - `0` AND `rebalanceThresholdsKnown=false`: indexer hasn't read on-chain
+ *    yet. Fall back to 10000 (100%) so the predicate doesn't false-trip
+ *    while waiting for self-heal.
+ *
+ * The schema-default unknown case must NOT collapse with the legitimate
+ * "never rebalance" case — both have `rebalanceThreshold === 0`, but only
+ * the latter has `rebalanceThresholdsKnown=true`.
  */
-export const effectiveThreshold = (
-  pool: Pick<Pool, "rebalanceThreshold">,
-): bigint =>
-  BigInt(pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000);
+export const effectiveThreshold = (pool: {
+  rebalanceThreshold: number;
+  // Optional: callers passing a synthetic threshold value (e.g.
+  // `deviationBreach` healing from a captured entry threshold) may not
+  // carry the Known flag. In that case we treat `0` as the unread
+  // sentinel and fall back to 10000 — matches pre-Lever-4 behaviour.
+  rebalanceThresholdsKnown?: boolean;
+}): bigint => {
+  if (pool.rebalanceThreshold > 0) return BigInt(pool.rebalanceThreshold);
+  // 1e12 is well past any realistic priceDifference (which is bps,
+  // bounded by ~10000) so the breach math reliably evaluates to false.
+  return pool.rebalanceThresholdsKnown ? 10n ** 12n : 10000n;
+};
 
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
  * line, integer-safe. Used by both the live status branch (here) and the
@@ -198,6 +217,10 @@ const SOURCE_PRIORITY = {
   fpmm_factory: 90,
   fpmm_rebalanced: 50,
   fpmm_update_reserves: 40,
+  // Below state-sync events: a threshold update doesn't change reserves
+  // or oracle, so the legacy "preferred-source" stickiness should keep
+  // whichever live event source wrote last.
+  fpmm_threshold_updated: 35,
   fpmm_swap: 30,
   fpmm_mint: 20,
   fpmm_burn: 20,
@@ -311,6 +334,44 @@ export async function selfHealInvertRateFeed(
   };
 }
 
+/** Self-heal `rebalanceThresholdAbove/Below` when the factory's
+ * `rebalanceThresholdsEffect` failed at deploy. Without this, a transient
+ * RPC blip would permanently leave both split fields at 0 → derive returns
+ * null forever → the entity-derived path is dead for that pool. Block-
+ * scoped read (effect is `cache: false` because thresholds are governance-
+ * mutable). The caller's own Pool.set persists the healed values. */
+export async function selfHealRebalanceThresholds(
+  context: { effect: EffectCaller },
+  pool: Pool,
+  blockNumber: bigint,
+): Promise<Pool> {
+  if (
+    pool.rebalanceThresholdsKnown ||
+    pool.source === "" ||
+    isVirtualPool(pool)
+  ) {
+    return pool;
+  }
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const thresholds = await context.effect(rebalanceThresholdsEffect, {
+    chainId: pool.chainId,
+    poolAddress: poolAddr,
+    blockNumber,
+  });
+  if (thresholds === undefined) return pool;
+  // Refresh the legacy `rebalanceThreshold` only when at least one side is
+  // configured. Both-zero means "never rebalance" — leave the legacy field
+  // at whatever the next state-sync event pins.
+  const broadest = Math.max(thresholds.above, thresholds.below);
+  return {
+    ...pool,
+    rebalanceThresholdAbove: thresholds.above,
+    rebalanceThresholdBelow: thresholds.below,
+    rebalanceThresholdsKnown: true,
+    rebalanceThreshold: broadest > 0 ? broadest : pool.rebalanceThreshold,
+  };
+}
+
 export type SnapshotContext = {
   PoolSnapshot: {
     get: (id: string) => Promise<PoolSnapshot | undefined>;
@@ -333,6 +394,8 @@ export const DEFAULT_ORACLE_FIELDS = {
   referenceRateFeedID: "",
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
+  medianLive: false,
+  lastOracleReportAt: 0n,
   prevMedianPrice: 0n,
   prevMedianAt: 0n,
   lastOracleJumpBps: "0.0000",
@@ -343,6 +406,11 @@ export const DEFAULT_ORACLE_FIELDS = {
   invertRateFeedKnown: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
+  rebalanceThresholdAbove: 0,
+  rebalanceThresholdBelow: 0,
+  // Mirrors `invertRateFeedKnown`: false until factory seed or
+  // `RebalanceThresholdUpdated` lands real values; gates state-sync self-heal.
+  rebalanceThresholdsKnown: false,
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
   currentOpenBreachPeak: 0n,

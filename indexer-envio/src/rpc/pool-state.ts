@@ -378,18 +378,47 @@ export async function fetchInvertRateFeed(
   }
 }
 
-/** Fetch the pool's rebalance threshold using standalone getters that do NOT
- * require the oracle to be live (unlike getRebalancingState which reverts when
- * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or
- * `null` on transient RPC failure. The pool entity treats absence /
- * `<= 0` as "not yet known" (defaults to the 10000 fallback in `pool.ts`),
- * so callers can persist 0 for "configured to never rebalance" and
- * `undefined`/null for "retry next event" without ambiguity. */
-export async function fetchRebalanceThreshold(
+/** @internal Test-only: pre-set mock thresholds for a pool address. The
+ * factory and self-heal paths read this map first, falling through to the
+ * live RPC only when no mock is set. Call `_clearMockRebalanceThresholds()`
+ * between tests to avoid leaking state. */
+const _testRebalanceThresholds = new Map<
+  string,
+  { above: number; below: number } | null
+>();
+
+export function _setMockRebalanceThresholds(
   chainId: number,
   poolAddress: string,
+  thresholds: { above: number; below: number } | null,
+): void {
+  _testRebalanceThresholds.set(
+    `${chainId}:${poolAddress.toLowerCase()}`,
+    thresholds,
+  );
+}
+
+export function _clearMockRebalanceThresholds(): void {
+  _testRebalanceThresholds.clear();
+}
+
+/** Fetch the pool's rebalance thresholds (above and below) at a specific
+ * block. Standalone getters do NOT require the oracle to be live (unlike
+ * getRebalancingState which reverts on stale/expired oracle data). Returns
+ * `{above, below}` or `null` on transient RPC failure. Block-scoped because
+ * thresholds are governance-mutable via `RebalanceThresholdUpdated`; reading
+ * at chain head would corrupt historical replay (factory at block N would
+ * persist post-update values for pools whose thresholds changed at N+M). */
+export async function fetchRebalanceThresholds(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
   log: RpcLogger = consoleLogger,
-): Promise<number | null> {
+): Promise<{ above: number; below: number } | null> {
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRebalanceThresholds.has(testKey)) {
+    return _testRebalanceThresholds.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
@@ -402,7 +431,7 @@ export async function fetchRebalanceThreshold(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdAbove",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
@@ -414,19 +443,27 @@ export async function fetchRebalanceThreshold(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdBelow",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
     ]);
-    return Math.max(Number(aboveRes.result), Number(belowRes.result));
+    // `latest`-fallback would silently return chain-head thresholds, which
+    // would re-introduce the historical-corruption bug this block-scoped
+    // signature was added to prevent. Reject the read in that case so the
+    // caller's null-handling path runs.
+    if (aboveRes.usedLatestFallback || belowRes.usedLatestFallback) return null;
+    return {
+      above: Number(aboveRes.result),
+      below: Number(belowRes.result),
+    };
   } catch (err) {
     logRpcFailure(
       chainId,
       "rebalanceThreshold",
       poolAddress,
       err,
-      undefined,
+      blockNumber,
       log,
     );
     return null;

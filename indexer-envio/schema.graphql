@@ -39,6 +39,21 @@ type Pool {
   # first-ever median). Sole consumer is the next MedianUpdated, which
   # captures it as `prevMedianAt` before overwrite.
   lastMedianAt: BigInt!
+  # True iff the most recent `MedianUpdated` for the feed had a non-zero
+  # value. Stays false during a zero-median outage even though
+  # `lastMedianPrice` retains the prior non-zero value (per
+  # `computeMedianLineageNext`). Gates `tryDeriveRebalanceState` so the
+  # entity-derive path doesn't keep using a stale median during outages —
+  # `oraclePrice` alone isn't enough since `OracleReported` writes reporter
+  # quotes to it.
+  medianLive: Boolean!
+  # Most recent `OracleReported` report time (from `event.params.timestamp`).
+  # Distinct from `oracleTimestamp` (also bumped by state-sync writes) and
+  # `lastMedianAt` (block timestamp of MedianUpdated). The on-chain
+  # `getRebalancingState` checks expiry via reporter `report.timestamp +
+  # oracleExpiry`; gating the entity-derive path on this field gives parity
+  # with that revert.
+  lastOracleReportAt: BigInt!
   # `lastMedianPrice` / `lastMedianAt` from the prior MedianUpdated, captured
   # before overwrite so the Oracle Jump alert can render "Previous Oracle
   # Price (Xm ago)". 0 until the second non-zero MedianUpdated.
@@ -64,6 +79,20 @@ type Pool {
   invertRateFeedKnown: Boolean!
   priceDifference: BigInt!
   rebalanceThreshold: Int!
+  # Direction-split thresholds (bps) populated from `FPMMRebalanceThresholdUpdated`
+  # events and seeded at FPMMDeployed. `rebalanceThreshold` is the active
+  # threshold for the current reserve direction, refreshed on every
+  # UpdateReserves/Rebalanced. The split fields let state-sync handlers
+  # pick the active side from the entity store without an `eth_call`.
+  # `rebalanceThresholdsKnown` mirrors `invertRateFeedKnown`: false = unread
+  # (pre-seed or RPC failure), true = real on-chain values persisted. While
+  # false, state-sync's self-heal retries the cached effect on every event
+  # so a transient deploy-time blip doesn't permanently disable the
+  # entity-derived path. The two int fields can both be 0 in the legitimate
+  # "configured to never rebalance" case, distinct from "not yet known".
+  rebalanceThresholdAbove: Int!
+  rebalanceThresholdBelow: Int!
+  rebalanceThresholdsKnown: Boolean!
   lastRebalancedAt: BigInt!
   # Rising-edge timestamp: block time when priceDifference crossed strictly
   # above the 1% tolerance line (devRatio > 1.01). Exact-tolerance pools

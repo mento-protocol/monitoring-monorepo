@@ -1,17 +1,33 @@
 // ---------------------------------------------------------------------------
 // FPMM limits and fees handlers: TradingLimitConfigured + LiquidityStrategyUpdated
 // + LPFeeUpdated + ProtocolFeeUpdated + RebalanceIncentiveUpdated
+// + RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-import { FPMM, type Pool, type TradingLimit } from "generated";
-import { asAddress, asBigInt, makePoolId } from "../../helpers";
+import {
+  FPMM,
+  type OracleSnapshot,
+  type Pool,
+  type TradingLimit,
+} from "generated";
+import { asAddress, asBigInt, eventId, makePoolId } from "../../helpers";
 import {
   TRADING_LIMITS_INTERNAL_DECIMALS,
   computeLimitPressures,
   computeLimitStatus,
 } from "../../tradingLimits";
-import { tradingLimitsEffect } from "../../rpc/effects";
-import { maybePreloadPool } from "../../pool";
+import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
+import {
+  maybePreloadPool,
+  selfHealInvertRateFeed,
+  upsertPool,
+  upsertSnapshot,
+} from "../../pool";
+import {
+  computePriceDifference,
+  pickActiveThreshold,
+} from "../../priceDifference";
+import { recordHealthSample } from "../../healthScore";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -152,3 +168,201 @@ FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
     event.params.newIncentive,
   ),
 );
+
+// ---------------------------------------------------------------------------
+// FPMM.RebalanceThresholdUpdated
+// ---------------------------------------------------------------------------
+
+// A governance threshold change can by itself open or close a breach
+// (e.g. tightening from 300 to 100 makes a previously-healthy pool
+// breached). Route through `upsertPool` so this event runs the same
+// breach/health pipeline that state-sync handlers do — including
+// `currentOpenBreachPeak` / `currentOpenBreachEntryThreshold` denorm
+// maintenance, `selfHealInvertRateFeed` for the direction calc, and
+// the `DeviationThresholdBreach` history row write. Then call
+// `upsertSnapshot` to refresh the daily rollup, mirroring the oracle
+// handlers — without it, threshold-only health transitions on a quiet
+// pool can leave `PoolDailySnapshot.cumulativeHealth*` stale until the
+// next reserve / oracle event.
+FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
+  const poolId = makePoolId(event.chainId, event.srcAddress);
+  // Same preload-bail rationale as state-sync handlers: with
+  // `preload_handlers: true` we'd otherwise run `recordBreachTransition`
+  // (inside `upsertPool`) twice per event.
+  if (await maybePreloadPool(context, poolId)) return;
+  const initial = await context.Pool.get(poolId);
+  if (!initial) return;
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  // Self-heal invertRateFeed before pickActiveThreshold reads it. Without
+  // this, an inverted pool whose deploy-time invert read failed and which
+  // gets a threshold update before any state-sync event would persist
+  // the wrong-side active threshold.
+  const existing = await selfHealInvertRateFeed(context, initial);
+  const above = Number(event.params.newThresholdAbove);
+  const below = Number(event.params.newThresholdBelow);
+  // Gate the breach/health recompute on a fresh live median AND
+  // non-degenerate reserves: the direction-pick + priceDifference both
+  // depend on `lastMedianPrice` AND `norm1/norm0`, so without a usable
+  // median the recompute would pass through a stale/expired median, and
+  // without usable reserves `pickActiveThreshold` would fall back to
+  // `above` (degenerate-reserve path) and `computePriceDifference` would
+  // return `0n`. Same gates the entity-derive path uses, applied here so
+  // a governance threshold update doesn't open/close breaches from
+  // oracle/reserve data the contract would reject.
+  const medianFresh =
+    existing.lastMedianPrice > 0n &&
+    existing.medianLive &&
+    existing.invertRateFeedKnown &&
+    existing.oracleOk &&
+    existing.oracleExpiry > 0n &&
+    existing.lastOracleReportAt > 0n &&
+    existing.lastOracleReportAt + existing.oracleExpiry > blockTimestamp &&
+    existing.reserves0 > 0n &&
+    existing.reserves1 > 0n;
+
+  // Resolve the threshold-event's recompute inputs, preferring local
+  // median when fresh (cheap, no RPC) and falling back to the contract's
+  // `getRebalancingState` otherwise (covers quiet pools where local
+  // median anchors stale even though the contract's median is fresh —
+  // codex M1). `null` means neither path could produce a usable
+  // priceDifference; the handler then writes only the threshold split
+  // fields and preserves existing breach/health state.
+  let priceDifferenceFromMedian: bigint | null = null;
+  let active: number | null = null;
+  if (medianFresh) {
+    // Synthetic pool view using `lastMedianPrice` (clean median) for both
+    // direction-pick AND priceDifference. Without this, upsertPool's
+    // breach/health recompute would derive priceDifference from the
+    // reporter-tainted `oraclePrice` (set by OracleReported).
+    const medianView = {
+      reserves0: existing.reserves0,
+      reserves1: existing.reserves1,
+      oraclePrice: existing.lastMedianPrice,
+      invertRateFeed: existing.invertRateFeed,
+      token0Decimals: existing.token0Decimals,
+      token1Decimals: existing.token1Decimals,
+    };
+    active = pickActiveThreshold(medianView, { above, below });
+    priceDifferenceFromMedian = computePriceDifference(medianView);
+  } else {
+    // Local median not usable — try the contract's authoritative state.
+    // Threshold updates are rare governance events so the extra RPC is
+    // acceptable. The contract's `getRebalancingState` returns the
+    // direction-correct active threshold + priceDifference at this block.
+    const rpc = await context.effect(rebalancingStateEffect, {
+      chainId: event.chainId,
+      poolAddress: asAddress(event.srcAddress),
+      blockNumber,
+    });
+    if (rpc) {
+      priceDifferenceFromMedian = rpc.priceDifference;
+      active = rpc.rebalanceThreshold;
+    }
+  }
+  // RPC fallback succeeded ⇒ contract had a live oracle at this block.
+  // If the local pool row still has `oracleOk=false` from deploy-time
+  // RPC misses or a prior stale state, lift it now so the upsertPool
+  // health/breach pipeline + the post-upsert `oracleOk` gate see the
+  // correct live-oracle status.
+  const rpcSucceeded = !medianFresh && priceDifferenceFromMedian !== null;
+
+  if (priceDifferenceFromMedian === null || active === null) {
+    // Neither local median nor RPC produced usable values. Write the
+    // new threshold split fields + Known flag so derive can succeed
+    // once a live median lands; preserve existing breach/health state.
+    //
+    // Special-case known-zero: when governance just configured the pool
+    // to never rebalance (above == 0 && below == 0), also clear the
+    // active `rebalanceThreshold`. `effectiveThreshold` reads the
+    // active value first (before consulting `rebalanceThresholdsKnown`),
+    // so leaving the prior positive value here would let breach checks
+    // continue tripping against the old threshold even though the new
+    // configuration says "never rebalance". Setting `rebalanceThreshold`
+    // = 0 + Known=true makes `effectiveThreshold` return the
+    // never-trips sentinel.
+    const isKnownZero = above === 0 && below === 0;
+    context.Pool.set({
+      ...existing,
+      rebalanceThresholdAbove: above,
+      rebalanceThresholdBelow: below,
+      rebalanceThresholdsKnown: true,
+      ...(isKnownZero ? { rebalanceThreshold: 0 } : {}),
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+    return;
+  }
+  const upserted = await upsertPool({
+    context,
+    chainId: event.chainId,
+    poolId,
+    source: "fpmm_threshold_updated",
+    blockNumber,
+    blockTimestamp,
+    txHash: event.transaction.hash,
+    oracleDelta: {
+      rebalanceThresholdAbove: above,
+      rebalanceThresholdBelow: below,
+      rebalanceThreshold: active,
+      rebalanceThresholdsKnown: true,
+      priceDifference: priceDifferenceFromMedian,
+      ...(rpcSucceeded ? { oracleOk: true } : {}),
+    },
+    existing: { pool: existing },
+  });
+  // Advance the health-time accumulators. Gate on `oracleOk` only:
+  // `hasHealthData` would skip pools whose previous threshold was 0 and
+  // therefore never accrued health. A governance change to a positive
+  // threshold is exactly the moment health tracking should start —
+  // dropping the gate lets `recordHealthSample` initialize the cursor.
+  //
+  // Write an `OracleSnapshot` row for the cursor-advance so the chart
+  // history has an explicit entry at this block. Without it, the next
+  // OracleReported/MedianUpdated snapshot's covered-interval would
+  // appear to start from a phantom cursor advance and the chart-side
+  // gap-detection would mis-attribute a discontinuity.
+  let pool = upserted;
+  if (upserted.oracleOk) {
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      upserted,
+      upserted.priceDifference,
+      upserted.rebalanceThreshold,
+      blockTimestamp,
+    );
+    pool = { ...upserted, ...poolUpdate };
+    context.Pool.set(pool);
+
+    // Only write the OracleSnapshot row when we used the local median
+    // (`medianFresh` path). On the RPC-fallback path `pool.lastMedianPrice`
+    // may be 0 / stale, so the row would mix a fresh deviation with an
+    // unrelated displayed oracle price.
+    if (medianFresh) {
+      const snapshot: OracleSnapshot = {
+        id: eventId(event.chainId, event.block.number, event.logIndex),
+        chainId: event.chainId,
+        poolId,
+        timestamp: blockTimestamp,
+        // Use `lastMedianPrice` so the snapshot's displayed oracle price
+        // is consistent with the priceDifference / threshold fields,
+        // which were both computed from the median above.
+        oraclePrice: pool.lastMedianPrice,
+        oracleOk: pool.oracleOk,
+        numReporters: pool.oracleNumReporters,
+        priceDifference: pool.priceDifference,
+        rebalanceThreshold: pool.rebalanceThreshold,
+        source: "threshold_updated",
+        blockNumber,
+        txHash: event.transaction.hash,
+        ...snapshotFields,
+      };
+      context.OracleSnapshot.set(snapshot);
+    }
+  }
+  await upsertSnapshot({
+    context,
+    pool,
+    blockTimestamp,
+    blockNumber,
+  });
+});

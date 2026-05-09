@@ -8,6 +8,8 @@ import {
   _clearMockRebalancingStates,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
 } from "../src/rpc.ts";
 
 type MockDb = {
@@ -133,12 +135,18 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
+    _clearMockRebalanceThresholds();
+    // Seed mock thresholds for the test pool so the factory's
+    // rebalanceThresholdsEffect (now block-scoped, cache: false) doesn't
+    // hit live RPC during FPMMDeployed processing.
+    _setMockRebalanceThresholds(CHAIN_CELO, POOL, { above: 100, below: 100 });
   });
 
   after(() => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
+    _clearMockRebalanceThresholds();
   });
 
   it("stamps amount deltas + USD fields from block-scoped incentive read", async function () {
