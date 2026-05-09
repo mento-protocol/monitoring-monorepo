@@ -24,6 +24,10 @@ If you find yourself reaching for `CronCreate` or `/loop` here, stop — Monitor
 Arm a single Monitor with `persistent: true` and a `description` like `envio sync for <commit>`. The script body:
 
 ```bash
+# Deliberately NOT setting -e: the inner jq parses use 2>/dev/null and we want
+# silent fall-through (empty var → loop continues at next poll) rather than a
+# fatal exit on a transient parse miss. -u catches typos in our own variables;
+# -o pipefail catches a real upstream failure that gets masked by jq exiting 0.
 set -uo pipefail
 TARGET="<TARGET_COMMIT>"               # interpolate the resolved short SHA
 ORG="mento-protocol"
@@ -34,32 +38,60 @@ SYNC_DEADLINE=$((START + 5400))        # 90 min
 POLL_INTERVAL=45                       # seconds
 
 REGISTERED=0
-LAST_ERROR_KIND=""                     # debounce identical errors
+# Per-call debounce so an alternating success/fail across the two API calls
+# can't wipe the debounce state of either one — see PR #364 review feedback.
+LAST_IDX_ERROR=""
+LAST_STATUS_ERROR=""
+STATUS_JSON=""                         # last successful status payload, used by SYNC_DEADLINE snapshot
 
 emit() { printf '%s\n' "$*"; }
 elapsed_min() { echo $(( ($(date +%s) - START) / 60 )); }
 
+# Wall-clock deadline check — runs at the TOP of every loop iteration so it
+# fires regardless of whether the upstream API has been succeeding or failing.
+# Without this, a stuck auth-expired state would emit ERROR once and then loop
+# forever silent until the user notices.
+check_deadlines() {
+  local now=$1
+  if (( REGISTERED == 0 && now >= BUILD_DEADLINE )); then
+    emit "BUILD_FAILED elapsed=$(elapsed_min)m — deployment for $TARGET never registered. Try: pnpm deploy:indexer:logs --build"
+    exit 1
+  fi
+  if (( now >= SYNC_DEADLINE )); then
+    if [[ -n "$STATUS_JSON" ]]; then
+      local snapshot
+      snapshot=$(echo "$STATUS_JSON" | jq -r \
+        '.data[]? | "  \(.network // .chain_id): \(.latest_processed_block)/\(.block_height) caught_up=\(.timestamp_caught_up_to_head_or_endblock // "false")"' 2>/dev/null)
+      emit "SYNC_DEADLINE elapsed=$(elapsed_min)m — last status:"
+      emit "$snapshot"
+    else
+      emit "SYNC_DEADLINE elapsed=$(elapsed_min)m — no successful status snapshot during the run"
+    fi
+    exit 1
+  fi
+}
+
 while true; do
   NOW=$(date +%s)
+  check_deadlines "$NOW"
 
   # --- Has the deployment registered yet? ---
   IDX_JSON=$(npx -q envio-cloud indexer get "$INDEXER" "$ORG" -o json 2>/dev/null) || {
-    if [[ "$LAST_ERROR_KIND" != "auth_or_network" ]]; then
+    if [[ "$LAST_IDX_ERROR" != "auth_or_network" ]]; then
       emit "ERROR auth_or_network: 'envio-cloud indexer get' failed — auth expired or network down. Try 'npx envio-cloud login'."
-      LAST_ERROR_KIND="auth_or_network"
+      LAST_IDX_ERROR="auth_or_network"
     fi
     sleep "$POLL_INTERVAL"; continue
   }
-  LAST_ERROR_KIND=""
+  LAST_IDX_ERROR=""
 
   DEPLOYMENT=$(echo "$IDX_JSON" | jq -r --arg t "$TARGET" \
     '.data.deployments[]? | select(.commit_hash | startswith($t))' 2>/dev/null)
 
   if [[ -z "$DEPLOYMENT" ]]; then
-    if (( NOW >= BUILD_DEADLINE )); then
-      emit "BUILD_FAILED elapsed=$(elapsed_min)m — deployment for $TARGET never registered. Try: pnpm deploy:indexer:logs --build"
-      exit 1
-    fi
+    # Build deadline is enforced by check_deadlines at the top of the loop;
+    # nothing extra needed here. Just keep polling until either the deployment
+    # registers or the deadline check fires.
     sleep "$POLL_INTERVAL"; continue
   fi
 
@@ -75,16 +107,21 @@ while true; do
 
   # --- Per-chain sync status ---
   STATUS_JSON=$(npx -q envio-cloud deployment status "$INDEXER" "$TARGET" "$ORG" -o json 2>/dev/null) || {
-    if [[ "$LAST_ERROR_KIND" != "status_fetch" ]]; then
+    STATUS_JSON=""  # don't trust a partial value
+    if [[ "$LAST_STATUS_ERROR" != "status_fetch" ]]; then
       emit "ERROR status_fetch: 'envio-cloud deployment status $TARGET' failed"
-      LAST_ERROR_KIND="status_fetch"
+      LAST_STATUS_ERROR="status_fetch"
     fi
     sleep "$POLL_INTERVAL"; continue
   }
-  LAST_ERROR_KIND=""
+  LAST_STATUS_ERROR=""
 
+  # `(.data | length) > 0 and (... | all)` guards against the vacuous-truth
+  # case: `[.data[]? | …] | all` returns true on an empty array, so a
+  # `data: []` response (e.g. before any chain row is created) would
+  # otherwise emit a false READY_TO_PROMOTE.
   ALL_CAUGHT_UP=$(echo "$STATUS_JSON" | jq -r \
-    '[.data[]? | (.timestamp_caught_up_to_head_or_endblock // "") != ""] | all' 2>/dev/null)
+    '(.data | length) > 0 and ([.data[] | (.timestamp_caught_up_to_head_or_endblock // "") != ""] | all)' 2>/dev/null)
 
   if [[ "$ALL_CAUGHT_UP" == "true" ]]; then
     PER_CHAIN=$(echo "$STATUS_JSON" | jq -r \
@@ -93,14 +130,6 @@ while true; do
     emit "$PER_CHAIN"
     emit "Run: pnpm deploy:indexer:promote $TARGET -y"
     exit 0
-  fi
-
-  if (( NOW >= SYNC_DEADLINE )); then
-    SNAPSHOT=$(echo "$STATUS_JSON" | jq -r \
-      '.data[]? | "  \(.network // .chain_id): \(.latest_processed_block)/\(.block_height) caught_up=\(.timestamp_caught_up_to_head_or_endblock // "false")"')
-    emit "SYNC_DEADLINE elapsed=$(elapsed_min)m — last status:"
-    emit "$SNAPSHOT"
-    exit 1
   fi
 
   sleep "$POLL_INTERVAL"
@@ -126,7 +155,19 @@ The script's natural exits (caught-up / build-failed / sync-deadline / already-p
 
 ## Decision tree for the calling skill
 
-When the Monitor emits `READY_TO_PROMOTE` or `ALREADY_PROMOTED`, treat it as the success terminal and proceed to the next phase (typically promote). When it emits `BUILD_FAILED`, `SYNC_DEADLINE`, or `ERROR <kind>` and exits, treat as failure and stop without promoting. The Monitor process exits cleanly on terminal events — no `TaskStop` needed for those paths. Call `TaskStop` only if the user asks to abort early.
+Each emit is either **terminal** (the script exits after emitting) or **transient** (the script keeps polling).
+
+**Terminal emits** — the calling skill treats these as the final result:
+
+- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success; proceed to the next phase (typically promote).
+- `BUILD_FAILED` / `SYNC_DEADLINE` → failure; stop without promoting.
+
+**Transient emits** — the script keeps polling after these; the calling skill should NOT stop on them:
+
+- `REGISTERED prod_status=<status>` — informational, fires once when the deployment first appears.
+- `ERROR auth_or_network: …` / `ERROR status_fetch: …` — debounced; surfaces a stuck upstream that the user may need to fix (e.g. `npx envio-cloud login`). The Monitor keeps polling, so transient blips self-heal. The wall-clock deadline checks at the top of the loop ensure a stuck error eventually escalates to `BUILD_FAILED` or `SYNC_DEADLINE` rather than running forever.
+
+The Monitor process exits cleanly on terminal events — no `TaskStop` needed. Call `TaskStop` only if the user asks to abort early.
 
 ## Rules
 
@@ -144,7 +185,8 @@ When the Monitor emits `READY_TO_PROMOTE` or `ALREADY_PROMOTED`, treat it as the
 Callers (notably the `deploy-indexer` skill, Phase 2) invoke this command with a target commit string and treat the Monitor's terminal emit as the result:
 
 - `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success, continue
-- `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR …` → failure, stop, do not promote
+- `BUILD_FAILED` / `SYNC_DEADLINE` → failure, stop, do not promote
 - User-cancelled (`TaskStop`) → stop, do not promote
+- `ERROR <kind>` is **non-terminal** — keep waiting; the Monitor will continue polling. A stuck error eventually escalates via the wall-clock deadline checks above.
 
-This contract matches the previous cron-based version's outputs verbatim, so `deploy-indexer` Phase 2 needs no changes.
+The terminal-emit names (`READY_TO_PROMOTE`, `ALREADY_PROMOTED`, `BUILD_FAILED`, `SYNC_DEADLINE`) replace the previous cron-based version's prose returns (`"ready to promote"`, etc.) — `deploy-indexer` Phase 2 needs to map to the new names.
