@@ -88,8 +88,13 @@ export const isNeverRebalance = (pool: {
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
 }): boolean =>
-  (pool.rebalanceThresholdAbove ?? 0) === 0 &&
-  (pool.rebalanceThresholdBelow ?? 0) === 0 &&
+  // STRICT equality: undefined is NOT treated as 0. A pool entity always
+  // has both split fields populated (Int! schema), so this only matters
+  // for synthetic test inputs. Defaulting undefined→0 would let a caller
+  // claim never-rebalance without populating the split fields, which is
+  // the same partial-shape pitfall the dashboard mirror guards against.
+  pool.rebalanceThresholdAbove === 0 &&
+  pool.rebalanceThresholdBelow === 0 &&
   pool.rebalanceThresholdsKnown === true;
 
 /** Resolve the effective threshold in bps. Three states:

@@ -309,6 +309,8 @@ describe("computeHealthStatus", () => {
         oracleTimestamp: FRESH_TS,
         priceDifference: "20000", // 200%
         rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
         rebalanceThresholdsKnown: true,
       }),
     ).toBe("OK");
@@ -324,6 +326,8 @@ describe("computeHealthStatus", () => {
         oracleTimestamp: FRESH_TS,
         priceDifference: String(2e12),
         rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
         rebalanceThresholdsKnown: true,
         deviationBreachStartedAt: String(
           Math.floor(Date.now() / 1000) - 2 * 3600,

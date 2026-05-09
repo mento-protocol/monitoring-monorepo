@@ -5,6 +5,7 @@ import type { Network } from "@/lib/networks";
 import type { HealthStatus } from "@/lib/health";
 import {
   computeHealthStatus,
+  effectiveThreshold,
   isNeverRebalance,
   isOracleFresh,
 } from "@/lib/health";
@@ -93,7 +94,7 @@ export function DeviationCell({
         <DeviationBar
           neverRebalances={neverRebalances}
           priceDifference={pool.priceDifference ?? "0"}
-          rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+          rebalanceThreshold={effectiveThreshold(pool)}
           status={status}
         />
       </dd>

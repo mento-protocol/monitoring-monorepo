@@ -76,6 +76,8 @@ describe("PoolConfigPanel", () => {
       const pool: Pool = {
         ...BASE_POOL,
         rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
         rebalanceThresholdsKnown: true,
       };
       const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);

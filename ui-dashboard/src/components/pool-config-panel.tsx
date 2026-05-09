@@ -117,10 +117,19 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
             />
           </span>
         }
-        // Distinguish the schema-default unknown-zero from governance's
-        // explicit never-rebalance configuration.
+        // Three states:
+        // - never-rebalance (both split sides 0 + Known): "Never"
+        // - threshold known (Known flag true): show the active value, even
+        //   if it's `0` on the inactive side of an asymmetric pool
+        //   (`above=0, below>0`) — that's a real configured value, not
+        //   missing data, so it shouldn't render as "—".
+        // - unknown (Known flag false): "—"
         value={
-          neverRebalances ? "Never" : formatBps(pool.rebalanceThreshold || null)
+          neverRebalances
+            ? "Never"
+            : pool.rebalanceThresholdsKnown
+              ? formatBps(pool.rebalanceThreshold ?? 0)
+              : formatBps(null)
         }
         mono
       />

@@ -250,6 +250,8 @@ describe("DeviationCell — info popover", () => {
     const pool: Pool = {
       ...BASE_POOL,
       rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
       rebalanceThresholdsKnown: true,
       priceDifference: "3000",
     };

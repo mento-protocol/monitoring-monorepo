@@ -112,9 +112,16 @@ export function isNeverRebalance(pool: {
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
 }): boolean {
+  // STRICT equality on the split fields: an absent (undefined) value is
+  // NOT treated as 0. A caller with `rebalanceThresholdsKnown: true` but
+  // missing split fields was probably built from a query that didn't
+  // fetch the isolated EXT triple — defaulting undefined→0 there would
+  // misclassify a real-threshold pool as never-rebalance and suppress
+  // its alerts. Both split sides must be explicitly 0 for the predicate
+  // to hold.
   return (
-    (pool.rebalanceThresholdAbove ?? 0) === 0 &&
-    (pool.rebalanceThresholdBelow ?? 0) === 0 &&
+    pool.rebalanceThresholdAbove === 0 &&
+    pool.rebalanceThresholdBelow === 0 &&
     pool.rebalanceThresholdsKnown === true
   );
 }
@@ -139,7 +146,7 @@ export function isNeverRebalance(pool: {
  * (older indexer schema or unmigrated query) defaults to the safe 10000
  * under-bound. 1e12 fits in a JS number (≪ Number.MAX_SAFE_INTEGER).
  */
-const effectiveThreshold = (pool: {
+export const effectiveThreshold = (pool: {
   rebalanceThreshold?: number;
   rebalanceThresholdAbove?: number;
   rebalanceThresholdBelow?: number;
