@@ -254,7 +254,15 @@ type BrokerSwapEvent
   # Lowercased; classifies the swap path (BiPoolManager → v2 legacy).
   exchangeProvider: String! @index
   exchangeId: String! @index # bytes32 hex; identifies the exchange row inside the provider
-  trader: String! @index # tx-level signer (not just the Broker caller)
+  # `event.params.trader` from Broker.Swap = `msg.sender` to Broker. For
+  # routed swaps this is a router/aggregator/wrapper contract (MentoRouter,
+  # OpenOcean executor, cluster-9fd2 adapters, etc.); for direct trades from
+  # a UI/SDK this equals `tx.from`. Use `caller` for signer-EOA-level
+  # attribution (volume-leaderboard primary key).
+  brokerCaller: String! @index
+  # tx.from — the EOA that signed the tx. Mirrors the v3 SwapEvent.caller
+  # field semantically; this is the volume-leaderboard primary key.
+  caller: String! @index
   tokenIn: String! @index
   tokenOut: String!
   amountIn: BigInt!
@@ -265,7 +273,7 @@ type BrokerSwapEvent
   # tx.to lowercased — the contract the user's transaction was directed to.
   # Used by the dashboard to disambiguate router-driven swaps (where the
   # Broker is invoked transitively via the v3 Router → VirtualPool wrapper)
-  # from broker-direct swaps (legacy v2 path).
+  # from broker-direct swaps (legacy v2 path). Mirrors v3 SwapEvent.txTo.
   txTo: String! @index
   # True iff `txTo == V3 Router (0x4861840C...)`. Denormalized so the chart
   # can sum daily volume without re-checking the router address per row.
@@ -311,17 +319,21 @@ type BrokerDailySnapshot
 # -----------------------------------------------------------------------------
 
 type BrokerTraderDailySnapshot
-  @index(fields: ["chainId", "trader", "timestamp"]) {
-  id: ID! # "{chainId}-{trader}-{day}"
+  @index(fields: ["chainId", "caller", "timestamp"]) {
+  id: ID! # "{chainId}-{caller}-{day}"
   chainId: Int! @index # exposed to getWhere for the BrokerLeaderboardWindowSnapshot heartbeat flush
-  trader: String! @index
+  # tx.from — the EOA that signed the tx. Mirrors TraderDailySnapshot.trader
+  # semantically; the entity is keyed by signer EOA so the v2 producer
+  # leaderboard reflects the actual person/integrator behind a swap rather
+  # than the immediate Broker caller (`msg.sender`, often a router contract).
+  caller: String! @index
   timestamp: BigInt! @index # UTC day bucket
   swapCount: Int!
   volumeUsdWei: BigInt!
   isSystemAddress: Boolean! @index
-  # Block timestamp of the trader's most recent v2-direct swap within this
+  # Block timestamp of the caller's most recent v2-direct swap within this
   # day. Drives "Last active" at sub-day precision (the day bucket alone would
-  # show every active trader as "today").
+  # show every active caller as "today").
   lastSeenTimestamp: BigInt!
 }
 
@@ -344,8 +356,10 @@ type BrokerAggregatorDailySnapshot
 
 # Existence-only marker: dedupes first-touch increments of
 # BrokerAggregatorDailySnapshot.uniqueTraders. Mirrors AggregatorTraderDayMarker.
+# Keyed by `caller` (tx.from / signer EOA) so uniqueTraders counts distinct
+# signer EOAs per day, not distinct msg.sender contracts.
 type BrokerAggregatorTraderDayMarker {
-  id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+  id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
 }
 
 type FactoryDeployment {
