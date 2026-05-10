@@ -20,6 +20,7 @@ import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
   effectiveThreshold,
   isNeverRebalance,
+  persistableThreshold,
   maybePreloadPool,
   selfHealInvertRateFeed,
   selfHealTokenDecimals,
@@ -389,10 +390,9 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
-        // For asymmetric pools with active=0, the raw value would render the
-        // chart at 0%/—. See sortedOracles handlers for full rationale.
-        rebalanceThreshold: Number(effectiveThreshold(pool)),
+        // See sortedOracles.OracleReported — `persistableThreshold` gates the
+        // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(pool),
         source: "threshold_updated",
         blockNumber,
         txHash: event.transaction.hash,

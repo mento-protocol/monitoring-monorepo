@@ -50,6 +50,7 @@ import {
   DEFAULT_ORACLE_FIELDS,
   effectiveThreshold,
   isNeverRebalance,
+  persistableThreshold,
   maybePreloadPool,
   selfHealInvertRateFeed,
   selfHealRebalanceThresholds,
@@ -204,10 +205,9 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
-        // Asymmetric pools with active side=0 would otherwise render the chart
-        // at 0%/—. See sortedOracles handlers for full rationale.
-        rebalanceThreshold: effectiveBps,
+        // See sortedOracles.OracleReported — `persistableThreshold` gates the
+        // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(pool),
         source: "update_reserves",
         blockNumber,
         txHash: event.transaction.hash,
@@ -428,10 +428,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
-        // Asymmetric pools with active side=0 would otherwise render the chart
-        // at 0%/—. See sortedOracles handlers for full rationale.
-        rebalanceThreshold: effectiveBps,
+        // See sortedOracles.OracleReported — `persistableThreshold` gates the
+        // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(pool),
         source: "rebalanced",
         blockNumber,
         txHash: event.transaction.hash,

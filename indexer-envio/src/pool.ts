@@ -134,6 +134,27 @@ export const effectiveThreshold = (pool: {
   return 10000n;
 };
 
+/**
+ * Persistable counterpart to `effectiveThreshold` for any field typed as
+ * GraphQL `Int!` (32-bit signed, max ~2.1e9). The 1e12 never-rebalance
+ * sentinel is intentionally only safe for in-memory comparisons — coercing
+ * it to JS `Number` and persisting overflows `Int!`, which Postgres rejects
+ * as `int4` out-of-range. Use this for `OracleSnapshot.rebalanceThreshold`
+ * and any other persisted threshold field; dashboard consumers that need
+ * to distinguish never-rebalance from on-chain-configured-zero must join
+ * the Pool entity's `rebalanceThresholdsKnown` + `rebalanceThresholdAbove/Below`
+ * fields rather than reading sentinel values from the snapshot row.
+ */
+export const persistableThreshold = (pool: {
+  rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  if (isNeverRebalance(pool)) return 0;
+  return Number(effectiveThreshold(pool));
+};
+
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
  * line, integer-safe. Used by both the live status branch (here) and the
  * cumulative `criticalDurationSeconds` accrual in `deviationBreach.ts` to

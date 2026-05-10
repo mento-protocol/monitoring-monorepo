@@ -12,6 +12,7 @@ import {
   computeHealthStatus,
   effectiveThreshold,
   isNeverRebalance,
+  persistableThreshold,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
   nextOpenBreachEntryThreshold,
@@ -188,12 +189,14 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         oracleOk: true,
         numReporters: existing.oracleNumReporters,
         priceDifference,
-        // Persist the effective threshold (matches what `snapshotFields.deviationRatio`
-        // was computed against). For asymmetric pools with active side = 0, the
-        // raw `existing.rebalanceThreshold` would render the chart at 0%/—; the
-        // effective value (10000 fallback) keeps the rendered deviation in lockstep
-        // with the indexed health sample.
-        rebalanceThreshold: effectiveBps,
+        // Persist the effective threshold so asymmetric pools with active
+        // side = 0 still show a non-zero denominator in the chart's
+        // deviation-ratio math (raw 0 would render 0%/—). Use
+        // `persistableThreshold` not `effectiveBps` directly: the 1e12
+        // never-rebalance sentinel overflows `OracleSnapshot.rebalanceThreshold`'s
+        // `Int!` (32-bit signed). Dashboards detect never-rebalance by joining
+        // the Pool entity's `rebalanceThresholdsKnown` + above/below fields.
+        rebalanceThreshold: persistableThreshold(finalPool),
         source: "oracle_reported",
         blockNumber,
         txHash: event.transaction.hash,
@@ -446,9 +449,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleOk: true,
         numReporters: existing.oracleNumReporters,
         priceDifference,
-        // Persist the effective threshold (matches `snapshotFields.deviationRatio`).
-        // See OracleReported handler for asymmetric-pool rendering rationale.
-        rebalanceThreshold: effectiveBps,
+        // See OracleReported handler — `persistableThreshold` gates 1e12
+        // never-rebalance sentinel out of the `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(finalPool),
         source: "oracle_median_updated",
         blockNumber,
         txHash: event.transaction.hash,
