@@ -71,6 +71,34 @@ const BASE_POOL: Pool = {
 };
 
 describe("PoolConfigPanel", () => {
+  describe("Rebalance Threshold tile", () => {
+    it("renders 'Never' when governance disabled rebalancing for the pool", () => {
+      const pool: Pool = {
+        ...BASE_POOL,
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      };
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
+      expect(html).toMatch(/Rebalance Threshold[\s\S]*?Never/);
+      expect(html).toContain(
+        "Governance has disabled rebalancing for this pool",
+      );
+    });
+
+    it("keeps the em dash when threshold zero still means 'not backfilled yet'", () => {
+      const pool: Pool = {
+        ...BASE_POOL,
+        rebalanceThreshold: 0,
+        rebalanceThresholdsKnown: false,
+      };
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
+      expect(html).toMatch(/Rebalance Threshold[\s\S]*?—/);
+      expect(html).not.toMatch(/Rebalance Threshold[\s\S]*?Never/);
+    });
+  });
+
   describe("Swap Fee tile", () => {
     it("renders the sum of LP and Protocol fees as the headline value", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);

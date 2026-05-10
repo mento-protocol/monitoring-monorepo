@@ -49,6 +49,38 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
+// Per-pool data-trust flags — `rebalanceThresholdsKnown` triple
+// (above/below/known) plus `tokenDecimalsKnown`. Kept OFF
+// `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
+// `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
+// the new fields before the prod indexer has them would otherwise reject
+// the entire pools query. Isolating means consumers (`isNeverRebalance`,
+// `effectiveThreshold` in `health.ts`, `getSnapshotVolumeInUsd` in
+// `volume.ts`) degrade safely (10000-bps under-bound for thresholds, null
+// USD volume for unknown decimals) until the merge lands.
+//
+// `rebalanceThresholdAbove` / `rebalanceThresholdBelow` ride alongside
+// the Known flag because `isNeverRebalance` requires BOTH split sides to
+// be 0 (the active `rebalanceThreshold` on the main query is just the
+// side `pickActiveThreshold` chose at index time — can be 0 on an
+// asymmetric `above=0, below>0` pool that DOES rebalance; see indexer
+// `pool.ts:isNeverRebalance`). `tokenDecimalsKnown` distinguishes
+// schema-default 18/18 from on-chain-trusted decimals so dashboard USD
+// math doesn't silently scale a 6-dp USDC leg as 18-dp. Triggered by
+// Cursor's learned rule "Isolate new Envio/Hasura entity fields in
+// separate queries for schema-lag resilience".
+export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
+  query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
+      rebalanceThresholdsKnown
+      tokenDecimalsKnown
+    }
+  }
+`;
+
 // Per-pool breach rollup counters, scoped to a chain. Kept OFF the
 // shared ALL_POOLS_WITH_HEALTH query on purpose: these fields are
 // deployed in a phased indexer rollout, and a schema-lag fail would
@@ -335,6 +367,23 @@ export const POOL_DETAIL_WITH_HEALTH = `
       swapCount
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Single-pool sibling of `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Same
+// isolation rationale: keeps the data-trust flags OFF the page's primary
+// `POOL_DETAIL_WITH_HEALTH` query so a schema-lag during deploy degrades
+// just the never-rebalance affordance / USD math instead of breaking
+// the entire pool detail page.
+export const POOL_THRESHOLDS_KNOWN_EXT = `
+  query PoolThresholdsKnownExt($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
+      rebalanceThresholdsKnown
+      tokenDecimalsKnown
     }
   }
 `;

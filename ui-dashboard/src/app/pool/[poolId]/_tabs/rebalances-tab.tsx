@@ -123,9 +123,10 @@ export function computeRewardThresholds(
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
   // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  const mad = median(
-    [...values.map((v) => Math.abs(v - med))].sort((a, b) => a - b),
+  const deviations = [...values.map((v) => Math.abs(v - med))].sort(
+    (a, b) => a - b,
   );
+  const mad = median(deviations);
   // MAD = 0 means majority of samples are exactly equal. No meaningful
   // spread → skip highlighting rather than tier on noise.
   if (mad === 0) return null;

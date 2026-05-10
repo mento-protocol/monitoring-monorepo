@@ -19,7 +19,11 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
-import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
+import {
+  ALL_POOLS_WITH_HEALTH,
+  POOL_DETAIL_WITH_HEALTH,
+  POOL_THRESHOLDS_KNOWN_EXT,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -115,33 +119,65 @@ export async function fetchPoolOgDataUncached(
   // the all-pools rate-map query transiently fail (including timeout), still
   // render a card with real title/chain/health — degraded cards beat generic
   // ones, and a hard fail here would be cached for an hour by unstable_cache.
-  // Parallelizing all three (vs. await-detail-then-await-others) saves ~200ms
-  // p50 on the success path. The rule's "skip-path stays fast" optimization
-  // would only help if the detail query failed, which is < 1% of calls — not
-  // worth the latency hit on the common case.
-  // Parallel allSettled is intentional — see comment above.
+  // Parallelizing all four (vs. await-detail-then-await-others) saves ~200ms
+  // p50 on the success path. react-doctor's "skip-path stays fast"
+  // optimization would only help if the detail query failed, which is < 1% of
+  // calls — not worth the latency hit on the common case.
   // react-doctor-disable-next-line react-doctor/async-defer-await
-  const [detailResult, dailyResult, allPoolsResult] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: POOL_DETAIL_WITH_HEALTH,
-      variables: { id: poolId, chainId },
-      signal,
-    }),
-    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-      document: POOL_OG_DAILY_SNAPSHOTS,
-      variables: { poolId },
-      signal,
-    }),
-    client.request<{ Pool: Pool[] }>({
-      document: ALL_POOLS_WITH_HEALTH,
-      variables: { chainId },
-      signal,
-    }),
-  ]);
+  const [detailResult, dailyResult, allPoolsResult, thresholdsResult] =
+    await Promise.allSettled([
+      client.request<{ Pool: Pool[] }>({
+        document: POOL_DETAIL_WITH_HEALTH,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+      client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+        document: POOL_OG_DAILY_SNAPSHOTS,
+        variables: { poolId },
+        signal,
+      }),
+      client.request<{ Pool: Pool[] }>({
+        document: ALL_POOLS_WITH_HEALTH,
+        variables: { chainId },
+        signal,
+      }),
+      // Threshold-known triple — isolated for the same schema-lag
+      // resilience as `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Fail-open:
+      // on transient miss the fields stay undefined and `isNeverRebalance`
+      // returns false (safe under-bound) — card renders WARN/CRITICAL
+      // instead of OK/never-rebalance until the next refresh, but
+      // doesn't fail the unfurl.
+      client.request<{
+        Pool: {
+          id: string;
+          rebalanceThresholdAbove?: number;
+          rebalanceThresholdBelow?: number;
+          rebalanceThresholdsKnown?: boolean;
+          tokenDecimalsKnown?: boolean;
+        }[];
+      }>({
+        document: POOL_THRESHOLDS_KNOWN_EXT,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+    ]);
 
   if (detailResult.status !== "fulfilled") return null;
-  const pool = detailResult.value.Pool[0];
-  if (!pool) return null;
+  const rawPool = detailResult.value.Pool[0];
+  if (!rawPool) return null;
+  const thresholdsExt =
+    thresholdsResult.status === "fulfilled"
+      ? (thresholdsResult.value.Pool[0] ?? null)
+      : null;
+  const pool: Pool = thresholdsExt
+    ? {
+        ...rawPool,
+        rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+        rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+        rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+        tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+      }
+    : rawPool;
 
   const dailyRows =
     dailyResult.status === "fulfilled"
@@ -226,6 +262,11 @@ function computeVolumeSeries(
   pool: Pool,
   rates: OracleRateMap,
 ): number[] {
+  // Same untrusted-decimals defense as the other valuation paths —
+  // `pool.tokenDecimalsKnown=false` means USD math against schema-default
+  // 18/18 would overstate by ~1e12 for a 6-dp leg. Empty series renders
+  // as "—" in the OG card. Undefined trusts default 18 (deploy-window).
+  if (pool.tokenDecimalsKnown === false) return [];
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
   const d0 = pool.token0Decimals ?? 18;
   const d1 = pool.token1Decimals ?? 18;
@@ -303,6 +344,8 @@ function sumVolumeInWindow(
   fromSec: number,
   toSec: number,
 ): number | null {
+  // Untrusted-decimals defense — see computeVolumeSeries for rationale.
+  if (pool.tokenDecimalsKnown === false) return null;
   const rows = daily.filter((s) => {
     const ts = Number(s.timestamp);
     return ts >= fromSec && ts < toSec;

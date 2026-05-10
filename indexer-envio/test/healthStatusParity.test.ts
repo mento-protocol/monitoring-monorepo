@@ -149,12 +149,80 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
-  it("falls back to 10000 bps threshold when rebalanceThreshold is 0", () => {
-    // 9000/10000 = 0.9 → still OK.
+  it("falls back to 10000 bps threshold when rebalanceThreshold is 0 and unknown", () => {
+    // 9000/10000 = 0.9 → still OK. `rebalanceThresholdsKnown=false` (default)
+    // means the indexer hasn't read the on-chain value yet, so we under-bound
+    // to keep breach detection safe.
     const pool = makePool({
       priceDifference: 9000n,
       rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: false,
     });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: known-zero rebalanceThreshold stays OK at any deviation", () => {
+    // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` is governance
+    // configuring the pool to never rebalance. A 200% priceDifference must
+    // still resolve to OK. Otherwise a never-rebalance pool would
+    // CRITICAL-spam every event.
+    const pool = makePool({
+      priceDifference: 20_000n, // 200% — well past the unknown-zero 10000 fallback
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: true,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: known-zero short-circuits even past the 1e12 effectiveThreshold cushion", () => {
+    // Past-grace anchor + priceDifference = 2e12 would trip the predicate
+    // if it relied on the 1e12 cushion alone (1e12 * 1.01 < 2e12). The
+    // explicit `isNeverRebalance` short-circuit must keep this OK regardless
+    // of magnitude. Extreme reserve skew can theoretically push
+    // priceDifference past the cushion; this pins that the short-circuit
+    // wins over the cushion at that boundary.
+    const pool = makePool({
+      priceDifference: 2n * 10n ** 12n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("dual-sentinel: unknown-zero with high deviation flows into WARN/CRITICAL via 10000 fallback", () => {
+    // Same priceDifference as above, but unknown-zero — caller should NOT
+    // treat this as never-rebalance. 20000/10000 = 2.0, well above the 1.05
+    // critical magnitude line. Past the 1h grace → CRITICAL. Pinned so a
+    // regression that collapsed both branches to 1e12 would flip this to OK.
+    const pool = makePool({
+      priceDifference: 20_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: false,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
+
+  it("asymmetric (above=0, below>0) does NOT count as never-rebalance", () => {
+    // Active `rebalanceThreshold` alone can't disambiguate: an asymmetric
+    // pool whose reservePrice currently sits on the above side persists
+    // `rebalanceThreshold=0` but the pool DOES rebalance on the below
+    // side. A regression that classifies this as never-rebalance would
+    // suppress all deviation alerts. Pinned: high diff (12000bps,
+    // > 1.05 * 10000 fallback) past the 1h grace → CRITICAL.
+    const pool = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0, // active side picked above (=0)
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300, // configured below side — pool DOES rebalance
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
 });

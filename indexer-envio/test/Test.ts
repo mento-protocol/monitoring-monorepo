@@ -497,11 +497,33 @@ async function seedPoolWithFeed(
     throw new Error("Expected seeded pool entity to exist");
   }
 
+  // Stamp `tokenDecimalsKnown: true` so SortedOracles handlers don't fire
+  // `selfHealTokenDecimals` against the fixture's fake addresses (which would
+  // fall through to live RPC and slow / flake the suite). Tests that
+  // exercise decimal self-heal explicitly should override the flag back to
+  // false on the seeded entity.
+  //
+  // Also stamp `rebalanceThresholdsKnown: true` + symmetric split sides so
+  // health-sample paths route through the valid-threshold branch (default
+  // pool from FPMMDeployed has `rebalanceThresholdsKnown: false` because
+  // the mock RPC returns undefined for the fake fee-token addresses). Tests
+  // exercising the unread case should override on the seeded entity.
   nextDb = nextDb.entities.Pool.set({
     ...existingPool,
     referenceRateFeedID: feedId,
     oracleExpiry,
     oracleNumReporters,
+    tokenDecimalsKnown: true,
+    rebalanceThresholdsKnown: true,
+    // Hardcoded 5000 (not `existingPool.* ?? 5000`) — the FPMMDeployed
+    // handler always leaves these at the schema default 0 because the mock
+    // RPC for the fake fee-token addresses can't read on-chain thresholds,
+    // so a fallthrough is the always-taken path. Tests exercising explicit
+    // asymmetric (`above=0, below>0`) or never-rebalance (both 0) shapes
+    // must override on the seeded entity AFTER this helper returns —
+    // expressing intent there is clearer than threading params through.
+    rebalanceThresholdAbove: 5000,
+    rebalanceThresholdBelow: 5000,
   });
 
   return nextDb;
@@ -1150,6 +1172,150 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
+  // -------------------------------------------------------------------------
+  // PR 1.6 — codex P2 #3214513402: when token decimals are unknown the
+  // OracleReported / MedianUpdated handlers skip the breach + snapshot
+  // pipeline, but they MUST NOT advance the freshness cursor (`oracleTimestamp`,
+  // `oracleOk`). Otherwise the dashboard's homepage table + OG card —
+  // which recompute health from `oracleTimestamp` + `priceDifference`
+  // without checking `hasHealthData` — would render the pool as OK / fresh
+  // while its priceDifference is still at the schema-default zero.
+  // -------------------------------------------------------------------------
+
+  it("OracleReported: holds oracleTimestamp + oracleOk on the existing values when tokenDecimalsKnown=false", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ee";
+    const FEED_ID = "0x000000000000000000000000000000000000ee00";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // Sentinel "previous freshness" values — the test passes only if the
+    // handler preserves these instead of overwriting from event payload.
+    const PREV_ORACLE_TS = 1_700_000_000n;
+    const PREV_ORACLE_OK = false;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      tokenDecimalsKnown: boolean;
+    };
+    // Flip decimals-unknown back on (seedPoolWithFeed stamps it true to
+    // avoid live-RPC flake by default), and seed a stale freshness cursor.
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      tokenDecimalsKnown: false,
+      oracleTimestamp: PREV_ORACLE_TS,
+      oracleOk: PREV_ORACLE_OK,
+    });
+
+    // Fire OracleReported with a fresh timestamp + value. The handler
+    // builds `updatedPool` with `oracleTimestamp = event.params.timestamp`
+    // and `oracleOk = true`; the `tokenDecimalsKnown=false` early-return
+    // must override both back to their existing values.
+    const FRESH_EVENT_TS = 1_700_010_000;
+    const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: BigInt(FRESH_EVENT_TS),
+      value: ORACLE_PRICE_24DP,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 1,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1000, timestamp: FRESH_EVENT_TS },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      tokenDecimalsKnown: boolean;
+    };
+    assert.equal(
+      pool.oracleTimestamp,
+      PREV_ORACLE_TS,
+      "tokenDecimalsKnown=false: oracleTimestamp must hold on the previous value",
+    );
+    assert.equal(
+      pool.oracleOk,
+      PREV_ORACLE_OK,
+      "tokenDecimalsKnown=false: oracleOk must hold on the previous value",
+    );
+    // Sanity: no OracleSnapshot row was written (handler skipped the
+    // breach + snapshot pipeline).
+    const snapshotId = `${42220}_${1000}_${1}-${pid(POOL_ADDR)}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.equal(
+      snapshot,
+      undefined,
+      "tokenDecimalsKnown=false: no OracleSnapshot row must be written",
+    );
+  });
+
+  it("MedianUpdated: holds oracleTimestamp + oracleOk + lastOracleReportAt when tokenDecimalsKnown=false", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ef";
+    const FEED_ID = "0x000000000000000000000000000000000000ef00";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    const PREV_ORACLE_TS = 1_700_000_000n;
+    const PREV_ORACLE_OK = false;
+    const PREV_LAST_REPORT_AT = 1_699_999_900n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      tokenDecimalsKnown: boolean;
+    };
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      tokenDecimalsKnown: false,
+      oracleTimestamp: PREV_ORACLE_TS,
+      oracleOk: PREV_ORACLE_OK,
+      lastOracleReportAt: PREV_LAST_REPORT_AT,
+    });
+
+    const FRESH_EVENT_TS = 1_700_010_000;
+    const medianEvent = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED_ID,
+      value: ORACLE_PRICE_24DP,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 1,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1000, timestamp: FRESH_EVENT_TS },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: medianEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      tokenDecimalsKnown: boolean;
+    };
+    assert.equal(
+      pool.oracleTimestamp,
+      PREV_ORACLE_TS,
+      "MedianUpdated decimals-unknown: oracleTimestamp must hold",
+    );
+    assert.equal(
+      pool.oracleOk,
+      PREV_ORACLE_OK,
+      "MedianUpdated decimals-unknown: oracleOk must hold",
+    );
+    assert.equal(
+      pool.lastOracleReportAt,
+      PREV_LAST_REPORT_AT,
+      "MedianUpdated decimals-unknown: lastOracleReportAt must hold (median freshness anchor)",
+    );
+  });
+
   it("MedianUpdated: sets, preserves, and clears deviationBreachStartedAt across transitions", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000d2";
     const FEED_ID = "0x000000000000000000000000000000000000d200";
@@ -1350,6 +1516,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: ORACLE_PRICE_24DP,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       source: "fpmm_update_reserves",
     });
@@ -1697,6 +1864,7 @@ describe("Envio Celo indexer handlers", () => {
       lastMedianAt: 1_700_004_900n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       rebalanceThresholdAbove: 5000,
       rebalanceThresholdBelow: 3000,
@@ -1706,6 +1874,9 @@ describe("Envio Celo indexer handlers", () => {
       deviationBreachStartedAt: BREACH_STARTED_AT,
       healthStatus: "WARN",
       source: "fpmm_update_reserves",
+      // Pool was previously breached → prior samples populated hasHealthData=true.
+      // Required for `computeHealthStatus` PR-1.6 N/A short-circuit.
+      hasHealthData: true,
     });
 
     const outageMedianEvent = SortedOracles.MedianUpdated.createMockEvent({
@@ -1890,6 +2061,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n, // 24dp
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -1977,6 +2149,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -2075,6 +2248,7 @@ describe("Envio Celo indexer handlers", () => {
       oracleExpiry: 3_600n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
     });
@@ -3603,14 +3777,19 @@ describe("Health score handler integration", () => {
       hasHealthData: true,
     });
 
-    // Step 2: fire an oracle event with rebalanceThreshold=0 → no-data snapshot
-    // Manually set threshold to 0 to trigger hasHealthData=false path
+    // Step 2: fire an oracle event in the "indexer hasn't read thresholds yet"
+    // state — `rebalanceThresholdsKnown=false` is the canonical no-data
+    // signal (post-PR-1.5). The handler routes through the no-data sentinel
+    // because the helper can't trust the threshold value.
     const poolBeforeNoData = mockDb.entities.Pool.get(
       pid(POOL_ADDR),
     ) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...poolBeforeNoData,
-      rebalanceThreshold: 0, // triggers hasHealthData=false in recordHealthSample
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: false, // unread → no-data
     });
 
     const noDataEvent = SortedOracles.OracleReported.createMockEvent({
@@ -3712,7 +3891,10 @@ describe("Health score handler integration", () => {
     );
   });
 
-  it("OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators", async () => {
+  it("OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators", async function () {
+    // Multi-event integration test — under c8 coverage on slower CI
+    // runners this brushes against the default ceiling. Inline 60s.
+    this.timeout(60_000);
     const POOL_ADDR = "0x000000000000000000000000000000000000ff05";
     const FEED_ID = "0x000000000000000000000000000000000000ff06";
     const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
@@ -3832,10 +4014,14 @@ describe("Health score handler integration", () => {
       oraclePrice: ORACLE_PRICE,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
       rebalanceThreshold: REBALANCE_THRESHOLD,
+      rebalanceThresholdAbove: REBALANCE_THRESHOLD,
+      rebalanceThresholdBelow: REBALANCE_THRESHOLD,
+      rebalanceThresholdsKnown: true,
       lastOracleSnapshotTimestamp: 1_700_005_000n,
       lastDeviationRatio: "0.500000", // prior healthy state
       healthTotalSeconds: 0n,

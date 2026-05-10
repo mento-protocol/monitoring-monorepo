@@ -13,7 +13,10 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
-import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
+import {
+  ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_WITH_HEALTH,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -120,18 +123,60 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
   const client = makeOgGraphQLClient(network);
 
-  let pools: Pool[];
-  try {
-    const res = await client.request<{ Pool: Pool[] }>({
+  // Fire main pools query + isolated trust-flag query in parallel — the
+  // trust-flag fetch is fail-open so its 5s timeout shouldn't tack on to
+  // the homepage OG critical path. Pool query is the only required
+  // result; if that one fails, treat the chain as offline.
+  type ThresholdsRow = {
+    id: string;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    rebalanceThresholdsKnown?: boolean;
+    tokenDecimalsKnown?: boolean;
+  };
+  // Parallelizing both saves ~200ms p50 on the success path; serializing
+  // would only help if `poolsResult` failed, which is < 1% of calls.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
+  const [poolsResult, thresholdsResult] = await Promise.allSettled([
+    client.request<{ Pool: Pool[] }>({
       document: ALL_POOLS_WITH_HEALTH,
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(5000),
-    });
-    pools = res.Pool ?? [];
-  } catch {
+    }),
+    client.request<{ Pool: ThresholdsRow[] }>({
+      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(5000),
+    }),
+  ]);
+
+  if (poolsResult.status !== "fulfilled") {
     // Chain pool query failed entirely — treat as offline. Aggregator
     // will surface this via `partial` / `offlineChains`.
     return null;
+  }
+  let pools: Pool[] = poolsResult.value.Pool ?? [];
+
+  // Merge trust flags fail-open — on miss/schema-lag, the fields stay
+  // undefined and `isNeverRebalance` returns false (under-bound).
+  // Without this merge, a 0/0 never-rebalance pool would appear in
+  // WARN/CRITICAL attention lists on the homepage OG card.
+  if (thresholdsResult.status === "fulfilled") {
+    const thresholdsById = new Map(
+      (thresholdsResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const t = thresholdsById.get(p.id);
+      return t == null
+        ? p
+        : {
+            ...p,
+            rebalanceThresholdAbove: t.rebalanceThresholdAbove,
+            rebalanceThresholdBelow: t.rebalanceThresholdBelow,
+            rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
+            tokenDecimalsKnown: t.tokenDecimalsKnown,
+          };
+    });
   }
 
   if (pools.length === 0) {
@@ -369,6 +414,12 @@ function rowUsdVolume(
   pool: Pool,
   slice: ChainSlice,
 ): number | null {
+  // Same untrusted-decimals defense as `getSnapshotVolumeInUsd` /
+  // `poolTotalVolumeUSD` / `poolTvlUSD`. A non-18-dp leg with
+  // `tokenDecimalsKnown=false` would parse `swapVolume*` against the
+  // schema-default 18 and inflate the daily USD figure by 1e12.
+  // Undefined still trusts default 18 (deploy-window resilience).
+  if (pool.tokenDecimalsKnown === false) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;

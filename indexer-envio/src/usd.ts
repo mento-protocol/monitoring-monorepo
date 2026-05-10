@@ -91,6 +91,12 @@ export interface RebalanceUsdInput {
   amount1Delta: bigint;
   /** Already passed through `normalizeRewardBps` by the caller. */
   rewardBps: number;
+  /** When false, USD valuation is gated to the `""` (uncomputable)
+   *  sentinel. A non-18-decimal USD leg computed against the schema-
+   *  default 18/18 would persist USD off by `10^(18 - real_dec)` for
+   *  the lifetime of the row. Optional: callers can omit (legacy
+   *  behaviour = always compute). */
+  tokenDecimalsKnown?: boolean;
 }
 
 export interface RebalanceUsd {
@@ -124,7 +130,15 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
     amount0Delta,
     amount1Delta,
     rewardBps,
+    tokenDecimalsKnown,
   } = input;
+
+  // Gate USD on `tokenDecimalsKnown` when present (see RebalanceUsdInput
+  // doc). Returns the same `""` sentinel as the address-missing /
+  // not-pegged cases below.
+  if (tokenDecimalsKnown === false) {
+    return { notionalUsd: "", rewardUsd: "" };
+  }
 
   const picked = pickPeggedSide(
     chainId,

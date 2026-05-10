@@ -40,6 +40,7 @@ import {
   parseTabLimit,
   selectActiveOlsPool,
 } from "../_lib/helpers";
+import { usePoolWithThresholds } from "../_lib/use-pool-with-thresholds";
 import { LiquidityTab } from "../_tabs/liquidity-tab";
 import { LpsTab } from "../_tabs/lps-tab";
 import { OlsTab } from "../_tabs/ols-tab";
@@ -129,7 +130,11 @@ function PoolDetail() {
     chainId: network.chainId,
   });
 
-  const pool = poolData?.Pool?.[0] ?? null;
+  const pool = usePoolWithThresholds(
+    poolData?.Pool?.[0] ?? null,
+    normalizedPoolId,
+    network.chainId,
+  );
 
   // Canonicalize legacy raw-address pool URLs onto namespaced multichain IDs,
   // but only after the pool resolves on the active network. That avoids

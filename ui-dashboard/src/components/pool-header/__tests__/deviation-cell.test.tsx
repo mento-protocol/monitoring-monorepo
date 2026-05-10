@@ -234,6 +234,7 @@ describe("DeviationCell — info popover", () => {
     const pool: Pool = {
       ...BASE_POOL,
       rebalanceThreshold: 0,
+      rebalanceThresholdsKnown: false,
       priceDifference: "3000",
     };
     const html = renderToStaticMarkup(
@@ -243,6 +244,23 @@ describe("DeviationCell — info popover", () => {
     // popover still explains the concept.
     expect(html).toMatch(/rebalance threshold\./);
     expect(html).not.toMatch(/rebalance threshold of/);
+  });
+
+  it("distinguishes governance-disabled rebalancing from missing threshold data", () => {
+    const pool: Pool = {
+      ...BASE_POOL,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: true,
+      priceDifference: "3000",
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("Never rebalances");
+    expect(html).toContain("Governance has disabled rebalancing for this pool");
+    expect(html).not.toMatch(/<dd><span[^>]*>—<\/span><\/dd>/);
   });
 });
 

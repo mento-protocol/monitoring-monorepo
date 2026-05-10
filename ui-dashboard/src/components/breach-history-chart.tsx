@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { DeviationThresholdBreach, Pool } from "@/lib/types";
+import type { DeviationThresholdBreach } from "@/lib/types";
 import {
   PLOTLY_AXIS_DEFAULTS,
   PLOTLY_BASE_LAYOUT,
@@ -22,7 +22,6 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface Props {
   breaches: DeviationThresholdBreach[];
-  pool: Pool;
 }
 
 /**
@@ -41,7 +40,7 @@ interface Props {
  * - Length    → marker Y. A red dot high up = a long, costly outage.
  * - Severity  → colour. Red dots are the ones that moved the uptime SLO.
  */
-export function BreachHistoryChart({ breaches, pool }: Props) {
+export function BreachHistoryChart({ breaches }: Props) {
   if (breaches.length === 0) return null;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -67,14 +66,15 @@ export function BreachHistoryChart({ breaches, pool }: Props) {
       ? tradingSecondsInRange(startedAt, nowSeconds)
       : Number(b.durationSeconds ?? "0");
     // Score peak severity against the threshold the breach OPENED against
-    // (entry, not current pool threshold). Falls back to current pool
-    // threshold during the indexer-resync window before the column lands.
+    // (entry, not current pool threshold). Pre-PR-1.6 legacy rows have
+    // `entryRebalanceThreshold=0` because the prior indexer captured raw
+    // active threshold without the asymmetric-zero substitute. Reading the
+    // live `pool.rebalanceThreshold` would consult the post-flip side and
+    // re-score history (cursor #3214689033), so the legacy fallback
+    // canonicalizes to 10000 directly — the same under-bound the predicate
+    // scored against at rising edge for any pool legitimately captured at 0.
     const entryThreshold =
-      (b.entryRebalanceThreshold ?? 0) > 0
-        ? b.entryRebalanceThreshold!
-        : (pool.rebalanceThreshold ?? 0) > 0
-          ? pool.rebalanceThreshold!
-          : 10000;
+      (b.entryRebalanceThreshold ?? 0) > 0 ? b.entryRebalanceThreshold! : 10000;
     const peakAboveCritical =
       Number(b.peakPriceDifference) / entryThreshold > DEVIATION_CRITICAL_RATIO;
     // Open-row past-grace only counts as critical when peak crossed the
