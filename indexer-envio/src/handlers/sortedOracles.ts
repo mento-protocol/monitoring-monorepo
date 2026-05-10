@@ -122,12 +122,22 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // `nextDeviationBreachStartedAt` / `recordBreachTransition` open or
       // close `DeviationThresholdBreach` rows from stale data — corrupting
       // breach durations and alert rollups. Skip the breach + health +
-      // snapshot pipeline entirely; Pool entity still advances oracle
-      // fields (oraclePrice, oracleTimestamp, oracleOk) for the freshness
-      // gate, but breach state stays as-is until self-heal lands.
+      // snapshot pipeline entirely; the Pool entity still advances
+      // diagnostic fields (`oraclePrice`, `lastFreshReporterAt`) but the
+      // FRESHNESS cursor (`oracleTimestamp` / `oracleOk`) is HELD on the
+      // existing values — advancing them would let the dashboard's homepage
+      // table + OG card (which recompute health from `oracleTimestamp` +
+      // `priceDifference` without checking `hasHealthData`) classify a
+      // pool with untrusted deviation data as "OK / fresh" instead of
+      // degraded (codex P2 #3214513402, PR 1.6).
       // Mirrors the two-cursor model in state-sync.ts.
       if (!updatedPool.tokenDecimalsKnown) {
-        context.Pool.set(updatedPool);
+        context.Pool.set({
+          ...updatedPool,
+          // Preserve freshness cursor — see comment above.
+          oracleTimestamp: existing.oracleTimestamp,
+          oracleOk: existing.oracleOk,
+        });
         return;
       }
 
@@ -368,11 +378,21 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // handler. When decimals aren't known we cannot compute a
       // trustworthy priceDifference, so feeding the frozen value into the
       // breach pipeline would corrupt `DeviationThresholdBreach` durations.
-      // Pool entity still advances oracle / median lineage fields (used
-      // for the freshness gate); breach state stays as-is until self-heal
-      // lands.
+      // Pool entity still advances diagnostic fields (`oraclePrice`, median
+      // lineage), but the FRESHNESS cursor (`oracleTimestamp` / `oracleOk`)
+      // is HELD on the existing values — see OracleReported handler for the
+      // dashboard-side rationale (codex P2 #3214513402, PR 1.6).
       if (!withThreshold.tokenDecimalsKnown) {
-        context.Pool.set(withThreshold);
+        context.Pool.set({
+          ...withThreshold,
+          // Preserve freshness cursor — see comment above.
+          oracleTimestamp: existing.oracleTimestamp,
+          oracleOk: existing.oracleOk,
+          // `lastOracleReportAt` is the median freshness anchor used by
+          // the indexer-side `derive` path; preserving it too keeps the
+          // anchor and the cursor in lockstep until self-heal lands.
+          lastOracleReportAt: existing.lastOracleReportAt,
+        });
         return;
       }
 
