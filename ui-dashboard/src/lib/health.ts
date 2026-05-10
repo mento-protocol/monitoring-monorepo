@@ -407,6 +407,16 @@ export function resolveLimitStatus(pool: {
 /**
  * Compute the effective display status for a pool, taking the worst of
  * oracle health and trading limit status. This is what the Health badge shows.
+ *
+ * `N/A` half-short-circuit: `worstStatus` is rank-based
+ * (`STATUS_RANK["N/A"]=0 < "OK"=1`), so without intervention
+ * `worstStatus("N/A", "OK")` resolves to `"OK"` — defeating the
+ * `hasHealthData=false` gate from `computeHealthStatus` and rendering
+ * no-data pools as healthy on the homepage / OG paths. When health is
+ * `N/A` AND limits aren't surfacing a real risk signal (OK / N/A), return
+ * `N/A` so the UI degrades visibly. When limits ARE elevated (WARN /
+ * CRITICAL / WEEKEND) those still flow through — limit risk dominates
+ * health uncertainty by design.
  */
 export function computeEffectiveStatus(
   pool: {
@@ -431,7 +441,9 @@ export function computeEffectiveStatus(
   chainId?: number,
 ): HealthStatus {
   const health = computeHealthStatus(pool, chainId);
-  return worstStatus(health, resolveLimitStatus(pool));
+  const limit = resolveLimitStatus(pool);
+  if (health === "N/A" && (limit === "OK" || limit === "N/A")) return "N/A";
+  return worstStatus(health, limit);
 }
 
 type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";

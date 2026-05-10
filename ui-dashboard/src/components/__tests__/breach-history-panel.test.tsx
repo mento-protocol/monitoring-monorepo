@@ -69,14 +69,9 @@ vi.mock("@/components/network-provider", () => ({
 // need to load the bundle. Capture the full props so A6's chart-section
 // extraction can't silently lose any prop on its way to the chart.
 let capturedChartBreaches: DeviationThresholdBreach[] | null = null;
-let capturedChartPool: unknown = null;
 vi.mock("@/components/breach-history-chart", () => ({
-  BreachHistoryChart: (props: {
-    breaches: DeviationThresholdBreach[];
-    pool?: unknown;
-  }) => {
+  BreachHistoryChart: (props: { breaches: DeviationThresholdBreach[] }) => {
     capturedChartBreaches = props.breaches;
-    capturedChartPool = props.pool ?? null;
     return <div data-testid="breach-chart" />;
   },
 }));
@@ -418,7 +413,6 @@ function commitOnEnter(input: HTMLInputElement): void {
 beforeEach(() => {
   mockUseGQL.mockReset();
   capturedChartBreaches = null;
-  capturedChartPool = null;
 });
 
 afterEach(() => {
@@ -597,9 +591,6 @@ describe("Initial render", () => {
     expect(capturedChartBreaches!.map((r) => r.id)).toEqual(
       ALL_ROWS.map((r) => r.id),
     );
-    // Pool prop forwards through to the chart so A6's chart-section
-    // extraction can't silently drop it.
-    expect(capturedChartPool).toMatchObject({ id: BASE_POOL.id });
   });
 });
 

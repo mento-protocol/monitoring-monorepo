@@ -131,7 +131,15 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // pool with untrusted deviation data as "OK / fresh" instead of
       // degraded (codex P2 #3214513402, PR 1.6).
       // Mirrors the two-cursor model in state-sync.ts.
-      if (!updatedPool.tokenDecimalsKnown) {
+      //
+      // Exception: never-rebalance pools (both split sides 0 + known)
+      // don't need priceDifference math at all — `effectiveThreshold`
+      // returns 1e12, the breach predicate / `computeHealthStatus` /
+      // `nextDeviationBreachStartedAt` all short-circuit to OK / no-breach
+      // regardless of priceDifference. Letting them through means uptime
+      // accrual keeps moving on every oracle event even if decimals
+      // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
+      if (!updatedPool.tokenDecimalsKnown && !isNeverRebalance(updatedPool)) {
         context.Pool.set({
           ...updatedPool,
           // Preserve freshness cursor — see comment above.
@@ -141,8 +149,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         return;
       }
 
+      // For the never-rebalance + decimals-untrusted fall-through case
+      // above, computePriceDifference would normalize against schema-default
+      // 18/18 and produce a fabricated value that gets persisted onto the
+      // OracleSnapshot row. The breach predicate / `computeHealthStatus` /
+      // `nextDeviationBreachStartedAt` ignore it (1e12 effective threshold
+      // short-circuits everything to no-breach / OK), but consumers who
+      // read the row's priceDifference directly (BreachEvent, oracle tab
+      // detail) would see a fake non-zero value. Preserve existing instead.
+      const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
       const priceDifference =
-        !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        decimalsTrustworthy &&
+        !updatedPool.source?.includes("virtual") &&
+        oraclePrice > 0n
           ? computePriceDifference(updatedPool)
           : updatedPool.priceDifference;
       const withDev = { ...updatedPool, priceDifference };
@@ -375,14 +394,17 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
 
       // `tokenDecimalsKnown` gate — same rationale as the OracleReported
-      // handler. When decimals aren't known we cannot compute a
-      // trustworthy priceDifference, so feeding the frozen value into the
-      // breach pipeline would corrupt `DeviationThresholdBreach` durations.
+      // handler, including the never-rebalance exception (those pools
+      // record OK uptime samples with no priceDifference math).
       // Pool entity still advances diagnostic fields (`oraclePrice`, median
-      // lineage), but the FRESHNESS cursor (`oracleTimestamp` / `oracleOk`)
-      // is HELD on the existing values — see OracleReported handler for the
-      // dashboard-side rationale (codex P2 #3214513402, PR 1.6).
-      if (!withThreshold.tokenDecimalsKnown) {
+      // lineage), but the FRESHNESS cursor (`oracleTimestamp` / `oracleOk` /
+      // `lastOracleReportAt`) is HELD on the existing values — see
+      // OracleReported handler for the dashboard-side rationale
+      // (codex P2 #3214513402, PR 1.6).
+      if (
+        !withThreshold.tokenDecimalsKnown &&
+        !isNeverRebalance(withThreshold)
+      ) {
         context.Pool.set({
           ...withThreshold,
           // Preserve freshness cursor — see comment above.
@@ -396,8 +418,13 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         return;
       }
 
+      // Preserve existing priceDifference when decimals are untrusted —
+      // see OracleReported handler comment block for rationale.
+      const decimalsTrustworthy = withThreshold.tokenDecimalsKnown === true;
       const priceDifference =
-        !withThreshold.source?.includes("virtual") && oraclePrice > 0n
+        decimalsTrustworthy &&
+        !withThreshold.source?.includes("virtual") &&
+        oraclePrice > 0n
           ? computePriceDifference(withThreshold)
           : withThreshold.priceDifference;
       const withDev = { ...withThreshold, priceDifference };

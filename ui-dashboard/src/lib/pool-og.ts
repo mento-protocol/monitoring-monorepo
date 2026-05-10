@@ -257,6 +257,11 @@ function computeVolumeSeries(
   pool: Pool,
   rates: OracleRateMap,
 ): number[] {
+  // Same untrusted-decimals defense as the other valuation paths —
+  // `pool.tokenDecimalsKnown=false` means USD math against schema-default
+  // 18/18 would overstate by ~1e12 for a 6-dp leg. Empty series renders
+  // as "—" in the OG card. Undefined trusts default 18 (deploy-window).
+  if (pool.tokenDecimalsKnown === false) return [];
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
   const d0 = pool.token0Decimals ?? 18;
   const d1 = pool.token1Decimals ?? 18;
@@ -334,6 +339,8 @@ function sumVolumeInWindow(
   fromSec: number,
   toSec: number,
 ): number | null {
+  // Untrusted-decimals defense — see computeVolumeSeries for rationale.
+  if (pool.tokenDecimalsKnown === false) return null;
   const rows = daily.filter((s) => {
     const ts = Number(s.timestamp);
     return ts >= fromSec && ts < toSec;

@@ -135,25 +135,46 @@ export const effectiveThreshold = (pool: {
 };
 
 /**
- * Persistable counterpart to `effectiveThreshold` for any field typed as
- * GraphQL `Int!` (32-bit signed, max ~2.1e9). Returns the raw on-chain
- * active threshold in bps — never the in-memory sentinels:
+ * Persistable counterpart to `effectiveThreshold` for `Int!`-typed fields
+ * (GraphQL 32-bit signed, max ~2.1e9). Three distinct zero-cases need
+ * three distinct persisted values so chart/table consumers don't have to
+ * synthesize them from joins:
  *
- * - 1e12 (never-rebalance) overflows `Int!`; Postgres rejects as `int4`
- *   out-of-range.
- * - 10000 (unknown-zero fallback) leaks into `OracleSnapshot.rebalanceThreshold`
- *   on rows that `recordHealthSample` flags `hasHealthData=false`. Oracle
- *   tab/chart consumers that read the row directly would render a fake
- *   "100% threshold" deviation against the row's preserved `priceDifference`
- *   instead of degrading to no-data.
+ * - **never-rebalance** (`above=0, below=0, known=true`): persist `0`.
+ *   Matches on-chain config; `isNeverRebalance(pool)` short-circuits the
+ *   chart/health math upstream, so the value is informational. The 1e12
+ *   in-memory sentinel would overflow `Int!` here.
+ * - **asymmetric-active-zero** (one split side `>0`, other `=0`,
+ *   `known=true`, reserves currently picking the zero side): persist
+ *   `10000` (the same fallback `effectiveThreshold` uses for breach
+ *   scoring). Without this, `oracle-chart.tsx` renders deviation as `0%`
+ *   and the table renders `—` even though `hasHealthData=true` and the
+ *   breach predicate scored against 10000 — making valid breach samples
+ *   look in-band.
+ * - **unknown-zero** (`known=false`, raw threshold `=0` because indexer
+ *   hasn't read on-chain): persist `0`. The row's `hasHealthData=false`
+ *   flag is what gates consumers; persisting 10000 here would leak the
+ *   fallback into rows that the indexer explicitly marked untrusted.
  *
- * Consumers that need to distinguish never-rebalance, asymmetric-active-zero,
- * and unknown-zero must join the Pool entity (`rebalanceThresholdsKnown` +
- * `rebalanceThresholdAbove/Below`) and the row's `hasHealthData` flag.
+ * For any non-zero raw threshold, return it directly (already `Int!`-safe).
  */
 export const persistableThreshold = (pool: {
   rebalanceThreshold: number;
-}): number => pool.rebalanceThreshold;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  if (pool.rebalanceThreshold > 0) return pool.rebalanceThreshold;
+  if (isNeverRebalance(pool)) return 0;
+  // From here: raw = 0 AND not never-rebalance. If thresholds are known,
+  // this is the asymmetric-active-zero case (the OTHER side is positive
+  // and the pool DOES rebalance on flip) — persist the 10000 fallback so
+  // the chart's deviation-ratio math has a non-zero denominator. If
+  // thresholds are unread, persist 0; `hasHealthData=false` on the row
+  // signals consumers to skip.
+  if (pool.rebalanceThresholdsKnown === true) return 10000;
+  return 0;
+};
 
 /**
  * Breach-row entry capture: the threshold the breach predicate
@@ -209,12 +230,20 @@ export const isAboveCriticalMagnitude = (
  *  - Weekend reclassification: only the UI has `isWeekend()` at render time.
  *    Indexed weekend-stale pools surface as CRITICAL here; the UI
  *    reclassifies them to WEEKEND.
+ *  - `hasHealthData=false` short-circuit: defense-in-depth mirror of the
+ *    UI's gate at `health.ts:230`. Indexer-side, the upstream
+ *    `tokenDecimalsKnown` early-return in sortedOracles handlers prevents
+ *    `computeHealthStatus` from being called on untrusted samples in the
+ *    first place — but mirroring the gate keeps the function pure and
+ *    answers any caller (parity tests, ad-hoc replay tooling) that
+ *    bypasses the upstream guard.
  */
 export function computeHealthStatus(
   pool: Pool,
   nowSeconds: bigint,
 ): IndexerHealthStatus {
   if (isVirtualPool(pool)) return "N/A";
+  if (pool.hasHealthData === false) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   // Governance-configured "never rebalance" pools stay OK regardless of
   // priceDifference magnitude. Short-circuit explicitly so extreme reserve

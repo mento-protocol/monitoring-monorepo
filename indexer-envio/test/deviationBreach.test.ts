@@ -1048,13 +1048,13 @@ describe("recordBreachTransition — asymmetric pool entry threshold (PR 1.6)", 
 
   it("close-time critical accrual scores against the 10000 floor for legacy entry=0 rows (asymmetric flip)", async () => {
     // The full integrity story for old rows: entry=0 stays 0 (test above),
-    // and at close time the fallback chain resolves to
-    // `Number(effectiveThreshold(next))` which returns 10000 for an
-    // asymmetric pool currently picking the zero side, OR the active
-    // value if reserves are still on the below side at close. Either
-    // way, the predicate sees a stable threshold across the breach
-    // lifecycle. Score: peak 12_000 against 10000 → ratio 1.2 →
-    // > 1.05 critical line → critical seconds accrue past grace.
+    // and at close time the fallback chain canonicalizes legacy 0 directly
+    // to the 10000 floor (cursor #3214689033). This is what stops the
+    // re-score on side flip — `next.rebalanceThreshold` could be 300 if
+    // reserves moved to the below side at close, but the chain ignores
+    // that and uses 10000, the same under-bound the predicate scored
+    // against at rising edge. Score: peak 12_000 against 10000 → ratio
+    // 1.2 → > 1.05 critical line → critical seconds accrue past grace.
     const { store, context } = makeMockContext();
     const open: DeviationThresholdBreach = {
       id: openBreachId("42220-0xtest", MON_NOON),

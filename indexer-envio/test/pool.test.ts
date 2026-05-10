@@ -404,6 +404,22 @@ describe("breachEntryThreshold — predicate-aligned entry capture (PR 1.6)", ()
     );
   });
 
+  it("returns 10000 fallback for asymmetric pool on its zero-threshold side (mirror: above=300, below=0)", () => {
+    // Mirror case — reserves picking the below side → active=0 even though
+    // above is positive. Same effectiveThreshold = 10000 logic; pin the
+    // symmetry so a one-sided refactor can't regress half the asymmetric
+    // pools (claude[bot] PR #370 review).
+    assert.equal(
+      breachEntryThreshold({
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 300,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      }),
+      10000,
+    );
+  });
+
   it("returns 10000 fallback for unknown-zero (cold-start)", () => {
     // Known=false: indexer hasn't read on-chain. Predicate falls back
     // to 10000-bps under-bound; capture must match.

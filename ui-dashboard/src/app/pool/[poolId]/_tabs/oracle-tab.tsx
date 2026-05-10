@@ -120,7 +120,7 @@ export function OracleTab({
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
-    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    return raw.toSorted((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
 
   const filteredRows = useMemo(() => {

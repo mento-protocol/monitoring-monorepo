@@ -193,26 +193,30 @@ export async function recordBreachTransition(
     // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
     // re-score severity, inflating or zeroing the accrual.
     //
-    // Fallback chain (PR 1.6 — codex P2 #3214513401):
+    // Fallback chain (PR 1.6 — codex P2 #3214513401, cursor #3214689033):
     //   1. `prev.currentOpenBreachEntryThreshold` (Pool denorm, captured
     //      at rising edge as `breachEntryThreshold(next)`).
     //   2. `open.entryRebalanceThreshold` (entity row captured the same).
-    //   3. `effectiveThreshold(next)` — final fallback resolves the
-    //      asymmetric-zero-side under-bound (returns 10000 when the
-    //      active side is currently 0, or the active value otherwise).
-    //      Old pre-PR-1.6 rows with `entryRebalanceThreshold=0` reach
-    //      this branch; `effectiveThreshold` short-circuits never-rebalance
-    //      to 1e12 too, but never-rebalance pools can't have an open
-    //      breach (`isInDeviationBreach` short-circuits them).
+    //   3. **10000 floor** — pre-PR-1.6 legacy rows have
+    //      `entryRebalanceThreshold=0` because the prior code captured the
+    //      raw active threshold and didn't substitute the 10000 fallback
+    //      for asymmetric-zero pools. `effectiveThreshold(next)` would
+    //      consult the LIVE active side, which can have flipped from 0 to
+    //      a positive value (asymmetric reserve direction change), letting
+    //      a peak that was non-critical at rising edge re-score as critical
+    //      at close. Canonicalize legacy `0` to `10000` — the same
+    //      under-bound the predicate scored against at rising edge for any
+    //      pool that could have legitimately captured `entry=0`.
     //
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
+    const LEGACY_ENTRY_THRESHOLD_FLOOR = 10000;
     const healedEntryThreshold =
       (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
         ? prev!.currentOpenBreachEntryThreshold
         : open.entryRebalanceThreshold > 0
           ? open.entryRebalanceThreshold
-          : Number(effectiveThreshold(next));
+          : LEGACY_ENTRY_THRESHOLD_FLOOR;
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
       effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),
