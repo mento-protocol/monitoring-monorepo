@@ -328,6 +328,7 @@ describe("BiPoolManager handlers", () => {
             lastBucketUpdate: bigint;
             isDeprecated: boolean;
             wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(row, "BiPoolExchange row should be created");
@@ -346,6 +347,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.lastBucketUpdate, 1_700_001_000n);
       assert.equal(row!.isDeprecated, false);
       assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
 
     it("falls through to event params + zero stubs when RPC backfill fails", async function () {
@@ -375,6 +377,7 @@ describe("BiPoolManager handlers", () => {
             referenceRateFeedID: string;
             bucket0: bigint;
             pricingModuleName?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(row);
@@ -389,6 +392,7 @@ describe("BiPoolManager handlers", () => {
         "0x0000000000000000000000000000000000000000",
       );
       assert.equal(row!.bucket0, 0n);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -460,6 +464,7 @@ describe("BiPoolManager handlers", () => {
             referenceRateFeedID: string;
             spread: bigint;
             wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(
@@ -480,6 +485,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.spread, 0n);
       // No matching VP self-healed yet → wrappedByPoolId stays undefined.
       assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -548,6 +554,40 @@ describe("BiPoolManager handlers", () => {
       assert.equal(exchange!.bucket1, 18_000_000n);
       assert.equal(exchange!.lastBucketUpdate, 1_700_002_000n);
       assert.equal(exchange!.updatedAtBlock, 300n);
+    });
+
+    it("marks self-healed v2-only exchanges as wrapper-checked", async function () {
+      this.timeout(10_000);
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      let mockDb = MockDb.createMockDb();
+
+      const update = BiPoolManager.BucketsUpdated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        bucket0: 9_000_000n,
+        bucket1: 18_000_000n,
+        mockEventData: mockEventData(2, 300, 1_700_002_000),
+      });
+      mockDb = await BiPoolManager.BucketsUpdated.processEvent({
+        event: update,
+        mockDb,
+      });
+
+      const exchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as
+        | {
+            wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
+          }
+        | undefined;
+      assert.ok(exchange);
+      assert.equal(exchange!.wrappedByPoolId, undefined);
+      assert.equal(exchange!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -935,9 +975,16 @@ describe("BiPoolManager handlers", () => {
       // BiPoolExchange row was inline-seeded with wrappedByPoolId already set.
       const exchange = mockDb.entities.BiPoolExchange.get(
         exchangeRowId(EXCHANGE_ID),
-      ) as { wrappedByPoolId?: string; asset0: string } | undefined;
+      ) as
+        | {
+            wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
+            asset0: string;
+          }
+        | undefined;
       assert.ok(exchange);
       assert.equal(exchange!.wrappedByPoolId, poolId);
+      assert.equal(exchange!.wrappedByPoolIdChecked, true);
       assert.equal(exchange!.asset0, ASSET0);
     });
 

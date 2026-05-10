@@ -116,7 +116,7 @@ Expansion procedure: when a new entry shows up in the top-N of `AggregatorDailyS
 ### Volume Leaderboard — follow-ups noted during PR #328 review
 
 - [ ] **Dedupe overlap between snapshot range and today in unique-trader count.** `mergeHeroSnapshot` adds the snapshot's `uniqueTraders` and today's distinct trader count without de-duplicating; a trader active both in `[windowStart, yesterday]` and today is counted twice. Acceptable today (today's distinct count is small, usually <50). Fix when needed: ship `distinctTraders: [String!]!` on `LeaderboardWindowSnapshot` so the dashboard can subtract the overlap. Source: claude[bot] review on PR #328 (finding 2).
-- [ ] **Date-range filter on `getWhere.chainId.eq` during heartbeat flush.** `flushV{2,3}LeaderboardWindowSnapshots` loads ALL historical `TraderDailySnapshot` / `BrokerTraderDailySnapshot` rows for the chain on each flush, then filters in memory. Fine at current scale (~21k rows / 100ms on Celo's all-window); needs a date-range filter (or a per-day partitioning entity) at 10× scale. Source: claude[bot] review on PR #328 (finding 4).
+- [x] ~~**Date-range filter on `getWhere.chainId.eq` during heartbeat flush.**~~ Closed after audit: Envio's generated `getWhere` API still exposes single-field `eq` / `gt` / `lt` operations only, and the exact `all` window still needs full historical rows for unique-trader dedupe. A timestamp-only query would fetch all chains and can be worse than the current chain query; a lower-bound date filter would make `all` incorrect. The safe future shape is a dedicated closed-day/all-time accumulator, not a standalone filter patch. Source: claude[bot] review on PR #328 (finding 4).
 - [x] ~~**Stale-snapshot detection when a chain has no events for ≥1 UTC day.**~~ Done in PR #339 (final shape after two codex iterations). Two-threshold rule on `windowKey ∈ {"7d","30d","90d"}`: `snapshotDay < today-2d` → STALE (snapshot AND today's partial dropped, amber banner); `snapshotDay = today-2d` → DEGRADED (snapshot kept, lighter banner — pre-first-swap-of-day state where yesterday's data isn't yet in either source); `snapshotDay ≥ today-1d` → FRESH. `all` and `24h` rows never flagged. Hero rollup extracted to `lib/leaderboard-hero.ts`; banners to `_components/hero-data-quality-banners.tsx`. `top10Concentration` applies the same chain mask to numerator and denominator. Source: claude[bot] review on PR #328 (finding 3).
 
 ## Refactor — long files (next candidates after PR #263)
@@ -384,21 +384,17 @@ Tighten the gate by un-silencing rules in
       the broker handler. Requires a schema bump + full re-sync, so deferred
       out of the Phase 2 PR which already ships one.
 
-- [ ] **`@index` on `BiPoolExchange.wrappedByPoolId`.** Dashboard's
-      `POOL_V2_EXCHANGE` filters on the field. At ~12 BiPoolExchange rows on
-      Celo today the scan is trivial; once exchange count grows on Monad / new
-      chains, the filter becomes O(N). Single-line schema change but triggers
-      a full re-sync — defer until either query latency degrades or the next
-      schema-touching PR rides it in. Flagged by claude[bot].
+- [x] ~~**`@index` on `BiPoolExchange.wrappedByPoolId`.**~~ Done:
+      `wrappedByPoolId` is indexed in `indexer-envio/schema.graphql`, so the
+      dashboard's `POOL_V2_EXCHANGE` filter no longer grows as an O(N)
+      exchange-table scan after the next schema re-sync.
 
-- [ ] **Sentinel for orphan exchanges (`wrappedByPoolId` will-never-be-set).**
-      `ensureBiPoolExchange` re-runs `Pool.getWhere.wrappedExchangeId.eq()`
-      on every `BucketsUpdated` (every 360s) for any exchange that has no
-      wrapping VP. Negligible at current 12-exchange scale, but at
-      higher scale (or for v2-only exchanges that genuinely have no wrapper)
-      this is unbounded retry work. Fix: add a "checked, no wrapper" sentinel
-      (e.g. `wrappedByPoolIdChecked: Boolean!`) and short-circuit the retry.
-      Schema change + re-sync, so deferred. Flagged by claude[bot].
+- [x] ~~**Sentinel for orphan exchanges (`wrappedByPoolId` will-never-be-set).**~~
+      Done: `BiPoolExchange.wrappedByPoolIdChecked` is persisted on create,
+      destroy, and self-heal seed paths. `ensureBiPoolExchange` and preload
+      now skip the repeated `Pool.getWhere.wrappedExchangeId.eq()` lookup once
+      the row is known wrapper-checked, while late VP-side self-heal can still
+      patch `wrappedByPoolId` directly.
 
 - [x] **Block-scoped `getPoolExchange` reads.** Done: `fetchPoolExchange`
       now requires the event block and routes `getPoolExchange` through
@@ -427,12 +423,15 @@ medium tier sits at ~66–72 min cold-cache and matches that within
 noise on cache-warm. The remaining levers below are the ones that
 were considered, sized, and explicitly deferred — not unknowns.
 
-- [ ] **Lever 4 — read entity store instead of RPC where the indexer already has the data.** The remaining lever for first-sync speed: per-handler audit of every `eth_call` site to see which can be answered from a Pool / Oracle / Reserve entity already written at an earlier event in the same sync. Highest-leverage candidates: `getRebalancingState`'s `oraclePriceNumerator/Denominator` (already mirrored on Oracle entity from MedianUpdated), `rebalanceIncentiveAtBlock` (we read `existing.rebalanceReward` to short-circuit on `-2`, but never to short-circuit on a real value). Lower-leverage: `getReserves` (block-scoped, but we DO write reserves into the Pool from UpdateReserves events — could reuse the persisted value when the request is for the same block). Each conversion is a per-handler correctness audit (do we actually have the value yet at this event? is it definitely the same block?) so this is incremental work, not a single PR. The right shape is one PR per fetcher that gets removed from the hot path. Estimated upside: 30–50% sync-time reduction on Celo if all hot-path block-scoped reads can be DB-served instead of RPC-served, dramatically less on Monad (event volume too low for the savings to materialize).
-- [ ] **Cache `resolveFeeTokenMeta` (decimals + symbol) via Effect API.** Considered + sized in the PR #356 description. ~60 cache rows × 2 RPC saved per cross-deploy = ~12s of saved sync time on the second deploy onwards. Wraps `feeToken.ts:resolveFeeTokenMeta` in a `createEffect({cache: true})`, follows the same null-on-failure → `context.cache = false` pattern as PR #353. Marginal benefit and adds handler-hot-path complexity (BrokerSwap calls it 2× per swap) — deferred until cross-deploy timings become a real concern.
+- [x] ~~**Lever 4 — read entity store instead of RPC where the indexer already has the data.**~~ Closed after audit: the hot `getRebalancingState` paths already use entity-derived state when the Pool row has live oracle, reserve, threshold, orientation, and decimals inputs (`UpdateReserves` with an event reserve override, `Rebalanced` after sibling reserve events, and threshold updates from the local median path). `getReserves` is no longer used for swap/update hot paths; the remaining read is `blockNumber - 1` for rebalance notional and cannot be answered from the post-event Pool row. `rebalanceIncentiveAtBlock` may only skip the permanent `-2` sentinel: short-circuiting on a real `Pool.rebalanceReward` would use a latest-seeded value during historical re-sync, which the focused `rebalancedUsd` tests intentionally reject.
+- [x] ~~**Cache `resolveFeeTokenMeta` (decimals + symbol) via Effect API.**~~ Done: `feeTokenMetaEffect` wraps `resolveFeeTokenMeta` with `cache: true`; Broker swaps and protocol-fee transfers now call it through `context.effect`. The UNKNOWN/18 degraded path sets `context.cache = false` so transient metadata failures still retry on later events.
 - [x] **Route `probeFunction` in `breakers.ts` through `readContractWithBlockFallback`.** Done: breaker-kind selector probes now use the shared wrapper, preserving unscoped-read semantics while gaining the same rate-limit retry / fallback path as the rest of the RPC layer. Focused tests pin rate-limit retry and zero-data selector-miss classification.
-- [ ] **Automate the cross-deploy "Save Cache" snapshot step.** Currently a manual dashboard click after a synced deployment, which is what makes the cache benefit available to the _next_ deploy. Could be wrapped into `pnpm deploy:indexer:promote` or fired from a post-promote GitHub Action via the `envio-cloud` API once such a CLI path exists (it doesn't today — only dashboard UI). Without automation, every new deploy is cache-cold unless someone remembers to click. Tracked here so it doesn't silently rot.
-- [ ] **Investigate Monad RPC archive depth as a follow-up to PR #336 / PR #346.** The current setup leans on `rpc2.monad.xyz` (deep archive, lower rate limit) as primary and QuickNode (shallow archive, high rate limit) as fallback. PR #356 made the dispatcher block-depth-aware so the `Invalid parameters` leak is bounded, but the underlying constraint — QuickNode prunes after ~40k blocks (~5.5h) — means we can never use it for catch-up reads. Worth (a) opening a QuickNode support ticket asking for an archive-retention upgrade on Monad, (b) evaluating dRPC / BlastAPI archive coverage for Monad mainnet, (c) confirming whether Monad's official `rpc2.monad.xyz` rate limits are documented anywhere we can plan against. Today's setup works at observed event volume (~63k Monad events total); we'll feel the pressure if Monad bridge usage grows 10×.
-- [ ] **Per-effect cache observability in the dashboard / alerts.** Envio exports `envio_effect_cache_count` and `envio_effect_cache_invalidations_count` Prometheus metrics. Today nothing surfaces them. A simple panel on the Envio Cloud dashboard or a Grafana alert at "invalidations > 0 for effect X" would catch (a) accidental schema drift on a cached effect's output, (b) cache-poisoning via the kind of transient-failure bug PR #353 fixed. Bonus: a sync-time-vs-cache-rows scatter would let us see whether more aggressive caching is even helping at the macro level.
+- [x] ~~**Automate the cross-deploy "Save Cache" snapshot step.**~~ Closed for now: current Envio docs still describe hosted cache save/restore as dashboard actions, and `envio-cloud --help` exposes no cache command. There is no repo-side API/CLI hook to wire into `pnpm deploy:indexer:promote` yet; re-open when Envio exposes a programmable cache-save command.
+- [x] ~~**Investigate Monad RPC archive depth as a follow-up to PR #336 / PR #346.**~~ Done: see `docs/notes/monad-rpc-archive-depth-2026-05-10.md`. Public QuickNode docs still list Monad as pruned to "Over 40,000 recent blocks available"; Monad docs publish provider gas/range limits but not request-rate limits; dRPC public docs do not state Monad archive retention depth. Keep the current block-depth-aware fallback policy.
+- [x] ~~**Per-effect cache observability in the dashboard / alerts.**~~ Done:
+      `terraform/alerts/rules-indexer.tf` adds a warning alert on
+      `increase(envio_effect_cache_invalidations_count[5m]) > 0`, grouped by
+      effect, so schema drift or cache-poisoning regressions surface in Slack.
 
 ## PR 1.6 — Asymmetric pool follow-ups (deferred from PR #366)
 

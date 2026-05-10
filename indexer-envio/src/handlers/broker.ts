@@ -17,13 +17,14 @@ import {
   makePoolId,
 } from "../helpers";
 import { computeSwapUsdWei } from "../usd";
-import { resolveFeeTokenMeta } from "../feeToken";
+import { UNKNOWN_FEE_TOKEN_META } from "../feeToken";
 import { getContractAddress } from "../contractAddresses";
 import { isSystemAddress } from "../system-addresses";
 import { classifyAggregator } from "../aggregators";
 import { maybeHeartbeatFlushV2 } from "../leaderboardWindowFlush";
 import { buildSwapAddressFields } from "../swap";
 import { selfHealWrappedExchangeId } from "../pool";
+import { feeTokenMetaEffect } from "../rpc/effects";
 
 // Per-chain cache of the v3 Router address. JSON lookup once per chain is
 // cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
@@ -60,10 +61,18 @@ Broker.Swap.handler(async ({ event, context }) => {
   // fallback, so per-token first-hit RPC for known Mento stablecoins is free
   // and tokens already touched by an earlier ProtocolFeeTransfer don't pay
   // a second-hit RPC here either.
-  const [tokenInMeta, tokenOutMeta] = await Promise.all([
-    resolveFeeTokenMeta(event.chainId, tokenIn, context.log),
-    resolveFeeTokenMeta(event.chainId, tokenOut, context.log),
+  const [tokenInMetaResult, tokenOutMetaResult] = await Promise.all([
+    context.effect(feeTokenMetaEffect, {
+      chainId: event.chainId,
+      tokenAddress: tokenIn,
+    }),
+    context.effect(feeTokenMetaEffect, {
+      chainId: event.chainId,
+      tokenAddress: tokenOut,
+    }),
   ]);
+  const tokenInMeta = tokenInMetaResult ?? UNKNOWN_FEE_TOKEN_META;
+  const tokenOutMeta = tokenOutMetaResult ?? UNKNOWN_FEE_TOKEN_META;
 
   // computeSwapUsdWei is built around the FPMM `(token0, token1,
   // amount{0,1}{In,Out})` shape. Broker.Swap is single-direction (only

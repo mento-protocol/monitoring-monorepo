@@ -696,6 +696,7 @@ export async function selfHealWrappedExchangeId(
         lastBucketUpdate: struct.lastBucketUpdate,
         isDeprecated: false,
         wrappedByPoolId: pool.id,
+        wrappedByPoolIdChecked: true,
         createdAtBlock: blockNumber,
         createdAtTimestamp: blockTimestamp,
         updatedAtBlock: blockNumber,
@@ -723,6 +724,7 @@ export async function selfHealWrappedExchangeId(
       context.BiPoolExchange.set({
         ...exchange,
         wrappedByPoolId: pool.id,
+        wrappedByPoolIdChecked: true,
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       });

@@ -6,11 +6,12 @@ import { ERC20FeeToken, type ProtocolFeeTransfer } from "generated";
 import { eventId, asAddress, makePoolId } from "../helpers";
 import {
   YIELD_SPLIT_ADDRESS,
-  resolveFeeTokenMeta,
+  UNKNOWN_FEE_TOKEN_META,
   selectStaleTransfers,
   backfilledTokens,
 } from "../feeToken";
 import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot";
+import { feeTokenMetaEffect } from "../rpc/effects";
 
 ERC20FeeToken.Transfer.handler(
   async ({ event, context }) => {
@@ -25,11 +26,11 @@ ERC20FeeToken.Transfer.handler(
 
     const { chainId } = event;
     const tokenAddress = event.srcAddress;
-    const { symbol, decimals } = await resolveFeeTokenMeta(
-      chainId,
-      tokenAddress,
-      context.log,
-    );
+    const { symbol, decimals } =
+      (await context.effect(feeTokenMetaEffect, {
+        chainId,
+        tokenAddress,
+      })) ?? UNKNOWN_FEE_TOKEN_META;
 
     const id = eventId(chainId, event.block.number, event.logIndex);
     const normalizedToken = asAddress(tokenAddress);
