@@ -13,7 +13,10 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
-import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
+import {
+  ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_WITH_HEALTH,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -132,6 +135,42 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     // Chain pool query failed entirely — treat as offline. Aggregator
     // will surface this via `partial` / `offlineChains`.
     return null;
+  }
+
+  // Threshold-known triple — isolated query so a schema-lag doesn't
+  // break the main pools fetch above. Fail-open: on miss the split
+  // fields stay undefined and `isNeverRebalance` returns false (safe
+  // under-bound). Without this merge, a 0/0 never-rebalance pool would
+  // appear in WARN/CRITICAL attention lists on the homepage OG card.
+  try {
+    const thresholdsRes = await client.request<{
+      Pool: {
+        id: string;
+        rebalanceThresholdAbove?: number;
+        rebalanceThresholdBelow?: number;
+        rebalanceThresholdsKnown?: boolean;
+      }[];
+    }>({
+      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(5000),
+    });
+    const thresholdsById = new Map(
+      (thresholdsRes.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const t = thresholdsById.get(p.id);
+      return t == null
+        ? p
+        : {
+            ...p,
+            rebalanceThresholdAbove: t.rebalanceThresholdAbove,
+            rebalanceThresholdBelow: t.rebalanceThresholdBelow,
+            rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
+          };
+    });
+  } catch {
+    // schema-lag / transient miss — pools render with under-bound fallback.
   }
 
   if (pools.length === 0) {

@@ -389,7 +389,10 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        rebalanceThreshold: pool.rebalanceThreshold,
+        // Persist effective threshold (matches `snapshotFields.deviationRatio`).
+        // For asymmetric pools with active=0, the raw value would render the
+        // chart at 0%/—. See sortedOracles handlers for full rationale.
+        rebalanceThreshold: Number(effectiveThreshold(pool)),
         source: "threshold_updated",
         blockNumber,
         txHash: event.transaction.hash,

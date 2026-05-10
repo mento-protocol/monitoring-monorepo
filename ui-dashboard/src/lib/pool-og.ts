@@ -19,7 +19,11 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
-import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
+import {
+  ALL_POOLS_WITH_HEALTH,
+  POOL_DETAIL_WITH_HEALTH,
+  POOL_THRESHOLDS_KNOWN_EXT,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -115,27 +119,58 @@ export async function fetchPoolOgDataUncached(
   // the all-pools rate-map query transiently fail (including timeout), still
   // render a card with real title/chain/health — degraded cards beat generic
   // ones, and a hard fail here would be cached for an hour by unstable_cache.
-  const [detailResult, dailyResult, allPoolsResult] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: POOL_DETAIL_WITH_HEALTH,
-      variables: { id: poolId, chainId },
-      signal,
-    }),
-    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-      document: POOL_OG_DAILY_SNAPSHOTS,
-      variables: { poolId },
-      signal,
-    }),
-    client.request<{ Pool: Pool[] }>({
-      document: ALL_POOLS_WITH_HEALTH,
-      variables: { chainId },
-      signal,
-    }),
-  ]);
+  const [detailResult, dailyResult, allPoolsResult, thresholdsResult] =
+    await Promise.allSettled([
+      client.request<{ Pool: Pool[] }>({
+        document: POOL_DETAIL_WITH_HEALTH,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+      client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+        document: POOL_OG_DAILY_SNAPSHOTS,
+        variables: { poolId },
+        signal,
+      }),
+      client.request<{ Pool: Pool[] }>({
+        document: ALL_POOLS_WITH_HEALTH,
+        variables: { chainId },
+        signal,
+      }),
+      // Threshold-known triple — isolated for the same schema-lag
+      // resilience as `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Fail-open:
+      // on transient miss the fields stay undefined and `isNeverRebalance`
+      // returns false (safe under-bound) — card renders WARN/CRITICAL
+      // instead of OK/never-rebalance until the next refresh, but
+      // doesn't fail the unfurl.
+      client.request<{
+        Pool: {
+          id: string;
+          rebalanceThresholdAbove?: number;
+          rebalanceThresholdBelow?: number;
+          rebalanceThresholdsKnown?: boolean;
+        }[];
+      }>({
+        document: POOL_THRESHOLDS_KNOWN_EXT,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+    ]);
 
   if (detailResult.status !== "fulfilled") return null;
-  const pool = detailResult.value.Pool[0];
-  if (!pool) return null;
+  const rawPool = detailResult.value.Pool[0];
+  if (!rawPool) return null;
+  const thresholdsExt =
+    thresholdsResult.status === "fulfilled"
+      ? (thresholdsResult.value.Pool[0] ?? null)
+      : null;
+  const pool: Pool = thresholdsExt
+    ? {
+        ...rawPool,
+        rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+        rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+        rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+      }
+    : rawPool;
 
   const dailyRows =
     dailyResult.status === "fulfilled"
