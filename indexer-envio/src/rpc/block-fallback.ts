@@ -2,7 +2,7 @@
 // fetcher in rpc.ts wraps `client.readContract` in. Two transient-failure
 // modes are handled here so individual fetchers don't have to: rate-limit
 // retries (with secondary-RPC fallback) and "block not yet on this node"
-// retries (with `latest` fallback).
+// retries (with a same-block secondary attempt before `latest` fallback).
 
 import type { createPublicClient } from "viem";
 import {
@@ -67,8 +67,8 @@ const ARCHIVE_DEPTH_RE =
 export type BlockFallbackResult = {
   result: unknown;
   /** True when the result came from anywhere other than the primary client at
-   *  the requested block — i.e. either the secondary RPC client (rate-limit
-   *  fallback) OR the `latest`-block fallback. Use this to skip block-scoped
+   *  the requested block — i.e. either the secondary RPC client at the same
+   *  block OR the `latest`-block fallback. Use this to skip block-scoped
    *  cache writes that could serve stale-across-fallbacks data. */
   usedFallback: boolean;
   /** True ONLY when the function fell back to reading `latest` instead of the
@@ -110,7 +110,7 @@ export const _testHooks = {
  * 1. **Rate limits** — retries with backoff, then falls back to a secondary
  *    (public) RPC client if available.
  * 2. **Block not available** — retries the original block with backoff, then
- *    falls back to reading "latest".
+ *    tries the secondary RPC at the same block before falling back to "latest".
  *
  * Returns `{ result, usedFallback, usedLatestFallback }`. Callers should skip
  * block-scoped cache writes when `usedFallback` is true, and additionally
@@ -323,7 +323,39 @@ export async function readContractWithBlockFallback(
         }
       }
 
-      // All retries exhausted — fall back to reading latest.
+      // All retries exhausted. Before accepting an unscoped `latest`
+      // fallback, try the secondary RPC at the SAME block. This covers the
+      // HyperSync-ahead-of-primary race without sacrificing the event that
+      // triggered the read: callers that reject `usedLatestFallback` can
+      // still consume the secondary result because it is block-scoped.
+      if (fallbackClient && fallbackLikelyHasBlock(chainId, blockNumber)) {
+        log.warn(
+          `[RPC_BLOCK_SECONDARY_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary block retries exhausted, trying fallback RPC at same block`,
+        );
+        try {
+          const result = await makeCall(fallbackClient, blockNumber);
+          return { result, usedFallback: true, usedLatestFallback: false };
+        } catch (fallbackErr) {
+          if (
+            fallbackErr instanceof Error &&
+            ARCHIVE_DEPTH_RE.test(fallbackErr.message)
+          ) {
+            recordFallbackArchiveMiss(chainId, blockNumber);
+          }
+          const secondaryMsg = sanitizeErrorMessage(
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr),
+          );
+          log.warn(
+            `[RPC_BLOCK_SECONDARY_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — falling back to latest`,
+          );
+        }
+      }
+
+      // Same-block recovery was unavailable or failed — fall back to reading
+      // latest, preserving the existing contract via usedLatestFallback=true
+      // so historical-accuracy callers can reject the result.
       log.warn(
         `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );

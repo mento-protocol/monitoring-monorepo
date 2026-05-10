@@ -638,8 +638,12 @@ export async function selfHealWrappedExchangeId(
   if (pool.wrappedExchangeId && pool.token0 && pool.token1) {
     const exchangeRowId = `${pool.chainId}-${pool.wrappedExchangeId}`;
     const existing = await context.BiPoolExchange.get(exchangeRowId);
-    if (existing) return pool;
+    if (existing?.wrappedByPoolId === pool.id) return pool;
     // Else fall through — exchange seed still owed.
+    // If the row exists but is missing the back-reference, keep healing:
+    // older exchange-first rows can be marked checked before the VP link
+    // becomes visible, and the dashboard's VP exchange query keys on
+    // `wrappedByPoolId`.
   }
   const poolAddr = extractAddressFromPoolId(pool.id);
   const result = await context.effect(vpExchangeIdEffect, {
