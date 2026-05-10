@@ -4,13 +4,9 @@ import { Redis } from "@upstash/redis";
 // path. Mirrors the address-labels split.
 export {
   type AddressReport,
-  type AddressReportRecord,
-  type AddressReportsIndex,
   MAX_BODY_LENGTH,
   MAX_TITLE_LENGTH,
   sanitizeReportInput,
-  upgradeReport,
-  upgradeReports,
 } from "./address-reports-shared";
 
 import {

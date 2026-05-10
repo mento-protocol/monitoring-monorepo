@@ -119,6 +119,11 @@ export async function fetchPoolOgDataUncached(
   // the all-pools rate-map query transiently fail (including timeout), still
   // render a card with real title/chain/health — degraded cards beat generic
   // ones, and a hard fail here would be cached for an hour by unstable_cache.
+  // Parallelizing all four (vs. await-detail-then-await-others) saves ~200ms
+  // p50 on the success path. react-doctor's "skip-path stays fast"
+  // optimization would only help if the detail query failed, which is < 1% of
+  // calls — not worth the latency hit on the common case.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
   const [detailResult, dailyResult, allPoolsResult, thresholdsResult] =
     await Promise.allSettled([
       client.request<{ Pool: Pool[] }>({

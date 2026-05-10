@@ -86,10 +86,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
  * numbers. Parity with the indexer's `pool.ts` is enforced by
  * `indexer-envio/test/healthStatusParity.test.ts`.
  */
-export {
-  DEVIATION_TOLERANCE_RATIO,
-  DEVIATION_CRITICAL_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thresholds";
 
 /** True iff governance has explicitly configured this pool to never
  * rebalance — BOTH split sides 0 AND `rebalanceThresholdsKnown=true`.

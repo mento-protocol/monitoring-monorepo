@@ -51,13 +51,11 @@ interface Props {
   onSearchChange: (value: string) => void;
 }
 
-export function BreachHistoryPanel({
-  pool,
-  network,
-  limit,
-  search,
-  onSearchChange,
-}: Props) {
+// 6 useState calls — independent filter pieces (pagination, sort,
+// bucket, min/max); a reducer would just rename the setters.
+// react-doctor-disable-next-line react-doctor/prefer-useReducer
+export function BreachHistoryPanel(props: Props) {
+  const { pool, network, limit, search, onSearchChange } = props;
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = useState(1);

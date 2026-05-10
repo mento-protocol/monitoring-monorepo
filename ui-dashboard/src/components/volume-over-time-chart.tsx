@@ -367,6 +367,8 @@ interface VolumeOverTimeChartProps {
   hasBrokerSnapshotError: boolean;
 }
 
+// Same independent-flags rationale as FeeOverTimeChart — see that file.
+// react-doctor-disable-next-line react-doctor/no-many-boolean-props
 export function VolumeOverTimeChart({
   networkData,
   isLoading,

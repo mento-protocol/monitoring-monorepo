@@ -19,6 +19,10 @@ export default function GlobalError({
 
   return (
     <html lang="en">
+      {/* Inline styles are required: global-error renders before CSS
+          modules / Tailwind have hydrated (the root layout that loads
+          them crashed). */}
+      {/* react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style */}
       <body
         style={{
           margin: 0,
@@ -67,6 +71,7 @@ export default function GlobalError({
               <code style={{ fontFamily: "monospace" }}>{error.digest}</code>
             </p>
           )}
+          {/* react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style */}
           <button
             type="button"
             onClick={reset}

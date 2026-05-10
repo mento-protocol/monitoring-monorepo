@@ -198,7 +198,7 @@ vi.mock("@/components/chain-icon", () => ({
   ChainIcon: ChainIconStub,
 }));
 
-import BridgeFlowsPage from "../page";
+import { BridgeFlowsPageClient as BridgeFlowsPage } from "../_components/bridge-flows-page-client";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -617,14 +617,12 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
   }
 
   function findHeaderButton(label: string): HTMLButtonElement {
-    const headers = Array.from(
-      container.querySelectorAll<HTMLTableCellElement>("th"),
+    const buttons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("th button"),
     );
-    for (const header of headers) {
-      const btn = header.querySelector<HTMLButtonElement>("button");
-      if (btn && btn.textContent?.includes(label)) return btn;
-    }
-    throw new Error(`No sortable header for ${label}`);
+    const match = buttons.find((b) => b.textContent?.includes(label));
+    if (!match) throw new Error(`No sortable header for ${label}`);
+    return match;
   }
 
   it("default sort is by Time DESC (newest first)", () => {
@@ -1168,9 +1166,9 @@ describe("BridgeFlowsPage — status filter", () => {
         if (query === BRIDGE_TRANSFERS_COUNT) {
           countVars = vars;
           return ok({
-            BridgeTransfer: ALL_THREE_TRANSFERS.filter(
-              (t) => t.status === "PENDING",
-            ).map((t) => ({ id: t.id })),
+            BridgeTransfer: ALL_THREE_TRANSFERS.flatMap((t) =>
+              t.status === "PENDING" ? [{ id: t.id }] : [],
+            ),
           });
         }
         if (query === BRIDGE_PENDING_IDS) return ok({ BridgeTransfer: [] });

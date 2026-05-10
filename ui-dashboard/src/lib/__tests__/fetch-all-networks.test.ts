@@ -22,7 +22,7 @@ const EXPECTED_EXPORT_NAMES = [
 describe("@/lib/fetch-all-networks — surface contract", () => {
   it("exports every expected name", () => {
     const actual = Object.keys(fetchAllNetworks).sort();
-    const expected = [...EXPECTED_EXPORT_NAMES].sort();
+    const expected = EXPECTED_EXPORT_NAMES.toSorted();
     expect(actual).toEqual(expected);
   });
 

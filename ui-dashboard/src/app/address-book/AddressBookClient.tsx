@@ -22,11 +22,14 @@ import { importFile, exportLabels } from "./_lib/address-book-import-export";
 
 type EditTarget = { address: string };
 
-export default function AddressBookPage({
-  canEdit: userCanEdit = false,
-}: {
-  canEdit?: boolean;
-}) {
+type AddressBookPageProps = { canEdit?: boolean };
+
+// 6 useState calls — independent UI pieces (search, modal targets,
+// import banners, draft); a reducer would just rename the setters.
+// no-giant-component is also deferred — see BACKLOG.md § "Architecture pass".
+// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
+export default function AddressBookPage(props: AddressBookPageProps) {
+  const { canEdit: userCanEdit = false } = props;
   const {
     customEntries,
     getEntry,

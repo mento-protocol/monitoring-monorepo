@@ -58,12 +58,13 @@ async function fetchSingleReport(
   return (await res.json()) as AddressReport;
 }
 
-export function AddressReportEditor({
-  address,
-  onSavingChange,
-  onDeletingChange,
-  externallyDisabled,
-}: Props) {
+// 6 useState calls — independent fields plus orthogonal flow flags;
+// a reducer would just rename the setters. no-giant-component is also
+// deferred — see BACKLOG.md § "Architecture pass".
+// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
+export function AddressReportEditor(props: Props) {
+  const { address, onSavingChange, onDeletingChange, externallyDisabled } =
+    props;
   const trimmed = address.trim();
   const normalizedAddress = trimmed.toLowerCase();
   const isAddressValid = isValidAddress(trimmed);
@@ -114,9 +115,9 @@ export function AddressReportEditor({
   // ledger twice — only one decrement runs and the address stays
   // permanently report-pending.
   const inFlightRef = useRef({ saving: false, deleting: false });
-  const [seenRecordKey, setSeenRecordKey] = useState(recordKey);
-  if (recordKey !== seenRecordKey) {
-    setSeenRecordKey(recordKey);
+  const seenRecordKeyRef = useRef(recordKey);
+  if (recordKey !== seenRecordKeyRef.current) {
+    seenRecordKeyRef.current = recordKey;
     setTitle(data?.title ?? "");
     setBody(data?.body ?? "");
     setPreviewMode(Boolean(data));

@@ -26,7 +26,7 @@ import type React from "react";
  */
 export type DurationBucket = "all" | "in_grace" | "short" | "long" | "ongoing";
 
-export const BUCKET_LABEL: Record<DurationBucket, string> = {
+const BUCKET_LABEL: Record<DurationBucket, string> = {
   all: "All",
   in_grace: "≤1h",
   short: "1h – 1d",

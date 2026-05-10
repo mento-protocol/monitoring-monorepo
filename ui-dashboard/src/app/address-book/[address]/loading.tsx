@@ -15,7 +15,8 @@ export default function AddressDetailLoading() {
           aria-label="Loading label form"
         >
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="space-y-2">
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <div key={`skel-form-${i}`} className="space-y-2">
               <div className="h-3 w-20 animate-pulse rounded bg-slate-800/50" />
               <div className="h-9 w-full animate-pulse rounded bg-slate-800/50" />
             </div>
@@ -27,8 +28,9 @@ export default function AddressDetailLoading() {
         >
           <div className="h-5 w-40 animate-pulse rounded bg-slate-800/50" />
           {Array.from({ length: 8 }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
             <div
-              key={i}
+              key={`skel-line-${i}`}
               className="h-4 animate-pulse rounded bg-slate-800/50"
               style={{ width: `${60 + ((i * 7) % 35)}%` }}
             />

@@ -13,8 +13,9 @@ export default function PoolDetailLoading() {
       </div>
       <div className="flex gap-1 border-b border-slate-800">
         {Array.from({ length: 7 }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
           <div
-            key={i}
+            key={`skel-tab-${i}`}
             className="h-9 w-24 animate-pulse rounded-t bg-slate-800/50"
           />
         ))}

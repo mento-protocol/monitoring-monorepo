@@ -42,7 +42,9 @@ function perPoolTvlWindow(
   network: Network,
   rates: OracleRateMap,
 ): Map<string, { now: number; ago: number }> {
-  const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
+  const fpmmMap = new Map(
+    pools.flatMap((p) => (isFpmm(p) ? [[p.id, p] as const] : [])),
+  );
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
     if (!fpmmMap.has(s.poolId)) continue;

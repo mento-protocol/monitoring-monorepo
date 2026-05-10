@@ -69,6 +69,9 @@ export function PoolTvlOverTimeChart({
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (snapshots.length === 0) return [];
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
     const sorted = [...snapshots].sort(
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );

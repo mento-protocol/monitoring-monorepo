@@ -167,7 +167,10 @@ async function pollUntilComplete(
   apiKey: string,
   executionId: string,
 ): Promise<void> {
+  // Sequential polling — each iteration is a status check that decides
+  // whether to keep waiting; parallelism doesn't apply.
   for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
     const res = await duneFetch(
       `/api/v1/execution/${executionId}/status`,
       apiKey,
@@ -248,7 +251,9 @@ export async function* fetchMiniPayUsers(opts: {
   await pollUntilComplete(opts.apiKey, executionId);
 
   let offset = 0;
+  // Sequential pagination — next_offset depends on the previous page.
   for (;;) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
     const page = await fetchResultsPage(opts.apiKey, executionId, offset);
     const rows = page.result?.rows ?? [];
     const seen = new Set<string>();
@@ -297,16 +302,24 @@ function bucketByShard(addresses: string[]): Map<string, string[]> {
 export async function addToMiniPaySet(addresses: string[]): Promise<number> {
   if (addresses.length === 0) return 0;
   const redis = getRedis();
-  let added = 0;
-  for (const [key, members] of bucketByShard(addresses)) {
-    for (const batch of chunk(members, SADD_CHUNK)) {
-      // SADD signature requires `(key, member, ...members)` — split the chunk
-      // so the first member is positional. Chunks are guaranteed non-empty.
-      const [head, ...tail] = batch;
-      added += await redis.sadd(key, head!, ...tail);
-    }
-  }
-  return added;
+  // Parallelize across shards (independent keys), keep chunks sequential
+  // within a shard so we don't overwhelm a single shard with concurrent
+  // SADD ops. Each shard tallies its own added count, then we sum.
+  const perShard = await Promise.all(
+    Array.from(bucketByShard(addresses), async ([key, members]) => {
+      let shardAdded = 0;
+      // chunks share a Redis key, so this loop must serialize.
+      for (const batch of chunk(members, SADD_CHUNK)) {
+        // SADD signature requires `(key, member, ...members)` — split the chunk
+        // so the first member is positional. Chunks are guaranteed non-empty.
+        const [head, ...tail] = batch;
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        shardAdded += await redis.sadd(key, head!, ...tail);
+      }
+      return shardAdded;
+    }),
+  );
+  return perShard.reduce((a, b) => a + b, 0);
 }
 
 /** Cumulative SCARD across all shards. */
@@ -328,7 +341,9 @@ export async function intersectMiniPay(addresses: string[]): Promise<string[]> {
   const perShard = await Promise.all(
     Array.from(bucketByShard(addresses), async ([key, members]) => {
       const matches: string[] = [];
+      // Chunks share a Redis key, so this loop must serialize.
       for (const batch of chunk(members, SMISMEMBER_CHUNK)) {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
         const flags = (await redis.smismember(key, batch)) as number[];
         for (let i = 0; i < batch.length; i += 1) {
           if (flags[i] === 1) matches.push(batch[i]!);

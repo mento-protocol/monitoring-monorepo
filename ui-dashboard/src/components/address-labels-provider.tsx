@@ -136,6 +136,10 @@ function emptyState(): EntriesState {
   return {};
 }
 
+// Provider body is over the no-giant-component threshold — it's mostly
+// state machinery (SWR + pending-mutation ledger). Tracked in
+// BACKLOG.md § "Architecture pass" for a focused split PR.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
@@ -164,9 +168,9 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // value, so the page would render a writable form on the new
   // session's stale fallback data before the new authenticated
   // `/api/address-labels` read lands.
-  const [prevStatus, setPrevStatus] = useState(status);
-  if (prevStatus !== status) {
-    setPrevStatus(status);
+  const prevStatusRef = useRef(status);
+  if (prevStatusRef.current !== status) {
+    prevStatusRef.current = status;
     if (status !== "authenticated" && hasLoaded) {
       setHasLoaded(false);
     }
