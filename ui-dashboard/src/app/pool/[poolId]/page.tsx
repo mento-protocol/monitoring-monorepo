@@ -20,6 +20,7 @@ import {
   POOL_DETAIL_WITH_HEALTH,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { usePoolWithThresholds } from "./_lib/use-pool-with-thresholds";
 import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
 import {
   buildOracleRateMap,
@@ -143,7 +144,11 @@ function PoolDetail() {
     chainId: network.chainId,
   });
 
-  const pool = poolData?.Pool?.[0] ?? null;
+  const pool = usePoolWithThresholds(
+    poolData?.Pool?.[0] ?? null,
+    normalizedPoolId,
+    network.chainId,
+  );
 
   // Canonicalize legacy raw-address pool URLs onto namespaced multichain IDs,
   // but only after the pool resolves on the active network. That avoids

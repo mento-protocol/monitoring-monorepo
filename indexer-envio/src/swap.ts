@@ -51,6 +51,12 @@ export interface PoolLike {
   token1: string | undefined;
   token0Decimals: number;
   token1Decimals: number;
+  // Optional: when callers pass the full Pool entity, this gates USD
+  // valuation against schema-default 18/18 decimals. Tests / synthetic
+  // PoolLike shapes can omit it; `buildSwapTraderFields` defaults to
+  // computing USD if the flag is missing (preserves prior behaviour for
+  // tests that don't care about the heal path).
+  tokenDecimalsKnown?: boolean;
 }
 
 /** The three trader-attribution fields added to v3 `SwapEvent`. Centralized so
@@ -63,18 +69,31 @@ export function buildSwapTraderFields(
   event: SwapEventLike,
   pool: PoolLike,
 ): { caller: string; txTo: string; volumeUsdWei: bigint } {
+  // Gate USD valuation on `tokenDecimalsKnown` when present. A
+  // non-18-decimal USD leg computed against the schema-default 18/18
+  // would persist a `volumeUsdWei` off by `10^(18 - real_dec)` (e.g.
+  // 1e12 for USDC), permanently skewing leaderboard / aggregator
+  // rollups for that swap. Emit `0n` (uncomputable) until self-heal
+  // lands real decimals — the sample is dropped from rollups but not
+  // falsified. SwapEvent rows are not recomputed post-heal, so the
+  // trade-off is one zero-value sample vs. a permanently-wrong row.
+  // Tests passing synthetic PoolLike without the flag default to
+  // compute (legacy behaviour).
+  const usdGated = pool.tokenDecimalsKnown === false;
   return {
     ...buildSwapAddressFields(event),
-    volumeUsdWei: computeSwapUsdWei({
-      chainId: event.chainId,
-      token0: pool.token0,
-      token1: pool.token1,
-      token0Decimals: pool.token0Decimals,
-      token1Decimals: pool.token1Decimals,
-      amount0In: event.params.amount0In,
-      amount0Out: event.params.amount0Out,
-      amount1In: event.params.amount1In,
-      amount1Out: event.params.amount1Out,
-    }),
+    volumeUsdWei: usdGated
+      ? 0n
+      : computeSwapUsdWei({
+          chainId: event.chainId,
+          token0: pool.token0,
+          token1: pool.token1,
+          token0Decimals: pool.token0Decimals,
+          token1Decimals: pool.token1Decimals,
+          amount0In: event.params.amount0In,
+          amount0Out: event.params.amount0Out,
+          amount1In: event.params.amount1In,
+          amount1Out: event.params.amount1Out,
+        }),
   };
 }

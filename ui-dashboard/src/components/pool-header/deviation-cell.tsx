@@ -3,7 +3,12 @@
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { HealthStatus } from "@/lib/health";
-import { computeHealthStatus, isOracleFresh } from "@/lib/health";
+import {
+  computeHealthStatus,
+  effectiveThreshold,
+  isNeverRebalance,
+  isOracleFresh,
+} from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
@@ -22,6 +27,7 @@ export function DeviationCell({
   network: Network;
 }) {
   const isVirtual = pool.source?.includes("virtual");
+  const neverRebalances = isNeverRebalance(pool);
   // Trust only `hasHealthData === true` — the indexer's default values
   // populate `pool.healthStatus` with "N/A" even for no-data pools, so a
   // `!== undefined` disjunction would let this cell render a synthetic
@@ -56,14 +62,14 @@ export function DeviationCell({
 
   const status = computeHealthStatus(pool, network.chainId);
 
-  // Surface the actual threshold inside the popover so operators don't
-  // have to hop to Pool Config. Falls back to a generic note when the
-  // indexer hasn't backfilled the threshold yet (sentinel 0).
-  const thresholdSuffix =
-    pool.rebalanceThreshold && pool.rebalanceThreshold > 0
-      ? ` of ${(pool.rebalanceThreshold / 100).toFixed(2)}%`
-      : "";
-  const explainer = `${DEVIATION_EXPLAINER_BASE}${thresholdSuffix}.`;
+  // Distinguish schema-default "threshold unknown" from governance's
+  // explicit "never rebalance" configuration — both arrive as `0`, but only
+  // the latter should be explained as an intentional operating mode.
+  const explainer = neverRebalances
+    ? `${DEVIATION_EXPLAINER_BASE}. Governance has disabled rebalancing for this pool, so deviation is monitored but never triggers a rebalance.`
+    : pool.rebalanceThreshold && pool.rebalanceThreshold > 0
+      ? `${DEVIATION_EXPLAINER_BASE} of ${(pool.rebalanceThreshold / 100).toFixed(2)}%.`
+      : `${DEVIATION_EXPLAINER_BASE}.`;
 
   return (
     <div>
@@ -86,8 +92,9 @@ export function DeviationCell({
       </dt>
       <dd>
         <DeviationBar
+          neverRebalances={neverRebalances}
           priceDifference={pool.priceDifference ?? "0"}
-          rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+          rebalanceThreshold={effectiveThreshold(pool)}
           status={status}
         />
       </dd>
@@ -96,14 +103,19 @@ export function DeviationCell({
 }
 
 function DeviationBar({
+  neverRebalances,
   priceDifference,
   rebalanceThreshold,
   status,
 }: {
+  neverRebalances: boolean;
   priceDifference: string;
   rebalanceThreshold: number;
   status: HealthStatus;
 }) {
+  if (neverRebalances) {
+    return <span className="text-sm text-slate-400">Never rebalances</span>;
+  }
   // Only the missing-threshold case renders an em-dash — that's a real
   // "no data" condition (indexer sentinel-0). diff === 0 is the perfect
   // case (pool exactly on the oracle); render a 0%-filled bar + caption

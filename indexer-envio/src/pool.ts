@@ -18,7 +18,7 @@ import {
   dailySnapshotId,
   extractAddressFromPoolId,
 } from "./helpers";
-import { computePriceDifference } from "./priceDifference";
+import { computePriceDifference, parseDecimalsPair } from "./priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -26,6 +26,7 @@ import {
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
+  tokenDecimalsScalingEffect,
   vpExchangeIdEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
@@ -63,11 +64,48 @@ export const DEVIATION_CRITICAL_DEN = 100n;
  */
 export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
+/** True iff governance has explicitly configured this pool to never
+ * rebalance — BOTH `rebalanceThresholdAbove === 0` AND
+ * `rebalanceThresholdBelow === 0` AND `rebalanceThresholdsKnown=true`.
+ * Distinct from the schema-default unknown case (`rebalanceThresholdsKnown=false`),
+ * where the breach predicate falls back to a 10000-bps under-bound until
+ * self-heal lands.
+ *
+ * Cannot infer from `rebalanceThreshold` alone: that's the ACTIVE side
+ * picked by `pickActiveThreshold` based on current reserve direction. An
+ * asymmetric pool with `above=0, below=300` legitimately persists
+ * `rebalanceThreshold=0` while reservePrice is on the above side, even
+ * though the pool DOES rebalance on the below side. Both split fields
+ * must be 0 for "never rebalance" to be the right semantic.
+ *
+ * Used to short-circuit breach/health predicates rather than relying on
+ * the `effectiveThreshold` 1e12 sentinel: explicit short-circuit means an
+ * extreme reserve-skew priceDifference > 1.01e12 still resolves to "no
+ * breach", as governance intended.
+ */
+export const isNeverRebalance = (pool: {
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): boolean =>
+  // STRICT equality: undefined is NOT treated as 0. A pool entity always
+  // has both split fields populated (Int! schema), so this only matters
+  // for synthetic test inputs. Defaulting undefined→0 would let a caller
+  // claim never-rebalance without populating the split fields, which is
+  // the same partial-shape pitfall the dashboard mirror guards against.
+  pool.rebalanceThresholdAbove === 0 &&
+  pool.rebalanceThresholdBelow === 0 &&
+  pool.rebalanceThresholdsKnown === true;
+
 /** Resolve the effective threshold in bps. Three states:
  *  - `> 0`: the on-chain configured threshold (active side).
  *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
  *    to never rebalance. Treat as effectively infinite so the breach
- *    predicate never trips — the pool isn't supposed to rebalance.
+ *    predicate never trips — the pool isn't supposed to rebalance. Callers
+ *    that take a different code path on never-rebalance pools should also
+ *    check `isNeverRebalance(pool)` and short-circuit upstream rather than
+ *    relying on the 1e12 sentinel — that cushion is unbounded-skew-tolerant
+ *    in practice but not by construction.
  *  - `0` AND `rebalanceThresholdsKnown=false`: indexer hasn't read on-chain
  *    yet. Fall back to 10000 (100%) so the predicate doesn't false-trip
  *    while waiting for self-heal.
@@ -78,6 +116,8 @@ export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
  */
 export const effectiveThreshold = (pool: {
   rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
   // Optional: callers passing a synthetic threshold value (e.g.
   // `deviationBreach` healing from a captured entry threshold) may not
   // carry the Known flag. In that case we treat `0` as the unread
@@ -85,9 +125,55 @@ export const effectiveThreshold = (pool: {
   rebalanceThresholdsKnown?: boolean;
 }): bigint => {
   if (pool.rebalanceThreshold > 0) return BigInt(pool.rebalanceThreshold);
-  // 1e12 is well past any realistic priceDifference (which is bps,
-  // bounded by ~10000) so the breach math reliably evaluates to false.
-  return pool.rebalanceThresholdsKnown ? 10n ** 12n : 10000n;
+  // Distinguish governance-disabled "never rebalance" (BOTH split sides
+  // 0 + Known) from an asymmetric pool whose active side just happens to
+  // be 0 right now. Otherwise an `above=0, below=300` pool with reserves
+  // currently picking the above side would suppress all deviation
+  // alerts via the 1e12 cushion even though the below side is real.
+  if (isNeverRebalance(pool)) return 10n ** 12n;
+  return 10000n;
+};
+
+/**
+ * Persistable counterpart to `effectiveThreshold` for `Int!`-typed fields
+ * (GraphQL 32-bit signed, max ~2.1e9). Three distinct zero-cases need
+ * three distinct persisted values so chart/table consumers don't have to
+ * synthesize them from joins:
+ *
+ * - **never-rebalance** (`above=0, below=0, known=true`): persist `0`.
+ *   Matches on-chain config; `isNeverRebalance(pool)` short-circuits the
+ *   chart/health math upstream, so the value is informational. The 1e12
+ *   in-memory sentinel would overflow `Int!` here.
+ * - **asymmetric-active-zero** (one split side `>0`, other `=0`,
+ *   `known=true`, reserves currently picking the zero side): persist
+ *   `10000` (the same fallback `effectiveThreshold` uses for breach
+ *   scoring). Without this, `oracle-chart.tsx` renders deviation as `0%`
+ *   and the table renders `—` even though `hasHealthData=true` and the
+ *   breach predicate scored against 10000 — making valid breach samples
+ *   look in-band.
+ * - **unknown-zero** (`known=false`, raw threshold `=0` because indexer
+ *   hasn't read on-chain): persist `0`. The row's `hasHealthData=false`
+ *   flag is what gates consumers; persisting 10000 here would leak the
+ *   fallback into rows that the indexer explicitly marked untrusted.
+ *
+ * For any non-zero raw threshold, return it directly (already `Int!`-safe).
+ */
+export const persistableThreshold = (pool: {
+  rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  if (pool.rebalanceThreshold > 0) return pool.rebalanceThreshold;
+  if (isNeverRebalance(pool)) return 0;
+  // From here: raw = 0 AND not never-rebalance. If thresholds are known,
+  // this is the asymmetric-active-zero case (the OTHER side is positive
+  // and the pool DOES rebalance on flip) — persist the 10000 fallback so
+  // the chart's deviation-ratio math has a non-zero denominator. If
+  // thresholds are unread, persist 0; `hasHealthData=false` on the row
+  // signals consumers to skip.
+  if (pool.rebalanceThresholdsKnown === true) return 10000;
+  return 0;
 };
 
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
@@ -121,6 +207,10 @@ export function computeHealthStatus(
 ): IndexerHealthStatus {
   if (isVirtualPool(pool)) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
+  // Governance-configured "never rebalance" pools stay OK regardless of
+  // priceDifference magnitude. Short-circuit explicitly so extreme reserve
+  // skew can't trip the predicate via the `effectiveThreshold` 1e12 cushion.
+  if (isNeverRebalance(pool)) return "OK";
   const threshold = effectiveThreshold(pool);
   const diff = pool.priceDifference;
   const aboveTolerance =
@@ -137,8 +227,11 @@ export function computeHealthStatus(
 
 // Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle
 // staleness is intentionally NOT counted — this tracks price action only.
+// Never-rebalance pools always short-circuit to false (mirrors
+// `computeHealthStatus`); see `isNeverRebalance` for why.
 export function isInDeviationBreach(pool: Pool): boolean {
   if (isVirtualPool(pool)) return false;
+  if (isNeverRebalance(pool)) return false;
   return (
     pool.priceDifference * DEVIATION_TOLERANCE_DEN >
     effectiveThreshold(pool) * DEVIATION_TOLERANCE_NUM
@@ -340,6 +433,53 @@ export async function selfHealInvertRateFeed(
   };
 }
 
+/** Self-heal `token0Decimals` / `token1Decimals` when the factory's
+ * `tokenDecimalsScalingEffect` reads failed at deploy. Without this, a
+ * non-18-decimal pool whose factory RPC blipped would silently keep the
+ * schema default 18/18 forever — `normalizeTo18` would not scale the
+ * affected reserve, and every priceDifference computation downstream
+ * would be wrong by `10^(18 - real_dec)` factor.
+ *
+ * Cache-true effect: `tokenDecimalsScalingEffect` is per-(chain, pool, fn)
+ * and the on-chain decimals are immutable, so this is one RPC pair per
+ * unhealed pool across the entire run. Once `tokenDecimalsKnown` flips
+ * true, subsequent calls are pure object-identity returns.
+ *
+ * Caller's own `Pool.set` persists the healed values. */
+export async function selfHealTokenDecimals(
+  context: { effect: EffectCaller },
+  pool: Pool,
+): Promise<Pool> {
+  // VPs were previously skipped because they don't go through the local
+  // priceDifference recompute path. But `buildSwapTraderFields` still uses
+  // `token0Decimals` / `token1Decimals` to compute `volumeUsdWei` and
+  // leaderboard snapshots — a non-18-decimal USD leg would stay mis-scaled
+  // for a VP with a deploy-time decimal blip. Cache:true effect, so the
+  // RPC pair fires once per VP across the run regardless of how many
+  // events touch it.
+  if (pool.tokenDecimalsKnown || pool.source === "") {
+    return pool;
+  }
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const [dec0Raw, dec1Raw] = await Promise.all([
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals0",
+      fallbackTokenAddress: pool.token0,
+    }),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals1",
+      fallbackTokenAddress: pool.token1,
+    }),
+  ]);
+  const parsed = parseDecimalsPair(dec0Raw, dec1Raw);
+  if (!parsed.tokenDecimalsKnown) return pool;
+  return { ...pool, ...parsed };
+}
+
 /** Self-heal `rebalanceThresholdAbove/Below` when the factory's
  * `rebalanceThresholdsEffect` failed at deploy. Without this, a transient
  * RPC blip would permanently leave both split fields at 0 → derive returns
@@ -539,6 +679,14 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
   token1Decimals: 18,
+  // Mirrors `invertRateFeedKnown`: false until factory seeds real values
+  // (or `selfHealTokenDecimals` lands them); true once persisted. While
+  // false, `selfHealTokenDecimals` retries on every event that touches
+  // this pool so a deploy-time RPC blip doesn't permanently keep
+  // non-18-decimal pools at the schema default 18/18.
+  tokenDecimalsKnown: false,
+  // Diagnostic only — see schema.graphql comment. NOT a freshness signal.
+  lastFreshReporterAt: 0n,
   // Health score accumulators
   healthTotalSeconds: 0n,
   healthBinarySeconds: 0n,
@@ -630,7 +778,11 @@ export const upsertPool = async ({
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
-  tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  tokenDecimals?: {
+    token0Decimals: number;
+    token1Decimals: number;
+    tokenDecimalsKnown: boolean;
+  };
   /** Static-config field for the referenced rate feed; explicit param so
    * callers can't accidentally clobber it via `oracleDelta` spread (see
    * the doc on `DEFAULT_ORACLE_FIELDS`). Only the FPMM factory + the
@@ -658,18 +810,13 @@ export const upsertPool = async ({
   const existingInitial: Pool = initialBase.source
     ? initialBase
     : { ...initialBase, source };
-  // Self-heal invertRateFeed up front so every downstream computation
-  // (priceDifference, oraclePrice flip, breach status) sees the corrected
-  // orientation. Same helper that handlers call before reading the field.
+  // Heal pipeline: invertRateFeed → wrappedExchangeId (VP only) →
+  // tokenDecimals. Each helper short-circuits when its field is already
+  // healed, so the per-event cost is at most a few boolean checks once
+  // a pool is fully seeded. All three back-end effects are `cache: true`
+  // (per-pool-once across the run).
   const invertHealed = await selfHealInvertRateFeed(context, existingInitial);
-  // Self-heal `wrappedExchangeId` for VirtualPools whose
-  // VirtualPoolDeployed event fired pre-start_block. Bytecode is immutable
-  // and the effect is `cache: true` so the actual RPC fires once per VP
-  // address across the whole sync regardless of how many events touch it.
-  // Inline gate on the hot path so FPMM events + already-healed VPs skip
-  // the await microtask hop; the helper itself early-returns on the same
-  // condition for off-hot-path callers.
-  const existing =
+  const wrappedHealed =
     invertHealed.wrappedExchangeId || !isVirtualPool(invertHealed)
       ? invertHealed
       : await selfHealWrappedExchangeId(
@@ -678,6 +825,9 @@ export const upsertPool = async ({
           blockNumber,
           blockTimestamp,
         );
+  // tokenDecimals heal short-circuits for VPs (the helper checks
+  // `isVirtualPool`) so FPMM-only paths pay the cost.
+  const existing = await selfHealTokenDecimals(context, wrappedHealed);
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
@@ -763,9 +913,27 @@ export const upsertPool = async ({
     // self-heal > existing.
     referenceRateFeedID:
       referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID,
-    // Persist token decimals if provided (set once at pool creation)
-    token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
-    token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    // OR-merge `tokenDecimalsKnown` so a self-healed `true` survives a
+    // later caller passing `false` (e.g. a factory replay that blipped).
+    // Symmetrically, gate the decimal field writes: when the incoming pair
+    // is unknown but the existing pair is known, keep the known values.
+    // Without this gate, a known-6/18 pool getting a re-blipped factory
+    // payload `{18, 18, false}` would clobber the real decimals to 18/18
+    // while the OR-merge held the flag at `true` — locking in wrong scaling.
+    token0Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token0Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token0Decimals
+          : (tokenDecimals?.token0Decimals ?? existing.token0Decimals),
+    token1Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token1Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token1Decimals
+          : (tokenDecimals?.token1Decimals ?? existing.token1Decimals),
+    tokenDecimalsKnown:
+      tokenDecimals?.tokenDecimalsKnown || existing.tokenDecimalsKnown,
     // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` above —
     // the helper updates `existing` in place (returns a new object on
     // healing, original on no-op) so the spread carries the field through.
@@ -782,15 +950,47 @@ export const upsertPool = async ({
   // Use contract-provided priceDifference when available (passed via oracleDelta
   // from fetchRebalancingState). Only fall back to local recomputation when the
   // contract value was not supplied (e.g. oracle-only update events).
+  // `tokenDecimalsKnown=false` blocks the local recomputation: `normalizeTo18`
+  // would silently use the schema-default 18/18 and produce a priceDifference
+  // off by 10^(18 - real_dec) for non-18-decimal pools whose factory +
+  // self-heal both blipped. Preserve `existing.priceDifference` until
+  // self-heal lands real decimals.
   const hasContractPriceDiff =
     oracleDelta != null &&
     "priceDifference" in oracleDelta &&
     oracleDelta.priceDifference !== undefined;
+  const canRecompute =
+    !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !isVirtualPool(next) && next.oraclePrice > 0n
+    : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
+
+  // When priceDifference is frozen (no contract-provided value AND can't
+  // recompute), skip the breach pipeline entirely. Feeding the frozen
+  // value into `nextDeviationBreachStartedAt` / `recordBreachTransition`
+  // would let a same-block threshold update flip breach state from
+  // stale/default deviation data — corrupting `DeviationThresholdBreach`
+  // rows. VirtualPools always take this branch (canRecompute=false for
+  // them) but their breach state stays at default-zero anyway, so the
+  // skip is a no-op for them. Mirrors the SortedOracles handler guard.
+  //
+  // EXCEPTION: when the new state is `isNeverRebalance` (governance just
+  // disabled rebalancing), let the breach pipeline run anyway —
+  // `isInDeviationBreach` short-circuits to false via `isNeverRebalance`,
+  // which lets `recordBreachTransition` close any open DTB row regardless
+  // of the frozen priceDifference. Without this exception, the
+  // limits-and-fees known-zero fallback's `upsertPool` routing would
+  // never close the breach (it relied on the breach pipeline to close it
+  // via the falling-edge logic).
+  const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
+  const becameNeverRebalance = isNeverRebalance(next);
+  if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
+    const persistedNoBreach: Pool = { ...next, priceDifference };
+    context.Pool.set(persistedNoBreach);
+    return persistedNoBreach;
+  }
 
   const withDeviation = { ...next, priceDifference };
   // Compute breach-start BEFORE health, so computeHealthStatus reads the

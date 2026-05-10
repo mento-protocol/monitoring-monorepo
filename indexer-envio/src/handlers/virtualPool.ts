@@ -16,10 +16,7 @@ import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
 import { tokenDecimalsScalingEffect } from "../rpc/effects";
-import {
-  buildRebalanceOutcome,
-  scalingFactorToDecimals,
-} from "../priceDifference";
+import { buildRebalanceOutcome, parseDecimalsPair } from "../priceDifference";
 
 // ---------------------------------------------------------------------------
 // VirtualPoolFactory.VirtualPoolDeployed
@@ -67,12 +64,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
       fallbackTokenAddress: token1,
     }),
   ]);
-  const token0Decimals = dec0Raw
-    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
-    : 18;
-  const token1Decimals = dec1Raw
-    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
-    : 18;
+  const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -86,7 +78,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     txHash: event.transaction.hash,
-    tokenDecimals: { token0Decimals, token1Decimals },
+    tokenDecimals,
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",

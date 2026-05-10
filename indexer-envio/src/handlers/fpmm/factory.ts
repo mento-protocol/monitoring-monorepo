@@ -15,7 +15,7 @@ import {
   makePoolId,
   extractAddressFromPoolId,
 } from "../../helpers";
-import { scalingFactorToDecimals } from "../../priceDifference";
+import { parseDecimalsPair } from "../../priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -192,13 +192,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       poolAddress: poolAddr,
     }),
   ]);
-  // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
-  const token0Decimals = dec0Raw
-    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
-    : 18;
-  const token1Decimals = dec1Raw
-    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
-    : 18;
+  const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
 
   if (rateFeedID) {
     // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
@@ -265,7 +259,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     oracleDelta,
-    tokenDecimals: { token0Decimals, token1Decimals },
+    tokenDecimals,
     referenceRateFeedID: rateFeedID ?? undefined,
   });
 

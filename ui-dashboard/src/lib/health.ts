@@ -46,6 +46,17 @@ interface PoolHealthState {
   oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  // Direction-split thresholds — populated by the isolated
+  // `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` / `POOL_THRESHOLDS_KNOWN_EXT`
+  // queries. Both must be 0 (with Known=true) for `isNeverRebalance` to
+  // hold; the active `rebalanceThreshold` alone can't be trusted because
+  // it's just the side `pickActiveThreshold` chose at index time.
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  // True when the indexer has read the on-chain values for both above/below
+  // thresholds; false (or missing) when still at the schema default. Drives
+  // the dual-sentinel `effectiveThreshold` semantics — see that function.
+  rebalanceThresholdsKnown?: boolean;
   lastRebalancedAt?: string | null;
   deviationBreachStartedAt?: string | null;
 }
@@ -75,12 +86,81 @@ export {
   DEVIATION_CRITICAL_RATIO,
 } from "@mento-protocol/monitoring-config/thresholds";
 
-/** Resolve the effective threshold in bps. The schema-default of 0 means the
- * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
- * pools don't trip the breach predicate while we wait for the RPC self-heal.
+/** True iff governance has explicitly configured this pool to never
+ * rebalance — BOTH split sides 0 AND `rebalanceThresholdsKnown=true`.
+ * Mirrors `isNeverRebalance` in indexer `pool.ts` (parity test in
+ * `indexer-envio/test/healthStatusParity.test.ts`). Used to short-
+ * circuit breach/health predicates without relying on the
+ * `effectiveThreshold` 1e12 cushion.
+ *
+ * Cannot infer from `rebalanceThreshold` alone: that's the ACTIVE side
+ * picked at indexing time based on current reserves. An asymmetric pool
+ * with `above=0, below=300` legitimately persists `rebalanceThreshold=0`
+ * while reservePrice is on the above side, but the pool DOES rebalance
+ * on the below side — classifying it never-rebalance would suppress
+ * deviation alerts for the half of the time it should fire. Both split
+ * fields must be 0 for the predicate to hold.
+ *
+ * If `rebalanceThresholdAbove` / `rebalanceThresholdBelow` aren't
+ * fetched yet (older indexer schema or unmigrated query), the predicate
+ * returns false — safe under-bound. The split fields are populated by
+ * the isolated `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` /
+ * `POOL_THRESHOLDS_KNOWN_EXT` queries.
  */
-const effectiveThreshold = (pool: { rebalanceThreshold?: number }): number =>
-  (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+export function isNeverRebalance(pool: {
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): boolean {
+  // STRICT equality on the split fields: an absent (undefined) value is
+  // NOT treated as 0. A caller with `rebalanceThresholdsKnown: true` but
+  // missing split fields was probably built from a query that didn't
+  // fetch the isolated EXT triple — defaulting undefined→0 there would
+  // misclassify a real-threshold pool as never-rebalance and suppress
+  // its alerts. Both split sides must be explicitly 0 for the predicate
+  // to hold.
+  return (
+    pool.rebalanceThresholdAbove === 0 &&
+    pool.rebalanceThresholdBelow === 0 &&
+    pool.rebalanceThresholdsKnown === true
+  );
+}
+
+/** Resolve the effective threshold in bps. Mirrors the indexer's `pool.ts`
+ * `effectiveThreshold` (parity-tested via `healthStatusParity`). Three states:
+ *  - `> 0`: the on-chain configured threshold (active side).
+ *  - `0` AND `rebalanceThresholdsKnown=true`: governance configured the pool
+ *    to never rebalance. Treat as effectively infinite (1e12) so high deviation
+ *    on a never-rebalance pool stays OK instead of false-tripping CRITICAL.
+ *    Callers should also short-circuit on `isNeverRebalance(pool)` — the 1e12
+ *    cushion handles realistic priceDifference magnitudes but not extreme
+ *    reserve-skew edges.
+ *  - `0` AND `rebalanceThresholdsKnown=false` (or missing): indexer hasn't
+ *    read the on-chain value yet (pre-resync, RPC blip, or pre-PR-1.5 schema).
+ *    Fall back to 10000 (100%) so the predicate doesn't false-trip while
+ *    waiting for the indexed flag.
+ *
+ * The schema-default unknown case must NOT collapse with the legitimate
+ * "never rebalance" case — both have `rebalanceThreshold === 0`, but only
+ * the latter has `rebalanceThresholdsKnown=true`. A missing `rebalanceThresholdsKnown`
+ * (older indexer schema or unmigrated query) defaults to the safe 10000
+ * under-bound. 1e12 fits in a JS number (≪ Number.MAX_SAFE_INTEGER).
+ */
+export const effectiveThreshold = (pool: {
+  rebalanceThreshold?: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  const threshold = pool.rebalanceThreshold ?? 0;
+  if (threshold > 0) return threshold;
+  // Same asymmetric-disambiguation as indexer `pool.ts:effectiveThreshold`:
+  // 1e12 cushion only applies when BOTH split sides are 0 (governance-
+  // disabled never-rebalance), not when the active side just happens to
+  // be 0 on a half-disabled pool.
+  if (isNeverRebalance(pool)) return 1e12;
+  return 10000;
+};
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },
@@ -135,6 +215,9 @@ export function computeHealthStatus(
     if (isWeekend()) return "WEEKEND";
     return "CRITICAL";
   }
+  // Governance-configured "never rebalance" pools stay OK regardless of
+  // priceDifference magnitude. Mirrors indexer `computeHealthStatus`.
+  if (isNeverRebalance(pool)) return "OK";
   const diff = Number(pool.priceDifference ?? "0");
   const devRatio = diff / effectiveThreshold(pool);
   if (devRatio <= DEVIATION_TOLERANCE_RATIO) return "OK";
@@ -314,6 +397,9 @@ export function computeEffectiveStatus(
     oracleExpiry?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    rebalanceThresholdsKnown?: boolean;
     deviationBreachStartedAt?: string | null;
     lastRebalancedAt?: string | null;
     limitStatus?: string;
@@ -345,10 +431,20 @@ export function computeRebalancerLiveness(
     lastRebalancedAt?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    rebalanceThresholdsKnown?: boolean;
   },
   nowSeconds: number,
 ): RebalancerStatus {
   if (pool.source?.includes("virtual")) return "N/A";
+  // Never-rebalance pools never have rebalance work to do — silence is
+  // expected by design. Short-circuit BEFORE the lastRebalancedAt
+  // check, otherwise a freshly-deployed never-rebalance pool (the most
+  // natural state — never rebalanced because it never should) would
+  // return NO_DATA instead of ACTIVE. Mirrors `computeHealthStatus`'s
+  // short-circuit so liveness ↔ health stay aligned for these pools.
+  if (isNeverRebalance(pool)) return "ACTIVE";
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   if (age <= 86400) return "ACTIVE";
