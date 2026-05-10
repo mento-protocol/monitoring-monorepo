@@ -155,6 +155,36 @@ export const persistableThreshold = (pool: {
   rebalanceThreshold: number;
 }): number => pool.rebalanceThreshold;
 
+/**
+ * Breach-row entry capture: the threshold the breach predicate
+ * (`isInDeviationBreach` → `effectiveThreshold(pool)`) was scored against
+ * at the rising edge. Differs from `persistableThreshold` because the
+ * breach row's `entryRebalanceThreshold` field exists to score severity
+ * across the breach lifecycle — capturing raw 0 on an asymmetric pool's
+ * zero-threshold side would let a later reserve flip re-score history
+ * against the post-flip opposite side (codex P2 #3214513401, PR 1.6).
+ *
+ * Returns:
+ *  - active threshold (bps) when positive — symmetric / on-active-side asymmetric.
+ *  - 10000 when active is 0 AND `rebalanceThresholdsKnown=false` (cold-start
+ *    under-bound — predicate scored against the same fallback) OR the pool
+ *    is asymmetric on its zero side (`above=0, below>0` etc.).
+ *  - 0 when `isNeverRebalance` — returning the never-rebalance 1e12 cushion
+ *    would overflow `Int!`. Never-rebalance pools cannot have an open breach
+ *    (the predicate short-circuits them), so this branch is defense-in-depth
+ *    only — if reached, the row's later `criticalDurationSeconds` accrual
+ *    would resolve to 0 via `effectiveThreshold(pool)`'s 1e12 cushion.
+ */
+export const breachEntryThreshold = (pool: {
+  rebalanceThreshold: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+}): number => {
+  if (isNeverRebalance(pool)) return 0;
+  return Number(effectiveThreshold(pool));
+};
+
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
  * line, integer-safe. Used by both the live status branch (here) and the
  * cumulative `criticalDurationSeconds` accrual in `deviationBreach.ts` to
@@ -263,24 +293,35 @@ export function nextOpenBreachPeak(prev: Pool | undefined, next: Pool): bigint {
 }
 
 /** Maintain the open-breach entry threshold denormalized on Pool. Captures
- * `rebalanceThreshold` at the rising edge so the live-uptime gate scores
- * the peak against the same threshold the persisted accrual uses (entry,
- * not current). Resets to 0 when no open breach; held across continuing
- * breach events so a mid-breach `FPMMRebalanceThresholdUpdated` can't
- * shift the live verdict. Self-heals from the 0 sentinel: if the breach
- * opened before RPC backfilled `rebalanceThreshold` and a real value
- * arrives mid-breach, adopt it once and then hold. */
+ * the EFFECTIVE threshold at the rising edge (`breachEntryThreshold(next)`,
+ * not raw `rebalanceThreshold`) so the live-uptime gate scores the peak
+ * against the same threshold the breach predicate (`isInDeviationBreach` →
+ * `effectiveThreshold(pool)`) used. Asymmetric pools on their zero-threshold
+ * side need this: raw `rebalanceThreshold === 0` while the predicate scored
+ * against the 10000-bps fallback; capturing 0 here would let the closing
+ * fallback chain in `recordBreachTransition` reach for the post-flip
+ * opposite side's active value instead. Held across continuing breach events
+ * so a mid-breach `FPMMRebalanceThresholdUpdated` (or a side flip) can't
+ * shift the live verdict. Resets to 0 when no open breach. */
 export function nextOpenBreachEntryThreshold(
   prev: Pool | undefined,
   next: Pool,
 ): number {
   if (next.deviationBreachStartedAt === 0n) return 0;
   const prevAnchor = prev?.deviationBreachStartedAt ?? 0n;
-  if (prevAnchor === 0n) return next.rebalanceThreshold; // rising edge
-  // Continuing: hold the previously-captured entry value, but heal when
-  // the captured value is the 0 RPC-pending sentinel and we now have one.
-  const stored = prev?.currentOpenBreachEntryThreshold ?? 0;
-  return stored > 0 ? stored : next.rebalanceThreshold;
+  // Rising edge — capture the predicate-scoring threshold (10000 fallback
+  // for asymmetric-zero-side pools), matching the entity row capture in
+  // `recordBreachTransition`. See deviationBreach.ts for the full
+  // asymmetric-side-flip rationale (codex P2 #3214513401, PR 1.6).
+  if (prevAnchor === 0n) return breachEntryThreshold(next);
+  // Continuing: never overwrite a captured value. The pre-PR-1.6
+  // heal-from-zero branch is retired for the same reason as the entity
+  // row's heal (see deviationBreach.ts) — overwriting an old captured 0
+  // with `next.rebalanceThreshold` would re-score history against the
+  // post-flip opposite side. Old rows with stored=0 stay 0; the closing
+  // fallback chain in `recordBreachTransition` defaults them to the
+  // 10000 effective floor.
+  return prev?.currentOpenBreachEntryThreshold ?? 0;
 }
 
 // ---------------------------------------------------------------------------
