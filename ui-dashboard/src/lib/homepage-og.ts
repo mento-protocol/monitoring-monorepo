@@ -12,6 +12,7 @@ import {
   USDM_SYMBOLS,
   type OracleRateMap,
 } from "@/lib/tokens";
+import { HASURA_TIMEOUT_MS } from "@/lib/graphql";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
@@ -141,12 +142,12 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     client.request<{ Pool: Pool[] }>({
       document: ALL_POOLS_WITH_HEALTH,
       variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
     client.request<{ Pool: ThresholdsRow[] }>({
       document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
       variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
   ]);
 
@@ -216,7 +217,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
           limit: DAILY_PAGE_SIZE,
           offset: page * DAILY_PAGE_SIZE,
         },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
       });
       const rows = res.PoolDailySnapshot ?? [];
       for (const row of rows) {

@@ -497,11 +497,11 @@ describe("getSnapshotVolumeInUsd", () => {
     ).toBeNull();
   });
 
-  it("returns null when tokenDecimalsKnown is undefined (PR 1.7 strict — fail closed)", () => {
-    // Per PR 1.7, the gate is strict `!== true`: undefined is treated as
-    // untrusted because post-PR-1.6 indexers populate the field on every
-    // pool. `undefined` now signals either a pre-PR-1.6 schema OR a
-    // transient EXT-query failure — both should fail closed.
+  it("returns null when tokenDecimalsKnown is undefined (strict gate — fail closed)", () => {
+    // Strict `!== true`: undefined signals either a legacy schema OR a
+    // transient EXT-query failure. Both should fail closed because the
+    // current indexer populates the field on every pool, so undefined
+    // is no longer a "deploy-window default" worth trusting.
     const pool: Pool = {
       id: "pool-legacy",
       chainId: 42220,

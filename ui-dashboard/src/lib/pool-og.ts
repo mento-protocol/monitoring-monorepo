@@ -19,6 +19,7 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
+import { HASURA_TIMEOUT_MS } from "@/lib/graphql";
 import {
   ALL_POOLS_WITH_HEALTH,
   POOL_DETAIL_WITH_HEALTH,
@@ -113,7 +114,7 @@ export async function fetchPoolOgDataUncached(
   // from resolving and the OG route blocks until Vercel's function timeout.
   // 5s is generous for a public Hasura lookup and short enough that crawler
   // unfurls fall back to the generic card promptly on indexer issues.
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Fail-open: only the detail query is load-bearing. If daily snapshots or
   // the all-pools rate-map query transiently fail (including timeout), still
@@ -246,7 +247,6 @@ export async function fetchPoolOgDataUncached(
     chainLabel: network.label,
     tokenSymbols: [sym0, sym1],
     tvlUsd: priceable ? rawTvlUsd : null,
-    // ^ priceable=false → null; priceable=true but untrusted-decimals → null too.
     tvlWoWPct,
     volume7dUsd,
     volume7dWoWPct,

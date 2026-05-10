@@ -101,8 +101,8 @@ function makePool(
     limitStatus: "OK",
     limitPressure0: "0",
     limitPressure1: "0",
-    // PR 1.7: USD math now requires `tokenDecimalsKnown === true` (strict).
-    // Tests exercising the untrusted gate explicitly override.
+    // USD-math helpers gate strict on `=== true`; see `makeTvlPool` in
+    // `network-fixtures.ts` for rationale.
     tokenDecimalsKnown: true,
     ...overrides,
   };

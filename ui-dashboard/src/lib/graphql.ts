@@ -21,6 +21,13 @@ function getClient(network: Network): GraphQLClient {
 // and hitting 429 "Tier Quota" errors mid-session.
 const DEFAULT_REFRESH_MS = 30_000;
 
+/** Per-request timeout for fail-open Hasura queries (OG card paths, isolated
+ *  EXT queries, anywhere a wedged HTTP connection should fail fast and let
+ *  the next refresh interval retry). 5s mirrors what the Vercel OG renderer
+ *  budgets for upstream data; pages requiring authoritative data shouldn't
+ *  set a timeout — SWR's retry/dedup is the right fallback there. */
+export const HASURA_TIMEOUT_MS = 5000;
+
 /**
  * Network-aware GraphQL hook.
  * Automatically switches Hasura endpoint based on the current network context.
