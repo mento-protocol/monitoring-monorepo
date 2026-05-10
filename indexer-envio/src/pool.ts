@@ -914,14 +914,23 @@ export const upsertPool = async ({
   // pays one RPC per address total) from "RPC threw" (transient, NOT
   // cached → next event for that address retries). See
   // `vpExchangeIdEffect` in `src/rpc/effects.ts` for the discriminator.
-  const existing = invertHealed.wrappedExchangeId
-    ? invertHealed
-    : await selfHealWrappedExchangeId(
-        context,
-        invertHealed,
-        blockNumber,
-        blockTimestamp,
-      );
+  // Call-site gate matches `selfHealWrappedExchangeId`'s internal gate
+  // (round 4 codex #1+#3): re-enter heal until the VP is fully healed
+  // (wrappedExchangeId pinned AND tokens populated). Gating on
+  // `wrappedExchangeId` alone would short-circuit transient
+  // `poolExchangeEffect` / `tokenDecimalsScalingEffect` failures and
+  // leave the VP at `?/?` with default 18 decimals indefinitely.
+  // `vpExchangeIdEffect` is `cache:true`, so re-entry is essentially
+  // free for already-bytecode-confirmed VPs.
+  const existing =
+    invertHealed.wrappedExchangeId && invertHealed.token0 && invertHealed.token1
+      ? invertHealed
+      : await selfHealWrappedExchangeId(
+          context,
+          invertHealed,
+          blockNumber,
+          blockTimestamp,
+        );
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.

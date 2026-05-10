@@ -562,6 +562,11 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
+      // Mock pool-exchange to null so the round 3 inline seed bails fast
+      // instead of hitting real RPC (the seed succeeding isn't what this
+      // test exercises). Without this, the CI runner sees viem retries +
+      // backoff (~10s) for the unmocked `poolExchangeEffect` call.
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
 
       let mockDb = MockDb.createMockDb();
       const swap = VirtualPool.Swap.createMockEvent({

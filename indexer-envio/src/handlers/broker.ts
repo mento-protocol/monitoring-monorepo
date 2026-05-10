@@ -131,7 +131,17 @@ Broker.Swap.handler(async ({ event, context }) => {
   // double-counting rollup. Run the heal here so isVirtualPool sees the
   // bytecode-confirmed `wrappedExchangeId`. Idempotent + effect-cached
   // — VirtualPool.Swap's later upsertPool call hits the same cache.
-  if (brokerCallerPool && !brokerCallerPool.wrappedExchangeId) {
+  // Call-site gate matches `selfHealWrappedExchangeId`'s internal gate
+  // (round 4 codex #1+#3): re-enter heal until the VP is fully healed.
+  // Gating on `wrappedExchangeId` alone would short-circuit a VP that
+  // bytecode-confirmed but had a transient seed/decimals failure,
+  // leaving it mis-classified as FPMM here.
+  if (
+    brokerCallerPool &&
+    (!brokerCallerPool.wrappedExchangeId ||
+      !brokerCallerPool.token0 ||
+      !brokerCallerPool.token1)
+  ) {
     brokerCallerPool = await selfHealWrappedExchangeId(
       context,
       brokerCallerPool,

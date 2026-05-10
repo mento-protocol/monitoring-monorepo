@@ -220,6 +220,7 @@ function clampedPct(binary: number, total: number): number | null {
  */
 export function computePoolUptimePct(pool: {
   source: string;
+  wrappedExchangeId?: string | null;
   healthTotalSeconds?: string;
   healthBinarySeconds?: string;
 }): number | null {
