@@ -18,8 +18,10 @@ import { consoleLogger, type RpcLogger } from "./log";
 // `ExchangeCreated` carries asset0/asset1/pricingModule but the rest of the
 // PoolExchange struct (spread, referenceRateFeedID, reset frequency, …) only
 // arrives via the SpreadUpdated / BucketsUpdated sub-events AFTER create.
-// `fetchPoolExchange` is called once at ExchangeCreated time so the
-// `BiPoolExchange` row is fully populated immediately.
+// `fetchPoolExchange` is called at ExchangeCreated time and from self-heal
+// paths when the create event predates the indexer start block, so the
+// `BiPoolExchange` row can be fully populated before downstream valuation
+// logic depends on the exchange's token metadata.
 //
 // Returns null on RPC failure. The handler skips the field overwrite on null
 // and the next SpreadUpdated / BucketsUpdated event still mutates incrementally.
@@ -63,6 +65,7 @@ export async function fetchPoolExchange(
   chainId: number,
   exchangeProvider: string,
   exchangeId: string,
+  blockNumber: bigint,
   log: RpcLogger = consoleLogger,
 ): Promise<PoolExchangeStruct | null> {
   const mockKey = `${chainId}:${exchangeProvider.toLowerCase()}:${exchangeId.toLowerCase()}`;
@@ -71,11 +74,9 @@ export async function fetchPoolExchange(
   }
   try {
     const client = getRpcClient(chainId);
-    // Address-keyed read with no blockNumber — read at `latest`. The struct
-    // changes only on governance + bucket-reset events that we already index
-    // (SpreadUpdated, BucketsUpdated, etc.) so the latest read is fine for
-    // the one-time seed; subsequent events overwrite the relevant fields.
-    const { result } = await readContractWithBlockFallback(
+    // Read at the event block so historical catch-up never stamps a future
+    // governance config or destroyed/empty exchange state onto a past row.
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
       chainId,
       client,
       {
@@ -84,10 +85,11 @@ export async function fetchPoolExchange(
         functionName: "getPoolExchange",
         args: [exchangeId as `0x${string}`],
       },
-      undefined,
+      blockNumber,
       getFallbackRpcClient(chainId),
       log,
     );
+    if (usedLatestFallback) return null;
     const r = result as {
       asset0: string;
       asset1: string;
@@ -122,7 +124,7 @@ export async function fetchPoolExchange(
       "getPoolExchange",
       `${exchangeProvider}:${exchangeId}`,
       err,
-      undefined,
+      blockNumber,
       log,
     );
     return null;
