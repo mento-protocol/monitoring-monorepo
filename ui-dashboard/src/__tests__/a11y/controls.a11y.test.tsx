@@ -338,23 +338,24 @@ describe("BridgeStatusFilter a11y", () => {
 // ---------------------------------------------------------------------------
 
 describe("BucketFilter a11y", () => {
-  function BucketFilterHarness({
-    initial = "all",
-    onChange = () => undefined,
-  }: {
-    initial?: DurationBucket;
-    onChange?: (next: DurationBucket) => void;
-  }) {
-    const [selected, setSelected] = useState<DurationBucket>(initial);
-    return (
-      <BucketFilter
-        selected={selected}
-        onChange={(next) => {
-          onChange(next);
-          setSelected(next);
-        }}
-      />
-    );
+  function renderBucketFilterHarness(
+    initial: DurationBucket = "all",
+    onChange: (next: DurationBucket) => void = () => undefined,
+  ) {
+    function BucketFilterHarness() {
+      const [selected, setSelected] = useState<DurationBucket>(initial);
+      return (
+        <BucketFilter
+          selected={selected}
+          onChange={(next) => {
+            onChange(next);
+            setSelected(next);
+          }}
+        />
+      );
+    }
+
+    render(<BucketFilterHarness />);
   }
 
   function radios(): HTMLButtonElement[] {
@@ -376,7 +377,7 @@ describe("BucketFilter a11y", () => {
   }
 
   it("single tab stop: exactly one tabIndex=0 (selected bucket); the rest are tabIndex=-1", () => {
-    render(<BucketFilterHarness initial="long" />);
+    renderBucketFilterHarness("long");
     const tabbable = radios().filter((r) => r.tabIndex === 0);
     const untabbable = radios().filter((r) => r.tabIndex === -1);
     expect(tabbable).toHaveLength(1);
@@ -386,7 +387,7 @@ describe("BucketFilter a11y", () => {
 
   it("ArrowRight moves focus + selection to the next bucket", () => {
     const onChange = vi.fn();
-    render(<BucketFilterHarness onChange={onChange} />);
+    renderBucketFilterHarness("all", onChange);
     const all = pillByLabel("All");
     all.focus();
     dispatch(all, "ArrowRight");
@@ -397,7 +398,7 @@ describe("BucketFilter a11y", () => {
 
   it("ArrowLeft from All wraps focus + selection to Ongoing", () => {
     const onChange = vi.fn();
-    render(<BucketFilterHarness onChange={onChange} />);
+    renderBucketFilterHarness("all", onChange);
     const all = pillByLabel("All");
     all.focus();
     dispatch(all, "ArrowLeft");
@@ -407,7 +408,7 @@ describe("BucketFilter a11y", () => {
 
   it("Home and End jump to the first and last bucket", () => {
     const onChange = vi.fn();
-    render(<BucketFilterHarness initial="short" onChange={onChange} />);
+    renderBucketFilterHarness("short", onChange);
     const short = pillByLabel("1h – 1d");
     short.focus();
     dispatch(short, "End");
@@ -432,7 +433,7 @@ describe("BucketFilter a11y", () => {
   });
 
   it("axe passes with the keyboard contract in place", async () => {
-    render(<BucketFilterHarness initial="short" />);
+    renderBucketFilterHarness("short");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
