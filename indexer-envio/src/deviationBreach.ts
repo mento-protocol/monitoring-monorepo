@@ -17,6 +17,7 @@
 
 import type { Pool, DeviationThresholdBreach } from "generated";
 import {
+  breachEntryThreshold,
   DEVIATION_BREACH_GRACE_SECONDS,
   effectiveThreshold,
   isAboveCriticalMagnitude,
@@ -136,7 +137,21 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
-      entryRebalanceThreshold: next.rebalanceThreshold,
+      // Persist the EFFECTIVE threshold the breach predicate was scored
+      // against (`isInDeviationBreach` reads `effectiveThreshold(pool)`).
+      // For an asymmetric pool currently on its zero-threshold side
+      // (`above=300, below=0` with reserves picking the below side, or
+      // mirrored), `next.rebalanceThreshold === 0` while the predicate
+      // scored against the 10000-bps fallback — capturing the raw 0
+      // would let the heal at line ~270 swap it to the OPPOSITE side's
+      // active threshold (300) once reserves flip, retroactively
+      // re-scoring `peakPriceDifference` and `criticalDurationSeconds`
+      // against a threshold that wasn't in force when the breach opened.
+      // `breachEntryThreshold` also gates the 1e12 never-rebalance
+      // sentinel out of this `Int!`-typed write — never-rebalance pools
+      // can't reach this code path anyway (`isInDeviationBreach`
+      // short-circuits them), but keep the conversion defensive.
+      entryRebalanceThreshold: breachEntryThreshold(next),
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
@@ -177,19 +192,31 @@ export async function recordBreachTransition(
     // RISING EDGE — not the current threshold. Otherwise an
     // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
     // re-score severity, inflating or zeroing the accrual.
-    // Fallback chain handles the RPC-pending 0 sentinel: prefer the
-    // self-healed Pool field, then the breach row, then the closing event's
-    // threshold (which may have healed if the breach opens AND closes
-    // before any continuing event), and finally `effectiveThreshold`'s
-    // 10000 default if no real value was ever observed.
+    //
+    // Resolution chain (PR 1.6 — codex P2 #3214513401, cursor #3214689033,
+    // codex P2 PR #370 #3214748744):
+    //   1. `open.entryRebalanceThreshold` (the immutable rising-edge entity
+    //      capture). PR-1.6+ rows captured `breachEntryThreshold(next)`,
+    //      which is non-zero except for never-rebalance (which can't open).
+    //   2. **10000 floor** — pre-PR-1.6 legacy rows have
+    //      `entryRebalanceThreshold=0` because the prior code captured the
+    //      raw active threshold without the asymmetric-zero substitute.
+    //
+    // `prev.currentOpenBreachEntryThreshold` is intentionally NOT consulted:
+    // for fresh rows it agrees with `open` (same rising-edge code path), but
+    // for legacy rows the OLD heal-from-zero branch may have written the
+    // post-flip OPPOSITE-side threshold there (e.g. 300 after reserves moved
+    // to the active-positive side). Trusting that denorm would re-score
+    // history against a threshold the predicate never saw at rising edge.
+    // Honor the entity row's immutable capture as the only legacy detector.
+    //
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
+    const LEGACY_ENTRY_THRESHOLD_FLOOR = 10000;
     const healedEntryThreshold =
-      (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
-        ? prev!.currentOpenBreachEntryThreshold
-        : open.entryRebalanceThreshold > 0
-          ? open.entryRebalanceThreshold
-          : next.rebalanceThreshold;
+      open.entryRebalanceThreshold > 0
+        ? open.entryRebalanceThreshold
+        : LEGACY_ENTRY_THRESHOLD_FLOOR;
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
       effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),
@@ -242,7 +269,9 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
-      entryRebalanceThreshold: next.rebalanceThreshold,
+      // See rising-edge case above for `breachEntryThreshold` rationale —
+      // identical reasoning applies to the bootstrap path.
+      entryRebalanceThreshold: breachEntryThreshold(next),
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
@@ -262,14 +291,27 @@ export async function recordBreachTransition(
   // the same tx rewrite the cause so the UI shows "Swap" instead.
   const upgradeCause =
     open.startedByEvent === "unknown" && category !== "unknown";
-  // Self-heal entry threshold: the row was opened with the 0 sentinel
-  // before RPC backfilled `rebalanceThreshold`. Adopt the first real
-  // value once and then hold so the breach history UI shows the actual
-  // threshold this breach opened against.
-  const healEntryThreshold =
-    open.entryRebalanceThreshold === 0 && next.rebalanceThreshold > 0;
-  if (!peakBumped && !isRebalance && !upgradeCause && !healEntryThreshold)
-    return {};
+  // Entry-threshold heal RETIRED (PR 1.6, codex P2 #3214513401):
+  //
+  // Pre-PR-1.6 the rising edge captured `next.rebalanceThreshold` raw.
+  // Asymmetric pools currently on their zero-threshold side persisted
+  // entry=0 and the predicate was scored against the 10000-bps fallback.
+  // The original heal then swapped that 0 to whatever `next.rebalanceThreshold`
+  // resolved to mid-breach — which, after a reserve flip, is the OPPOSITE
+  // side's active value. That re-scored `peakPriceDifference` and
+  // `criticalDurationSeconds` against a threshold that was never in force
+  // when the breach opened, corrupting peak % and critical-duration history.
+  //
+  // PR 1.6 captures `breachEntryThreshold(next)` at rising edge — always > 0
+  // unless never-rebalance (which can't enter breach via `isInDeviationBreach`'s
+  // short-circuit). So new breach rows never have `entryRebalanceThreshold === 0`
+  // and the heal would never legitimately fire. Old pre-PR-1.6 rows that DO
+  // have entry=0 stay at 0: writing the current side's value would still
+  // mislead, and the falling-edge fallback chain (`prev.currentOpenBreachEntryThreshold`
+  // → `open.entryRebalanceThreshold` → `next.rebalanceThreshold` → 10000) still
+  // produces a usable threshold for the close-time `criticalDurationSeconds`
+  // accrual.
+  if (!peakBumped && !isRebalance && !upgradeCause) return {};
   context.DeviationThresholdBreach.set({
     ...open,
     ...(peakBumped && {
@@ -280,9 +322,6 @@ export async function recordBreachTransition(
     ...(upgradeCause && {
       startedByEvent: category,
       startedByTxHash: trigger.txHash,
-    }),
-    ...(healEntryThreshold && {
-      entryRebalanceThreshold: next.rebalanceThreshold,
     }),
     rebalanceCountDuring: isRebalance
       ? open.rebalanceCountDuring + 1

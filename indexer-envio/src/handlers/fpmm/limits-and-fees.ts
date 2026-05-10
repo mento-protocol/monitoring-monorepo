@@ -18,6 +18,7 @@ import {
 } from "../../tradingLimits";
 import { rebalancingStateEffect, tradingLimitsEffect } from "../../rpc/effects";
 import {
+  computeHealthStatus,
   effectiveThreshold,
   isNeverRebalance,
   persistableThreshold,
@@ -370,7 +371,15 @@ FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
       blockTimestamp,
       isNeverRebalance(upserted),
     );
-    pool = { ...upserted, ...poolUpdate };
+    // Recompute `healthStatus` after the merge: `recordHealthSample` may
+    // have flipped `hasHealthData: false → true`, and `upsertted`'s earlier
+    // healthStatus was computed against the OLD value (codex P2 PR #370
+    // #3214748736).
+    const merged = { ...upserted, ...poolUpdate };
+    pool = {
+      ...merged,
+      healthStatus: computeHealthStatus(merged, blockTimestamp),
+    };
     context.Pool.set(pool);
 
     // Only write the OracleSnapshot row when we used the local median

@@ -5,7 +5,7 @@
 // — pinned by the characterization tests; do not change.
 
 import React from "react";
-import type { DeviationThresholdBreach, Pool } from "@/lib/types";
+import type { DeviationThresholdBreach } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
@@ -20,12 +20,10 @@ import { END_REASON_LABELS, START_REASON_LABELS } from "./filters";
 
 export function BreachRow({
   breach,
-  pool,
   network,
   getName,
 }: {
   breach: DeviationThresholdBreach;
-  pool: Pool;
   network: Network;
   getName: (addr: string | null, chainId?: number) => string;
 }) {
@@ -42,15 +40,17 @@ export function BreachRow({
   // closed-breach logic and the uptime tile.
   const graceEnd =
     Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
-  // Fallback to current pool threshold during the indexer resync window
-  // before `entryRebalanceThreshold` is backfilled. Once resync lands every
-  // breach row carries its own entry threshold.
+  // Pre-PR-1.6 legacy rows have `entryRebalanceThreshold=0` because the
+  // prior indexer captured raw active threshold without the asymmetric-zero
+  // substitute. Reading the live `pool.rebalanceThreshold` would consult
+  // the post-flip side and re-score history (codex P2 PR #370 #3214748742,
+  // mirrors the breach-history-chart fix). Canonicalize legacy 0 to 10000
+  // directly — the predicate's under-bound for any pool that could have
+  // legitimately captured 0.
   const entryThreshold =
     (breach.entryRebalanceThreshold ?? 0) > 0
       ? breach.entryRebalanceThreshold!
-      : (pool.rebalanceThreshold ?? 0) > 0
-        ? pool.rebalanceThreshold!
-        : 10000;
+      : 10000;
   const peakAboveCritical =
     Number(breach.peakPriceDifference) / entryThreshold >
     DEVIATION_CRITICAL_RATIO;
