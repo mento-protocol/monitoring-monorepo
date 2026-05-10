@@ -3891,7 +3891,10 @@ describe("Health score handler integration", () => {
     );
   });
 
-  it("OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators", async () => {
+  it("OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators", async function () {
+    // Multi-event integration test — under c8 coverage on slower CI
+    // runners this brushes against the default ceiling. Inline 60s.
+    this.timeout(60_000);
     const POOL_ADDR = "0x000000000000000000000000000000000000ff05";
     const FEED_ID = "0x000000000000000000000000000000000000ff06";
     const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;

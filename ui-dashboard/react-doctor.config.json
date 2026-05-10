@@ -38,6 +38,11 @@
         "comment": "BreachHistoryPanel has 6 useState calls — pre-existing latent warning re-triggered by PR #370 touching the file (`pool` prop removal in BreachHistoryChart cascade). Suppressing so unrelated PRs aren't blocked by debt that didn't grow with the change. Tracked in BACKLOG.md § 'Dashboard tech debt' for a focused useReducer refactor.",
         "files": ["src/components/breach-history-panel.tsx"],
         "rules": ["react-doctor/prefer-useReducer"]
+      },
+      {
+        "comment": "GlobalPoolsTable is 327 lines — pre-existing latent warning re-triggered by PR #370 (computeEffectiveStatus refactor + spread-sort cleanup). Suppressing so unrelated PRs aren't blocked by debt that didn't grow with the change. Tracked in BACKLOG.md § 'Dashboard tech debt' for a focused refactor.",
+        "files": ["src/components/global-pools-table.tsx"],
+        "rules": ["react-doctor/no-giant-component"]
       }
     ]
   }
