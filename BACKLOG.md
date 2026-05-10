@@ -373,6 +373,8 @@ Round-12 codex follow-ups to the round-10/11 `tokenDecimalsKnown` gating sweep. 
 
 - [ ] **Resolve react-doctor `no-giant-component` suppression on `pool/[poolId]/_tabs/oracle-tab.tsx`.** PR #366 added a per-file override after a fresh edit re-triggered the diff gate on this 340-line component (latent warning, not introduced by the PR). Real fix: split into smaller focused units — table-only `<OracleSnapshotsTable />` (search + sort + pagination wiring), chart-only path stays in the parent, lift state hooks where natural. Lift the override once under threshold. Estimate: ~1h.
 
+- [ ] **Resolve react-doctor `prefer-useReducer` suppression on `components/breach-history-panel.tsx`.** PR #370 added a per-file override after a fresh edit (removing the `pool` prop from `BreachHistoryChart`) re-triggered the diff gate on this 6-useState component (latent warning, not introduced by the PR). Real fix: collapse the related state hooks (page, sort col/dir, search-bootstrap, chart-rows) into a single `useReducer` so transitions stay coherent. Lift the override once converted. Estimate: ~45 min.
+
 ## File-size watchlist (auto-generated)
 
 _Last updated: 2026-05-01 by file-size-budget-drift-detector. Soft cap 600 lines / hard cap 1,000. See `/AGENTS.md` §"File-size budget"._
