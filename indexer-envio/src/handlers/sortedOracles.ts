@@ -139,8 +139,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         return;
       }
 
+      // For the never-rebalance + decimals-untrusted fall-through case
+      // above, computePriceDifference would normalize against schema-default
+      // 18/18 and produce a fabricated value that gets persisted onto the
+      // OracleSnapshot row. The breach predicate / `computeHealthStatus` /
+      // `nextDeviationBreachStartedAt` ignore it (1e12 effective threshold
+      // short-circuits everything to no-breach / OK), but consumers who
+      // read the row's priceDifference directly (BreachEvent, oracle tab
+      // detail) would see a fake non-zero value. Preserve existing instead.
+      const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
       const priceDifference =
-        !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        decimalsTrustworthy &&
+        !updatedPool.source?.includes("virtual") &&
+        oraclePrice > 0n
           ? computePriceDifference(updatedPool)
           : updatedPool.priceDifference;
       const withDev = { ...updatedPool, priceDifference };
@@ -383,8 +394,13 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         return;
       }
 
+      // Preserve existing priceDifference when decimals are untrusted —
+      // see OracleReported handler comment block for rationale.
+      const decimalsTrustworthy = withThreshold.tokenDecimalsKnown === true;
       const priceDifference =
-        !withThreshold.source?.includes("virtual") && oraclePrice > 0n
+        decimalsTrustworthy &&
+        !withThreshold.source?.includes("virtual") &&
+        oraclePrice > 0n
           ? computePriceDifference(withThreshold)
           : withThreshold.priceDifference;
       const withDev = { ...withThreshold, priceDifference };

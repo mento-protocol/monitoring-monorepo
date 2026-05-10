@@ -398,6 +398,12 @@ function rowUsdVolume(
   pool: Pool,
   slice: ChainSlice,
 ): number | null {
+  // Same untrusted-decimals defense as `getSnapshotVolumeInUsd` /
+  // `poolTotalVolumeUSD` / `poolTvlUSD`. A non-18-dp leg with
+  // `tokenDecimalsKnown=false` would parse `swapVolume*` against the
+  // schema-default 18 and inflate the daily USD figure by 1e12.
+  // Undefined still trusts default 18 (deploy-window resilience).
+  if (pool.tokenDecimalsKnown === false) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;
