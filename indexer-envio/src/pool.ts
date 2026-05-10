@@ -476,9 +476,15 @@ export async function selfHealWrappedExchangeId(
     // later asset-bearing event arrives — which may never happen for
     // pre-start_block VPs. The BiPoolExchange row already has the
     // assets from BiPoolManager.ExchangeCreated. Only fill on miss
-    // (existing token0/token1 wins on direct conflict).
-    const filledToken0 = !healedToken0 && exchange.asset0;
-    const filledToken1 = !healedToken1 && exchange.asset1;
+    // (existing token0/token1 wins on direct conflict). Skip
+    // ZERO_ADDRESS — a zeroed exchange row (transient RPC backfill at
+    // ExchangeCreated time) shouldn't pin token0/token1 to 0x0 + then
+    // fire an `eth_call decimals()` against it. Mirrors the same guard
+    // in `mirrorTokensAndDecimalsToPool` (reverse-link).
+    const filledToken0 =
+      !healedToken0 && exchange.asset0 && exchange.asset0 !== ZERO_ADDRESS;
+    const filledToken1 =
+      !healedToken1 && exchange.asset1 && exchange.asset1 !== ZERO_ADDRESS;
     if (filledToken0) healedToken0 = exchange.asset0;
     if (filledToken1) healedToken1 = exchange.asset1;
     // Backfill decimals for newly-filled tokens. Default 18 is wrong for
