@@ -112,16 +112,19 @@ export function computeRewardThresholds(
   // Visual-equality across display-precision is preserved at the cell
   // render site by `rounded > cutoff` (renderRewardCell), which quantises
   // both cells to the same bin regardless of where cutoff lands.
-  const values = rawRewards
-    .flatMap((r) => {
-      const v = r ? Number(r) : Number.NaN;
-      return Number.isFinite(v) && v > 0 ? [v] : [];
-    })
-    .toSorted((a, b) => a - b);
+  const finite = rawRewards.flatMap((r) => {
+    const v = r ? Number(r) : Number.NaN;
+    return Number.isFinite(v) && v > 0 ? [v] : [];
+  });
+  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+  const values = [...finite].sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
   const mad = median(
-    values.map((v) => Math.abs(v - med)).toSorted((a, b) => a - b),
+    [...values.map((v) => Math.abs(v - med))].sort((a, b) => a - b),
   );
   // MAD = 0 means majority of samples are exactly equal. No meaningful
   // spread → skip highlighting rather than tier on noise.
@@ -281,7 +284,10 @@ export function RebalancesTab({
     const raw = (chartData?.RebalanceEvent ?? []).filter(
       (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
-    return raw.toSorted(
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+    return [...raw].sort(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
     );
   }, [chartData]);

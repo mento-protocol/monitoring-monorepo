@@ -64,29 +64,31 @@ export function LpsTab({
     LiquidityPosition: LiquidityPosition[];
   }>(shouldSkip ? null : POOL_LP_POSITIONS, { poolId });
 
-  const positions = useMemo(
-    () =>
-      (indexedData?.LiquidityPosition ?? [])
-        .flatMap((position) => {
-          const netLiquidity = BigInt(position.netLiquidity);
-          if (netLiquidity <= BigInt(0)) return [];
-          return [
-            {
-              address: position.address,
-              netLiquidity,
-              lastUpdatedTimestamp: position.lastUpdatedTimestamp,
-            },
-          ];
-        })
-        .toSorted((a, b) =>
-          a.netLiquidity === b.netLiquidity
-            ? 0
-            : a.netLiquidity > b.netLiquidity
-              ? -1
-              : 1,
-        ),
-    [indexedData],
-  );
+  const positions = useMemo(() => {
+    const filtered = (indexedData?.LiquidityPosition ?? []).flatMap(
+      (position) => {
+        const netLiquidity = BigInt(position.netLiquidity);
+        if (netLiquidity <= BigInt(0)) return [];
+        return [
+          {
+            address: position.address,
+            netLiquidity,
+            lastUpdatedTimestamp: position.lastUpdatedTimestamp,
+          },
+        ];
+      },
+    );
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+    return [...filtered].sort((a, b) =>
+      a.netLiquidity === b.netLiquidity
+        ? 0
+        : a.netLiquidity > b.netLiquidity
+          ? -1
+          : 1,
+    );
+  }, [indexedData]);
 
   const totalLiquidity = useMemo(
     () =>

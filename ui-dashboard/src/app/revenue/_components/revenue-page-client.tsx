@@ -66,7 +66,10 @@ function RevenueContent() {
       totalFees24h,
       totalFees7d,
       totalFees30d,
-      unpricedSymbols: Array.from(unpricedSymbolSet).toSorted(),
+      // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+      // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+      // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+      unpricedSymbols: [...Array.from(unpricedSymbolSet)].sort(),
       totalUnresolvedCount,
     };
   }, [networkData, anyNetworkError, anyFeesError]);

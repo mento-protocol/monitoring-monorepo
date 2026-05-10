@@ -122,7 +122,10 @@ export function OracleTab(props: OracleTabProps) {
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
-    return raw.toSorted((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
 
   const filteredRows = useMemo(() => {

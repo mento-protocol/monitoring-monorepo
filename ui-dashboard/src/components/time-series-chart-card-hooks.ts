@@ -199,26 +199,30 @@ export function useSortedHover(params: {
       // trace occupies index 0 and `breakdown[curveNumber - 1]` is the
       // underlying series.
       const breakdownIndexOffset = isStacked ? 0 : 1;
-      const sorted = uniquePoints
-        .flatMap((p) => {
-          const cn = p.curveNumber;
-          const pi = p.pointIndex;
-          const idx = typeof cn === "number" ? cn - breakdownIndexOffset : -1;
-          const b = idx >= 0 ? breakdownByCurve[idx] : undefined;
-          // Filter the totalTrace point (curveNumber 0 in non-stacked mode):
-          // no `breakdown[]` entry, so name would be empty — drop it.
-          if (!b?.name) return [];
-          const seriesPoint = typeof pi === "number" ? b.series[pi] : undefined;
-          return [
-            {
-              name: b.name,
-              value: seriesPoint?.value ?? 0,
-              color: b.color ?? "#94a3b8",
-              legendIcon: b.legendIcon,
-            },
-          ];
-        })
-        .toSorted((a, b) => b.value - a.value);
+      const points = uniquePoints.flatMap((p) => {
+        const cn = p.curveNumber;
+        const pi = p.pointIndex;
+        const idx = typeof cn === "number" ? cn - breakdownIndexOffset : -1;
+        const b = idx >= 0 ? breakdownByCurve[idx] : undefined;
+        // Filter the totalTrace point (curveNumber 0 in non-stacked mode):
+        // no `breakdown[]` entry, so name would be empty — drop it.
+        if (!b?.name) return [];
+        const seriesPoint = typeof pi === "number" ? b.series[pi] : undefined;
+        return [
+          {
+            name: b.name,
+            value: seriesPoint?.value ?? 0,
+            color: b.color ?? "#94a3b8",
+            legendIcon: b.legendIcon,
+          },
+        ];
+      });
+      // ES2023 `Array.prototype.toSorted` would be cleaner but requires
+      // Safari 16+ / Chrome 110+; the dashboard's compile target is
+      // ES2017 with no polyfill, so keep the cloned `sort()` form to
+      // stay compatible with older browsers (codex P2, PR #371).
+      // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+      const sorted = [...points].sort((a, b) => b.value - a.value);
       const xRaw = rawPoints[0]?.x;
       const dayLabel =
         typeof xRaw === "string" || typeof xRaw === "number"
