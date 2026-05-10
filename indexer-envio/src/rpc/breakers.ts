@@ -181,15 +181,23 @@ async function probeFunction(
   abi: readonly unknown[],
   functionName: string,
   args: readonly unknown[] = [],
+  log: RpcLogger = consoleLogger,
 ): Promise<"present" | "missing" | "rpc_error"> {
   try {
     const client = getRpcClient(chainId);
-    await client.readContract({
-      address: address as `0x${string}`,
-      abi: abi as never,
-      functionName,
-      args: args as never,
-    });
+    await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address: address as `0x${string}`,
+        abi: abi as never,
+        functionName,
+        args: args as never,
+      },
+      undefined,
+      getFallbackRpcClient(chainId),
+      log,
+    );
     return "present";
   } catch (err) {
     // Distinguish "function not in bytecode" (selector miss) from a
@@ -215,6 +223,7 @@ async function probeFunction(
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
+  log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";
@@ -226,6 +235,7 @@ export async function fetchBreakerKind(
     MEDIAN_DELTA_BREAKER_ABI,
     "medianRatesEMA",
     [probeAddr],
+    log,
   );
   if (mdProbe === "rpc_error") return null;
   if (mdProbe === "present") return "MEDIAN_DELTA";
@@ -236,6 +246,7 @@ export async function fetchBreakerKind(
     VALUE_DELTA_BREAKER_ABI,
     "referenceValues",
     [probeAddr],
+    log,
   );
   if (vdProbe === "rpc_error") return null;
   if (vdProbe === "present") return "VALUE_DELTA";

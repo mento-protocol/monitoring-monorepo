@@ -6,8 +6,9 @@ import {
   _clearMockPoolExchanges,
   _setMockVpExchangeId,
   _clearMockVpExchangeIds,
-  _setMockERC20Decimals,
   _clearMockERC20Decimals,
+  _setMockTokenDecimalsScaling,
+  _clearMockTokenDecimalsScaling,
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
@@ -15,6 +16,8 @@ import {
   VP_PROBE_RPC_ERROR,
   type PoolExchangeStruct,
 } from "../src/rpc/biPoolManager.ts";
+import { fetchTokenDecimalsScaling } from "../src/rpc/pool-state.ts";
+import { _setRpcClientForTests } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
@@ -122,6 +125,18 @@ const CONSTANT_SUM_MAINNET = "0xdebed1f6f6ce9f6e73aa25f95acbffe2397550fb";
 
 const VP_ADDRESS = "0x000000000000000000000000000000000000beef";
 
+const noopLogger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
+
+function mockVpTokenDecimalsScaling(): void {
+  _setMockTokenDecimalsScaling(CHAIN_ID, VP_ADDRESS, "decimals0", 10n ** 6n);
+  _setMockTokenDecimalsScaling(CHAIN_ID, VP_ADDRESS, "decimals1", 10n ** 18n);
+}
+
 function exchangeRowId(exchangeId: string): string {
   return `${CHAIN_ID}-${exchangeId.toLowerCase()}`;
 }
@@ -161,6 +176,7 @@ describe("BiPoolManager handlers", () => {
     _clearMockPoolExchanges();
     _clearMockVpExchangeIds();
     _clearMockERC20Decimals();
+    _clearMockTokenDecimalsScaling();
     _clearPricingModuleIndex();
   });
 
@@ -485,10 +501,7 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
-      // ERC20 decimals fallback for the dec0/dec1 effects (no FPMM getter
-      // on a VP, so the fallback fires; without mock it logs a warn).
-      _setMockERC20Decimals(CHAIN_ID, ASSET0, 18);
-      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+      mockVpTokenDecimalsScaling();
 
       let mockDb = MockDb.createMockDb();
       const deploy = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
@@ -616,8 +629,7 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
-      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6); // USDC-like
-      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+      mockVpTokenDecimalsScaling();
 
       let mockDb = MockDb.createMockDb();
       // Step 1: ExchangeCreated seeds BiPoolExchange (asset0, asset1, feedID)
@@ -664,7 +676,7 @@ describe("BiPoolManager handlers", () => {
       // Backfilled from BiPoolExchange.asset0/asset1.
       assert.equal(pool!.token0, ASSET0);
       assert.equal(pool!.token1, ASSET1);
-      // Backfilled from ERC20 decimals via tokenDecimalsScalingEffect.
+      // Backfilled from decimals0()/decimals1() via tokenDecimalsScalingEffect.
       // 6 dp on the USDC-like leg is the load-bearing assertion: a stale
       // 18 default would mis-scale `volumeUsdWei` by 1e12.
       assert.equal(pool!.token0Decimals, 6);
@@ -694,8 +706,7 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
-      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6);
-      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+      mockVpTokenDecimalsScaling();
 
       let mockDb = MockDb.createMockDb();
       // Step 1: VirtualPool.Swap heals wrappedExchangeId, but NO
@@ -782,8 +793,7 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
-      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6);
-      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+      mockVpTokenDecimalsScaling();
 
       let mockDb = MockDb.createMockDb();
       // VirtualPool.Swap is the FIRST event — no prior BiPoolManager
@@ -851,9 +861,14 @@ describe("BiPoolManager handlers", () => {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
       });
-      // NOTE: no _setMockERC20Decimals — `tokenDecimalsScalingEffect`
-      // falls through to the ERC20 mock layer which is empty, so it
-      // returns undefined (transient failure simulation).
+      // Simulate transient decimals RPC failures without touching live RPC.
+      _setMockTokenDecimalsScaling(CHAIN_ID, VP_ADDRESS, "decimals0", null);
+      _setMockTokenDecimalsScaling(CHAIN_ID, VP_ADDRESS, "decimals1", null);
+      _setRpcClientForTests(CHAIN_ID, {
+        readContract: async () => {
+          throw new Error("mock RPC failure");
+        },
+      });
 
       let mockDb = MockDb.createMockDb();
       const swap = VirtualPool.Swap.createMockEvent({
@@ -865,10 +880,14 @@ describe("BiPoolManager handlers", () => {
         to: ASSET1,
         mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
       });
-      mockDb = await VirtualPool.Swap.processEvent({
-        event: swap,
-        mockDb,
-      });
+      try {
+        mockDb = await VirtualPool.Swap.processEvent({
+          event: swap,
+          mockDb,
+        });
+      } finally {
+        _setRpcClientForTests(CHAIN_ID, null);
+      }
 
       const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
       const poolAfterFailure = mockDb.entities.Pool.get(poolId) as
@@ -892,6 +911,71 @@ describe("BiPoolManager handlers", () => {
       assert.equal(poolAfterFailure!.token0, undefined);
       assert.equal(poolAfterFailure!.token1, undefined);
     });
+  });
+});
+
+describe("fetchTokenDecimalsScaling test mock", () => {
+  beforeEach(() => {
+    _clearMockTokenDecimalsScaling();
+  });
+
+  it("returns mocked decimals0()/decimals1() scaling before real RPC", async () => {
+    const unsupportedChainId = 999_999;
+    const upperPool = VP_ADDRESS.toUpperCase();
+
+    _setMockTokenDecimalsScaling(
+      unsupportedChainId,
+      upperPool,
+      "decimals0",
+      1_000_000n,
+    );
+    _setMockTokenDecimalsScaling(
+      unsupportedChainId,
+      upperPool,
+      "decimals1",
+      1_000_000_000_000_000_000n,
+    );
+
+    assert.equal(
+      await fetchTokenDecimalsScaling(
+        unsupportedChainId,
+        VP_ADDRESS,
+        "decimals0",
+        noopLogger,
+      ),
+      1_000_000n,
+    );
+    assert.equal(
+      await fetchTokenDecimalsScaling(
+        unsupportedChainId,
+        VP_ADDRESS,
+        "decimals1",
+        noopLogger,
+      ),
+      1_000_000_000_000_000_000n,
+    );
+  });
+
+  it("clears mocked decimals scaling and falls back to the RPC path", async () => {
+    const unsupportedChainId = 999_999;
+
+    _setMockTokenDecimalsScaling(
+      unsupportedChainId,
+      VP_ADDRESS,
+      "decimals0",
+      1_000_000n,
+    );
+    _clearMockTokenDecimalsScaling();
+
+    assert.equal(
+      await fetchTokenDecimalsScaling(
+        unsupportedChainId,
+        VP_ADDRESS,
+        "decimals0",
+        noopLogger,
+      ),
+      null,
+    );
   });
 });
 

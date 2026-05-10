@@ -574,7 +574,11 @@ export const breakerKindEffect = createEffect(
   // classifications and safe to cache. Skip the cache only on null
   // so a flaky probe doesn't poison every later breaker bootstrap.
   async ({ input, context }) => {
-    const result = await fetchBreakerKind(input.chainId, input.breakerAddress);
+    const result = await fetchBreakerKind(
+      input.chainId,
+      input.breakerAddress,
+      context.log,
+    );
     if (result === null) {
       context.cache = false;
       return undefined;

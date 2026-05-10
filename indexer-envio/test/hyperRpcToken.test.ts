@@ -79,12 +79,18 @@ describe("withHyperRpcToken", () => {
 // actual call.
 describe("getRpcClient fail-fast guard", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
+  const ORIGINAL_RPC_GLOBAL = process.env.ENVIO_RPC_URL;
   const ORIGINAL_RPC_42220 = process.env.ENVIO_RPC_URL_42220;
   const ORIGINAL_RPC_143 = process.env.ENVIO_RPC_URL_143;
   const ORIGINAL_RPC_10143 = process.env.ENVIO_RPC_URL_10143;
 
   beforeEach(() => {
     _clearRpcClients();
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL;
+    delete process.env.ENVIO_RPC_URL_42220;
+    delete process.env.ENVIO_RPC_URL_143;
+    delete process.env.ENVIO_RPC_URL_10143;
   });
 
   afterEach(() => {
@@ -93,6 +99,11 @@ describe("getRpcClient fail-fast guard", () => {
       process.env.ENVIO_API_TOKEN = ORIGINAL_TOKEN;
     } else {
       delete process.env.ENVIO_API_TOKEN;
+    }
+    if (ORIGINAL_RPC_GLOBAL !== undefined) {
+      process.env.ENVIO_RPC_URL = ORIGINAL_RPC_GLOBAL;
+    } else {
+      delete process.env.ENVIO_RPC_URL;
     }
     if (ORIGINAL_RPC_42220 !== undefined) {
       process.env.ENVIO_RPC_URL_42220 = ORIGINAL_RPC_42220;
