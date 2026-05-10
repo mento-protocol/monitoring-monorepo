@@ -130,7 +130,7 @@ function PoolDetail() {
     chainId: network.chainId,
   });
 
-  const pool = usePoolWithThresholds(
+  const { pool } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,
     normalizedPoolId,
     network.chainId,

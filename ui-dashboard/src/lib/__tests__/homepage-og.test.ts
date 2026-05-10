@@ -261,6 +261,66 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.attentionPools[1].health).toBe("WARN");
   });
 
+  it("flags partial when ALL_POOLS_WITH_HEALTH succeeds but the trust-flag EXT query fails (cursor #3215044221)", async () => {
+    // Regression: per PR 1.7's strict `tokenDecimalsKnown !== true` gate,
+    // an isolated `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` failure leaves
+    // every pool with `tokenDecimalsKnown=undefined`, so `poolTvlUSD`
+    // returns null for all of them. Without the OG-side `anyPoolUntrusted`
+    // check, the `partial` flag would stay false and the card would
+    // silently ship "no TVL data" labelled as complete protocol-wide
+    // numbers. Assert the flag flips.
+    const celoPool = makePool(
+      42220,
+      POOL_CELO,
+      ADDR_USDM_CELO,
+      ADDR_CUSD_CELO,
+      {
+        // Override the fixture default so the main pool query reflects the
+        // pre-merge state (tokenDecimalsKnown undefined → strict gate fires).
+        tokenDecimalsKnown: undefined,
+      },
+    );
+    const monadPool = makePool(
+      143,
+      POOL_MONAD,
+      ADDR_USDM_MONAD,
+      ADDR_GBPM_MONAD,
+      { tokenDecimalsKnown: undefined },
+    );
+    routeByChain({
+      42220: (doc) => {
+        if (
+          doc.includes("ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN") ||
+          doc.includes("AllPoolsRebalanceThresholdsKnown")
+        ) {
+          throw new Error("trust-flag query timeout");
+        }
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [celoPool] };
+      },
+      143: (doc) => {
+        if (
+          doc.includes("ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN") ||
+          doc.includes("AllPoolsRebalanceThresholdsKnown")
+        ) {
+          throw new Error("trust-flag query timeout");
+        }
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [monadPool] };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    // Trust flags missing → strict gate skips every pool → partial fires.
+    expect(result!.partial).toBe(true);
+    expect(result!.poolCount).toBe(2);
+    // Aggregate TVL: every pool's poolTvlUSD returned null, so totalTvlUsd
+    // collapses to null rather than reporting a misleading 0.
+    expect(result!.totalTvlUsd).toBeNull();
+    expect(result!.offlineChains).toEqual([]);
+  });
+
   it("flags partial + names offline chain when one chain's pool query fails", async () => {
     const monadPool = makePool(
       143,

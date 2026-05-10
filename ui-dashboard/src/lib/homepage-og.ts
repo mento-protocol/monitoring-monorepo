@@ -12,7 +12,7 @@ import {
   USDM_SYMBOLS,
   type OracleRateMap,
 } from "@/lib/tokens";
-import { HASURA_TIMEOUT_MS } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
@@ -265,7 +265,15 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     r.slice !== null ? [r.slice] : [],
   );
   if (slices.length === 0) return null;
-  const partial = offlineChains.length > 0;
+  // OR-extend `partial` to include "any pool's decimals are untrusted":
+  // strict-gate USD math returns null for those pools, every aggregation
+  // below silently skips them, and consumers labeling the card as
+  // "complete" would mis-report a 1e12-overstated 6-dp leg as missing.
+  // Cheaper to flag once at the top than thread through every helper.
+  const anyPoolUntrusted = slices.some((s) =>
+    s.pools.some((p) => p.tokenDecimalsKnown !== true),
+  );
+  const partial = offlineChains.length > 0 || anyPoolUntrusted;
 
   // TVL aggregation uses only FPMM pools with a live oracle price —
   // VirtualPools have no reserves and can't be TVL-counted. `canValueTvl`

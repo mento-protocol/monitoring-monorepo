@@ -19,7 +19,7 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
-import { HASURA_TIMEOUT_MS } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import {
   ALL_POOLS_WITH_HEALTH,
   POOL_DETAIL_WITH_HEALTH,

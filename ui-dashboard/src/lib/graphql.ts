@@ -2,7 +2,13 @@ import { GraphQLClient } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Network } from "@/lib/networks";
+
+// Re-export for backward compatibility — but new server-side imports
+// should target `@/lib/hasura-timeout` directly to avoid pulling
+// useSWR / useNetwork into the server bundle (codex P1 PR #372).
+export { HASURA_TIMEOUT_MS };
 
 // Cache clients per Hasura URL so we don't recreate on every render
 const clientCache = new Map<string, GraphQLClient>();
@@ -20,13 +26,6 @@ function getClient(network: Network): GraphQLClient {
 // useGQL calls — at 10s we were burning the Envio "small" tier monthly quota
 // and hitting 429 "Tier Quota" errors mid-session.
 const DEFAULT_REFRESH_MS = 30_000;
-
-/** Per-request timeout for fail-open Hasura queries (OG card paths, isolated
- *  EXT queries, anywhere a wedged HTTP connection should fail fast and let
- *  the next refresh interval retry). 5s mirrors what the Vercel OG renderer
- *  budgets for upstream data; pages requiring authoritative data shouldn't
- *  set a timeout — SWR's retry/dedup is the right fallback there. */
-export const HASURA_TIMEOUT_MS = 5000;
 
 /**
  * Network-aware GraphQL hook.
@@ -61,7 +60,10 @@ export function useGQL<T>(
   const { network } = useNetwork();
   const client = getClient(network);
 
-  const timeoutMs = swrOptions?.timeoutMs;
+  // Split `timeoutMs` (custom, fetcher-only) from genuine SWR options before
+  // spreading. SWR ignores unknown properties but the partition keeps the
+  // config object honest for any future config-validating SWR plugin.
+  const { timeoutMs, ...swrConfigOverrides } = swrOptions ?? {};
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
     () =>
@@ -78,7 +80,7 @@ export function useGQL<T>(
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
-      ...swrOptions,
+      ...swrConfigOverrides,
     },
   );
 

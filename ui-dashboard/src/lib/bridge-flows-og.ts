@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
-import { HASURA_TIMEOUT_MS } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { BRIDGE_DAILY_SNAPSHOT } from "@/lib/bridge-queries";
 import {
