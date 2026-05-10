@@ -10,7 +10,7 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
-import type { Pool, TradingLimit } from "@/lib/types";
+import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -541,7 +541,7 @@ export function GlobalPoolsTable({
             const isCdp = cdpPoolKeys?.has(key) ?? false;
             const isReserve = reservePoolKeys?.has(key) ?? false;
             const strategies = poolStrategies(isOls, isCdp, isReserve);
-            const isVirtual = p.source?.includes("virtual");
+            const isVirtual = isVirtualPool(p);
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -558,7 +558,10 @@ export function GlobalPoolsTable({
                 {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
                     {p.source ? (
-                      <SourceBadge source={p.source} />
+                      <SourceBadge
+                        source={p.source}
+                        wrappedExchangeId={p.wrappedExchangeId}
+                      />
                     ) : (
                       <span className="text-slate-600 text-xs">—</span>
                     )}

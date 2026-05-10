@@ -103,7 +103,10 @@ export function PoolHeader({
         <span className="text-sm">
           <AddressLink address={poolContractAddress} readOnly />
         </span>
-        <SourceBadge source={pool.source} />
+        <SourceBadge
+          source={pool.source}
+          wrappedExchangeId={pool.wrappedExchangeId}
+        />
         {v2Config?.isDeprecated && (
           <span className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-300">
             Deprecated
@@ -258,9 +261,11 @@ function VirtualPoolHeaderTiles({
   // VirtualPoolDeployed and BiPoolManager.ExchangeCreated handlers), so
   // SortedOracles writes `oraclePrice` / `oracleTimestamp` on every
   // OracleReported / MedianUpdated event. Until the link lands the field
-  // is empty and the tile would render "—" — the empty-string gate hides
-  // the dead tile in that pre-link interval. `OraclePriceValue` itself
-  // renders the staleness color + tooltip the same as the FPMM path.
+  // is empty and the real tile would render "—". We render an invisible
+  // placeholder Stat in that pre-link interval so the grid slot is held;
+  // when self-heal lands the populated tile pops in without reflowing
+  // the rest of the header. `OraclePriceValue` itself renders the
+  // staleness color + tooltip the same as the FPMM path.
   const hasOracleFeed = !!pool.referenceRateFeedID;
   return (
     <>
@@ -293,7 +298,14 @@ function VirtualPoolHeaderTiles({
           label="Oracle Price"
           value={<OraclePriceValue pool={pool} network={network} />}
         />
-      ) : null}
+      ) : (
+        // `invisible` (Tailwind → `visibility: hidden`) keeps the slot in
+        // the grid layout (same width + height as the populated tile)
+        // without rendering anything visible — screen readers also skip
+        // `visibility: hidden` content, so the empty "Oracle Price" label
+        // isn't announced during the pre-link interval.
+        <Stat label="Oracle Price" value="—" className="invisible" />
+      )}
     </>
   );
 }

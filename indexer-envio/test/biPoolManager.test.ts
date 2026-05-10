@@ -11,10 +11,12 @@ import {
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
+  fetchVirtualPoolExchangeId,
+  VP_PROBE_RPC_ERROR,
   type PoolExchangeStruct,
 } from "../src/rpc/biPoolManager.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
-import { makePoolId } from "../src/helpers.ts";
+import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
 type MockDb = {
   entities: {
@@ -76,6 +78,16 @@ type VPDeployedArgs = {
   mockEventData: MockEventData;
 };
 
+type VPSwapArgs = {
+  sender: string;
+  amount0In: bigint;
+  amount1In: bigint;
+  amount0Out: bigint;
+  amount1Out: bigint;
+  to: string;
+  mockEventData: MockEventData;
+};
+
 type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
@@ -88,11 +100,14 @@ type GeneratedModule = {
     VirtualPoolFactory: {
       VirtualPoolDeployed: EventProcessor<VPDeployedArgs>;
     };
+    VirtualPool: {
+      Swap: EventProcessor<VPSwapArgs>;
+    };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, BiPoolManager, VirtualPoolFactory } = TestHelpers;
+const { MockDb, BiPoolManager, VirtualPoolFactory, VirtualPool } = TestHelpers;
 
 const CHAIN_ID = 42220; // Celo mainnet — pricingModule index resolves here.
 const BIPOOL_MANAGER_ADDRESS = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
@@ -527,6 +542,427 @@ describe("BiPoolManager handlers", () => {
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
     });
+
+    it("self-heals wrappedExchangeId when first event is VirtualPool.Swap (fpmm_* source override)", async function () {
+      this.timeout(10_000);
+      // Pre-start_block VP scenario: VirtualPoolDeployed fired before our
+      // start_block, so the factory handler never ran. The first event we
+      // observe for this VP is `VirtualPool.Swap`, which calls upsertPool
+      // with `source: "fpmm_swap"` (intentional reuse — VP swap shares
+      // priority with FPMM swap for `pickPreferredSource`).
+      //
+      // Before the source-gate refactor, `selfHealWrappedExchangeId` gated
+      // on `isVirtualPool(pool)` (which checks `pool.source.includes("virtual")`),
+      // so a VP with `source = "fpmm_swap"` would be treated as an FPMM
+      // and the heal would be skipped → `wrappedExchangeId` stayed empty
+      // forever. The bytecode-pattern detector (`vpExchangeIdEffect`) is
+      // now the authoritative VP test, so the heal runs regardless of
+      // the source string.
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      // Mock pool-exchange to null so the round 3 inline seed bails fast
+      // instead of hitting real RPC (the seed succeeding isn't what this
+      // test exercises). Without this, the CI runner sees viem retries +
+      // backoff (~10s) for the unmocked `poolExchangeEffect` call.
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
+
+      let mockDb = MockDb.createMockDb();
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | { source: string; wrappedExchangeId?: string }
+        | undefined;
+      assert.ok(pool);
+      // Source stamps as fpmm_swap (the gate-bypass under test) — without
+      // the refactor, the next assertion would fail because the source
+      // gate would have skipped the heal.
+      assert.equal(pool!.source, "fpmm_swap");
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+    });
+
+    it("backfills token0/token1 + decimals from BiPoolExchange when first event is VirtualPool.Swap", async function () {
+      this.timeout(10_000);
+      // Codex P2 #3 follow-up: in the pre-start_block scenario above, the
+      // Pool is created via `getOrCreate` without `defaults.token0/token1`
+      // (Swap/Mint/Burn events don't carry the pair). Without backfill,
+      // the first swap is valued at $0 and the dashboard renders "?"
+      // symbols until some later asset-bearing event arrives. With the
+      // BiPoolExchange row already seeded by `BiPoolManager.ExchangeCreated`,
+      // `selfHealWrappedExchangeId` mirrors `asset0/asset1` onto the Pool
+      // and fetches their decimals via `tokenDecimalsScalingEffect`.
+      //
+      // Asset0 = USDC-like (6 decimals) to exercise the non-default path —
+      // a stale 18 default would mis-scale `volumeUsdWei` for the very
+      // first VP swap.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6); // USDC-like
+      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+
+      let mockDb = MockDb.createMockDb();
+      // Step 1: ExchangeCreated seeds BiPoolExchange (asset0, asset1, feedID)
+      // but NO Pool yet — VP wasn't observed yet, so wrappedByPoolId stays
+      // empty and the Pool side is created on Step 2.
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      // Step 2: VirtualPool.Swap is the first VP-side event — Pool gets
+      // created here without defaults.token0/token1, then selfHeal runs.
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            token0Decimals: number;
+            token1Decimals: number;
+            wrappedExchangeId?: string;
+            referenceRateFeedID: string;
+          }
+        | undefined;
+      assert.ok(pool);
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      // Backfilled from BiPoolExchange.asset0/asset1.
+      assert.equal(pool!.token0, ASSET0);
+      assert.equal(pool!.token1, ASSET1);
+      // Backfilled from ERC20 decimals via tokenDecimalsScalingEffect.
+      // 6 dp on the USDC-like leg is the load-bearing assertion: a stale
+      // 18 default would mis-scale `volumeUsdWei` by 1e12.
+      assert.equal(pool!.token0Decimals, 6);
+      assert.equal(pool!.token1Decimals, 18);
+      // Side-effect of the same heal path: feedID also mirrors over.
+      assert.equal(pool!.referenceRateFeedID, FEED_ID);
+    });
+
+    it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {
+      this.timeout(10_000);
+      // Codex P2 round 2 #3: the heal-before-exchange ordering. VP self-
+      // heals first (via VirtualPool.Swap → `selfHealWrappedExchangeId`)
+      // when no `BiPoolExchange` row exists yet, so the heal path can't
+      // mirror tokens / decimals. The reverse-link site in
+      // `BiPoolManager.ExchangeCreated.handler` must mirror them when it
+      // discovers the existing wrapping Pool via the `wrappedByPoolId`
+      // back-link lookup. Without `mirrorTokensAndDecimalsToPool` the
+      // Pool stays at `?/?` + 18/18 default forever.
+      //
+      // Round 3 #5 changed the heal path to also RPC-seed the
+      // BiPoolExchange row inline. To exercise the reverse-link branch
+      // specifically, we mock `poolExchangeEffect` to return null
+      // (transient RPC failure) so the inline seed bails — leaving the
+      // Pool healed-but-token-empty until ExchangeCreated lands.
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6);
+      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+
+      let mockDb = MockDb.createMockDb();
+      // Step 1: VirtualPool.Swap heals wrappedExchangeId, but NO
+      // BiPoolExchange exists yet, so token/decimal backfill is skipped
+      // inside the heal helper.
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const poolAfterHeal = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            token0Decimals: number;
+            wrappedExchangeId?: string;
+          }
+        | undefined;
+      assert.ok(poolAfterHeal);
+      assert.equal(poolAfterHeal!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      // Heal couldn't backfill tokens — no BiPoolExchange row to mirror from.
+      assert.equal(poolAfterHeal!.token0, undefined);
+      assert.equal(poolAfterHeal!.token1, undefined);
+
+      // Step 2: ExchangeCreated finally fires. Reverse-link discovers the
+      // wrapping Pool via `Pool.getWhere.wrappedExchangeId.eq` and calls
+      // `mirrorTokensAndDecimalsToPool` to fill the gaps.
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(1, 200, 1_700_001_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolFinal = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            token0Decimals: number;
+            token1Decimals: number;
+          }
+        | undefined;
+      assert.ok(poolFinal);
+      assert.equal(poolFinal!.token0, ASSET0);
+      assert.equal(poolFinal!.token1, ASSET1);
+      assert.equal(poolFinal!.token0Decimals, 6);
+      assert.equal(poolFinal!.token1Decimals, 18);
+    });
+
+    it("heal-path inline seed: VirtualPool.Swap-first RPC-seeds BiPoolExchange so the swap valuation has correct decimals", async function () {
+      this.timeout(10_000);
+      // Codex P2 round 3 #5: when VP.Swap is the first observed event AND
+      // the BiPoolExchange row doesn't exist yet, `selfHealWrappedExchangeId`
+      // must RPC-seed the row (via `poolExchangeEffect`) before
+      // `buildSwapTraderFields` consumes the pool. Without this, the
+      // first SwapEvent.volumeUsdWei is mis-scaled at 18/18 decimals
+      // and historical leaderboard rows lock the wrong values forever
+      // (the later reverse-link backfill only touches Pool, not
+      // SwapEvent).
+      //
+      // Setup: pool-exchange struct returns a 6dp asset0 (USDC-like).
+      // The heal helper inline-seeds BiPoolExchange from the struct,
+      // backfills tokens + decimals on the Pool, returns the healed
+      // pool, and `buildSwapTraderFields` then uses the correct 6dp.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6);
+      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+
+      let mockDb = MockDb.createMockDb();
+      // VirtualPool.Swap is the FIRST event — no prior BiPoolManager
+      // event. Heal must RPC-seed the exchange row inline.
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            token0Decimals: number;
+            token1Decimals: number;
+            wrappedExchangeId?: string;
+            referenceRateFeedID: string;
+          }
+        | undefined;
+      assert.ok(pool);
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      // Tokens + decimals filled inline via the heal path's RPC seed.
+      assert.equal(pool!.token0, ASSET0);
+      assert.equal(pool!.token1, ASSET1);
+      assert.equal(pool!.token0Decimals, 6);
+      assert.equal(pool!.token1Decimals, 18);
+      assert.equal(pool!.referenceRateFeedID, FEED_ID);
+
+      // BiPoolExchange row was inline-seeded with wrappedByPoolId already set.
+      const exchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as { wrappedByPoolId?: string; asset0: string } | undefined;
+      assert.ok(exchange);
+      assert.equal(exchange!.wrappedByPoolId, poolId);
+      assert.equal(exchange!.asset0, ASSET0);
+    });
+
+    it("paired pinning: decimals fetch failure leaves both token AND decimals unset (gate-keeps-retry)", async function () {
+      this.timeout(10_000);
+      // Codex P2 round 4 #1: pinning the token address while leaving
+      // decimals at the default 18 would lock in mis-scaled valuations
+      // for any non-18dp leg. Fix: token + decimals are pinned as a
+      // unit. If `tokenDecimalsScalingEffect` returns undefined, leave
+      // both unset so the fully-healed gate (`pool.token0 &&
+      // pool.token1`) keeps re-running the heal until decimals
+      // succeed. Asserting the decimals-failure half here covers the
+      // important invariant: no half-pinned state. The retry-success
+      // companion path is exercised by the inline-seed test above
+      // (which has decimals mocked) — that proves the heal does land
+      // when decimals are available.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      // NOTE: no _setMockERC20Decimals — `tokenDecimalsScalingEffect`
+      // falls through to the ERC20 mock layer which is empty, so it
+      // returns undefined (transient failure simulation).
+
+      let mockDb = MockDb.createMockDb();
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: swap,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const poolAfterFailure = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            wrappedExchangeId?: string;
+          }
+        | undefined;
+      assert.ok(poolAfterFailure);
+      // wrappedExchangeId pinned (bytecode is authoritative — dashboard's
+      // isVirtualPool needs this to suppress FPMM panels even before
+      // tokens land).
+      assert.equal(
+        poolAfterFailure!.wrappedExchangeId,
+        EXCHANGE_ID.toLowerCase(),
+      );
+      // Tokens NOT pinned because decimals fetch failed. The
+      // fully-healed gate (`wrappedExchangeId && token0 && token1`)
+      // stays open, so the next event will re-attempt the heal.
+      assert.equal(poolAfterFailure!.token0, undefined);
+      assert.equal(poolAfterFailure!.token1, undefined);
+    });
+  });
+});
+
+describe("fetchVirtualPoolExchangeId discriminator", () => {
+  // Three-way return contract — preserved by `vpExchangeIdEffect` to decide
+  // what's safe to cache:
+  //   - VirtualPoolExchangeId  → VP, cache forever
+  //   - null                   → bytecode present but pattern miss, cache forever
+  //   - VP_PROBE_RPC_ERROR     → RPC threw, do NOT cache (transient)
+  beforeEach(() => {
+    _clearMockVpExchangeIds();
+  });
+
+  it("passes through a VirtualPoolExchangeId mock unchanged", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+      exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+      exchangeId: EXCHANGE_ID,
+    });
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.deepEqual(result, {
+      exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+      exchangeId: EXCHANGE_ID,
+    });
+  });
+
+  it("returns null (permanent miss) when mock is null — caller treats this as cacheable not-VP", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, null);
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.equal(result, null);
+  });
+
+  it("returns VP_PROBE_RPC_ERROR (transient) when mock is the RPC-error sentinel", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, VP_PROBE_RPC_ERROR);
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.equal(result, VP_PROBE_RPC_ERROR);
+  });
+});
+
+describe("isVirtualPool predicate", () => {
+  // Two positive signals — either is sufficient. Healed VPs retain their
+  // `fpmm_*` source by design (pickPreferredSource priority alignment), so
+  // the wrappedExchangeId-based recognition is what classifies them
+  // correctly downstream after PR #369.
+  it("recognizes the canonical virtual_pool_factory source", () => {
+    assert.equal(isVirtualPool({ source: "virtual_pool_factory" }), true);
+  });
+
+  it("recognizes any source containing 'virtual'", () => {
+    assert.equal(isVirtualPool({ source: "virtual_swap" }), true);
+  });
+
+  it("recognizes a healed VP whose source is fpmm_* but wrappedExchangeId is set", () => {
+    assert.equal(
+      isVirtualPool({
+        source: "fpmm_swap",
+        wrappedExchangeId: "0xabc",
+      }),
+      true,
+    );
+  });
+
+  it("classifies a plain FPMM (fpmm_* source, no wrappedExchangeId) as non-virtual", () => {
+    assert.equal(isVirtualPool({ source: "fpmm_swap" }), false);
+    assert.equal(
+      isVirtualPool({ source: "fpmm_swap", wrappedExchangeId: undefined }),
+      false,
+    );
+    assert.equal(
+      isVirtualPool({ source: "fpmm_swap", wrappedExchangeId: "" }),
+      false,
+    );
   });
 });
 

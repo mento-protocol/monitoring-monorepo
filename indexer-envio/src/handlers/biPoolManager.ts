@@ -21,7 +21,7 @@ import {
 import type { HandlerContext } from "generated/src/Types";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { ZERO_ADDRESS } from "../constants";
-import { mirrorFeedIdToPool } from "../pool";
+import { mirrorFeedIdToPool, mirrorTokensAndDecimalsToPool } from "../pool";
 import { poolExchangeEffect } from "../rpc/effects";
 import { lookupPricingModuleName } from "../contractAddresses";
 
@@ -148,6 +148,25 @@ async function ensureBiPoolExchange(
         );
       }
     }
+    // Token + decimals mirror: runs unconditionally when the link is
+    // established (newly-discovered or already-set) so a Pool that's
+    // linked-but-missing-tokens gets healed on the next event. The
+    // helper is idempotent — fast-bails when both tokens are already
+    // present, so re-runs on every BucketsUpdated/SpreadUpdated cost
+    // one DB read at most. Without this branch, a VP that healed under
+    // an older code revision (link landed before token backfill) keeps
+    // `?/?` symbols + 18/18 default decimals indefinitely because the
+    // newly-link branch only fires when `wrappedByPoolId` was unset.
+    if (current.wrappedByPoolId) {
+      await mirrorTokensAndDecimalsToPool(
+        context,
+        current.wrappedByPoolId,
+        current.asset0,
+        current.asset1,
+        blockNumber,
+        blockTimestamp,
+      );
+    }
     return current;
   }
 
@@ -212,6 +231,18 @@ async function ensureBiPoolExchange(
       context,
       wrappedByPoolId,
       row.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
+    // Same reverse-link backfill as the link-after-seed branch above —
+    // a VP that self-healed before this row was seeded carries empty
+    // tokens / default decimals; mirror them from the row we just
+    // materialized.
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      row.asset0,
+      row.asset1,
       blockNumber,
       blockTimestamp,
     );
@@ -317,6 +348,19 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
       blockNumber,
       blockTimestamp,
     );
+    // VP-deployed-before-exchange ordering: the wrapping VP self-healed
+    // (or set its forward link via `VirtualPoolDeployed`) before this
+    // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
+    // mirror tokens because the row wasn't there yet — backfill them
+    // now that we just persisted asset0/asset1.
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      row.asset0,
+      row.asset1,
+      blockNumber,
+      blockTimestamp,
+    );
   }
 });
 
@@ -370,6 +414,19 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     });
+    // Round 5 codex: mirror tokens + decimals to the wrapping Pool when
+    // the destroy completes the link. Existing row carries asset0/asset1.
+    // Helper is idempotent — fast-bails when both tokens are present.
+    if (wrappedByPoolId) {
+      await mirrorTokensAndDecimalsToPool(
+        context,
+        wrappedByPoolId,
+        existing.asset0,
+        existing.asset1,
+        blockNumber,
+        blockTimestamp,
+      );
+    }
     return;
   }
 
@@ -407,6 +464,20 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
     updatedAtTimestamp: blockTimestamp,
   };
   context.BiPoolExchange.set(seeded);
+  // Round 5 codex: seed-from-destroy completes the reverse-link too.
+  // If a VP self-healed before this row existed, no later
+  // BucketsUpdated/SpreadUpdated events will fire on the destroyed
+  // exchange, so this is the LAST chance to mirror tokens + decimals.
+  if (wrappedByPoolId) {
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      seeded.asset0,
+      seeded.asset1,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -97,6 +97,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             token0Decimals
             token1Decimals
             source
+            wrappedExchangeId
             createdAtBlock
             createdAtTimestamp
             updatedAtBlock

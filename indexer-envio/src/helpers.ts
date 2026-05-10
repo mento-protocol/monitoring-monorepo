@@ -58,12 +58,27 @@ export const extractAddressFromPoolId = (poolId: string): string => {
 export const asBigInt = (value: number): bigint => BigInt(value);
 
 /** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
- * mechanics). Matches by source-string substring so both "virtual" and
- * "virtual_pool_factory" qualify. Use this predicate everywhere instead
- * of inlining `source.includes("virtual")` — keeps the invariant in one
- * place for future schema refinements. */
-export const isVirtualPool = (pool: { source: string }): boolean =>
-  pool.source.includes("virtual");
+ * mechanics).
+ *
+ * Two positive signals — either is sufficient:
+ *   1. `source.includes("virtual")` — set by `VirtualPoolDeployed` and
+ *      forward paths. Misses pre-start_block VPs whose first observed
+ *      event was `VirtualPool.Swap` / `Mint` / `Burn` because those
+ *      handlers reuse the `fpmm_*` source keys (intentional: they share
+ *      `pickPreferredSource` priority with FPMM events).
+ *   2. `wrappedExchangeId` populated — set by `selfHealWrappedExchangeId`
+ *      after the bytecode pattern match in `vpExchangeIdEffect` proves
+ *      VP identity. Catches the case (1) misses; FPMMs never have this
+ *      field set so the predicate stays disjoint.
+ *
+ * Use this predicate everywhere instead of inlining either substring or
+ * field check — keeps the invariant in one place for future schema
+ * refinements. */
+export const isVirtualPool = (pool: {
+  source: string;
+  wrappedExchangeId?: string | undefined;
+}): boolean =>
+  pool.source.includes("virtual") || Boolean(pool.wrappedExchangeId);
 
 export const SECONDS_PER_HOUR = 3600n;
 export const SECONDS_PER_DAY = 86400n;

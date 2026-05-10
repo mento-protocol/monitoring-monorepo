@@ -1,4 +1,4 @@
-import type { Pool } from "./types";
+import { isVirtualPool, type Pool } from "./types";
 import type { Network } from "./networks";
 import { truncateAddress, parseWei } from "./format";
 
@@ -125,9 +125,17 @@ export function poolName(
   return `${sym0}/${sym1}`;
 }
 
-/** Returns true if the pool is an FPMM (as opposed to a VirtualPool). */
-export function isFpmm(pool: Pick<Pool, "source">): boolean {
-  return pool.source.toLowerCase().includes("fpmm");
+/** Returns true if the pool is an FPMM (as opposed to a VirtualPool).
+ *
+ * Healed VirtualPools intentionally retain their `fpmm_*` source for
+ * pickPreferredSource priority alignment (see `isVirtualPool` doc), so
+ * a source-only check would incorrectly classify them as FPMM and
+ * render FPMM-only Health/TVL/Volume/Reserves panels alongside the
+ * VP header. Disjoint with `isVirtualPool` by construction. */
+export function isFpmm(
+  pool: Pick<Pool, "source"> & { wrappedExchangeId?: string | null },
+): boolean {
+  return pool.source.toLowerCase().includes("fpmm") && !isVirtualPool(pool);
 }
 
 /**

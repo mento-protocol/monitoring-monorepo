@@ -26,7 +26,7 @@ import {
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
-import type { OracleSnapshot, Pool } from "@/lib/types";
+import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
 import React, { useMemo } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
@@ -158,7 +158,7 @@ export function OracleTab(props: OracleTabProps) {
     [sortCol],
   );
 
-  if (pool?.source?.includes("virtual")) {
+  if (pool && isVirtualPool(pool)) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
   }
 

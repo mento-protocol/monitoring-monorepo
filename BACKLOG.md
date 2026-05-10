@@ -386,26 +386,6 @@ Tighten the gate by un-silencing rules in
       fetchers through `readContractWithBlockFallback` (with archive-RPC
       fallback) the same way `fetchReserves` does today. Flagged by codex.
 
-- [ ] **VP detail page: oracle-tile layout shift.** When `Pool.referenceRateFeedID`
-      self-heals, the header transitions from 2 → 3 tiles on the next page
-      load. Use a fixed-height invisible placeholder to hold the slot for VPs
-      where the field is empty. UX nit; not user-visible most of the time.
-      Flagged by claude[bot].
-
-- [ ] **VP self-heal source-gate (testnet-only edge case).** `selfHealWrappedExchangeId`
-      gates on `isVirtualPool(pool)` which checks `pool.source.includes("virtual")`.
-      For pre-start*block VPs whose first-seen event is `VirtualPool.Swap` /
-      `Mint` / `Burn`, those handlers reuse the `fpmm*\*`source keys (intentional —
-they share priority with FPMM events), so the pool source never gets the
-"virtual" substring → self-heal skipped →`wrappedExchangeId`never populates.
-Production has zero pre-start_block active VPs (verified — all 12 Celo
-VPs have createdAtBlock > 60664500), so this only bites the testnet
-static VP list. Real fix: drop the source gate and let`vpExchangeIdEffect`
-      (cache:true) be the authoritative VP-detector — the bytecode pattern is
-      definitive. Tradeoff: per-batch RPC for every FPMM-event heal until the
-      cache returns null. Defer until either the gate breaks production or
-      a separate refactor revisits the source-key reuse. Flagged by codex.
-
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
 Captured during the medium-tier benchmarking session that landed the

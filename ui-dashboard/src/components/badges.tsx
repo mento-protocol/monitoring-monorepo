@@ -47,15 +47,30 @@ export function HealthBadge({ status }: { status: string }) {
   );
 }
 
-export function SourceBadge({ source }: { source: string }) {
-  const isFPMM = source.includes("fpmm");
-  const label = isFPMM ? "FPMM" : "Virtual";
+export function SourceBadge({
+  source,
+  wrappedExchangeId,
+}: {
+  source: string;
+  wrappedExchangeId?: string | null;
+}) {
+  // Healed VirtualPools intentionally retain `fpmm_*` source for
+  // pickPreferredSource priority alignment; `wrappedExchangeId` is the
+  // VP-side canonical signal. Same disjoint logic as `isVirtualPool` /
+  // `isFpmm` (kept inline here to avoid pulling tokens.ts into a
+  // pure-presentation component).
+  const isVirtual = source.includes("virtual") || Boolean(wrappedExchangeId);
+  const label = isVirtual ? "Virtual" : "FPMM";
+  // Color follows the same predicate as the label so non-virtual non-fpmm
+  // sources (e.g. `oracle_reported` on a synthetic test fixture) get a
+  // consistent FPMM/indigo treatment instead of FPMM-label-with-Virtual-
+  // color (round 7 cursor finding).
   return (
     <span
       className={`rounded px-2 py-0.5 text-xs font-medium ${
-        isFPMM
-          ? "bg-indigo-500/20 text-indigo-300"
-          : "bg-emerald-500/20 text-emerald-300"
+        isVirtual
+          ? "bg-emerald-500/20 text-emerald-300"
+          : "bg-indigo-500/20 text-indigo-300"
       }`}
     >
       {label}

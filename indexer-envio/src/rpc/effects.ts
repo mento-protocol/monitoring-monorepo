@@ -35,7 +35,11 @@ import {
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
 } from "./pool-state";
-import { fetchPoolExchange, fetchVirtualPoolExchangeId } from "./biPoolManager";
+import {
+  fetchPoolExchange,
+  fetchVirtualPoolExchangeId,
+  VP_PROBE_RPC_ERROR,
+} from "./biPoolManager";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
@@ -681,26 +685,27 @@ export const vpExchangeIdEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: true,
   },
-  // `fetchVirtualPoolExchangeId` returns null when the bytecode-pattern
-  // doesn't match (not a VirtualPool — shouldn't happen) OR on transient RPC
-  // failure. The first is a permanent classification (safe to cache); the
-  // second isn't. Without `context.cache = false` on the failure path, a
-  // single deployment-time RPC blip would persist `null` and every later
-  // self-heal would receive the cached miss.
+  // `fetchVirtualPoolExchangeId` returns three discriminated cases:
+  //   1. `VirtualPoolExchangeId` — bytecode matched the VP pattern → cache
+  //      forever (bytecode is immutable per address).
+  //   2. `null` — got bytecode (or `0x`) but pattern didn't match → permanent
+  //      not-VP classification, cache forever as `undefined`. After PR #369
+  //      dropped the source-string gate in `selfHealWrappedExchangeId`, FPMM
+  //      addresses also reach this effect; caching their not-VP miss is what
+  //      keeps the FPMM hot path from paying an `eth_getCode` per event.
+  //   3. `VP_PROBE_RPC_ERROR` — `getCode` itself rejected → transient,
+  //      `context.cache = false` so a deployment-time RPC blip doesn't
+  //      persist as a permanent miss.
   async ({ input, context }) => {
     const result = await fetchVirtualPoolExchangeId(
       input.chainId,
       input.vpAddress,
       context.log,
     );
-    if (result === null) {
-      // We can't distinguish "no bytecode / no pattern match" from "RPC
-      // failed" here — pool-state.ts catches both and returns null. Treat
-      // every null as transient: cost is one extra RPC per VP on next
-      // touch, which is negligible (12 VPs total today).
+    if (result === VP_PROBE_RPC_ERROR) {
       context.cache = false;
       return undefined;
     }
-    return result;
+    return result ?? undefined;
   },
 );
