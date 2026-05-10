@@ -136,6 +136,7 @@ export function buildDailySeries(
     timestamp += bucketSeconds
   ) {
     let tvl = 0;
+    let anyContributed = false;
     const perChainTvl = new Map<string, number>();
     for (let i = 0; i < histories.length; i++) {
       const history = histories[i];
@@ -156,10 +157,20 @@ export function buildDailySeries(
       // Summing null as 0 would understate aggregate / per-chain TVL.
       if (poolTvl === null) continue;
       tvl += poolTvl;
+      anyContributed = true;
       const id = history.network.id;
       perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
     }
-    series.push({ timestamp, tvlUSD: tvl });
+    // Aggregate: skip the bucket entirely when no pool contributed.
+    // Emitting `tvlUSD: 0` would render as "$0 TVL" in the historical
+    // line, presenting unknown data as a real zero (codex P2 PR #372).
+    // Per-chain breakdown still emits 0 for chains that didn't
+    // contribute — the breakdown lines need filled timestamps to stay
+    // continuous (existing test "includes chains with zero contribution
+    // in a bucket as 0, not omitted").
+    if (anyContributed) {
+      series.push({ timestamp, tvlUSD: tvl });
+    }
     for (const c of chainsSeen) {
       perChainSeries.get(c.id)!.push({
         timestamp,
