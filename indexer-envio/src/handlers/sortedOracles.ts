@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
-import { eventId, asAddress, asBigInt } from "../helpers";
+import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers";
 import {
   computePriceDifference,
   pickActiveThreshold,
@@ -149,9 +149,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // detail) would see a fake non-zero value. Preserve existing instead.
       const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
       const priceDifference =
-        decimalsTrustworthy &&
-        !updatedPool.source?.includes("virtual") &&
-        oraclePrice > 0n
+        decimalsTrustworthy && !isVirtualPool(updatedPool) && oraclePrice > 0n
           ? computePriceDifference(updatedPool)
           : updatedPool.priceDifference;
       const withDev = { ...updatedPool, priceDifference };
@@ -398,9 +396,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // see OracleReported handler comment block for rationale.
       const decimalsTrustworthy = withThreshold.tokenDecimalsKnown === true;
       const priceDifference =
-        decimalsTrustworthy &&
-        !withThreshold.source?.includes("virtual") &&
-        oraclePrice > 0n
+        decimalsTrustworthy && !isVirtualPool(withThreshold) && oraclePrice > 0n
           ? computePriceDifference(withThreshold)
           : withThreshold.priceDifference;
       const withDev = { ...withThreshold, priceDifference };
