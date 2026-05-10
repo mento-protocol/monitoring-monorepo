@@ -134,13 +134,17 @@ export function sortGlobalPools(
         return sortDir === "asc" ? aFee - bFee : bFee - aFee;
       }
       case "tvl": {
-        // Untrusted pools (null) sink to the bottom of descending order.
-        // Without `Number.NEGATIVE_INFINITY` they'd compare as 0 and
-        // intermix with legitimate $0 pools.
-        const aTvl = tvlByKey.get(aKey) ?? Number.NEGATIVE_INFINITY;
-        const bTvl = tvlByKey.get(bKey) ?? Number.NEGATIVE_INFINITY;
-        cmp = aTvl - bTvl;
-        break;
+        // Untrusted pools (null) sink to the bottom regardless of direction —
+        // matches the volume / total-volume / WoW columns. Sentinel-mapping
+        // null to ±Infinity would put unknowns at the top of ascending order
+        // ahead of legitimate $0 pools (fail-open suggests "lowest"); the
+        // explicit-skip pattern keeps unknown rows last either way.
+        const aTvl = tvlByKey.get(aKey);
+        const bTvl = tvlByKey.get(bKey);
+        if (aTvl == null && bTvl == null) return 0;
+        if (aTvl == null) return 1;
+        if (bTvl == null) return -1;
+        return sortDir === "asc" ? aTvl - bTvl : bTvl - aTvl;
       }
       case "tvlChangeWoW": {
         // Both error (null) and missing-data (undefined) sink regardless of direction.
