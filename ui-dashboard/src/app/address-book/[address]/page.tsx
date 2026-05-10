@@ -43,10 +43,9 @@ export default async function AddressDetailPage({
 }) {
   const { address: raw } = await params;
   const address = decodeAddressParam(raw);
-  // Server-side guard: invalid input (user-typed garbage,
-  // malformed percent-encoding) redirects before any client JS
-  // ships. Replaces the old useEffect+router.replace pattern that
-  // tripped `nextjs-no-client-side-redirect`.
+  // Server-side guard runs before any client JS ships — invalid input
+  // (user-typed garbage, malformed percent-encoding) redirects to the
+  // address-book index instead of crashing the error boundary.
   if (!isValidAddress(address)) redirect("/address-book");
   return <AddressDetailPageClient address={address} />;
 }

@@ -163,12 +163,11 @@ function RewardCell({
   rewardUsd: string | null | undefined;
   thresholds: RewardThresholds | null;
 }) {
-  // `renderRewardCell` stays exported for the test contract pinned in
-  // `__tests__/exports.test.ts`. The wrapper is the named component the
-  // rule wants for proper reconciliation; the inline call here is the
-  // sole shared implementation.
+  // `renderRewardCell` stays exported for `__tests__/exports.test.ts`'s
+  // pinned contract; this wrapper is the named-component form the rule
+  // wants for proper reconciliation.
   // react-doctor-disable-next-line react-doctor/no-render-in-render
-  return <>{renderRewardCell(rewardUsd, thresholds)}</>;
+  return renderRewardCell(rewardUsd, thresholds);
 }
 
 export function RebalancesTab({

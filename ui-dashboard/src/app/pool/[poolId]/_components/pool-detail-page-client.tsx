@@ -56,22 +56,6 @@ import {
 import { ReservesTab } from "../_tabs/reserves-tab";
 import { SwapsTab } from "../_tabs/swaps-tab";
 
-// Re-export public symbols — `__tests__/ols.test.ts`, `page.test.tsx`,
-// `__tests__/reward-outliers.test.tsx`, and `__tests__/exports.test.ts`
-// import these directly from "../page", which now re-exports them from
-// here. Keep the import paths stable.
-export {
-  computeRewardThresholds,
-  decodePoolId,
-  getDebtTokenSideLabel,
-  OlsLiquidityTable,
-  OlsStatusPanel,
-  parseTabLimit,
-  renderRewardCell,
-  selectActiveOlsPool,
-  toDisplayPrecision,
-};
-
 export function PoolDetailPageClient() {
   return (
     <Suspense>

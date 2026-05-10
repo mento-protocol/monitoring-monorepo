@@ -78,16 +78,18 @@ export async function generateMetadata({
 // and several test files (ols, page, reward-outliers, use-gql-shape) import
 // these directly from "../page". Keep stable.
 export {
-  computeRewardThresholds,
   decodePoolId,
   getDebtTokenSideLabel,
-  OlsLiquidityTable,
-  OlsStatusPanel,
   parseTabLimit,
-  renderRewardCell,
   selectActiveOlsPool,
+} from "./_lib/helpers";
+export {
+  computeRewardThresholds,
+  renderRewardCell,
   toDisplayPrecision,
-} from "./_components/pool-detail-page-client";
+} from "./_tabs/rebalances-tab";
+export { OlsLiquidityTable } from "./_components/ols-liquidity-table";
+export { OlsStatusPanel } from "./_components/ols-status-panel";
 
 export default function PoolDetailPage() {
   return <PoolDetailPageClient />;

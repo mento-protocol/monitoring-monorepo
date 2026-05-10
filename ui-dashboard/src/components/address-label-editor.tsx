@@ -94,14 +94,9 @@ export function AddressLabelEditor({
   const firstInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
   // Mirror the form's typed address so the Forensic Report tab can read
-  // the draft. Pre-extraction the address state lived here directly; the
-  // refactor moved it into AddressLabelForm and broke the cross-tab
-  // contract for the new-address flow (typed address stayed inside the
-  // form, report tab kept seeing the original `""` prop). Re-bubbling via
-  // `onAddressChange` restores parity.
-  // `address` seeds the local draft once; subsequent updates flow
-  // through `onAddressChange`. Re-syncing on prop change would clobber
-  // a typed-but-unsaved address.
+  // the draft — `onAddressChange` bubbles every keystroke from
+  // `AddressLabelForm` up here. `address` seeds the local draft once;
+  // re-syncing on prop change would clobber typed-but-unsaved input.
   // react-doctor-disable-next-line react-doctor/no-derived-useState
   const [draftAddress, setDraftAddress] = useState(address);
   const { isCustom } = useAddressLabels();
