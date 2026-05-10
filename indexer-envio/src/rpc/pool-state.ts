@@ -80,6 +80,26 @@ export function _clearMockERC20Decimals(): void {
   _testERC20Decimals.clear();
 }
 
+/** @internal Test-only: pre-set mock decimals0()/decimals1() scaling.
+ * Pass `null` to simulate a transient RPC failure. */
+const _testTokenDecimalsScaling = new Map<string, bigint | null>();
+
+export function _setMockTokenDecimalsScaling(
+  chainId: number,
+  poolAddress: string,
+  fn: "decimals0" | "decimals1",
+  value: bigint | null,
+): void {
+  _testTokenDecimalsScaling.set(
+    `${chainId}:${poolAddress.toLowerCase()}:${fn}`,
+    value,
+  );
+}
+
+export function _clearMockTokenDecimalsScaling(): void {
+  _testTokenDecimalsScaling.clear();
+}
+
 /**
  * Fetch a token's `decimals()` value as an integer (e.g., 18 for cUSD, 6 for
  * USDC). Production-safe: consults the test-only mock map first, then RPC.
@@ -628,6 +648,11 @@ export async function fetchTokenDecimalsScaling(
   fn: "decimals0" | "decimals1",
   log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
+  const mockKey = `${chainId}:${poolAddress.toLowerCase()}:${fn}`;
+  if (_testTokenDecimalsScaling.has(mockKey)) {
+    return _testTokenDecimalsScaling.get(mockKey) ?? null;
+  }
+
   try {
     const client = getRpcClient(chainId);
     const { result } = await readContractWithBlockFallback(

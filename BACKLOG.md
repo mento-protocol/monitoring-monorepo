@@ -415,22 +415,12 @@ Tighten the gate by un-silencing rules in
       returns the destroyed/empty state and the pre-destroy Swap path
       persists `volumeUsdWei = 0`) — same conclusion, deferred.
 
-- [ ] **`fetchTokenDecimalsScaling` test mock layer.** Unlike its
-      ERC20-fallback companion (`fetchErc20Decimals` has
-      `_setMockERC20Decimals`), the FPMM-direct decimals fetcher
-      (`pool-state.ts:625`) hits real RPC in tests — there's no
-      `_testTokenDecimalsScaling` map. Locally fast
-      (`forno.celo.org` reachable from dev machines), but blacksmith
-      CI runners can't reach Celo so viem retries + backoff stack to
-      ~10s per call and tests time out. Caused 3 CI failures in PR
-      #369: each time a heal-pipeline test didn't anticipate that an
-      upstream merge had added a new effect call (e.g.
-      `selfHealTokenDecimals` from PR #370). Fix: add
+- [x] **`fetchTokenDecimalsScaling` test mock layer.** Done: added
       `_setMockTokenDecimalsScaling(chainId, addr, fn, value)` +
-      `_clearMockTokenDecimalsScaling`, mirroring the existing mock
-      pattern in `pool-state.ts`. Mechanical, ~30 lines, but unblocks
-      future heal-pipeline tests that touch FPMM-direct decimal
-      fetches.
+      `_clearMockTokenDecimalsScaling`, re-exported them through the existing
+      test barrels, and rewired VP heal-pipeline tests to use direct
+      decimals0/decimals1 mocks instead of live RPC or ERC20 fallback mocks.
+      The mock supports `null` for transient failure simulation.
 
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
@@ -444,7 +434,7 @@ were considered, sized, and explicitly deferred — not unknowns.
 
 - [ ] **Lever 4 — read entity store instead of RPC where the indexer already has the data.** The remaining lever for first-sync speed: per-handler audit of every `eth_call` site to see which can be answered from a Pool / Oracle / Reserve entity already written at an earlier event in the same sync. Highest-leverage candidates: `getRebalancingState`'s `oraclePriceNumerator/Denominator` (already mirrored on Oracle entity from MedianUpdated), `rebalanceIncentiveAtBlock` (we read `existing.rebalanceReward` to short-circuit on `-2`, but never to short-circuit on a real value). Lower-leverage: `getReserves` (block-scoped, but we DO write reserves into the Pool from UpdateReserves events — could reuse the persisted value when the request is for the same block). Each conversion is a per-handler correctness audit (do we actually have the value yet at this event? is it definitely the same block?) so this is incremental work, not a single PR. The right shape is one PR per fetcher that gets removed from the hot path. Estimated upside: 30–50% sync-time reduction on Celo if all hot-path block-scoped reads can be DB-served instead of RPC-served, dramatically less on Monad (event volume too low for the savings to materialize).
 - [ ] **Cache `resolveFeeTokenMeta` (decimals + symbol) via Effect API.** Considered + sized in the PR #356 description. ~60 cache rows × 2 RPC saved per cross-deploy = ~12s of saved sync time on the second deploy onwards. Wraps `feeToken.ts:resolveFeeTokenMeta` in a `createEffect({cache: true})`, follows the same null-on-failure → `context.cache = false` pattern as PR #353. Marginal benefit and adds handler-hot-path complexity (BrokerSwap calls it 2× per swap) — deferred until cross-deploy timings become a real concern.
-- [ ] **Route `probeFunction` in `breakers.ts` through `readContractWithBlockFallback`.** Flagged by claude[bot] on PR #353. Currently the breaker-kind selector probe (`probeFunction` at `breakers.ts:186`) calls `client.readContract` directly without rate-limit retry. After PR #353 + PR #356, every other RPC site goes through the wrapper that gives 3-retry rate-limit backoff + (depth-aware) secondary failover. Lower priority: ~5 breaker addresses × 2 selector probes = ~10 calls per cold sync, only matters on the first encounter per breaker per deploy. The cache from PR #353 (`breakerKindEffect: cache: true`) shields subsequent calls.
+- [x] **Route `probeFunction` in `breakers.ts` through `readContractWithBlockFallback`.** Done: breaker-kind selector probes now use the shared wrapper, preserving unscoped-read semantics while gaining the same rate-limit retry / fallback path as the rest of the RPC layer. Focused tests pin rate-limit retry and zero-data selector-miss classification.
 - [ ] **Automate the cross-deploy "Save Cache" snapshot step.** Currently a manual dashboard click after a synced deployment, which is what makes the cache benefit available to the _next_ deploy. Could be wrapped into `pnpm deploy:indexer:promote` or fired from a post-promote GitHub Action via the `envio-cloud` API once such a CLI path exists (it doesn't today — only dashboard UI). Without automation, every new deploy is cache-cold unless someone remembers to click. Tracked here so it doesn't silently rot.
 - [ ] **Investigate Monad RPC archive depth as a follow-up to PR #336 / PR #346.** The current setup leans on `rpc2.monad.xyz` (deep archive, lower rate limit) as primary and QuickNode (shallow archive, high rate limit) as fallback. PR #356 made the dispatcher block-depth-aware so the `Invalid parameters` leak is bounded, but the underlying constraint — QuickNode prunes after ~40k blocks (~5.5h) — means we can never use it for catch-up reads. Worth (a) opening a QuickNode support ticket asking for an archive-retention upgrade on Monad, (b) evaluating dRPC / BlastAPI archive coverage for Monad mainnet, (c) confirming whether Monad's official `rpc2.monad.xyz` rate limits are documented anywhere we can plan against. Today's setup works at observed event volume (~63k Monad events total); we'll feel the pressure if Monad bridge usage grows 10×.
 - [ ] **Per-effect cache observability in the dashboard / alerts.** Envio exports `envio_effect_cache_count` and `envio_effect_cache_invalidations_count` Prometheus metrics. Today nothing surfaces them. A simple panel on the Envio Cloud dashboard or a Grafana alert at "invalidations > 0 for effect X" would catch (a) accidental schema drift on a cached effect's output, (b) cache-poisoning via the kind of transient-failure bug PR #353 fixed. Bonus: a sync-time-vs-cache-rows scatter would let us see whether more aggressive caching is even helping at the macro level.
@@ -453,7 +443,7 @@ were considered, sized, and explicitly deferred — not unknowns.
 
 Carved out of PR #366's review cycles when the marginal-cost of additional codex rounds outweighed shipping the existing improvements. Both are real concerns but bounded in user-visible impact.
 
-- [ ] **`entryRebalanceThreshold` for asymmetric pools.** `nextOpenBreachEntryThreshold` (in `pool.ts`) captures the raw active `rebalanceThreshold` at the rising edge. For an asymmetric pool (`above=0, below>0` or vice versa) breach that opened on the zero side, the `deviationBreach.ts:269-285` heal logic later adopts the OTHER side's threshold as a "first positive value" — corrupting `peakPriceDifference` / `criticalDurationSeconds` history scoring. Fix: capture `Number(effectiveThreshold(next))` in `nextOpenBreachEntryThreshold` so the breach row's score doesn't depend on side flips. Bounded impact: live status / alerts use `effectiveThreshold` via `isInDeviationBreach` and are unaffected; only retroactive breach-history rendering misreports for asymmetric mid-breach side flips. Codex P2 from round 9 (comment 3214513401).
+- [x] **`entryRebalanceThreshold` for asymmetric pools.** Done on `origin/main`: `breachEntryThreshold` now captures the effective entry threshold for asymmetric zero-side breaches, `nextOpenBreachEntryThreshold` preserves that capture across side flips, and focused coverage lives in `indexer-envio/test/pool.test.ts` + `indexer-envio/test/deviationBreach.test.ts`. Codex P2 from round 9 (comment 3214513401).
 - [ ] **Dashboard consumers should gate on `hasHealthData`.** `global-pools-table.tsx:505-507` and `homepage-og.ts:347` recompute health from `oracleTimestamp` + `priceDifference` without checking `hasHealthData`. PR #366's round-7 indexer fix correctly skips snapshot/health-sample writes when `tokenDecimalsKnown=false`, but a dashboard consumer that ignores `hasHealthData=false` can mark a pool "fresh OK" off a stale priceDifference. Fix: add `hasHealthData` gate to the dashboard recompute paths so untrustworthy samples render as no-data. Codex P2 from round 9 (comment 3214513402).
 
 ## PR 1.7 — Untrusted-decimals dashboard tightening (deferred from PR #366)

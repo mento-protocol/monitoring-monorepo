@@ -33,6 +33,12 @@ function restoreEnv(snap: Record<string, string | undefined>): void {
   }
 }
 
+function clearRpcEnv(): void {
+  for (const k of ENV_KEYS) {
+    delete process.env[k];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // console capture
 // ---------------------------------------------------------------------------
@@ -71,6 +77,7 @@ describe("getRpcClient", () => {
 
   beforeEach(() => {
     envSnap = snapshotEnv();
+    clearRpcEnv();
     _clearRpcClients();
   });
 
@@ -320,6 +327,7 @@ describe("getFallbackRpcClient", () => {
 
   beforeEach(() => {
     envSnap = snapshotEnv();
+    clearRpcEnv();
     _clearRpcClients();
   });
 

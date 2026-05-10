@@ -6,8 +6,21 @@ import {
   effectiveThreshold,
   nextMedianEMA,
 } from "../src/breakers.ts";
+import {
+  _clearBreakerMocks,
+  _clearRpcClients,
+  _setRpcClientForTests,
+  _testHooks,
+  fetchBreakerKind,
+} from "../src/rpc.ts";
 
 const FIXED_1 = 10n ** 24n;
+const noopLogger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 describe("nextMedianEMA — Fixidity formula mirroring MedianDeltaBreaker.shouldTrigger", () => {
   it("seeds EMA with currentMedian when previousEMA is 0 (contract line 182-186)", () => {
@@ -70,5 +83,67 @@ describe("effectiveCooldown / effectiveThreshold — sentinel-0 inheritance", ()
   it("threshold inherits the same way", () => {
     assert.equal(effectiveThreshold(breaker, 0n), 4n * 10n ** 22n);
     assert.equal(effectiveThreshold(breaker, 1n * 10n ** 22n), 1n * 10n ** 22n);
+  });
+});
+
+describe("fetchBreakerKind RPC selector probes", () => {
+  const CHAIN_ID = 42220;
+  const BREAKER = "0x00000000000000000000000000000000000000bb";
+  let originalDelayFn: typeof _testHooks.delayFn;
+
+  before(() => {
+    originalDelayFn = _testHooks.delayFn;
+    _testHooks.delayFn = async () => {};
+  });
+
+  after(() => {
+    _testHooks.delayFn = originalDelayFn;
+  });
+
+  afterEach(() => {
+    _setRpcClientForTests(CHAIN_ID, null);
+    _clearRpcClients();
+    _clearBreakerMocks();
+  });
+
+  it("retries rate-limited selector probes through readContractWithBlockFallback", async () => {
+    const calls: unknown[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        calls.push(args);
+        if (calls.length === 1) {
+          throw new Error("rate limit exceeded");
+        }
+        return 0n;
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
+
+    assert.equal(kind, "MEDIAN_DELTA");
+    assert.equal(calls.length, 2);
+    assert.equal(
+      (calls[0] as { functionName: string }).functionName,
+      "medianRatesEMA",
+    );
+    assert.equal(
+      (calls[1] as { functionName: string }).functionName,
+      "medianRatesEMA",
+    );
+  });
+
+  it("still treats selector zero-data responses as missing functions", async () => {
+    const functionNames: string[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        functionNames.push((args as { functionName: string }).functionName);
+        throw new Error('The contract function "x" returned no data ("0x").');
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
+
+    assert.equal(kind, "MARKET_HOURS");
+    assert.deepEqual(functionNames, ["medianRatesEMA", "referenceValues"]);
   });
 });
