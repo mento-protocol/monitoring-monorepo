@@ -32,7 +32,7 @@ type EntriesState = Record<string, AddressEntry>;
 
 /** Full resolved entry (no scope wrapper — kept for API compat with callers
  * that destructure `.entry`). */
-export type ResolvedEntry = {
+type ResolvedEntry = {
   entry: AddressEntry;
 };
 
@@ -136,11 +136,7 @@ function emptyState(): EntriesState {
   return {};
 }
 
-// Provider body is over the no-giant-component threshold — it's mostly
-// state machinery (SWR + pending-mutation ledger). Tracked in
-// BACKLOG.md § "Architecture pass" for a focused split PR.
-// react-doctor-disable-next-line react-doctor/no-giant-component
-export function AddressLabelsProvider({ children }: { children: ReactNode }) {
+function useAddressLabelsValue(): AddressLabelsContextValue {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
   const { status } = useSession();
@@ -441,7 +437,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     [pendingReportMutations],
   );
 
-  const value: AddressLabelsContextValue = {
+  return {
     getName,
     getTags,
     hasName,
@@ -459,7 +455,10 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     markPendingReportMutation,
     isReportMutationPending,
   };
+}
 
+export function AddressLabelsProvider({ children }: { children: ReactNode }) {
+  const value = useAddressLabelsValue();
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;
 }
 

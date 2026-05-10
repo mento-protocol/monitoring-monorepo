@@ -1,13 +1,28 @@
 import type { Metadata } from "next";
 import { fetchPoolForMetadata, type PoolOgData } from "@/lib/pool-og";
 import { formatUSD } from "@/lib/format";
+import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
+import {
+  extractChainIdFromPoolId,
+  isNamespacedPoolId,
+  normalizePoolIdForChain,
+} from "@/lib/pool-id";
+import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
+import { redirect } from "next/navigation";
 import { PoolDetailPageClient } from "./_components/pool-detail-page-client";
+import { decodePoolId } from "./_lib/helpers";
 
 // 60s — incident-time state flips should propagate in minutes, not hours.
 export const revalidate = 60;
 
 const FALLBACK_TITLE = "Pool — Mento Analytics";
 const FALLBACK_DESCRIPTION = "Mento protocol pool analytics";
+
+type PageSearchParams = Record<string, string | string[] | undefined>;
+type PoolDetailPageProps = {
+  params?: Promise<{ poolId: string }>;
+  searchParams?: Promise<PageSearchParams>;
+};
 
 function healthLabel(status: PoolOgData["health"]): string {
   switch (status) {
@@ -38,6 +53,24 @@ function buildDescription(data: PoolOgData): string {
   }
   parts.push(healthText);
   return parts.join(" · ");
+}
+
+function toURLSearchParams(searchParams: PageSearchParams): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (Array.isArray(value)) {
+      for (const item of value) params.append(key, item);
+    } else if (value !== undefined) {
+      params.set(key, value);
+    }
+  }
+  return params;
+}
+
+function routeCanonicalPoolId(poolId: string): string {
+  const chainId =
+    extractChainIdFromPoolId(poolId) ?? NETWORKS[DEFAULT_NETWORK].chainId;
+  return normalizePoolIdForChain(poolId, chainId);
 }
 
 export async function generateMetadata({
@@ -91,6 +124,41 @@ export {
 export { OlsLiquidityTable } from "./_components/ols-liquidity-table";
 export { OlsStatusPanel } from "./_components/ols-status-panel";
 
-export default function PoolDetailPage() {
+async function CanonicalPoolDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ poolId: string }>;
+  searchParams: Promise<PageSearchParams>;
+}) {
+  const [{ poolId }, resolvedSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+  const decodedId = decodePoolId(poolId);
+  const canonicalPoolId = routeCanonicalPoolId(decodedId);
+
+  if (canonicalPoolId !== decodedId) {
+    redirect(
+      buildPoolDetailUrl(
+        canonicalPoolId,
+        toURLSearchParams(resolvedSearchParams),
+      ),
+    );
+  }
+  if (!isNamespacedPoolId(canonicalPoolId)) {
+    redirect(POOL_NOT_FOUND_DEST);
+  }
+
   return <PoolDetailPageClient />;
+}
+
+export default function PoolDetailPage({
+  params,
+  searchParams,
+}: PoolDetailPageProps = {}) {
+  if (!params || !searchParams) return <PoolDetailPageClient />;
+  return (
+    <CanonicalPoolDetailPage params={params} searchParams={searchParams} />
+  );
 }

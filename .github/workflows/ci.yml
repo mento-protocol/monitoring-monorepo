@@ -155,6 +155,13 @@ jobs:
         run: |
           git switch -c __react_doctor_scan
           pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
+      - name: React Doctor score floor
+        run: |
+          score="$(pnpm --filter @mento-protocol/ui-dashboard react-doctor --full --score --offline | tail -n 1)"
+          if [ "$score" != "100" ]; then
+            echo "Expected ui-dashboard react-doctor score 100, got ${score}" >&2
+            exit 1
+          fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0

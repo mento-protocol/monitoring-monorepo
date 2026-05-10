@@ -20,12 +20,13 @@ import {
   POOL_DETAIL_WITH_HEALTH,
   TRADING_LIMITS,
 } from "@/lib/queries";
-import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
+import { buildPoolDetailUrl } from "@/lib/routing";
 import {
   buildOracleRateMap,
   canPricePool,
   isFpmm,
   poolName,
+  type OracleRateMap,
 } from "@/lib/tokens";
 import type { OlsPool, Pool, PoolSnapshot, TradingLimit } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
@@ -57,11 +58,12 @@ export function PoolDetailPageClient() {
   );
 }
 
-// Component is over the no-giant-component threshold — pool hero,
-// chart panels, tab list, and per-tab body. Tracked in BACKLOG.md
-// § "Architecture pass" for a focused split PR (extract PoolHero /
-// PoolChartsRow / PoolTabPanels).
-// react-doctor-disable-next-line react-doctor/no-giant-component
+type SearchParamsReader = Pick<URLSearchParams, "get" | "toString">;
+
+function readSearchParam(params: SearchParamsReader, key: string) {
+  return params.get(key);
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -71,15 +73,11 @@ function PoolDetail() {
   const decodedId = decodePoolId(poolId);
   const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
   const poolAddress = stripChainIdFromPoolId(normalizedPoolId);
-  // ReadonlyURLSearchParams methods rely on `this` (prototype-based);
-  // destructuring breaks runtime, so calls stay member-form.
-  // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
-  const rawTab = searchParams.get("tab");
+  const rawTab = readSearchParam(searchParams, "tab");
   const requestedTab: Tab = TABS.includes(rawTab as Tab)
     ? (rawTab as Tab)
     : "providers";
-  // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
-  const limit = parseTabLimit(searchParams.get("limit"));
+  const limit = parseTabLimit(readSearchParam(searchParams, "limit"));
 
   const getCurrentParams = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -135,44 +133,6 @@ function PoolDetail() {
     normalizedPoolId,
     network.chainId,
   );
-
-  // Canonicalize legacy raw-address pool URLs onto namespaced multichain IDs,
-  // but only after the pool resolves on the active network. That avoids
-  // rewriting ambiguous raw links into a wrong namespaced id before we know the
-  // current network actually serves that pool.
-  //
-  // The redirect lives in useEffect because both prerequisites are
-  // client-side: (1) `pool` resolves via SWR (`useGQL`) and (2) the
-  // active `network` flips when the user changes the global network
-  // selector. A server-side `redirect()` would need to duplicate the
-  // entire SWR-cached pool fetch on every navigation; intentionally
-  // suppressed here.
-  // react-doctor-disable-next-line react-doctor/nextjs-no-client-side-redirect
-  useEffect(() => {
-    if (!poolLoading && !poolErr && pool && decodedId !== normalizedPoolId) {
-      replace(buildPoolDetailUrl(normalizedPoolId, searchParams), {
-        scroll: false,
-      });
-    }
-  }, [
-    decodedId,
-    normalizedPoolId,
-    pool,
-    poolErr,
-    poolLoading,
-    replace,
-    searchParams,
-  ]);
-
-  // Not-found redirect — `pool === null` only after the SWR fetch
-  // resolves with an empty result, so server-side `redirect()` /
-  // `notFound()` aren't applicable without duplicating the fetch.
-  // react-doctor-disable-next-line react-doctor/nextjs-no-client-side-redirect
-  useEffect(() => {
-    if (!poolLoading && !poolErr && !pool) {
-      replace(POOL_NOT_FOUND_DEST);
-    }
-  }, [pool, poolLoading, poolErr, replace]);
 
   const { data: limitsData, error: limitsError } = useGQL<{
     TradingLimit: TradingLimit[];
@@ -253,8 +213,8 @@ function PoolDetail() {
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
-  // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
-  const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
+  const activeSearch =
+    readSearchParam(searchParams, SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
   // Canonicalize the URL when the requested tab was filtered out (e.g.
   // ?tab=breaches on a virtual pool, where the breaches tab is hidden).
@@ -280,108 +240,30 @@ function PoolDetail() {
     }
   }, [pool, tab, requestedTab, rawTab, visibleTabs, limit, setURL]);
 
-  // Return null while redirect is pending to avoid a transient error flash
-  // and unnecessary error announcement for assistive tech. MUST sit below
-  // all hook declarations so React sees the same hook order every render —
-  // an early return above a hook violates the Rules of Hooks and throws
-  // "Rendered fewer hooks than expected" when the query resolves mid-page.
-  if (!poolLoading && !poolErr && !pool) return null;
-
   return (
     <div className="space-y-6">
-      <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
-        <Link href="/pools" className="hover:text-indigo-400">
-          Pools
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-200">
-          {pool ? (
-            poolName(network, pool.token0, pool.token1)
-          ) : (
-            <AddressLink address={poolAddress} />
-          )}
-        </span>
-      </nav>
+      <PoolBreadcrumb pool={pool} poolAddress={poolAddress} network={network} />
 
-      {poolErr ? (
-        <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />
-      ) : poolLoading ? (
-        <Skeleton rows={2} />
-      ) : !pool ? (
-        <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
-      ) : (
-        <>
-          <PoolHeader
-            pool={pool}
-            deployTxHash={deployTxHash}
-            tradingLimits={tradingLimits}
-            tradingLimitsError={tradingLimitsError}
-          />
-          <HealthPanel pool={pool} />
-          {/*
-            TVL / Volume / Reserves panels render FPMM-only data — virtual
-            pools wrap a v2 BiPoolManager exchange where reserves live in
-            buckets surfaced in the V2ExchangePanel above. Hiding these
-            panels avoids three "History unavailable" / "Pool has no
-            reserves yet" empty states that the user can do nothing with.
-            Phase 2 of the plan adds a per-exchangeId activity chart here
-            for virtual pools.
-          */}
-          {fpmmPool && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <PoolTvlOverTimeChart
-                pool={pool}
-                network={network}
-                snapshots={dailySnapshots}
-                isLoading={
-                  fpmmPool &&
-                  (dailySnapshotLoading ||
-                    (poolNeedsRates && ratesLoading) ||
-                    thresholdsLoading)
-                }
-                hasError={
-                  fpmmPool &&
-                  (dailySnapshotError !== undefined ||
-                    (poolNeedsRates && ratesError) ||
-                    thresholdsError !== undefined)
-                }
-                rates={rates}
-                historySupported={fpmmPool}
-              />
-              <PoolVolumeOverTimeChart
-                pool={pool}
-                network={network}
-                snapshots={dailySnapshots}
-                isLoading={
-                  fpmmPool &&
-                  (dailySnapshotLoading ||
-                    (poolNeedsRates && ratesLoading) ||
-                    thresholdsLoading)
-                }
-                hasError={
-                  fpmmPool &&
-                  (dailySnapshotError !== undefined ||
-                    (poolNeedsRates && ratesError) ||
-                    thresholdsError !== undefined)
-                }
-                rates={rates}
-                historySupported={fpmmPool}
-              />
-              <ReservesPanel
-                pool={pool}
-                rates={rates}
-                ratesLoading={
-                  (poolNeedsRates && ratesLoading) || thresholdsLoading
-                }
-                ratesError={
-                  (poolNeedsRates && ratesError) ||
-                  thresholdsError !== undefined
-                }
-              />
-            </div>
-          )}
-        </>
-      )}
+      <PoolOverview
+        poolErr={poolErr}
+        poolLoading={poolLoading}
+        pool={pool}
+        normalizedPoolId={normalizedPoolId}
+        deployTxHash={deployTxHash}
+        tradingLimits={tradingLimits}
+        tradingLimitsError={tradingLimitsError}
+        fpmmPool={fpmmPool}
+        network={network}
+        dailySnapshots={dailySnapshots}
+        dailySnapshotLoading={dailySnapshotLoading}
+        dailySnapshotError={dailySnapshotError}
+        poolNeedsRates={poolNeedsRates}
+        ratesLoading={ratesLoading}
+        ratesError={ratesError}
+        thresholdsLoading={thresholdsLoading}
+        thresholdsError={thresholdsError}
+        rates={rates}
+      />
 
       <PoolTablist
         visibleTabs={visibleTabs}
@@ -391,86 +273,290 @@ function PoolDetail() {
         onLimitChange={(l) => setURL(tab, l)}
       />
 
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "swaps" && (
-          <SwapsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("swaps", value)}
-          />
+      <PoolTabPanel
+        tab={tab}
+        normalizedPoolId={normalizedPoolId}
+        limit={limit}
+        pool={pool}
+        activeSearch={activeSearch}
+        setTabSearch={setTabSearch}
+        tradingLimits={tradingLimits}
+        tradingLimitsError={tradingLimitsError}
+        fpmmPool={fpmmPool}
+        network={network}
+      />
+    </div>
+  );
+}
+
+function PoolBreadcrumb({
+  pool,
+  poolAddress,
+  network,
+}: {
+  pool: Pool | null;
+  poolAddress: string;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  return (
+    <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
+      <Link href="/pools" className="hover:text-indigo-400">
+        Pools
+      </Link>
+      <span className="mx-2">/</span>
+      <span className="text-slate-200">
+        {pool ? (
+          poolName(network, pool.token0, pool.token1)
+        ) : (
+          <AddressLink address={poolAddress} />
         )}
-        {tab === "reserves" && (
-          <ReservesTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("reserves", value)}
-          />
-        )}
-        {tab === "rebalances" && (
-          <RebalancesTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("rebalances", value)}
-          />
-        )}
-        {tab === "liquidity" && (
-          <LiquidityTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("liquidity", value)}
-          />
-        )}
-        {tab === "oracle" && (
-          <OracleTab
-            poolId={normalizedPoolId}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("oracle", value)}
-          />
-        )}
-        {tab === "providers" && (
-          <LpsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("providers", value)}
-          />
-        )}
-        {tab === "limits" && pool && (
-          <LimitPanel
-            pool={pool}
-            tradingLimits={tradingLimits}
-            hasError={tradingLimitsError}
-          />
-        )}
-        {tab === "breaches" && fpmmPool && pool && (
-          <BreachHistoryPanel
-            pool={pool}
-            network={network}
-            limit={limit}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("breaches", value)}
-          />
-        )}
-        {tab === "ols" && (
-          <OlsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("ols", value)}
-          />
-        )}
-      </div>
+      </span>
+    </nav>
+  );
+}
+
+function PoolOverview({
+  poolErr,
+  poolLoading,
+  pool,
+  normalizedPoolId,
+  deployTxHash,
+  tradingLimits,
+  tradingLimitsError,
+  fpmmPool,
+  network,
+  dailySnapshots,
+  dailySnapshotLoading,
+  dailySnapshotError,
+  poolNeedsRates,
+  ratesLoading,
+  ratesError,
+  thresholdsLoading,
+  thresholdsError,
+  rates,
+}: {
+  poolErr: Error | undefined;
+  poolLoading: boolean;
+  pool: Pool | null;
+  normalizedPoolId: string;
+  deployTxHash: string | undefined;
+  tradingLimits: TradingLimit[];
+  tradingLimitsError: boolean;
+  fpmmPool: boolean;
+  network: ReturnType<typeof useNetwork>["network"];
+  dailySnapshots: PoolSnapshot[];
+  dailySnapshotLoading: boolean;
+  dailySnapshotError: Error | undefined;
+  poolNeedsRates: boolean;
+  ratesLoading: boolean;
+  ratesError: boolean;
+  thresholdsLoading: boolean;
+  thresholdsError: Error | undefined;
+  rates: OracleRateMap;
+}) {
+  if (poolErr)
+    return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
+  if (poolLoading) return <Skeleton rows={2} />;
+  if (!pool)
+    return <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />;
+
+  return (
+    <>
+      <PoolHeader
+        pool={pool}
+        deployTxHash={deployTxHash}
+        tradingLimits={tradingLimits}
+        tradingLimitsError={tradingLimitsError}
+      />
+      <HealthPanel pool={pool} />
+      {fpmmPool && (
+        <PoolChartsRow
+          pool={pool}
+          network={network}
+          dailySnapshots={dailySnapshots}
+          dailySnapshotLoading={dailySnapshotLoading}
+          dailySnapshotError={dailySnapshotError}
+          poolNeedsRates={poolNeedsRates}
+          ratesLoading={ratesLoading}
+          ratesError={ratesError}
+          thresholdsLoading={thresholdsLoading}
+          thresholdsError={thresholdsError}
+          rates={rates}
+        />
+      )}
+    </>
+  );
+}
+
+function PoolChartsRow({
+  pool,
+  network,
+  dailySnapshots,
+  dailySnapshotLoading,
+  dailySnapshotError,
+  poolNeedsRates,
+  ratesLoading,
+  ratesError,
+  thresholdsLoading,
+  thresholdsError,
+  rates,
+}: {
+  pool: Pool;
+  network: ReturnType<typeof useNetwork>["network"];
+  dailySnapshots: PoolSnapshot[];
+  dailySnapshotLoading: boolean;
+  dailySnapshotError: Error | undefined;
+  poolNeedsRates: boolean;
+  ratesLoading: boolean;
+  ratesError: boolean;
+  thresholdsLoading: boolean;
+  thresholdsError: Error | undefined;
+  rates: OracleRateMap;
+}) {
+  const isLoading =
+    dailySnapshotLoading ||
+    (poolNeedsRates && ratesLoading) ||
+    thresholdsLoading;
+  const hasError =
+    dailySnapshotError !== undefined ||
+    (poolNeedsRates && ratesError) ||
+    thresholdsError !== undefined;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <PoolTvlOverTimeChart
+        pool={pool}
+        network={network}
+        snapshots={dailySnapshots}
+        isLoading={isLoading}
+        hasError={hasError}
+        rates={rates}
+        historySupported
+      />
+      <PoolVolumeOverTimeChart
+        pool={pool}
+        network={network}
+        snapshots={dailySnapshots}
+        isLoading={isLoading}
+        hasError={hasError}
+        rates={rates}
+        historySupported
+      />
+      <ReservesPanel
+        pool={pool}
+        rates={rates}
+        ratesLoading={(poolNeedsRates && ratesLoading) || thresholdsLoading}
+        ratesError={
+          (poolNeedsRates && ratesError) || thresholdsError !== undefined
+        }
+      />
+    </div>
+  );
+}
+
+function PoolTabPanel({
+  tab,
+  normalizedPoolId,
+  limit,
+  pool,
+  activeSearch,
+  setTabSearch,
+  tradingLimits,
+  tradingLimitsError,
+  fpmmPool,
+  network,
+}: {
+  tab: Tab;
+  normalizedPoolId: string;
+  limit: number;
+  pool: Pool | null;
+  activeSearch: string;
+  setTabSearch: (tab: Tab, value: string) => void;
+  tradingLimits: TradingLimit[];
+  tradingLimitsError: boolean;
+  fpmmPool: boolean;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  return (
+    <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+      {tab === "swaps" && (
+        <SwapsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("swaps", value)}
+        />
+      )}
+      {tab === "reserves" && (
+        <ReservesTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("reserves", value)}
+        />
+      )}
+      {tab === "rebalances" && (
+        <RebalancesTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("rebalances", value)}
+        />
+      )}
+      {tab === "liquidity" && (
+        <LiquidityTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("liquidity", value)}
+        />
+      )}
+      {tab === "oracle" && (
+        <OracleTab
+          poolId={normalizedPoolId}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("oracle", value)}
+        />
+      )}
+      {tab === "providers" && (
+        <LpsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("providers", value)}
+        />
+      )}
+      {tab === "limits" && pool && (
+        <LimitPanel
+          pool={pool}
+          tradingLimits={tradingLimits}
+          hasError={tradingLimitsError}
+        />
+      )}
+      {tab === "breaches" && fpmmPool && pool && (
+        <BreachHistoryPanel
+          pool={pool}
+          network={network}
+          limit={limit}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("breaches", value)}
+        />
+      )}
+      {tab === "ols" && (
+        <OlsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("ols", value)}
+        />
+      )}
     </div>
   );
 }

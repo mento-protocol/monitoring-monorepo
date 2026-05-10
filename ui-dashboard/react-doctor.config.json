@@ -5,7 +5,9 @@
       "react-doctor/design-no-em-dash-in-jsx-text",
       "react-doctor/design-no-redundant-size-axes",
       "react-doctor/design-no-bold-heading",
-      "react-doctor/js-tosorted-immutable"
+      "react-doctor/js-tosorted-immutable",
+      "effect/no-event-handler",
+      "react-you-might-not-need-an-effect/no-event-handler"
     ],
     "overrides": [
       {
@@ -15,14 +17,15 @@
           "**/__tests__/**",
           "scripts/**"
         ],
-        "rules": [
-          "react-doctor/no-secrets-in-client-code",
-          "react-hooks/rules-of-hooks"
-        ]
+        "rules": ["react-doctor/no-secrets-in-client-code"]
       },
       {
         "files": ["scripts/**"],
         "rules": ["knip/files"]
+      },
+      {
+        "files": ["src/lib/graphql.ts"],
+        "rules": ["knip/exports"]
       }
     ]
   }

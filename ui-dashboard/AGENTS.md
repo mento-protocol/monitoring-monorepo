@@ -50,6 +50,9 @@ through:
 Run `pnpm dashboard:react-doctor:diff` from the repo root for the
 CI-equivalent diff scan, or `pnpm react-doctor` locally for a full scan.
 
+CI also runs a full-score floor and fails unless
+`react-doctor --full --score --offline` returns `100`.
+
 Project-wide silences live in `react-doctor.config.json`. Current state:
 
 - **Silenced project-wide** (stylistic, ~805 noise hits): the four
@@ -59,16 +62,20 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   are legitimate punctuation in our copy.
 - **Silenced in tests/scripts only** (`__tests__`, `*.test.{ts,tsx}`,
   `*.spec.{ts,tsx}`, `scripts/**`): `react-doctor/no-secrets-in-client-code`
-  (test fixtures use placeholder addresses) and `react-hooks/rules-of-hooks`
-  (legitimate when shimming hook-shaped mocks).
+  because fixtures use placeholder public addresses.
+- **Silenced project-wide for compatibility/noise:** `react-doctor/js-tosorted-immutable`
+  (client code intentionally keeps spread+sort for older browser support) and
+  `effect/no-event-handler` from the companion effect plugin (false-positives
+  on debounced search and URL-state sync helpers).
+- **Silenced in `src/lib/graphql.ts` only:** `knip/exports` for the
+  `HASURA_TIMEOUT_MS` backward-compat re-export. New imports still target
+  `@/lib/hasura-timeout` directly so server code does not pull in SWR.
 
 ### Cleanup backlog
 
-After silencing, the codebase has 1 error and ~128 warnings. The
-prioritized cleanup list, ratchet plan (un-silence design rules), and
-operational follow-ups (bumping `react-doctor`, score-floor job, etc.)
-all live in `BACKLOG.md` under "Follow-ups deferred from PR #367
-(react-doctor diff gate)". Single source of truth — update there, not
+The dashboard's enforced React Doctor state is **100 / 100 (0 diagnostics)**.
+Historical cleanup notes live in `BACKLOG.md` under "Follow-ups deferred from
+PR #367 (react-doctor diff gate)". Single source of truth — update there, not
 here.
 
 ## Tech Stack

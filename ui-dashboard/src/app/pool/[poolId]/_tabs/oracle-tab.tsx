@@ -2,6 +2,7 @@
 
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
+import type { Network } from "@/lib/networks";
 import { OracleChart } from "@/components/oracle-chart";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -38,10 +39,6 @@ type OracleTabProps = {
   onSearchChange: (value: string) => void;
 };
 
-// Tab body is over the no-giant-component threshold — chart + table
-// + summary tiles. Tracked in BACKLOG.md § "Architecture pass" for
-// a focused split PR (extract OracleChart / OracleTable).
-// react-doctor-disable-next-line react-doctor/no-giant-component
 export function OracleTab(props: OracleTabProps) {
   const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
@@ -169,20 +166,6 @@ export function OracleTab(props: OracleTabProps) {
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />
     );
 
-  // Arrows and aria-sort are suppressed during search: sort controls remain
-  // clickable (to stage a sort for when search is cleared) but the UI does not
-  // announce a sort that isn't currently applied to the visible rows.
-  const arrow = (col: OracleSortCol) =>
-    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-  const ariaSortFor = (
-    col: OracleSortCol,
-  ): "ascending" | "descending" | "none" =>
-    !isSearching && sortCol === col
-      ? sortDir === "asc"
-        ? "ascending"
-        : "descending"
-      : "none";
-
   return (
     <>
       {pool?.deviationBreachStartedAt &&
@@ -215,164 +198,245 @@ export function OracleTab(props: OracleTabProps) {
       {filteredRows.length === 0 ? (
         <EmptyBox message="No oracle snapshots match your search." />
       ) : (
-        <>
-          <Table>
-            <thead>
-              <tr className="border-b border-slate-800 bg-slate-900/50">
-                <Th>Source</Th>
-                <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("oracleOk")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Oracle OK{arrow("oracleOk")}
-                  </button>
-                </Th>
-                <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("oraclePrice")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Price ({sym0}/{sym1}){arrow("oraclePrice")}
-                  </button>
-                </Th>
-                <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("priceDifference")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Price Diff{arrow("priceDifference")}
-                  </button>
-                </Th>
-                <Th align="right">Threshold</Th>
-                <Th aria-sort={ariaSortFor("timestamp")}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSort("timestamp")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Time{arrow("timestamp")}
-                  </button>
-                </Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((r) => {
-                const txUrl = r.txHash
-                  ? `${network.explorerBaseUrl}/tx/${r.txHash}`
-                  : null;
-                const diffBps = Number(r.priceDifference);
-                const thresholdBps = r.rebalanceThreshold;
-                // `hasHealthData=false` rows preserve the previous
-                // priceDifference and may carry a raw threshold of 0 or
-                // an unread fallback — show "—" rather than fake a %.
-                const diffPct =
-                  r.hasHealthData !== false && diffBps > 0 && thresholdBps > 0
-                    ? ((diffBps / thresholdBps) * 100).toFixed(1)
-                    : null;
-                return (
-                  <Row key={r.id}>
-                    <Td small>
-                      {txUrl ? (
-                        <a
-                          href={txUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono hover:text-indigo-400 transition-colors"
-                        >
-                          {r.source}
-                        </a>
-                      ) : (
-                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                          {r.source}
-                        </span>
-                      )}
-                    </Td>
-                    <Td small align="right">
-                      <span
-                        className={
-                          r.oracleOk ? "text-emerald-400" : "text-red-400"
-                        }
-                      >
-                        {r.oracleOk ? "✓" : "✗"}
-                      </span>
-                    </Td>
-                    <Td mono small align="right">
-                      {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
-                    </Td>
-                    <Td mono small align="right">
-                      {diffBps > 0 ? (
-                        <span title={`${diffBps.toLocaleString()} bps`}>
-                          {diffPct !== null ? `${diffPct}%` : `${diffBps} bps`}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </Td>
-                    <Td mono small align="right">
-                      {thresholdBps > 0 ? (
-                        <span title={`${thresholdBps.toLocaleString()} bps`}>
-                          {(thresholdBps / 100).toFixed(2)}%
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </Td>
-                    <Td small muted title={formatTimestamp(r.timestamp)}>
-                      {txUrl ? (
-                        <a
-                          href={txUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-indigo-400 transition-colors"
-                        >
-                          {relativeTime(r.timestamp)}
-                        </a>
-                      ) : (
-                        relativeTime(r.timestamp)
-                      )}
-                    </Td>
-                  </Row>
-                );
-              })}
-            </tbody>
-          </Table>
-          {!isSearching && (
-            <Pagination
-              page={page}
-              pageSize={DEFAULT_PAGE_SIZE}
-              total={total}
-              onPageChange={setRawPage}
-            />
-          )}
-          {countCapped && !isSearching && (
-            <p className="px-1 pt-1 text-xs text-amber-400">
-              Showing first {ENVIO_MAX_ROWS.toLocaleString()} snapshots — older
-              entries may exist beyond this page range.
-            </p>
-          )}
-          {!countError && isSearchCapped && (
-            <p className="px-1 pt-1 text-xs text-amber-400">
-              Search is limited to the most recent{" "}
-              {SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
-            </p>
-          )}
-          {countError && isSearching && (
-            <p className="px-1 pt-1 text-xs text-amber-400">
-              Could not load total count — search covers the most recent{" "}
-              {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
-            </p>
-          )}
-          {countError && !isSearching && (
-            <p className="px-1 pt-1 text-xs text-amber-400">
-              Could not load total count — pagination may be incomplete.
-            </p>
-          )}
-        </>
+        <OracleSnapshotsTable
+          rows={filteredRows}
+          network={network}
+          sym0={sym0}
+          sym1={sym1}
+          sortCol={sortCol}
+          sortDir={sortDir}
+          isSearching={isSearching}
+          onSort={toggleSort}
+          page={page}
+          total={total}
+          onPageChange={setRawPage}
+          countCapped={countCapped}
+          countError={countError}
+          isSearchCapped={isSearchCapped}
+        />
       )}
     </>
+  );
+}
+
+type OracleSnapshotsTableProps = {
+  rows: OracleSnapshot[];
+  network: Network;
+  sym0: string;
+  sym1: string;
+  sortCol: OracleSortCol;
+  sortDir: "asc" | "desc";
+  isSearching: boolean;
+  onSort: (col: OracleSortCol) => void;
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  countCapped: boolean;
+  countError: Error | undefined;
+  isSearchCapped: boolean;
+};
+
+function OracleSnapshotsTable({
+  rows,
+  network,
+  sym0,
+  sym1,
+  sortCol,
+  sortDir,
+  isSearching,
+  onSort,
+  page,
+  total,
+  onPageChange,
+  countCapped,
+  countError,
+  isSearchCapped,
+}: OracleSnapshotsTableProps) {
+  // Arrows and aria-sort are suppressed during search: sort controls remain
+  // clickable (to stage a sort for when search is cleared) but the UI does not
+  // announce a sort that isn't currently applied to the visible rows.
+  const arrow = (col: OracleSortCol) =>
+    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const ariaSortFor = (
+    col: OracleSortCol,
+  ): "ascending" | "descending" | "none" =>
+    !isSearching && sortCol === col
+      ? sortDir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
+
+  return (
+    <>
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>Source</Th>
+            <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
+              <button
+                type="button"
+                onClick={() => onSort("oracleOk")}
+                className="hover:text-indigo-400 transition-colors"
+              >
+                Oracle OK{arrow("oracleOk")}
+              </button>
+            </Th>
+            <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
+              <button
+                type="button"
+                onClick={() => onSort("oraclePrice")}
+                className="hover:text-indigo-400 transition-colors"
+              >
+                Price ({sym0}/{sym1}){arrow("oraclePrice")}
+              </button>
+            </Th>
+            <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
+              <button
+                type="button"
+                onClick={() => onSort("priceDifference")}
+                className="hover:text-indigo-400 transition-colors"
+              >
+                Price Diff{arrow("priceDifference")}
+              </button>
+            </Th>
+            <Th align="right">Threshold</Th>
+            <Th aria-sort={ariaSortFor("timestamp")}>
+              <button
+                type="button"
+                onClick={() => onSort("timestamp")}
+                className="hover:text-indigo-400 transition-colors"
+              >
+                Time{arrow("timestamp")}
+              </button>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <OracleSnapshotRow
+              key={r.id}
+              row={r}
+              network={network}
+              sym0={sym0}
+            />
+          ))}
+        </tbody>
+      </Table>
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={DEFAULT_PAGE_SIZE}
+          total={total}
+          onPageChange={onPageChange}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} snapshots — older
+          entries may exist beyond this page range.
+        </p>
+      )}
+      {!countError && isSearchCapped && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search is limited to the most recent{" "}
+          {SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+    </>
+  );
+}
+
+function OracleSnapshotRow({
+  row,
+  network,
+  sym0,
+}: {
+  row: OracleSnapshot;
+  network: Network;
+  sym0: string;
+}) {
+  const txUrl = row.txHash
+    ? `${network.explorerBaseUrl}/tx/${row.txHash}`
+    : null;
+  const diffBps = Number(row.priceDifference);
+  const thresholdBps = row.rebalanceThreshold;
+  // `hasHealthData=false` rows preserve the previous priceDifference and may
+  // carry a raw threshold of 0 or an unread fallback — show "—" rather than
+  // fake a %.
+  const diffPct =
+    row.hasHealthData !== false && diffBps > 0 && thresholdBps > 0
+      ? ((diffBps / thresholdBps) * 100).toFixed(1)
+      : null;
+
+  return (
+    <Row>
+      <Td small>
+        {txUrl ? (
+          <a
+            href={txUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono hover:text-indigo-400 transition-colors"
+          >
+            {row.source}
+          </a>
+        ) : (
+          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+            {row.source}
+          </span>
+        )}
+      </Td>
+      <Td small align="right">
+        <span className={row.oracleOk ? "text-emerald-400" : "text-red-400"}>
+          {row.oracleOk ? "✓" : "✗"}
+        </span>
+      </Td>
+      <Td mono small align="right">
+        {parseOraclePriceToNumber(row.oraclePrice, sym0).toFixed(6)}
+      </Td>
+      <Td mono small align="right">
+        {diffBps > 0 ? (
+          <span title={`${diffBps.toLocaleString()} bps`}>
+            {diffPct !== null ? `${diffPct}%` : `${diffBps} bps`}
+          </span>
+        ) : (
+          "—"
+        )}
+      </Td>
+      <Td mono small align="right">
+        {thresholdBps > 0 ? (
+          <span title={`${thresholdBps.toLocaleString()} bps`}>
+            {(thresholdBps / 100).toFixed(2)}%
+          </span>
+        ) : (
+          "—"
+        )}
+      </Td>
+      <Td small muted title={formatTimestamp(row.timestamp)}>
+        {txUrl ? (
+          <a
+            href={txUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-indigo-400 transition-colors"
+          >
+            {relativeTime(row.timestamp)}
+          </a>
+        ) : (
+          relativeTime(row.timestamp)
+        )}
+      </Td>
+    </Row>
   );
 }
