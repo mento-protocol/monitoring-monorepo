@@ -69,20 +69,29 @@ export function PoolTvlOverTimeChart({
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (snapshots.length === 0) return [];
-    const sorted = [...snapshots].sort(
+    const sorted = snapshots.toSorted(
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
-    const points: TimeSeriesPoint[] = sorted.map((snap) => ({
-      timestamp: Number(snap.timestamp),
-      value: poolTvlUSD(
+    // Skip points where TVL is unknowable (untrusted decimals → null) so
+    // the historical line shows gaps for those windows rather than
+    // synthesizing $0. See `poolTvlUSD` in `lib/tokens.ts`.
+    const points: TimeSeriesPoint[] = [];
+    for (const snap of sorted) {
+      const value = poolTvlUSD(
         { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
         network,
         rates,
-      ),
-    }));
+      );
+      if (value !== null) {
+        points.push({ timestamp: Number(snap.timestamp), value });
+      }
+    }
     const nowSec = Math.floor(Date.now() / 1000);
     const currentTvl = poolTvlUSD(pool, network, rates);
-    return [...points, { timestamp: nowSec, value: currentTvl }];
+    if (currentTvl !== null) {
+      points.push({ timestamp: nowSec, value: currentTvl });
+    }
+    return points;
   }, [pool, network, snapshots, rates]);
 
   const visibleSeries = useMemo(
@@ -94,12 +103,13 @@ export function PoolTvlOverTimeChart({
   const change7d = useMemo(() => tvlWoWChangePct(fullSeries), [fullSeries]);
   const priceable = canValueTvl(pool, network, rates ?? new Map());
 
-  // Distinguish "unpriceable" (no USDm leg and no rate for either leg) from
-  // real zero TVL. Without this, the chart silently renders $0.00 whenever
-  // rates haven't arrived yet or the pair is unsupported.
+  // Distinguish "unpriceable" (no USDm leg and no rate for either leg) AND
+  // "untrusted decimals" (currentTvl === null) from real zero TVL. Without
+  // this, the chart silently renders $0.00 whenever rates haven't arrived
+  // yet or the pair is unsupported or decimals aren't yet known.
   const headline = isLoading
     ? "…"
-    : !priceable
+    : !priceable || currentTvl === null
       ? "—"
       : currentTvl === 0 && fullSeries.length === 0
         ? "—"

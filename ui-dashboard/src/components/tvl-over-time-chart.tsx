@@ -152,6 +152,9 @@ export function buildDailySeries(
         history.network,
         history.rates,
       );
+      // Skip pools whose TVL is unknowable (untrusted decimals → null).
+      // Summing null as 0 would understate aggregate / per-chain TVL.
+      if (poolTvl === null) continue;
       tvl += poolTvl;
       const id = history.network.id;
       perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
@@ -169,6 +172,7 @@ export function buildDailySeries(
   const perChainNowTvl = new Map<string, number>();
   for (const history of histories) {
     const poolTvl = poolTvlUSD(history.pool, history.network, history.rates);
+    if (poolTvl === null) continue;
     nowTvl += poolTvl;
     const id = history.network.id;
     perChainNowTvl.set(id, (perChainNowTvl.get(id) ?? 0) + poolTvl);

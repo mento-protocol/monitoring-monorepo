@@ -275,14 +275,22 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     s.pools.map((pool) => ({ pool, slice: s })),
   );
 
-  const totalTvlUsd =
-    priceable.length === 0
-      ? null
-      : priceable.reduce(
-          (acc, { pool, slice }) =>
-            acc + poolTvlUSD(pool, slice.network, slice.rates),
-          0,
-        );
+  // Skip pools whose TVL is unknowable (untrusted decimals → null) so a
+  // 1e12-overstated 6-dp leg can't poison the protocol-wide total.
+  // See `poolTvlUSD` in `lib/tokens.ts`.
+  let totalTvlUsd: number | null = null;
+  if (priceable.length > 0) {
+    let sum = 0;
+    let any = false;
+    for (const { pool, slice } of priceable) {
+      const v = poolTvlUSD(pool, slice.network, slice.rates);
+      if (v !== null) {
+        sum += v;
+        any = true;
+      }
+    }
+    totalTvlUsd = any ? sum : null;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   // If any chain's daily-snapshot fetch failed or truncated, the cross-chain
@@ -310,9 +318,11 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
       slice.network,
       slice.rates,
     );
-    if (agoTvl <= 0) continue;
+    if (agoTvl === null || agoTvl <= 0) continue;
+    const currentTvl = poolTvlUSD(pool, slice.network, slice.rates);
+    if (currentTvl === null) continue;
     priorTvlSum += agoTvl;
-    currentSubsetSum += poolTvlUSD(pool, slice.network, slice.rates);
+    currentSubsetSum += currentTvl;
     anyPrior = true;
   }
   const tvlWoWPct =
@@ -403,7 +413,7 @@ function rowUsdVolume(
   // `tokenDecimalsKnown=false` would parse `swapVolume*` against the
   // schema-default 18 and inflate the daily USD figure by 1e12.
   // Undefined still trusts default 18 (deploy-window resilience).
-  if (pool.tokenDecimalsKnown === false) return null;
+  if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;
@@ -518,11 +528,12 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
       }
       if (cursors[i] < 0) continue;
       const point = h.points[cursors[i]];
-      tvl += poolTvlUSD(
+      const v = poolTvlUSD(
         { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
         h.slice.network,
         h.slice.rates,
       );
+      if (v !== null) tvl += v;
     }
     series.push(tvl);
   }

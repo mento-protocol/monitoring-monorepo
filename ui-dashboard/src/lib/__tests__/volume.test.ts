@@ -492,16 +492,24 @@ describe("getSnapshotVolumeInUsd", () => {
     ).toBeNull();
   });
 
-  it("returns valued volume when tokenDecimalsKnown is undefined (legacy schema, trust default 18)", () => {
+  it("returns null when tokenDecimalsKnown is undefined (PR 1.7 strict — fail closed)", () => {
+    // Per PR 1.7, the gate is strict `!== true`: undefined is treated as
+    // untrusted because post-PR-1.6 indexers populate the field on every
+    // pool. `undefined` now signals either a pre-PR-1.6 schema OR a
+    // transient EXT-query failure — both should fail closed.
     const pool: Pool = {
-      ...BASE_POOL_FIELDS,
       id: "pool-legacy",
       chainId: 42220,
       token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
       token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      source: "fpmm_factory",
+      createdAtBlock: "0",
+      createdAtTimestamp: "0",
+      updatedAtBlock: "0",
+      updatedAtTimestamp: "0",
       token0Decimals: 18,
       token1Decimals: 18,
-      // tokenDecimalsKnown intentionally undefined (deploy-window schema-lag)
+      // tokenDecimalsKnown intentionally undefined — must fail closed.
     };
     expect(
       getSnapshotVolumeInUsd(
@@ -518,7 +526,7 @@ describe("getSnapshotVolumeInUsd", () => {
         network,
         EMPTY_RATES,
       ),
-    ).toBeCloseTo(1, 8);
+    ).toBeNull();
   });
 });
 
@@ -528,6 +536,10 @@ const BASE_POOL_FIELDS = {
   createdAtTimestamp: "0",
   updatedAtBlock: "0",
   updatedAtTimestamp: "0",
+  // PR 1.7: USD math now requires `tokenDecimalsKnown === true` (strict).
+  // Default the shared fixture to a fully-indexed-trusted pool; tests
+  // exercising the untrusted gate explicitly override `false` / undefined.
+  tokenDecimalsKnown: true,
 };
 
 describe("poolTotalVolumeUSD", () => {

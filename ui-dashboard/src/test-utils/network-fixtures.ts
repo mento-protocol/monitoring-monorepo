@@ -62,6 +62,10 @@ export function makeTvlPool(overrides: Partial<Pool> = {}): Pool {
     updatedAtTimestamp: "0",
     reserves0: "0",
     reserves1: "0",
+    // PR 1.7: USD math now requires `tokenDecimalsKnown === true` (strict).
+    // Default the shared fixture to a fully-indexed-trusted pool; tests
+    // exercising the untrusted gate explicitly override.
+    tokenDecimalsKnown: true,
     ...overrides,
   };
 }

@@ -77,6 +77,9 @@ function makeDetailPool(overrides: Record<string, unknown> = {}) {
     limitStatus: "OK",
     limitPressure0: "0",
     limitPressure1: "0",
+    // PR 1.7: USD math now requires `tokenDecimalsKnown === true` (strict).
+    // Tests exercising the untrusted gate explicitly override.
+    tokenDecimalsKnown: true,
     ...overrides,
   };
 }

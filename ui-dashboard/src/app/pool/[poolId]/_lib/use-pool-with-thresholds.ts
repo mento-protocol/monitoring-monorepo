@@ -27,9 +27,16 @@ export function usePoolWithThresholds(
   poolId: string,
   chainId: number,
 ): Pool | null {
+  // 5s timeout matches the OG paths (homepage-og + pool-og) which set
+  // `signal: AbortSignal.timeout(5000)` on the same query. Without this,
+  // a wedged Hasura connection on the trust-flag fetch sticks the SWR
+  // poll until the underlying socket times out (minutes), instead of
+  // failing fast and letting the next refresh interval retry.
   const { data: thresholdsData } = useGQL<{ Pool: ThresholdsExtRow[] }>(
     POOL_THRESHOLDS_KNOWN_EXT,
     { id: poolId, chainId },
+    undefined,
+    { timeoutMs: 5000 },
   );
   const thresholdsExt = thresholdsData?.Pool?.[0] ?? null;
   return useMemo<Pool | null>(() => {

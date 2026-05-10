@@ -48,7 +48,7 @@ function perPoolTvlWindow(
   pools: Pool[],
   network: Network,
   rates: OracleRateMap,
-): Map<string, { now: number; ago: number }> {
+): Map<string, { now: number | null; ago: number | null }> {
   const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
@@ -58,7 +58,9 @@ function perPoolTvlWindow(
       earliest.set(s.poolId, s);
     }
   }
-  const result = new Map<string, { now: number; ago: number }>();
+  // `null` propagates "TVL unknowable for this pool" (untrusted decimals)
+  // up to consumers — see `poolTvlUSD` in `lib/tokens.ts` for the rationale.
+  const result = new Map<string, { now: number | null; ago: number | null }>();
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
     result.set(poolId, {
@@ -160,10 +162,15 @@ function GlobalContent({
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
-      const chainTvlNow = fpmmPools.reduce(
-        (sum, p) => sum + poolTvlUSD(p, network, rates),
-        0,
-      );
+      // Skip pools whose TVL is unknowable (untrusted decimals → null).
+      // Summing null as 0 would understate aggregate TVL but more
+      // importantly hide the fact that some pools' contribution is
+      // missing entirely. See `poolTvlUSD` in `lib/tokens.ts`.
+      let chainTvlNow = 0;
+      for (const p of fpmmPools) {
+        const v = poolTvlUSD(p, network, rates);
+        if (v !== null) chainTvlNow += v;
+      }
       totalTvl += chainTvlNow;
 
       // 7d-window per-pool TVL — computed once, reused for the aggregate
@@ -175,6 +182,11 @@ function GlobalContent({
           : null;
       if (perPool7dTvl && perPool7dTvl.size > 0) {
         for (const v of perPool7dTvl.values()) {
+          // Skip pools whose TVL is unknowable (untrusted decimals → null).
+          // Including null on either side would either NaN-poison the sum or
+          // misrepresent a missing-data pool as $0 — both wrong for the WoW
+          // KPI. See `poolTvlUSD` in `lib/tokens.ts`.
+          if (v.now === null || v.ago === null) continue;
           tvlNow7d += v.now;
           tvlAgo7d += v.ago;
         }

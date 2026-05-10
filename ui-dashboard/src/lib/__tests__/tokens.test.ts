@@ -101,6 +101,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000000000000000", // 2 USDm
         reserves1: "3000000000000000000", // 3 KESm
         oraclePrice: "500000000000000000000000", // 0.5
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -119,6 +120,7 @@ describe("poolTvlUSD", () => {
         reserves0: "4000000000000000000", // 4 KESm
         reserves1: "1000000000000000000", // 1 USDm
         oraclePrice: "500000000000000000000000", // 0.5
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -164,6 +166,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000000000000000",
         reserves1: "3000000000000000000",
         oraclePrice: "500000000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -187,6 +190,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000", // 2 axlEUROC (6 decimals)
         reserves1: "3000000000000000000", // 3 EURm
         oraclePrice: "500000000000000000000000", // feedVal = 0.5
+        tokenDecimalsKnown: true,
       },
       mainnet,
       rates,
@@ -212,6 +216,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000", // 2 axlEUROC
         reserves1: "3000000000000000000", // 3 EURm
         oraclePrice: "500000000000000000000000", // feedVal = 0.5
+        tokenDecimalsKnown: true,
       },
       mainnet,
       rates,
