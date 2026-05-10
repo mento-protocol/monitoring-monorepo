@@ -21,7 +21,7 @@ import {
 import type { HandlerContext } from "generated/src/Types";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { ZERO_ADDRESS } from "../constants";
-import { mirrorFeedIdToPool } from "../pool";
+import { mirrorFeedIdToPool, mirrorTokensAndDecimalsToPool } from "../pool";
 import { poolExchangeEffect } from "../rpc/effects";
 import { lookupPricingModuleName } from "../contractAddresses";
 
@@ -146,6 +146,19 @@ async function ensureBiPoolExchange(
           blockNumber,
           blockTimestamp,
         );
+        // Heal-before-exchange ordering: VP self-healed when no exchange
+        // row existed yet, so its `selfHealWrappedExchangeId` couldn't
+        // mirror tokens/decimals from `BiPoolExchange.asset0/asset1`. Now
+        // that the row IS available and we just established the back-link,
+        // do the mirror that the heal path missed.
+        await mirrorTokensAndDecimalsToPool(
+          context,
+          wrappedByPoolId,
+          current.asset0,
+          current.asset1,
+          blockNumber,
+          blockTimestamp,
+        );
       }
     }
     return current;
@@ -212,6 +225,18 @@ async function ensureBiPoolExchange(
       context,
       wrappedByPoolId,
       row.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
+    // Same reverse-link backfill as the link-after-seed branch above —
+    // a VP that self-healed before this row was seeded carries empty
+    // tokens / default decimals; mirror them from the row we just
+    // materialized.
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      row.asset0,
+      row.asset1,
       blockNumber,
       blockTimestamp,
     );
@@ -314,6 +339,19 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
       context,
       wrappedByPoolId,
       row.referenceRateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
+    // VP-deployed-before-exchange ordering: the wrapping VP self-healed
+    // (or set its forward link via `VirtualPoolDeployed`) before this
+    // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
+    // mirror tokens because the row wasn't there yet — backfill them
+    // now that we just persisted asset0/asset1.
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      row.asset0,
+      row.asset1,
       blockNumber,
       blockTimestamp,
     );

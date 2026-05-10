@@ -18,7 +18,10 @@ import {
   dailySnapshotId,
   extractAddressFromPoolId,
 } from "./helpers";
-import { computePriceDifference } from "./priceDifference";
+import {
+  computePriceDifference,
+  scalingFactorToDecimals,
+} from "./priceDifference";
 import {
   compactFees,
   feesEffect,
@@ -26,6 +29,7 @@ import {
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
+  tokenDecimalsScalingEffect,
   vpExchangeIdEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
@@ -429,6 +433,8 @@ export async function selfHealWrappedExchangeId(
   let healedFeedId = pool.referenceRateFeedID;
   let healedToken0 = pool.token0;
   let healedToken1 = pool.token1;
+  let healedToken0Decimals = pool.token0Decimals;
+  let healedToken1Decimals = pool.token1Decimals;
   if (exchange) {
     if (exchange.wrappedByPoolId !== pool.id) {
       context.BiPoolExchange.set({
@@ -471,8 +477,37 @@ export async function selfHealWrappedExchangeId(
     // pre-start_block VPs. The BiPoolExchange row already has the
     // assets from BiPoolManager.ExchangeCreated. Only fill on miss
     // (existing token0/token1 wins on direct conflict).
-    if (!healedToken0) healedToken0 = exchange.asset0;
-    if (!healedToken1) healedToken1 = exchange.asset1;
+    const filledToken0 = !healedToken0 && exchange.asset0;
+    const filledToken1 = !healedToken1 && exchange.asset1;
+    if (filledToken0) healedToken0 = exchange.asset0;
+    if (filledToken1) healedToken1 = exchange.asset1;
+    // Backfill decimals for newly-filled tokens. Default 18 is wrong for
+    // any non-18dp leg (e.g. USDC at 6dp) — `buildSwapTraderFields` runs
+    // immediately after `upsertPool` returns and uses these to scale
+    // `volumeUsdWei`, so a stale 18 mis-scales the very first swap and
+    // leaderboard snapshots. `tokenDecimalsScalingEffect` is cache:true,
+    // so the cost is one RPC per (chain, token) per sync. The effect
+    // tries `decimals0()` / `decimals1()` on the pool first (returns
+    // null for VPs — those getters live on FPMM), then falls back to
+    // ERC20 `decimals()` on the token address.
+    if (filledToken0) {
+      const dec = await context.effect(tokenDecimalsScalingEffect, {
+        chainId: pool.chainId,
+        poolAddress: poolAddr,
+        fn: "decimals0",
+        fallbackTokenAddress: exchange.asset0,
+      });
+      if (dec) healedToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+    }
+    if (filledToken1) {
+      const dec = await context.effect(tokenDecimalsScalingEffect, {
+        chainId: pool.chainId,
+        poolAddress: poolAddr,
+        fn: "decimals1",
+        fallbackTokenAddress: exchange.asset1,
+      });
+      if (dec) healedToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+    }
   }
   return {
     ...pool,
@@ -480,6 +515,8 @@ export async function selfHealWrappedExchangeId(
     referenceRateFeedID: healedFeedId,
     token0: healedToken0,
     token1: healedToken1,
+    token0Decimals: healedToken0Decimals,
+    token1Decimals: healedToken1Decimals,
   };
 }
 
@@ -507,6 +544,72 @@ export async function mirrorFeedIdToPool(
   context.Pool.set({
     ...pool,
     referenceRateFeedID: feedId,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
+}
+
+/** Reverse-link backfill: when a `BiPoolExchange` row is created/updated
+ * AFTER its wrapping VP has self-healed (so the back-link
+ * `wrappedByPoolId` is already known), mirror `asset0`/`asset1` and the
+ * matching decimals onto the Pool row. Mirrors the forward backfill in
+ * `selfHealWrappedExchangeId` for the heal-before-exchange ordering.
+ *
+ * Without this, a VP that healed when no `BiPoolExchange` row existed
+ * yet keeps `token0`/`token1` empty + decimals at the 18/18 default
+ * forever — the heal helper only mirrored fields it could see at the
+ * time, and `mirrorFeedIdToPool` only handles the feedID. The first
+ * VP swap then valuates at `?/?` with mis-scaled USD until some later
+ * asset-bearing event lands (which may never happen for pre-start_block
+ * VPs).
+ *
+ * Idempotent: only fills missing fields (existing token0/token1 wins on
+ * direct conflict). Skips the decimals RPC when the address backfill
+ * isn't needed. Wider context type (handler `effect` + `Pool` access)
+ * because the decimals fetcher uses `tokenDecimalsScalingEffect`. */
+export async function mirrorTokensAndDecimalsToPool(
+  context: {
+    Pool: PoolContext["Pool"];
+    effect: PoolContext["effect"];
+  },
+  poolId: string,
+  asset0: string,
+  asset1: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+  const fillToken0 = !pool.token0 && asset0 && asset0 !== ZERO_ADDRESS;
+  const fillToken1 = !pool.token1 && asset1 && asset1 !== ZERO_ADDRESS;
+  if (!fillToken0 && !fillToken1) return;
+  const poolAddr = extractAddressFromPoolId(poolId);
+  let token0Decimals = pool.token0Decimals;
+  let token1Decimals = pool.token1Decimals;
+  if (fillToken0) {
+    const dec = await context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals0",
+      fallbackTokenAddress: asset0,
+    });
+    if (dec) token0Decimals = scalingFactorToDecimals(dec) ?? 18;
+  }
+  if (fillToken1) {
+    const dec = await context.effect(tokenDecimalsScalingEffect, {
+      chainId: pool.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals1",
+      fallbackTokenAddress: asset1,
+    });
+    if (dec) token1Decimals = scalingFactorToDecimals(dec) ?? 18;
+  }
+  context.Pool.set({
+    ...pool,
+    token0: fillToken0 ? asset0 : pool.token0,
+    token1: fillToken1 ? asset1 : pool.token1,
+    token0Decimals,
+    token1Decimals,
     updatedAtBlock: blockNumber,
     updatedAtTimestamp: blockTimestamp,
   });

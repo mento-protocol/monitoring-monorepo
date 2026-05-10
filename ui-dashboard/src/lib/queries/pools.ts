@@ -310,6 +310,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
   query PoolDetailWithHealth($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id chainId token0 token1 token0Decimals token1Decimals source
+      wrappedExchangeId
       createdAtBlock createdAtTimestamp
       updatedAtBlock updatedAtTimestamp
       healthStatus
