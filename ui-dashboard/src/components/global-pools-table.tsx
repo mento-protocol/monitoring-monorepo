@@ -22,7 +22,6 @@ import {
   pressureColorClass,
   resolveLimitStatus,
   uptimeColorClass,
-  worstStatus,
 } from "@/lib/health";
 import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
@@ -95,7 +94,7 @@ export function sortGlobalPools(
     tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
-  return [...entries].sort((a, b) => {
+  return entries.toSorted((a, b) => {
     const aKey = globalPoolKey(a);
     const bKey = globalPoolKey(b);
     let cmp = 0;
@@ -194,7 +193,7 @@ function LimitHeatmap({
     return <span className="text-slate-600 text-xs">—</span>;
 
   // Order by the pool's token0/token1 so heatmap rows match the displayed pair
-  const sorted = [...limits].sort((a, b) => {
+  const sorted = limits.toSorted((a, b) => {
     const aIdx = a.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     const bIdx = b.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     return aIdx - bIdx;
@@ -502,9 +501,14 @@ export function GlobalPoolsTable({
           {sortedEntries.map((e) => {
             const { pool: p, network } = e;
             const key = globalPoolKey(e);
+            // Use `computeEffectiveStatus` (not `worstStatus(computeHealthStatus, ...)`
+            // directly) so the `hasHealthData=false → "N/A"` half-short-circuit
+            // applies here too. Without this, no-data pools paired with
+            // healthy limits would resolve to OK via STATUS_RANK (codex P2
+            // PR #370 #3214748745).
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = resolveLimitStatus(p);
-            const effectiveStatus = worstStatus(healthStatus, limitStatus);
+            const effectiveStatus = computeEffectiveStatus(p, network.chainId);
             const tvl = tvlByKey.get(key) ?? 0;
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);

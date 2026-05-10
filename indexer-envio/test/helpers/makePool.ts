@@ -35,6 +35,13 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     rebalanceThresholdAbove: 5000,
     rebalanceThresholdBelow: 5000,
     rebalanceThresholdsKnown: true,
+    // `DEFAULT_ORACLE_FIELDS` (production-realistic for a fresh pool) sets
+    // `hasHealthData: false`. The shared test fixture represents a fully-
+    // indexed healthy pool — override here so the new
+    // `computeHealthStatus → "N/A"` gate (PR 1.6) doesn't short-circuit
+    // every parity/health test. Tests exercising the no-data gate must
+    // override `hasHealthData: false` explicitly.
+    hasHealthData: true,
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,
     updatedAtBlock: 0n,

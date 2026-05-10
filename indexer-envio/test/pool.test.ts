@@ -2,9 +2,11 @@
 import { assert } from "chai";
 import type { Pool } from "generated";
 import {
+  breachEntryThreshold,
   isInDeviationBreach,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
+  nextOpenBreachEntryThreshold,
 } from "../src/pool";
 import { makePool } from "./helpers/makePool";
 
@@ -369,5 +371,177 @@ describe("maybePreloadPool", () => {
     assert.isTrue(result);
     assert.deepEqual(calls.poolGets, []);
     assert.deepEqual(calls.breachGets, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nextOpenBreachEntryThreshold (Pool denorm) — PR 1.6
+// codex P2 #3214513401: matches the entity-row capture in
+// `recordBreachTransition`. Asymmetric pools on their zero-threshold side
+// score the breach predicate against the 10000 effective fallback; the
+// denorm must store 10000 (not raw 0), and a continuing-breach event
+// must NEVER overwrite a captured value, even when reserves flip to the
+// active side.
+// ---------------------------------------------------------------------------
+
+describe("breachEntryThreshold — predicate-aligned entry capture (PR 1.6)", () => {
+  it("returns the active threshold when positive (symmetric or on-active-side)", () => {
+    assert.equal(breachEntryThreshold({ rebalanceThreshold: 5000 }), 5000);
+  });
+
+  it("returns 10000 fallback for asymmetric pool on its zero-threshold side", () => {
+    // above=0, below=300, reserves picking the above side → active=0.
+    // Predicate scored against effectiveThreshold = 10000 (asymmetric
+    // case is NOT never-rebalance because below>0).
+    assert.equal(
+      breachEntryThreshold({
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 300,
+        rebalanceThresholdsKnown: true,
+      }),
+      10000,
+    );
+  });
+
+  it("returns 10000 fallback for asymmetric pool on its zero-threshold side (mirror: above=300, below=0)", () => {
+    // Mirror case — reserves picking the below side → active=0 even though
+    // above is positive. Same effectiveThreshold = 10000 logic; pin the
+    // symmetry so a one-sided refactor can't regress half the asymmetric
+    // pools (claude[bot] PR #370 review).
+    assert.equal(
+      breachEntryThreshold({
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 300,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      }),
+      10000,
+    );
+  });
+
+  it("returns 10000 fallback for unknown-zero (cold-start)", () => {
+    // Known=false: indexer hasn't read on-chain. Predicate falls back
+    // to 10000-bps under-bound; capture must match.
+    assert.equal(
+      breachEntryThreshold({
+        rebalanceThreshold: 0,
+        rebalanceThresholdsKnown: false,
+      }),
+      10000,
+    );
+  });
+
+  it("returns 0 for never-rebalance (defensive — unreachable in practice)", () => {
+    // BOTH split sides 0 + Known. `isInDeviationBreach` short-circuits
+    // never-rebalance pools to false, so this code path shouldn't run.
+    // If it does, return 0 instead of the 1e12 cushion that would
+    // overflow `Int!`.
+    assert.equal(
+      breachEntryThreshold({
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      }),
+      0,
+    );
+  });
+});
+
+describe("nextOpenBreachEntryThreshold — asymmetric pool capture (PR 1.6)", () => {
+  it("returns 0 when no open breach", () => {
+    const next = makePool({ deviationBreachStartedAt: 0n });
+    assert.equal(nextOpenBreachEntryThreshold(undefined, next), 0);
+  });
+
+  it("rising edge captures persistableThreshold (10000 fallback) for asymmetric-zero-side breach", () => {
+    const prev = makePool({
+      priceDifference: 4000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0, // active side picks 0
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 1_704_672_000n,
+    });
+    // Predicate scores against 10000 fallback (see effectiveThreshold).
+    // The denorm must mirror that — not raw next.rebalanceThreshold = 0.
+    assert.equal(nextOpenBreachEntryThreshold(prev, next), 10000);
+  });
+
+  it("rising edge captures the active threshold for symmetric pools", () => {
+    const prev = makePool({
+      priceDifference: 4000n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 8000n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: 1_704_672_000n,
+    });
+    assert.equal(nextOpenBreachEntryThreshold(prev, next), 5000);
+  });
+
+  it("continuing breach holds the captured value even when reserves flip to the active side", () => {
+    // Pre-fix: stored=0 (raw asymmetric capture) → heal swapped it to
+    // post-flip 300, re-scoring history. Post-fix: stored=10000 (correct
+    // capture), continuing event MUST NOT overwrite. Pin against the
+    // post-flip pool state.
+    const prev = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 1_704_672_000n,
+      currentOpenBreachEntryThreshold: 10000, // captured at rising edge
+    });
+    const next = makePool({
+      priceDifference: 12_500n,
+      rebalanceThreshold: 300, // <-- side flipped
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 1_704_672_000n,
+    });
+    assert.equal(nextOpenBreachEntryThreshold(prev, next), 10000);
+  });
+
+  it("legacy continuing breach with stored=0 stays at 0 (heal retired)", () => {
+    // Old rows captured stored=0 raw. Pre-fix the heal would substitute
+    // next.rebalanceThreshold once it became positive — re-scoring the
+    // breach against the post-flip side. Post-fix: stored=0 stays 0;
+    // closing fallback chain handles the floor.
+    const prev = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 1_704_672_000n,
+      currentOpenBreachEntryThreshold: 0, // legacy capture
+    });
+    const next = makePool({
+      priceDifference: 12_500n,
+      rebalanceThreshold: 300,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 1_704_672_000n,
+    });
+    assert.equal(
+      nextOpenBreachEntryThreshold(prev, next),
+      0,
+      "legacy stored=0 must NOT heal to next.rebalanceThreshold (PR 1.6)",
+    );
   });
 });

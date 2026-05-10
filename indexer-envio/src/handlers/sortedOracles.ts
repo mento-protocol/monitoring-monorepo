@@ -122,9 +122,14 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // `nextDeviationBreachStartedAt` / `recordBreachTransition` open or
       // close `DeviationThresholdBreach` rows from stale data — corrupting
       // breach durations and alert rollups. Skip the breach + health +
-      // snapshot pipeline entirely; Pool entity still advances oracle
-      // fields (oraclePrice, oracleTimestamp, oracleOk) for the freshness
-      // gate, but breach state stays as-is until self-heal lands.
+      // snapshot pipeline entirely; the Pool entity still advances
+      // diagnostic fields (`oraclePrice`, `lastFreshReporterAt`) but the
+      // FRESHNESS cursor (`oracleTimestamp` / `oracleOk`) is HELD on the
+      // existing values — advancing them would let the dashboard's homepage
+      // table + OG card (which recompute health from `oracleTimestamp` +
+      // `priceDifference` without checking `hasHealthData`) classify a
+      // pool with untrusted deviation data as "OK / fresh" instead of
+      // degraded (codex P2 #3214513402, PR 1.6).
       // Mirrors the two-cursor model in state-sync.ts.
       //
       // Exception: never-rebalance pools (both split sides 0 + known)
@@ -135,7 +140,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // accrual keeps moving on every oracle event even if decimals
       // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
       if (!updatedPool.tokenDecimalsKnown && !isNeverRebalance(updatedPool)) {
-        context.Pool.set(updatedPool);
+        // Preserve the FULL freshness cursor — timestamp, oracleOk,
+        // tx hash, AND displayed oraclePrice. Persisting the current
+        // event's `oraclePrice` / `oracleTxHash` next to a frozen
+        // timestamp would render a misleading row in the oracle tab
+        // (fresh price + tx, stale timestamp). codex P2 PR #370
+        // #3214756049 + #3214756054.
+        context.Pool.set({
+          ...updatedPool,
+          oracleTimestamp: existing.oracleTimestamp,
+          oracleOk: existing.oracleOk,
+          oracleTxHash: existing.oracleTxHash,
+          oraclePrice: existing.oraclePrice,
+        });
         return;
       }
 
@@ -188,10 +205,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
-      const persistedPool: Pool = {
+      const merged: Pool = {
         ...finalPool,
         ...poolUpdate,
         ...breachPoolUpdate,
+      };
+      // `recordHealthSample` may have flipped `hasHealthData: false → true`
+      // on the first valid sample. The earlier `computeHealthStatus` call
+      // ran against the OLD value (returning `N/A` via the new gate), so
+      // `merged.healthStatus` is stale. Recompute against `merged` so the
+      // persisted state is consistent (codex P2 PR #370 #3214748736).
+      const persistedPool: Pool = {
+        ...merged,
+        healthStatus: computeHealthStatus(merged, blockTimestamp),
       };
       context.Pool.set(persistedPool);
 
@@ -384,11 +410,31 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // `tokenDecimalsKnown` gate — same rationale as the OracleReported
       // handler, including the never-rebalance exception (those pools
       // record OK uptime samples with no priceDifference math).
+      // Pool entity still advances diagnostic fields (`oraclePrice`, median
+      // lineage), but the FRESHNESS cursor (`oracleTimestamp` / `oracleOk` /
+      // `lastOracleReportAt`) is HELD on the existing values — see
+      // OracleReported handler for the dashboard-side rationale
+      // (codex P2 #3214513402, PR 1.6).
       if (
         !withThreshold.tokenDecimalsKnown &&
         !isNeverRebalance(withThreshold)
       ) {
-        context.Pool.set(withThreshold);
+        // Preserve the FULL median cursor — timestamp + oracleOk +
+        // lastOracleReportAt + tx hash + displayed oraclePrice. Persisting
+        // the current event's `oraclePrice` / `oracleTxHash` next to a
+        // frozen timestamp would render a misleading row in the oracle
+        // tab. codex P2 PR #370 #3214756053.
+        context.Pool.set({
+          ...withThreshold,
+          oracleTimestamp: existing.oracleTimestamp,
+          oracleOk: existing.oracleOk,
+          // `lastOracleReportAt` is the median freshness anchor used by
+          // the indexer-side `derive` path; preserving it too keeps the
+          // anchor and the cursor in lockstep until self-heal lands.
+          lastOracleReportAt: existing.lastOracleReportAt,
+          oracleTxHash: existing.oracleTxHash,
+          oraclePrice: existing.oraclePrice,
+        });
         return;
       }
 
@@ -450,10 +496,19 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
-      const persistedPool: Pool = {
+      const merged: Pool = {
         ...finalPool,
         ...poolUpdate,
         ...breachPoolUpdate,
+      };
+      // `recordHealthSample` may have flipped `hasHealthData: false → true`
+      // on the first valid sample. The earlier `computeHealthStatus` call
+      // ran against the OLD value (returning `N/A` via the new gate), so
+      // `merged.healthStatus` is stale. Recompute against `merged` so the
+      // persisted state is consistent (codex P2 PR #370 #3214748736).
+      const persistedPool: Pool = {
+        ...merged,
+        healthStatus: computeHealthStatus(merged, blockTimestamp),
       };
       context.Pool.set(persistedPool);
 

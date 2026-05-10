@@ -48,6 +48,7 @@ import {
 import { computeRebalanceUsd, normalizeRewardBps } from "../../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
+  computeHealthStatus,
   effectiveThreshold,
   isNeverRebalance,
   persistableThreshold,
@@ -187,7 +188,16 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     );
     // Reassign so the daily-snapshot upsert below freezes the just-updated
     // health counters, not the pre-recordHealthSample values.
-    pool = { ...pool, ...poolUpdate };
+    // Recompute `healthStatus`: `recordHealthSample` may have flipped
+    // `hasHealthData: false → true` on the first valid sample, and
+    // `upsertPool`'s earlier computeHealthStatus ran against the OLD value.
+    // Without this, the persisted pool has the new hasHealthData but a
+    // stale `N/A` healthStatus (codex P2 PR #370 #3214748736).
+    const merged = { ...pool, ...poolUpdate };
+    pool = {
+      ...merged,
+      healthStatus: computeHealthStatus(merged, blockTimestamp),
+    };
     context.Pool.set(pool);
     // Skip the OracleSnapshot row when orientation is unknown: we'd be
     // writing a fresh deviation alongside a stale (often zero) oraclePrice
@@ -412,7 +422,16 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     );
     // Reassign so the daily-snapshot upsert below freezes the just-updated
     // health counters, not the pre-recordHealthSample values.
-    pool = { ...pool, ...poolUpdate };
+    // Recompute `healthStatus`: `recordHealthSample` may have flipped
+    // `hasHealthData: false → true` on the first valid sample, and
+    // `upsertPool`'s earlier computeHealthStatus ran against the OLD value.
+    // Without this, the persisted pool has the new hasHealthData but a
+    // stale `N/A` healthStatus (codex P2 PR #370 #3214748736).
+    const merged = { ...pool, ...poolUpdate };
+    pool = {
+      ...merged,
+      healthStatus: computeHealthStatus(merged, blockTimestamp),
+    };
     context.Pool.set(pool);
 
     // Skip OracleSnapshot when orientation is unknown — see UpdateReserves

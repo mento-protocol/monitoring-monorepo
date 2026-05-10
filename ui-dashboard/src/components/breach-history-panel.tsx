@@ -307,7 +307,7 @@ function BreachHistoryPanelInner({
 
   return (
     <div className="flex flex-col gap-4">
-      <BreachHistoryChart breaches={chartRows} pool={pool} />
+      <BreachHistoryChart breaches={chartRows} />
 
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -359,7 +359,6 @@ function BreachHistoryPanelInner({
         ) : (
           <BreachTable
             rows={filteredRows}
-            pool={pool}
             network={network}
             getName={getName}
             sortKey={sortKey}
