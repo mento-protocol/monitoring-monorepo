@@ -25,7 +25,7 @@ import {
   POOL_THRESHOLDS_KNOWN_EXT,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
-import type { Pool, PoolSnapshot } from "@/lib/types";
+import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
 
 // Lean, OG-specific daily snapshot query. Only pulls the fields and row count
 // needed for the sparkline + 7d WoW — a fraction of POOL_DAILY_SNAPSHOTS_CHART's
@@ -289,7 +289,7 @@ const REASON_CRITICAL = 4;
  * Each reason is a short lowercase phrase suitable for display in meta
  * descriptions and card sublines, sorted by severity descending. */
 function computeHealthReasons(pool: Pool, chainId: number): string[] {
-  if (pool.source?.includes("virtual")) return [];
+  if (isVirtualPool(pool)) return [];
   if (computeEffectiveStatus(pool, chainId) === "WEEKEND") return [];
 
   const items: { text: string; severity: number }[] = [];
@@ -420,7 +420,7 @@ function computeOracleFreshness(
   chainId: number,
 ): { ageSeconds: number | null; fresh: boolean } {
   const oracleTs = Number(pool.oracleTimestamp ?? "0");
-  if (!oracleTs || pool.source?.includes("virtual")) {
+  if (!oracleTs || isVirtualPool(pool)) {
     return { ageSeconds: null, fresh: false };
   }
   const now = Math.floor(Date.now() / 1000);

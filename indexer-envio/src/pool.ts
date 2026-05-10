@@ -650,6 +650,14 @@ export async function selfHealWrappedExchangeId(
   let healedToken1 = pool.token1;
   let healedToken0Decimals = pool.token0Decimals;
   let healedToken1Decimals = pool.token1Decimals;
+  // Track per-leg whether THIS pass actually fetched decimals (vs.
+  // inheriting them from the spread). Round 5 used `dec > 0` which
+  // was satisfied by the schema-default 18 — codex caught this as a
+  // false-positive that would prevent `selfHealTokenDecimals` from
+  // ever retrying a transient blip on a non-18dp leg. Only flip
+  // `tokenDecimalsKnown=true` when both legs were fetched this pass.
+  let fetchedDec0 = false;
+  let fetchedDec1 = false;
   if (exchange) {
     if (exchange.wrappedByPoolId !== pool.id) {
       context.BiPoolExchange.set({
@@ -726,6 +734,7 @@ export async function selfHealWrappedExchangeId(
       if (dec) {
         healedToken0 = exchange.asset0;
         healedToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+        fetchedDec0 = true;
       }
     }
     if (fillToken1) {
@@ -738,19 +747,18 @@ export async function selfHealWrappedExchangeId(
       if (dec) {
         healedToken1 = exchange.asset1;
         healedToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+        fetchedDec1 = true;
       }
     }
   }
-  // Mark decimals trustworthy when both legs were paired-pinned this
-  // pass (or were already set + non-default before). Lets the merged-in
-  // `selfHealTokenDecimals` short-circuit on the next event instead of
-  // firing an additional RPC pair through `tokenDecimalsScalingEffect`.
-  const decimalsKnown =
-    pool.tokenDecimalsKnown ||
-    (Boolean(healedToken0) &&
-      Boolean(healedToken1) &&
-      healedToken0Decimals > 0 &&
-      healedToken1Decimals > 0);
+  // Flip `tokenDecimalsKnown` only when this pass actually fetched both
+  // legs' decimals via the effect. Inheriting `decimals > 0` from the
+  // schema default (18) is NOT proof of trust — that's the
+  // false-positive codex flagged. If decimals were already known
+  // before this call, preserve true. Otherwise the cross-pass
+  // coordination falls to `selfHealTokenDecimals` (which fires both
+  // legs independently and sets the flag when both succeed).
+  const decimalsKnown = pool.tokenDecimalsKnown || (fetchedDec0 && fetchedDec1);
   return {
     ...pool,
     wrappedExchangeId: result.exchangeId,
@@ -836,6 +844,11 @@ export async function mirrorTokensAndDecimalsToPool(
   let nextToken1 = pool.token1;
   let nextToken0Decimals = pool.token0Decimals;
   let nextToken1Decimals = pool.token1Decimals;
+  // Round 6 codex #3: track per-leg whether THIS pass actually fetched
+  // decimals. The flag-set below uses these so a transient failure on
+  // one leg doesn't trick the gate into trusting decimals.
+  let fetchedDec0 = false;
+  let fetchedDec1 = false;
   if (fillToken0) {
     const dec = await context.effect(tokenDecimalsScalingEffect, {
       chainId: pool.chainId,
@@ -846,6 +859,7 @@ export async function mirrorTokensAndDecimalsToPool(
     if (dec) {
       nextToken0 = asset0;
       nextToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+      fetchedDec0 = true;
     }
   }
   if (fillToken1) {
@@ -858,17 +872,26 @@ export async function mirrorTokensAndDecimalsToPool(
     if (dec) {
       nextToken1 = asset1;
       nextToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+      fetchedDec1 = true;
     }
   }
   // No-op write guard: if both legs failed to fetch decimals, skip the
   // Pool.set entirely so the updatedAt cursor doesn't move on a no-op.
   if (nextToken0 === pool.token0 && nextToken1 === pool.token1) return;
+  // Flip `tokenDecimalsKnown` when both legs were freshly fetched. In
+  // the heal-before-exchange ordering this mirror may be the only
+  // write after the BiPoolExchange row arrives — without setting the
+  // flag, dashboard TVL/volume paths keep treating decimals as
+  // untrusted until some unrelated VP event happens to run
+  // `selfHealTokenDecimals`.
+  const decimalsKnown = pool.tokenDecimalsKnown || (fetchedDec0 && fetchedDec1);
   context.Pool.set({
     ...pool,
     token0: nextToken0,
     token1: nextToken1,
     token0Decimals: nextToken0Decimals,
     token1Decimals: nextToken1Decimals,
+    tokenDecimalsKnown: decimalsKnown,
     updatedAtBlock: blockNumber,
     updatedAtTimestamp: blockTimestamp,
   });

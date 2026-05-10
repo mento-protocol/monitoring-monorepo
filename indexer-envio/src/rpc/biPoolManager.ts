@@ -214,7 +214,14 @@ export async function fetchVirtualPoolExchangeId(
     const code = await client.getCode({
       address: vpAddress as `0x${string}`,
     });
-    if (!code || code === "0x") return null;
+    // Empty bytecode (`0x` or null) is transient: an Envio sync that
+    // observes the deploy event ahead of the configured RPC's view
+    // would see no code yet. Caching that as a permanent not-VP would
+    // disable healed-VP paths forever for the just-deployed pool.
+    // Distinguish it from "got real bytecode but no pattern match"
+    // (returned as `null` from `extractVpExchangeIdFromBytecode`),
+    // which IS permanent and safe to cache.
+    if (!code || code === "0x") return VP_PROBE_RPC_ERROR;
     return extractVpExchangeIdFromBytecode(code);
   } catch (err) {
     logRpcFailure(chainId, "vpExchangeId", vpAddress, err, undefined, log);
