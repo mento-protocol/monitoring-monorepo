@@ -414,6 +414,19 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     });
+    // Round 5 codex: mirror tokens + decimals to the wrapping Pool when
+    // the destroy completes the link. Existing row carries asset0/asset1.
+    // Helper is idempotent — fast-bails when both tokens are present.
+    if (wrappedByPoolId) {
+      await mirrorTokensAndDecimalsToPool(
+        context,
+        wrappedByPoolId,
+        existing.asset0,
+        existing.asset1,
+        blockNumber,
+        blockTimestamp,
+      );
+    }
     return;
   }
 
@@ -451,6 +464,20 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
     updatedAtTimestamp: blockTimestamp,
   };
   context.BiPoolExchange.set(seeded);
+  // Round 5 codex: seed-from-destroy completes the reverse-link too.
+  // If a VP self-healed before this row existed, no later
+  // BucketsUpdated/SpreadUpdated events will fire on the destroyed
+  // exchange, so this is the LAST chance to mirror tokens + decimals.
+  if (wrappedByPoolId) {
+    await mirrorTokensAndDecimalsToPool(
+      context,
+      wrappedByPoolId,
+      seeded.asset0,
+      seeded.asset1,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

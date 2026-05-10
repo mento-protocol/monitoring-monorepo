@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
@@ -67,7 +67,7 @@ export function useRebalanceCheck(
 
 function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
   if (!pool) return false;
-  if (pool.source?.includes("virtual")) return false;
+  if (isVirtualPool(pool)) return false;
   if (!pool.rebalancerAddress) return false;
   // Match DeviationCell / HealthPanel: when the indexer hasn't backfilled
   // health columns yet, zero-filled defaults make `computeHealthStatus`

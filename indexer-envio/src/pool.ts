@@ -459,15 +459,13 @@ export async function selfHealWrappedExchangeId(
       exchangeProvider: result.exchangeProvider,
       exchangeId: result.exchangeId,
     });
-    if (
-      struct &&
-      struct.pricingModule !== ZERO_ADDRESS &&
-      !(
-        struct.bucket0 === BigInt(0) &&
-        struct.bucket1 === BigInt(0) &&
-        struct.lastBucketUpdate === BigInt(0)
-      )
-    ) {
+    // Match `ensureBiPoolExchange`'s "destroyed exchange" test: reject
+    // ONLY the all-zero-and-no-pricing-module case. Pre-`BucketsUpdated`
+    // (newly-created exchange before its first bucket reset) returns
+    // zero buckets but has a real `pricingModule` + assets — that's a
+    // valid seed. A bucket-zero gate would reject those and skip the
+    // token/decimal backfill on the first VP swap.
+    if (struct && struct.pricingModule !== ZERO_ADDRESS) {
       const seeded = {
         id: exchangeRowId,
         chainId: pool.chainId,
