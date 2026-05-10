@@ -26,12 +26,14 @@ import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
+  poolExchangeEffect,
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
   tokenDecimalsScalingEffect,
   vpExchangeIdEffect,
 } from "./rpc/effects";
+import { lookupPricingModuleName } from "./contractAddresses";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
 
@@ -429,7 +431,64 @@ export async function selfHealWrappedExchangeId(
   });
   if (!result) return pool;
   const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
-  const exchange = await context.BiPoolExchange.get(exchangeRowId);
+  let exchange = await context.BiPoolExchange.get(exchangeRowId);
+  // Round 3 #5: seed the BiPoolExchange row inline if it doesn't exist
+  // yet. Pre-start_block ordering: VP.Swap is the first observed event,
+  // BiPoolManager.ExchangeCreated fired before our start_block (so it
+  // never replays). Without seeding here, token + decimal backfill
+  // can't run, and the swap handler immediately persists
+  // `SwapEvent.volumeUsdWei` from default 18/18 decimals → mis-scaled
+  // forever (the later reverse-link backfill only updates the Pool
+  // row, not historical SwapEvent / leaderboard rows). RPC-fetch the
+  // struct via the same effect `BiPoolManager.ExchangeCreated` uses
+  // and materialize a row keyed on the bytecode-extracted
+  // exchangeProvider/exchangeId. Skip on RPC failure (transient) and
+  // on all-zero struct (destroyed exchange).
+  if (!exchange) {
+    const struct = await context.effect(poolExchangeEffect, {
+      chainId: pool.chainId,
+      exchangeProvider: result.exchangeProvider,
+      exchangeId: result.exchangeId,
+    });
+    if (
+      struct &&
+      struct.pricingModule !== ZERO_ADDRESS &&
+      !(
+        struct.bucket0 === BigInt(0) &&
+        struct.bucket1 === BigInt(0) &&
+        struct.lastBucketUpdate === BigInt(0)
+      )
+    ) {
+      const seeded = {
+        id: exchangeRowId,
+        chainId: pool.chainId,
+        exchangeId: result.exchangeId,
+        exchangeProvider: result.exchangeProvider,
+        asset0: struct.asset0,
+        asset1: struct.asset1,
+        pricingModule: struct.pricingModule,
+        pricingModuleName:
+          lookupPricingModuleName(pool.chainId, struct.pricingModule) ??
+          undefined,
+        spread: struct.spread,
+        referenceRateFeedID: struct.referenceRateFeedID,
+        referenceRateResetFrequency: struct.referenceRateResetFrequency,
+        minimumReports: struct.minimumReports,
+        stablePoolResetSize: struct.stablePoolResetSize,
+        bucket0: struct.bucket0,
+        bucket1: struct.bucket1,
+        lastBucketUpdate: struct.lastBucketUpdate,
+        isDeprecated: false,
+        wrappedByPoolId: pool.id,
+        createdAtBlock: blockNumber,
+        createdAtTimestamp: blockTimestamp,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      };
+      context.BiPoolExchange.set(seeded);
+      exchange = seeded;
+    }
+  }
   let healedFeedId = pool.referenceRateFeedID;
   let healedToken0 = pool.token0;
   let healedToken1 = pool.token1;

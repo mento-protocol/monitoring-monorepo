@@ -543,7 +543,10 @@ export function GlobalPoolsTable({
                 {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
                     {p.source ? (
-                      <SourceBadge source={p.source} />
+                      <SourceBadge
+                        source={p.source}
+                        wrappedExchangeId={p.wrappedExchangeId}
+                      />
                     ) : (
                       <span className="text-slate-600 text-xs">—</span>
                     )}

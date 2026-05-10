@@ -103,7 +103,10 @@ export function PoolHeader({
         <span className="text-sm">
           <AddressLink address={poolContractAddress} readOnly />
         </span>
-        <SourceBadge source={pool.source} />
+        <SourceBadge
+          source={pool.source}
+          wrappedExchangeId={pool.wrappedExchangeId}
+        />
         {v2Config?.isDeprecated && (
           <span className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-300">
             Deprecated

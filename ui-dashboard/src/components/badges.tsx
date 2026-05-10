@@ -47,9 +47,21 @@ export function HealthBadge({ status }: { status: string }) {
   );
 }
 
-export function SourceBadge({ source }: { source: string }) {
-  const isFPMM = source.includes("fpmm");
-  const label = isFPMM ? "FPMM" : "Virtual";
+export function SourceBadge({
+  source,
+  wrappedExchangeId,
+}: {
+  source: string;
+  wrappedExchangeId?: string | null;
+}) {
+  // Healed VirtualPools intentionally retain `fpmm_*` source for
+  // pickPreferredSource priority alignment; `wrappedExchangeId` is the
+  // VP-side canonical signal. Same disjoint logic as `isVirtualPool` /
+  // `isFpmm` (kept inline here to avoid pulling tokens.ts into a
+  // pure-presentation component).
+  const isVirtual = source.includes("virtual") || Boolean(wrappedExchangeId);
+  const isFPMM = !isVirtual && source.includes("fpmm");
+  const label = isVirtual ? "Virtual" : "FPMM";
   return (
     <span
       className={`rounded px-2 py-0.5 text-xs font-medium ${

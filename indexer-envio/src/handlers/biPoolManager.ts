@@ -146,20 +146,26 @@ async function ensureBiPoolExchange(
           blockNumber,
           blockTimestamp,
         );
-        // Heal-before-exchange ordering: VP self-healed when no exchange
-        // row existed yet, so its `selfHealWrappedExchangeId` couldn't
-        // mirror tokens/decimals from `BiPoolExchange.asset0/asset1`. Now
-        // that the row IS available and we just established the back-link,
-        // do the mirror that the heal path missed.
-        await mirrorTokensAndDecimalsToPool(
-          context,
-          wrappedByPoolId,
-          current.asset0,
-          current.asset1,
-          blockNumber,
-          blockTimestamp,
-        );
       }
+    }
+    // Token + decimals mirror: runs unconditionally when the link is
+    // established (newly-discovered or already-set) so a Pool that's
+    // linked-but-missing-tokens gets healed on the next event. The
+    // helper is idempotent — fast-bails when both tokens are already
+    // present, so re-runs on every BucketsUpdated/SpreadUpdated cost
+    // one DB read at most. Without this branch, a VP that healed under
+    // an older code revision (link landed before token backfill) keeps
+    // `?/?` symbols + 18/18 default decimals indefinitely because the
+    // newly-link branch only fires when `wrappedByPoolId` was unset.
+    if (current.wrappedByPoolId) {
+      await mirrorTokensAndDecimalsToPool(
+        context,
+        current.wrappedByPoolId,
+        current.asset0,
+        current.asset1,
+        blockNumber,
+        blockTimestamp,
+      );
     }
     return current;
   }

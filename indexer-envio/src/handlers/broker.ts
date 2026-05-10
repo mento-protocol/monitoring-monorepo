@@ -23,6 +23,7 @@ import { isSystemAddress } from "../system-addresses";
 import { classifyAggregator } from "../aggregators";
 import { maybeHeartbeatFlushV2 } from "../leaderboardWindowFlush";
 import { buildSwapAddressFields } from "../swap";
+import { selfHealWrappedExchangeId } from "../pool";
 
 // Per-chain cache of the v3 Router address. JSON lookup once per chain is
 // cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
@@ -118,9 +119,26 @@ Broker.Swap.handler(async ({ event, context }) => {
   // via `routedViaV3Router=false` filter) excludes these double-counted
   // swaps too — the original schema flag `routedViaV3Router` only catches
   // the `tx.to == Routerv300` path, not the aggregator → VirtualPool path.
-  const brokerCallerPool = await context.Pool.get(
+  let brokerCallerPool = await context.Pool.get(
     makePoolId(event.chainId, brokerCaller),
   );
+  // Round 3 #6: pre-warm VP classification. Pre-start_block VPs whose
+  // first event is `VirtualPool.UpdateReserves` (the inner step of a
+  // VP-routed swap) get a Pool row with source `fpmm_update_reserves`
+  // and no `wrappedExchangeId` yet. Broker.Swap fires next in the same
+  // tx, BEFORE VirtualPool.Swap's own heal runs, so a source-only check
+  // would misclassify the VP-routed swap as legacy v2 and write the
+  // double-counting rollup. Run the heal here so isVirtualPool sees the
+  // bytecode-confirmed `wrappedExchangeId`. Idempotent + effect-cached
+  // — VirtualPool.Swap's later upsertPool call hits the same cache.
+  if (brokerCallerPool && !brokerCallerPool.wrappedExchangeId) {
+    brokerCallerPool = await selfHealWrappedExchangeId(
+      context,
+      brokerCallerPool,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
   const brokerCallerIsVirtualPool = brokerCallerPool
     ? isVirtualPool(brokerCallerPool)
     : false;

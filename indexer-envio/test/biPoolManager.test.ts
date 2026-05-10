@@ -678,12 +678,13 @@ describe("BiPoolManager handlers", () => {
       // discovers the existing wrapping Pool via the `wrappedByPoolId`
       // back-link lookup. Without `mirrorTokensAndDecimalsToPool` the
       // Pool stays at `?/?` + 18/18 default forever.
-      _setMockPoolExchange(
-        CHAIN_ID,
-        BIPOOL_MANAGER_ADDRESS,
-        EXCHANGE_ID,
-        fullStruct(),
-      );
+      //
+      // Round 3 #5 changed the heal path to also RPC-seed the
+      // BiPoolExchange row inline. To exercise the reverse-link branch
+      // specifically, we mock `poolExchangeEffect` to return null
+      // (transient RPC failure) so the inline seed bails — leaving the
+      // Pool healed-but-token-empty until ExchangeCreated lands.
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
       _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
         exchangeProvider: BIPOOL_MANAGER_ADDRESS,
         exchangeId: EXCHANGE_ID,
@@ -749,6 +750,77 @@ describe("BiPoolManager handlers", () => {
       assert.equal(poolFinal!.token1, ASSET1);
       assert.equal(poolFinal!.token0Decimals, 6);
       assert.equal(poolFinal!.token1Decimals, 18);
+    });
+
+    it("heal-path inline seed: VirtualPool.Swap-first RPC-seeds BiPoolExchange so the swap valuation has correct decimals", async function () {
+      this.timeout(10_000);
+      // Codex P2 round 3 #5: when VP.Swap is the first observed event AND
+      // the BiPoolExchange row doesn't exist yet, `selfHealWrappedExchangeId`
+      // must RPC-seed the row (via `poolExchangeEffect`) before
+      // `buildSwapTraderFields` consumes the pool. Without this, the
+      // first SwapEvent.volumeUsdWei is mis-scaled at 18/18 decimals
+      // and historical leaderboard rows lock the wrong values forever
+      // (the later reverse-link backfill only touches Pool, not
+      // SwapEvent).
+      //
+      // Setup: pool-exchange struct returns a 6dp asset0 (USDC-like).
+      // The heal helper inline-seeds BiPoolExchange from the struct,
+      // backfills tokens + decimals on the Pool, returns the healed
+      // pool, and `buildSwapTraderFields` then uses the correct 6dp.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockERC20Decimals(CHAIN_ID, ASSET0, 6);
+      _setMockERC20Decimals(CHAIN_ID, ASSET1, 18);
+
+      let mockDb = MockDb.createMockDb();
+      // VirtualPool.Swap is the FIRST event — no prior BiPoolManager
+      // event. Heal must RPC-seed the exchange row inline.
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            token0Decimals: number;
+            token1Decimals: number;
+            wrappedExchangeId?: string;
+            referenceRateFeedID: string;
+          }
+        | undefined;
+      assert.ok(pool);
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      // Tokens + decimals filled inline via the heal path's RPC seed.
+      assert.equal(pool!.token0, ASSET0);
+      assert.equal(pool!.token1, ASSET1);
+      assert.equal(pool!.token0Decimals, 6);
+      assert.equal(pool!.token1Decimals, 18);
+      assert.equal(pool!.referenceRateFeedID, FEED_ID);
+
+      // BiPoolExchange row was inline-seeded with wrappedByPoolId already set.
+      const exchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as { wrappedByPoolId?: string; asset0: string } | undefined;
+      assert.ok(exchange);
+      assert.equal(exchange!.wrappedByPoolId, poolId);
+      assert.equal(exchange!.asset0, ASSET0);
     });
   });
 });

@@ -15,6 +15,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       token0Decimals
       token1Decimals
       source
+      wrappedExchangeId
       createdAtBlock
       createdAtTimestamp
       updatedAtBlock
