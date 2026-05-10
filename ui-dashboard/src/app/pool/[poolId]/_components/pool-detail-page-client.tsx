@@ -370,8 +370,13 @@ function PoolDetail() {
               <ReservesPanel
                 pool={pool}
                 rates={rates}
-                ratesLoading={poolNeedsRates && ratesLoading}
-                ratesError={poolNeedsRates && ratesError}
+                ratesLoading={
+                  (poolNeedsRates && ratesLoading) || thresholdsLoading
+                }
+                ratesError={
+                  (poolNeedsRates && ratesError) ||
+                  thresholdsError !== undefined
+                }
               />
             </div>
           )}
