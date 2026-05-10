@@ -466,6 +466,15 @@ export async function selfHealTokenDecimals(
   if (pool.tokenDecimalsKnown || pool.source === "") {
     return pool;
   }
+  // Skip when both pair tokens are still unset — the only way the direct
+  // `decimals0`/`decimals1` getters could be authoritative without
+  // a fallback is on FPMMs, which always have tokens set from their
+  // factory event. If tokens aren't set yet, this is a pre-start_block
+  // VP whose `selfHealWrappedExchangeId` couldn't backfill from
+  // `BiPoolExchange` (transient seed failure) — running the direct
+  // RPC here without a fallback is a wasted call. The next event,
+  // post-reverse-link backfill, will retry with tokens populated.
+  if (!pool.token0 || !pool.token1) return pool;
   const poolAddr = extractAddressFromPoolId(pool.id);
   const [dec0Raw, dec1Raw] = await Promise.all([
     context.effect(tokenDecimalsScalingEffect, {
@@ -732,6 +741,16 @@ export async function selfHealWrappedExchangeId(
       }
     }
   }
+  // Mark decimals trustworthy when both legs were paired-pinned this
+  // pass (or were already set + non-default before). Lets the merged-in
+  // `selfHealTokenDecimals` short-circuit on the next event instead of
+  // firing an additional RPC pair through `tokenDecimalsScalingEffect`.
+  const decimalsKnown =
+    pool.tokenDecimalsKnown ||
+    (Boolean(healedToken0) &&
+      Boolean(healedToken1) &&
+      healedToken0Decimals > 0 &&
+      healedToken1Decimals > 0);
   return {
     ...pool,
     wrappedExchangeId: result.exchangeId,
@@ -740,6 +759,7 @@ export async function selfHealWrappedExchangeId(
     token1: healedToken1,
     token0Decimals: healedToken0Decimals,
     token1Decimals: healedToken1Decimals,
+    tokenDecimalsKnown: decimalsKnown,
   };
 }
 
@@ -1075,9 +1095,7 @@ export const upsertPool = async ({
   // `vpExchangeIdEffect` is `cache:true`, so re-entry is essentially
   // free for already-bytecode-confirmed VPs.
   const wrappedHealed =
-    invertHealed.wrappedExchangeId &&
-    invertHealed.token0 &&
-    invertHealed.token1
+    invertHealed.wrappedExchangeId && invertHealed.token0 && invertHealed.token1
       ? invertHealed
       : await selfHealWrappedExchangeId(
           context,
