@@ -77,7 +77,7 @@ async function ensureBiPoolExchange(
         // Bucket fields: only fill from struct when no BucketsUpdated has
         // landed yet (`lastBucketUpdate === 0n`). Once a BucketsUpdated
         // event has moved them, those values are more authoritative than
-        // the struct's `latest`-block read. Without this, a stub retry
+        // the struct's block-scoped read. Without this, a stub retry
         // triggered first by `SpreadUpdated` (before any BucketsUpdated)
         // would leave buckets at zero even though the struct had real
         // values, and the panel would render an active exchange with
