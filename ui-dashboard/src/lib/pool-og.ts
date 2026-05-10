@@ -267,9 +267,10 @@ function computeVolumeSeries(
   rates: OracleRateMap,
 ): number[] {
   // Same untrusted-decimals defense as the other valuation paths —
-  // `pool.tokenDecimalsKnown=false` means USD math against schema-default
+  // `pool.tokenDecimalsKnown !== true` means USD math against schema-default
   // 18/18 would overstate by ~1e12 for a 6-dp leg. Empty series renders
-  // as "—" in the OG card. Undefined trusts default 18 (deploy-window).
+  // as "—" in the OG card. Strict gate (PR 1.7): undefined fails closed
+  // since the post-PR-1.6 indexer populates the field on every pool.
   if (pool.tokenDecimalsKnown !== true) return [];
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
   const d0 = pool.token0Decimals ?? 18;

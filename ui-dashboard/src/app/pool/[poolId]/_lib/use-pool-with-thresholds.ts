@@ -5,9 +5,9 @@
 // consumers get a single `Pool` object with the trust flags merged in.
 // On EXT failure the fields stay `undefined`: `isNeverRebalance` /
 // `effectiveThreshold` fall back to the 10000-bps under-bound, and
-// USD math via `getSnapshotVolumeInUsd` short-circuits only on an
-// explicit `tokenDecimalsKnown=false` (undefined trusts the legacy
-// schema-default 18 path so existing pools don't blank).
+// USD math via `getSnapshotVolumeInUsd` / `poolTvlUSD` fails closed —
+// PR 1.7 tightened the gate to strict `!== true`, so an EXT-query
+// failure renders the pool's USD fields as `—` until the next refresh.
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";

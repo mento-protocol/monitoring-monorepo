@@ -208,9 +208,11 @@ export function getSnapshotVolumeInUsd(
   // those fields hold the schema-default 18 — a 6-dp USDC leg would be
   // scaled by 1e18 and produce a 1e12-fold USD overstatement. The indexer
   // already suppresses `SwapEvent.volumeUsdWei` in that case; mirror the
-  // gate here so snapshot-derived volumes stay null too. Undefined flag
-  // (deploy-window schema-lag) trusts the legacy schema-default 18 path
-  // so existing pools don't blank — only an explicit `false` short-circuits.
+  // gate here so snapshot-derived volumes stay null too. Strict `!== true`
+  // (PR 1.7): `undefined` represents either a pre-PR-1.5 indexer schema OR
+  // a transient EXT-query failure — both should fail closed. The post-PR-1.6
+  // indexer populates the field on every pool, so `undefined` is no longer a
+  // "deploy-window default" worth trusting.
   if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);

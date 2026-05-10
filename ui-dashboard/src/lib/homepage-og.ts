@@ -427,9 +427,11 @@ function rowUsdVolume(
 ): number | null {
   // Same untrusted-decimals defense as `getSnapshotVolumeInUsd` /
   // `poolTotalVolumeUSD` / `poolTvlUSD`. A non-18-dp leg with
-  // `tokenDecimalsKnown=false` would parse `swapVolume*` against the
+  // `tokenDecimalsKnown !== true` would parse `swapVolume*` against the
   // schema-default 18 and inflate the daily USD figure by 1e12.
-  // Undefined still trusts default 18 (deploy-window resilience).
+  // Strict gate (PR 1.7): undefined fails closed since the post-PR-1.6
+  // indexer populates the field on every pool — `undefined` represents
+  // either a transient EXT-query failure or a legacy/unindexed pool.
   if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
