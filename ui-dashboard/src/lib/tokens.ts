@@ -216,11 +216,31 @@ export function canValueTvl(
 
 /**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
- * Returns 0 if oracle price or reserves are missing, or if the indexer
- * hasn't read on-chain decimals yet (`tokenDecimalsKnown=false` would scale
- * a non-18-dp leg by `1e18` instead of e.g. `1e6` and overstate TVL by 1e12).
- * Undefined trusts the legacy schema-default 18 path so deploy-window pools
- * don't blank.
+ *
+ * Returns:
+ *  - `null` when the indexer hasn't confirmed on-chain decimals
+ *    (`tokenDecimalsKnown !== true`). USD math against the schema-default
+ *    18 would overstate by ~1e12 for a 6-dp leg. Callers MUST skip null
+ *    from sums and render `—` instead — sorting/aggregating null as 0
+ *    treats the pool as if it has no value, which is misleading for what
+ *    is actually "value unknown." Strict `!== true` (not `=== false`)
+ *    so EXT-query failures and pre-PR-1.7 indexer schemas degrade safely.
+ *  - `0` for legitimate "no value yet" — missing oracle price OR both
+ *    reserves zero OR neither leg priceable via oracle/FX. These are
+ *    pools that are computable but evaluate to nothing.
+ *  - The computed USD value otherwise.
+ *
+ * Caller pattern for sums:
+ *     let sum = 0;
+ *     for (const p of pools) {
+ *       const v = poolTvlUSD(p, n, r);
+ *       if (v !== null) sum += v;
+ *     }
+ *
+ * Caller pattern for sorts (untrusted to bottom of descending order):
+ *     pools.toSorted((a, b) =>
+ *       (poolTvlUSD(b) ?? Number.NEGATIVE_INFINITY) -
+ *       (poolTvlUSD(a) ?? Number.NEGATIVE_INFINITY))
  */
 export function poolTvlUSD(
   pool: {
@@ -235,8 +255,8 @@ export function poolTvlUSD(
   },
   network: Network,
   rates?: OracleRateMap,
-): number {
-  if (pool.tokenDecimalsKnown === false) return 0;
+): number | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
   if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
   if (!pool.reserves0 && !pool.reserves1) return 0;
   const r0 = parseWei(pool.reserves0 ?? "0", pool.token0Decimals ?? 18);

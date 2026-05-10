@@ -75,7 +75,7 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
 }
 
 export interface GlobalSortContext {
-  tvlByKey: Map<string, number>;
+  tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
   volume24hByKey?: Map<string, number | null | undefined>;
   volume7dByKey?: Map<string, number | null | undefined>;
@@ -133,9 +133,19 @@ export function sortGlobalPools(
         const bFee = (b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0);
         return sortDir === "asc" ? aFee - bFee : bFee - aFee;
       }
-      case "tvl":
-        cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
-        break;
+      case "tvl": {
+        // Untrusted pools (null) sink to the bottom regardless of direction —
+        // matches the volume / total-volume / WoW columns. Sentinel-mapping
+        // null to ±Infinity would put unknowns at the top of ascending order
+        // ahead of legitimate $0 pools (fail-open suggests "lowest"); the
+        // explicit-skip pattern keeps unknown rows last either way.
+        const aTvl = tvlByKey.get(aKey);
+        const bTvl = tvlByKey.get(bKey);
+        if (aTvl == null && bTvl == null) return 0;
+        if (aTvl == null) return 1;
+        if (bTvl == null) return -1;
+        return sortDir === "asc" ? aTvl - bTvl : bTvl - aTvl;
+      }
       case "tvlChangeWoW": {
         // Both error (null) and missing-data (undefined) sink regardless of direction.
         const aW = tvlChangeWoWByKey?.get(aKey);
@@ -520,7 +530,7 @@ export function GlobalPoolsTable({
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = resolveLimitStatus(p);
             const effectiveStatus = computeEffectiveStatus(p, network.chainId);
-            const tvl = tvlByKey.get(key) ?? 0;
+            const tvl = tvlByKey.get(key) ?? null;
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
             const totalVol = totalVolumeByKey.get(key);
@@ -607,7 +617,7 @@ export function GlobalPoolsTable({
                   )}
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
-                  {tvl > 0 ? formatUSD(tvl) : "—"}
+                  {tvl !== null && tvl > 0 ? formatUSD(tvl) : "—"}
                 </td>
                 <td
                   className={`hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono ${wowColor}`}

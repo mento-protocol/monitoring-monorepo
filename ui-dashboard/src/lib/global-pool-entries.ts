@@ -41,7 +41,7 @@ function perPoolTvlWindow(
   pools: Pool[],
   network: Network,
   rates: OracleRateMap,
-): Map<string, { now: number; ago: number }> {
+): Map<string, { now: number | null; ago: number | null }> {
   const fpmmMap = new Map(
     pools.flatMap((p) => (isFpmm(p) ? [[p.id, p] as const] : [])),
   );
@@ -53,7 +53,9 @@ function perPoolTvlWindow(
       earliest.set(s.poolId, s);
     }
   }
-  const result = new Map<string, { now: number; ago: number }>();
+  // `null` propagates "TVL unknowable for this pool" (untrusted decimals)
+  // up to consumers — see `poolTvlUSD` in `lib/tokens.ts` for the rationale.
+  const result = new Map<string, { now: number | null; ago: number | null }>();
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
     result.set(poolId, {
@@ -122,7 +124,9 @@ export function buildGlobalPoolEntries(
         tvlChangeWoWByKey.set(key, null);
       } else {
         const v = perPool7dTvl?.get(pool.id);
-        if (v && v.ago > 0) {
+        // Untrusted-decimals pools surface as null on either side — skip
+        // the WoW computation entirely so the column degrades to "—".
+        if (v && v.now !== null && v.ago !== null && v.ago > 0) {
           tvlChangeWoWByKey.set(key, ((v.now - v.ago) / v.ago) * 100);
         }
       }

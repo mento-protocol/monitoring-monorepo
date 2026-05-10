@@ -62,6 +62,9 @@ export function makeTvlPool(overrides: Partial<Pool> = {}): Pool {
     updatedAtTimestamp: "0",
     reserves0: "0",
     reserves1: "0",
+    // USD-math helpers gate strict on `=== true`; default to trusted so
+    // tests not exercising the untrusted-decimals gate don't have to opt in.
+    tokenDecimalsKnown: true,
     ...overrides,
   };
 }

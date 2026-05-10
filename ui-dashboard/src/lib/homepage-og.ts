@@ -12,6 +12,7 @@ import {
   USDM_SYMBOLS,
   type OracleRateMap,
 } from "@/lib/tokens";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
@@ -141,12 +142,12 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     client.request<{ Pool: Pool[] }>({
       document: ALL_POOLS_WITH_HEALTH,
       variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
     client.request<{ Pool: ThresholdsRow[] }>({
       document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
       variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
   ]);
 
@@ -216,7 +217,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
           limit: DAILY_PAGE_SIZE,
           offset: page * DAILY_PAGE_SIZE,
         },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
       });
       const rows = res.PoolDailySnapshot ?? [];
       for (const row of rows) {
@@ -264,7 +265,15 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     r.slice !== null ? [r.slice] : [],
   );
   if (slices.length === 0) return null;
-  const partial = offlineChains.length > 0;
+  // OR-extend `partial` to include "any pool's decimals are untrusted":
+  // strict-gate USD math returns null for those pools, every aggregation
+  // below silently skips them, and consumers labeling the card as
+  // "complete" would mis-report a 1e12-overstated 6-dp leg as missing.
+  // Cheaper to flag once at the top than thread through every helper.
+  const anyPoolUntrusted = slices.some((s) =>
+    s.pools.some((p) => p.tokenDecimalsKnown !== true),
+  );
+  const partial = offlineChains.length > 0 || anyPoolUntrusted;
 
   // TVL aggregation uses only FPMM pools with a live oracle price —
   // VirtualPools have no reserves and can't be TVL-counted. `canValueTvl`
@@ -283,14 +292,22 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     s.pools.map((pool) => ({ pool, slice: s })),
   );
 
-  const totalTvlUsd =
-    priceable.length === 0
-      ? null
-      : priceable.reduce(
-          (acc, { pool, slice }) =>
-            acc + poolTvlUSD(pool, slice.network, slice.rates),
-          0,
-        );
+  // Skip pools whose TVL is unknowable (untrusted decimals → null) so a
+  // 1e12-overstated 6-dp leg can't poison the protocol-wide total.
+  // See `poolTvlUSD` in `lib/tokens.ts`.
+  let totalTvlUsd: number | null = null;
+  if (priceable.length > 0) {
+    let sum = 0;
+    let any = false;
+    for (const { pool, slice } of priceable) {
+      const v = poolTvlUSD(pool, slice.network, slice.rates);
+      if (v !== null) {
+        sum += v;
+        any = true;
+      }
+    }
+    totalTvlUsd = any ? sum : null;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   // If any chain's daily-snapshot fetch failed or truncated, the cross-chain
@@ -326,9 +343,11 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
       slice.network,
       slice.rates,
     );
-    if (agoTvl <= 0) continue;
+    if (agoTvl === null || agoTvl <= 0) continue;
+    const currentTvl = poolTvlUSD(pool, slice.network, slice.rates);
+    if (currentTvl === null) continue;
     priorTvlSum += agoTvl;
-    currentSubsetSum += poolTvlUSD(pool, slice.network, slice.rates);
+    currentSubsetSum += currentTvl;
     anyPrior = true;
   }
   const tvlWoWPct =
@@ -416,10 +435,12 @@ function rowUsdVolume(
 ): number | null {
   // Same untrusted-decimals defense as `getSnapshotVolumeInUsd` /
   // `poolTotalVolumeUSD` / `poolTvlUSD`. A non-18-dp leg with
-  // `tokenDecimalsKnown=false` would parse `swapVolume*` against the
+  // `tokenDecimalsKnown !== true` would parse `swapVolume*` against the
   // schema-default 18 and inflate the daily USD figure by 1e12.
-  // Undefined still trusts default 18 (deploy-window resilience).
-  if (pool.tokenDecimalsKnown === false) return null;
+  // Strict gate (PR 1.7): undefined fails closed since the post-PR-1.6
+  // indexer populates the field on every pool — `undefined` represents
+  // either a transient EXT-query failure or a legacy/unindexed pool.
+  if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;
@@ -533,11 +554,12 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
       }
       if (cursors[i] < 0) continue;
       const point = h.points[cursors[i]];
-      tvl += poolTvlUSD(
+      const v = poolTvlUSD(
         { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
         h.slice.network,
         h.slice.rates,
       );
+      if (v !== null) tvl += v;
     }
     series.push(tvl);
   }

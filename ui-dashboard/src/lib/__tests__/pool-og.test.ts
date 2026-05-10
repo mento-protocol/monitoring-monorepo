@@ -77,6 +77,9 @@ function makeDetailPool(overrides: Record<string, unknown> = {}) {
     limitStatus: "OK",
     limitPressure0: "0",
     limitPressure1: "0",
+    // USD-math helpers gate strict on `=== true`; see `makeTvlPool` in
+    // `network-fixtures.ts` for rationale.
+    tokenDecimalsKnown: true,
     ...overrides,
   };
 }

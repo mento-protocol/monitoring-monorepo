@@ -130,7 +130,7 @@ function PoolDetail() {
     chainId: network.chainId,
   });
 
-  const pool = usePoolWithThresholds(
+  const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,
     normalizedPoolId,
     network.chainId,
@@ -335,12 +335,15 @@ function PoolDetail() {
                 snapshots={dailySnapshots}
                 isLoading={
                   fpmmPool &&
-                  (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+                  (dailySnapshotLoading ||
+                    (poolNeedsRates && ratesLoading) ||
+                    thresholdsLoading)
                 }
                 hasError={
                   fpmmPool &&
                   (dailySnapshotError !== undefined ||
-                    (poolNeedsRates && ratesError))
+                    (poolNeedsRates && ratesError) ||
+                    thresholdsError !== undefined)
                 }
                 rates={rates}
                 historySupported={fpmmPool}
@@ -351,12 +354,15 @@ function PoolDetail() {
                 snapshots={dailySnapshots}
                 isLoading={
                   fpmmPool &&
-                  (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+                  (dailySnapshotLoading ||
+                    (poolNeedsRates && ratesLoading) ||
+                    thresholdsLoading)
                 }
                 hasError={
                   fpmmPool &&
                   (dailySnapshotError !== undefined ||
-                    (poolNeedsRates && ratesError))
+                    (poolNeedsRates && ratesError) ||
+                    thresholdsError !== undefined)
                 }
                 rates={rates}
                 historySupported={fpmmPool}
@@ -364,8 +370,13 @@ function PoolDetail() {
               <ReservesPanel
                 pool={pool}
                 rates={rates}
-                ratesLoading={poolNeedsRates && ratesLoading}
-                ratesError={poolNeedsRates && ratesError}
+                ratesLoading={
+                  (poolNeedsRates && ratesLoading) || thresholdsLoading
+                }
+                ratesError={
+                  (poolNeedsRates && ratesError) ||
+                  thresholdsError !== undefined
+                }
               />
             </div>
           )}

@@ -19,6 +19,7 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import {
   ALL_POOLS_WITH_HEALTH,
   POOL_DETAIL_WITH_HEALTH,
@@ -113,7 +114,7 @@ export async function fetchPoolOgDataUncached(
   // from resolving and the OG route blocks until Vercel's function timeout.
   // 5s is generous for a public Hasura lookup and short enough that crawler
   // unfurls fall back to the generic card promptly on indexer issues.
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Fail-open: only the detail query is load-bearing. If daily snapshots or
   // the all-pools rate-map query transiently fail (including timeout), still
@@ -198,8 +199,10 @@ export async function fetchPoolOgDataUncached(
   // ALL_POOLS_WITH_HEALTH query leaves `rates` empty and poolTvlUSD silently
   // returns 0. Suppress TVL-derived fields (null, not 0) so consumers can
   // distinguish "unpriceable" from "genuinely empty pool".
+  // `rawTvlUsd === null` also covers untrusted-decimals (poolTvlUSD now
+  // returns null for those).
   const priceable = canValueTvl(pool, network, rates);
-  const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : 0;
+  const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : null;
   const nowSec = Math.floor(Date.now() / 1000);
   const volume7dUsd = priceable
     ? sumVolumeInWindow(
@@ -227,9 +230,10 @@ export async function fetchPoolOgDataUncached(
     volume7dUsd != null && priorVolume != null && priorVolume > 0
       ? ((volume7dUsd - priorVolume) / priorVolume) * 100
       : null;
-  const tvlWoWPct = priceable
-    ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
-    : null;
+  const tvlWoWPct =
+    priceable && rawTvlUsd !== null
+      ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
+      : null;
   const tvlSeries = priceable
     ? computeTvlSeries(dailyRows, pool, network, rates)
     : [];
@@ -263,10 +267,11 @@ function computeVolumeSeries(
   rates: OracleRateMap,
 ): number[] {
   // Same untrusted-decimals defense as the other valuation paths —
-  // `pool.tokenDecimalsKnown=false` means USD math against schema-default
+  // `pool.tokenDecimalsKnown !== true` means USD math against schema-default
   // 18/18 would overstate by ~1e12 for a 6-dp leg. Empty series renders
-  // as "—" in the OG card. Undefined trusts default 18 (deploy-window).
-  if (pool.tokenDecimalsKnown === false) return [];
+  // as "—" in the OG card. Strict gate (PR 1.7): undefined fails closed
+  // since the post-PR-1.6 indexer populates the field on every pool.
+  if (pool.tokenDecimalsKnown !== true) return [];
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
   const d0 = pool.token0Decimals ?? 18;
   const d1 = pool.token1Decimals ?? 18;
@@ -345,7 +350,7 @@ function sumVolumeInWindow(
   toSec: number,
 ): number | null {
   // Untrusted-decimals defense — see computeVolumeSeries for rationale.
-  if (pool.tokenDecimalsKnown === false) return null;
+  if (pool.tokenDecimalsKnown !== true) return null;
   const rows = daily.filter((s) => {
     const ts = Number(s.timestamp);
     return ts >= fromSec && ts < toSec;
@@ -399,7 +404,7 @@ function computeTvlWoW(
     network,
     rates,
   );
-  if (tvlAgo <= 0) return null;
+  if (tvlAgo === null || tvlAgo <= 0) return null;
   return ((tvlNow - tvlAgo) / tvlAgo) * 100;
 }
 
@@ -410,14 +415,19 @@ function computeTvlSeries(
   rates: OracleRateMap,
 ): number[] {
   // Daily rows arrive newest-first; take up to 14 and reverse to chronological.
+  // Skip rows where TVL is unknowable (untrusted decimals → null) — the
+  // sparkline shows what we can compute and gaps are honest about gaps.
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
-  return slice.map((row) =>
-    poolTvlUSD(
+  const series: number[] = [];
+  for (const row of slice) {
+    const v = poolTvlUSD(
       { ...pool, reserves0: row.reserves0, reserves1: row.reserves1 },
       network,
       rates,
-    ),
-  );
+    );
+    if (v !== null) series.push(v);
+  }
+  return series;
 }
 
 function computeOracleFreshness(

@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { BRIDGE_DAILY_SNAPSHOT } from "@/lib/bridge-queries";
 import {
@@ -56,7 +57,7 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   // Per-request timeout. Without this a hung upstream would block the OG
   // route until Vercel's function timeout fires, stalling crawler unfurls.
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Snapshots live on the multichain endpoint; any configured mainnet
   // network works as the query host (same env var backs both).

@@ -48,7 +48,7 @@ function perPoolTvlWindow(
   pools: Pool[],
   network: Network,
   rates: OracleRateMap,
-): Map<string, { now: number; ago: number }> {
+): Map<string, { now: number | null; ago: number | null }> {
   const fpmmMap = new Map(
     pools.flatMap((p) => (isFpmm(p) ? [[p.id, p] as const] : [])),
   );
@@ -60,7 +60,9 @@ function perPoolTvlWindow(
       earliest.set(s.poolId, s);
     }
   }
-  const result = new Map<string, { now: number; ago: number }>();
+  // `null` propagates "TVL unknowable for this pool" (untrusted decimals)
+  // up to consumers — see `poolTvlUSD` in `lib/tokens.ts` for the rationale.
+  const result = new Map<string, { now: number | null; ago: number | null }>();
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
     result.set(poolId, {
@@ -140,6 +142,11 @@ function GlobalContent({
     let totalPools = 0;
     let totalFpmmPools = 0;
     let totalTvl = 0;
+    // Count of pools whose TVL was unknowable (untrusted decimals → null).
+    // Drives the headline's `(partial)` qualifier so the user can see when
+    // the sum is provisional. Mirrors the OG path's null aggregate behavior.
+    let unknownTvlPools = 0;
+    let priceableTvlPools = 0;
     // Track current + historical TVL only for chains that contributed
     // snapshot data, so numerator and denominator always match. Uses the 7d
     // window so weekend oracle stalls in FX pools don't distort the delta.
@@ -166,10 +173,21 @@ function GlobalContent({
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
-      const chainTvlNow = fpmmPools.reduce(
-        (sum, p) => sum + poolTvlUSD(p, network, rates),
-        0,
-      );
+      // Skip pools whose TVL is unknowable (untrusted decimals → null) AND
+      // count them — the summed total is `formatUSD(totalTvl)` in the
+      // headline, which would otherwise misrepresent partial-trust state
+      // as complete. See `poolTvlUSD` in `lib/tokens.ts` and the
+      // `tvlPartial` flag plumbed into `TvlOverTimeChart` below.
+      let chainTvlNow = 0;
+      for (const p of fpmmPools) {
+        const v = poolTvlUSD(p, network, rates);
+        if (v === null) {
+          unknownTvlPools += 1;
+        } else {
+          chainTvlNow += v;
+          priceableTvlPools += 1;
+        }
+      }
       totalTvl += chainTvlNow;
 
       // 7d-window per-pool TVL — computed once, reused for the aggregate
@@ -181,6 +199,11 @@ function GlobalContent({
           : null;
       if (perPool7dTvl && perPool7dTvl.size > 0) {
         for (const v of perPool7dTvl.values()) {
+          // Skip pools whose TVL is unknowable (untrusted decimals → null).
+          // Including null on either side would either NaN-poison the sum or
+          // misrepresent a missing-data pool as $0 — both wrong for the WoW
+          // KPI. See `poolTvlUSD` in `lib/tokens.ts`.
+          if (v.now === null || v.ago === null) continue;
           tvlNow7d += v.now;
           tvlAgo7d += v.ago;
         }
@@ -228,6 +251,12 @@ function GlobalContent({
       totalPools,
       totalFpmmPools,
       totalTvl,
+      // `tvlPartial` semantics:
+      //   - `null` (no priceable pools) → headline renders "—"
+      //   - `false` (every priceable pool had a value) → headline = USD total
+      //   - `true` (≥1 priceable pool returned null) → headline = USD total + "(partial)"
+      tvlPartial: priceableTvlPools === 0 ? null : unknownTvlPools > 0,
+      unknownTvlPools,
       totalSwapsAllTime,
       totalFeesAllTime,
       totalFees24h,
@@ -270,6 +299,7 @@ function GlobalContent({
         <TvlOverTimeChart
           networkData={networkData}
           totalTvl={aggregated.totalTvl}
+          tvlPartial={aggregated.tvlPartial}
           change7d={aggregated.tvlChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}

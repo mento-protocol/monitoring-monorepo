@@ -29,11 +29,14 @@ export function poolTotalVolumeUSD(
   rates: OracleRateMap,
 ): number | null {
   // Same untrusted-decimals gate as `getSnapshotVolumeInUsd` — a non-18-dp
-  // leg with `tokenDecimalsKnown=false` would scale `notionalVolume0/1`
+  // leg with `tokenDecimalsKnown !== true` would scale `notionalVolume0/1`
   // (in raw token wei) by `1e18` instead of the real `1e6` and overstate
-  // all-time USD volume by 1e12. Undefined trusts the legacy schema-default
-  // 18 path so deploy-window pools don't blank.
-  if (pool.tokenDecimalsKnown === false) return null;
+  // all-time USD volume by 1e12. Strict `!== true` (not `=== false`):
+  // `undefined` represents either pre-PR-1.5 indexer schema OR a transient
+  // EXT-query failure — both should fail closed. Post-PR-1.6 indexer
+  // populates the field on every pool, so `undefined` is a real signal,
+  // not a deploy-window default.
+  if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {
@@ -205,10 +208,12 @@ export function getSnapshotVolumeInUsd(
   // those fields hold the schema-default 18 — a 6-dp USDC leg would be
   // scaled by 1e18 and produce a 1e12-fold USD overstatement. The indexer
   // already suppresses `SwapEvent.volumeUsdWei` in that case; mirror the
-  // gate here so snapshot-derived volumes stay null too. Undefined flag
-  // (deploy-window schema-lag) trusts the legacy schema-default 18 path
-  // so existing pools don't blank — only an explicit `false` short-circuits.
-  if (pool.tokenDecimalsKnown === false) return null;
+  // gate here so snapshot-derived volumes stay null too. Strict `!== true`
+  // (PR 1.7): `undefined` represents either a pre-PR-1.5 indexer schema OR
+  // a transient EXT-query failure — both should fail closed. The post-PR-1.6
+  // indexer populates the field on every pool, so `undefined` is no longer a
+  // "deploy-window default" worth trusting.
+  if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {
