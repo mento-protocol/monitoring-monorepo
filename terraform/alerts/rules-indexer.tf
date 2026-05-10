@@ -9,7 +9,7 @@ resource "grafana_rule_group" "indexer_effect_cache" {
   rule {
     name           = "Envio Effect Cache Invalidations"
     condition      = "threshold"
-    for            = "0m"
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
