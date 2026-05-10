@@ -933,8 +933,18 @@ export const upsertPool = async ({
   // rows. VirtualPools always take this branch (canRecompute=false for
   // them) but their breach state stays at default-zero anyway, so the
   // skip is a no-op for them. Mirrors the SortedOracles handler guard.
+  //
+  // EXCEPTION: when the new state is `isNeverRebalance` (governance just
+  // disabled rebalancing), let the breach pipeline run anyway —
+  // `isInDeviationBreach` short-circuits to false via `isNeverRebalance`,
+  // which lets `recordBreachTransition` close any open DTB row regardless
+  // of the frozen priceDifference. Without this exception, the
+  // limits-and-fees known-zero fallback's `upsertPool` routing would
+  // never close the breach (it relied on the breach pipeline to close it
+  // via the falling-edge logic).
   const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
-  if (!priceDifferenceTrustworthy) {
+  const becameNeverRebalance = isNeverRebalance(next);
+  if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
     const persistedNoBreach: Pool = { ...next, priceDifference };
     context.Pool.set(persistedNoBreach);
     return persistedNoBreach;

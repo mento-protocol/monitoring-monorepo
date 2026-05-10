@@ -471,6 +471,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     token1: pool.token1,
     token0Decimals: pool.token0Decimals,
     token1Decimals: pool.token1Decimals,
+    tokenDecimalsKnown: pool.tokenDecimalsKnown,
     amount0Delta,
     amount1Delta,
     rewardBps,
