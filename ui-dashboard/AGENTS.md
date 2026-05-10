@@ -159,3 +159,9 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Hasura silently caps every query at 1000 rows; any `limit:` in a UI query also silently drops data. Curl-verify against hosted before shipping
 - `_aggregate` queries are disabled on hosted Hasura — don't ship them
 - Multi-field `order_by` MUST use array syntax `[{a: desc}, {b: asc}]`. Object syntax silently drops fields after the first
+
+### Server vs client module boundaries
+
+- Modules that import `useSWR` / `useNetwork` / `next-auth` / any React-only API (e.g. `lib/graphql.ts` — exports `useGQL`) are **client-only**. They cannot be imported by server-side code: `lib/homepage-og.ts`, `lib/pool-og.ts`, `lib/bridge-flows-og.ts`, `app/.../opengraph-image.tsx`, `app/api/**` route handlers. Next.js RSC bundling pulls the full transitive graph into the server bundle and breaks `next build` (or worse, ships React/SWR to the OG image renderer).
+- Shared constants needed on both sides go in zero-dependency modules — e.g. `lib/hasura-timeout.ts` (single `export const HASURA_TIMEOUT_MS = 5000`). The client-side `lib/graphql.ts` re-exports for backwards compat, but new server-side imports MUST target the zero-dep module directly.
+- Caused codex P1 on PR #372 — `HASURA_TIMEOUT_MS` was added to `lib/graphql.ts` and three OG modules imported it; CI didn't catch it because the next build step isn't gated, but it would have leaked SWR into the server bundle.
