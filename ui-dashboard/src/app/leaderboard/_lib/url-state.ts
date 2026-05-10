@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   rangeCutoffSeconds,
   type LeaderboardRangeKey,
@@ -18,11 +19,6 @@ const VALID_RANGES = new Set<LeaderboardRangeKey>([
 ]);
 const DEFAULT_RANGE: LeaderboardRangeKey = "7d";
 const VALID_VENUES = new Set<Venue>(["v3", "v2"]);
-
-function initialParams(): URLSearchParams {
-  if (typeof window === "undefined") return new URLSearchParams();
-  return new URLSearchParams(window.location.search);
-}
 
 function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
   const raw = params.get("range");
@@ -63,20 +59,30 @@ export function useLeaderboardUrlState(): {
   updateShowSystem: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
 } {
-  // Read directly from `window.location.search` rather than via
-  // `useSearchParams()` — the hook would force the leaderboard page out
-  // of static rendering (and trip
-  // `nextjs-no-use-search-params-without-suspense`) for an SSR pass that
-  // never matters here: the page is `"use client"`, admin-only
-  // (`robots: noindex`), and re-syncs via `popstate` after mount.
+  // `useSearchParams()` here is load-bearing for direct page loads —
+  // `useState` lazy initializers serialize their result on SSR and don't
+  // re-run on hydration, so reading `window.location.search` only would
+  // discard `?range=90d&venue=v2` when a user lands on the page directly
+  // (Cursor Bugbot bbc20b5f, PR #371). All consumers of this hook are
+  // wrapped in <Suspense> at `app/layout.tsx` line 51 and at the route's
+  // own `page.tsx`, so the rule's "wrap consumer in Suspense" guidance
+  // is satisfied — the rule's static check just can't see across files.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
+  const searchParams = useSearchParams();
+
+  const initialReadParams =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : searchParams;
+
   const [range, setRange] = useState<LeaderboardRangeKey>(() =>
-    readRangeFromParams(initialParams()),
+    readRangeFromParams(initialReadParams),
   );
   const [showSystem, setShowSystem] = useState<boolean>(() =>
-    readShowSystemFromParams(initialParams()),
+    readShowSystemFromParams(initialReadParams),
   );
   const [venue, setVenue] = useState<Venue>(() =>
-    readVenueFromParams(initialParams()),
+    readVenueFromParams(initialReadParams),
   );
 
   const writeUrl = useCallback(
