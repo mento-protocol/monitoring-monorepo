@@ -5,6 +5,7 @@ import type React from "react";
 
 type ArrowKeyMode = "horizontal" | "all";
 type ActivationMode = "manual" | "automatic";
+type RovingItemRefCallback = (node: HTMLButtonElement | null) => void;
 
 export interface UseRovingTabIndexOptions {
   activeIndex: number;
@@ -15,7 +16,7 @@ export interface UseRovingTabIndexOptions {
 }
 
 export interface RovingItemProps {
-  ref: (node: HTMLButtonElement | null) => void;
+  ref: RovingItemRefCallback;
   tabIndex: number;
   onFocus: () => void;
 }
@@ -31,6 +32,9 @@ function clampIndex(index: number, itemCount: number): number {
  * The single `tabIndex={0}` follows local focus, not the controlled active
  * prop. This matters for URL-backed widgets where the active prop can lag
  * behind arrow-key focus while `router.replace` or another side effect settles.
+ *
+ * Current callers attach `groupRef` to a `<div>` wrapper. If we add non-div
+ * button groups, make the group element type generic before widening usage.
  */
 export function useRovingTabIndex({
   activeIndex,
@@ -41,6 +45,7 @@ export function useRovingTabIndex({
 }: UseRovingTabIndexOptions) {
   const groupRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const itemRefCallbacksRef = useRef(new Map<number, RovingItemRefCallback>());
   itemsRef.current.length = itemCount;
 
   const normalizedActiveIndex = clampIndex(activeIndex, itemCount);
@@ -64,11 +69,20 @@ export function useRovingTabIndex({
     }
   }
 
+  function getItemRef(index: number): RovingItemRefCallback {
+    const existingRef = itemRefCallbacksRef.current.get(index);
+    if (existingRef) return existingRef;
+
+    const itemRef: RovingItemRefCallback = (node) => {
+      itemsRef.current[index] = node;
+    };
+    itemRefCallbacksRef.current.set(index, itemRef);
+    return itemRef;
+  }
+
   function getItemProps(index: number): RovingItemProps {
     return {
-      ref: (node) => {
-        itemsRef.current[index] = node;
-      },
+      ref: getItemRef(index),
       tabIndex: index === focusedIndex ? 0 : -1,
       onFocus: () => setFocusedIndex(index),
     };
