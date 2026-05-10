@@ -190,6 +190,14 @@ export function buildDailySeries(
 interface TvlOverTimeChartProps {
   networkData: NetworkData[];
   totalTvl: number;
+  /**
+   * Trust-state of `totalTvl`:
+   * - `null` — no priceable pools contributed (render headline as "—")
+   * - `false` — every priceable pool returned a value (render USD total)
+   * - `true` — at least one pool's TVL was unknowable (render USD total
+   *   with a "(partial)" qualifier so the user can see the sum is provisional)
+   */
+  tvlPartial: boolean | null;
   change7d: number | null;
   isLoading: boolean;
   hasError: boolean;
@@ -199,6 +207,7 @@ interface TvlOverTimeChartProps {
 export function TvlOverTimeChart({
   networkData,
   totalTvl,
+  tvlPartial,
   change7d,
   isLoading,
   hasError,
@@ -257,7 +266,13 @@ export function TvlOverTimeChart({
     [fullBreakdown, range],
   );
 
-  const headline = isLoading ? "…" : formatUSD(totalTvl);
+  const headline = isLoading
+    ? "…"
+    : tvlPartial === null
+      ? "—"
+      : tvlPartial
+        ? `${formatUSD(totalTvl)} (partial)`
+        : formatUSD(totalTvl);
   const emptyMessage = hasError
     ? "Unable to load TVL history"
     : hasSnapshotError

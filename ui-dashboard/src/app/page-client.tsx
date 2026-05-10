@@ -142,6 +142,11 @@ function GlobalContent({
     let totalPools = 0;
     let totalFpmmPools = 0;
     let totalTvl = 0;
+    // Count of pools whose TVL was unknowable (untrusted decimals → null).
+    // Drives the headline's `(partial)` qualifier so the user can see when
+    // the sum is provisional. Mirrors the OG path's null aggregate behavior.
+    let unknownTvlPools = 0;
+    let priceableTvlPools = 0;
     // Track current + historical TVL only for chains that contributed
     // snapshot data, so numerator and denominator always match. Uses the 7d
     // window so weekend oracle stalls in FX pools don't distort the delta.
@@ -168,14 +173,20 @@ function GlobalContent({
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
-      // Skip pools whose TVL is unknowable (untrusted decimals → null).
-      // Summing null as 0 would understate aggregate TVL but more
-      // importantly hide the fact that some pools' contribution is
-      // missing entirely. See `poolTvlUSD` in `lib/tokens.ts`.
+      // Skip pools whose TVL is unknowable (untrusted decimals → null) AND
+      // count them — the summed total is `formatUSD(totalTvl)` in the
+      // headline, which would otherwise misrepresent partial-trust state
+      // as complete. See `poolTvlUSD` in `lib/tokens.ts` and the
+      // `tvlPartial` flag plumbed into `TvlOverTimeChart` below.
       let chainTvlNow = 0;
       for (const p of fpmmPools) {
         const v = poolTvlUSD(p, network, rates);
-        if (v !== null) chainTvlNow += v;
+        if (v === null) {
+          unknownTvlPools += 1;
+        } else {
+          chainTvlNow += v;
+          priceableTvlPools += 1;
+        }
       }
       totalTvl += chainTvlNow;
 
@@ -240,6 +251,12 @@ function GlobalContent({
       totalPools,
       totalFpmmPools,
       totalTvl,
+      // `tvlPartial` semantics:
+      //   - `null` (no priceable pools) → headline renders "—"
+      //   - `false` (every priceable pool had a value) → headline = USD total
+      //   - `true` (≥1 priceable pool returned null) → headline = USD total + "(partial)"
+      tvlPartial: priceableTvlPools === 0 ? null : unknownTvlPools > 0,
+      unknownTvlPools,
       totalSwapsAllTime,
       totalFeesAllTime,
       totalFees24h,
@@ -282,6 +299,7 @@ function GlobalContent({
         <TvlOverTimeChart
           networkData={networkData}
           totalTvl={aggregated.totalTvl}
+          tvlPartial={aggregated.tvlPartial}
           change7d={aggregated.tvlChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}
