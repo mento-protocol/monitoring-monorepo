@@ -385,6 +385,27 @@ Tighten the gate by un-silencing rules in
       `SpreadUpdated` immediately overwrite. Real fix wires the BiPoolManager
       fetchers through `readContractWithBlockFallback` (with archive-RPC
       fallback) the same way `fetchReserves` does today. Flagged by codex.
+      Re-raised by codex in PR #369 round 6 with a new framing
+      (catch-up across destroy events, where `getPoolExchange` at latest
+      returns the destroyed/empty state and the pre-destroy Swap path
+      persists `volumeUsdWei = 0`) — same conclusion, deferred.
+
+- [ ] **`fetchTokenDecimalsScaling` test mock layer.** Unlike its
+      ERC20-fallback companion (`fetchErc20Decimals` has
+      `_setMockERC20Decimals`), the FPMM-direct decimals fetcher
+      (`pool-state.ts:625`) hits real RPC in tests — there's no
+      `_testTokenDecimalsScaling` map. Locally fast
+      (`forno.celo.org` reachable from dev machines), but blacksmith
+      CI runners can't reach Celo so viem retries + backoff stack to
+      ~10s per call and tests time out. Caused 3 CI failures in PR
+      #369: each time a heal-pipeline test didn't anticipate that an
+      upstream merge had added a new effect call (e.g.
+      `selfHealTokenDecimals` from PR #370). Fix: add
+      `_setMockTokenDecimalsScaling(chainId, addr, fn, value)` +
+      `_clearMockTokenDecimalsScaling`, mirroring the existing mock
+      pattern in `pool-state.ts`. Mechanical, ~30 lines, but unblocks
+      future heal-pipeline tests that touch FPMM-direct decimal
+      fetches.
 
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
