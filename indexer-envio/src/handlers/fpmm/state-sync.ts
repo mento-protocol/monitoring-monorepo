@@ -1,6 +1,31 @@
 // ---------------------------------------------------------------------------
 // FPMM state-sync handlers: UpdateReserves + Rebalanced
 // ---------------------------------------------------------------------------
+//
+// Two-cursor model (PR 1.5 design decision):
+//
+// On orientation-unknown events (pool deployed during a deploy-time RPC blip
+// where `invertRateFeedKnown=false` survived self-heal):
+//
+//  1. Pool entity ADVANCES on every event — `priceDifference`,
+//     `rebalanceThreshold`, reserves, breach state. The contract values are
+//     authoritative regardless of our local `invertRateFeed` flag, so breach
+//     detection / health badges always read current state.
+//
+//  2. `oraclePrice` + `oracleTimestamp` HOLD on the prior values when
+//     orientation is unknown. Advancing them with a guess from the schema
+//     default would mark stale data as freshly updated under the
+//     `oracleTimestamp + oracleExpiry` freshness check.
+//
+//  3. OracleSnapshot row SKIPPED when orientation is unknown. A row whose
+//     displayed `oraclePrice` doesn't match its `priceDifference` would be
+//     worse than no row — chart history would show a fabricated sample.
+//
+// The cursor (Pool entity) and the snapshot stream (OracleSnapshot rows) are
+// allowed to drift here. It's a feature, not a bug: breach detection stays
+// current, chart history stays trustworthy. Cursor → invariants advance
+// freely; OracleSnapshot → only writes data we believe in.
+// ---------------------------------------------------------------------------
 
 import {
   FPMM,
@@ -23,9 +48,13 @@ import {
 import { computeRebalanceUsd, normalizeRewardBps } from "../../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
+  effectiveThreshold,
+  isNeverRebalance,
+  persistableThreshold,
   maybePreloadPool,
   selfHealInvertRateFeed,
   selfHealRebalanceThresholds,
+  selfHealTokenDecimals,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -64,7 +93,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const existing = fetched
     ? await selfHealRebalanceThresholds(
         context,
-        await selfHealInvertRateFeed(context, fetched),
+        await selfHealTokenDecimals(
+          context,
+          await selfHealInvertRateFeed(context, fetched),
+        ),
         blockNumber,
       )
     : undefined;
@@ -145,11 +177,13 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     // health accumulators here. Safe because Envio is single-threaded, but
     // the double-write is intentional — health update must come after upsertPool
     // so we have the final pool state to accumulate against.
+    const effectiveBps = Number(effectiveThreshold(pool));
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      pool.rebalanceThreshold,
+      effectiveBps,
       blockTimestamp,
+      isNeverRebalance(pool),
     );
     // Reassign so the daily-snapshot upsert below freezes the just-updated
     // health counters, not the pre-recordHealthSample values.
@@ -171,7 +205,9 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        rebalanceThreshold: pool.rebalanceThreshold,
+        // See sortedOracles.OracleReported — `persistableThreshold` gates the
+        // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(pool),
         source: "update_reserves",
         blockNumber,
         txHash: event.transaction.hash,
@@ -231,7 +267,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const existing = initial
     ? await selfHealRebalanceThresholds(
         context,
-        await selfHealInvertRateFeed(context, initial),
+        await selfHealTokenDecimals(
+          context,
+          await selfHealInvertRateFeed(context, initial),
+        ),
         blockNumber,
       )
     : undefined;
@@ -363,11 +402,13 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     // health accumulators here. Safe because Envio is single-threaded, but
     // the double-write is intentional — health update must come after upsertPool
     // so we have the final pool state to accumulate against.
+    const effectiveBps = Number(effectiveThreshold(pool));
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
-      pool.rebalanceThreshold,
+      effectiveBps,
       blockTimestamp,
+      isNeverRebalance(pool),
     );
     // Reassign so the daily-snapshot upsert below freezes the just-updated
     // health counters, not the pre-recordHealthSample values.
@@ -387,7 +428,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
         oracleOk: pool.oracleOk,
         numReporters: pool.oracleNumReporters,
         priceDifference: pool.priceDifference,
-        rebalanceThreshold: pool.rebalanceThreshold,
+        // See sortedOracles.OracleReported — `persistableThreshold` gates the
+        // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+        rebalanceThreshold: persistableThreshold(pool),
         source: "rebalanced",
         blockNumber,
         txHash: event.transaction.hash,
@@ -427,6 +470,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     token1: pool.token1,
     token0Decimals: pool.token0Decimals,
     token1Decimals: pool.token1Decimals,
+    tokenDecimalsKnown: pool.tokenDecimalsKnown,
     amount0Delta,
     amount1Delta,
     rewardBps,

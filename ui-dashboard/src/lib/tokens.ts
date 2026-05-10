@@ -216,7 +216,11 @@ export function canValueTvl(
 
 /**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
- * Returns 0 if oracle price or reserves are missing.
+ * Returns 0 if oracle price or reserves are missing, or if the indexer
+ * hasn't read on-chain decimals yet (`tokenDecimalsKnown=false` would scale
+ * a non-18-dp leg by `1e18` instead of e.g. `1e6` and overstate TVL by 1e12).
+ * Undefined trusts the legacy schema-default 18 path so deploy-window pools
+ * don't blank.
  */
 export function poolTvlUSD(
   pool: {
@@ -224,6 +228,7 @@ export function poolTvlUSD(
     reserves1?: string;
     token0Decimals?: number;
     token1Decimals?: number;
+    tokenDecimalsKnown?: boolean;
     oraclePrice?: string;
     token0?: string | null;
     token1?: string | null;
@@ -231,6 +236,7 @@ export function poolTvlUSD(
   network: Network,
   rates?: OracleRateMap,
 ): number {
+  if (pool.tokenDecimalsKnown === false) return 0;
   if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
   if (!pool.reserves0 && !pool.reserves1) return 0;
   const r0 = parseWei(pool.reserves0 ?? "0", pool.token0Decimals ?? 18);

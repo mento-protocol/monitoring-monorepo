@@ -283,8 +283,10 @@ describe("computeHealthStatus", () => {
     ).toBe("WARN");
   });
 
-  it("uses fallback threshold of 10000 when rebalanceThreshold is 0", () => {
-    // ratio = 9000/10000 = 0.9 — still OK under the new rule.
+  it("uses fallback threshold of 10000 when rebalanceThreshold is 0 and unknown", () => {
+    // ratio = 9000/10000 = 0.9 — still OK under the under-bound fallback.
+    // No `rebalanceThresholdsKnown` field (or false) means the indexer hasn't
+    // read the on-chain value; under-bound preserves breach safety.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -294,6 +296,85 @@ describe("computeHealthStatus", () => {
         rebalanceThreshold: 0,
       }),
     ).toBe("OK");
+  });
+
+  it("dual-sentinel: known-zero rebalanceThreshold stays OK at high deviation (mirrors indexer)", () => {
+    // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` = governance
+    // configured to never rebalance. Short-circuits to OK regardless of
+    // priceDifference. Mirrored test in indexer-envio/test/healthStatusParity.test.ts.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "20000", // 200%
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      }),
+    ).toBe("OK");
+  });
+
+  it("dual-sentinel: known-zero short-circuits even past the 1e12 cushion", () => {
+    // Mirrored from healthStatusParity.test.ts. Pins the explicit short-
+    // circuit beats the 1e12 effectiveThreshold cushion at extreme magnitudes.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: String(2e12),
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("OK");
+  });
+
+  it("asymmetric (above=0, below>0) does NOT count as never-rebalance (mirrors indexer)", () => {
+    // The active `rebalanceThreshold` alone can be 0 on a half-disabled
+    // pool. The predicate must require BOTH split sides to be 0; this
+    // fixture has below>0 so the pool DOES rebalance and the deviation
+    // path runs normally. 12000bps / 10000 fallback = 1.2 → CRITICAL.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "12000",
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 300,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("dual-sentinel: unknown-zero with high deviation goes CRITICAL via 10000 fallback (mirrors indexer)", () => {
+    // Same diff, unknown-zero. 20000/10000 = 2.0, past 1.05 critical magnitude
+    // and past the 1h grace. Pinned so a regression collapsing both
+    // branches to 1e12 (or both to 10000) is caught by parity.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "20000",
+        rebalanceThreshold: 0,
+        rebalanceThresholdsKnown: false,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("CRITICAL");
   });
 
   it("handles missing fields gracefully (defaults to CRITICAL for stale oracle)", () => {

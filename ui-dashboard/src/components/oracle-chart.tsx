@@ -40,8 +40,13 @@ export function OracleChart({
     parseOraclePriceToNumber(s.oraclePrice ?? null, token0Symbol ?? ""),
   );
 
-  // Deviation % of rebalance threshold
+  // Deviation % of rebalance threshold. `hasHealthData=false` rows have a
+  // preserved (potentially stale) `priceDifference` and a raw threshold
+  // that may be 0 or unread — rendering as a percentage would fake a
+  // signal where the indexer marked the sample untrusted. Plotly skips
+  // NaN points cleanly, leaving a gap in the line.
   const deviations = snapshots.map((s) => {
+    if (s.hasHealthData === false) return Number.NaN;
     const threshold = Number(s.rebalanceThreshold);
     return threshold > 0 ? (Number(s.priceDifference) / threshold) * 100 : 0;
   });

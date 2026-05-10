@@ -497,11 +497,33 @@ async function seedPoolWithFeed(
     throw new Error("Expected seeded pool entity to exist");
   }
 
+  // Stamp `tokenDecimalsKnown: true` so SortedOracles handlers don't fire
+  // `selfHealTokenDecimals` against the fixture's fake addresses (which would
+  // fall through to live RPC and slow / flake the suite). Tests that
+  // exercise decimal self-heal explicitly should override the flag back to
+  // false on the seeded entity.
+  //
+  // Also stamp `rebalanceThresholdsKnown: true` + symmetric split sides so
+  // health-sample paths route through the valid-threshold branch (default
+  // pool from FPMMDeployed has `rebalanceThresholdsKnown: false` because
+  // the mock RPC returns undefined for the fake fee-token addresses). Tests
+  // exercising the unread case should override on the seeded entity.
   nextDb = nextDb.entities.Pool.set({
     ...existingPool,
     referenceRateFeedID: feedId,
     oracleExpiry,
     oracleNumReporters,
+    tokenDecimalsKnown: true,
+    rebalanceThresholdsKnown: true,
+    // Hardcoded 5000 (not `existingPool.* ?? 5000`) — the FPMMDeployed
+    // handler always leaves these at the schema default 0 because the mock
+    // RPC for the fake fee-token addresses can't read on-chain thresholds,
+    // so a fallthrough is the always-taken path. Tests exercising explicit
+    // asymmetric (`above=0, below>0`) or never-rebalance (both 0) shapes
+    // must override on the seeded entity AFTER this helper returns —
+    // expressing intent there is clearer than threading params through.
+    rebalanceThresholdAbove: 5000,
+    rebalanceThresholdBelow: 5000,
   });
 
   return nextDb;
@@ -1350,6 +1372,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: ORACLE_PRICE_24DP,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       source: "fpmm_update_reserves",
     });
@@ -1697,6 +1720,7 @@ describe("Envio Celo indexer handlers", () => {
       lastMedianAt: 1_700_004_900n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       rebalanceThresholdAbove: 5000,
       rebalanceThresholdBelow: 3000,
@@ -1890,6 +1914,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n, // 24dp
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -1977,6 +2002,7 @@ describe("Envio Celo indexer handlers", () => {
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       rebalanceThresholdAbove: 200,
@@ -2075,6 +2101,7 @@ describe("Envio Celo indexer handlers", () => {
       oracleExpiry: 3_600n,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
     });
@@ -3603,14 +3630,19 @@ describe("Health score handler integration", () => {
       hasHealthData: true,
     });
 
-    // Step 2: fire an oracle event with rebalanceThreshold=0 → no-data snapshot
-    // Manually set threshold to 0 to trigger hasHealthData=false path
+    // Step 2: fire an oracle event in the "indexer hasn't read thresholds yet"
+    // state — `rebalanceThresholdsKnown=false` is the canonical no-data
+    // signal (post-PR-1.5). The handler routes through the no-data sentinel
+    // because the helper can't trust the threshold value.
     const poolBeforeNoData = mockDb.entities.Pool.get(
       pid(POOL_ADDR),
     ) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...poolBeforeNoData,
-      rebalanceThreshold: 0, // triggers hasHealthData=false in recordHealthSample
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 0,
+      rebalanceThresholdsKnown: false, // unread → no-data
     });
 
     const noDataEvent = SortedOracles.OracleReported.createMockEvent({
@@ -3832,10 +3864,14 @@ describe("Health score handler integration", () => {
       oraclePrice: ORACLE_PRICE,
       token0Decimals: 18,
       token1Decimals: 18,
+      tokenDecimalsKnown: true,
       invertRateFeed: false,
       invertRateFeedKnown: true,
       source: "fpmm_update_reserves",
       rebalanceThreshold: REBALANCE_THRESHOLD,
+      rebalanceThresholdAbove: REBALANCE_THRESHOLD,
+      rebalanceThresholdBelow: REBALANCE_THRESHOLD,
+      rebalanceThresholdsKnown: true,
       lastOracleSnapshotTimestamp: 1_700_005_000n,
       lastDeviationRatio: "0.500000", // prior healthy state
       healthTotalSeconds: 0n,

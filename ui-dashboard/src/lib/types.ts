@@ -52,6 +52,9 @@ export type Pool = {
   referenceRateFeedID?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
   lpFee?: number;
@@ -63,6 +66,7 @@ export type Pool = {
   rebalancerAddress?: string;
   token0Decimals?: number;
   token1Decimals?: number;
+  tokenDecimalsKnown?: boolean;
   swapCount?: number;
   rebalanceCount?: number;
   notionalVolume0?: string;

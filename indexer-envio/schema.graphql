@@ -5,6 +5,12 @@ type Pool {
   token1: String
   token0Decimals: Int!
   token1Decimals: Int!
+  # Mirrors `invertRateFeedKnown` / `rebalanceThresholdsKnown`: false until the
+  # factory's `decimalsN` reads succeed (or self-heal lands real values),
+  # true once persisted. Distinguishes "schema default 18" from "really 18 on
+  # chain" so non-18-decimal pools whose factory RPC blipped don't silently
+  # keep the wrong scaling. Gates `selfHealTokenDecimals` retries.
+  tokenDecimalsKnown: Boolean!
   source: String!
 
   # Latest reserves (updated on every ReserveUpdate / Swap)
@@ -54,6 +60,15 @@ type Pool {
   # oracleExpiry`; gating the entity-derive path on this field gives parity
   # with that revert.
   lastOracleReportAt: BigInt!
+  # `max(event.params.timestamp)` across all `OracleReported` events on this
+  # pool's rate feed. Diagnostic only — NOT used in `tryDeriveRebalanceState`'s
+  # freshness gate, because it would over-bound the contract's median-reporter
+  # expiry (a fresh non-median reporter could keep this advancing while the
+  # median reporter is stale). The under-bound `lastOracleReportAt` stays
+  # authoritative for the gate. Surfaces per-reporter freshness data for
+  # future parity work without changing the safe-by-construction current
+  # behaviour. 0n until the first `OracleReported` for the feed.
+  lastFreshReporterAt: BigInt!
   # `lastMedianPrice` / `lastMedianAt` from the prior MedianUpdated, captured
   # before overwrite so the Oracle Jump alert can render "Previous Oracle
   # Price (Xm ago)". 0 until the second non-zero MedianUpdated.

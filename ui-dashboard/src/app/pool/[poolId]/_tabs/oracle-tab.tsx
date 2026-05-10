@@ -120,7 +120,7 @@ export function OracleTab({
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
-    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    return raw.toSorted((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
 
   const filteredRows = useMemo(() => {
@@ -261,8 +261,11 @@ export function OracleTab({
                   : null;
                 const diffBps = Number(r.priceDifference);
                 const thresholdBps = r.rebalanceThreshold;
+                // `hasHealthData=false` rows preserve the previous
+                // priceDifference and may carry a raw threshold of 0 or
+                // an unread fallback — show "—" rather than fake a %.
                 const diffPct =
-                  diffBps > 0 && thresholdBps > 0
+                  r.hasHealthData !== false && diffBps > 0 && thresholdBps > 0
                     ? ((diffBps / thresholdBps) * 100).toFixed(1)
                     : null;
                 return (
