@@ -32,14 +32,11 @@ import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo } from "react";
-import { OlsLiquidityTable } from "./ols-liquidity-table";
-import { OlsStatusPanel } from "./ols-status-panel";
 import { PoolHeader } from "./pool-header";
 import { PoolTablist } from "./pool-tablist";
 import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "../_lib/constants";
 import {
   decodePoolId,
-  getDebtTokenSideLabel,
   parseTabLimit,
   selectActiveOlsPool,
 } from "../_lib/helpers";
@@ -47,12 +44,7 @@ import { LiquidityTab } from "../_tabs/liquidity-tab";
 import { LpsTab } from "../_tabs/lps-tab";
 import { OlsTab } from "../_tabs/ols-tab";
 import { OracleTab } from "../_tabs/oracle-tab";
-import {
-  computeRewardThresholds,
-  RebalancesTab,
-  renderRewardCell,
-  toDisplayPrecision,
-} from "../_tabs/rebalances-tab";
+import { RebalancesTab } from "../_tabs/rebalances-tab";
 import { ReservesTab } from "../_tabs/reserves-tab";
 import { SwapsTab } from "../_tabs/swaps-tab";
 
