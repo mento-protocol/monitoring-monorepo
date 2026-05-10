@@ -349,9 +349,11 @@ export function sanitizeAndFilter(
   entries: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
   return Object.fromEntries(
-    Object.entries(entries)
-      .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
-      .filter(([, e]) => e.name !== "" || e.tags.length > 0),
+    Object.entries(entries).flatMap(([addr, e]) => {
+      const sanitized = sanitizeEntry(e);
+      if (sanitized.name === "" && sanitized.tags.length === 0) return [];
+      return [[addr.toLowerCase(), sanitized] as const];
+    }),
   );
 }
 
@@ -481,7 +483,7 @@ export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   );
 }
 
-export function serverError(err: unknown): NextResponse {
+function serverError(err: unknown): NextResponse {
   // Full error is in Sentry; return a generic string to the client.
   Sentry.captureException(err, { tags: { route: "address-labels/import" } });
   console.error("[address-labels/import]", err);
@@ -538,16 +540,15 @@ export async function handleCsvText(text: string): Promise<NextResponse> {
   for (const { address, name, tags } of rows) {
     // Do NOT set isPublic here — the merge below preserves the existing value.
     // Forcing isPublic:true would silently un-private any previously private label.
-    // Deduplicate tags case-insensitively
+    // Deduplicate tags case-insensitively in a single pass.
     const seenTags = new Set<string>();
-    const deduplicatedTags = tags
-      .map((t) => t.trim())
-      .filter((t) => {
-        const key = t.toLowerCase();
-        if (seenTags.has(key)) return false;
-        seenTags.add(key);
-        return true;
-      });
+    const deduplicatedTags = tags.flatMap((raw) => {
+      const t = raw.trim();
+      const key = t.toLowerCase();
+      if (seenTags.has(key)) return [];
+      seenTags.add(key);
+      return [t];
+    });
     const lower = address.toLowerCase();
     labels[lower] = {
       name,
@@ -650,10 +651,10 @@ export function parseCsv(text: string): CsvParseResult {
     const name = cols[nameIdx]?.trim() ?? "";
     const tagsRaw = tagsIdx !== -1 ? (cols[tagsIdx]?.trim() ?? "") : "";
     const tags = tagsRaw
-      ? tagsRaw
-          .split(";")
-          .map((t) => t.trim())
-          .filter(Boolean)
+      ? tagsRaw.split(";").flatMap((t) => {
+          const trimmed = t.trim();
+          return trimmed ? [trimmed] : [];
+        })
       : [];
 
     // Skip only fully empty rows. Half-empty rows are malformed input and

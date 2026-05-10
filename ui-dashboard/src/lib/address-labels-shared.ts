@@ -142,7 +142,12 @@ export function mergeEntries(
   const createdCandidates = [prior.createdAt, incoming.createdAt].filter(
     (s): s is string => typeof s === "string" && s.length > 0,
   );
-  const createdAt = createdCandidates.sort()[0];
+  // Single-pass min — string lex-order works because both candidates are
+  // ISO-8601 timestamps when present (chars compare in chronological order).
+  const createdAt = createdCandidates.reduce<string | undefined>(
+    (min, next) => (min === undefined || next < min ? next : min),
+    undefined,
+  );
 
   return {
     name: newer.name,
@@ -284,18 +289,16 @@ export function sanitizeEntry(entry: AddressEntry): AddressEntry {
   const name = entry.name.trim().slice(0, MAX_NAME_LENGTH);
   const notes = entry.notes?.slice(0, MAX_NOTES_LENGTH);
 
-  // Trim, truncate, and case-insensitive dedup tags
+  // Trim, truncate, and case-insensitive dedup tags — single pass.
   const seenTags = new Set<string>();
-  const tags = entry.tags
-    .slice(0, MAX_TAGS_COUNT)
-    .map((t) => t.trim().slice(0, MAX_TAG_LENGTH))
-    .filter((t) => {
-      if (!t) return false;
-      const key = t.toLowerCase();
-      if (seenTags.has(key)) return false;
-      seenTags.add(key);
-      return true;
-    });
+  const tags = entry.tags.slice(0, MAX_TAGS_COUNT).flatMap((raw) => {
+    const t = raw.trim().slice(0, MAX_TAG_LENGTH);
+    if (!t) return [];
+    const key = t.toLowerCase();
+    if (seenTags.has(key)) return [];
+    seenTags.add(key);
+    return [t];
+  });
 
   return {
     ...entry,

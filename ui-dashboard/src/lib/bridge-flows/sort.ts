@@ -88,7 +88,7 @@ export function sortTransfers(
   sortDir: SortDir,
   rates: OracleRateMap,
 ): BridgeTransfer[] {
-  return [...transfers].sort((a, b) => {
+  return transfers.toSorted((a, b) => {
     switch (sortKey) {
       case "provider":
         return compareString(a.provider, b.provider, sortDir);

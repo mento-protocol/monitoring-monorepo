@@ -134,7 +134,7 @@ function sortRows(
   sortKey: SortKey,
   sortDir: SortDir,
 ): PoolFeeRow[] {
-  return [...rows].sort((a, b) => {
+  return rows.toSorted((a, b) => {
     const aV = rowSortValue(a, sortKey);
     const bV = rowSortValue(b, sortKey);
     if (aV == null && bV == null) return 0;

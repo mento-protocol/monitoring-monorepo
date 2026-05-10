@@ -174,6 +174,3 @@ export function useProtocolFees(): ProtocolFeesResult {
     isLoading,
   };
 }
-
-// Re-export so consumers can still discriminate types if needed.
-export type { OracleRateMap };

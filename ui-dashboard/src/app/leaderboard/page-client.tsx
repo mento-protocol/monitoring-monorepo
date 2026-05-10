@@ -51,6 +51,11 @@ type PoolRow = {
 // stacked bars of varying widths that look noisy).
 const RANGES_WITH_CHART = new Set<LeaderboardRangeKey>(["30d", "90d", "all"]);
 
+// Component is over the no-giant-component threshold — venue toggle
+// + range filter + multi-table layout. Tracked in BACKLOG.md
+// § "Architecture pass" for a focused split PR (extract
+// LeaderboardFilters / V3Tables / V2Tables).
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function LeaderboardClient() {
   const {
     range,

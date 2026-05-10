@@ -200,24 +200,25 @@ export function useSortedHover(params: {
       // underlying series.
       const breakdownIndexOffset = isStacked ? 0 : 1;
       const sorted = uniquePoints
-        .map((p) => {
+        .flatMap((p) => {
           const cn = p.curveNumber;
           const pi = p.pointIndex;
           const idx = typeof cn === "number" ? cn - breakdownIndexOffset : -1;
           const b = idx >= 0 ? breakdownByCurve[idx] : undefined;
-          const seriesPoint =
-            b && typeof pi === "number" ? b.series[pi] : undefined;
-          return {
-            name: b?.name ?? "",
-            value: seriesPoint?.value ?? 0,
-            color: b?.color ?? "#94a3b8",
-            legendIcon: b?.legendIcon,
-          };
+          // Filter the totalTrace point (curveNumber 0 in non-stacked mode):
+          // no `breakdown[]` entry, so name would be empty — drop it.
+          if (!b?.name) return [];
+          const seriesPoint = typeof pi === "number" ? b.series[pi] : undefined;
+          return [
+            {
+              name: b.name,
+              value: seriesPoint?.value ?? 0,
+              color: b.color ?? "#94a3b8",
+              legendIcon: b.legendIcon,
+            },
+          ];
         })
-        // Filter the totalTrace point (curveNumber 0 in non-stacked mode):
-        // no `breakdown[]` entry, so name is empty.
-        .filter((p) => p.name !== "")
-        .sort((a, b) => b.value - a.value);
+        .toSorted((a, b) => b.value - a.value);
       const xRaw = rawPoints[0]?.x;
       const dayLabel =
         typeof xRaw === "string" || typeof xRaw === "number"

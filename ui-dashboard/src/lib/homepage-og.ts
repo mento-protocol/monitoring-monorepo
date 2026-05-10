@@ -66,7 +66,7 @@ const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
   }
 `;
 
-export type AttentionPool = {
+type AttentionPool = {
   name: string;
   chainLabel: string;
   health: HealthStatus;
@@ -158,7 +158,11 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   const daily: PoolSnapshot[] = [];
   let dailyDegraded = false;
   try {
+    // Sequential pagination — each iteration's `break` depends on the
+    // previous page's row count (early-exit on short page). Can't
+    // parallelize without an upfront count query.
     for (let page = 0; page < DAILY_MAX_PAGES; page++) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
         document: HOMEPAGE_OG_DAILY_SNAPSHOTS,
         variables: {
@@ -194,9 +198,10 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
 }
 
 export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> {
-  const configuredChains = NETWORK_IDS.map((id) => NETWORKS[id]).filter(
-    (n) => n.hasuraUrl && !n.local && !n.testnet,
-  );
+  const configuredChains = NETWORK_IDS.flatMap((id) => {
+    const n = NETWORKS[id];
+    return n.hasuraUrl && !n.local && !n.testnet ? [n] : [];
+  });
   if (configuredChains.length === 0) return null;
 
   const sliceResults = await Promise.all(
@@ -207,12 +212,12 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   );
   // Track chains whose pool query failed entirely so consumers can surface
   // "partial overview" rather than ship surviving-chain numbers as complete.
-  const offlineChains = sliceResults
-    .filter((r) => r.slice === null)
-    .map((r) => r.network.label);
-  const slices = sliceResults
-    .map((r) => r.slice)
-    .filter((s): s is ChainSlice => s !== null);
+  const offlineChains = sliceResults.flatMap((r) =>
+    r.slice === null ? [r.network.label] : [],
+  );
+  const slices = sliceResults.flatMap((r) =>
+    r.slice !== null ? [r.slice] : [],
+  );
   if (slices.length === 0) return null;
   const partial = offlineChains.length > 0;
 
@@ -221,7 +226,7 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   // already requires `oraclePrice`, so virtual and oracle-stale pools
   // drop out here.
   const fpmmEntries = slices.flatMap((s) =>
-    s.pools.filter(isFpmm).map((pool) => ({ pool, slice: s })),
+    s.pools.flatMap((pool) => (isFpmm(pool) ? [{ pool, slice: s }] : [])),
   );
   const priceable = fpmmEntries.filter(({ pool, slice }) =>
     canValueTvl(pool, slice.network, slice.rates),
@@ -253,15 +258,23 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   // snapshot in [now-14d, now-7d] (matches pool-card bounded-window rule).
   const upperCutoff = now - SEVEN_DAYS;
   const lowerCutoff = now - FOURTEEN_DAYS;
+  // Pre-index the WoW row per (slice, poolId) so the loop below does an
+  // O(1) Map lookup instead of an O(n) scan over slice.daily for each pool.
+  type AgoRow = ChainSlice["daily"][number];
+  const agoRowByKey = new Map<string, AgoRow>();
+  for (const slice of slices) {
+    for (const d of slice.daily) {
+      const ts = Number(d.timestamp);
+      if (ts > upperCutoff || ts < lowerCutoff) continue;
+      const key = `${slice.network.id}:${d.poolId}`;
+      if (!agoRowByKey.has(key)) agoRowByKey.set(key, d);
+    }
+  }
   let priorTvlSum = 0;
   let currentSubsetSum = 0;
   let anyPrior = false;
   for (const { pool, slice } of priceable) {
-    const agoRow = slice.daily.find((d) => {
-      if (d.poolId !== pool.id) return false;
-      const ts = Number(d.timestamp);
-      return ts <= upperCutoff && ts >= lowerCutoff;
-    });
+    const agoRow = agoRowByKey.get(`${slice.network.id}:${pool.id}`);
     if (!agoRow) continue;
     const agoTvl = poolTvlUSD(
       { ...pool, reserves0: agoRow.reserves0, reserves1: agoRow.reserves1 },
@@ -425,13 +438,12 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
   const histories: History[] = [];
   for (const { pool, slice } of entries) {
     const points = slice.daily
-      .filter((d) => d.poolId === pool.id)
-      .map((d) => ({
-        ts: Number(d.timestamp),
-        r0: d.reserves0,
-        r1: d.reserves1,
-      }))
-      .sort((a, b) => a.ts - b.ts);
+      .flatMap((d) =>
+        d.poolId === pool.id
+          ? [{ ts: Number(d.timestamp), r0: d.reserves0, r1: d.reserves1 }]
+          : [],
+      )
+      .toSorted((a, b) => a.ts - b.ts);
     // Pool has no snapshots in the 35d window. Since PoolDailySnapshot is
     // written on swap activity, zero snapshots means the pool has been
     // dormant — reserves in `pool.reserves0/1` haven't changed since the

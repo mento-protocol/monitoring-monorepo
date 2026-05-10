@@ -31,17 +31,19 @@ import React, { useMemo } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
 
-export function OracleTab({
-  poolId,
-  pool,
-  search,
-  onSearchChange,
-}: {
+type OracleTabProps = {
   poolId: string;
   pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
-}) {
+};
+
+// Tab body is over the no-giant-component threshold — chart + table
+// + summary tiles. Tracked in BACKLOG.md § "Architecture pass" for
+// a focused split PR (extract OracleChart / OracleTable).
+// react-doctor-disable-next-line react-doctor/no-giant-component
+export function OracleTab(props: OracleTabProps) {
+  const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
   const query = normalizeSearch(search);
 
@@ -120,7 +122,7 @@ export function OracleTab({
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
-    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    return raw.toSorted((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
 
   const filteredRows = useMemo(() => {

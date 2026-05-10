@@ -450,8 +450,10 @@ describe("GET /api/rebalance-check — DoS caps", () => {
     // Each request resolves immediately with the base result, populating cache.
     mockCheckRebalanceStatus.mockImplementation(async () => BASE_RESULT);
 
-    // Fill cache to exactly 1024 entries.
+    // Fill cache to exactly 1024 entries — sequential by design so
+    // FIFO order is deterministic for the eviction assertion below.
     for (let i = 0; i < 1024; i++) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const res = await GET(
         new NextRequest(
           buildUrl({

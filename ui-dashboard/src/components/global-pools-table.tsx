@@ -95,7 +95,7 @@ export function sortGlobalPools(
     tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
-  return [...entries].sort((a, b) => {
+  return entries.toSorted((a, b) => {
     const aKey = globalPoolKey(a);
     const bKey = globalPoolKey(b);
     let cmp = 0;
@@ -194,7 +194,7 @@ function LimitHeatmap({
     return <span className="text-slate-600 text-xs">—</span>;
 
   // Order by the pool's token0/token1 so heatmap rows match the displayed pair
-  const sorted = [...limits].sort((a, b) => {
+  const sorted = limits.toSorted((a, b) => {
     const aIdx = a.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     const bIdx = b.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     return aIdx - bIdx;
@@ -322,6 +322,11 @@ interface GlobalPoolsTableProps {
   reservePoolKeys?: Set<string>;
 }
 
+// Component is over the no-giant-component threshold — table with
+// sort/filter logic + per-row formatting. Tracked in BACKLOG.md
+// § "Architecture pass" for a focused split PR (extract row component
+// + sort/filter state hook).
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function GlobalPoolsTable({
   entries,
   volume24hByKey,

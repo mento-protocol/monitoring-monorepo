@@ -49,7 +49,9 @@ function perPoolTvlWindow(
   network: Network,
   rates: OracleRateMap,
 ): Map<string, { now: number; ago: number }> {
-  const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
+  const fpmmMap = new Map(
+    pools.flatMap((p) => (isFpmm(p) ? [[p.id, p] as const] : [])),
+  );
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
     if (!fpmmMap.has(s.poolId)) continue;
@@ -73,6 +75,10 @@ function perPoolTvlWindow(
   return result;
 }
 
+// Component is over the no-giant-component threshold — global hero
+// + multi-section trend layout. Tracked in BACKLOG.md § "Architecture
+// pass" for a focused split PR.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 function GlobalContent({
   initialNetworkData,
 }: {

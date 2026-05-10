@@ -67,13 +67,18 @@ export function LpsTab({
   const positions = useMemo(
     () =>
       (indexedData?.LiquidityPosition ?? [])
-        .map((position) => ({
-          address: position.address,
-          netLiquidity: BigInt(position.netLiquidity),
-          lastUpdatedTimestamp: position.lastUpdatedTimestamp,
-        }))
-        .filter((position) => position.netLiquidity > BigInt(0))
-        .sort((a, b) =>
+        .flatMap((position) => {
+          const netLiquidity = BigInt(position.netLiquidity);
+          if (netLiquidity <= BigInt(0)) return [];
+          return [
+            {
+              address: position.address,
+              netLiquidity,
+              lastUpdatedTimestamp: position.lastUpdatedTimestamp,
+            },
+          ];
+        })
+        .toSorted((a, b) =>
           a.netLiquidity === b.netLiquidity
             ? 0
             : a.netLiquidity > b.netLiquidity

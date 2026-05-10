@@ -113,13 +113,15 @@ export function computeRewardThresholds(
   // render site by `rounded > cutoff` (renderRewardCell), which quantises
   // both cells to the same bin regardless of where cutoff lands.
   const values = rawRewards
-    .map((r) => (r ? Number(r) : Number.NaN))
-    .filter((v) => Number.isFinite(v) && v > 0)
-    .sort((a, b) => a - b);
+    .flatMap((r) => {
+      const v = r ? Number(r) : Number.NaN;
+      return Number.isFinite(v) && v > 0 ? [v] : [];
+    })
+    .toSorted((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
   const mad = median(
-    values.map((v) => Math.abs(v - med)).sort((a, b) => a - b),
+    values.map((v) => Math.abs(v - med)).toSorted((a, b) => a - b),
   );
   // MAD = 0 means majority of samples are exactly equal. No meaningful
   // spread → skip highlighting rather than tier on noise.
@@ -152,6 +154,21 @@ export function renderRewardCell(
       <span className="sr-only"> — {match.tier.title}</span>
     </span>
   );
+}
+
+function RewardCell({
+  rewardUsd,
+  thresholds,
+}: {
+  rewardUsd: string | null | undefined;
+  thresholds: RewardThresholds | null;
+}) {
+  // `renderRewardCell` stays exported for the test contract pinned in
+  // `__tests__/exports.test.ts`. The wrapper is the named component the
+  // rule wants for proper reconciliation; the inline call here is the
+  // sole shared implementation.
+  // react-doctor-disable-next-line react-doctor/no-render-in-render
+  return <>{renderRewardCell(rewardUsd, thresholds)}</>;
 }
 
 export function RebalancesTab({
@@ -265,7 +282,7 @@ export function RebalancesTab({
     const raw = (chartData?.RebalanceEvent ?? []).filter(
       (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
-    return [...raw].sort(
+    return raw.toSorted(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
     );
   }, [chartData]);
@@ -385,7 +402,10 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {renderRewardCell(r.rewardUsd, rewardThresholds)}
+                    <RewardCell
+                      rewardUsd={r.rewardUsd}
+                      thresholds={rewardThresholds}
+                    />
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

@@ -57,7 +57,7 @@ const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 describe("@/lib/queries — surface contract", () => {
   it("exports every expected query name", () => {
     const actual = Object.keys(queries).sort();
-    const expected = [...EXPECTED_EXPORT_NAMES].sort();
+    const expected = EXPECTED_EXPORT_NAMES.toSorted();
     expect(actual).toEqual(expected);
   });
 

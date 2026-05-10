@@ -69,7 +69,7 @@ export function PoolTvlOverTimeChart({
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (snapshots.length === 0) return [];
-    const sorted = [...snapshots].sort(
+    const sorted = snapshots.toSorted(
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
     const points: TimeSeriesPoint[] = sorted.map((snap) => ({

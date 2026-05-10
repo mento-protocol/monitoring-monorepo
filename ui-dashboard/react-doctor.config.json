@@ -18,6 +18,10 @@
           "react-doctor/no-secrets-in-client-code",
           "react-hooks/rules-of-hooks"
         ]
+      },
+      {
+        "files": ["scripts/**"],
+        "rules": ["knip/files"]
       }
     ]
   }

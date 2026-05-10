@@ -70,10 +70,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
  * numbers. Parity with the indexer's `pool.ts` is enforced by
  * `indexer-envio/test/healthStatusParity.test.ts`.
  */
-export {
-  DEVIATION_TOLERANCE_RATIO,
-  DEVIATION_CRITICAL_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thresholds";
 
 /** Resolve the effective threshold in bps. The schema-default of 0 means the
  * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so

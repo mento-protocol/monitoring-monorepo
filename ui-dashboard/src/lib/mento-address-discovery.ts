@@ -66,6 +66,8 @@ async function fetchDistinctAddresses(
   const all = new Set<string>();
   let page = 0;
 
+  // Sequential pagination — early-exit on short-page; can't parallelize
+  // without an upfront count.
   for (; page < HARD_PAGE_CAP; page += 1) {
     const offset = page * PAGE_SIZE;
     const query = `
@@ -81,6 +83,7 @@ async function fetchDistinctAddresses(
         }
       }
     `;
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
     const data = await client.request<DistinctQueryShape>({
       document: query,
       variables: { chainId, limit: PAGE_SIZE, offset },

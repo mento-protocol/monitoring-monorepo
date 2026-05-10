@@ -47,11 +47,6 @@ export type AddressReportsIndex = {
   addresses: string[];
 };
 
-/** Full record including the address. */
-export type AddressReportRecord = AddressReport & {
-  address: string;
-};
-
 // Limits — 50KB per body (50,000 characters).
 export const MAX_BODY_LENGTH = 50_000;
 export const MAX_TITLE_LENGTH = 200;

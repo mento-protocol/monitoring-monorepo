@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   rangeCutoffSeconds,
   type LeaderboardRangeKey,
@@ -19,6 +18,11 @@ const VALID_RANGES = new Set<LeaderboardRangeKey>([
 ]);
 const DEFAULT_RANGE: LeaderboardRangeKey = "7d";
 const VALID_VENUES = new Set<Venue>(["v3", "v2"]);
+
+function initialParams(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
 
 function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
   const raw = params.get("range");
@@ -59,16 +63,20 @@ export function useLeaderboardUrlState(): {
   updateShowSystem: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
 } {
-  const searchParams = useSearchParams();
-
+  // Read directly from `window.location.search` rather than via
+  // `useSearchParams()` — the hook would force the leaderboard page out
+  // of static rendering (and trip
+  // `nextjs-no-use-search-params-without-suspense`) for an SSR pass that
+  // never matters here: the page is `"use client"`, admin-only
+  // (`robots: noindex`), and re-syncs via `popstate` after mount.
   const [range, setRange] = useState<LeaderboardRangeKey>(() =>
-    readRangeFromParams(searchParams),
+    readRangeFromParams(initialParams()),
   );
   const [showSystem, setShowSystem] = useState<boolean>(() =>
-    readShowSystemFromParams(searchParams),
+    readShowSystemFromParams(initialParams()),
   );
   const [venue, setVenue] = useState<Venue>(() =>
-    readVenueFromParams(searchParams),
+    readVenueFromParams(initialParams()),
   );
 
   const writeUrl = useCallback(
@@ -118,6 +126,10 @@ export function useLeaderboardUrlState(): {
   // Browser back/forward fires `popstate`. `replaceState` itself doesn't,
   // and `useSearchParams` doesn't observe our writes — popstate is the only
   // signal that real navigation moved the URL out from under us.
+  // The 3 setters below all update from the same single URL snapshot in a
+  // single event handler, so React's auto-batching collapses them to one
+  // re-render. A useReducer rewrite would just rename the same operation.
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onPopState = () => {

@@ -39,5 +39,5 @@ export function getUsedTags(entries: AddressEntryRecord[]): string[] {
       set.add(tag);
     }
   }
-  return [...set].sort((a, b) => a.localeCompare(b));
+  return Array.from(set).toSorted((a, b) => a.localeCompare(b));
 }

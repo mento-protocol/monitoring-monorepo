@@ -99,6 +99,10 @@ export function AddressLabelEditor({
   // contract for the new-address flow (typed address stayed inside the
   // form, report tab kept seeing the original `""` prop). Re-bubbling via
   // `onAddressChange` restores parity.
+  // `address` seeds the local draft once; subsequent updates flow
+  // through `onAddressChange`. Re-syncing on prop change would clobber
+  // a typed-but-unsaved address.
+  // react-doctor-disable-next-line react-doctor/no-derived-useState
   const [draftAddress, setDraftAddress] = useState(address);
   const { isCustom } = useAddressLabels();
 

@@ -76,7 +76,7 @@ vi.mock("@/components/tag-input", () => ({
   ),
 }));
 
-import AddressDetailPage from "../page";
+import { AddressDetailPageClient } from "../_components/address-detail-page-client";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -105,58 +105,18 @@ afterEach(() => {
   container.remove();
 });
 
-function render() {
+function render(address: string = mockParamsAddress) {
   act(() => {
-    root.render(<AddressDetailPage />);
+    root.render(<AddressDetailPageClient address={address} />);
   });
 }
 
-describe("AddressDetailPage — invalid address", () => {
-  it("redirects to /address-book and renders nothing", () => {
-    mockParamsAddress = "not-an-address";
-    render();
-    expect(mockReplace).toHaveBeenCalledWith("/address-book");
-    expect(container.textContent).toBe("");
-  });
-
-  it("stable hook count when an address goes valid → invalid on the same component instance (rules-of-hooks regression)", () => {
-    // Cursor flagged that placing the form-key latch's `useState` /
-    // `useRef` *after* the `if (!valid) return null` early return would
-    // trip React's hooks-count check the moment a user typed garbage into
-    // the URL bar (same component instance, fewer hooks the next render →
-    // crash). Pin the fix: re-render the same root with first a valid
-    // address, then an invalid one. React would throw "Rendered fewer
-    // hooks than expected" if the new hooks were still gated by the
-    // early return.
-    const consoleErrorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    mockParamsAddress = VALID_ADDR;
-    render();
-    expect(container.querySelector("h1")).not.toBeNull();
-
-    mockParamsAddress = "not-an-address";
-    expect(() => render()).not.toThrow();
-    // No "Rendered fewer hooks" or "Rules of Hooks" error logged.
-    const errorCalls = consoleErrorSpy.mock.calls
-      .map((c) => String(c[0] ?? ""))
-      .filter((s) => /hook/i.test(s));
-    expect(errorCalls).toEqual([]);
-    consoleErrorSpy.mockRestore();
-  });
-
-  it("redirects gracefully on a malformed percent-encoded URL (e.g. /%zz) instead of throwing", () => {
-    // Cursor flagged that an unguarded `decodeURIComponent` would throw
-    // `URIError` and dump the user into the error boundary. Pin the
-    // try-catch fallback: malformed input falls through to
-    // `isValidAddress` (returns false) → silent redirect, same UX as any
-    // other garbage path.
-    mockParamsAddress = "%zz";
-    expect(() => render()).not.toThrow();
-    expect(mockReplace).toHaveBeenCalledWith("/address-book");
-    expect(container.textContent).toBe("");
-  });
-});
+// Invalid-address handling moved to the server-component shell in
+// `../page.tsx`: `decodeURIComponent` + `isValidAddress` now run before
+// the client renders, with `redirect("/address-book")` from
+// next/navigation. The client component only ever receives a validated
+// address, so the prior "invalid address" client-side tests no longer
+// apply.
 
 describe("AddressDetailPage — empty state", () => {
   it("renders the empty form + empty report editor + hint when no data exists", () => {
@@ -211,14 +171,14 @@ describe("AddressDetailPage — populated state", () => {
     expect(container.textContent).not.toMatch(/No label or report yet/);
   });
 
-  it("normalizes mixed-case URL params to lowercase before lookup", () => {
-    const upper = "0x" + "A".repeat(40);
-    mockParamsAddress = upper;
-    render();
-    // Provider lookup is case-sensitive on the call site; assert we lowered
-    // before passing through.
+  it("looks up the entry with the address it was given (server-side normalization is verified separately)", () => {
+    // The page-level server component now does decode + lowercase
+    // before passing `address` into this client. Pin the contract:
+    // whatever address arrives is what the provider sees.
+    const lower = "0x" + "a".repeat(40);
+    render(lower);
     const calls = mockGetEntry.mock.calls;
-    expect(calls[0]?.[0]).toBe(upper.toLowerCase());
+    expect(calls[0]?.[0]).toBe(lower);
   });
 
   it("forwards the address to the report editor verbatim (already lowercased)", () => {

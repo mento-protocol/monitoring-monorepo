@@ -342,14 +342,12 @@ describe("Pool detail LPs tab", () => {
   // avoids substring collisions — e.g. "OracleSnapshots" would otherwise match
   // the header-hook query `OracleSnapshotsWindow` which is not tab-scoped.
   function firedOperationNames(): string[] {
-    return mockUseGQL.mock.calls
-      .map((args) => args[0])
-      .filter((q): q is string => typeof q === "string")
-      .map((q) => {
-        const m = q.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
-        return m ? m[1] : "";
-      })
-      .filter(Boolean);
+    return mockUseGQL.mock.calls.flatMap((args) => {
+      const q = args[0];
+      if (typeof q !== "string") return [];
+      const m = q.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
+      return m && m[1] ? [m[1]] : [];
+    });
   }
 
   // Operation names for each tab's tab-scoped queries. Header/panel queries

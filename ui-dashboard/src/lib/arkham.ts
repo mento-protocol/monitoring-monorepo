@@ -72,10 +72,10 @@ export type ArkhamEnrichedAddress = {
   clusterIds?: string[];
 };
 
-// Re-export so existing `from "@/lib/arkham"` import sites keep working.
-// The canonical home is `address-labels-shared.ts` because client components
-// (e.g. AddressBookClient) need these and this module is server-only.
-export { ARKHAM_TAG, isArkhamSourced };
+// `ARKHAM_TAG` and `isArkhamSourced` live in `address-labels-shared.ts` —
+// client components import directly from there. Don't re-export here so
+// new code doesn't accidentally pull this server-only module into the
+// client bundle.
 
 export class ArkhamRateLimitedError extends Error {
   constructor() {
@@ -278,9 +278,13 @@ export async function enrichBatch(
   const { apiKey, fetchImpl = fetch, sleeper = defaultSleeper } = opts;
   const results: EnrichmentResult[] = [];
 
+  // Sequential by design — Arkham rate-limits hard, so back-off + retry
+  // must happen between calls (not in parallel) to avoid burning the
+  // budget faster than recovery. `Promise.all` would 429 the whole batch.
   for (let i = 0; i < addresses.length; i += 1) {
     const address = addresses[i]!;
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       results.push(await tryEnrich(address, apiKey, fetchImpl));
     } catch (err) {
       // Auth errors are fatal: the rest of the batch will all 401 too.
@@ -364,12 +368,11 @@ export function filterCandidates(
   existing: Record<string, AddressEntry>,
   mode: "new" | "refresh" = "new",
 ): string[] {
-  return candidates
-    .map((a) => a.toLowerCase())
-    .filter((address) => {
-      const current = existing[address];
-      if (!current) return mode !== "refresh"; // unlabeled: enrich in new mode only
-      if (isArkhamSourced(current)) return mode === "refresh";
-      return false; // manual label — skip
-    });
+  return candidates.flatMap((a) => {
+    const address = a.toLowerCase();
+    const current = existing[address];
+    if (!current) return mode !== "refresh" ? [address] : []; // unlabeled: enrich in new mode only
+    if (isArkhamSourced(current)) return mode === "refresh" ? [address] : [];
+    return []; // manual label — skip
+  });
 }

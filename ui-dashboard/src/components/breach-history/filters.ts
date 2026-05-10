@@ -22,9 +22,7 @@ export const START_REASON_LABELS: Record<BreachEventCategory, string> = {
   unknown: "Unknown",
 };
 
-export function whereForBucket(
-  bucket: DurationBucket,
-): Record<string, unknown> {
+function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
   switch (bucket) {
     case "all":
       return {};
