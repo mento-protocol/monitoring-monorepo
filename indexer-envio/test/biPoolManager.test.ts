@@ -11,10 +11,12 @@ import {
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
+  fetchVirtualPoolExchangeId,
+  VP_PROBE_RPC_ERROR,
   type PoolExchangeStruct,
 } from "../src/rpc/biPoolManager.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
-import { makePoolId } from "../src/helpers.ts";
+import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
 type MockDb = {
   entities: {
@@ -584,6 +586,144 @@ describe("BiPoolManager handlers", () => {
       assert.equal(pool!.source, "fpmm_swap");
       assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
     });
+
+    it("backfills token0/token1 from BiPoolExchange when first event is VirtualPool.Swap", async function () {
+      this.timeout(10_000);
+      // Codex P2 #3 follow-up: in the pre-start_block scenario above, the
+      // Pool is created via `getOrCreate` without `defaults.token0/token1`
+      // (Swap/Mint/Burn events don't carry the pair). Without backfill,
+      // the first swap is valued at $0 and the dashboard renders "?"
+      // symbols until some later asset-bearing event arrives. With the
+      // BiPoolExchange row already seeded by `BiPoolManager.ExchangeCreated`,
+      // `selfHealWrappedExchangeId` mirrors `asset0/asset1` onto the Pool.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+
+      let mockDb = MockDb.createMockDb();
+      // Step 1: ExchangeCreated seeds BiPoolExchange (asset0, asset1, feedID)
+      // but NO Pool yet — VP wasn't observed yet, so wrappedByPoolId stays
+      // empty and the Pool side is created on Step 2.
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      // Step 2: VirtualPool.Swap is the first VP-side event — Pool gets
+      // created here without defaults.token0/token1, then selfHeal runs.
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const pool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            wrappedExchangeId?: string;
+            referenceRateFeedID: string;
+          }
+        | undefined;
+      assert.ok(pool);
+      assert.equal(pool!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      // Backfilled from BiPoolExchange.asset0/asset1.
+      assert.equal(pool!.token0, ASSET0);
+      assert.equal(pool!.token1, ASSET1);
+      // Side-effect of the same heal path: feedID also mirrors over.
+      assert.equal(pool!.referenceRateFeedID, FEED_ID);
+    });
+  });
+});
+
+describe("fetchVirtualPoolExchangeId discriminator", () => {
+  // Three-way return contract — preserved by `vpExchangeIdEffect` to decide
+  // what's safe to cache:
+  //   - VirtualPoolExchangeId  → VP, cache forever
+  //   - null                   → bytecode present but pattern miss, cache forever
+  //   - VP_PROBE_RPC_ERROR     → RPC threw, do NOT cache (transient)
+  beforeEach(() => {
+    _clearMockVpExchangeIds();
+  });
+
+  it("passes through a VirtualPoolExchangeId mock unchanged", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+      exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+      exchangeId: EXCHANGE_ID,
+    });
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.deepEqual(result, {
+      exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+      exchangeId: EXCHANGE_ID,
+    });
+  });
+
+  it("returns null (permanent miss) when mock is null — caller treats this as cacheable not-VP", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, null);
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.equal(result, null);
+  });
+
+  it("returns VP_PROBE_RPC_ERROR (transient) when mock is the RPC-error sentinel", async () => {
+    _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, VP_PROBE_RPC_ERROR);
+    const result = await fetchVirtualPoolExchangeId(CHAIN_ID, VP_ADDRESS);
+    assert.equal(result, VP_PROBE_RPC_ERROR);
+  });
+});
+
+describe("isVirtualPool predicate", () => {
+  // Two positive signals — either is sufficient. Healed VPs retain their
+  // `fpmm_*` source by design (pickPreferredSource priority alignment), so
+  // the wrappedExchangeId-based recognition is what classifies them
+  // correctly downstream after PR #369.
+  it("recognizes the canonical virtual_pool_factory source", () => {
+    assert.equal(isVirtualPool({ source: "virtual_pool_factory" }), true);
+  });
+
+  it("recognizes any source containing 'virtual'", () => {
+    assert.equal(isVirtualPool({ source: "virtual_swap" }), true);
+  });
+
+  it("recognizes a healed VP whose source is fpmm_* but wrappedExchangeId is set", () => {
+    assert.equal(
+      isVirtualPool({
+        source: "fpmm_swap",
+        wrappedExchangeId: "0xabc",
+      }),
+      true,
+    );
+  });
+
+  it("classifies a plain FPMM (fpmm_* source, no wrappedExchangeId) as non-virtual", () => {
+    assert.equal(isVirtualPool({ source: "fpmm_swap" }), false);
+    assert.equal(
+      isVirtualPool({ source: "fpmm_swap", wrappedExchangeId: undefined }),
+      false,
+    );
+    assert.equal(
+      isVirtualPool({ source: "fpmm_swap", wrappedExchangeId: "" }),
+      false,
+    );
   });
 });
 

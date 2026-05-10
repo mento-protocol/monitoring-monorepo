@@ -392,19 +392,23 @@ export async function selfHealRebalanceThresholds(
  * The bytecode pattern is definitive — it returns null for FPMMs and
  * `{exchangeProvider, exchangeId}` for VPs.
  *
- * The effect is `cache: true` and bytecode is immutable, so for actual
- * VPs the cache fires the RPC once per address across the whole sync.
- * For FPMM pools the bytecode pattern doesn't match → effect handler
- * sets `context.cache = false` and returns undefined; this means each
- * unhealed FPMM event triggers an `eth_getCode` (within a batch the
- * load-layer memoizes by input key, so the cost is one RPC per FPMM
- * address per batch). Acceptable cost in exchange for closing the
- * testnet edge case — production has zero pre-start_block active VPs.
+ * The effect is `cache: true` and bytecode is immutable, so the RPC
+ * fires once per address across the whole sync regardless of whether
+ * the address is a VP or an FPMM. `vpExchangeIdEffect` distinguishes
+ * "got bytecode, not a VP" (cached as a permanent miss) from "RPC
+ * threw" (transient, not cached) — see the effect's comment for the
+ * discriminator. After the cache populates, FPMMs cost zero RPC on
+ * subsequent events.
  *
  * Also patches the matching `BiPoolExchange.wrappedByPoolId` back-
  * reference if the exchange row already exists, so the dashboard's
  * `wrappedByPoolId`-keyed GraphQL query finds the join after a heal
- * that only the Pool side knew about.
+ * that only the Pool side knew about. When the BiPoolExchange row is
+ * present, also backfills `token0`/`token1` from its `asset0`/`asset1`
+ * if the Pool was created without them (Swap/Mint/Burn-first scenario:
+ * those events don't carry the pair tokens, so the first VP swap
+ * would otherwise show "?" symbols + zero USD valuation until some
+ * later asset-bearing event lands).
  *
  * No-op on pools that already have `wrappedExchangeId` set. */
 export async function selfHealWrappedExchangeId(
@@ -423,6 +427,8 @@ export async function selfHealWrappedExchangeId(
   const exchangeRowId = `${pool.chainId}-${result.exchangeId}`;
   const exchange = await context.BiPoolExchange.get(exchangeRowId);
   let healedFeedId = pool.referenceRateFeedID;
+  let healedToken0 = pool.token0;
+  let healedToken1 = pool.token1;
   if (exchange) {
     if (exchange.wrappedByPoolId !== pool.id) {
       context.BiPoolExchange.set({
@@ -457,11 +463,23 @@ export async function selfHealWrappedExchangeId(
     ) {
       healedFeedId = exchange.referenceRateFeedID;
     }
+    // Backfill pair tokens. Swap/Mint/Burn-first scenario: the Pool was
+    // created via getOrCreate without `defaults.token0/token1` (those
+    // events don't carry the pair). Without this, the first swap is
+    // valued at $0 and the dashboard renders "?" symbols until some
+    // later asset-bearing event arrives — which may never happen for
+    // pre-start_block VPs. The BiPoolExchange row already has the
+    // assets from BiPoolManager.ExchangeCreated. Only fill on miss
+    // (existing token0/token1 wins on direct conflict).
+    if (!healedToken0) healedToken0 = exchange.asset0;
+    if (!healedToken1) healedToken1 = exchange.asset1;
   }
   return {
     ...pool,
     wrappedExchangeId: result.exchangeId,
     referenceRateFeedID: healedFeedId,
+    token0: healedToken0,
+    token1: healedToken1,
   };
 }
 
@@ -687,13 +705,11 @@ export const upsertPool = async ({
   // (intentional: they share priority with FPMM events for `pickPreferredSource`),
   // so the pool source never gets the "virtual" substring → self-heal was
   // skipped → `wrappedExchangeId` never populated. Bytecode is immutable
-  // and the effect is `cache: true`, so the per-VP RPC fires once per
-  // address across the whole sync; FPMM-event callers hit the bytecode
-  // pattern check, get a null result, and the effect falls through. The
-  // null path explicitly sets `context.cache = false` (see
-  // `vpExchangeIdEffect` in `src/rpc/effects.ts`) so a transient RPC
-  // failure won't be persisted; the cost is one `eth_getCode` per FPMM
-  // event whose pool isn't yet healed.
+  // and the effect is `cache: true`. `vpExchangeIdEffect` discriminates
+  // "got bytecode, not a VP" (cached as a permanent miss → FPMM hot path
+  // pays one RPC per address total) from "RPC threw" (transient, NOT
+  // cached → next event for that address retries). See
+  // `vpExchangeIdEffect` in `src/rpc/effects.ts` for the discriminator.
   const existing = invertHealed.wrappedExchangeId
     ? invertHealed
     : await selfHealWrappedExchangeId(

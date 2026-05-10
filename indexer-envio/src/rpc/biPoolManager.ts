@@ -143,10 +143,11 @@ export async function fetchPoolExchange(
 //   DUP2 (81) AND (16) PUSH1 0x04 (6004) DUP4 (83) ADD (01) MSTORE (52)
 //   PUSH32 <32B exchangeId> — capture 2
 //
-// Returns null when the address has no bytecode (likely not yet deployed at
-// the requested block) or when the pattern doesn't match (not a VirtualPool —
-// shouldn't happen given how this is called, but defends against future
-// non-VP deployments routed through the same factory).
+// Returns `null` (permanent miss) when the address has no bytecode or the
+// pattern doesn't match — both are stable classifications safe to cache
+// forever. Returns the `RPC_ERROR` sentinel when `getCode` itself rejects;
+// callers must NOT cache that case (the next event for the same address
+// should retry).
 // ---------------------------------------------------------------------------
 
 export type VirtualPoolExchangeId = {
@@ -154,14 +155,24 @@ export type VirtualPoolExchangeId = {
   exchangeId: string;
 };
 
-const _testVpExchangeIds = new Map<string, VirtualPoolExchangeId | null>();
+/** Sentinel: bytecode probe failed transiently (RPC threw). Distinct from
+ * `null`, which means "got bytecode, definitively not a VP" and is safe
+ * to cache as a permanent classification. */
+export const VP_PROBE_RPC_ERROR = "rpc-error" as const;
+export type VpProbeResult =
+  | VirtualPoolExchangeId
+  | null
+  | typeof VP_PROBE_RPC_ERROR;
+
+const _testVpExchangeIds = new Map<string, VpProbeResult>();
 
 /** @internal Test-only: pre-set a mock VirtualPool exchangeId extraction.
- *  Pass `null` to simulate "not a VP" (no pattern match). */
+ *  Pass `null` to simulate "not a VP" (no pattern match — permanent miss).
+ *  Pass `VP_PROBE_RPC_ERROR` to simulate a transient RPC failure. */
 export function _setMockVpExchangeId(
   chainId: number,
   vpAddress: string,
-  result: VirtualPoolExchangeId | null,
+  result: VpProbeResult,
 ): void {
   const key = `${chainId}:${vpAddress.toLowerCase()}`;
   _testVpExchangeIds.set(key, result);
@@ -193,7 +204,7 @@ export async function fetchVirtualPoolExchangeId(
   chainId: number,
   vpAddress: string,
   log: RpcLogger = consoleLogger,
-): Promise<VirtualPoolExchangeId | null> {
+): Promise<VpProbeResult> {
   const mockKey = `${chainId}:${vpAddress.toLowerCase()}`;
   if (_testVpExchangeIds.has(mockKey)) {
     return _testVpExchangeIds.get(mockKey) ?? null;
@@ -207,6 +218,6 @@ export async function fetchVirtualPoolExchangeId(
     return extractVpExchangeIdFromBytecode(code);
   } catch (err) {
     logRpcFailure(chainId, "vpExchangeId", vpAddress, err, undefined, log);
-    return null;
+    return VP_PROBE_RPC_ERROR;
   }
 }
