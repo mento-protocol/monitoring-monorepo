@@ -194,6 +194,15 @@ export function getSnapshotVolumeInUsd(
   rates: OracleRateMap,
 ): number | null {
   if (!pool || !isUsdConvertible(pool, network, rates)) return null;
+  // `parseWei` below scales by `pool.tokenNDecimals ?? 18`. If the
+  // indexer hasn't yet read on-chain decimals (`tokenDecimalsKnown=false`),
+  // those fields hold the schema-default 18 — a 6-dp USDC leg would be
+  // scaled by 1e18 and produce a 1e12-fold USD overstatement. The indexer
+  // already suppresses `SwapEvent.volumeUsdWei` in that case; mirror the
+  // gate here so snapshot-derived volumes stay null too. Undefined flag
+  // (deploy-window schema-lag) trusts the legacy schema-default 18 path
+  // so existing pools don't blank — only an explicit `false` short-circuits.
+  if (pool.tokenDecimalsKnown === false) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {

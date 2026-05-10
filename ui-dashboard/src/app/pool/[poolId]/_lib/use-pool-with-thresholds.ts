@@ -1,11 +1,13 @@
 // Pool detail page fetches POOL_DETAIL_WITH_HEALTH for the bulk of the
-// pool entity, but `rebalanceThresholdAbove` / `rebalanceThresholdBelow` /
-// `rebalanceThresholdsKnown` are isolated in `POOL_THRESHOLDS_KNOWN_EXT`
-// for schema-lag resilience (see queries.ts). This hook merges the two
-// so consumers get a single `Pool` object with the threshold fields
-// merged in. On EXT failure the threshold fields stay `undefined` and
-// `isNeverRebalance` / `effectiveThreshold` fall back to the safe
-// 10000-bps under-bound.
+// pool entity, but data-trust flags (`rebalanceThresholdsKnown` triple +
+// `tokenDecimalsKnown`) are isolated in `POOL_THRESHOLDS_KNOWN_EXT` for
+// schema-lag resilience (see queries.ts). This hook merges the two so
+// consumers get a single `Pool` object with the trust flags merged in.
+// On EXT failure the fields stay `undefined`: `isNeverRebalance` /
+// `effectiveThreshold` fall back to the 10000-bps under-bound, and
+// USD math via `getSnapshotVolumeInUsd` short-circuits only on an
+// explicit `tokenDecimalsKnown=false` (undefined trusts the legacy
+// schema-default 18 path so existing pools don't blank).
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
@@ -17,6 +19,7 @@ type ThresholdsExtRow = {
   rebalanceThresholdAbove?: number;
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
+  tokenDecimalsKnown?: boolean;
 };
 
 export function usePoolWithThresholds(
@@ -37,6 +40,7 @@ export function usePoolWithThresholds(
       rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
       rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
       rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+      tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
     };
   }, [rawPool, thresholdsExt]);
 }

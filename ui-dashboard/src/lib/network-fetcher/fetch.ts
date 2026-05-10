@@ -430,18 +430,21 @@ export async function fetchNetworkData(
         healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
-    // `rebalanceThresholdsKnown` triple — isolated for the same schema-
-    // lag reason as the breach rollup above. Consumers (`isNeverRebalance`,
-    // `effectiveThreshold`) degrade safely to the 10000-bps under-bound
-    // when the fields are missing. Split sides included because the
-    // never-rebalance predicate requires BOTH above/below to be 0 (active
-    // `rebalanceThreshold` alone can't disambiguate).
+    // Data-trust flags (`rebalanceThresholdsKnown` triple +
+    // `tokenDecimalsKnown`) — isolated for the same schema-lag reason as
+    // the breach rollup above. Consumers degrade safely when the fields
+    // are missing: thresholds fall back to the 10000-bps under-bound;
+    // USD math via `getSnapshotVolumeInUsd` returns null and the volume
+    // column shows "—" rather than a 6-dp-USDC-as-18-dp scaled lie.
+    // Split-side fields included because `isNeverRebalance` needs BOTH
+    // above/below to be 0.
     timed<{
       Pool: {
         id: string;
         rebalanceThresholdAbove?: number;
         rebalanceThresholdBelow?: number;
         rebalanceThresholdsKnown?: boolean;
+        tokenDecimalsKnown?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
     // RPC probe — no indexer entity for CDP strategy, so we detect by
@@ -474,10 +477,12 @@ export async function fetchNetworkData(
     });
   }
 
-  // Merge `rebalanceThresholdsKnown` triple into the pool objects. On
-  // failure (schema-lag during deploy), the fields stay `undefined` and
+  // Merge data-trust flags into the pool objects. On failure (schema-
+  // lag during deploy), the fields stay `undefined` and
   // `isNeverRebalance` / `effectiveThreshold` fall back to the safe
-  // 10000-bps under-bound.
+  // 10000-bps under-bound; `getSnapshotVolumeInUsd` returns null
+  // when `tokenDecimalsKnown` is undefined-or-false so untrusted-decimal
+  // pools don't fake a USD volume from schema-default 18/18.
   if (rebalanceThresholdsKnownResult.status === "fulfilled") {
     const knownById = new Map(
       (rebalanceThresholdsKnownResult.value.Pool ?? []).map((r) => [r.id, r]),
@@ -491,6 +496,7 @@ export async function fetchNetworkData(
             rebalanceThresholdAbove: r.rebalanceThresholdAbove,
             rebalanceThresholdBelow: r.rebalanceThresholdBelow,
             rebalanceThresholdsKnown: r.rebalanceThresholdsKnown,
+            tokenDecimalsKnown: r.tokenDecimalsKnown,
           };
     });
   }

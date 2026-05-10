@@ -462,6 +462,64 @@ describe("getSnapshotVolumeInUsd", () => {
       ),
     ).toBeNull();
   });
+
+  it("returns null when tokenDecimalsKnown is false (avoid 18/18 fake-scale on USDC leg)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-usdc",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm (USD-pegged)
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18, // schema-default — actual would be 6 for USDC etc.
+      tokenDecimalsKnown: false,
+    };
+    expect(
+      getSnapshotVolumeInUsd(
+        {
+          poolId: "pool-usdc",
+          timestamp: "0",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000", // 1 USDm in 18dp
+          swapVolume1: "0",
+        },
+        pool,
+        network,
+        EMPTY_RATES,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns valued volume when tokenDecimalsKnown is undefined (legacy schema, trust default 18)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-legacy",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18,
+      // tokenDecimalsKnown intentionally undefined (deploy-window schema-lag)
+    };
+    expect(
+      getSnapshotVolumeInUsd(
+        {
+          poolId: "pool-legacy",
+          timestamp: "0",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000",
+          swapVolume1: "0",
+        },
+        pool,
+        network,
+        EMPTY_RATES,
+      ),
+    ).toBeCloseTo(1, 8);
+  });
 });
 
 const BASE_POOL_FIELDS = {

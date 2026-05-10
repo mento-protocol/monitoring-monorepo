@@ -49,6 +49,7 @@ export type Pool = {
   rebalancerAddress?: string;
   token0Decimals?: number;
   token1Decimals?: number;
+  tokenDecimalsKnown?: boolean;
   swapCount?: number;
   rebalanceCount?: number;
   notionalVolume0?: string;

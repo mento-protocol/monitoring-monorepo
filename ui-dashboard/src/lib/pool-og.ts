@@ -148,6 +148,7 @@ export async function fetchPoolOgDataUncached(
           rebalanceThresholdAbove?: number;
           rebalanceThresholdBelow?: number;
           rebalanceThresholdsKnown?: boolean;
+          tokenDecimalsKnown?: boolean;
         }[];
       }>({
         document: POOL_THRESHOLDS_KNOWN_EXT,
@@ -169,6 +170,7 @@ export async function fetchPoolOgDataUncached(
         rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
         rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
         rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+        tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
       }
     : rawPool;
 

@@ -49,23 +49,26 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-// Per-pool threshold-known flag + split sides, scoped to a chain. Kept
-// OFF `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
+// Per-pool data-trust flags — `rebalanceThresholdsKnown` triple
+// (above/below/known) plus `tokenDecimalsKnown`. Kept OFF
+// `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
 // `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
 // the new fields before the prod indexer has them would otherwise reject
 // the entire pools query. Isolating means consumers (`isNeverRebalance`,
-// `effectiveThreshold` in `health.ts`) degrade safely to the 10000-bps
-// under-bound until the merge lands.
+// `effectiveThreshold` in `health.ts`, `getSnapshotVolumeInUsd` in
+// `volume.ts`) degrade safely (10000-bps under-bound for thresholds, null
+// USD volume for unknown decimals) until the merge lands.
 //
-// Includes `rebalanceThresholdAbove` / `rebalanceThresholdBelow`
-// alongside the Known flag because `isNeverRebalance` requires BOTH
-// split sides to be 0 (the active `rebalanceThreshold` field on the
-// main query is just the side `pickActiveThreshold` chose at index
-// time, so it can be 0 on an asymmetric `above=0, below>0` pool that
-// DOES rebalance — see indexer `pool.ts:isNeverRebalance` for the full
-// rationale). Triggered by Cursor's learned rule "Isolate new
-// Envio/Hasura entity fields in separate queries for schema-lag
-// resilience".
+// `rebalanceThresholdAbove` / `rebalanceThresholdBelow` ride alongside
+// the Known flag because `isNeverRebalance` requires BOTH split sides to
+// be 0 (the active `rebalanceThreshold` on the main query is just the
+// side `pickActiveThreshold` chose at index time — can be 0 on an
+// asymmetric `above=0, below>0` pool that DOES rebalance; see indexer
+// `pool.ts:isNeverRebalance`). `tokenDecimalsKnown` distinguishes
+// schema-default 18/18 from on-chain-trusted decimals so dashboard USD
+// math doesn't silently scale a 6-dp USDC leg as 18-dp. Triggered by
+// Cursor's learned rule "Isolate new Envio/Hasura entity fields in
+// separate queries for schema-lag resilience".
 export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
   query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
@@ -73,6 +76,7 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
       rebalanceThresholdAbove
       rebalanceThresholdBelow
       rebalanceThresholdsKnown
+      tokenDecimalsKnown
     }
   }
 `;
@@ -368,10 +372,9 @@ export const POOL_DETAIL_WITH_HEALTH = `
 `;
 
 // Single-pool sibling of `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Same
-// isolation rationale: keeps the `rebalanceThresholdsKnown` /
-// `rebalanceThresholdAbove` / `rebalanceThresholdBelow` triple OFF the
-// page's primary `POOL_DETAIL_WITH_HEALTH` query so a schema-lag during
-// deploy degrades just the never-rebalance affordance instead of breaking
+// isolation rationale: keeps the data-trust flags OFF the page's primary
+// `POOL_DETAIL_WITH_HEALTH` query so a schema-lag during deploy degrades
+// just the never-rebalance affordance / USD math instead of breaking
 // the entire pool detail page.
 export const POOL_THRESHOLDS_KNOWN_EXT = `
   query PoolThresholdsKnownExt($id: String!, $chainId: Int!) {
@@ -380,6 +383,7 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
       rebalanceThresholdAbove
       rebalanceThresholdBelow
       rebalanceThresholdsKnown
+      tokenDecimalsKnown
     }
   }
 `;

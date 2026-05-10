@@ -136,24 +136,24 @@ export const effectiveThreshold = (pool: {
 
 /**
  * Persistable counterpart to `effectiveThreshold` for any field typed as
- * GraphQL `Int!` (32-bit signed, max ~2.1e9). The 1e12 never-rebalance
- * sentinel is intentionally only safe for in-memory comparisons — coercing
- * it to JS `Number` and persisting overflows `Int!`, which Postgres rejects
- * as `int4` out-of-range. Use this for `OracleSnapshot.rebalanceThreshold`
- * and any other persisted threshold field; dashboard consumers that need
- * to distinguish never-rebalance from on-chain-configured-zero must join
- * the Pool entity's `rebalanceThresholdsKnown` + `rebalanceThresholdAbove/Below`
- * fields rather than reading sentinel values from the snapshot row.
+ * GraphQL `Int!` (32-bit signed, max ~2.1e9). Returns the raw on-chain
+ * active threshold in bps — never the in-memory sentinels:
+ *
+ * - 1e12 (never-rebalance) overflows `Int!`; Postgres rejects as `int4`
+ *   out-of-range.
+ * - 10000 (unknown-zero fallback) leaks into `OracleSnapshot.rebalanceThreshold`
+ *   on rows that `recordHealthSample` flags `hasHealthData=false`. Oracle
+ *   tab/chart consumers that read the row directly would render a fake
+ *   "100% threshold" deviation against the row's preserved `priceDifference`
+ *   instead of degrading to no-data.
+ *
+ * Consumers that need to distinguish never-rebalance, asymmetric-active-zero,
+ * and unknown-zero must join the Pool entity (`rebalanceThresholdsKnown` +
+ * `rebalanceThresholdAbove/Below`) and the row's `hasHealthData` flag.
  */
 export const persistableThreshold = (pool: {
   rebalanceThreshold: number;
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
-  rebalanceThresholdsKnown?: boolean;
-}): number => {
-  if (isNeverRebalance(pool)) return 0;
-  return Number(effectiveThreshold(pool));
-};
+}): number => pool.rebalanceThreshold;
 
 /** True when `priceDifference` is strictly above the 5% critical-magnitude
  * line, integer-safe. Used by both the live status branch (here) and the

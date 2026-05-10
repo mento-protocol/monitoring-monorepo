@@ -149,6 +149,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
         rebalanceThresholdAbove?: number;
         rebalanceThresholdBelow?: number;
         rebalanceThresholdsKnown?: boolean;
+        tokenDecimalsKnown?: boolean;
       }[];
     }>({
       document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
@@ -167,6 +168,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
             rebalanceThresholdAbove: t.rebalanceThresholdAbove,
             rebalanceThresholdBelow: t.rebalanceThresholdBelow,
             rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
+            tokenDecimalsKnown: t.tokenDecimalsKnown,
           };
     });
   } catch {
