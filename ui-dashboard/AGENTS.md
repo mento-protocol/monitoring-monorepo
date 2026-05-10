@@ -52,6 +52,9 @@ CI-equivalent diff scan, or `pnpm react-doctor` locally for a full scan.
 
 CI also runs a full-score floor and fails unless
 `react-doctor --full --score --offline` returns `100`.
+Some high-noise React Doctor rules are intentionally disabled in ESLint to keep
+IDE signal useful; the standalone CLI/diff gate and `BACKLOG.md` remain the
+source of truth for those rules.
 
 Project-wide silences live in `react-doctor.config.json`. Current state:
 

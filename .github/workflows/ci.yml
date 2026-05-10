@@ -157,7 +157,7 @@ jobs:
           pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
       - name: React Doctor score floor
         run: |
-          score="$(pnpm --filter @mento-protocol/ui-dashboard react-doctor --full --score --offline | tail -n 1)"
+          score="$(pnpm --filter @mento-protocol/ui-dashboard react-doctor --full --score --offline | tail -n 1 | tr -d '[:space:]')"
           if [ "$score" != "100" ]; then
             echo "Expected ui-dashboard react-doctor score 100, got ${score}" >&2
             exit 1

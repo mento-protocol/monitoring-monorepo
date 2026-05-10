@@ -175,6 +175,30 @@ export function BreachHistoryPanel(props: Props) {
   );
 }
 
+type BreachHistoryPanelInnerProps = {
+  pool: Pool;
+  network: Network;
+  limit: number;
+  query: string;
+  search: string;
+  onSearchChange: (v: string) => void;
+  getName: (addr: string | null, chainId?: number) => string;
+  getTags: (addr: string | null) => string[];
+  rawPage: number;
+  onPageChange: (n: number) => void;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  bucket: DurationBucket;
+  onBucket: (next: DurationBucket) => void;
+  minSeconds: number | null;
+  onMinCommit: (seconds: number | null) => void;
+  maxSeconds: number | null;
+  onMaxCommit: (seconds: number | null) => void;
+  where: Record<string, unknown>;
+  orderBy: ReturnType<typeof buildOrderBy>;
+};
+
 function BreachHistoryPanelInner({
   pool,
   network,
@@ -197,29 +221,7 @@ function BreachHistoryPanelInner({
   onMaxCommit,
   where,
   orderBy,
-}: {
-  pool: Pool;
-  network: Network;
-  limit: number;
-  query: string;
-  search: string;
-  onSearchChange: (v: string) => void;
-  getName: (addr: string | null, chainId?: number) => string;
-  getTags: (addr: string | null) => string[];
-  rawPage: number;
-  onPageChange: (n: number) => void;
-  sortKey: SortKey;
-  sortDir: SortDir;
-  onSort: (key: SortKey) => void;
-  bucket: DurationBucket;
-  onBucket: (next: DurationBucket) => void;
-  minSeconds: number | null;
-  onMinCommit: (seconds: number | null) => void;
-  maxSeconds: number | null;
-  onMaxCommit: (seconds: number | null) => void;
-  where: Record<string, unknown>;
-  orderBy: ReturnType<typeof buildOrderBy>;
-}) {
+}: BreachHistoryPanelInnerProps) {
   // Count + paginated page run in parallel against the same $where so the
   // pagination controls match what's rendered.
   //

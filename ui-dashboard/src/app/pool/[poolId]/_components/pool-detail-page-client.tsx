@@ -207,8 +207,12 @@ function PoolDetail() {
   const olsTabVisible = hasOlsPool || olsLoading;
   // Non-FPMM pools (virtual pools) have no deviation breach model — hide
   // the tab rather than render an empty panel, same pattern as OLS.
-  const visibleTabs = TABS.filter(
-    (t) => (t !== "ols" || olsTabVisible) && (t !== "breaches" || fpmmPool),
+  const visibleTabs = useMemo(
+    () =>
+      TABS.filter(
+        (t) => (t !== "ols" || olsTabVisible) && (t !== "breaches" || fpmmPool),
+      ),
+    [olsTabVisible, fpmmPool],
   );
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab

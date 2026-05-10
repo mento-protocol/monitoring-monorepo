@@ -28,7 +28,7 @@ import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
 import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
-import React, { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
 
@@ -39,17 +39,21 @@ type OracleTabProps = {
   onSearchChange: (value: string) => void;
 };
 
+// Search always uses newest-first so the bounded window is chronologically
+// consistent with what the warning text says ("most recent N snapshots").
+const SEARCH_ORDER_BY = buildOrderBy("timestamp", "desc");
+
 export function OracleTab(props: OracleTabProps) {
   const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
   const query = normalizeSearch(search);
 
-  const [rawPage, setRawPage] = React.useState(1);
-  const [sortCol, setSortCol] = React.useState<OracleSortCol>("timestamp");
-  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+  const [rawPage, setRawPage] = useState(1);
+  const [sortCol, setSortCol] = useState<OracleSortCol>("timestamp");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Wrap search handler so changing the query always resets to page 1
-  const handleSearchChange = React.useCallback(
+  const handleSearchChange = useCallback(
     (value: string) => {
       onSearchChange(value);
       setRawPage(1);
@@ -65,7 +69,7 @@ export function OracleTab(props: OracleTabProps) {
     offset: 0,
   });
   // Preserve last known total on count error so pagination stays visible.
-  const lastKnownTotalRef = React.useRef(0);
+  const lastKnownTotalRef = useRef(0);
   const rawTotal = countData?.OracleSnapshot?.length ?? 0;
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   const total = countError ? lastKnownTotalRef.current : rawTotal;
@@ -92,10 +96,7 @@ export function OracleTab(props: OracleTabProps) {
     () => buildOrderBy(sortCol, sortDir, "timestamp"),
     [sortCol, sortDir],
   );
-  // Search always uses newest-first so the bounded window is chronologically
-  // consistent with what the warning text says ("most recent N snapshots")
-  const searchOrderBy = useMemo(() => buildOrderBy("timestamp", "desc"), []);
-  const orderBy = isSearching ? searchOrderBy : tableOrderBy;
+  const orderBy = isSearching ? SEARCH_ORDER_BY : tableOrderBy;
 
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
@@ -142,7 +143,7 @@ export function OracleTab(props: OracleTabProps) {
     });
   }, [rows, query, sym0]);
 
-  const toggleSort = React.useCallback(
+  const toggleSort = useCallback(
     (col: OracleSortCol) => {
       if (sortCol === col) {
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
