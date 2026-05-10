@@ -126,7 +126,15 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // fields (oraclePrice, oracleTimestamp, oracleOk) for the freshness
       // gate, but breach state stays as-is until self-heal lands.
       // Mirrors the two-cursor model in state-sync.ts.
-      if (!updatedPool.tokenDecimalsKnown) {
+      //
+      // Exception: never-rebalance pools (both split sides 0 + known)
+      // don't need priceDifference math at all — `effectiveThreshold`
+      // returns 1e12, the breach predicate / `computeHealthStatus` /
+      // `nextDeviationBreachStartedAt` all short-circuit to OK / no-breach
+      // regardless of priceDifference. Letting them through means uptime
+      // accrual keeps moving on every oracle event even if decimals
+      // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
+      if (!updatedPool.tokenDecimalsKnown && !isNeverRebalance(updatedPool)) {
         context.Pool.set(updatedPool);
         return;
       }
@@ -365,13 +373,12 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       const withThreshold: Pool = { ...updatedPool, rebalanceThreshold };
 
       // `tokenDecimalsKnown` gate — same rationale as the OracleReported
-      // handler. When decimals aren't known we cannot compute a
-      // trustworthy priceDifference, so feeding the frozen value into the
-      // breach pipeline would corrupt `DeviationThresholdBreach` durations.
-      // Pool entity still advances oracle / median lineage fields (used
-      // for the freshness gate); breach state stays as-is until self-heal
-      // lands.
-      if (!withThreshold.tokenDecimalsKnown) {
+      // handler, including the never-rebalance exception (those pools
+      // record OK uptime samples with no priceDifference math).
+      if (
+        !withThreshold.tokenDecimalsKnown &&
+        !isNeverRebalance(withThreshold)
+      ) {
         context.Pool.set(withThreshold);
         return;
       }

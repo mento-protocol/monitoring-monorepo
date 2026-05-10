@@ -576,6 +576,22 @@ describe("poolTotalVolumeUSD", () => {
     expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeNull();
   });
 
+  it("returns null when tokenDecimalsKnown is false (cumulative variant of getSnapshotVolumeInUsd gate)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-untrusted",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18, // schema-default — actual could be 6
+      tokenDecimalsKnown: false,
+      notionalVolume0: "5000000000000000000",
+      notionalVolume1: "0",
+    };
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeNull();
+  });
+
   it("converts volume via FX rate for non-USDm pools (e.g. axlEUROC/EURm)", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,

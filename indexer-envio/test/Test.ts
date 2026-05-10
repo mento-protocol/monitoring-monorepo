@@ -515,8 +515,15 @@ async function seedPoolWithFeed(
     oracleNumReporters,
     tokenDecimalsKnown: true,
     rebalanceThresholdsKnown: true,
-    rebalanceThresholdAbove: existingPool.rebalanceThresholdAbove || 5000,
-    rebalanceThresholdBelow: existingPool.rebalanceThresholdBelow || 5000,
+    // Hardcoded 5000 (not `existingPool.* ?? 5000`) — the FPMMDeployed
+    // handler always leaves these at the schema default 0 because the mock
+    // RPC for the fake fee-token addresses can't read on-chain thresholds,
+    // so a fallthrough is the always-taken path. Tests exercising explicit
+    // asymmetric (`above=0, below>0`) or never-rebalance (both 0) shapes
+    // must override on the seeded entity AFTER this helper returns —
+    // expressing intent there is clearer than threading params through.
+    rebalanceThresholdAbove: 5000,
+    rebalanceThresholdBelow: 5000,
   });
 
   return nextDb;
