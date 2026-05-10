@@ -219,6 +219,7 @@ function PoolDetail() {
     : (visibleTabs[0] ?? "providers");
   const activeSearch =
     readSearchParam(searchParams, SEARCH_PARAM_BY_TAB[tab]) ?? "";
+  const poolMissing = !poolLoading && !poolErr && !pool;
 
   // Canonicalize the URL when the requested tab was filtered out (e.g.
   // ?tab=breaches on a virtual pool, where the breaches tab is hidden).
@@ -269,26 +270,30 @@ function PoolDetail() {
         rates={rates}
       />
 
-      <PoolTablist
-        visibleTabs={visibleTabs}
-        active={tab}
-        onSelect={(t) => setURL(t, limit)}
-        limit={limit}
-        onLimitChange={(l) => setURL(tab, l)}
-      />
+      {!poolMissing && (
+        <>
+          <PoolTablist
+            visibleTabs={visibleTabs}
+            active={tab}
+            onSelect={(t) => setURL(t, limit)}
+            limit={limit}
+            onLimitChange={(l) => setURL(tab, l)}
+          />
 
-      <PoolTabPanel
-        tab={tab}
-        normalizedPoolId={normalizedPoolId}
-        limit={limit}
-        pool={pool}
-        activeSearch={activeSearch}
-        setTabSearch={setTabSearch}
-        tradingLimits={tradingLimits}
-        tradingLimitsError={tradingLimitsError}
-        fpmmPool={fpmmPool}
-        network={network}
-      />
+          <PoolTabPanel
+            tab={tab}
+            normalizedPoolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            activeSearch={activeSearch}
+            setTabSearch={setTabSearch}
+            tradingLimits={tradingLimits}
+            tradingLimitsError={tradingLimitsError}
+            fpmmPool={fpmmPool}
+            network={network}
+          />
+        </>
+      )}
     </div>
   );
 }
