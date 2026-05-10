@@ -433,10 +433,10 @@ describe("computeHealthStatus", () => {
     ).toBe("N/A");
   });
 
-  it("hasHealthData=false overrides what would otherwise be CRITICAL (untrusted data is untrusted)", () => {
-    // Even with stale oracle (would normally be CRITICAL), hasHealthData=false
-    // should still resolve to N/A — the sample's deviation contribution is
-    // untrusted, so we shouldn't synthesize ANY status from it.
+  it("oracle-staleness still surfaces as CRITICAL even when hasHealthData=false (codex P2 PR #370 #3214756051)", () => {
+    // Stale-oracle is an alertable freshness incident — it must NOT be
+    // masked into N/A by the hasHealthData gate. Untrusted deviation is
+    // less important than a missing-oracle incident for ops alerting.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -446,7 +446,7 @@ describe("computeHealthStatus", () => {
         rebalanceThreshold: 5000,
         hasHealthData: false,
       }),
-    ).toBe("N/A");
+    ).toBe("CRITICAL");
   });
 
   it("treats missing hasHealthData as the prior behaviour (no implicit gating)", () => {

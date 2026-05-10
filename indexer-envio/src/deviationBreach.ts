@@ -193,30 +193,30 @@ export async function recordBreachTransition(
     // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
     // re-score severity, inflating or zeroing the accrual.
     //
-    // Fallback chain (PR 1.6 — codex P2 #3214513401, cursor #3214689033):
-    //   1. `prev.currentOpenBreachEntryThreshold` (Pool denorm, captured
-    //      at rising edge as `breachEntryThreshold(next)`).
-    //   2. `open.entryRebalanceThreshold` (entity row captured the same).
-    //   3. **10000 floor** — pre-PR-1.6 legacy rows have
+    // Resolution chain (PR 1.6 — codex P2 #3214513401, cursor #3214689033,
+    // codex P2 PR #370 #3214748744):
+    //   1. `open.entryRebalanceThreshold` (the immutable rising-edge entity
+    //      capture). PR-1.6+ rows captured `breachEntryThreshold(next)`,
+    //      which is non-zero except for never-rebalance (which can't open).
+    //   2. **10000 floor** — pre-PR-1.6 legacy rows have
     //      `entryRebalanceThreshold=0` because the prior code captured the
-    //      raw active threshold and didn't substitute the 10000 fallback
-    //      for asymmetric-zero pools. `effectiveThreshold(next)` would
-    //      consult the LIVE active side, which can have flipped from 0 to
-    //      a positive value (asymmetric reserve direction change), letting
-    //      a peak that was non-critical at rising edge re-score as critical
-    //      at close. Canonicalize legacy `0` to `10000` — the same
-    //      under-bound the predicate scored against at rising edge for any
-    //      pool that could have legitimately captured `entry=0`.
+    //      raw active threshold without the asymmetric-zero substitute.
+    //
+    // `prev.currentOpenBreachEntryThreshold` is intentionally NOT consulted:
+    // for fresh rows it agrees with `open` (same rising-edge code path), but
+    // for legacy rows the OLD heal-from-zero branch may have written the
+    // post-flip OPPOSITE-side threshold there (e.g. 300 after reserves moved
+    // to the active-positive side). Trusting that denorm would re-score
+    // history against a threshold the predicate never saw at rising edge.
+    // Honor the entity row's immutable capture as the only legacy detector.
     //
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
     const LEGACY_ENTRY_THRESHOLD_FLOOR = 10000;
     const healedEntryThreshold =
-      (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
-        ? prev!.currentOpenBreachEntryThreshold
-        : open.entryRebalanceThreshold > 0
-          ? open.entryRebalanceThreshold
-          : LEGACY_ENTRY_THRESHOLD_FLOOR;
+      open.entryRebalanceThreshold > 0
+        ? open.entryRebalanceThreshold
+        : LEGACY_ENTRY_THRESHOLD_FLOOR;
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
       effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),

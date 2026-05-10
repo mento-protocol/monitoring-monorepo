@@ -1087,9 +1087,11 @@ describe("BreachRow critical-ratio scoring", () => {
     expect(html).not.toContain("50.0%");
   });
 
-  it("falls back to pool.rebalanceThreshold when entryRebalanceThreshold is missing", () => {
-    // Resync window: no entry threshold yet. peakPriceDifference / pool.rebalanceThreshold
-    // = 100 / 100 = 1.0 → "100.0%"
+  it("falls back to the 10000 floor when entryRebalanceThreshold is missing (legacy / resync window)", () => {
+    // Pre-PR-1.6 legacy rows have entry=0; reading live pool.rebalanceThreshold
+    // would re-score history against the post-flip side (cursor #3214689033,
+    // codex P2 PR #370 #3214748742). Canonicalize to 10000 directly.
+    // peakPriceDifference / 10000 = 100 / 10000 = 1.0% → "1.0%"
     const breach = makeBreach({
       id: "b-thresh-fallback",
       peakPriceDifference: "100",
@@ -1109,7 +1111,7 @@ describe("BreachRow critical-ratio scoring", () => {
         onSearchChange={() => {}}
       />,
     );
-    expect(html).toContain("100.0%");
+    expect(html).toContain("1.0%");
   });
 
   it("renders past-grace duration in red when peak crossed the 1.05x critical ratio (closed row)", () => {

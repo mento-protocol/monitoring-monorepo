@@ -225,15 +225,19 @@ export function computeHealthStatus(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  // Indexer flagged the deviation accrual as untrusted — don't render
-  // synthesized health status. See docblock for rationale.
-  if (pool.hasHealthData === false) return "N/A";
+  // Oracle-staleness is an alertable freshness incident — keep it ABOVE
+  // the hasHealthData gate so a stale-oracle pool doesn't get masked into
+  // "N/A" just because the deviation accrual is also untrusted (codex P2
+  // PR #370 #3214756051).
   const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
     if (isWeekend()) return "WEEKEND";
     return "CRITICAL";
   }
+  // Indexer flagged the deviation accrual as untrusted — don't render
+  // synthesized health status. See docblock for rationale.
+  if (pool.hasHealthData === false) return "N/A";
   // Governance-configured "never rebalance" pools stay OK regardless of
   // priceDifference magnitude. Mirrors indexer `computeHealthStatus`.
   if (isNeverRebalance(pool)) return "OK";

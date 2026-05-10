@@ -359,7 +359,6 @@ function BreachHistoryPanelInner({
         ) : (
           <BreachTable
             rows={filteredRows}
-            pool={pool}
             network={network}
             getName={getName}
             sortKey={sortKey}

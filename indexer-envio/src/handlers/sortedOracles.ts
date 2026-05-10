@@ -140,11 +140,18 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       // accrual keeps moving on every oracle event even if decimals
       // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
       if (!updatedPool.tokenDecimalsKnown && !isNeverRebalance(updatedPool)) {
+        // Preserve the FULL freshness cursor — timestamp, oracleOk,
+        // tx hash, AND displayed oraclePrice. Persisting the current
+        // event's `oraclePrice` / `oracleTxHash` next to a frozen
+        // timestamp would render a misleading row in the oracle tab
+        // (fresh price + tx, stale timestamp). codex P2 PR #370
+        // #3214756049 + #3214756054.
         context.Pool.set({
           ...updatedPool,
-          // Preserve freshness cursor — see comment above.
           oracleTimestamp: existing.oracleTimestamp,
           oracleOk: existing.oracleOk,
+          oracleTxHash: existing.oracleTxHash,
+          oraclePrice: existing.oraclePrice,
         });
         return;
       }
@@ -200,10 +207,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
-      const persistedPool: Pool = {
+      const merged: Pool = {
         ...finalPool,
         ...poolUpdate,
         ...breachPoolUpdate,
+      };
+      // `recordHealthSample` may have flipped `hasHealthData: false → true`
+      // on the first valid sample. The earlier `computeHealthStatus` call
+      // ran against the OLD value (returning `N/A` via the new gate), so
+      // `merged.healthStatus` is stale. Recompute against `merged` so the
+      // persisted state is consistent (codex P2 PR #370 #3214748736).
+      const persistedPool: Pool = {
+        ...merged,
+        healthStatus: computeHealthStatus(merged, blockTimestamp),
       };
       context.Pool.set(persistedPool);
 
@@ -405,15 +421,21 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         !withThreshold.tokenDecimalsKnown &&
         !isNeverRebalance(withThreshold)
       ) {
+        // Preserve the FULL median cursor — timestamp + oracleOk +
+        // lastOracleReportAt + tx hash + displayed oraclePrice. Persisting
+        // the current event's `oraclePrice` / `oracleTxHash` next to a
+        // frozen timestamp would render a misleading row in the oracle
+        // tab. codex P2 PR #370 #3214756053.
         context.Pool.set({
           ...withThreshold,
-          // Preserve freshness cursor — see comment above.
           oracleTimestamp: existing.oracleTimestamp,
           oracleOk: existing.oracleOk,
           // `lastOracleReportAt` is the median freshness anchor used by
           // the indexer-side `derive` path; preserving it too keeps the
           // anchor and the cursor in lockstep until self-heal lands.
           lastOracleReportAt: existing.lastOracleReportAt,
+          oracleTxHash: existing.oracleTxHash,
+          oraclePrice: existing.oraclePrice,
         });
         return;
       }
@@ -478,10 +500,19 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         blockTimestamp,
         isNeverRebalance(finalPool),
       );
-      const persistedPool: Pool = {
+      const merged: Pool = {
         ...finalPool,
         ...poolUpdate,
         ...breachPoolUpdate,
+      };
+      // `recordHealthSample` may have flipped `hasHealthData: false → true`
+      // on the first valid sample. The earlier `computeHealthStatus` call
+      // ran against the OLD value (returning `N/A` via the new gate), so
+      // `merged.healthStatus` is stale. Recompute against `merged` so the
+      // persisted state is consistent (codex P2 PR #370 #3214748736).
+      const persistedPool: Pool = {
+        ...merged,
+        healthStatus: computeHealthStatus(merged, blockTimestamp),
       };
       context.Pool.set(persistedPool);
 

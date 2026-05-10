@@ -243,8 +243,12 @@ export function computeHealthStatus(
   nowSeconds: bigint,
 ): IndexerHealthStatus {
   if (isVirtualPool(pool)) return "N/A";
-  if (pool.hasHealthData === false) return "N/A";
+  // `oracleOk=false` is an alertable freshness incident — keep it ABOVE the
+  // hasHealthData gate so a stale-oracle pool doesn't get masked into "N/A"
+  // just because the deviation accrual is also untrusted (codex P2 PR #370
+  // #3214756056).
   if (!pool.oracleOk) return "CRITICAL";
+  if (pool.hasHealthData === false) return "N/A";
   // Governance-configured "never rebalance" pools stay OK regardless of
   // priceDifference magnitude. Short-circuit explicitly so extreme reserve
   // skew can't trip the predicate via the `effectiveThreshold` 1e12 cushion.

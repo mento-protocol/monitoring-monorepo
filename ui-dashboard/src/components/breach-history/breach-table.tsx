@@ -3,7 +3,7 @@
 // Sort state lives in the parent so a sort change can also reset pagination.
 
 import React from "react";
-import type { DeviationThresholdBreach, Pool } from "@/lib/types";
+import type { DeviationThresholdBreach } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { SortableTh } from "@/components/sortable-th";
 import type { SortDir } from "@/lib/table-sort";
@@ -18,7 +18,6 @@ export type SortKey =
 
 export function BreachTable({
   rows,
-  pool,
   network,
   getName,
   sortKey,
@@ -26,7 +25,6 @@ export function BreachTable({
   onSort,
 }: {
   rows: DeviationThresholdBreach[];
-  pool: Pool;
   network: Network;
   getName: (addr: string | null, chainId?: number) => string;
   sortKey: SortKey;
@@ -81,7 +79,6 @@ export function BreachTable({
             <BreachRow
               key={b.id}
               breach={b}
-              pool={pool}
               network={network}
               getName={getName}
             />
