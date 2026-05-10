@@ -400,20 +400,15 @@ Tighten the gate by un-silencing rules in
       (e.g. `wrappedByPoolIdChecked: Boolean!`) and short-circuit the retry.
       Schema change + re-sync, so deferred. Flagged by claude[bot].
 
-- [ ] **Block-scoped `getPoolExchange` reads.** `fetchPoolExchange` reads at
-      `latest`, not the event block. For freshly-created exchanges during
-      steady-state sync, latest ≈ event block. For deep historical replay,
-      a future governance change to spread / feedID / reset frequency could
-      stamp a future config onto a past row. Currently safe because: (a) the
-      static-config triple is governance-rare in practice, (b) the all-zero
-      detection skips destroyed exchanges, (c) `BucketsUpdated` /
-      `SpreadUpdated` immediately overwrite. Real fix wires the BiPoolManager
-      fetchers through `readContractWithBlockFallback` (with archive-RPC
-      fallback) the same way `fetchReserves` does today. Flagged by codex.
-      Re-raised by codex in PR #369 round 6 with a new framing
-      (catch-up across destroy events, where `getPoolExchange` at latest
-      returns the destroyed/empty state and the pre-destroy Swap path
-      persists `volumeUsdWei = 0`) — same conclusion, deferred.
+- [x] **Block-scoped `getPoolExchange` reads.** Done: `fetchPoolExchange`
+      now requires the event block and routes `getPoolExchange` through
+      `readContractWithBlockFallback` at that block. `poolExchangeEffect`
+      carries `blockNumber`, and all callers (`ExchangeCreated`,
+      `BucketsUpdated` / `SpreadUpdated` self-heal, and VP
+      `selfHealWrappedExchangeId`) pass their event block. Focused coverage
+      pins that the RPC call receives the supplied block number and rejects
+      latest-block fallback results, preventing historical catch-up from
+      stamping future config or destroyed-state structs onto past rows.
 
 - [x] **`fetchTokenDecimalsScaling` test mock layer.** Done: added
       `_setMockTokenDecimalsScaling(chainId, addr, fn, value)` +
@@ -444,13 +439,24 @@ were considered, sized, and explicitly deferred — not unknowns.
 Carved out of PR #366's review cycles when the marginal-cost of additional codex rounds outweighed shipping the existing improvements. Both are real concerns but bounded in user-visible impact.
 
 - [x] **`entryRebalanceThreshold` for asymmetric pools.** Done on `origin/main`: `breachEntryThreshold` now captures the effective entry threshold for asymmetric zero-side breaches, `nextOpenBreachEntryThreshold` preserves that capture across side flips, and focused coverage lives in `indexer-envio/test/pool.test.ts` + `indexer-envio/test/deviationBreach.test.ts`. Codex P2 from round 9 (comment 3214513401).
-- [ ] **Dashboard consumers should gate on `hasHealthData`.** `global-pools-table.tsx:505-507` and `homepage-og.ts:347` recompute health from `oracleTimestamp` + `priceDifference` without checking `hasHealthData`. PR #366's round-7 indexer fix correctly skips snapshot/health-sample writes when `tokenDecimalsKnown=false`, but a dashboard consumer that ignores `hasHealthData=false` can mark a pool "fresh OK" off a stale priceDifference. Fix: add `hasHealthData` gate to the dashboard recompute paths so untrustworthy samples render as no-data. Codex P2 from round 9 (comment 3214513402).
+- [x] **Dashboard consumers should gate on `hasHealthData`.** Already done on
+      `origin/main`: `computeHealthStatus` returns `N/A` for
+      `hasHealthData === false` after the stale-oracle check, the global
+      pools table calls `computeEffectiveStatus` / `computeHealthStatus`
+      instead of recomputing directly, and `homepage-og.ts` uses
+      `computeEffectiveStatus` for health buckets. Coverage lives in
+      `ui-dashboard/src/lib/__tests__/health.test.ts`.
 
 ## PR 1.7 — Untrusted-decimals dashboard tightening (deferred from PR #366)
 
 Round-12 codex follow-ups to the round-10/11 `tokenDecimalsKnown` gating sweep. Each one is a real correctness improvement but the cost is invasive enough to warrant a focused follow-up PR rather than another #366 round.
 
-- [ ] **`poolTvlUSD` should return `number | null` not `number` for untrusted pools.** Currently returns 0 when `pool.tokenDecimalsKnown === false`, which is silently summed into TVL aggregates and sorts the row to the bottom of the leaderboard as if it had $0 of value. Real fix: change return type to `number | null`, update all 18 callers (page-client, pool-tvl-over-time-chart, tvl-over-time-chart, global-pools-table, global-pool-entries, homepage-og ×3, pool-og ×2) to handle null (skip from sums, render "—"). Codex P2 from PR #366 round 12 (comment 3214690053). Estimate: ~30 min mechanical caller-update.
+- [x] **`poolTvlUSD` should return `number | null` not `number` for
+      untrusted pools.** Already done on `origin/main`: `poolTvlUSD` returns
+      `null` unless `tokenDecimalsKnown === true`, callers skip null from
+      sums / render unavailable values, and coverage in
+      `ui-dashboard/src/lib/__tests__/tokens.test.ts` pins both
+      `false` and `undefined` trust states.
 - [ ] **Treat `tokenDecimalsKnown === undefined` as untrusted in valuation paths.** Currently the gate is `=== false` so undefined falls through to `tokenNDecimals ?? 18`. Codex argues this leaks fake USD figures during EXT-query failure / schema-lag windows. Trade: stricter `!== true` semantics break ALL pools' USD figures during the ~10-15min indexer redeploy window (existing pools transiently lose their trust signal). Pre-PR-1.5 indexers pre-rollout would also blank universally. Real fix likely needs an explicit "this came from a successful EXT query" sentinel separate from the field value, OR coordinate the rollout so the indexer field always lands first. Codex P2 from PR #366 round 12 (comment 3214690061). Estimate: ~1h with new sentinel design.
 - [ ] **Add `AbortSignal` to the `usePoolWithThresholds` polling extension.** `useGQL` (project hook around graphql-request) doesn't currently expose `AbortSignal` to consumers. A wedged Hasura connection on the trust-flag EXT query could stick the SWR poll instead of failing open and retrying. Real fix: thread `AbortSignal` through `useGQL` (and `useGQL`'s underlying fetcher) — touches the shared graphql layer used by every dashboard query. Codex P2 from PR #366 round 12 (comment 3214690063). Estimate: ~45 min, touches shared graphql plumbing.
 

@@ -648,13 +648,12 @@ export const breakerFeedStateEffect = createEffect(
 // ---------------------------------------------------------------------------
 // Group G — BiPoolManager / VirtualPool seed reads.
 //
-// Both effects fire ONCE per entity creation (ExchangeCreated /
-// VirtualPoolDeployed) — they're not on the per-event hot path. Caching:
-//   - `poolExchangeEffect`: `cache: false`. The struct includes bucket
-//     reserves which mutate every `referenceRateResetFrequency` (~360s),
-//     and we'd rather re-read on a re-sync than serve a stale cached
-//     snapshot whose bucket fields drift from the BucketsUpdated event
-//     stream that overwrites them.
+// Both effects fire on entity creation or self-heal, so they're not on the
+// per-event hot path for already-healed rows. Caching:
+//   - `poolExchangeEffect`: `cache: false`. The struct is read at the event
+//     block and includes bucket reserves which mutate every
+//     `referenceRateResetFrequency` (~360s); reindexing a block range expects
+//     a fresh block-scoped read, not a cached value from another block.
 //   - `vpExchangeIdEffect`: `cache: true`. Bytecode is immutable for a
 //     deployed contract, so a cache row keyed by (chainId, vpAddress) is
 //     accurate forever and skips an RPC on every full re-sync.
@@ -667,6 +666,7 @@ export const poolExchangeEffect = createEffect(
       chainId: S.int32,
       exchangeProvider: S.string,
       exchangeId: S.string,
+      blockNumber: S.bigint,
     },
     output: S.nullable(poolExchangeShape),
     rateLimit: { calls: 50, per: "second" },
@@ -677,6 +677,7 @@ export const poolExchangeEffect = createEffect(
       input.chainId,
       input.exchangeProvider,
       input.exchangeId,
+      input.blockNumber,
       context.log,
     )) ?? undefined,
 );

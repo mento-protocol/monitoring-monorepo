@@ -12,12 +12,13 @@ import {
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
+  fetchPoolExchange,
   fetchVirtualPoolExchangeId,
   VP_PROBE_RPC_ERROR,
   type PoolExchangeStruct,
 } from "../src/rpc/biPoolManager.ts";
 import { fetchTokenDecimalsScaling } from "../src/rpc/pool-state.ts";
-import { _setRpcClientForTests } from "../src/rpc.ts";
+import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
@@ -171,13 +172,115 @@ function fullStruct(): PoolExchangeStruct {
   };
 }
 
+function rpcPoolExchangeResult(): {
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
+  bucket0: bigint;
+  bucket1: bigint;
+  lastBucketUpdate: bigint;
+  config: {
+    spread: { value: bigint };
+    referenceRateFeedID: string;
+    referenceRateResetFrequency: bigint;
+    minimumReports: bigint;
+    stablePoolResetSize: bigint;
+  };
+} {
+  const struct = fullStruct();
+  return {
+    asset0: struct.asset0,
+    asset1: struct.asset1,
+    pricingModule: struct.pricingModule,
+    bucket0: struct.bucket0,
+    bucket1: struct.bucket1,
+    lastBucketUpdate: struct.lastBucketUpdate,
+    config: {
+      spread: { value: struct.spread },
+      referenceRateFeedID: struct.referenceRateFeedID,
+      referenceRateResetFrequency: struct.referenceRateResetFrequency,
+      minimumReports: struct.minimumReports,
+      stablePoolResetSize: struct.stablePoolResetSize,
+    },
+  };
+}
+
 describe("BiPoolManager handlers", () => {
   beforeEach(() => {
     _clearMockPoolExchanges();
     _clearMockVpExchangeIds();
     _clearMockERC20Decimals();
     _clearMockTokenDecimalsScaling();
+    _setRpcClientForTests(CHAIN_ID, null);
     _clearPricingModuleIndex();
+  });
+
+  describe("fetchPoolExchange", () => {
+    it("reads getPoolExchange at the supplied event block", async () => {
+      const calls: unknown[] = [];
+      const blockNumber = 123_456n;
+      _setRpcClientForTests(CHAIN_ID, {
+        readContract: async (args) => {
+          calls.push(args);
+          return rpcPoolExchangeResult();
+        },
+      });
+
+      const result = await fetchPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        blockNumber,
+        noopLogger,
+      );
+
+      assert.ok(result);
+      assert.equal(calls.length, 1);
+      assert.equal(
+        (calls[0] as { functionName: string }).functionName,
+        "getPoolExchange",
+      );
+      assert.equal(
+        (calls[0] as { blockNumber?: bigint }).blockNumber,
+        blockNumber,
+      );
+    });
+
+    it("returns null instead of accepting a latest-block fallback", async () => {
+      const originalDelayFn = _testHooks.delayFn;
+      _testHooks.delayFn = async () => {};
+
+      const calls: unknown[] = [];
+      const blockNumber = 123_456n;
+      _setRpcClientForTests(CHAIN_ID, {
+        readContract: async (args) => {
+          calls.push(args);
+          if ((args as { blockNumber?: bigint }).blockNumber === blockNumber) {
+            throw new Error("header not found");
+          }
+          return rpcPoolExchangeResult();
+        },
+      });
+
+      try {
+        const result = await fetchPoolExchange(
+          CHAIN_ID,
+          BIPOOL_MANAGER_ADDRESS,
+          EXCHANGE_ID,
+          blockNumber,
+          noopLogger,
+        );
+
+        assert.equal(result, null);
+        assert.equal(calls.length, 5);
+        assert.equal(
+          (calls.at(-1) as { blockNumber?: bigint }).blockNumber,
+          undefined,
+        );
+      } finally {
+        _testHooks.delayFn = originalDelayFn;
+      }
+    });
   });
 
   describe("ExchangeCreated", () => {

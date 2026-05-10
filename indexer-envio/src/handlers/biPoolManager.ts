@@ -71,6 +71,7 @@ async function ensureBiPoolExchange(
         chainId,
         exchangeProvider,
         exchangeId,
+        blockNumber,
       });
       if (struct && struct.pricingModule !== ZERO_ADDRESS) {
         // Bucket fields: only fill from struct when no BucketsUpdated has
@@ -174,6 +175,7 @@ async function ensureBiPoolExchange(
     chainId,
     exchangeProvider,
     exchangeId,
+    blockNumber,
   });
   // RPC failure (or seed RPC actually returned a deprecated zero struct).
   // The caller skips the mutation; next event re-fetches.
@@ -294,6 +296,7 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
     chainId: event.chainId,
     exchangeProvider,
     exchangeId,
+    blockNumber,
   });
 
   // Reverse-join: a VP deployed BEFORE this exchange would have stamped its

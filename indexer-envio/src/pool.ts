@@ -666,6 +666,7 @@ export async function selfHealWrappedExchangeId(
       chainId: pool.chainId,
       exchangeProvider: result.exchangeProvider,
       exchangeId: result.exchangeId,
+      blockNumber,
     });
     // Match `ensureBiPoolExchange`'s "destroyed exchange" test: reject
     // ONLY the all-zero-and-no-pricing-module case. Pre-`BucketsUpdated`
