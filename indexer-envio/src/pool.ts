@@ -572,16 +572,22 @@ export async function selfHealWrappedExchangeId(
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<Pool> {
-  // Fully-healed gate: VP-confirmed AND tokens populated. Token presence
-  // is what blocks retries on transient seed/decimals failures (round 4
-  // codex finding). Without this, a VP whose `wrappedExchangeId` was
-  // pinned but whose `poolExchangeEffect` or `tokenDecimalsScalingEffect`
-  // failed once would short-circuit forever, leaving the Pool at `?/?`
-  // or with default 18 decimals while later swap valuations mis-scale.
-  // The bytecode effect is `cache:true`, so re-running the heal on every
-  // event for a fully-healed pool would be cheap anyway — the gate is
-  // primarily about correctness, not cost.
-  if (pool.wrappedExchangeId && pool.token0 && pool.token1) return pool;
+  // Fully-healed gate: VP-confirmed AND tokens populated AND BiPoolExchange
+  // row seeded. Token presence and exchange presence both block retries
+  // on transient `poolExchangeEffect` / `tokenDecimalsScalingEffect`
+  // failures. Without the exchange-row check, a `VirtualPoolDeployed`
+  // event that succeeds in setting tokens but fails the exchange seed
+  // RPC would leave `wrappedExchangeId` pinned + tokens populated → the
+  // gate would skip heal forever, leaving no `BiPoolExchange` row and
+  // an empty `referenceRateFeedID` (round 7 codex #3). The bytecode
+  // effect is `cache:true`, so re-running the heal on every event for
+  // a fully-healed pool is cheap.
+  if (pool.wrappedExchangeId && pool.token0 && pool.token1) {
+    const exchangeRowId = `${pool.chainId}-${pool.wrappedExchangeId}`;
+    const existing = await context.BiPoolExchange.get(exchangeRowId);
+    if (existing) return pool;
+    // Else fall through — exchange seed still owed.
+  }
   const poolAddr = extractAddressFromPoolId(pool.id);
   const result = await context.effect(vpExchangeIdEffect, {
     chainId: pool.chainId,
@@ -831,9 +837,12 @@ export async function mirrorTokensAndDecimalsToPool(
 ): Promise<void> {
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
+  // Fully verified: tokens populated AND `tokenDecimalsKnown=true`.
+  // Otherwise fall through so cross-pass / partial-fetch state can be
+  // re-validated (round 7 codex #1+#2).
+  if (pool.tokenDecimalsKnown && pool.token0 && pool.token1) return;
   const fillToken0 = !pool.token0 && asset0 && asset0 !== ZERO_ADDRESS;
   const fillToken1 = !pool.token1 && asset1 && asset1 !== ZERO_ADDRESS;
-  if (!fillToken0 && !fillToken1) return;
   const poolAddr = extractAddressFromPoolId(poolId);
   // Round 4 codex #1: pin token + decimals as a unit. If the decimals
   // fetch transiently fails, leave the address unset too so the next
@@ -844,54 +853,65 @@ export async function mirrorTokensAndDecimalsToPool(
   let nextToken1 = pool.token1;
   let nextToken0Decimals = pool.token0Decimals;
   let nextToken1Decimals = pool.token1Decimals;
-  // Round 6 codex #3: track per-leg whether THIS pass actually fetched
-  // decimals. The flag-set below uses these so a transient failure on
-  // one leg doesn't trick the gate into trusting decimals.
+  // Per-leg track whether THIS pass actually fetched decimals. The flag
+  // flips below only when BOTH legs end up known — either via a fresh
+  // fetch this pass OR via a fetch in this pass that confirms the
+  // existing value (cross-pass case). `tokenDecimalsScalingEffect` is
+  // `cache:true`, so re-fetching a leg whose decimals are already in
+  // place is essentially free.
   let fetchedDec0 = false;
   let fetchedDec1 = false;
-  if (fillToken0) {
+  // Round 7 codex #1+#2: even when both tokens are populated already,
+  // run the decimals fetch when `tokenDecimalsKnown=false` so the flag
+  // gets flipped on the cross-pass case (each leg landed via a
+  // separate event). Use the existing token address as the fallback
+  // when we're not filling.
+  const fallback0 = fillToken0 ? asset0 : pool.token0;
+  const fallback1 = fillToken1 ? asset1 : pool.token1;
+  if (fallback0 && fallback0 !== ZERO_ADDRESS) {
     const dec = await context.effect(tokenDecimalsScalingEffect, {
       chainId: pool.chainId,
       poolAddress: poolAddr,
       fn: "decimals0",
-      fallbackTokenAddress: asset0,
+      fallbackTokenAddress: fallback0,
     });
     if (dec) {
-      nextToken0 = asset0;
+      if (fillToken0) nextToken0 = asset0;
       nextToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
       fetchedDec0 = true;
     }
   }
-  if (fillToken1) {
+  if (fallback1 && fallback1 !== ZERO_ADDRESS) {
     const dec = await context.effect(tokenDecimalsScalingEffect, {
       chainId: pool.chainId,
       poolAddress: poolAddr,
       fn: "decimals1",
-      fallbackTokenAddress: asset1,
+      fallbackTokenAddress: fallback1,
     });
     if (dec) {
-      nextToken1 = asset1;
+      if (fillToken1) nextToken1 = asset1;
       nextToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
       fetchedDec1 = true;
     }
   }
-  // No-op write guard: if both legs failed to fetch decimals, skip the
-  // Pool.set entirely so the updatedAt cursor doesn't move on a no-op.
-  if (nextToken0 === pool.token0 && nextToken1 === pool.token1) return;
-  // Flip `tokenDecimalsKnown` when both legs were freshly fetched. In
-  // the heal-before-exchange ordering this mirror may be the only
-  // write after the BiPoolExchange row arrives — without setting the
-  // flag, dashboard TVL/volume paths keep treating decimals as
-  // untrusted until some unrelated VP event happens to run
-  // `selfHealTokenDecimals`.
-  const decimalsKnown = pool.tokenDecimalsKnown || (fetchedDec0 && fetchedDec1);
+  // Decide if any state actually changed. A change is: a token address
+  // newly filled, decimals updated, or the trust-flag flipping.
+  const decimalsKnownNext =
+    pool.tokenDecimalsKnown || (fetchedDec0 && fetchedDec1);
+  const tokensChanged =
+    nextToken0 !== pool.token0 || nextToken1 !== pool.token1;
+  const decimalsChanged =
+    nextToken0Decimals !== pool.token0Decimals ||
+    nextToken1Decimals !== pool.token1Decimals;
+  const flagFlipped = decimalsKnownNext !== pool.tokenDecimalsKnown;
+  if (!tokensChanged && !decimalsChanged && !flagFlipped) return;
   context.Pool.set({
     ...pool,
     token0: nextToken0,
     token1: nextToken1,
     token0Decimals: nextToken0Decimals,
     token1Decimals: nextToken1Decimals,
-    tokenDecimalsKnown: decimalsKnown,
+    tokenDecimalsKnown: decimalsKnownNext,
     updatedAtBlock: blockNumber,
     updatedAtTimestamp: blockTimestamp,
   });
@@ -1109,23 +1129,21 @@ export const upsertPool = async ({
   // pays one RPC per address total) from "RPC threw" (transient, NOT
   // cached → next event for that address retries). See
   // `vpExchangeIdEffect` in `src/rpc/effects.ts` for the discriminator.
-  // Call-site gate matches `selfHealWrappedExchangeId`'s internal gate
-  // (round 4 codex #1+#3): re-enter heal until the VP is fully healed
-  // (wrappedExchangeId pinned AND tokens populated). Gating on
-  // `wrappedExchangeId` alone would short-circuit transient
-  // `poolExchangeEffect` / `tokenDecimalsScalingEffect` failures and
-  // leave the VP at `?/?` with default 18 decimals indefinitely.
-  // `vpExchangeIdEffect` is `cache:true`, so re-entry is essentially
-  // free for already-bytecode-confirmed VPs.
-  const wrappedHealed =
-    invertHealed.wrappedExchangeId && invertHealed.token0 && invertHealed.token1
-      ? invertHealed
-      : await selfHealWrappedExchangeId(
-          context,
-          invertHealed,
-          blockNumber,
-          blockTimestamp,
-        );
+  // Call site delegates fully to `selfHealWrappedExchangeId` — that
+  // function's internal gate decides whether to short-circuit. We
+  // can't gate at the call site on `wrappedExchangeId && token0 &&
+  // token1` because that would skip the seed-retry path the helper
+  // owns (round 7 codex #3: a `VirtualPoolDeployed` whose seed RPC
+  // fails sets all three fields but leaves `BiPoolExchange` unseeded).
+  // `vpExchangeIdEffect` is `cache:true`, so the helper's bytecode
+  // probe is free on re-entry; the only added work for fully-healed
+  // pools is one DB read for `BiPoolExchange.get`.
+  const wrappedHealed = await selfHealWrappedExchangeId(
+    context,
+    invertHealed,
+    blockNumber,
+    blockTimestamp,
+  );
   // tokenDecimals heal short-circuits for VPs (the helper checks
   // `isVirtualPool`) so FPMM-only paths pay the cost.
   const existing = await selfHealTokenDecimals(context, wrappedHealed);

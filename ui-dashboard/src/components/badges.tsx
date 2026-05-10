@@ -60,14 +60,17 @@ export function SourceBadge({
   // `isFpmm` (kept inline here to avoid pulling tokens.ts into a
   // pure-presentation component).
   const isVirtual = source.includes("virtual") || Boolean(wrappedExchangeId);
-  const isFPMM = !isVirtual && source.includes("fpmm");
   const label = isVirtual ? "Virtual" : "FPMM";
+  // Color follows the same predicate as the label so non-virtual non-fpmm
+  // sources (e.g. `oracle_reported` on a synthetic test fixture) get a
+  // consistent FPMM/indigo treatment instead of FPMM-label-with-Virtual-
+  // color (round 7 cursor finding).
   return (
     <span
       className={`rounded px-2 py-0.5 text-xs font-medium ${
-        isFPMM
-          ? "bg-indigo-500/20 text-indigo-300"
-          : "bg-emerald-500/20 text-emerald-300"
+        isVirtual
+          ? "bg-emerald-500/20 text-emerald-300"
+          : "bg-indigo-500/20 text-indigo-300"
       }`}
     >
       {label}
