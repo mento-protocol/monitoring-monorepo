@@ -107,7 +107,7 @@ vi.mock("@/components/table", () => ({
   Th: ({ children }: { children: ReactNode }) => <th>{children}</th>,
 }));
 
-import PoolDetailPage from "../page";
+import { PoolDetailPageClient as PoolDetailPage } from "../_components/pool-detail-page-client";
 
 const BASE_POOL: Pool = {
   id: "42220-0xpool",
