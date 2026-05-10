@@ -95,6 +95,13 @@ export function useTableSort<K extends string>({
   validKeys,
   paramPrefix = "",
 }: UseTableSortOptions<K>): UseTableSortResult<K> {
+  // `useSearchParams()` is used only for the SSR-pass fallback (window
+  // is undefined on the server). All consumers are page-level `"use
+  // client"` components wrapped in `<Suspense>` (see `app/layout.tsx`
+  // and per-page Suspense boundaries), so the rule's "wrap consumer
+  // in Suspense" guidance is already satisfied transitively — the
+  // rule's static check just can't see across files.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
 
   const sortParam = `${paramPrefix}Sort`;

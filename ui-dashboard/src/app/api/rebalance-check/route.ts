@@ -43,6 +43,41 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
   cache.set(key, entry);
 }
 
+type DedupOutcome<T> =
+  | { kind: "hit"; result: T }
+  | { kind: "saturated" }
+  | { kind: "fresh"; promise: Promise<T> };
+
+/**
+ * Cache + in-flight dedup for read-only GET responses. Encapsulates the
+ * `inFlight.set/delete` mutations so the GET handler has no observable
+ * side effects of its own — only `getOrDispatch` does, and it's an
+ * idempotent read-through cache primitive.
+ */
+function getOrDispatch(
+  key: string,
+  produce: () => Promise<RebalanceCheckResult>,
+): DedupOutcome<RebalanceCheckResult> {
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { kind: "hit", result: cached.result };
+  }
+  const existing = inFlight.get(key);
+  if (existing) return { kind: "fresh", promise: existing };
+  if (inFlight.size >= INFLIGHT_MAX_ENTRIES) return { kind: "saturated" };
+
+  const promise = produce()
+    .then((result) => {
+      setCacheEntry(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+      return result;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+  inFlight.set(key, promise);
+  return { kind: "fresh", promise };
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const network = req.nextUrl.searchParams.get("network");
   const pool = req.nextUrl.searchParams.get("pool");
@@ -73,36 +108,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const key = `${network}:${pool.toLowerCase()}:${strategy.toLowerCase()}`;
-  const now = Date.now();
 
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > now) {
-    return NextResponse.json(cached.result);
+  const outcome = getOrDispatch(key, () =>
+    runWithRetry(pool, strategy, rpcUrl),
+  );
+  if (outcome.kind === "hit") {
+    return NextResponse.json(outcome.result);
   }
-
-  let pending = inFlight.get(key);
-  if (!pending) {
-    // Refuse new upstream calls once we're saturated so attacker-controlled
-    // keys can't blow memory/RPC quota. Existing in-flight keys still resolve.
-    if (inFlight.size >= INFLIGHT_MAX_ENTRIES) {
-      return NextResponse.json({ error: "Server busy" }, { status: 503 });
-    }
-    // Populate the cache INSIDE the promise chain (before .finally clears
-    // inFlight) so we never leave a window where a new request sees neither
-    // inFlight nor cache and fires a duplicate upstream RPC.
-    pending = runWithRetry(pool, strategy, rpcUrl)
-      .then((result) => {
-        setCacheEntry(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
-        return result;
-      })
-      .finally(() => {
-        inFlight.delete(key);
-      });
-    inFlight.set(key, pending);
+  if (outcome.kind === "saturated") {
+    return NextResponse.json({ error: "Server busy" }, { status: 503 });
   }
 
   try {
-    const result = await pending;
+    const result = await outcome.promise;
     return NextResponse.json(result);
   } catch (err) {
     // Ship the upstream error to Sentry after redacting the RPC URL from

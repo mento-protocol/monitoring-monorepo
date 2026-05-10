@@ -26,22 +26,24 @@ import {
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
-import type { OracleSnapshot, Pool } from "@/lib/types";
+import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
 import React, { useMemo } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
 
-export function OracleTab({
-  poolId,
-  pool,
-  search,
-  onSearchChange,
-}: {
+type OracleTabProps = {
   poolId: string;
   pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
-}) {
+};
+
+// Tab body is over the no-giant-component threshold — chart + table
+// + summary tiles. Tracked in BACKLOG.md § "Architecture pass" for
+// a focused split PR (extract OracleChart / OracleTable).
+// react-doctor-disable-next-line react-doctor/no-giant-component
+export function OracleTab(props: OracleTabProps) {
+  const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
   const query = normalizeSearch(search);
 
@@ -120,7 +122,10 @@ export function OracleTab({
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
-    return raw.toSorted((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
 
   const filteredRows = useMemo(() => {
@@ -153,7 +158,7 @@ export function OracleTab({
     [sortCol],
   );
 
-  if (pool?.source?.includes("virtual")) {
+  if (pool && isVirtualPool(pool)) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
   }
 

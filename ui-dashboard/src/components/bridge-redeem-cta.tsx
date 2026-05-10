@@ -100,7 +100,7 @@ export type AddToast = (
   href?: string,
 ) => void;
 
-export function ToastItem({
+function ToastItem({
   entry,
   onDismiss,
 }: {
@@ -178,9 +178,12 @@ async function waitForTransaction(
   rpcUrl: string,
   signal: AbortSignal,
 ): Promise<TxReceipt> {
+  // Sequential RPC poll — each iteration checks tx receipt and decides
+  // whether to keep waiting; parallelism doesn't apply to status polls.
   for (let attempt = 0; attempt < 30; attempt++) {
     if (signal.aborted) return null;
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const response = await fetch(rpcUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -216,6 +219,11 @@ export function BridgeRedeemPill({
   tokenSymbol: string;
   addToast: AddToast;
 }) {
+  // `phase` IS rendered — drives both the spinner-vs-button branch
+  // selection and the `"fetching…"/"sending…"/"pending…"` label below.
+  // Rule misses the conditional-return usage; phase must remain
+  // useState so transitions trigger a re-render.
+  // react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
   const [phase, setPhase] = useState<RedeemPhase>("idle");
   const abortRef = useRef<AbortController | null>(null);
 

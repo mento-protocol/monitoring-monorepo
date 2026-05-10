@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type MouseEvent } from "react";
+import { Suspense, useEffect, type MouseEvent } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSWRConfig } from "swr";
 import Link from "next/link";
@@ -28,11 +28,24 @@ export function buildSignInHref(pathname: string, search: string): string {
 }
 
 export function AuthStatus() {
+  // Local Suspense boundary so the `useSearchParams()` consumer below
+  // can't bail the surrounding tree to client-side rendering. The
+  // global `app/layout.tsx` already wraps its body in <Suspense>, but
+  // wrapping here keeps the rule's static check satisfied at the
+  // component level and isolates `<AuthStatusInner />` from siblings.
+  return (
+    <Suspense fallback={null}>
+      <AuthStatusInner />
+    </Suspense>
+  );
+}
+
+function AuthStatusInner() {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const router = useRouter();
+  const { push } = useRouter();
 
   // Attach the authenticated user's email to every Sentry event so issues
   // are filterable by who's affected. Internal-only tool (mentolabs.xyz
@@ -63,7 +76,7 @@ export function AuthStatus() {
     // the same gotcha. We rebuild the destination from `window.location` at
     // click time so the OAuth round-trip lands the user back on whatever
     // they're actually looking at, including their current sort/filter.
-    const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    const navigateToLiveSignIn = (e: MouseEvent<HTMLAnchorElement>) => {
       // Let modified clicks (cmd/ctrl/shift, middle button) keep their
       // browser-native semantics — opening in a new tab with the
       // render-time href is fine; the user's not navigating away.
@@ -83,13 +96,13 @@ export function AuthStatus() {
       );
       if (liveHref === renderHref) return;
       e.preventDefault();
-      router.push(liveHref);
+      push(liveHref);
     };
 
     return (
       <Link
         href={renderHref}
-        onClick={handleClick}
+        onClick={navigateToLiveSignIn}
         className="ml-auto text-xs text-slate-400 hover:text-white transition-colors"
       >
         Sign in

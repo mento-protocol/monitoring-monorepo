@@ -10,7 +10,7 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
-import type { Pool, TradingLimit } from "@/lib/types";
+import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -94,7 +94,10 @@ export function sortGlobalPools(
     tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
-  return entries.toSorted((a, b) => {
+  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+  return [...entries].sort((a, b) => {
     const aKey = globalPoolKey(a);
     const bKey = globalPoolKey(b);
     let cmp = 0;
@@ -199,7 +202,10 @@ function LimitHeatmap({
     return <span className="text-slate-600 text-xs">—</span>;
 
   // Order by the pool's token0/token1 so heatmap rows match the displayed pair
-  const sorted = limits.toSorted((a, b) => {
+  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+  const sorted = [...limits].sort((a, b) => {
     const aIdx = a.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     const bIdx = b.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
     return aIdx - bIdx;
@@ -327,6 +333,11 @@ interface GlobalPoolsTableProps {
   reservePoolKeys?: Set<string>;
 }
 
+// Component is over the no-giant-component threshold — table with
+// sort/filter logic + per-row formatting. Tracked in BACKLOG.md
+// § "Architecture pass" for a focused split PR (extract row component
+// + sort/filter state hook).
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function GlobalPoolsTable({
   entries,
   volume24hByKey,
@@ -536,7 +547,7 @@ export function GlobalPoolsTable({
             const isCdp = cdpPoolKeys?.has(key) ?? false;
             const isReserve = reservePoolKeys?.has(key) ?? false;
             const strategies = poolStrategies(isOls, isCdp, isReserve);
-            const isVirtual = p.source?.includes("virtual");
+            const isVirtual = isVirtualPool(p);
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -553,7 +564,10 @@ export function GlobalPoolsTable({
                 {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
                     {p.source ? (
-                      <SourceBadge source={p.source} />
+                      <SourceBadge
+                        source={p.source}
+                        wrappedExchangeId={p.wrappedExchangeId}
+                      />
                     ) : (
                       <span className="text-slate-600 text-xs">—</span>
                     )}

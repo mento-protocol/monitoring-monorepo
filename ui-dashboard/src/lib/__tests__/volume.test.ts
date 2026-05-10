@@ -197,6 +197,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -236,6 +237,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -275,6 +277,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -325,6 +328,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -408,6 +412,7 @@ describe("buildPoolVolumeMapInWindow", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 

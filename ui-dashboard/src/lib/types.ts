@@ -8,10 +8,27 @@
 export const MAINNET_CHAIN_IDS = [42220, 143] as const;
 
 /** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
- * mechanics). Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`;
- * keep both in lockstep. */
-export function isVirtualPool(pool: { source?: string }): boolean {
-  return pool.source?.includes("virtual") ?? false;
+ * mechanics).
+ *
+ * Two positive signals — either is sufficient:
+ *   1. `source.includes("virtual")` — set by VirtualPoolDeployed-driven
+ *      paths.
+ *   2. `wrappedExchangeId` populated — set by `selfHealWrappedExchangeId`
+ *      after the bytecode pattern match in `vpExchangeIdEffect` proves
+ *      VP identity. Required for the Swap/Mint/Burn-first scenario
+ *      where the persisted source is `fpmm_*` (intentional reuse for
+ *      pickPreferredSource priority alignment) but the pool IS a VP.
+ *
+ * Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`; keep both
+ * in lockstep. */
+export function isVirtualPool(pool: {
+  source?: string;
+  wrappedExchangeId?: string | null;
+}): boolean {
+  return (
+    (pool.source?.includes("virtual") ?? false) ||
+    Boolean(pool.wrappedExchangeId)
+  );
 }
 
 export type Pool = {
@@ -134,7 +151,7 @@ export type OracleSnapshot = {
   hasHealthData?: boolean;
 };
 
-export type VirtualPoolLifecycleAction = "DEPLOYED" | "DEPRECATED";
+type VirtualPoolLifecycleAction = "DEPLOYED" | "DEPRECATED";
 
 export type VirtualPoolLifecycle = {
   id: string;
@@ -176,24 +193,6 @@ export type BiPoolExchangeRow = {
   /** poolId of the VirtualPool that wraps this exchange. `null` for v2-only
    * exchanges (legacy direct trading via Broker, no v3 wrapper). */
   wrappedByPoolId: string | null;
-};
-
-// Per-event Broker.Swap row scoped to a specific v2 exchangeId. Mirrors the
-// raw schema fields the dashboard's combined-volume chart consumes — the v2
-// "trading-pair view" of a VirtualPool wraps over this exchange.
-export type BrokerSwapEventRow = {
-  id: string;
-  trader: string;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: string;
-  amountOut: string;
-  volumeUsdWei: string;
-  txTo: string;
-  routedViaV3Router: boolean;
-  txHash: string;
-  blockNumber: string;
-  blockTimestamp: string;
 };
 
 export type SwapEvent = {
@@ -453,11 +452,11 @@ export type BridgeBridger = {
 // Circuit breakers — see indexer-envio/schema.graphql for the source of truth.
 // =============================================================================
 
-export type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
-export type BreakerStatus = "OK" | "TRIPPED";
+type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+type BreakerStatus = "OK" | "TRIPPED";
 
 /** One row per (chainId, breakerAddress). */
-export type Breaker = {
+type Breaker = {
   id: string;
   address: string;
   kind: BreakerKind;

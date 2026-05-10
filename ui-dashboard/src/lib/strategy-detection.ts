@@ -58,8 +58,7 @@ const PROBE_TIMEOUT_MS = 3000;
 export const SENTRY_THROTTLE_MS = 60_000;
 
 const strategyTypeCache = new Map<string, CacheEntry>();
-/** @internal Exported for test-scope `.clear()`. */
-export const sentryLastCapturedAt = new Map<string, number>();
+const sentryLastCapturedAt = new Map<string, number>();
 
 // Cache key includes `network.id` (not just `chainId`) because multiple
 // configured networks can share a chainId with different RPC backends

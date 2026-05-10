@@ -72,7 +72,7 @@ export type RebalanceCheckResult = {
   enrichment: StrategyEnrichment | null;
 };
 
-export type StrategyEnrichment =
+type StrategyEnrichment =
   | {
       type: "cdp";
       /** Total deposits available in the stability pool (human units) */

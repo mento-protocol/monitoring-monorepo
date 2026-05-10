@@ -13,8 +13,6 @@ export {
   ARKHAM_TAG,
   MINIPAY_SOURCE,
   derivePreservedSource,
-  isArkhamSourced,
-  isMiniPaySourced,
   mergeEntries,
   upgradeEntry,
   upgradeEntries,

@@ -95,6 +95,7 @@ function Card({ data }: { data: HomepageOgData | null }) {
   const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
 
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",

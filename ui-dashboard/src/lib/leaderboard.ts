@@ -15,7 +15,7 @@
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 /** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
-export const USD_WEI_DECIMALS = 18;
+const USD_WEI_DECIMALS = 18;
 
 /** Window selection for the leaderboard view. The full range set covers
  * both v3 and v2 venues; the per-pool chart is hidden for `<30d` windows
@@ -426,7 +426,7 @@ export function weiToUsd(wei: bigint): number {
 
 // ─── Flow imbalance (drives the FlowBadge) ────────────────────────────────
 
-export type FlowKind = "one-directional" | "delta-neutral" | "mixed";
+type FlowKind = "one-directional" | "delta-neutral" | "mixed";
 
 export type FlowResult = {
   kind: FlowKind;
@@ -487,11 +487,7 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
 // ─── Per-pool stacked chart aggregation ───────────────────────────────────
 // Moved to `lib/leaderboard-pool.ts` to keep this file under the AGENTS.md
 // 600-line soft cap. Re-exported below so existing imports keep working.
-export {
-  aggregatePoolDailyVolume,
-  type PoolBreakdown,
-  type PoolDailyVolumeRow,
-} from "@/lib/leaderboard-pool";
+export { aggregatePoolDailyVolume } from "@/lib/leaderboard-pool";
 
 // Hero KPI rollup (mergeHeroSnapshot, top10Concentration, related types)
 // is in `lib/leaderboard-hero.ts` to keep this file under the 600-line
@@ -499,7 +495,6 @@ export {
 export {
   mergeHeroSnapshot,
   top10Concentration,
-  type HeroSnapshotTotals,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,

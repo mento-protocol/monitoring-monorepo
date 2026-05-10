@@ -112,15 +112,21 @@ export function computeRewardThresholds(
   // Visual-equality across display-precision is preserved at the cell
   // render site by `rounded > cutoff` (renderRewardCell), which quantises
   // both cells to the same bin regardless of where cutoff lands.
-  const values = rawRewards
-    .map((r) => (r ? Number(r) : Number.NaN))
-    .filter((v) => Number.isFinite(v) && v > 0)
-    .sort((a, b) => a - b);
+  const finite = rawRewards.flatMap((r) => {
+    const v = r ? Number(r) : Number.NaN;
+    return Number.isFinite(v) && v > 0 ? [v] : [];
+  });
+  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+  const values = [...finite].sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
-  const mad = median(
-    values.map((v) => Math.abs(v - med)).sort((a, b) => a - b),
+  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
+  const deviations = [...values.map((v) => Math.abs(v - med))].sort(
+    (a, b) => a - b,
   );
+  const mad = median(deviations);
   // MAD = 0 means majority of samples are exactly equal. No meaningful
   // spread → skip highlighting rather than tier on noise.
   if (mad === 0) return null;
@@ -152,6 +158,20 @@ export function renderRewardCell(
       <span className="sr-only"> — {match.tier.title}</span>
     </span>
   );
+}
+
+function RewardCell({
+  rewardUsd,
+  thresholds,
+}: {
+  rewardUsd: string | null | undefined;
+  thresholds: RewardThresholds | null;
+}) {
+  // `renderRewardCell` stays exported for `__tests__/exports.test.ts`'s
+  // pinned contract; this wrapper is the named-component form the rule
+  // wants for proper reconciliation.
+  // react-doctor-disable-next-line react-doctor/no-render-in-render
+  return renderRewardCell(rewardUsd, thresholds);
 }
 
 export function RebalancesTab({
@@ -265,6 +285,9 @@ export function RebalancesTab({
     const raw = (chartData?.RebalanceEvent ?? []).filter(
       (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
+    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
+    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
     return [...raw].sort(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
     );
@@ -385,7 +408,10 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {renderRewardCell(r.rewardUsd, rewardThresholds)}
+                    <RewardCell
+                      rewardUsd={r.rewardUsd}
+                      thresholds={rewardThresholds}
+                    />
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

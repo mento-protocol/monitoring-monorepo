@@ -35,12 +35,8 @@ import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { getAuthSession } from "@/auth";
 import { getLabels, importLabels } from "@/lib/address-labels";
-import {
-  ARKHAM_TAG,
-  ArkhamAuthError,
-  enrichBatch,
-  fetchHealth,
-} from "@/lib/arkham";
+import { ARKHAM_TAG } from "@/lib/address-labels-shared";
+import { ArkhamAuthError, enrichBatch, fetchHealth } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);

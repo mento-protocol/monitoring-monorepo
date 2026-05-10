@@ -136,6 +136,7 @@ describe("poolTvlUSD", () => {
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
         reserves0: "1000000000000000000",
         reserves1: "1000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -149,6 +150,7 @@ describe("poolTvlUSD", () => {
         token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
         oraclePrice: "1000000000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );

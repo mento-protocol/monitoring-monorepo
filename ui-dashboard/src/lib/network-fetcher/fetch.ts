@@ -202,9 +202,12 @@ async function fetchPaginatedRows<TRow, TVars>(args: {
     args;
   const seen = new Set<string>();
   const rows: TRow[] = [];
+  // Sequential pagination — each iteration breaks early when the page
+  // is short, so we can't batch ahead without risking unnecessary work.
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
     let batch: TRow[];
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const result = await client.request<Record<string, TRow[]>>({
         document: query,
         variables: variablesFor(page) as Record<string, unknown>,
@@ -378,7 +381,7 @@ export async function fetchNetworkData(
   }
 
   const poolIds = pools.map((p) => p.id);
-  const fpmmPoolIds = pools.filter(isFpmm).map((p) => p.id);
+  const fpmmPoolIds = pools.flatMap((p) => (isFpmm(p) ? [p.id] : []));
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
 
   const emptySnapshotPage: SnapshotPageResult = {

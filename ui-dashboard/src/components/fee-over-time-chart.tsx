@@ -28,6 +28,12 @@ interface FeeOverTimeChartProps {
   isApproximate: boolean;
 }
 
+// The four flags above are genuinely independent — a chart can be
+// simultaneously loading, have a partial fees error, and an
+// approximate-data warning. Compound-component variants would force
+// a Cartesian product (`Chart.Loading.WithError.Approximate`) without
+// removing any meaningful state.
+// react-doctor-disable-next-line react-doctor/no-many-boolean-props
 export function FeeOverTimeChart({
   networkData,
   isLoading,

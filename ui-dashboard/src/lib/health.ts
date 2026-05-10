@@ -41,6 +41,10 @@ export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
 
 interface PoolHealthState {
   source?: string;
+  // Healed VPs intentionally retain `fpmm_*` source (pickPreferredSource
+  // priority alignment); `wrappedExchangeId` is the canonical VP signal.
+  // Both feed `isVirtualPool`, which gates the "N/A" branch below.
+  wrappedExchangeId?: string | null;
   oracleOk?: boolean;
   oracleTimestamp?: string;
   oracleExpiry?: string;
@@ -86,10 +90,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
  * numbers. Parity with the indexer's `pool.ts` is enforced by
  * `indexer-envio/test/healthStatusParity.test.ts`.
  */
-export {
-  DEVIATION_TOLERANCE_RATIO,
-  DEVIATION_CRITICAL_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thresholds";
 
 /** True iff governance has explicitly configured this pool to never
  * rebalance — BOTH split sides 0 AND `rebalanceThresholdsKnown=true`.
@@ -224,7 +225,7 @@ export function computeHealthStatus(
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
   // "N/A" just because the deviation accrual is also untrusted (codex P2
@@ -256,17 +257,18 @@ export function computeHealthStatus(
 /**
  * Compute the trading limit status for a pool based on pressure values.
  *
- * - "N/A":       VirtualPools (source includes "virtual") — no limits
+ * - "N/A":       VirtualPools (source-or-wrappedExchangeId-confirmed) — no limits
  * - "CRITICAL":  max pressure >= 1.0 (limit breached)
  * - "WARN":      max pressure >= 0.8
  * - "OK":        max pressure < 0.8
  */
 export function computeLimitStatus(pool: {
   source?: string;
+  wrappedExchangeId?: string | null;
   limitPressure0?: string;
   limitPressure1?: string;
 }): HealthStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   const p0 = Number(pool.limitPressure0 ?? "0");
   const p1 = Number(pool.limitPressure1 ?? "0");
   const max = Math.max(p0, p1);
@@ -321,6 +323,7 @@ function clampedPct(binary: number, total: number): number | null {
  */
 export function computePoolUptimePct(pool: {
   source: string;
+  wrappedExchangeId?: string | null;
   healthTotalSeconds?: string;
   healthBinarySeconds?: string;
 }): number | null {
@@ -466,6 +469,7 @@ type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
 export function computeRebalancerLiveness(
   pool: {
     source?: string;
+    wrappedExchangeId?: string | null;
     lastRebalancedAt?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
@@ -475,7 +479,7 @@ export function computeRebalancerLiveness(
   },
   nowSeconds: number,
 ): RebalancerStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   // Never-rebalance pools never have rebalance work to do — silence is
   // expected by design. Short-circuit BEFORE the lastRebalancedAt
   // check, otherwise a freshly-deployed never-rebalance pool (the most

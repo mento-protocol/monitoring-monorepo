@@ -284,9 +284,12 @@ function tbodyBadges(): string[] {
   // (em-dashes, name text, chain labels) don't leak into the result and
   // mask a regression where the searched-for string lands in the wrong
   // element.
-  return Array.from(container.querySelectorAll("tbody td span.rounded-full"))
-    .map((s) => s.textContent?.trim() ?? "")
-    .filter(Boolean);
+  return Array.from(
+    container.querySelectorAll("tbody td span.rounded-full"),
+  ).flatMap((s) => {
+    const t = s.textContent?.trim() ?? "";
+    return t ? [t] : [];
+  });
 }
 
 async function dispatchFile(

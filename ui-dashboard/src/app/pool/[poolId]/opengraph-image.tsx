@@ -105,6 +105,7 @@ function Tile({
   chart?: React.ReactNode;
 }) {
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",
@@ -229,6 +230,7 @@ function Card({ data }: { data: PoolOgData | null }) {
   const sparkColor = tvlWow?.color ?? TONE_COLOR.neutral.fg;
 
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",
