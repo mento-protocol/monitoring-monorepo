@@ -423,7 +423,16 @@ export async function selfHealWrappedExchangeId(
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<Pool> {
-  if (pool.wrappedExchangeId) return pool;
+  // Fully-healed gate: VP-confirmed AND tokens populated. Token presence
+  // is what blocks retries on transient seed/decimals failures (round 4
+  // codex finding). Without this, a VP whose `wrappedExchangeId` was
+  // pinned but whose `poolExchangeEffect` or `tokenDecimalsScalingEffect`
+  // failed once would short-circuit forever, leaving the Pool at `?/?`
+  // or with default 18 decimals while later swap valuations mis-scale.
+  // The bytecode effect is `cache:true`, so re-running the heal on every
+  // event for a fully-healed pool would be cheap anyway — the gate is
+  // primarily about correctness, not cost.
+  if (pool.wrappedExchangeId && pool.token0 && pool.token1) return pool;
   const poolAddr = extractAddressFromPoolId(pool.id);
   const result = await context.effect(vpExchangeIdEffect, {
     chainId: pool.chainId,
@@ -540,38 +549,49 @@ export async function selfHealWrappedExchangeId(
     // ExchangeCreated time) shouldn't pin token0/token1 to 0x0 + then
     // fire an `eth_call decimals()` against it. Mirrors the same guard
     // in `mirrorTokensAndDecimalsToPool` (reverse-link).
-    const filledToken0 =
+    // Backfill pair tokens + decimals AS A UNIT (round 4 codex #1).
+    // Pinning the address while leaving decimals at the default 18 was
+    // a bug: the new gate above (`&& pool.token0 && pool.token1`) would
+    // see token0 set + skip retries, leaving a 6dp USDC leg permanently
+    // mis-scaled. Fix: only pin the token when decimals fetch succeeds.
+    // On transient `tokenDecimalsScalingEffect` failure, leave both
+    // unset — gate stays open, next event retries the pair.
+    //
+    // Default 18 is wrong for any non-18dp leg (e.g. USDC at 6dp) —
+    // `buildSwapTraderFields` runs immediately after `upsertPool`
+    // returns and uses these to scale `volumeUsdWei`. `tokenDecimalsScalingEffect`
+    // is cache:true (one RPC per chain/token per sync) and tries
+    // `decimals0()`/`decimals1()` on the pool first (null for VPs — that
+    // getter lives on FPMM), then falls back to ERC20 `decimals()` on
+    // the token address. ZERO_ADDRESS guard mirrors the same in
+    // `mirrorTokensAndDecimalsToPool`.
+    const fillToken0 =
       !healedToken0 && exchange.asset0 && exchange.asset0 !== ZERO_ADDRESS;
-    const filledToken1 =
+    const fillToken1 =
       !healedToken1 && exchange.asset1 && exchange.asset1 !== ZERO_ADDRESS;
-    if (filledToken0) healedToken0 = exchange.asset0;
-    if (filledToken1) healedToken1 = exchange.asset1;
-    // Backfill decimals for newly-filled tokens. Default 18 is wrong for
-    // any non-18dp leg (e.g. USDC at 6dp) — `buildSwapTraderFields` runs
-    // immediately after `upsertPool` returns and uses these to scale
-    // `volumeUsdWei`, so a stale 18 mis-scales the very first swap and
-    // leaderboard snapshots. `tokenDecimalsScalingEffect` is cache:true,
-    // so the cost is one RPC per (chain, token) per sync. The effect
-    // tries `decimals0()` / `decimals1()` on the pool first (returns
-    // null for VPs — those getters live on FPMM), then falls back to
-    // ERC20 `decimals()` on the token address.
-    if (filledToken0) {
+    if (fillToken0) {
       const dec = await context.effect(tokenDecimalsScalingEffect, {
         chainId: pool.chainId,
         poolAddress: poolAddr,
         fn: "decimals0",
         fallbackTokenAddress: exchange.asset0,
       });
-      if (dec) healedToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+      if (dec) {
+        healedToken0 = exchange.asset0;
+        healedToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+      }
     }
-    if (filledToken1) {
+    if (fillToken1) {
       const dec = await context.effect(tokenDecimalsScalingEffect, {
         chainId: pool.chainId,
         poolAddress: poolAddr,
         fn: "decimals1",
         fallbackTokenAddress: exchange.asset1,
       });
-      if (dec) healedToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+      if (dec) {
+        healedToken1 = exchange.asset1;
+        healedToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+      }
     }
   }
   return {
@@ -649,8 +669,15 @@ export async function mirrorTokensAndDecimalsToPool(
   const fillToken1 = !pool.token1 && asset1 && asset1 !== ZERO_ADDRESS;
   if (!fillToken0 && !fillToken1) return;
   const poolAddr = extractAddressFromPoolId(poolId);
-  let token0Decimals = pool.token0Decimals;
-  let token1Decimals = pool.token1Decimals;
+  // Round 4 codex #1: pin token + decimals as a unit. If the decimals
+  // fetch transiently fails, leave the address unset too so the next
+  // event re-tries the pair — pinning the address while leaving
+  // decimals at default 18 would lock in a mis-scaled valuation for
+  // any non-18dp token (e.g. USDC at 6dp).
+  let nextToken0 = pool.token0;
+  let nextToken1 = pool.token1;
+  let nextToken0Decimals = pool.token0Decimals;
+  let nextToken1Decimals = pool.token1Decimals;
   if (fillToken0) {
     const dec = await context.effect(tokenDecimalsScalingEffect, {
       chainId: pool.chainId,
@@ -658,7 +685,10 @@ export async function mirrorTokensAndDecimalsToPool(
       fn: "decimals0",
       fallbackTokenAddress: asset0,
     });
-    if (dec) token0Decimals = scalingFactorToDecimals(dec) ?? 18;
+    if (dec) {
+      nextToken0 = asset0;
+      nextToken0Decimals = scalingFactorToDecimals(dec) ?? 18;
+    }
   }
   if (fillToken1) {
     const dec = await context.effect(tokenDecimalsScalingEffect, {
@@ -667,14 +697,20 @@ export async function mirrorTokensAndDecimalsToPool(
       fn: "decimals1",
       fallbackTokenAddress: asset1,
     });
-    if (dec) token1Decimals = scalingFactorToDecimals(dec) ?? 18;
+    if (dec) {
+      nextToken1 = asset1;
+      nextToken1Decimals = scalingFactorToDecimals(dec) ?? 18;
+    }
   }
+  // No-op write guard: if both legs failed to fetch decimals, skip the
+  // Pool.set entirely so the updatedAt cursor doesn't move on a no-op.
+  if (nextToken0 === pool.token0 && nextToken1 === pool.token1) return;
   context.Pool.set({
     ...pool,
-    token0: fillToken0 ? asset0 : pool.token0,
-    token1: fillToken1 ? asset1 : pool.token1,
-    token0Decimals,
-    token1Decimals,
+    token0: nextToken0,
+    token1: nextToken1,
+    token0Decimals: nextToken0Decimals,
+    token1Decimals: nextToken1Decimals,
     updatedAtBlock: blockNumber,
     updatedAtTimestamp: blockTimestamp,
   });

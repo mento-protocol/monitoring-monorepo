@@ -41,6 +41,10 @@ export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
 
 interface PoolHealthState {
   source?: string;
+  // Healed VPs intentionally retain `fpmm_*` source (pickPreferredSource
+  // priority alignment); `wrappedExchangeId` is the canonical VP signal.
+  // Both feed `isVirtualPool`, which gates the "N/A" branch below.
+  wrappedExchangeId?: string | null;
   oracleOk?: boolean;
   oracleTimestamp?: string;
   oracleExpiry?: string;
@@ -128,7 +132,7 @@ export function computeHealthStatus(
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
@@ -150,17 +154,18 @@ export function computeHealthStatus(
 /**
  * Compute the trading limit status for a pool based on pressure values.
  *
- * - "N/A":       VirtualPools (source includes "virtual") — no limits
+ * - "N/A":       VirtualPools (source-or-wrappedExchangeId-confirmed) — no limits
  * - "CRITICAL":  max pressure >= 1.0 (limit breached)
  * - "WARN":      max pressure >= 0.8
  * - "OK":        max pressure < 0.8
  */
 export function computeLimitStatus(pool: {
   source?: string;
+  wrappedExchangeId?: string | null;
   limitPressure0?: string;
   limitPressure1?: string;
 }): HealthStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   const p0 = Number(pool.limitPressure0 ?? "0");
   const p1 = Number(pool.limitPressure1 ?? "0");
   const max = Math.max(p0, p1);
@@ -342,13 +347,14 @@ type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
 export function computeRebalancerLiveness(
   pool: {
     source?: string;
+    wrappedExchangeId?: string | null;
     lastRebalancedAt?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
   },
   nowSeconds: number,
 ): RebalancerStatus {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   if (age <= 86400) return "ACTIVE";

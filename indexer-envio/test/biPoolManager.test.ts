@@ -822,6 +822,71 @@ describe("BiPoolManager handlers", () => {
       assert.equal(exchange!.wrappedByPoolId, poolId);
       assert.equal(exchange!.asset0, ASSET0);
     });
+
+    it("paired pinning: decimals fetch failure leaves both token AND decimals unset (gate-keeps-retry)", async function () {
+      this.timeout(10_000);
+      // Codex P2 round 4 #1: pinning the token address while leaving
+      // decimals at the default 18 would lock in mis-scaled valuations
+      // for any non-18dp leg. Fix: token + decimals are pinned as a
+      // unit. If `tokenDecimalsScalingEffect` returns undefined, leave
+      // both unset so the fully-healed gate (`pool.token0 &&
+      // pool.token1`) keeps re-running the heal until decimals
+      // succeed. Asserting the decimals-failure half here covers the
+      // important invariant: no half-pinned state. The retry-success
+      // companion path is exercised by the inline-seed test above
+      // (which has decimals mocked) — that proves the heal does land
+      // when decimals are available.
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      // NOTE: no _setMockERC20Decimals — `tokenDecimalsScalingEffect`
+      // falls through to the ERC20 mock layer which is empty, so it
+      // returns undefined (transient failure simulation).
+
+      let mockDb = MockDb.createMockDb();
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(0, 100, 1_700_000_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: swap,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const poolAfterFailure = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            wrappedExchangeId?: string;
+          }
+        | undefined;
+      assert.ok(poolAfterFailure);
+      // wrappedExchangeId pinned (bytecode is authoritative — dashboard's
+      // isVirtualPool needs this to suppress FPMM panels even before
+      // tokens land).
+      assert.equal(
+        poolAfterFailure!.wrappedExchangeId,
+        EXCHANGE_ID.toLowerCase(),
+      );
+      // Tokens NOT pinned because decimals fetch failed. The
+      // fully-healed gate (`wrappedExchangeId && token0 && token1`)
+      // stays open, so the next event will re-attempt the heal.
+      assert.equal(poolAfterFailure!.token0, undefined);
+      assert.equal(poolAfterFailure!.token1, undefined);
+    });
   });
 });
 
