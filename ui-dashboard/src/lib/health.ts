@@ -57,6 +57,11 @@ interface PoolHealthState {
   // thresholds; false (or missing) when still at the schema default. Drives
   // the dual-sentinel `effectiveThreshold` semantics — see that function.
   rebalanceThresholdsKnown?: boolean;
+  // Indexer's "is the deviation accrual trustworthy" flag. False when token
+  // decimals are unknown (`normalizeTo18` would skew priceDifference) or
+  // when threshold isn't yet read. Gates `computeHealthStatus` so a fresh
+  // oracle report alongside untrusted priceDifference doesn't render as OK.
+  hasHealthData?: boolean;
   lastRebalancedAt?: string | null;
   deviationBreachStartedAt?: string | null;
 }
@@ -190,7 +195,9 @@ export function isOracleFresh(
 
 /**
  * Compute the health status for a pool. Returns:
- *  - "N/A" for VirtualPools (no oracle)
+ *  - "N/A" for VirtualPools (no oracle), and for FPMM pools whose indexer
+ *    has flagged the deviation accrual as untrusted (`hasHealthData=false`
+ *    — token decimals or threshold not yet read on chain)
  *  - "WEEKEND" when the oracle is stale during FX market closure
  *  - "CRITICAL" when the oracle is stale (real incident) OR devRatio > 1.05
  *    sustained past `DEVIATION_BREACH_GRACE_SECONDS`
@@ -202,6 +209,15 @@ export function isOracleFresh(
  * `ORACLE_STALE_SECONDS` fallback for pools that pre-date the field. The
  * deviation tier mirrors the indexer's `computeHealthStatus` (parity test
  * lives in `indexer-envio/test/healthStatusParity.test.ts`).
+ *
+ * The `hasHealthData` short-circuit is a dashboard-side defense for the
+ * indexer's decimals-unknown early-return path (codex P2 #3214513402,
+ * PR 1.6): the homepage table + OG card recompute health here without
+ * checking `hasHealthData`, so without this gate a pool whose indexer
+ * advanced `oracleTimestamp` from before the freshness-cursor preserve
+ * fix landed would render OK / fresh while its `priceDifference` is
+ * still stale / default. Strict `=== false` so callers from queries
+ * that don't fetch the field (older snapshots) keep the prior behaviour.
  */
 export function computeHealthStatus(
   pool: PoolHealthState,
@@ -209,6 +225,9 @@ export function computeHealthStatus(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
+  // Indexer flagged the deviation accrual as untrusted — don't render
+  // synthesized health status. See docblock for rationale.
+  if (pool.hasHealthData === false) return "N/A";
   const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
@@ -400,6 +419,9 @@ export function computeEffectiveStatus(
     rebalanceThresholdAbove?: number;
     rebalanceThresholdBelow?: number;
     rebalanceThresholdsKnown?: boolean;
+    // Untrusted-deviation flag — propagated through `computeHealthStatus`.
+    // See `PoolHealthState.hasHealthData` for the gating semantics.
+    hasHealthData?: boolean;
     deviationBreachStartedAt?: string | null;
     lastRebalancedAt?: string | null;
     limitStatus?: string;

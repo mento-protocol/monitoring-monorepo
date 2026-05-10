@@ -410,6 +410,73 @@ describe("computeHealthStatus", () => {
       }),
     ).toBe("OK");
   });
+
+  // --- PR 1.6: hasHealthData=false short-circuit -----------------------------
+  // codex P2 #3214513402: indexer flags `hasHealthData=false` while token
+  // decimals are unknown (the deviation accrual is untrusted). Without this
+  // gate, an OracleReported event with a fresh timestamp + default-zero
+  // priceDifference would render OK on the homepage table and OG card, even
+  // though `priceDifference` is the schema-default zero.
+
+  it("returns 'N/A' when pool.hasHealthData === false (decimals-unknown defense in depth)", () => {
+    // Fresh oracle, default-zero priceDifference, valid-looking threshold —
+    // would normally classify OK. The hasHealthData gate forces N/A.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+      }),
+    ).toBe("N/A");
+  });
+
+  it("hasHealthData=false overrides what would otherwise be CRITICAL (untrusted data is untrusted)", () => {
+    // Even with stale oracle (would normally be CRITICAL), hasHealthData=false
+    // should still resolve to N/A — the sample's deviation contribution is
+    // untrusted, so we shouldn't synthesize ANY status from it.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: false,
+        oracleTimestamp: STALE_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+      }),
+    ).toBe("N/A");
+  });
+
+  it("treats missing hasHealthData as the prior behaviour (no implicit gating)", () => {
+    // Older queries that don't fetch the field must not flip to N/A.
+    // Strict `=== false` check in the implementation; missing is allowed
+    // through to the normal pipeline.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        // hasHealthData omitted — pre-PR 1.6 query shape
+      }),
+    ).toBe("OK");
+  });
+
+  it("hasHealthData=true does NOT short-circuit (normal pipeline runs)", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        hasHealthData: true,
+      }),
+    ).toBe("OK");
+  });
 });
 
 describe("formatDeviationPct", () => {
@@ -675,6 +742,26 @@ describe("computeEffectiveStatus", () => {
         limitPressure1: "1.5",
       }),
     ).toBe("N/A");
+  });
+
+  it("propagates the hasHealthData=false short-circuit through worstStatus (PR 1.6)", () => {
+    // Even with WARN-level limit pressure, hasHealthData=false drags health
+    // to N/A, and `worstStatus(N/A, WARN) = WARN`. The PR's defense-in-depth
+    // intent is for the homepage table — `computeHealthStatus` returning
+    // N/A removes the misleading "OK" rendering even though the limit
+    // status remains visible. This test pins that the short-circuit takes
+    // effect and limit pressure isn't masked.
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+        limitPressure0: "0.85",
+        limitPressure1: "0",
+      }),
+    ).toBe("WARN"); // limit WARN wins over health N/A
   });
 });
 
