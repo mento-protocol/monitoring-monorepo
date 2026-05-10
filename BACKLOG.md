@@ -200,12 +200,16 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 PR #367 wired [react-doctor](https://github.com/millionco/react-doctor) into
 the dashboard CI as a PR-only diff-mode gate (file-level `--fail-on warning`).
 
-**Status update (PR closing the cleanup):** PR _react-doctor cleanup_ took
-the score from **80 / 100 (1 error + 162 warnings)** to **100 / 100 (0
-issues)** by fixing every actionable category and inline-disabling the
-remaining false-positives (architectural false alarms or infeasible-without-
-bigger-refactor cases) with rationale. Items below that are checked were
-addressed in that PR; the unchecked items are still genuine follow-up work.
+**Status update (PR #371 closed the cleanup):** PR #371 took the score
+from **80 / 100 (1 error + 162 warnings)** to **100 / 100 (0 issues)**
+by fixing every actionable category and inline-disabling the remaining
+false-positives (architectural false alarms or infeasible-without-
+bigger-refactor cases) with rationale. PR #373 then extended
+`ui-dashboard/AGENTS.md` § "URL state in client-only tables / filters"
+to document WHY `useSearchParams` is the SSR-safe lazy-init source
+(rationale for the `useState` lazy-init + hydration mechanic that
+caught us mid-PR-#371). Items below that are checked were addressed
+in those PRs; the unchecked items are still genuine follow-up work.
 
 ### Cleanup PRs (reduce the backlog to zero)
 
@@ -219,9 +223,13 @@ addressed in that PR; the unchecked items are still genuine follow-up work.
     client logic moved to `_components/<route>-page-client.tsx`.
   - `nextjs-no-use-search-params-without-suspense` ×3 — `auth-status.tsx`
     gained a local `<Suspense>` boundary; `useTableSort` and
-    `useLeaderboardUrlState` dropped `useSearchParams()` (only used as an
-    SSR fallback; the consumer pages are `"use client"` admin tools with
-    `robots: noindex` so the SSR-default → hydrated transition is invisible).
+    `useLeaderboardUrlState` keep `useSearchParams()` as the SSR-pass
+    fallback with an inline disable pointing at the layout-level
+    `<Suspense>` boundary (Cursor Bugbot bbc20b5f / Cursor CHANGES_REQUESTED
+    on PR #371 caught the initial "drop the hook entirely" attempt —
+    `useState` lazy initializers serialize on SSR and don't re-run on
+    hydration, so `window.location.search` alone silently dropped
+    URL params on direct page loads).
   - `nextjs-no-client-side-redirect` ×3 — `address-book/[address]/page.tsx`
     now redirects server-side via `redirect()` after sync `isValidAddress`;
     the two pool-detail redirects (legacy-id canonicalization and
@@ -248,7 +256,13 @@ addressed in that PR; the unchecked items are still genuine follow-up work.
 - [x] ~~**Performance pass** (~63 warnings).~~ Done:
   - `js-combine-iterations` ×24 — `.map().filter()` consolidated into
     single-pass `.flatMap()`s.
-  - `js-tosorted-immutable` ×14 — `[...arr].sort()` → `arr.toSorted()`.
+  - `js-tosorted-immutable` ×14 — server-only and test sites converted
+    to `arr.toSorted()`; **client-shipped sites kept as `[...arr].sort()`
+    with inline disables** because the dashboard's TS target is ES2017
+    with no polyfill, so `Array.prototype.toSorted` (ES2023) would crash
+    Safari ≤15 / Chrome ≤109 (codex P2 ×5 caught the regression on
+    PR #371; the actual client blast radius was 12 sites, not the 5
+    codex flagged).
   - `async-await-in-loop` ×11 — most sites are sequential-by-design
     (rate-limited Arkham enrichment, paginated Hasura with early-exit,
     status-poll loops, Redis ops sharing a key); inline-disabled with the
@@ -348,6 +362,17 @@ Tighten the gate by un-silencing rules in
       running `react-doctor --score` and failing on a ratchet floor would
       close that gap. Probably not worth setting up until the backlog is
       meaningfully reduced.
+- [ ] **Bump TS target to ES2022+ (or add a `toSorted` polyfill) and
+      remove the 12 client-side `js-tosorted-immutable` inline disables.**
+      `ui-dashboard/tsconfig.json` targets ES2017, which is why every
+      `.toSorted()` call in client-shipped code carries a
+      `react-doctor-disable-next-line react-doctor/js-tosorted-immutable`
+      pointing at this constraint. When the target moves up — Next.js's
+      default browserslist already requires Chrome 64 / Safari 12 baseline
+      so the next bump is well-supported — those disables collapse into
+      a one-line cleanup PR. Same pattern would apply to any other
+      ES2023+ array method we'd want to use on the client (`findLast`,
+      `with`, `Object.groupBy`, etc.).
 
 ## Follow-ups deferred from Phase 2 (BiPoolExchange indexer + dashboard refactor)
 
@@ -385,6 +410,27 @@ Tighten the gate by un-silencing rules in
       `SpreadUpdated` immediately overwrite. Real fix wires the BiPoolManager
       fetchers through `readContractWithBlockFallback` (with archive-RPC
       fallback) the same way `fetchReserves` does today. Flagged by codex.
+      Re-raised by codex in PR #369 round 6 with a new framing
+      (catch-up across destroy events, where `getPoolExchange` at latest
+      returns the destroyed/empty state and the pre-destroy Swap path
+      persists `volumeUsdWei = 0`) — same conclusion, deferred.
+
+- [ ] **`fetchTokenDecimalsScaling` test mock layer.** Unlike its
+      ERC20-fallback companion (`fetchErc20Decimals` has
+      `_setMockERC20Decimals`), the FPMM-direct decimals fetcher
+      (`pool-state.ts:625`) hits real RPC in tests — there's no
+      `_testTokenDecimalsScaling` map. Locally fast
+      (`forno.celo.org` reachable from dev machines), but blacksmith
+      CI runners can't reach Celo so viem retries + backoff stack to
+      ~10s per call and tests time out. Caused 3 CI failures in PR
+      #369: each time a heal-pipeline test didn't anticipate that an
+      upstream merge had added a new effect call (e.g.
+      `selfHealTokenDecimals` from PR #370). Fix: add
+      `_setMockTokenDecimalsScaling(chainId, addr, fn, value)` +
+      `_clearMockTokenDecimalsScaling`, mirroring the existing mock
+      pattern in `pool-state.ts`. Mechanical, ~30 lines, but unblocks
+      future heal-pipeline tests that touch FPMM-direct decimal
+      fetches.
 
 ## Indexer sync-perf follow-ups (after PRs #329 / #341 / #346 / #351 / #353 / #356)
 
