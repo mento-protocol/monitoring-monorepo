@@ -327,11 +327,17 @@ This installs deps and runs Envio codegen (required for `indexer-envio` TypeScri
 
 ## Pre-Push Checklist (MANDATORY for server-side work)
 
-> ⚠️ **Git hooks don't run on the server.** Trunk's pre-push hooks live in the Mac's common `.git/hooks/` dir. When pushing from the server, they are silently skipped. CI is the first place checks run — and CI failures are far more expensive than local checks. Always run these manually before pushing:
+> ⚠️ **Do not assume git hooks are installed.** `./scripts/setup.sh` points
+> `core.hooksPath` at `.trunk/hooks`, but fresh worktrees, server clones, and
+> unusual git setups can miss that configuration. When hooks are absent or
+> uncertain, CI becomes the first place checks run — and CI failures are far
+> more expensive than local checks. Always run these manually before pushing:
 
 ```bash
+git fetch origin main
 ./tools/trunk fmt --all
 ./tools/trunk check --all
+pnpm dashboard:react-doctor:diff
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 pnpm --filter @mento-protocol/indexer-envio test

@@ -30,6 +30,7 @@ pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
+pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
 
 ## React Doctor
@@ -46,7 +47,8 @@ through:
   offending line with a one-line rationale, if the warning isn't
   actionable in your PR's scope.
 
-Run `pnpm react-doctor` locally for a full scan.
+Run `pnpm dashboard:react-doctor:diff` from the repo root for the
+CI-equivalent diff scan, or `pnpm react-doctor` locally for a full scan.
 
 Project-wide silences live in `react-doctor.config.json`. Current state:
 

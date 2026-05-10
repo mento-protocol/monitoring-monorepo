@@ -70,6 +70,12 @@ actions:
       run: pnpm indexer:codegen && pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio --filter @mento-protocol/metrics-bridge typecheck
       triggers:
         - git_hooks: [pre-push]
+    - id: react-doctor-pre-push
+      display_name: React Doctor Pre-Push
+      description: Mirrors the ui-dashboard CI diff gate locally so React Doctor warnings fail before push.
+      run: git fetch origin main && pnpm dashboard:react-doctor:diff
+      triggers:
+        - git_hooks: [pre-push]
     - id: test-pre-push
       display_name: Test Pre-Push
       run: pnpm --filter @mento-protocol/ui-dashboard test:coverage && pnpm --filter @mento-protocol/metrics-bridge test
@@ -86,5 +92,6 @@ actions:
     - trunk-fmt-pre-push
     - trunk-check-all-pre-push
     - typecheck-pre-push
+    - react-doctor-pre-push
     - test-pre-push
     - trunk-upgrade-available

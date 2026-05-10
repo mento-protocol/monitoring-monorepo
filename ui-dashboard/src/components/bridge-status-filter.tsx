@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
 import { bridgeStatusDetailLabel } from "@/lib/bridge-status";
 import type { BridgeStatus } from "@/lib/types";
+import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 
 interface BridgeStatusFilterProps {
   options: readonly BridgeStatus[];
@@ -19,8 +19,8 @@ interface BridgeStatusFilterProps {
  * Implements the WAI-ARIA radiogroup keyboard contract
  * (https://www.w3.org/WAI/ARIA/apg/patterns/radio/ — selection follows
  * focus per the spec):
- * - Single tab stop: `tabIndex={0}` on the selected pill, `tabIndex={-1}`
- *   on all others.
+ * - Single tab stop: `tabIndex={0}` starts on the selected pill, then
+ *   follows local focus; all other radios are `tabIndex={-1}`.
  * - Arrow keys (Left/Right/Up/Down) move focus AND change selection.
  * - Home / End jump to first / last option (and select it).
  * - Space/Enter activate the focused pill (native `<button>` behavior).
@@ -44,31 +44,9 @@ export function BridgeStatusFilter({
   selected,
   onChange,
 }: BridgeStatusFilterProps) {
-  const groupRef = useRef<HTMLDivElement>(null);
   // Index in the radio sequence (0 = "All" pill, 1..N = `options[i - 1]`).
   const activeIndex =
     selected === null ? 0 : Math.max(0, options.indexOf(selected) + 1);
-  // Roving tabindex: `tabIndex={0}` follows the FOCUSED radio, not
-  // the selected one. Tying the tab stop to `selected` was racy on
-  // URL-backed callers — between an arrow keystroke and the
-  // router.replace re-render, focus had already moved but the prop
-  // (and therefore tabIndex) hadn't, leaving the user able to Tab
-  // back to the stale tab stop instead of leaving the group (codex
-  // finding on PR #350). The local `focusedIndex` updates
-  // synchronously via the radios' `onFocus`.
-  const [focusedIndex, setFocusedIndex] = useState(activeIndex);
-  // Re-sync to `activeIndex` on external prop changes (e.g. browser
-  // back-button mutating the URL) when focus is NOT in the group.
-  // Detected during render via a ref; `setState` during render is
-  // React-allowed for derived-from-prop sync and avoids the
-  // `no-direct-set-state-in-use-effect` lint.
-  const lastActiveIndexRef = useRef(activeIndex);
-  if (lastActiveIndexRef.current !== activeIndex) {
-    lastActiveIndexRef.current = activeIndex;
-    if (!groupRef.current?.contains(document.activeElement)) {
-      setFocusedIndex(activeIndex);
-    }
-  }
 
   // Resolve a radio index back to its `selected` value. Index 0 = "All"
   // (null); 1..N = `options[index - 1]`.
@@ -76,43 +54,14 @@ export function BridgeStatusFilter({
     return index === 0 ? null : (options[index - 1] ?? null);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    const key = e.key;
-    if (
-      key !== "ArrowDown" &&
-      key !== "ArrowRight" &&
-      key !== "ArrowUp" &&
-      key !== "ArrowLeft" &&
-      key !== "Home" &&
-      key !== "End"
-    ) {
-      return;
-    }
-    e.preventDefault();
-    const radios = Array.from(
-      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
-    );
-    if (radios.length === 0) return;
-    const currentIndex = radios.indexOf(e.target as HTMLButtonElement);
-    // If the keydown originated outside the radio set (e.g. on the wrapper
-    // itself), fall back to the currently focused pill.
-    const fromIndex = currentIndex === -1 ? focusedIndex : currentIndex;
-
-    let nextIndex: number;
-    if (key === "Home") {
-      nextIndex = 0;
-    } else if (key === "End") {
-      nextIndex = radios.length - 1;
-    } else if (key === "ArrowDown" || key === "ArrowRight") {
-      nextIndex = (fromIndex + 1) % radios.length;
-    } else {
-      // ArrowUp / ArrowLeft
-      nextIndex = (fromIndex - 1 + radios.length) % radios.length;
-    }
-
-    radios[nextIndex]?.focus();
-    onChange(valueAt(nextIndex));
-  }
+  const { groupRef, getItemProps, handleKeyDown } = useRovingTabIndex({
+    activeIndex,
+    itemCount: options.length + 1,
+    activation: "automatic",
+    arrowKeys: "all",
+    onActivate: (index) => onChange(valueAt(index)),
+  });
+  const allRovingProps = getItemProps(0);
 
   return (
     // `tabIndex={-1}` keeps the wrapper out of the natural tab order
@@ -132,8 +81,9 @@ export function BridgeStatusFilter({
         type="button"
         role="radio"
         aria-checked={selected === null}
-        tabIndex={focusedIndex === 0 ? 0 : -1}
-        onFocus={() => setFocusedIndex(0)}
+        ref={allRovingProps.ref}
+        tabIndex={allRovingProps.tabIndex}
+        onFocus={allRovingProps.onFocus}
         onClick={() => selected !== null && onChange(null)}
         className={
           "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
@@ -147,14 +97,16 @@ export function BridgeStatusFilter({
       {options.map((status, i) => {
         const active = selected === status;
         const radioIndex = i + 1;
+        const rovingProps = getItemProps(radioIndex);
         return (
           <button
             key={status}
             type="button"
             role="radio"
             aria-checked={active}
-            tabIndex={radioIndex === focusedIndex ? 0 : -1}
-            onFocus={() => setFocusedIndex(radioIndex)}
+            ref={rovingProps.ref}
+            tabIndex={rovingProps.tabIndex}
+            onFocus={rovingProps.onFocus}
             onClick={() => !active && onChange(status)}
             className={
               "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
