@@ -117,6 +117,12 @@ PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how 
 - **Gate-vs-retry: the gate must not short-circuit on partial state.** A gate like `if (wrappedExchangeId && token0 && token1) return pool;` fires after a transient `poolExchangeEffect` failure leaves the row mid-state (token addresses pinned but no `BiPoolExchange` row + no `referenceRateFeedID` mirrored). The fully-healed condition must include downstream side effects, not just the entity's own fields. PR #369 ended up checking `BiPoolExchange.get(exchangeRowId)` in the gate — extra DB read per event is the cost of correct retry semantics.
 - **Test setup must mock every RPC effect the merged-in heal pipeline can hit.** Upstream merges add new heal steps (e.g. `selfHealTokenDecimals` was added by PR #370 mid-PR-#369) — existing tests that drove `upsertPool` for an unmocked code path then time out in CI (locally fine because forno.celo.org is reachable from dev machines, not from blacksmith CI runners). When extending a heal-driven test, re-check what RPC paths the heal touches NOW, not when the test was written.
 
+### Mocha timeout under c8 coverage
+
+- `.mocharc.cjs` sets a 30s default timeout, but the CI `Test with coverage` job wraps mocha in `c8` and the wrapped run sometimes ignores the rc default — observed brushing against the bare 15s mocha default on slower CI runners.
+- Multi-event integration tests (anything that fires multiple `processEvent` calls in sequence and waits for state) should add inline `this.timeout(60_000)` defensively at the top of the `it(...)` body. Locally these tests resolve in 0.5–2s, so the higher ceiling is purely defensive against CI variance under coverage.
+- Bit us on PR #366 round-9 (`feeUpdated`, `dailySnapshot`, `biPoolManager`) and PR #372 (`OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators`).
+
 ### Cross-checks before opening a PR
 
 - Run the queries the dashboard depends on against your local Hasura with a representative pool (one with hundreds of events) to catch silent truncation
