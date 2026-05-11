@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 
 const LOCATION_CHANGE_EVENT = "mento:locationchange";
 const SNAPSHOT_SEPARATOR = "\0";
+const SERVER_LOCATION_SNAPSHOT = `/${SNAPSHOT_SEPARATOR}`;
 
 declare global {
   interface Window {
@@ -52,8 +53,12 @@ function subscribeToLocationChange(callback: () => void) {
 }
 
 function getLocationSnapshot() {
-  if (typeof window === "undefined") return `/${SNAPSHOT_SEPARATOR}`;
+  if (typeof window === "undefined") return SERVER_LOCATION_SNAPSHOT;
   return `${window.location.pathname}${SNAPSHOT_SEPARATOR}${window.location.search}`;
+}
+
+function getServerLocationSnapshot() {
+  return SERVER_LOCATION_SNAPSHOT;
 }
 
 function splitLocationSnapshot(snapshot: string) {
@@ -69,7 +74,7 @@ export function useLiveLocation() {
   const snapshot = useSyncExternalStore(
     subscribeToLocationChange,
     getLocationSnapshot,
-    getLocationSnapshot,
+    getServerLocationSnapshot,
   );
   return splitLocationSnapshot(snapshot);
 }

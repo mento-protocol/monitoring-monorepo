@@ -2,7 +2,8 @@
 
 import React from "react";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStatus } from "@/components/auth-status";
 
@@ -41,8 +42,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-let container: HTMLElement;
-let root: Root;
+let container: HTMLElement | null = null;
+let root: Root | null = null;
 let previousActEnvironment: boolean | undefined;
 
 function setup(url: string) {
@@ -52,8 +53,26 @@ function setup(url: string) {
   root = createRoot(container);
 }
 
+function setupServerHtml(url: string, html: string) {
+  window.history.replaceState(window.history.state, "", url);
+  container = document.createElement("div");
+  container.innerHTML = html;
+  document.body.appendChild(container);
+}
+
+function renderWithoutBrowserWindow(element: React.ReactElement) {
+  const originalWindow = window;
+  vi.stubGlobal("window", undefined);
+  try {
+    return renderToString(element);
+  } finally {
+    vi.stubGlobal("window", originalWindow);
+  }
+}
+
 function signInLink() {
-  const link = container.querySelector("a");
+  expect(container).not.toBeNull();
+  const link = container?.querySelector("a");
   expect(link).not.toBeNull();
   return link as HTMLAnchorElement;
 }
@@ -63,22 +82,29 @@ beforeEach(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   mockUseSession.mockReturnValue({ data: null, status: "unauthenticated" });
-  setup("/pools");
 });
 
 afterEach(() => {
-  act(() => {
-    root.unmount();
-  });
-  document.body.removeChild(container);
+  if (root) {
+    act(() => {
+      root?.unmount();
+    });
+  }
+  if (container?.parentNode) {
+    document.body.removeChild(container);
+  }
+  root = null;
+  container = null;
   window.history.replaceState(window.history.state, "", "/");
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
 });
 
 describe("AuthStatus sign-in href", () => {
   it("updates the anchor href after history.replaceState changes search params", () => {
+    setup("/pools");
+
     act(() => {
-      root.render(<AuthStatus />);
+      root?.render(<AuthStatus />);
     });
     expect(signInLink().getAttribute("href")).toBe(
       "/sign-in?callbackUrl=%2Fpools",
@@ -98,8 +124,10 @@ describe("AuthStatus sign-in href", () => {
   });
 
   it("updates the anchor href after history.pushState changes the path", () => {
+    setup("/pools");
+
     act(() => {
-      root.render(<AuthStatus />);
+      root?.render(<AuthStatus />);
     });
 
     act(() => {
@@ -116,8 +144,10 @@ describe("AuthStatus sign-in href", () => {
   });
 
   it("updates the anchor href after browser back emits popstate", async () => {
+    setup("/pools");
+
     act(() => {
-      root.render(<AuthStatus />);
+      root?.render(<AuthStatus />);
     });
 
     act(() => {
@@ -141,6 +171,21 @@ describe("AuthStatus sign-in href", () => {
 
     expect(signInLink().getAttribute("href")).toBe(
       "/sign-in?callbackUrl=%2Fpools",
+    );
+  });
+
+  it("updates the server fallback href immediately after hydration", async () => {
+    const serverHtml = renderWithoutBrowserWindow(<AuthStatus />);
+    setupServerHtml("/pools?poolsSort=tvl&poolsDir=desc", serverHtml);
+    expect(signInLink().getAttribute("href")).toBe("/sign-in?callbackUrl=%2F");
+
+    await act(async () => {
+      root = hydrateRoot(container as HTMLElement, <AuthStatus />);
+      await Promise.resolve();
+    });
+
+    expect(signInLink().getAttribute("href")).toBe(
+      "/sign-in?callbackUrl=%2Fpools%3FpoolsSort%3Dtvl%26poolsDir%3Ddesc",
     );
   });
 });
