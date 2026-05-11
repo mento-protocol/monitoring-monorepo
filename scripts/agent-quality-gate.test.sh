@@ -81,6 +81,15 @@ run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"
 
+run_gate "ui-dashboard/src/lib/fetch-all-networks.ts"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
+run_gate "ui-dashboard/src/lib/network-fetcher/fetch.ts"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
+run_gate "ui-dashboard/src/lib/queries.ts"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
 run_gate "terraform/main.tf"
 assert_contains "- terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
