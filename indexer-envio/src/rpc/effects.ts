@@ -23,18 +23,19 @@
 import { createEffect, S } from "envio";
 import {
   fetchErc20Decimals,
-  fetchFees,
   fetchInvertRateFeed,
-  fetchNumReporters,
-  fetchRebalanceIncentiveAtBlock,
   fetchRebalanceThresholds,
   fetchRebalancingState,
-  fetchReferenceRateFeedID,
-  fetchReportExpiry,
   fetchReserves,
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
 } from "./pool-state";
+import {
+  fetchNumReporters,
+  fetchReferenceRateFeedID,
+  fetchReportExpiry,
+} from "./oracle-state";
+import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees";
 import {
   fetchPoolExchange,
   fetchVirtualPoolExchangeId,

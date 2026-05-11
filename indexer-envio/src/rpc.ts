@@ -38,27 +38,31 @@ export {
   _clearMockERC20Decimals,
   _setMockTokenDecimalsScaling,
   _clearMockTokenDecimalsScaling,
-  _setMockFees,
-  _clearMockFees,
-  _setMockRateFeedID,
-  _clearMockRateFeedIDs,
-  _setMockReportExpiry,
-  _clearMockReportExpiry,
   fetchRebalancingState,
   fetchReserves,
   fetchInvertRateFeed,
   fetchRebalanceThresholds,
-  fetchReferenceRateFeedID,
-  fetchNumReporters,
-  fetchReportExpiry,
   fetchTokenDecimalsScaling,
   fetchErc20Decimals,
   fetchTradingLimits,
+} from "./rpc/pool-state";
+export {
+  _setMockRateFeedID,
+  _clearMockRateFeedIDs,
+  _setMockReportExpiry,
+  _clearMockReportExpiry,
+  fetchReferenceRateFeedID,
+  fetchNumReporters,
+  fetchReportExpiry,
+} from "./rpc/oracle-state";
+export {
+  _setMockFees,
+  _clearMockFees,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
-} from "./rpc/pool-state";
+} from "./rpc/pool-fees";
 export {
   _setMockPoolExchange,
   _clearMockPoolExchanges,
@@ -68,11 +72,8 @@ export {
   fetchVirtualPoolExchangeId,
   extractVpExchangeIdFromBytecode,
 } from "./rpc/biPoolManager";
-export type {
-  RebalancingState,
-  FeeGetterMock,
-  FetchFeesMock,
-} from "./rpc/pool-state";
+export type { RebalancingState } from "./rpc/pool-state";
+export type { FeeGetterMock, FetchFeesMock } from "./rpc/pool-fees";
 export type {
   PoolExchangeStruct,
   VirtualPoolExchangeId,
