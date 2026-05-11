@@ -481,7 +481,11 @@ describe("leaderboard insights", () => {
       ratio: 0,
       band: "extractive",
     });
-    expect(computeLpFriendliness(zeroPressure).score).toBe(100);
+    expect(computeLpFriendliness(zeroPressure)).toMatchObject({
+      score: 100,
+      ratio: 1,
+      band: "friendly",
+    });
   });
 
   it("parses USD-wei strings defensively", () => {

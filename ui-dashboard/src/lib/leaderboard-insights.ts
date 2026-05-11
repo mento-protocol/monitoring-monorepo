@@ -122,8 +122,10 @@ export function computeLpFriendliness(
     Number((pool.feesPaidUsdWei * BigInt(1_000_000)) / pool.volumeUsdWei) / 100;
   const pressureUsdWei = netPressureUsdWei(pool);
   const denominator = pressureUsdWei > ZERO ? pressureUsdWei : BigInt(1);
-  const ratio =
+  const uncappedRatio =
     Number((pool.feesPaidUsdWei * BigInt(1_000_000)) / denominator) / 1_000_000;
+  // Keep the badge tooltip bounded when net directional pressure is zero.
+  const ratio = Math.min(uncappedRatio, 1);
   const score = Math.max(0, Math.min(100, Math.round(ratio * 10_000)));
   return {
     score,
