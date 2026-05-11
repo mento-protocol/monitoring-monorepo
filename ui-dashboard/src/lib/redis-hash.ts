@@ -19,9 +19,10 @@ for keyIndex = 1, #KEYS do
   argIndex = argIndex + 1
 
   redis.call('DEL', key)
-  for _ = 1, fieldCount do
-    redis.call('HSET', key, ARGV[argIndex], ARGV[argIndex + 1])
-    argIndex = argIndex + 2
+  if fieldCount > 0 then
+    local lastFieldArg = argIndex + (fieldCount * 2) - 1
+    redis.call('HSET', key, unpack(ARGV, argIndex, lastFieldArg))
+    argIndex = lastFieldArg + 1
   end
 end
 return 1

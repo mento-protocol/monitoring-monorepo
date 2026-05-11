@@ -15,7 +15,9 @@ describe("replaceRedisHashes", () => {
     ]);
 
     expect(evalMock).toHaveBeenCalledOnce();
-    const [, keys, argv] = evalMock.mock.calls[0]!;
+    const [script, keys, argv] = evalMock.mock.calls[0]!;
+    expect(script).toContain("unpack(ARGV, argIndex, lastFieldArg)");
+    expect(script).not.toContain("ARGV[argIndex], ARGV[argIndex + 1]");
     expect(keys).toEqual(["labels", "reports"]);
     expect(argv).toEqual(["1", "0xaaa", "label", "1", "0xbbb", "report"]);
   });
