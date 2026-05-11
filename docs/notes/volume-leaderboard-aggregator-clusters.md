@@ -27,7 +27,7 @@ that inference as identity.
 Expansion procedure:
 
 1. When a new entry appears in the top-N of
-   `AggregatorDailySnapshot.aggregator = "unknown"`, pull
+   `AggregatorDailySnapshot.aggregator = "unknown"`, pull the snapshot's
    `lastSeenAggregatorAddress`.
 2. Look up the deployer on the relevant explorer.
 3. Check whether other contracts in the observed `unknown` bucket share that

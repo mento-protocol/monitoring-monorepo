@@ -337,9 +337,9 @@ interface GlobalPoolsTableProps {
   reservePoolKeys?: Set<string>;
 }
 
-// Component is over the no-giant-component threshold — table with
-// sort/filter logic + per-row formatting. Also slightly over the file-size
-// soft budget; see BACKLOG.md "File Size And Lint Hygiene".
+// Component is over the no-giant-component threshold — table sort/filter state,
+// row selection, per-row formatting, and shared column helpers move together.
+// Split the row component and sort/filter state when adding more behavior.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function GlobalPoolsTable({
   entries,
