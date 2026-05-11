@@ -6,6 +6,7 @@ import {
   aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
+  buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
   rangeCutoffSeconds,
@@ -13,9 +14,9 @@ import {
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
-  type LeaderboardWindowTraderSetRow,
   type LeaderboardWindowRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
@@ -855,23 +856,22 @@ describe("mergeHeroSnapshot", () => {
         overrides.firstDayExclusiveUniqueTradersIncludingSystem ??
         overrides.firstDayExclusiveUniqueTraders ??
         0,
-      ...overrides,
-    };
-  }
-  function traderSet(
-    overrides: Partial<LeaderboardWindowTraderSetRow> & { chainId: number },
-  ): LeaderboardWindowTraderSetRow {
-    const snapshotDay = overrides.snapshotDay ?? String(YESTERDAY_MIDNIGHT);
-    return {
-      snapshotDay,
-      traders: [],
-      tradersIncludingSystem:
-        overrides.tradersIncludingSystem ?? overrides.traders ?? [],
       firstDayExclusiveTraders: [],
       firstDayExclusiveTradersIncludingSystem:
         overrides.firstDayExclusiveTradersIncludingSystem ??
         overrides.firstDayExclusiveTraders ??
         [],
+      ...overrides,
+    };
+  }
+  function overlap(
+    overrides: Partial<LeaderboardPartialOverlapRow> & {
+      chainId: number;
+      trader: string;
+    },
+  ): LeaderboardPartialOverlapRow {
+    return {
+      timestamp: String(YESTERDAY_MIDNIGHT),
       ...overrides,
     };
   }
@@ -926,7 +926,7 @@ describe("mergeHeroSnapshot", () => {
     expect(out.staleChains).toEqual([]);
   });
 
-  it("uses exact trader sets to de-dupe snapshot and today's partial rows", () => {
+  it("uses bounded overlap rows to de-dupe snapshot and today's partial rows", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -936,18 +936,18 @@ describe("mergeHeroSnapshot", () => {
           uniqueTraders: 2,
         }),
       ],
-      traderSetRows: [traderSet({ chainId: 42220, traders: ["0xa", "0xb"] })],
       todayRows: [
         today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
         today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
       ],
+      partialOverlapRows: [overlap({ chainId: 42220, trader: "0xa" })],
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(3);
   });
 
-  it("falls back to legacy approximate unique counts when trader sets are missing", () => {
+  it("falls back to legacy approximate unique counts when overlap rows are missing", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -967,7 +967,7 @@ describe("mergeHeroSnapshot", () => {
     expect(out.uniqueTraders).toBe(4);
   });
 
-  it("falls back to approximate counts when trader sets are missing for one chain", () => {
+  it("treats partial traders as new when the bounded overlap query returns empty", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -976,22 +976,18 @@ describe("mergeHeroSnapshot", () => {
           totalSwapCount: 50,
           uniqueTraders: 2,
         }),
-        snap({
-          chainId: 44787,
-          totalVolumeUsdWei: USD(2000),
-          totalSwapCount: 80,
-          uniqueTraders: 3,
-        }),
       ],
-      traderSetRows: [traderSet({ chainId: 42220, traders: ["0xa", "0xb"] })],
-      todayRows: [],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [],
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    expect(out.uniqueTraders).toBe(5);
+    expect(out.uniqueTraders).toBe(3);
   });
 
-  it("uses exact trader sets through degraded-chain slice subtraction", () => {
+  it("uses bounded overlap rows through degraded-chain slice subtraction", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1011,14 +1007,6 @@ describe("mergeHeroSnapshot", () => {
           firstDayExclusiveUniqueTraders: 1,
         }),
       ],
-      traderSetRows: [
-        traderSet({
-          chainId: 42220,
-          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
-          traders: ["0xa", "0xb", "0xc"],
-          firstDayExclusiveTraders: ["0xa"],
-        }),
-      ],
       yesterdayRows: [
         today({ chainId: 42220, trader: "0xb", volumeUsdWei: USD(10) }),
         today({ chainId: 42220, trader: "0xd", volumeUsdWei: USD(10) }),
@@ -1027,11 +1015,121 @@ describe("mergeHeroSnapshot", () => {
         today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
         today({ chainId: 42220, trader: "0xe", volumeUsdWei: USD(10) }),
       ],
+      partialOverlapRows: [
+        overlap({ chainId: 42220, trader: "0xb" }),
+        overlap({ chainId: 42220, trader: "0xc" }),
+      ],
       showSystem: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(4);
     expect(out.degradedChains).toEqual([]);
+  });
+
+  it("preserves a first-day-exclusive trader who also appears in today's partial", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+          firstDayExclusiveTraders: ["0xa"],
+        }),
+      ],
+      yesterdayRows: [],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(out.uniqueTraders).toBe(2);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("builds bounded overlap query input for retained snapshot ranges", () => {
+    const snapshot = snap({
+      chainId: 42220,
+      snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+      totalVolumeUsdWei: USD(1000),
+      uniqueTraders: 2,
+    });
+    const input = buildHeroPartialOverlapQueryInput({
+      snapshotRows: [snapshot],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      yesterdayRows: [
+        today({ chainId: 42220, trader: "0xb", volumeUsdWei: USD(10) }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({
+          chainId: 42220,
+          trader: "0xsys",
+          volumeUsdWei: USD(10),
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(input).toEqual({
+      limit: 2,
+      where: {
+        _or: [
+          {
+            chainId: { _eq: 42220 },
+            trader: { _in: ["0xa", "0xb"] },
+            timestamp: {
+              _gte: Number(snapshot.windowStartDay) + SECONDS_PER_DAY,
+              _lte: Number(snapshot.snapshotDay),
+            },
+            isSystemAddress: { _eq: false },
+          },
+        ],
+      },
+    });
+  });
+
+  it("disables exact overlap when active partial traders exceed the query cap", () => {
+    const snapshot = snap({
+      chainId: 42220,
+      totalVolumeUsdWei: USD(1000),
+      uniqueTraders: 2,
+    });
+    const input = buildHeroPartialOverlapQueryInput({
+      snapshotRows: [snapshot],
+      todayRows: Array.from({ length: 1001 }, (_, i) =>
+        today({
+          chainId: 42220,
+          trader: `0x${i.toString(16).padStart(40, "0")}`,
+          volumeUsdWei: USD(1),
+        }),
+      ),
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(input).toBeUndefined();
   });
 
   it("today-only (cold start): returns today's totals", () => {

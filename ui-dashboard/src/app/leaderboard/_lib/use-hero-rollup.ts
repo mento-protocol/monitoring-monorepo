@@ -3,25 +3,26 @@
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
+  BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   BROKER_LEADERBOARD_TODAY_TRADERS,
   BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   BROKER_LEADERBOARD_WINDOW_LATEST,
-  BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST,
   BROKER_LEADERBOARD_YESTERDAY_TRADERS,
+  LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   LEADERBOARD_TODAY_TRADERS,
   LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
-  LEADERBOARD_WINDOW_TRADER_SETS_LATEST,
   LEADERBOARD_YESTERDAY_TRADERS,
 } from "@/lib/queries/leaderboard";
 import {
+  buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
   top10Concentration,
   weiToUsd,
   type LeaderboardRangeKey,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
-  type LeaderboardWindowTraderSetRow,
   type LeaderboardWindowRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
@@ -147,27 +148,6 @@ export function useHeroRollup({
       ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
       : heroFirstDayV2Result.data?.BrokerLeaderboardWindowSnapshot;
 
-  const heroTraderSetsV3Result = useGQL<{
-    LeaderboardWindowSnapshot: LeaderboardWindowTraderSetRow[];
-  }>(
-    venue === "v3" ? LEADERBOARD_WINDOW_TRADER_SETS_LATEST : null,
-    { windowKey: range },
-    undefined,
-    { timeoutMs: 8_000 },
-  );
-  const heroTraderSetsV2Result = useGQL<{
-    BrokerLeaderboardWindowSnapshot: LeaderboardWindowTraderSetRow[];
-  }>(
-    venue === "v2" ? BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST : null,
-    { windowKey: range },
-    undefined,
-    { timeoutMs: 8_000 },
-  );
-  const traderSetRows =
-    venue === "v3"
-      ? heroTraderSetsV3Result.data?.LeaderboardWindowSnapshot
-      : heroTraderSetsV2Result.data?.BrokerLeaderboardWindowSnapshot;
-
   // First-pass merge — without `yesterdayRows`. Used solely to discover
   // which chains are in the DEGRADED state (snapshotDay = today - 2 days),
   // so we can gate the yesterday-traders query on them. Cheap (one
@@ -219,12 +199,11 @@ export function useHeroRollup({
       ? yesterdayV3Result.data?.TraderDailySnapshot
       : yesterdayV2Result.data?.BrokerTraderDailySnapshot;
 
-  const heroTotals = useMemo(
+  const partialOverlapInput = useMemo(
     () =>
-      mergeHeroSnapshot({
+      buildHeroPartialOverlapQueryInput({
         snapshotRows,
         todayRows: todayPartialRows,
-        traderSetRows,
         firstDayRows,
         yesterdayRows: yesterdayPartialRows,
         showSystem,
@@ -233,9 +212,58 @@ export function useHeroRollup({
     [
       snapshotRows,
       todayPartialRows,
-      traderSetRows,
       firstDayRows,
       yesterdayPartialRows,
+      showSystem,
+      todayMidnight,
+    ],
+  );
+  const partialOverlapV3Result = useGQL<{
+    TraderDailySnapshot: LeaderboardPartialOverlapRow[];
+  }>(
+    venue === "v3" && partialOverlapInput
+      ? LEADERBOARD_PARTIAL_OVERLAP_TRADERS
+      : null,
+    partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const partialOverlapV2Result = useGQL<{
+    BrokerTraderDailySnapshot: LeaderboardPartialOverlapRow[];
+  }>(
+    venue === "v2" && partialOverlapInput
+      ? BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS
+      : null,
+    partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const partialOverlapRows =
+    partialOverlapInput === null
+      ? []
+      : partialOverlapInput === undefined
+        ? undefined
+        : venue === "v3"
+          ? partialOverlapV3Result.data?.TraderDailySnapshot
+          : partialOverlapV2Result.data?.BrokerTraderDailySnapshot;
+
+  const heroTotals = useMemo(
+    () =>
+      mergeHeroSnapshot({
+        snapshotRows,
+        todayRows: todayPartialRows,
+        firstDayRows,
+        yesterdayRows: yesterdayPartialRows,
+        partialOverlapRows,
+        showSystem,
+        todayMidnightSeconds: todayMidnight,
+      }),
+    [
+      snapshotRows,
+      todayPartialRows,
+      firstDayRows,
+      yesterdayPartialRows,
+      partialOverlapRows,
       showSystem,
       todayMidnight,
     ],

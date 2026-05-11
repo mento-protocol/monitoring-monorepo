@@ -148,8 +148,6 @@ describe("buildLeaderboardWindowSnapshot", () => {
     assert.equal(snap.totalSwapCountIncludingSystem, 3);
     assert.equal(snap.uniqueTraders, 1);
     assert.equal(snap.uniqueTradersIncludingSystem, 2);
-    assert.deepEqual(snap.traders, [TRADER_A]);
-    assert.deepEqual(snap.tradersIncludingSystem, [TRADER_A, TRADER_B]);
   });
 
   it("firstDay fields default to zero when no aggregates carry first-day slice", () => {

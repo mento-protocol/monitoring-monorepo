@@ -10,7 +10,7 @@ import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 100;
 const REFRESH_MS = 10_000;
-const REQUEST_TIMEOUT_MS = 8_000;
+const POLL_TIMEOUT_MS = 8_000;
 
 type PoolVolumePage = {
   PoolDailyVolumeSnapshot: PoolDailyVolumeRow[];
@@ -28,6 +28,7 @@ export async function fetchPoolVolumeSnapshots(
   const client = new GraphQLClient(hasuraUrl);
   const rows: PoolDailyVolumeRow[] = [];
   const seen = new Set<string>();
+  const signal = AbortSignal.timeout(POLL_TIMEOUT_MS);
 
   for (let page = 0; page <= MAX_PAGES; page += 1) {
     let batch: PoolDailyVolumeRow[];
@@ -39,7 +40,7 @@ export async function fetchPoolVolumeSnapshots(
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
         },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal,
       });
       batch = result.PoolDailyVolumeSnapshot ?? [];
     } catch (err) {

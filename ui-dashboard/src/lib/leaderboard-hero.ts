@@ -61,18 +61,18 @@ export type LeaderboardWindowFirstDayRow = {
   firstDaySwapCountIncludingSystem: number;
   firstDayExclusiveUniqueTraders: number;
   firstDayExclusiveUniqueTradersIncludingSystem: number;
-};
-
-/** Wire shape of the isolated exact trader-set query. Optional in the
- *  merge path: if the query is unavailable during schema rollout, callers
- *  keep the legacy count-based approximation. */
-export type LeaderboardWindowTraderSetRow = {
-  chainId: number;
-  snapshotDay: string;
-  traders: string[];
-  tradersIncludingSystem: string[];
   firstDayExclusiveTraders: string[];
   firstDayExclusiveTradersIncludingSystem: string[];
+};
+
+/** Bounded historical-overlap row for partial-day traders. The query is
+ *  distinct on `(chainId, trader)`, so it returns at most one row per
+ *  active yesterday/today trader and avoids polling full cumulative
+ *  snapshot trader arrays. */
+export type LeaderboardPartialOverlapRow = {
+  chainId: number;
+  trader: string;
+  timestamp: string;
 };
 
 /** Wire shape of today's partial trader-day rows. v3 and v2 share this
@@ -145,14 +145,110 @@ function buildFirstDaySnapshotKeyMap(
   return m;
 }
 
-function buildTraderSetSnapshotKeyMap(
-  rows: ReadonlyArray<LeaderboardWindowTraderSetRow>,
-): Map<string, LeaderboardWindowTraderSetRow> {
-  const m = new Map<string, LeaderboardWindowTraderSetRow>();
-  for (const row of rows) {
-    m.set(`${row.chainId}-${row.snapshotDay}`, row);
+export type LeaderboardPartialOverlapQueryInput = {
+  where: Record<string, unknown>;
+  limit: number;
+};
+
+const MAX_PARTIAL_OVERLAP_KEYS = 1000;
+
+function traderKey(chainId: number, trader: string): string {
+  return `${chainId}-${trader}`;
+}
+
+function addPartialRowsByChain(
+  rows: ReadonlyArray<LeaderboardTodayTraderRow> | undefined,
+  staleChainSet: ReadonlySet<number>,
+  showSystem: boolean,
+  out: Map<number, Set<string>>,
+): void {
+  for (const row of rows ?? []) {
+    if (staleChainSet.has(row.chainId)) continue;
+    if (!showSystem && row.isSystemAddress) continue;
+    const traders = out.get(row.chainId);
+    if (traders) {
+      traders.add(row.trader);
+    } else {
+      out.set(row.chainId, new Set([row.trader]));
+    }
   }
-  return m;
+}
+
+export function buildHeroPartialOverlapQueryInput(args: {
+  snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
+  todayRows: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
+  firstDayRows?: ReadonlyArray<LeaderboardWindowFirstDayRow> | undefined;
+  yesterdayRows?: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
+  showSystem: boolean;
+  todayMidnightSeconds: number;
+}): LeaderboardPartialOverlapQueryInput | null | undefined {
+  if (!args.snapshotRows || args.snapshotRows.length === 0) return null;
+
+  const staleCutoffSeconds = args.todayMidnightSeconds - 2 * SECONDS_PER_DAY;
+  const degradedCutoffSeconds = args.todayMidnightSeconds - SECONDS_PER_DAY;
+  const firstDayBySnapshotKey = args.firstDayRows
+    ? buildFirstDaySnapshotKeyMap(args.firstDayRows)
+    : null;
+  const staleChains = new Set<number>();
+  const snapshotRangesByChain = new Map<
+    number,
+    { start: number; end: number }
+  >();
+
+  for (const row of args.snapshotRows) {
+    const snapDay = Number(row.snapshotDay);
+    let start = Number(row.windowStartDay);
+    if (isStaleableWindow(row.windowKey)) {
+      if (snapDay < staleCutoffSeconds) {
+        staleChains.add(row.chainId);
+        continue;
+      }
+      if (snapDay < degradedCutoffSeconds) {
+        const firstDay = firstDayBySnapshotKey?.get(
+          `${row.chainId}-${row.snapshotDay}`,
+        );
+        if (args.yesterdayRows !== undefined && firstDay) {
+          start += SECONDS_PER_DAY;
+        }
+      }
+    }
+    if (start <= snapDay) {
+      snapshotRangesByChain.set(row.chainId, { start, end: snapDay });
+    }
+  }
+
+  const partialRowsByChain = new Map<number, Set<string>>();
+  addPartialRowsByChain(
+    args.todayRows,
+    staleChains,
+    args.showSystem,
+    partialRowsByChain,
+  );
+  addPartialRowsByChain(
+    args.yesterdayRows,
+    staleChains,
+    args.showSystem,
+    partialRowsByChain,
+  );
+
+  const clauses: Record<string, unknown>[] = [];
+  let limit = 0;
+  for (const [chainId, traders] of partialRowsByChain) {
+    const range = snapshotRangesByChain.get(chainId);
+    if (!range || traders.size === 0) continue;
+    const traderList = Array.from(traders).sort();
+    limit += traderList.length;
+    clauses.push({
+      chainId: { _eq: chainId },
+      trader: { _in: traderList },
+      timestamp: { _gte: range.start, _lte: range.end },
+      ...(args.showSystem ? {} : { isSystemAddress: { _eq: false } }),
+    });
+  }
+
+  if (clauses.length === 0) return null;
+  if (limit > MAX_PARTIAL_OVERLAP_KEYS) return undefined;
+  return { where: { _or: clauses }, limit };
 }
 
 /**
@@ -165,10 +261,11 @@ function buildTraderSetSnapshotKeyMap(
  * pre-filtered by the `isSystemAddressIn` query variable, so the
  * showSystem branch only filters out anything that snuck through.
  *
- * The unique-trader count uses exact snapshot trader arrays when the
- * isolated trader-set query has landed. During schema rollout or query
- * failure it falls back to the legacy count-based path, which adds
- * snapshot + yesterday + today counts without cross-source de-duping.
+ * The unique-trader count uses a bounded historical-overlap query for
+ * yesterday/today partial traders when it has landed. During schema rollout,
+ * query failure, or a large active-partial set it falls back to the legacy
+ * count-based path, which adds snapshot + yesterday + today counts without
+ * cross-source de-duping.
  *
  * `todayMidnightSeconds` is the UTC midnight of "today" in Unix seconds
  * (must match the unit `snapshotDay` is stored in — see
@@ -247,11 +344,11 @@ function buildTraderSetSnapshotKeyMap(
  *                                   the slice subtraction (zero
  *                                   yesterday contribution).
  *
- * Unique-trader precision: with `traderSetRows`, the catch-up deletes
- * first-day-exclusive traders from the snapshot set, then unions
- * yesterday + today so overlap across all three sources is exact. Without
- * `traderSetRows`, the fallback count path remains approximate; volume and
- * swap counts are exact through slice subtraction either way.
+ * Unique-trader precision: with `partialOverlapRows`, the count starts from
+ * the retained snapshot unique count, then adds only yesterday/today traders
+ * that did not appear in that retained snapshot range. Without overlap rows,
+ * the fallback count path remains approximate; volume and swap counts are
+ * exact through slice subtraction either way.
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
@@ -262,11 +359,10 @@ export function mergeHeroSnapshot(args: {
    *  ONLY the catch-up (chains stay degraded) instead of failing the
    *  primary hero query. `undefined` until the isolated query lands. */
   firstDayRows?: ReadonlyArray<LeaderboardWindowFirstDayRow> | undefined;
-  /** Exact per-window trader sets for the same (chainId, snapshotDay)
-   *  tuples as `snapshotRows`. Lives in an isolated query so schema lag
-   *  degrades only unique-trader precision; volume/swap totals and the
-   *  legacy count fallback continue to render. */
-  traderSetRows?: ReadonlyArray<LeaderboardWindowTraderSetRow> | undefined;
+  /** Distinct historical rows for yesterday/today partial traders that
+   *  already occurred in the retained snapshot range. Lives in an isolated
+   *  query so schema lag degrades only unique-trader precision. */
+  partialOverlapRows?: ReadonlyArray<LeaderboardPartialOverlapRow> | undefined;
   /** Optional yesterday's-closed-day rows (one trader-day per row),
    *  used to catch up DEGRADED chains via slice subtraction. Caller
    *  fires `LEADERBOARD_YESTERDAY_TRADERS` only when `degradedChains`
@@ -286,11 +382,7 @@ export function mergeHeroSnapshot(args: {
   let uniqueFromSnapshot = 0;
   const staleChains: number[] = [];
   const degradedChains: number[] = [];
-  const exactTraders = new Set<string>();
-  const traderSetBySnapshotKey = args.traderSetRows
-    ? buildTraderSetSnapshotKeyMap(args.traderSetRows)
-    : null;
-  let canUseExactTraderSets = traderSetBySnapshotKey !== null;
+  const partialTraderKeys = new Set<string>();
   // Track per-chain snapshot rows for degraded chains so the post-pass
   // slice-subtraction step can read the firstDay* fields without
   // re-iterating the whole list.
@@ -311,20 +403,6 @@ export function mergeHeroSnapshot(args: {
         // gap and is signaled to the user via a lighter banner.
         degradedChains.push(row.chainId);
         degradedSnapshotByChain.set(row.chainId, row);
-      }
-    }
-    const traderSet = traderSetBySnapshotKey?.get(
-      `${row.chainId}-${row.snapshotDay}`,
-    );
-    if (canUseExactTraderSets && !traderSet) {
-      canUseExactTraderSets = false;
-    }
-    if (traderSet) {
-      const traders = args.showSystem
-        ? traderSet.tradersIncludingSystem
-        : traderSet.traders;
-      for (const trader of traders) {
-        exactTraders.add(`${row.chainId}-${trader}`);
       }
     }
     if (args.showSystem) {
@@ -348,9 +426,9 @@ export function mergeHeroSnapshot(args: {
     if (!args.showSystem && row.isSystemAddress) continue;
     totalVolumeUsdWei += BigInt(row.volumeUsdWei);
     totalSwapCount += row.swapCount;
-    const key = `${row.chainId}-${row.trader}`;
+    const key = traderKey(row.chainId, row.trader);
     todayTraders.add(key);
-    if (canUseExactTraderSets) exactTraders.add(key);
+    partialTraderKeys.add(key);
   }
 
   // ─── Degraded-chain catch-up via slice subtraction ──────────────
@@ -419,21 +497,6 @@ export function mergeHeroSnapshot(args: {
         totalSwapCount -= firstDay.firstDaySwapCount;
         uniqueFromSnapshot -= firstDay.firstDayExclusiveUniqueTraders;
       }
-      if (canUseExactTraderSets) {
-        const traderSet = traderSetBySnapshotKey?.get(
-          `${chainId}-${snap.snapshotDay}`,
-        );
-        const firstDayExclusive = args.showSystem
-          ? traderSet?.firstDayExclusiveTradersIncludingSystem
-          : traderSet?.firstDayExclusiveTraders;
-        if (!firstDayExclusive) {
-          canUseExactTraderSets = false;
-        } else {
-          for (const trader of firstDayExclusive) {
-            exactTraders.delete(`${chainId}-${trader}`);
-          }
-        }
-      }
       // Add yesterday's rows for this chain (may be empty).
       const yRows = yesterdayByChain.get(chainId);
       if (yRows && yRows.length > 0) {
@@ -442,9 +505,7 @@ export function mergeHeroSnapshot(args: {
           totalVolumeUsdWei += BigInt(row.volumeUsdWei);
           totalSwapCount += row.swapCount;
           yesterdayTradersForChain.add(row.trader);
-          if (canUseExactTraderSets) {
-            exactTraders.add(`${row.chainId}-${row.trader}`);
-          }
+          partialTraderKeys.add(traderKey(row.chainId, row.trader));
         }
         yesterdayUniqueTradersAdded += yesterdayTradersForChain.size;
       }
@@ -457,12 +518,27 @@ export function mergeHeroSnapshot(args: {
     remainingDegradedChains.push(...degradedChains);
   }
 
+  const overlapKeys =
+    args.partialOverlapRows === undefined
+      ? null
+      : new Set(
+          args.partialOverlapRows.map((row) =>
+            traderKey(row.chainId, row.trader),
+          ),
+        );
+  const exactNewPartialTraders =
+    overlapKeys === null
+      ? null
+      : Array.from(partialTraderKeys).filter((key) => !overlapKeys.has(key))
+          .length;
+
   return {
     totalVolumeUsdWei,
     totalSwapCount,
-    uniqueTraders: canUseExactTraderSets
-      ? exactTraders.size
-      : uniqueFromSnapshot + todayTraders.size + yesterdayUniqueTradersAdded,
+    uniqueTraders:
+      exactNewPartialTraders === null
+        ? uniqueFromSnapshot + todayTraders.size + yesterdayUniqueTradersAdded
+        : uniqueFromSnapshot + exactNewPartialTraders,
     staleChains,
     degradedChains: remainingDegradedChains,
   };

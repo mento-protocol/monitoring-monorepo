@@ -74,6 +74,22 @@ describe("fetchPoolVolumeSnapshots", () => {
     expect(result.rows).toHaveLength(1001);
   });
 
+  it("uses one abort deadline for the whole paginated poll", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
+          row(String(i)),
+        ),
+      })
+      .mockResolvedValueOnce({ PoolDailyVolumeSnapshot: [row("1000")] });
+
+    await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+
+    expect(requestMock.mock.calls[0]![0].signal).toBe(
+      requestMock.mock.calls[1]![0].signal,
+    );
+  });
+
   it("returns partial rows when a later page fails", async () => {
     requestMock
       .mockResolvedValueOnce({

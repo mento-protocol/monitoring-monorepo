@@ -344,6 +344,8 @@ export const LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       firstDaySwapCountIncludingSystem
       firstDayExclusiveUniqueTraders
       firstDayExclusiveUniqueTradersIncludingSystem
+      firstDayExclusiveTraders
+      firstDayExclusiveTradersIncludingSystem
     }
   }
 `;
@@ -364,46 +366,49 @@ export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       firstDaySwapCountIncludingSystem
       firstDayExclusiveUniqueTraders
       firstDayExclusiveUniqueTradersIncludingSystem
-    }
-  }
-`;
-
-// Isolated exact trader-set query. These arrays let the dashboard de-dupe
-// window-snapshot traders against yesterday + today trader rows. Keeping
-// them out of the primary hero query preserves the legacy approximate count
-// during hosted-Hasura schema rollout.
-export const LEADERBOARD_WINDOW_TRADER_SETS_LATEST = /* GraphQL */ `
-  query LeaderboardWindowTraderSetsLatest($windowKey: String!) {
-    LeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      chainId
-      snapshotDay
-      traders
-      tradersIncludingSystem
       firstDayExclusiveTraders
       firstDayExclusiveTradersIncludingSystem
     }
   }
 `;
 
-export const BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST = /* GraphQL */ `
-  query BrokerLeaderboardWindowTraderSetsLatest($windowKey: String!) {
-    BrokerLeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
+// Isolated bounded overlap query for exact hero unique-trader counts.
+// The caller passes an `_or` where clause scoped to the active yesterday/today
+// partial traders and each chain's retained snapshot range. `distinct_on`
+// returns at most one historical row per active `(chainId, trader)`, so this
+// avoids polling unbounded full-window trader arrays.
+export const LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query LeaderboardPartialOverlapTraders(
+    $where: TraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: $where
+      order_by: [{ chainId: asc }, { trader: asc }, { timestamp: desc }]
+      distinct_on: [chainId, trader]
+      limit: $limit
     ) {
       chainId
-      snapshotDay
-      traders
-      tradersIncludingSystem
-      firstDayExclusiveTraders
-      firstDayExclusiveTradersIncludingSystem
+      trader
+      timestamp
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query BrokerLeaderboardPartialOverlapTraders(
+    $where: BrokerTraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: $where
+      order_by: [{ chainId: asc }, { trader: asc }, { timestamp: desc }]
+      distinct_on: [chainId, trader]
+      limit: $limit
+    ) {
+      chainId
+      trader
+      timestamp
     }
   }
 `;
