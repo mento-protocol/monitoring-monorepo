@@ -193,7 +193,7 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 
 ## Follow-ups deferred from PR #335 (sign-in callback preservation)
 
-- [ ] **Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.** PR #335 keeps the unmodified-click path on a live URL by recomputing `callbackUrl` from `window.location` inside the click handler, but the anchor `href` itself stays frozen at the render-time `useSearchParams()` snapshot — so cmd-click / middle-click / "open link in new tab" sends OAuth through the stale callback. Acceptable today: cmd-click is a deliberate "open in a side tab" gesture, the original tab still has the live URL state, and shared session means returning to the source tab works. To fix properly: monkeypatch `history.pushState`/`replaceState` once at the app root to dispatch a `'locationchange'` custom event, and have `AuthStatus` (and any future consumers) re-derive `href` via a `useSyncExternalStore` (or equivalent) that listens to `popstate` + `locationchange`. Cursor flagged this on PR #335 review.
+- [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in this PR: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates and `pushState` path changes.
 
 ## Follow-ups deferred from PR #367 (react-doctor diff gate)
 
