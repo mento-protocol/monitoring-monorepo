@@ -59,6 +59,15 @@ describe("pool route canonicalization", () => {
     ).toBe("10143-0xaaa0000000000000000000000000000000000001");
   });
 
+  it("normalizes leading-zero namespaced chain prefixes", () => {
+    expect(
+      routeCanonicalPoolId(
+        "00143-0xAaa0000000000000000000000000000000000001",
+        null,
+      ),
+    ).toBe("143-0xaaa0000000000000000000000000000000000001");
+  });
+
   it("only marks namespaced ids as routable", () => {
     expect(isRoutablePoolId("0xaaa0000000000000000000000000000000000001")).toBe(
       false,

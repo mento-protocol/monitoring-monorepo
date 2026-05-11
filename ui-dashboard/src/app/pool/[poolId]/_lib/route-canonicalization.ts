@@ -3,6 +3,7 @@ import {
   extractChainIdFromPoolId,
   isNamespacedPoolId,
   normalizePoolIdForChain,
+  stripChainIdFromPoolId,
 } from "@/lib/pool-id";
 import { isValidAddress } from "@/lib/validators";
 
@@ -25,7 +26,16 @@ export function routeCanonicalPoolId(
   poolId: string,
   chainId: number | null,
 ): string {
-  if (isNamespacedPoolId(poolId)) return poolId.toLowerCase();
+  if (isNamespacedPoolId(poolId)) {
+    const routeChainId = extractChainIdFromPoolId(poolId);
+    if (routeChainId !== null) {
+      return normalizePoolIdForChain(
+        stripChainIdFromPoolId(poolId),
+        routeChainId,
+      );
+    }
+    return poolId.toLowerCase();
+  }
   if (isValidAddress(poolId) && chainId !== null) {
     return normalizePoolIdForChain(poolId, chainId);
   }
