@@ -110,13 +110,13 @@ list have shipped.
 
 ## Virtual Pool Metrics
 
-- [ ] **24h Volume tile for VPs.** Add per-exchangeId 24h USD volume to the VirtualPool header. Sourcing directly from `BrokerSwapEvent` would hit Hasura's 1000-row cap for active pairs; the proper fix is a new `BrokerExchangeDailySnapshot` entity keyed by `chainId-exchangeId-day`, updated alongside `BrokerDailySnapshot` in the broker handler. Requires a schema bump and full re-sync.
+- [x] ~~**24h Volume tile for VPs.**~~ Done on `virtual-pools`: `BrokerExchangeDailySnapshot` now rolls up per-`chainId-exchangeId-day` Broker volume in the indexer, and the VirtualPool header reads that isolated daily rollup for the current UTC-day 24h volume tile with visible query-failure degradation. Requires a schema bump and full re-sync.
 
 ## Dashboard Data Correctness
 
 - [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in PR #389: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates, `pushState` path changes, `popstate` back navigation, and hydration correction.
-- [ ] **Volume chart partial signal on the homepage.** Strict `tokenDecimalsKnown !== true` gating now exists in the valuation helpers, but `VolumeOverTimeChart` only receives `hasSnapshotError`. When untrusted-decimal pools are skipped, the headline can still look like a confident low/zero value. Add `volumePartial` alongside the existing `tvlPartial` plumbing.
-- [ ] **Pool detail tab panels gate on decimal trust state.** The top overview charts now receive `thresholdsLoading` / `thresholdsError`, but tab-local charts and tables still parse raw amounts with `pool.tokenNDecimals ?? 18`. Under an EXT query failure or `tokenDecimalsKnown=false`, those tabs can render schema-default-scaled balances. Add a page-level trust banner or per-tab gating.
+- [x] ~~**Volume chart partial signal on the homepage.**~~ Done in PR #387: `buildDailyVolumeSeries` now returns `volumePartial`, `VolumeOverTimeChart` renders partial/unavailable v3 states explicitly, and tests cover skipped untrusted-decimal snapshots.
+- [x] ~~**Pool detail tab panels gate on decimal trust state.**~~ Token-amount tabs now fail closed behind `TokenAmountTrustGate` until `POOL_THRESHOLDS_KNOWN_EXT` verifies token decimals; page tests cover untrusted decimals and trust-query failure without firing the tab-local reserves query.
 
 ## File Size And Lint Hygiene
 

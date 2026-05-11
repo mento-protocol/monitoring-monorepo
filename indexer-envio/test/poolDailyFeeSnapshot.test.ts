@@ -141,6 +141,24 @@ async function seedFpmmPool(
   return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 }
 
+function cloneSeededPoolToChain(
+  mockDb: MockDb,
+  poolAddr: string,
+  fromChainId: number,
+  toChainId: number,
+): MockDb {
+  const seeded = mockDb.entities.Pool.get(pid(poolAddr, fromChainId)) as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(seeded, "Pool must exist before cloning it to another chain");
+
+  return mockDb.entities.Pool.set({
+    ...seeded,
+    id: pid(poolAddr, toChainId),
+    chainId: toChainId,
+  });
+}
+
 function createTransferEvent(overrides: {
   from?: string;
   to?: string;
@@ -470,24 +488,12 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
 
     // Seed pools on both chains (same address)
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS, CELO_CHAIN);
-
-    // Also seed on Monad (different chainId)
-    const monadDeployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
-      token0: USDC_ADDRESS,
-      token1: USDM_ADDRESS,
-      fpmmProxy: POOL_ADDRESS,
-      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-      mockEventData: {
-        chainId: MONAD_CHAIN,
-        logIndex: 1,
-        srcAddress: "0x00000000000000000000000000000000000000cc",
-        block: { number: 100, timestamp: 1_700_000_000 },
-      },
-    });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
-      event: monadDeployEvent,
+    mockDb = cloneSeededPoolToChain(
       mockDb,
-    });
+      POOL_ADDRESS,
+      CELO_CHAIN,
+      MONAD_CHAIN,
+    );
 
     // Fire a transfer on Celo
     const celoEv = createTransferEvent({
