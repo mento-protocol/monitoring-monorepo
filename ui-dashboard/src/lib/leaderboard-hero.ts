@@ -61,18 +61,17 @@ export type LeaderboardWindowFirstDayRow = {
   firstDaySwapCountIncludingSystem: number;
   firstDayExclusiveUniqueTraders: number;
   firstDayExclusiveUniqueTradersIncludingSystem: number;
-  firstDayExclusiveTraders: string[];
-  firstDayExclusiveTradersIncludingSystem: string[];
 };
 
 /** Bounded historical-overlap row for partial-day traders. The query is
- *  distinct on `(chainId, trader)`, so it returns at most one row per
- *  active yesterday/today trader and avoids polling full cumulative
- *  snapshot trader arrays. */
+ *  distinct on `(chainId, trader, isSystemAddress)`, so it returns at most
+ *  two rows per active yesterday/today trader and avoids polling full
+ *  cumulative snapshot trader arrays. */
 export type LeaderboardPartialOverlapRow = {
   chainId: number;
   trader: string;
   timestamp: string;
+  isSystemAddress: boolean;
 };
 
 /** Wire shape of today's partial trader-day rows. v3 and v2 share this
@@ -150,10 +149,51 @@ export type LeaderboardPartialOverlapQueryInput = {
   limit: number;
 };
 
-const MAX_PARTIAL_OVERLAP_KEYS = 1000;
+// Hasura caps query responses at 1000 rows. The overlap query can return
+// one non-system and one system row per active partial trader, so exact mode
+// stops at 500 active keys and falls back above that.
+const MAX_PARTIAL_OVERLAP_QUERY_ROWS = 1000;
+const MAX_PARTIAL_OVERLAP_KEYS = MAX_PARTIAL_OVERLAP_QUERY_ROWS / 2;
 
 function traderKey(chainId: number, trader: string): string {
   return `${chainId}-${trader}`;
+}
+
+function buildHistoricalOverlapKeys(
+  rows: ReadonlyArray<LeaderboardPartialOverlapRow>,
+  showSystem: boolean,
+): Set<string> {
+  if (showSystem) {
+    return new Set(rows.map((row) => traderKey(row.chainId, row.trader)));
+  }
+
+  const statusByKey = new Map<
+    string,
+    { seenNonSystem: boolean; seenSystem: boolean }
+  >();
+  for (const row of rows) {
+    const key = traderKey(row.chainId, row.trader);
+    const status = statusByKey.get(key) ?? {
+      seenNonSystem: false,
+      seenSystem: false,
+    };
+    if (row.isSystemAddress) {
+      status.seenSystem = true;
+    } else {
+      status.seenNonSystem = true;
+    }
+    statusByKey.set(key, status);
+  }
+
+  const overlapKeys = new Set<string>();
+  for (const [key, status] of statusByKey) {
+    // Snapshot uniqueTraders is sticky-system: any system day excludes that
+    // trader from the hidden-system count, even if another day was non-system.
+    if (status.seenNonSystem && !status.seenSystem) {
+      overlapKeys.add(key);
+    }
+  }
+  return overlapKeys;
 }
 
 function addPartialRowsByChain(
@@ -181,6 +221,7 @@ export function buildHeroPartialOverlapQueryInput(args: {
   yesterdayRows?: ReadonlyArray<LeaderboardTodayTraderRow> | undefined;
   showSystem: boolean;
   todayMidnightSeconds: number;
+  traderField?: "trader" | "caller";
 }): LeaderboardPartialOverlapQueryInput | null | undefined {
   if (!args.snapshotRows || args.snapshotRows.length === 0) return null;
 
@@ -218,6 +259,7 @@ export function buildHeroPartialOverlapQueryInput(args: {
   }
 
   const partialRowsByChain = new Map<number, Set<string>>();
+  const traderField = args.traderField ?? "trader";
   addPartialRowsByChain(
     args.todayRows,
     staleChains,
@@ -240,15 +282,14 @@ export function buildHeroPartialOverlapQueryInput(args: {
     limit += traderList.length;
     clauses.push({
       chainId: { _eq: chainId },
-      trader: { _in: traderList },
+      [traderField]: { _in: traderList },
       timestamp: { _gte: range.start, _lte: range.end },
-      ...(args.showSystem ? {} : { isSystemAddress: { _eq: false } }),
     });
   }
 
   if (clauses.length === 0) return null;
   if (limit > MAX_PARTIAL_OVERLAP_KEYS) return undefined;
-  return { where: { _or: clauses }, limit };
+  return { where: { _or: clauses }, limit: limit * 2 };
 }
 
 /**
@@ -521,11 +562,7 @@ export function mergeHeroSnapshot(args: {
   const overlapKeys =
     args.partialOverlapRows === undefined
       ? null
-      : new Set(
-          args.partialOverlapRows.map((row) =>
-            traderKey(row.chainId, row.trader),
-          ),
-        );
+      : buildHistoricalOverlapKeys(args.partialOverlapRows, args.showSystem);
   const exactNewPartialTraders =
     overlapKeys === null
       ? null

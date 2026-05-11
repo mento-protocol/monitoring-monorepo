@@ -344,8 +344,6 @@ export const LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       firstDaySwapCountIncludingSystem
       firstDayExclusiveUniqueTraders
       firstDayExclusiveUniqueTradersIncludingSystem
-      firstDayExclusiveTraders
-      firstDayExclusiveTradersIncludingSystem
     }
   }
 `;
@@ -366,17 +364,17 @@ export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       firstDaySwapCountIncludingSystem
       firstDayExclusiveUniqueTraders
       firstDayExclusiveUniqueTradersIncludingSystem
-      firstDayExclusiveTraders
-      firstDayExclusiveTradersIncludingSystem
     }
   }
 `;
 
 // Isolated bounded overlap query for exact hero unique-trader counts.
 // The caller passes an `_or` where clause scoped to the active yesterday/today
-// partial traders and each chain's retained snapshot range. `distinct_on`
-// returns at most one historical row per active `(chainId, trader)`, so this
-// avoids polling unbounded full-window trader arrays.
+// partial traders and each chain's retained snapshot range. The query is
+// distinct on `(chainId, trader, isSystemAddress)` so the hidden-system merge
+// can distinguish "had a non-system historical row" from "sticky-system trader
+// excluded from the snapshot unique count" without polling full cumulative
+// trader arrays.
 export const LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
   query LeaderboardPartialOverlapTraders(
     $where: TraderDailySnapshot_bool_exp!
@@ -384,13 +382,19 @@ export const LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
   ) {
     TraderDailySnapshot(
       where: $where
-      order_by: [{ chainId: asc }, { trader: asc }, { timestamp: desc }]
-      distinct_on: [chainId, trader]
+      order_by: [
+        { chainId: asc }
+        { trader: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, trader, isSystemAddress]
       limit: $limit
     ) {
       chainId
       trader
       timestamp
+      isSystemAddress
     }
   }
 `;
@@ -402,13 +406,19 @@ export const BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
   ) {
     BrokerTraderDailySnapshot(
       where: $where
-      order_by: [{ chainId: asc }, { trader: asc }, { timestamp: desc }]
-      distinct_on: [chainId, trader]
+      order_by: [
+        { chainId: asc }
+        { caller: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, caller, isSystemAddress]
       limit: $limit
     ) {
       chainId
-      trader
+      trader: caller
       timestamp
+      isSystemAddress
     }
   }
 `;

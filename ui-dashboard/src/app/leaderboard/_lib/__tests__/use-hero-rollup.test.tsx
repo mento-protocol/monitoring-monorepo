@@ -121,8 +121,6 @@ function firstDaySlice(
     firstDaySwapCountIncludingSystem: 5,
     firstDayExclusiveUniqueTraders: 1,
     firstDayExclusiveUniqueTradersIncludingSystem: 1,
-    firstDayExclusiveTraders: [],
-    firstDayExclusiveTradersIncludingSystem: [],
     ...overrides,
   };
 }
@@ -280,7 +278,7 @@ describe("useHeroRollup orchestration", () => {
     // uniqueTraders: snapshot 10 - exclusive 1 + yesterday's 2 distinct = 11
     expect(result!.totalTraders).toBe(11);
     const overlapVars = lastVariables.get(LEADERBOARD_PARTIAL_OVERLAP_TRADERS);
-    expect(overlapVars?.limit).toBe(2);
+    expect(overlapVars?.limit).toBe(4);
   });
 
   it("phase 3: firstDay query errors out → chain stays degraded, tiles stay rendered with conservative totals", () => {

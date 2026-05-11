@@ -208,6 +208,7 @@ export function useHeroRollup({
         yesterdayRows: yesterdayPartialRows,
         showSystem,
         todayMidnightSeconds: todayMidnight,
+        traderField: venue === "v2" ? "caller" : "trader",
       }),
     [
       snapshotRows,
@@ -216,6 +217,7 @@ export function useHeroRollup({
       yesterdayPartialRows,
       showSystem,
       todayMidnight,
+      venue,
     ],
   );
   const partialOverlapV3Result = useGQL<{
