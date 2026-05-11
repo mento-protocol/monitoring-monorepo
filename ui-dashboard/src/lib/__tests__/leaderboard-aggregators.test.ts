@@ -73,6 +73,8 @@ describe("buildAggregatorDailyVolumeBreakdown", () => {
     expect(out.totalSeries.map((p) => p.timestamp)).toEqual([day0, day1, day2]);
     expect(out.totalSeries[1]!.value).toBe(0);
     expect(out.breakdown).toHaveLength(8);
+    expect(out.breakdown[0]!.id).toBe(out.breakdown[0]!.key);
+    expect(out.breakdown[0]!.name).toBe("agg-0 (Celo)");
     expect(out.breakdown.at(-1)!.name).toBe("Other (2)");
   });
 });

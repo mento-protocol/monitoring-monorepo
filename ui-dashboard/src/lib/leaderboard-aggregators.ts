@@ -1,4 +1,5 @@
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import { networkForChainId } from "@/lib/networks";
 
 export type AggregatorDailyRow = {
   id: string;
@@ -22,6 +23,7 @@ export type AggregatorWindowRow = {
 
 export type AggregatorBreakdown = {
   key: string;
+  id: string;
   name: string;
   color: string;
   series: Array<{ timestamp: number; value: number }>;
@@ -94,6 +96,10 @@ export function buildAggregatorDailyVolumeBreakdown(
   totalSeries: Array<{ timestamp: number; value: number }>;
   breakdown: AggregatorBreakdown[];
 } {
+  if (rows.length === 0) {
+    return { totalSeries: [], breakdown: [] };
+  }
+
   const byAggregatorDay = new Map<string, bigint>();
   const totalsByAggregator = new Map<string, bigint>();
   const totalsByDay = new Map<number, bigint>();
@@ -108,10 +114,6 @@ export function buildAggregatorDailyVolumeBreakdown(
     byAggregatorDay.set(dayKey, (byAggregatorDay.get(dayKey) ?? ZERO) + wei);
     totalsByAggregator.set(key, (totalsByAggregator.get(key) ?? ZERO) + wei);
     totalsByDay.set(day, (totalsByDay.get(day) ?? ZERO) + wei);
-  }
-
-  if (rows.length === 0) {
-    return { totalSeries: [], breakdown: [] };
   }
 
   const sortedDays: number[] = [];
@@ -141,6 +143,7 @@ export function buildAggregatorDailyVolumeBreakdown(
 
   const breakdown: AggregatorBreakdown[] = topKeys.map((key, idx) => ({
     key,
+    id: key,
     name: aggregatorNameFromKey(key),
     color: AGGREGATOR_PALETTE[idx % AGGREGATOR_PALETTE.length]!,
     series: sortedDays.map((day) => ({
@@ -152,6 +155,7 @@ export function buildAggregatorDailyVolumeBreakdown(
   if (otherKeys.size > 0) {
     breakdown.push({
       key: OTHER_KEY,
+      id: OTHER_KEY,
       name: `Other (${otherKeys.size})`,
       color: OTHER_COLOR,
       series: sortedDays.map((day) => {
@@ -175,7 +179,11 @@ export function buildAggregatorDailyVolumeBreakdown(
 
 function aggregatorNameFromKey(key: string): string {
   const firstDash = key.indexOf("-");
-  return firstDash === -1 ? key : key.slice(firstDash + 1);
+  if (firstDash === -1) return key;
+  const chainId = Number(key.slice(0, firstDash));
+  const name = key.slice(firstDash + 1);
+  const network = networkForChainId(chainId);
+  return network ? `${name} (${network.label})` : name;
 }
 
 function usdWeiToUsd(wei: bigint): number {

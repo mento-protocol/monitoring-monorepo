@@ -559,7 +559,7 @@ export function LeaderboardClient() {
                   range: chartRange,
                   onRangeChange: onChartRangeChange,
                   ranges: LEADERBOARD_FALLBACK_CHART_RANGES,
-                  total: v3AggregatorChartTotal,
+                  headline: formatUSD(v3AggregatorChartTotal),
                 }
           }
         />

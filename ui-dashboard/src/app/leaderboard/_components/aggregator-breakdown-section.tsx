@@ -25,7 +25,7 @@ const AGG_SORT_KEYS = ["volume", "swaps", "traders"] as const;
 type AggSortKey = (typeof AGG_SORT_KEYS)[number];
 const AGG_VALID_KEYS = new Set<AggSortKey>(AGG_SORT_KEYS);
 
-type ChartProps = {
+export type AggregatorChartProps = {
   series: TimeSeriesPoint[];
   breakdown: BreakdownSeries[];
   range: RangeKey;
@@ -49,7 +49,7 @@ export function AggregatorBreakdownSection({
   isLoading: boolean;
   hasError: boolean;
   isCapHit: boolean;
-  chart?: ChartProps;
+  chart?: AggregatorChartProps;
 }) {
   return (
     <section className="space-y-3">
@@ -63,7 +63,10 @@ export function AggregatorBreakdownSection({
             unknown
           </span>{" "}
           rows are unclassified routers. Cluster rows include a deployer link
-          for curation.
+          for curation.{" "}
+          {venueLabel === "v2"
+            ? "File an entry to label them and reach out to the operator about migrating to v3."
+            : null}
         </p>
       </div>
       {isCapHit && (

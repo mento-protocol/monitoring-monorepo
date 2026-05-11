@@ -1,12 +1,12 @@
 "use client";
 
-import { formatUSD } from "@/lib/format";
-import type { RangeKey } from "@/lib/time-series";
 import type { TraderWindowRow } from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
-import type { BreakdownSeries } from "@/components/time-series-chart-card";
 import { LeaderboardTable } from "./leaderboard-table";
-import { AggregatorBreakdownSection } from "./aggregator-breakdown-section";
+import {
+  AggregatorBreakdownSection,
+  type AggregatorChartProps,
+} from "./aggregator-breakdown-section";
 
 type PoolMeta = ReadonlyMap<
   string,
@@ -36,14 +36,7 @@ export function V3LeaderboardSection({
   aggIsLoading: boolean;
   aggHasError: boolean;
   isAggregatorCapHit: boolean;
-  chart?: {
-    series: Array<{ timestamp: number; value: number }>;
-    breakdown: BreakdownSeries[];
-    range: RangeKey;
-    onRangeChange: (range: RangeKey) => void;
-    ranges: ReadonlyArray<{ key: RangeKey; label: string }>;
-    total: number;
-  };
+  chart?: AggregatorChartProps;
 }) {
   return (
     <>
@@ -66,18 +59,7 @@ export function V3LeaderboardSection({
         isLoading={aggIsLoading}
         hasError={aggHasError}
         isCapHit={isAggregatorCapHit}
-        chart={
-          chart
-            ? {
-                series: chart.series,
-                breakdown: chart.breakdown,
-                range: chart.range,
-                onRangeChange: chart.onRangeChange,
-                ranges: chart.ranges,
-                headline: formatUSD(chart.total),
-              }
-            : undefined
-        }
+        chart={chart}
       />
     </>
   );

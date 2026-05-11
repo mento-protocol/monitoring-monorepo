@@ -148,6 +148,14 @@ describe("AggregatorBreakdownSection", () => {
     );
   });
 
+  it("keeps the v2 migration-outreach note", () => {
+    handle = renderSection({ venueLabel: "v2" });
+
+    expect(handle.container.textContent).toContain(
+      "reach out to the operator about migrating to v3",
+    );
+  });
+
   it("sorts rows through the v3 aggregator URL params", () => {
     handle = renderSection({
       aggregators: [
