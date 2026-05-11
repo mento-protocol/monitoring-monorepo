@@ -243,6 +243,102 @@ quote_path() {
   printf "%q" "$1"
 }
 
+json_change_paths() {
+  local path="$1"
+  local base_file
+  local head_file
+  base_file="$(mktemp)"
+  head_file="$(mktemp)"
+
+  if ! git show "${base_ref}:${path}" > "$base_file" 2>/dev/null; then
+    rm -f "$base_file" "$head_file"
+    echo "__unknown__"
+    return
+  fi
+
+  if [[ "$head_ref" == "HEAD" && -f "$path" ]]; then
+    cp "$path" "$head_file"
+  elif ! git show "${head_ref}:${path}" > "$head_file" 2>/dev/null; then
+    rm -f "$base_file" "$head_file"
+    echo "__unknown__"
+    return
+  fi
+
+  node - "$base_file" "$head_file" <<'NODE'
+const fs = require("fs");
+
+const [, , basePath, headPath] = process.argv;
+
+const escapePointer = (part) =>
+  part.replace(/~/g, "~0").replace(/\//g, "~1");
+
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const sameScalar = (a, b) => Object.is(a, b);
+
+const changes = [];
+
+function walk(a, b, path) {
+  if (sameScalar(a, b)) return;
+
+  if (isRecord(a) && isRecord(b)) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of [...keys].sort()) {
+      walk(a[key], b[key], `${path}/${escapePointer(key)}`);
+    }
+    return;
+  }
+
+  if (JSON.stringify(a) !== JSON.stringify(b)) {
+    changes.push(path || "/");
+  }
+}
+
+try {
+  const baseJson = JSON.parse(fs.readFileSync(basePath, "utf8"));
+  const headJson = JSON.parse(fs.readFileSync(headPath, "utf8"));
+  walk(baseJson, headJson, "");
+  for (const change of changes) console.log(change);
+} catch {
+  console.log("__unknown__");
+}
+NODE
+  rm -f "$base_file" "$head_file"
+}
+
+classify_root_package_json_changes() {
+  local change
+  local saw_change=false
+  local agent_gate_only=true
+
+  while IFS= read -r change; do
+    [[ -n "$change" ]] || continue
+    saw_change=true
+    case "$change" in
+      "__unknown__")
+        echo "workspace"
+        return
+        ;;
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test)
+        ;;
+      /scripts/*)
+        echo "package-scripts"
+        return
+        ;;
+      *)
+        agent_gate_only=false
+        ;;
+    esac
+  done < <(json_change_paths "package.json")
+
+  if [[ "$saw_change" == true && "$agent_gate_only" == true ]]; then
+    echo "agent-quality-gate-scripts"
+  else
+    echo "workspace"
+  fi
+}
+
 add_package_quality_commands() {
   local package_name="$1"
   local reason="$2"
@@ -360,7 +456,25 @@ add_command "./tools/trunk check --all" "changed files should pass the same full
 
 while IFS= read -r path; do
   case "$path" in
-    package.json|*/package.json)
+    package.json)
+      root_package_json_class="$(classify_root_package_json_changes)"
+      case "$root_package_json_class" in
+        agent-quality-gate-scripts)
+          add_surface "tooling"
+          add_command "pnpm agent:quality-gate:test" "root package agent quality gate script changed"
+          ;;
+        package-scripts)
+          package_script_risk_changed=true
+          add_surface "workspace"
+          add_command "pnpm agent:quality-gate:test" "root package script changed"
+          ;;
+        *)
+          package_script_risk_changed=true
+          add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
+          ;;
+      esac
+      ;;
+    */package.json)
       package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
       ;;
@@ -412,8 +526,19 @@ while IFS= read -r path; do
     indexer-envio/*)
       add_surface "indexer-envio"
       case "$path" in
-        indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/scripts/*|indexer-envio/package.json)
+        indexer-envio/schema.graphql|indexer-envio/abis/*|indexer-envio/scripts/run-envio-with-env.mjs|indexer-envio/package.json)
           add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/src/EventHandlersBridgeOnly.ts|indexer-envio/src/handlers/wormhole/*)
+          add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/src/EventHandlers.ts|indexer-envio/src/handlers/*)
+          add_indexer_mainnet_codegen "indexer handler registration path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/src/*)
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
       esac
@@ -523,10 +648,19 @@ while IFS= read -r path; do
       add_surface "scripts"
       ;;
     package.json)
-      add_surface "workspace"
-      add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-      add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
-      add_workspace_quality_commands "workspace dependency/config changed"
+      root_package_json_class="$(classify_root_package_json_changes)"
+      case "$root_package_json_class" in
+        agent-quality-gate-scripts)
+          ;;
+        package-scripts)
+          ;;
+        *)
+          add_surface "workspace"
+          add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+          add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
+          add_workspace_quality_commands "workspace dependency/config changed"
+          ;;
+      esac
       ;;
     pnpm-lock.yaml|pnpm-workspace.yaml)
       add_surface "workspace"
@@ -596,22 +730,131 @@ if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" 
 fi
 
 failures=0
+command_summaries=()
+
+format_duration() {
+  local seconds="$1"
+  local minutes
+  local remainder
+
+  if [[ "$seconds" -lt 60 ]]; then
+    echo "${seconds}s"
+    return
+  fi
+
+  minutes=$((seconds / 60))
+  remainder=$((seconds % 60))
+  echo "${minutes}m${remainder}s"
+}
+
+filter_expected_output() {
+  local skip_expected_stack=false
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[(RPC_FAILURE|RPC_FAILURE_BURST|CONTRACT_REVERT|CONTRACT_REVERT_BURST)\] ]]; then
+      skip_expected_stack=false
+      continue
+    fi
+
+    if [[ "$line" =~ ^\[(rebalance-check|address-labels|address-labels/[^]]+|address-reports|backup|minipay/tag|minipay/sync|arkham/enrich)\] ]]; then
+      skip_expected_stack=true
+      continue
+    fi
+
+    if [[ "$skip_expected_stack" == true ]]; then
+      case "$line" in
+        Error:*|TypeError:*|*" at "*|"    at "*)
+          continue
+          ;;
+        "")
+          skip_expected_stack=false
+          continue
+          ;;
+      esac
+    fi
+
+    skip_expected_stack=false
+    echo "$line"
+  done
+}
+
+record_command_summary() {
+  local status="$1"
+  local elapsed="$2"
+  local command="$3"
+  command_summaries+=("${status}|${elapsed}|${command}")
+}
+
+print_command_summary() {
+  local entry
+  local status
+  local elapsed
+  local command
+
+  if [[ ${#command_summaries[@]} -eq 0 ]]; then
+    return
+  fi
+
+  echo
+  echo "Command elapsed-time summary:"
+  for entry in "${command_summaries[@]+"${command_summaries[@]}"}"; do
+    status="${entry%%|*}"
+    elapsed_and_command="${entry#*|}"
+    elapsed="${elapsed_and_command%%|*}"
+    command="${elapsed_and_command#*|}"
+    echo "- ${status} $(format_duration "$elapsed") ${command}"
+  done
+}
+
+run_mapped_command() {
+  local command="$1"
+  local output_file
+  local start_ts
+  local end_ts
+  local elapsed
+  local exit_code
+
+  output_file="$(mktemp)"
+  start_ts="$(date +%s)"
+  echo
+  echo "+ ${command}"
+  set +e
+  bash -c "$command" > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  end_ts="$(date +%s)"
+  elapsed=$((end_ts - start_ts))
+
+  if [[ "$exit_code" -eq 0 ]]; then
+    record_command_summary "ok" "$elapsed" "$command"
+    echo "✓ ${command} ($(format_duration "$elapsed"))"
+    rm -f "$output_file"
+    return 0
+  fi
+
+  record_command_summary "fail" "$elapsed" "$command"
+  echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+  filter_expected_output < "$output_file" >&2
+  rm -f "$output_file"
+  return "$exit_code"
+}
+
 for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}" \
   "${codegen_commands[@]+"${codegen_commands[@]}"}" \
   "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}" \
   "${quality_commands[@]+"${quality_commands[@]}"}"; do
   command="${entry%%|*}"
-  echo
-  echo "+ ${command}"
-  if ! bash -c "$command"; then
+  if ! run_mapped_command "$command"; then
     failures=$((failures + 1))
     if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
       echo
       echo "Stopping after first failed mapped command (--fail-fast)." >&2
+      print_command_summary
       exit 1
     fi
   fi
 done
+
+print_command_summary
 
 if [[ "$failures" -gt 0 ]]; then
   echo

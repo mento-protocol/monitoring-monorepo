@@ -151,8 +151,41 @@ assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (workspace dependency/config changed)"
 
+package_json_repo="$(mktemp -d)"
+(
+  cd "$package_json_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts["agent:quality-gate:test"] = "bash scripts/agent-quality-gate.test.sh --fixture";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$package_json_repo"
+assert_contains "- tooling"
+assert_contains "- pnpm agent:quality-gate:test (root package agent quality gate script changed)"
+assert_not_contains "- pnpm install --frozen-lockfile"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+assert_occurrences 1 "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)"
@@ -170,15 +203,33 @@ assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio lint (indexer-envio changed)"
 
 run_gate "indexer-envio/src/bridge.ts"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
+assert_not_contains "indexer:bridge-only:codegen"
+assert_not_contains "indexer:testnet:codegen"
+assert_not_contains "pnpm indexer:codegen"
+
+run_gate "indexer-envio/src/EventHandlers.ts"
+assert_contains "- pnpm indexer:codegen (indexer handler registration path changed)"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm indexer:testnet:codegen"
+
+run_gate "indexer-envio/src/EventHandlersBridgeOnly.ts"
 assert_order \
-  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)" \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge handler registration path changed)" \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
+assert_not_contains "- pnpm indexer:testnet:codegen"
+
+run_gate "indexer-envio/src/handlers/fpmm.ts"
+assert_contains "- pnpm indexer:codegen (indexer handler registration path changed)"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm indexer:testnet:codegen"
+
+run_gate "indexer-envio/src/handlers/wormhole/nttManager.ts"
 assert_order \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
-  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)"
-assert_order \
-  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)" \
-  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge handler registration path changed)" \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
+assert_not_contains "- pnpm indexer:testnet:codegen"
 
 run_gate "indexer-envio/scripts/run-envio-with-env.mjs"
 assert_order \
@@ -192,22 +243,17 @@ assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 
 run_gate "indexer-envio/config.multichain.mainnet.yaml" "indexer-envio/src/handlers/fpmm.ts"
-assert_order \
-  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)" \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
-assert_order \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
-  "- pnpm indexer:codegen (mainnet indexer config changed)"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm indexer:testnet:codegen"
+assert_contains "- pnpm indexer:codegen (mainnet indexer config changed)"
 assert_order \
   "- pnpm indexer:codegen (mainnet indexer config changed)" \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 
 run_gate "indexer-envio/config.multichain.bridge-only.yaml" "indexer-envio/src/bridge.ts"
+assert_not_contains "- pnpm indexer:testnet:codegen"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)" \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
-assert_order \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
   "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
 assert_order \
   "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)" \
@@ -426,7 +472,65 @@ fail_fast_repo="$(mktemp -d)"
 rm -rf "$fail_fast_repo"
 assert_contains "+ ./tools/trunk check --all"
 assert_contains "Stopping after first failed mapped command (--fail-fast)."
+assert_contains "Command elapsed-time summary:"
+assert_contains "- fail "
 assert_not_contains "+ pnpm agent:quality-gate:test"
+
+quiet_success_repo="$(mktemp -d)"
+(
+  cd "$quiet_success_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+echo "[RPC_FAILURE] expected fixture failure that should stay quiet"
+echo "successful command noise that should stay quiet"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> README.md
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+)
+rm -rf "$quiet_success_repo"
+assert_contains "+ ./tools/trunk check --all"
+assert_contains "Command elapsed-time summary:"
+assert_contains "- ok "
+assert_not_contains "expected fixture failure that should stay quiet"
+assert_not_contains "successful command noise that should stay quiet"
+
+quiet_failure_repo="$(mktemp -d)"
+(
+  cd "$quiet_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+echo "[RPC_FAILURE] expected fixture failure that should be filtered"
+echo "real failure line"
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> README.md
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$quiet_failure_repo"
+assert_contains "Command failed after"
+assert_contains "real failure line"
+assert_contains "Command elapsed-time summary:"
+assert_not_contains "expected fixture failure that should be filtered"
 
 react_doctor_repo="$(mktemp -d)"
 (
