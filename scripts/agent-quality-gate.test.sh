@@ -146,6 +146,15 @@ run_gate "indexer-envio/config/aggregators.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer config data flow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
 
+run_gate "metrics-bridge/src/graphql.ts"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+
+run_gate "metrics-bridge/src/poller.ts"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+
+run_gate "metrics-bridge/src/metrics.ts"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+
 run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"

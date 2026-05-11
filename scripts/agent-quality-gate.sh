@@ -355,6 +355,11 @@ while IFS= read -r path; do
 	  ;;
     metrics-bridge/*)
       add_surface "metrics-bridge"
+      case "$path" in
+        metrics-bridge/src/*)
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "metrics bridge data flow changed"
+          ;;
+      esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
 	shared-config/*)
