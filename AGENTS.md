@@ -29,6 +29,10 @@ then you are expected to run the dedicated PR checklist before opening or updati
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
+## PR feedback sweep rule
+
+Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
+
 ## Recurring PR-review patterns — fix locally, not in review
 
 Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. Each rule is a hard must/never — if your change touches one of these areas, follow the linked checklist before opening the PR.
