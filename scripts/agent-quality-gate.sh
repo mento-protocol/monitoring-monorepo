@@ -35,9 +35,6 @@ while [[ $# -gt 0 ]]; do
       mode="run"
       shift
       ;;
-    --)
-      shift
-      ;;
     --base)
       base_ref="${2:-}"
       if [[ -z "$base_ref" ]]; then
@@ -223,6 +220,10 @@ while IFS= read -r path; do
       add_command "terraform -chdir=terraform fmt -check" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
+    cloudbuild.yaml)
+      add_surface "cloudbuild"
+      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Build config changed"
+      ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
       ;;
@@ -288,7 +289,7 @@ for entry in "${commands[@]}"; do
   command="${entry%%|*}"
   echo
   echo "+ ${command}"
-  if ! bash -lc "$command"; then
+  if ! bash -c "$command"; then
     failures=$((failures + 1))
   fi
 done
