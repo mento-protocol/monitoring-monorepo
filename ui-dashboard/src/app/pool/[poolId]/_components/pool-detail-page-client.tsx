@@ -461,10 +461,10 @@ function PoolChartsRow({
       <ReservesPanel
         pool={pool}
         rates={rates}
-        ratesLoading={(poolNeedsRates && ratesLoading) || thresholdsLoading}
-        ratesError={
-          (poolNeedsRates && ratesError) || thresholdsError !== undefined
-        }
+        ratesLoading={poolNeedsRates && ratesLoading}
+        ratesError={poolNeedsRates && ratesError}
+        decimalsLoading={thresholdsLoading}
+        decimalsError={thresholdsError !== undefined}
       />
     </div>
   );
