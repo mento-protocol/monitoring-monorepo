@@ -7,12 +7,12 @@ import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
-  AGGREGATOR_DAILY_TOP,
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_TRADER_DAILY_TOP,
   POOL_DAILY_VOLUME,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
+  aggregatorDailyTopQuery,
 } from "@/lib/queries/leaderboard";
 import {
   LEADERBOARD_RANGES,
@@ -28,6 +28,7 @@ import {
 import {
   aggregateAggregatorsByWindow,
   buildAggregatorDailyVolumeBreakdown,
+  selectAggregatorRowsForSystemToggle,
   type AggregatorDailyRow,
 } from "@/lib/leaderboard-aggregators";
 import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
@@ -112,10 +113,12 @@ export function LeaderboardClient() {
   });
   const v3AggregatorsResult = useGQL<{
     AggregatorDailySnapshot: AggregatorDailyRow[];
-  }>(venue === "v3" ? AGGREGATOR_DAILY_TOP : null, {
-    afterTimestamp: cutoff,
-    limit: ENVIO_MAX_ROWS,
-  });
+  }>(
+    venue === "v3" ? aggregatorDailyTopQuery(showSystem) : null,
+    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
 
   const v2TradersResult = useGQL<{
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
@@ -153,15 +156,7 @@ export function LeaderboardClient() {
     [v2TraderRows],
   );
   const filteredV3AggregatorRows = useMemo(
-    () =>
-      showSystem
-        ? v3AggregatorRows.map((r) => ({
-            ...r,
-            swapCount: r.swapCountIncludingSystem,
-            uniqueTraders: r.uniqueTradersIncludingSystem,
-            volumeUsdWei: r.volumeUsdWeiIncludingSystem,
-          }))
-        : v3AggregatorRows.filter((r) => r.aggregator !== "system"),
+    () => selectAggregatorRowsForSystemToggle(v3AggregatorRows, showSystem),
     [v3AggregatorRows, showSystem],
   );
   const v3AggregatorAggregated = useMemo(

@@ -171,6 +171,37 @@ export const AGGREGATOR_DAILY_TOP = /* GraphQL */ `
   }
 `;
 
+export const AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM = /* GraphQL */ `
+  query AggregatorDailyTopIncludingSystem(
+    $afterTimestamp: numeric!
+    $limit: Int!
+  ) {
+    AggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+export function aggregatorDailyTopQuery(showSystem: boolean): string {
+  return showSystem
+    ? AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+    : AGGREGATOR_DAILY_TOP;
+}
+
 /**
  * Top legacy-v2 producer-day rows by volume. Source: BrokerTraderDailySnapshot,
  * which the broker handler only writes when `routedViaV3Router=false` — so

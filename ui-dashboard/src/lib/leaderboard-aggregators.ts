@@ -58,6 +58,24 @@ const TOP_N_AGGREGATORS = 7;
 const OTHER_KEY = "__other__";
 const ZERO = BigInt(0);
 
+export function selectAggregatorRowsForSystemToggle(
+  rows: readonly AggregatorDailyRow[],
+  showSystem: boolean,
+): AggregatorDailyRowBase[] {
+  if (!showSystem) {
+    return rows.filter(
+      (row) => row.aggregator !== "system" && hasPrimaryActivity(row),
+    );
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    swapCount: row.swapCountIncludingSystem,
+    uniqueTraders: row.uniqueTradersIncludingSystem,
+    volumeUsdWei: row.volumeUsdWeiIncludingSystem,
+  }));
+}
+
 /**
  * Group `AggregatorDailySnapshot`-shaped rows by `(chainId, aggregator)`.
  * Volume and swap counts sum; unique traders is a lower bound using the
@@ -199,4 +217,12 @@ function aggregatorNameFromKey(key: string): string {
   const name = key.slice(firstDash + 1);
   const network = networkForChainId(chainId);
   return network ? `${name} (${network.label})` : name;
+}
+
+function hasPrimaryActivity(row: AggregatorDailyRowBase): boolean {
+  return (
+    row.swapCount > 0 ||
+    row.uniqueTraders > 0 ||
+    BigInt(row.volumeUsdWei) > ZERO
+  );
 }

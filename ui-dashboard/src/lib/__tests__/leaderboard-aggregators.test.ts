@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateAggregatorsByWindow,
   buildAggregatorDailyVolumeBreakdown,
+  selectAggregatorRowsForSystemToggle,
   type AggregatorDailyRow,
 } from "../leaderboard-aggregators";
+import {
+  AGGREGATOR_DAILY_TOP,
+  AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM,
+  aggregatorDailyTopQuery,
+} from "../queries/leaderboard";
 
 const USD = (n: number) =>
   (BigInt(Math.floor(n * 1_000_000)) * BigInt(10) ** BigInt(12)).toString();
@@ -51,6 +57,71 @@ describe("aggregateAggregatorsByWindow", () => {
     expect(out[0]!.swapCount).toBe(3);
     expect(out[0]!.uniqueTradersApprox).toBe(4);
     expect(out[0]!.volumeUsdWei).toBe(BigInt(USD(7)));
+  });
+});
+
+describe("selectAggregatorRowsForSystemToggle", () => {
+  it("drops hidden-system rows whose primary fields were zeroed", () => {
+    const selected = selectAggregatorRowsForSystemToggle(
+      [
+        row({ id: "visible", aggregator: "squid", volumeUsdWei: USD(5) }),
+        row({
+          id: "system-bucket",
+          aggregator: "system",
+          volumeUsdWei: USD(10),
+        }),
+        row({
+          id: "system-via-router",
+          aggregator: "squid",
+          swapCount: 0,
+          uniqueTraders: 0,
+          volumeUsdWei: "0",
+          swapCountIncludingSystem: 3,
+          uniqueTradersIncludingSystem: 2,
+          volumeUsdWeiIncludingSystem: USD(99),
+        }),
+      ],
+      false,
+    );
+
+    expect(selected.map((r) => r.volumeUsdWei)).toEqual([USD(5)]);
+  });
+
+  it("maps including-system fields when system addresses are shown", () => {
+    const selected = selectAggregatorRowsForSystemToggle(
+      [
+        row({
+          swapCount: 0,
+          uniqueTraders: 0,
+          volumeUsdWei: "0",
+          swapCountIncludingSystem: 3,
+          uniqueTradersIncludingSystem: 2,
+          volumeUsdWeiIncludingSystem: USD(99),
+        }),
+      ],
+      true,
+    );
+
+    expect(selected[0]).toMatchObject({
+      swapCount: 3,
+      uniqueTraders: 2,
+      volumeUsdWei: USD(99),
+    });
+  });
+});
+
+describe("aggregatorDailyTopQuery", () => {
+  it("orders by the displayed volume for the active system toggle", () => {
+    expect(aggregatorDailyTopQuery(false)).toBe(AGGREGATOR_DAILY_TOP);
+    expect(aggregatorDailyTopQuery(false)).toContain(
+      "order_by: [{ volumeUsdWei: desc }, { id: asc }]",
+    );
+    expect(aggregatorDailyTopQuery(true)).toBe(
+      AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM,
+    );
+    expect(aggregatorDailyTopQuery(true)).toContain(
+      "order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]",
+    );
   });
 });
 

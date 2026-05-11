@@ -12,6 +12,11 @@ type RawClusterMetadata = {
 
 type IndexerAggregatorsConfig = {
   $clusters?: Record<string, RawClusterMetadata | string | undefined>;
+  [chainId: string]:
+    | Record<string, { name?: unknown } | string | undefined>
+    | Record<string, RawClusterMetadata | string | undefined>
+    | string
+    | undefined;
 };
 
 const INDEXER_CONFIG = JSON.parse(
@@ -55,4 +60,37 @@ describe("aggregator cluster metadata", () => {
       });
     }
   });
+
+  it("covers every per-chain cluster reference used by the indexer", () => {
+    const sharedClusters = clustersJson as Record<string, RawClusterMetadata>;
+    for (const { chainId, address, name } of indexerClusterReferences()) {
+      expect(
+        sharedClusters[name],
+        `${address} on chain ${chainId} references missing cluster metadata ${name}`,
+      ).toBeDefined();
+    }
+  });
 });
+
+function indexerClusterReferences(): Array<{
+  chainId: string;
+  address: string;
+  name: string;
+}> {
+  const refs: Array<{ chainId: string; address: string; name: string }> = [];
+  for (const [chainId, value] of Object.entries(INDEXER_CONFIG)) {
+    if (chainId.startsWith("$") || typeof value !== "object" || !value) {
+      continue;
+    }
+    for (const [address, entry] of Object.entries(value)) {
+      if (address.startsWith("$") || typeof entry !== "object" || !entry) {
+        continue;
+      }
+      const name = (entry as { name?: unknown }).name;
+      if (typeof name === "string" && name.startsWith("cluster-")) {
+        refs.push({ chainId, address, name });
+      }
+    }
+  }
+  return refs;
+}
