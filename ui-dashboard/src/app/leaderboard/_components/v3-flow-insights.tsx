@@ -264,6 +264,11 @@ function CorridorPanel({
         <PanelMessage variant="error" message="Couldn't load corridor flows." />
       ) : isLoading ? (
         <Skeleton rows={4} />
+      ) : isPartial && rows.length === 0 ? (
+        <PanelMessage
+          variant="warn"
+          message="Corridor data may be incomplete; top-query cap reached."
+        />
       ) : rows.length === 0 ? (
         <PanelMessage message="No directional corridors in this window." />
       ) : (
@@ -321,6 +326,11 @@ function OutlierPanel({
         <PanelMessage variant="error" message="Couldn't load outlier swaps." />
       ) : isLoading ? (
         <Skeleton rows={4} />
+      ) : isPartial && rows.length === 0 ? (
+        <PanelMessage
+          variant="warn"
+          message="Outlier data may be incomplete; top-query cap reached."
+        />
       ) : rows.length === 0 ? (
         <PanelMessage message="No outlier swaps in this window." />
       ) : (
@@ -393,14 +403,18 @@ function PanelMessage({
   variant = "muted",
 }: {
   message: string;
-  variant?: "muted" | "error";
+  variant?: "muted" | "warn" | "error";
 }) {
+  const tone =
+    variant === "error"
+      ? "text-red-400"
+      : variant === "warn"
+        ? "text-amber-300"
+        : "text-slate-500";
+
   return (
     <p
-      className={
-        "py-8 text-center text-sm " +
-        (variant === "error" ? "text-red-400" : "text-slate-500")
-      }
+      className={"py-8 text-center text-sm " + tone}
       role={variant === "error" ? "alert" : undefined}
     >
       {message}
