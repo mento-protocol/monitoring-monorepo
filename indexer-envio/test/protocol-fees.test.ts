@@ -13,6 +13,8 @@ import {
   _setMockRebalanceThresholds,
   _clearMockRebalanceThresholds,
 } from "../src/rpc.ts";
+import { feeTokenMetaEffect } from "../src/rpc/effects.ts";
+import { UNKNOWN_FEE_TOKEN_META } from "../src/feeToken.ts";
 import { makePoolId } from "../src/helpers.ts";
 
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
@@ -75,8 +77,31 @@ type GeneratedModule = {
   };
 };
 
+type FeeTokenMetaEffectRuntime = {
+  handler: (args: {
+    input: { chainId: number; tokenAddress: string };
+    context: {
+      log: {
+        debug: () => void;
+        info: () => void;
+        warn: () => void;
+        error: () => void;
+      };
+      cache: boolean;
+    };
+  }) => Promise<{ symbol: string; decimals: number }>;
+};
+
 const { TestHelpers } = generated as unknown as GeneratedModule;
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
+const feeTokenMetaEffectRuntime =
+  feeTokenMetaEffect as unknown as FeeTokenMetaEffectRuntime;
+const noopLog = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 /** The yield-split address used as `to` in production. */
 const YIELD_SPLIT = "0x0dd57f6f181d0469143fe9380762d8a112e96e4a" as const;
@@ -412,5 +437,26 @@ describe("KNOWN_TOKEN_META static fallback", () => {
     const meta = await resolveFeeTokenMeta(143, monadUsdm);
 
     assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
+  });
+});
+
+describe("feeTokenMetaEffect cache guard", () => {
+  afterEach(() => {
+    _clearMockFeeTokenMeta();
+    _clearFeeTokenMetaCache();
+  });
+
+  it("does not cache UNKNOWN/18 transient RPC failures", async () => {
+    const unknownToken = "0x0000000000000000000000000000000000000999";
+    _setMockFeeTokenMeta(42220, unknownToken, "FAIL");
+    const context = { log: noopLog, cache: true };
+
+    const meta = await feeTokenMetaEffectRuntime.handler({
+      input: { chainId: 42220, tokenAddress: unknownToken },
+      context,
+    });
+
+    assert.deepEqual(meta, UNKNOWN_FEE_TOKEN_META);
+    assert.equal(context.cache, false);
   });
 });

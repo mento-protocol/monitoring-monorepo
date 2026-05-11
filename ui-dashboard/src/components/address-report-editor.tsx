@@ -59,8 +59,8 @@ async function fetchSingleReport(
 }
 
 // 6 useState calls — independent fields plus orthogonal flow flags;
-// a reducer would just rename the setters. no-giant-component is also
-// deferred — see BACKLOG.md § "Architecture pass".
+// a reducer would just rename the setters. The component is intentionally kept
+// together because save/delete ownership and preview state share one form.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
 export function AddressReportEditor(props: Props) {
   const { address, onSavingChange, onDeletingChange, externallyDisabled } =

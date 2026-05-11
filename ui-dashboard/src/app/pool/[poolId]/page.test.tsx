@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, isValidElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
@@ -38,6 +38,7 @@ import {
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 const replaceMock = vi.fn();
+const redirectMock = vi.fn();
 const useGQLMock = vi.fn();
 const getNameMock = vi.fn((address: string | null | undefined) => {
   if (!address) return "";
@@ -54,6 +55,7 @@ const getNameMock = vi.fn((address: string | null | undefined) => {
 const getTagsMock = vi.fn((_address: string | null) => [] as string[]);
 
 vi.mock("next/navigation", () => ({
+  redirect: (href: string) => redirectMock(href),
   useParams: () => ({ poolId: encodeURIComponent("pool-1") }),
   useRouter: () => ({ replace: replaceMock }),
   useSearchParams: () => currentSearchParams,
@@ -80,6 +82,21 @@ vi.mock("@/components/network-provider", () => ({
     },
   }),
 }));
+
+vi.mock("@/lib/networks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/networks")>();
+  return {
+    ...actual,
+    isConfiguredNetworkId: (networkId: string) =>
+      networkId === "celo-mainnet" || networkId === "monad-mainnet",
+    networkIdForChainId: (chainId: number) =>
+      chainId === 42220
+        ? "celo-mainnet"
+        : chainId === 143
+          ? "monad-mainnet"
+          : null,
+  };
+});
 
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({
@@ -181,6 +198,7 @@ vi.mock("@/components/tx-hash-cell", () => ({
 }));
 
 import PoolDetailPage, { decodePoolId, parseTabLimit } from "./page";
+import { POOL_NOT_FOUND_DEST } from "@/lib/routing";
 
 let currentSearchParams = new URLSearchParams();
 let interactiveContainer: HTMLDivElement | null = null;
@@ -330,8 +348,35 @@ function renderWithParams(params: Record<string, string> = {}) {
   return renderToStaticMarkup(<PoolDetailPage />);
 }
 
+type ServerSearchParams = Record<string, string | string[] | undefined>;
+type CanonicalPoolPageElement = ReactElement<{
+  params: Promise<{ poolId: string }>;
+  searchParams: Promise<ServerSearchParams>;
+}>;
+
+async function renderServerPoolPage(
+  poolId: string,
+  searchParams: ServerSearchParams = {},
+) {
+  const element = PoolDetailPage({
+    params: Promise.resolve({ poolId: encodeURIComponent(poolId) }),
+    searchParams: Promise.resolve(searchParams),
+  });
+
+  expect(isValidElement(element)).toBe(true);
+  const canonicalElement = element as CanonicalPoolPageElement;
+  const renderCanonical = canonicalElement.type as (
+    props: CanonicalPoolPageElement["props"],
+  ) => Promise<unknown>;
+  return renderCanonical(canonicalElement.props);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
+  redirectMock.mockReset();
+  redirectMock.mockImplementation((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  });
   replaceMock.mockReset();
   useGQLMock.mockReset();
   getNameMock.mockClear();
@@ -430,6 +475,57 @@ describe("pool detail helpers", () => {
     expect(parseTabLimit("NaN")).toBe(25);
     expect(parseTabLimit("50")).toBe(50);
     expect(parseTabLimit("9999")).toBe(200); // capped at MAX_TAB_LIMIT
+  });
+});
+
+describe("pool detail route redirects", () => {
+  const rawPoolId = "0xaaa0000000000000000000000000000000000001";
+
+  it("redirects raw addresses with explicit chain context to namespaced routes", async () => {
+    await expect(
+      renderServerPoolPage(rawPoolId, { chainId: "143", tab: "swaps" }),
+    ).rejects.toThrow(
+      "NEXT_REDIRECT:/pool/143-0xaaa0000000000000000000000000000000000001?tab=swaps",
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/pool/143-0xaaa0000000000000000000000000000000000001?tab=swaps",
+    );
+  });
+
+  it("rejects raw addresses without explicit chain context", async () => {
+    await expect(renderServerPoolPage(rawPoolId)).rejects.toThrow(
+      `NEXT_REDIRECT:${POOL_NOT_FOUND_DEST}`,
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(POOL_NOT_FOUND_DEST);
+  });
+
+  it("rejects namespaced routes for unsupported chains", async () => {
+    await expect(renderServerPoolPage(`10143-${rawPoolId}`)).rejects.toThrow(
+      `NEXT_REDIRECT:${POOL_NOT_FOUND_DEST}`,
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(POOL_NOT_FOUND_DEST);
+  });
+
+  it("redirects leading-zero namespaced routes to the canonical prefix", async () => {
+    await expect(
+      renderServerPoolPage(`00143-${rawPoolId}`, { tab: "reserves" }),
+    ).rejects.toThrow(
+      "NEXT_REDIRECT:/pool/143-0xaaa0000000000000000000000000000000000001?tab=reserves",
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/pool/143-0xaaa0000000000000000000000000000000000001?tab=reserves",
+    );
+  });
+
+  it("renders supported namespaced routes without redirecting", async () => {
+    const rendered = await renderServerPoolPage(`143-${rawPoolId}`);
+
+    expect(isValidElement(rendered)).toBe(true);
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 });
 
