@@ -141,9 +141,8 @@ jobs:
       # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: React Doctor (diff vs base)
         # PR-only: scans files changed vs the PR base and fails on any
-        # warning/error in the diff. Existing repo-wide debt (~129 warnings,
-        # 1 error) is tracked separately — see ui-dashboard/AGENTS.md
-        # "React Doctor" section. Project-wide rule silences live in
+        # warning/error in those files. The full-score floor below keeps the
+        # dashboard at 100 / 100; accepted project-wide silences live in
         # ui-dashboard/react-doctor.config.json.
         #
         # `git switch -c` reattaches HEAD to a named branch:

@@ -200,16 +200,20 @@ Both items shipped together — `it.todo` blocks in `ui-dashboard/src/__tests__/
 PR #367 wired [react-doctor](https://github.com/millionco/react-doctor) into
 the dashboard CI as a PR-only diff-mode gate (file-level `--fail-on warning`).
 
-**Status update (PR #371 closed the cleanup):** PR #371 took the score
-from **80 / 100 (1 error + 162 warnings)** to **100 / 100 (0 issues)**
-by fixing every actionable category and inline-disabling the remaining
-false-positives (architectural false alarms or infeasible-without-
-bigger-refactor cases) with rationale. PR #373 then extended
+**Status update (PR #371 + PR #382 closed the cleanup):** PR #371 took
+the score from **80 / 100 (1 error + 162 warnings)** to
+**100 / 100 (0 issues)** by fixing every actionable category and
+inline-disabling the remaining false-positives (architectural false alarms
+or infeasible-without-bigger-refactor cases) with rationale. PR #382 kept
+the dashboard at 100 / 100, removed the touched-file suppressions that were
+still easy to trip in pool-detail/oracle/breach-history code, reinstalled the
+React Doctor ESLint plugin, and added the full-score CI floor. PR #373 then extended
 `ui-dashboard/AGENTS.md` § "URL state in client-only tables / filters"
 to document WHY `useSearchParams` is the SSR-safe lazy-init source
 (rationale for the `useState` lazy-init + hydration mechanic that
 caught us mid-PR-#371). Items below that are checked were addressed
-in those PRs; the unchecked items are still genuine follow-up work.
+in those PRs; remaining unchecked items, if any are added later, are genuine
+follow-up work.
 
 ### Cleanup PRs (reduce the backlog to zero)
 
@@ -283,18 +287,16 @@ in those PRs; the unchecked items are still genuine follow-up work.
   - `no-cascading-set-state` ×1 — three setStates inside one popstate
     handler are auto-batched by React 18+; inline-disabled.
 
-### Optional react-doctor surfaces deferred
+### Optional react-doctor surfaces closed
 
-The cleanup PR experimented with wiring `react-doctor`'s ESLint plugin
-alongside the standalone CLI for IDE-time inline warnings. The plugin
-and CLI ship the same rule set but use DIFFERENT disable comment
-syntaxes: the CLI honours `react-doctor-disable-next-line
-react-doctor/<rule>` while the plugin honours
-`eslint-disable-next-line react-doctor/<rule>`. The plugin install was
-backed out before merge so trunk's `check --all` (which runs ESLint
-across the project) stays clean — re-introducing the plugin is
-straightforward, but every existing CLI-syntax disable also needs an
-ESLint-syntax shim or the trunk gate fails on ~50 warnings.
+The cleanup PR originally deferred wiring `react-doctor`'s ESLint plugin
+alongside the standalone CLI for IDE-time inline warnings. That deferral is
+closed: `eslint.config.mjs` now installs the plugin and mirrors the accepted
+project-wide CLI silences so `pnpm lint` stays zero-noise while the standalone
+CLI remains the authoritative full-score gate. The plugin and CLI still use
+different disable comment syntaxes if a future rule needs a local exception:
+the CLI honours `react-doctor-disable-next-line react-doctor/<rule>` while the
+plugin honours `eslint-disable-next-line react-doctor/<rule>`.
 
 - [x] ~~**Re-install the react-doctor ESLint plugin + add
       `eslint-disable-next-line` shims.**~~ Done: `eslint.config.mjs` now wires

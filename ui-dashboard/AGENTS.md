@@ -38,11 +38,11 @@ pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 CI runs `react-doctor --diff origin/<base> --fail-on warning` on every PR
 (see `.github/workflows/ci.yml` `ui` job). The CLI's `--diff` is
 **file-level, not line-level**: it scans every source file the PR
-touches in full, so editing a file that already has backlog warnings
-will fail CI even if your change isn't what triggered them. Two ways
-through:
+touches in full. Because the full-score floor is 100, touched files should
+normally be clean; any newly unsilenced diagnostic anywhere in a touched file
+fails CI. Two ways through:
 
-- Fix the warnings (preferred — chips at the cleanup backlog).
+- Fix the warnings (preferred — keeps the score floor meaningful).
 - Add an inline `// react-doctor-disable-next-line <rule-id>` above the
   offending line with a one-line rationale, if the warning isn't
   actionable in your PR's scope.
@@ -74,7 +74,7 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   `HASURA_TIMEOUT_MS` backward-compat re-export. New imports still target
   `@/lib/hasura-timeout` directly so server code does not pull in SWR.
 
-### Cleanup backlog
+### Historical Cleanup Notes
 
 The dashboard's enforced React Doctor state is **100 / 100 (0 diagnostics)**.
 Historical cleanup notes live in `BACKLOG.md` under "Follow-ups deferred from
