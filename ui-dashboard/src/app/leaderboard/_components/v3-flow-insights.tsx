@@ -139,11 +139,11 @@ export function V3FlowInsights({
   const isSwapOutlierFetchCapHit =
     (swapOutliersResult.data?.SwapEvent.length ?? 0) ===
     SWAP_OUTLIER_FETCH_LIMIT;
-  const insightPartial =
+  const isCorridorCapHit =
     isTraderCapHit ||
     (traderPoolResult.data?.TraderPoolDailySnapshot.length ?? 0) ===
-      ENVIO_MAX_ROWS ||
-    isSwapOutlierFetchCapHit;
+      ENVIO_MAX_ROWS;
+  const insightPartial = isCorridorCapHit || isSwapOutlierFetchCapHit;
 
   return (
     <section className="space-y-3">
@@ -174,7 +174,7 @@ export function V3FlowInsights({
           pools={pools}
           isLoading={tableIsLoading || traderPoolResult.isLoading}
           hasError={tableHasError || !!traderPoolResult.error}
-          isPartial={insightPartial}
+          isPartial={isCorridorCapHit}
         />
         <OutlierPanel
           rows={swapOutliers}
