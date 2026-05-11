@@ -1,0 +1,8 @@
+{
+  "cluster-7dc08ec28f299c06": {
+    "chainId": 42220,
+    "deployer": "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+    "explorerUrl": "https://celoscan.io/address/0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+    "$note": "Operator of a 16-contract fleet on Celo, funded by Binance, deploying via CREATE3 factory 0xba5ed099633d3b313e4d5f7bdc1305d3c28ba5ed. The cluster label is deployer provenance only; it does not assert a public project identity."
+  }
+}

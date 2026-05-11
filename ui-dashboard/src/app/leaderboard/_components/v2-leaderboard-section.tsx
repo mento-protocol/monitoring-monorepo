@@ -1,14 +1,11 @@
 "use client";
 
-import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import type {
   BrokerAggregatorWindowRow,
   BrokerTraderWindowRow,
 } from "@/lib/leaderboard";
-import {
-  V2LeaderboardAggregatorTable,
-  V2LeaderboardTraderTable,
-} from "./v2-leaderboard-tables";
+import { V2LeaderboardTraderTable } from "./v2-leaderboard-tables";
+import { AggregatorBreakdownSection } from "./aggregator-breakdown-section";
 
 /**
  * V2 venue panel for `/leaderboard` — the legacy-broker trader table plus
@@ -70,34 +67,14 @@ export function V2LeaderboardSection({
           hasError={tableHasError}
         />
       </section>
-      <section>
-        <h2 className="mb-3 text-sm font-medium text-slate-300">
-          v2 volume by aggregator / entry-point ({rangeLabel})
-        </h2>
-        <p className="mb-3 text-xs text-slate-500">
-          Canonical name from <code>aggregators.json</code>. Large{" "}
-          <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
-            unknown
-          </span>{" "}
-          rows are unclassified routers — file an entry to label them and reach
-          out to the operator about migrating to v3.
-        </p>
-        {isV2AggregatorCapHit && (
-          <div className="mb-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
-            <strong className="font-medium">
-              Approximate aggregator list.
-            </strong>{" "}
-            Showing the top {ENVIO_MAX_ROWS.toLocaleString()} aggregator-day
-            rows by single-day volume — long-tail aggregators whose daily volume
-            doesn&apos;t crack the cap may be missing.
-          </div>
-        )}
-        <V2LeaderboardAggregatorTable
-          aggregators={v2AggregatorAggregated}
-          isLoading={v2AggIsLoading}
-          hasError={v2AggHasError}
-        />
-      </section>
+      <AggregatorBreakdownSection
+        venueLabel="v2"
+        rangeLabel={rangeLabel}
+        aggregators={v2AggregatorAggregated}
+        isLoading={v2AggIsLoading}
+        hasError={v2AggHasError}
+        isCapHit={isV2AggregatorCapHit}
+      />
     </>
   );
 }

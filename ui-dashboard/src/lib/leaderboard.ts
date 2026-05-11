@@ -13,6 +13,11 @@
  */
 
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import {
+  aggregateAggregatorsByWindow,
+  type AggregatorDailyRow,
+  type AggregatorWindowRow,
+} from "@/lib/leaderboard-aggregators";
 
 /** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
 const USD_WEI_DECIMALS = 18;
@@ -158,30 +163,8 @@ export type BrokerTraderWindowRow = {
   lastSeenTimestamp: number;
 };
 
-export type BrokerAggregatorDailyRow = {
-  id: string;
-  chainId: number;
-  aggregator: string;
-  lastSeenAggregatorAddress: string;
-  timestamp: string;
-  swapCount: number;
-  uniqueTraders: number;
-  volumeUsdWei: string;
-};
-
-export type BrokerAggregatorWindowRow = {
-  chainId: number;
-  aggregator: string;
-  lastSeenAggregatorAddress: string;
-  swapCount: number;
-  /** Lower bound: max single-day uniqueTraders across the window's days for
-   * this (chain, aggregator). True window-unique would need a marker per
-   * (chain, aggregator, trader, window) which isn't worth the indexer
-   * complexity for an outreach view. Same approximation pattern as
-   * `TraderWindowRow.uniquePoolsApprox`. */
-  uniqueTradersApprox: number;
-  volumeUsdWei: bigint;
-};
+export type BrokerAggregatorDailyRow = AggregatorDailyRow;
+export type BrokerAggregatorWindowRow = AggregatorWindowRow;
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
@@ -320,57 +303,7 @@ export function aggregateBrokerTradersByWindow(
   });
 }
 
-/**
- * Group `BrokerAggregatorDailyRow`s by `(chainId, aggregator)`. Volume + swap
- * counts sum; `uniqueTraders` becomes a max-of-day-counts lower bound (see
- * `BrokerAggregatorWindowRow.uniqueTradersApprox` rationale).
- */
-export function aggregateBrokerAggregatorsByWindow(
-  rows: readonly BrokerAggregatorDailyRow[],
-): BrokerAggregatorWindowRow[] {
-  const byKey = new Map<string, BrokerAggregatorWindowRow>();
-  // Tracks the latest day-bucket timestamp seen per key so
-  // `lastSeenAggregatorAddress` reflects the most recent day, not whichever
-  // single-day row happened to come last in iteration order. The
-  // BROKER_AGGREGATOR_DAILY_TOP query orders by `volumeUsdWei desc`, so
-  // iterating without comparing timestamps would surface the lowest-volume
-  // day's router (often a stale or rotated address).
-  const latestTsByKey = new Map<string, number>();
-  for (const r of rows) {
-    const key = `${r.chainId}-${r.aggregator}`;
-    const ts = Number(r.timestamp);
-    const existing = byKey.get(key);
-    if (existing) {
-      existing.swapCount += r.swapCount;
-      existing.volumeUsdWei += BigInt(r.volumeUsdWei);
-      existing.uniqueTradersApprox = Math.max(
-        existing.uniqueTradersApprox,
-        r.uniqueTraders,
-      );
-      const prevLatest = latestTsByKey.get(key) ?? 0;
-      if (ts > prevLatest) {
-        existing.lastSeenAggregatorAddress = r.lastSeenAggregatorAddress;
-        latestTsByKey.set(key, ts);
-      }
-    } else {
-      byKey.set(key, {
-        chainId: r.chainId,
-        aggregator: r.aggregator,
-        lastSeenAggregatorAddress: r.lastSeenAggregatorAddress,
-        swapCount: r.swapCount,
-        uniqueTradersApprox: r.uniqueTraders,
-        volumeUsdWei: BigInt(r.volumeUsdWei),
-      });
-      latestTsByKey.set(key, ts);
-    }
-  }
-  return Array.from(byKey.values()).sort((a, b) => {
-    if (b.volumeUsdWei > a.volumeUsdWei) return 1;
-    if (b.volumeUsdWei < a.volumeUsdWei) return -1;
-    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
-    return a.aggregator.localeCompare(b.aggregator);
-  });
-}
+export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 
 /**
  * Day-keyed totals across all traders in the window. Drives the volume

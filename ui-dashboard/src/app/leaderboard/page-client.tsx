@@ -7,6 +7,7 @@ import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
+  AGGREGATOR_DAILY_TOP,
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_TRADER_DAILY_TOP,
   POOL_DAILY_VOLUME,
@@ -15,7 +16,6 @@ import {
 } from "@/lib/queries/leaderboard";
 import {
   LEADERBOARD_RANGES,
-  aggregateBrokerAggregatorsByWindow,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
@@ -25,16 +25,22 @@ import {
   type LeaderboardRangeKey,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
+import {
+  aggregateAggregatorsByWindow,
+  buildAggregatorDailyVolumeBreakdown,
+  type AggregatorDailyRow,
+} from "@/lib/leaderboard-aggregators";
 import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
 import {
   LEADERBOARD_CHART_RANGES,
   LEADERBOARD_FALLBACK_CHART_RANGES,
+  SECONDS_PER_DAY,
   type RangeKey,
 } from "@/lib/time-series";
 import { HeroDataQualityBanners } from "./_components/hero-data-quality-banners";
-import { LeaderboardTable } from "./_components/leaderboard-table";
 import { TopPoolsList } from "./_components/top-pools-list";
 import { V2LeaderboardSection } from "./_components/v2-leaderboard-section";
+import { V3LeaderboardSection } from "./_components/v3-leaderboard-section";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
 import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useLeaderboardUrlState } from "./_lib/url-state";
@@ -104,6 +110,12 @@ export function LeaderboardClient() {
     afterTimestamp: cutoff,
     limit: ENVIO_MAX_ROWS,
   });
+  const v3AggregatorsResult = useGQL<{
+    AggregatorDailySnapshot: AggregatorDailyRow[];
+  }>(venue === "v3" ? AGGREGATOR_DAILY_TOP : null, {
+    afterTimestamp: cutoff,
+    limit: ENVIO_MAX_ROWS,
+  });
 
   const v2TradersResult = useGQL<{
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
@@ -122,6 +134,8 @@ export function LeaderboardClient() {
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
   const poolVolumeRows = poolVolumeResult.data?.TraderPoolDailySnapshot ?? [];
+  const v3AggregatorRows =
+    v3AggregatorsResult.data?.AggregatorDailySnapshot ?? [];
   const v2TraderRows = v2TradersResult.data?.BrokerTraderDailySnapshot ?? [];
   const v2AggregatorRows =
     v2AggregatorsResult.data?.BrokerAggregatorDailySnapshot ?? [];
@@ -138,6 +152,17 @@ export function LeaderboardClient() {
     () => aggregateBrokerTradersByWindow(v2TraderRows),
     [v2TraderRows],
   );
+  const filteredV3AggregatorRows = useMemo(
+    () =>
+      showSystem
+        ? v3AggregatorRows
+        : v3AggregatorRows.filter((r) => r.aggregator !== "system"),
+    [v3AggregatorRows, showSystem],
+  );
+  const v3AggregatorAggregated = useMemo(
+    () => aggregateAggregatorsByWindow(filteredV3AggregatorRows),
+    [filteredV3AggregatorRows],
+  );
   const v2AggregatorAggregated = useMemo(
     () =>
       // Honour the page-level `Show system addresses` toggle on the
@@ -146,7 +171,7 @@ export function LeaderboardClient() {
       // `"system"` bucket rather than an `isSystemAddress` flag. Filter
       // client-side because the schema doesn't carry an indexed
       // boolean for the aggregator side.
-      aggregateBrokerAggregatorsByWindow(
+      aggregateAggregatorsByWindow(
         showSystem
           ? v2AggregatorRows
           : v2AggregatorRows.filter((r) => r.aggregator !== "system"),
@@ -187,6 +212,26 @@ export function LeaderboardClient() {
       cutoff,
       utcDayKey,
     });
+
+  const aggregatorWindowRange = useMemo(() => {
+    const todayMidnightUtc =
+      Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    return cutoff > 0
+      ? { fromSec: cutoff, toSec: todayMidnightUtc }
+      : undefined;
+  }, [cutoff, utcDayKey]);
+  const v3AggregatorChart = useMemo(
+    () =>
+      buildAggregatorDailyVolumeBreakdown(
+        filteredV3AggregatorRows,
+        aggregatorWindowRange,
+      ),
+    [filteredV3AggregatorRows, aggregatorWindowRange],
+  );
+  const v3AggregatorChartTotal = useMemo(
+    () => v3AggregatorChart.totalSeries.reduce((sum, p) => sum + p.value, 0),
+    [v3AggregatorChart],
+  );
 
   // Hero KPIs — totals come from the pre-rolled LeaderboardWindowSnapshot
   // plus today's partial (both exact, no Hasura row cap). Top-10
@@ -246,6 +291,8 @@ export function LeaderboardClient() {
   // in isolated queries that degrade independently.
   const v2AggIsLoading = v2AggregatorsResult.isLoading;
   const v2AggHasError = !!v2AggregatorsResult.error;
+  const v3AggIsLoading = v3AggregatorsResult.isLoading;
+  const v3AggHasError = !!v3AggregatorsResult.error;
   // Independent Hasura cap signals.
   //
   // Hero tiles (total volume / unique traders / total swaps) are EXACT
@@ -276,6 +323,11 @@ export function LeaderboardClient() {
     venue === "v2" &&
     !!v2AggregatorsResult.data &&
     (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
+      ENVIO_MAX_ROWS;
+  const isV3AggregatorCapHit =
+    venue === "v3" &&
+    !!v3AggregatorsResult.data &&
+    (v3AggregatorsResult.data.AggregatorDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
 
   // Headline reads `totalVolume` from the hero snapshot, so it follows
@@ -487,18 +539,30 @@ export function LeaderboardClient() {
       ) : null}
 
       {venue === "v3" ? (
-        <section>
-          <h2 className="mb-3 text-sm font-medium text-slate-300">
-            Top traders ({rangeLabel(range)})
-          </h2>
-          <LeaderboardTable
-            cutoff={cutoff}
-            traders={aggregated}
-            pools={poolMeta}
-            isLoading={tableIsLoading}
-            hasError={tableHasError}
-          />
-        </section>
+        <V3LeaderboardSection
+          rangeLabel={rangeLabel(range)}
+          cutoff={cutoff}
+          traders={aggregated}
+          pools={poolMeta}
+          tableIsLoading={tableIsLoading}
+          tableHasError={tableHasError}
+          aggregators={v3AggregatorAggregated}
+          aggIsLoading={v3AggIsLoading}
+          aggHasError={v3AggHasError}
+          isAggregatorCapHit={isV3AggregatorCapHit}
+          chart={
+            range === "24h"
+              ? undefined
+              : {
+                  series: v3AggregatorChart.totalSeries,
+                  breakdown: v3AggregatorChart.breakdown,
+                  range: chartRange,
+                  onRangeChange: onChartRangeChange,
+                  ranges: LEADERBOARD_FALLBACK_CHART_RANGES,
+                  total: v3AggregatorChartTotal,
+                }
+          }
+        />
       ) : (
         <V2LeaderboardSection
           rangeLabel={rangeLabel(range)}
