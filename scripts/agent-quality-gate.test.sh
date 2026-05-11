@@ -65,9 +65,39 @@ run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
-  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)"
+assert_order \
+  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+assert_order \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
+  "- pnpm --filter @mento-protocol/indexer-envio lint (indexer-envio changed)"
+
+run_gate "indexer-envio/src/bridge.ts"
+assert_order \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)"
+assert_order \
+  "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+
+run_gate "indexer-envio/config.multichain.bridge-only.yaml"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)"
+assert_contains "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)"
+assert_order \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)" \
+  "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)"
+assert_order \
+  "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)" \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \

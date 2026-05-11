@@ -255,9 +255,15 @@ add_indexer_bridge_codegen() {
 
 add_all_indexer_codegen() {
   local reason="$1"
+  add_indexer_bridge_codegen "$reason"
   add_indexer_testnet_codegen "$reason"
   add_indexer_mainnet_codegen "$reason"
-  add_indexer_bridge_codegen "$reason"
+}
+
+add_bridge_codegen_then_restore_mainnet() {
+  local bridge_reason="$1"
+  add_indexer_bridge_codegen "$bridge_reason"
+  add_indexer_mainnet_codegen "restore full multichain generated package after bridge-only codegen"
 }
 
 add_command "./tools/trunk check" "changed files should pass repo-wide Trunk linters"
@@ -305,7 +311,7 @@ while IFS= read -r path; do
 	indexer-envio/*)
 	  add_surface "indexer-envio"
 	  case "$path" in
-	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/src/handlers/*|indexer-envio/src/rpc/*|indexer-envio/abis/*|indexer-envio/package.json)
+	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/package.json)
 	      add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
 	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
 	      ;;
@@ -325,7 +331,7 @@ while IFS= read -r path; do
 	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
 	      ;;
 	    indexer-envio/config.multichain.bridge-only.yaml)
-	      add_indexer_bridge_codegen "bridge-only indexer config changed"
+	      add_bridge_codegen_then_restore_mainnet "bridge-only indexer config changed"
 	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
 	      ;;
 	  esac
