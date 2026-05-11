@@ -35,7 +35,11 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo } from "react";
 import { PoolHeader } from "./pool-header";
 import { PoolTablist } from "./pool-tablist";
-import { TokenDecimalsTrustNotice } from "./token-decimals-trust-notice";
+import {
+  isTokenAmountTab,
+  TokenAmountTrustGate,
+  TokenDecimalsTrustNotice,
+} from "./token-decimals-trust-notice";
 import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "../_lib/constants";
 import {
   decodePoolId,
@@ -457,10 +461,10 @@ function PoolChartsRow({
       <ReservesPanel
         pool={pool}
         rates={rates}
-        ratesLoading={(poolNeedsRates && ratesLoading) || thresholdsLoading}
-        ratesError={
-          (poolNeedsRates && ratesError) || thresholdsError !== undefined
-        }
+        ratesLoading={poolNeedsRates && ratesLoading}
+        ratesError={poolNeedsRates && ratesError}
+        decimalsLoading={thresholdsLoading}
+        decimalsError={thresholdsError !== undefined}
       />
     </div>
   );
@@ -500,84 +504,91 @@ function PoolTabPanel({
         thresholdsLoading={thresholdsLoading}
         thresholdsError={thresholdsError}
       />
-      {tab === "swaps" && (
-        <SwapsTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("swaps", value)}
-        />
-      )}
-      {tab === "reserves" && (
-        <ReservesTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("reserves", value)}
-        />
-      )}
-      {tab === "rebalances" && (
-        <RebalancesTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("rebalances", value)}
-        />
-      )}
-      {tab === "liquidity" && (
-        <LiquidityTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("liquidity", value)}
-        />
-      )}
-      {tab === "oracle" && (
-        <OracleTab
-          poolId={normalizedPoolId}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("oracle", value)}
-        />
-      )}
-      {tab === "providers" && (
-        <LpsTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("providers", value)}
-        />
-      )}
-      {tab === "limits" && pool && (
-        <LimitPanel
-          pool={pool}
-          tradingLimits={tradingLimits}
-          hasError={tradingLimitsError}
-        />
-      )}
-      {tab === "breaches" && fpmmPool && pool && (
-        <BreachHistoryPanel
-          pool={pool}
-          network={network}
-          limit={limit}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("breaches", value)}
-        />
-      )}
-      {tab === "ols" && (
-        <OlsTab
-          poolId={normalizedPoolId}
-          limit={limit}
-          pool={pool}
-          search={activeSearch}
-          onSearchChange={(value) => setTabSearch("ols", value)}
-        />
-      )}
+      <TokenAmountTrustGate
+        active={isTokenAmountTab(tab)}
+        pool={pool}
+        thresholdsLoading={thresholdsLoading}
+        thresholdsError={thresholdsError}
+      >
+        {tab === "swaps" && (
+          <SwapsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("swaps", value)}
+          />
+        )}
+        {tab === "reserves" && (
+          <ReservesTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("reserves", value)}
+          />
+        )}
+        {tab === "rebalances" && (
+          <RebalancesTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("rebalances", value)}
+          />
+        )}
+        {tab === "liquidity" && (
+          <LiquidityTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("liquidity", value)}
+          />
+        )}
+        {tab === "oracle" && (
+          <OracleTab
+            poolId={normalizedPoolId}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("oracle", value)}
+          />
+        )}
+        {tab === "providers" && (
+          <LpsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("providers", value)}
+          />
+        )}
+        {tab === "limits" && pool && (
+          <LimitPanel
+            pool={pool}
+            tradingLimits={tradingLimits}
+            hasError={tradingLimitsError}
+          />
+        )}
+        {tab === "breaches" && fpmmPool && pool && (
+          <BreachHistoryPanel
+            pool={pool}
+            network={network}
+            limit={limit}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("breaches", value)}
+          />
+        )}
+        {tab === "ols" && (
+          <OlsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("ols", value)}
+          />
+        )}
+      </TokenAmountTrustGate>
     </div>
   );
 }

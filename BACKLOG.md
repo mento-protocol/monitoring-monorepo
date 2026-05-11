@@ -59,7 +59,7 @@ a critical module with acceptable manual/nightly runtime.
 
 ## Virtual Pool Metrics
 
-- [ ] **24h Volume tile for VPs.** Add per-exchangeId 24h USD volume to the VirtualPool header. Sourcing directly from `BrokerSwapEvent` would hit Hasura's 1000-row cap for active pairs; the proper fix is a new `BrokerExchangeDailySnapshot` entity keyed by `chainId-exchangeId-day`, updated alongside `BrokerDailySnapshot` in the broker handler. Requires a schema bump and full re-sync.
+- [x] ~~**24h Volume tile for VPs.**~~ Done on `virtual-pools`: `BrokerExchangeDailySnapshot` now rolls up per-`chainId-exchangeId-day` Broker volume in the indexer, and the VirtualPool header reads that isolated daily rollup for the current UTC-day 24h volume tile with visible query-failure degradation. Requires a schema bump and full re-sync.
 
 ## Address Book
 
