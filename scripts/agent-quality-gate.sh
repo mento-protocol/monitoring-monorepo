@@ -412,10 +412,11 @@ while IFS= read -r path; do
       case "$path" in
         metrics-bridge/src/*)
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "metrics bridge data flow changed"
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
       esac
       case "$path" in
-        metrics-bridge/Dockerfile|metrics-bridge/src/config.ts|metrics-bridge/src/main.ts|metrics-bridge/src/poller.ts|metrics-bridge/src/server.ts)
+        metrics-bridge/Dockerfile)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
       esac

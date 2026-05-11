@@ -208,6 +208,7 @@ assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-env
 
 run_gate "metrics-bridge/src/graphql.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
 run_gate "metrics-bridge/src/poller.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
@@ -215,6 +216,16 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Clou
 
 run_gate "metrics-bridge/src/metrics.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/rpc.ts"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/rebalance-probe.ts"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/rebalance-check.ts"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
 run_gate "metrics-bridge/Dockerfile"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
