@@ -59,7 +59,7 @@ export async function fetchPoolVolumeSnapshots(
     if (batch.length < PAGE_SIZE) return { rows, partial: false };
   }
 
-  return { rows, partial: true };
+  throw new Error("unreachable pool-volume pagination state");
 }
 
 export function usePoolVolumeSnapshots({
