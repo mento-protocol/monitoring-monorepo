@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -18,6 +18,8 @@ Options:
   --allow-package-script-changes
                  With --run, acknowledge that changed package manifests may
                  alter lifecycle/package scripts before they execute.
+  --fail-fast    With --run, stop after the first failed mapped command.
+  --keep-going   With --run, continue after failures and report the total.
   -h, --help     Show this help.
 
 Environment:
@@ -26,6 +28,8 @@ Environment:
   AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES
                       Same acknowledgement as --allow-package-script-changes
                       when set to 1 or true.
+  AGENT_QUALITY_FAIL_FAST
+                      Same behavior as --fail-fast when set to 1 or true.
 USAGE
 }
 
@@ -34,6 +38,10 @@ base_ref="${AGENT_QUALITY_BASE:-origin/main}"
 head_ref="${AGENT_QUALITY_HEAD:-HEAD}"
 changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
+fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
+if [[ -z "$allow_package_script_changes" ]]; then
+  allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +79,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-package-script-changes)
       allow_package_script_changes="true"
+      shift
+      ;;
+    --fail-fast)
+      fail_fast="true"
+      shift
+      ;;
+    --keep-going)
+      fail_fast="false"
       shift
       ;;
     -h|--help)
@@ -450,10 +466,10 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    .github/workflows/*|.github/actions/*)
-      add_surface "github-workflows"
-      add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
-      case "$path" in
+	    .github/workflows/*|.github/actions/*)
+	      add_surface "github-workflows"
+	      add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
+	      case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
@@ -467,11 +483,15 @@ while IFS= read -r path; do
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"
           add_workspace_quality_commands "pnpm install action changed"
           ;;
-      esac
-      ;;
-    terraform/*)
-      add_surface "terraform"
-      add_terraform_validate_commands "terraform" "Terraform changed"
+	      esac
+	      ;;
+	    .trunk/*)
+	      add_surface "tooling"
+	      add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
+	      ;;
+	    terraform/*)
+	      add_surface "terraform"
+	      add_terraform_validate_commands "terraform" "Terraform changed"
       add_terraform_validate_commands "terraform/alerts" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
@@ -585,6 +605,11 @@ for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}" \
   echo "+ ${command}"
   if ! bash -c "$command"; then
     failures=$((failures + 1))
+    if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
+      echo
+      echo "Stopping after first failed mapped command (--fail-fast)." >&2
+      exit 1
+    fi
   fi
 done
 

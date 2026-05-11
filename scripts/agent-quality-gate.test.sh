@@ -23,7 +23,8 @@ run_gate() {
     printf '%s\n' "$path" >> "$paths_file"
   done
 
-  scripts/agent-quality-gate.sh \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+    scripts/agent-quality-gate.sh \
     --changed-paths-file "$paths_file" \
     --base origin/test \
     > "$output_file"
@@ -37,7 +38,8 @@ run_gate_expect_failure() {
   done
 
   set +e
-  scripts/agent-quality-gate.sh \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+    scripts/agent-quality-gate.sh \
     --changed-paths-file "$paths_file" \
     --base origin/test \
     --run \
@@ -62,6 +64,13 @@ assert_occurrences() {
   actual_count="$(awk -v expected="$expected" 'index($0, expected) { count++ } END { print count + 0 }' "$output_file")"
   [[ "$actual_count" == "$expected_count" ]] ||
     fail "expected $expected_count occurrence(s) of '$expected', found $actual_count"
+}
+
+assert_not_contains() {
+  local unexpected="$1"
+  if grep -Fq -- "$unexpected" "$output_file"; then
+    fail "expected output not to contain: $unexpected"
+  fi
 }
 
 line_number() {
@@ -392,6 +401,33 @@ run_gate "scripts/check-react-doctor-score.sh"
 assert_contains "- bash -n scripts/check-react-doctor-score.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
+run_gate ".trunk/trunk.yaml"
+assert_contains "- tooling"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+fail_fast_repo="$(mktemp -d)"
+(
+  cd "$fail_fast_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .trunk
+  printf 'version: 0.1\n' > .trunk/trunk.yaml
+  git add .
+  git commit -qm init
+  printf 'version: 0.2\n' > .trunk/trunk.yaml
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$fail_fast_repo"
+assert_contains "+ ./tools/trunk check --all"
+assert_contains "Stopping after first failed mapped command (--fail-fast)."
+assert_not_contains "+ pnpm agent:quality-gate:test"
+
 react_doctor_repo="$(mktemp -d)"
 (
   cd "$react_doctor_repo"
@@ -471,7 +507,8 @@ rename_repo="$(mktemp -d)"
   git mv pnpmfile.cjs docs.md
   printf 'export const changed = true;\n' >> indexer-envio/src/rpc/client.ts
   set +e
-  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
   exit_code=$?
   set -e
   [[ "$exit_code" -ne 0 ]]
