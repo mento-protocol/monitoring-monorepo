@@ -408,5 +408,6 @@ export {
   top10Concentration,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
+  type LeaderboardWindowTraderSetRow,
   type LeaderboardWindowRow,
 } from "@/lib/leaderboard-hero";

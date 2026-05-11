@@ -63,6 +63,18 @@ export type LeaderboardWindowFirstDayRow = {
   firstDayExclusiveUniqueTradersIncludingSystem: number;
 };
 
+/** Wire shape of the isolated exact trader-set query. Optional in the
+ *  merge path: if the query is unavailable during schema rollout, callers
+ *  keep the legacy count-based approximation. */
+export type LeaderboardWindowTraderSetRow = {
+  chainId: number;
+  snapshotDay: string;
+  traders: string[];
+  tradersIncludingSystem: string[];
+  firstDayExclusiveTraders: string[];
+  firstDayExclusiveTradersIncludingSystem: string[];
+};
+
 /** Wire shape of today's partial trader-day rows. v3 and v2 share this
  *  minimal subset (we only need volume + swap count + system flag). */
 export type LeaderboardTodayTraderRow = {
@@ -133,6 +145,16 @@ function buildFirstDaySnapshotKeyMap(
   return m;
 }
 
+function buildTraderSetSnapshotKeyMap(
+  rows: ReadonlyArray<LeaderboardWindowTraderSetRow>,
+): Map<string, LeaderboardWindowTraderSetRow> {
+  const m = new Map<string, LeaderboardWindowTraderSetRow>();
+  for (const row of rows) {
+    m.set(`${row.chainId}-${row.snapshotDay}`, row);
+  }
+  return m;
+}
+
 /**
  * Sum hero-tile totals across all chains, combining the pre-rolled
  * [windowStart, yesterday] snapshot with today's partial.
@@ -143,12 +165,10 @@ function buildFirstDaySnapshotKeyMap(
  * pre-filtered by the `isSystemAddressIn` query variable, so the
  * showSystem branch only filters out anything that snuck through.
  *
- * The unique-trader count adds the snapshot's count to today's
- * distinct-trader count without de-duplicating across the two sources.
- * A trader active both in the snapshot range AND today is counted twice.
- * Acceptable for the hero tile (today's distinct count is small — usually
- * <50 — and the overcount is at most that). Follow-up if precision is
- * needed: ship a `distinctTraders: [String!]!` array on the snapshot.
+ * The unique-trader count uses exact snapshot trader arrays when the
+ * isolated trader-set query has landed. During schema rollout or query
+ * failure it falls back to the legacy count-based path, which adds
+ * snapshot + yesterday + today counts without cross-source de-duping.
  *
  * `todayMidnightSeconds` is the UTC midnight of "today" in Unix seconds
  * (must match the unit `snapshotDay` is stored in — see
@@ -227,13 +247,11 @@ function buildFirstDaySnapshotKeyMap(
  *                                   the slice subtraction (zero
  *                                   yesterday contribution).
  *
- * Unique-trader caveat: the catch-up adds yesterday's distinct
- * traders without de-duplicating against the snapshot's retained
- * `[windowStartDay+1, snapshotDay]` slice — a trader active both in
- * `[T-6, T-2]` and `T-1` is counted twice. This mirrors the existing
- * snapshot-vs-today double-count comment above (today's overlap is
- * already approximate) and keeps the wire shape minimal. Volume and
- * swap counts ARE exact through the slice subtraction.
+ * Unique-trader precision: with `traderSetRows`, the catch-up deletes
+ * first-day-exclusive traders from the snapshot set, then unions
+ * yesterday + today so overlap across all three sources is exact. Without
+ * `traderSetRows`, the fallback count path remains approximate; volume and
+ * swap counts are exact through slice subtraction either way.
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
@@ -244,6 +262,11 @@ export function mergeHeroSnapshot(args: {
    *  ONLY the catch-up (chains stay degraded) instead of failing the
    *  primary hero query. `undefined` until the isolated query lands. */
   firstDayRows?: ReadonlyArray<LeaderboardWindowFirstDayRow> | undefined;
+  /** Exact per-window trader sets for the same (chainId, snapshotDay)
+   *  tuples as `snapshotRows`. Lives in an isolated query so schema lag
+   *  degrades only unique-trader precision; volume/swap totals and the
+   *  legacy count fallback continue to render. */
+  traderSetRows?: ReadonlyArray<LeaderboardWindowTraderSetRow> | undefined;
   /** Optional yesterday's-closed-day rows (one trader-day per row),
    *  used to catch up DEGRADED chains via slice subtraction. Caller
    *  fires `LEADERBOARD_YESTERDAY_TRADERS` only when `degradedChains`
@@ -263,6 +286,11 @@ export function mergeHeroSnapshot(args: {
   let uniqueFromSnapshot = 0;
   const staleChains: number[] = [];
   const degradedChains: number[] = [];
+  const exactTraders = new Set<string>();
+  const traderSetBySnapshotKey = args.traderSetRows
+    ? buildTraderSetSnapshotKeyMap(args.traderSetRows)
+    : null;
+  let canUseExactTraderSets = traderSetBySnapshotKey !== null;
   // Track per-chain snapshot rows for degraded chains so the post-pass
   // slice-subtraction step can read the firstDay* fields without
   // re-iterating the whole list.
@@ -283,6 +311,20 @@ export function mergeHeroSnapshot(args: {
         // gap and is signaled to the user via a lighter banner.
         degradedChains.push(row.chainId);
         degradedSnapshotByChain.set(row.chainId, row);
+      }
+    }
+    const traderSet = traderSetBySnapshotKey?.get(
+      `${row.chainId}-${row.snapshotDay}`,
+    );
+    if (canUseExactTraderSets && !traderSet) {
+      canUseExactTraderSets = false;
+    }
+    if (traderSet) {
+      const traders = args.showSystem
+        ? traderSet.tradersIncludingSystem
+        : traderSet.traders;
+      for (const trader of traders) {
+        exactTraders.add(`${row.chainId}-${trader}`);
       }
     }
     if (args.showSystem) {
@@ -306,7 +348,9 @@ export function mergeHeroSnapshot(args: {
     if (!args.showSystem && row.isSystemAddress) continue;
     totalVolumeUsdWei += BigInt(row.volumeUsdWei);
     totalSwapCount += row.swapCount;
-    todayTraders.add(`${row.chainId}-${row.trader}`);
+    const key = `${row.chainId}-${row.trader}`;
+    todayTraders.add(key);
+    if (canUseExactTraderSets) exactTraders.add(key);
   }
 
   // ─── Degraded-chain catch-up via slice subtraction ──────────────
@@ -375,6 +419,21 @@ export function mergeHeroSnapshot(args: {
         totalSwapCount -= firstDay.firstDaySwapCount;
         uniqueFromSnapshot -= firstDay.firstDayExclusiveUniqueTraders;
       }
+      if (canUseExactTraderSets) {
+        const traderSet = traderSetBySnapshotKey?.get(
+          `${chainId}-${snap.snapshotDay}`,
+        );
+        const firstDayExclusive = args.showSystem
+          ? traderSet?.firstDayExclusiveTradersIncludingSystem
+          : traderSet?.firstDayExclusiveTraders;
+        if (!firstDayExclusive) {
+          canUseExactTraderSets = false;
+        } else {
+          for (const trader of firstDayExclusive) {
+            exactTraders.delete(`${chainId}-${trader}`);
+          }
+        }
+      }
       // Add yesterday's rows for this chain (may be empty).
       const yRows = yesterdayByChain.get(chainId);
       if (yRows && yRows.length > 0) {
@@ -383,6 +442,9 @@ export function mergeHeroSnapshot(args: {
           totalVolumeUsdWei += BigInt(row.volumeUsdWei);
           totalSwapCount += row.swapCount;
           yesterdayTradersForChain.add(row.trader);
+          if (canUseExactTraderSets) {
+            exactTraders.add(`${row.chainId}-${row.trader}`);
+          }
         }
         yesterdayUniqueTradersAdded += yesterdayTradersForChain.size;
       }
@@ -398,8 +460,9 @@ export function mergeHeroSnapshot(args: {
   return {
     totalVolumeUsdWei,
     totalSwapCount,
-    uniqueTraders:
-      uniqueFromSnapshot + todayTraders.size + yesterdayUniqueTradersAdded,
+    uniqueTraders: canUseExactTraderSets
+      ? exactTraders.size
+      : uniqueFromSnapshot + todayTraders.size + yesterdayUniqueTradersAdded,
     staleChains,
     degradedChains: remainingDegradedChains,
   };

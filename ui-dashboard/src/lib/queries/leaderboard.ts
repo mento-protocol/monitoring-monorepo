@@ -109,37 +109,35 @@ export const POOLS_FOR_LEADERBOARD = /* GraphQL */ `
 `;
 
 /**
- * Trader-pool-day rows in a window, used to drive the per-pool stacked
- * volume chart on `/leaderboard`. The dashboard sums these client-side
- * by `(poolId, day)` to produce one series per pool — pre-rolling
- * `PoolDailyVolumeSnapshot` at the indexer level is the proper fix
- * (`BACKLOG.md` PR 4) but client-side aggregation is fine for the MVP
- * given the 1000-row cap is rarely hit at 7d/30d.
+ * Pool-day rows in a window, used to drive the per-pool stacked volume
+ * chart on `/leaderboard`. Source: pre-rolled PoolDailyVolumeSnapshot,
+ * not TraderPoolDailySnapshot, so long-window pool charts don't depend on
+ * trader-pool row cardinality.
  *
- * Ordered by `volumeUsdWei desc` so the cap, when hit, drops the
- * smallest contributors — the top-5 pools that drive the stacked chart's
- * visual signal stay intact.
- *
- * `trader` is selected so the page can intersect rows against the
- * non-system trader allowlist client-side when the system toggle is
- * off — `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress`
- * column of its own (indexer schema doesn't snapshot it on this
- * entity), so we can't push the filter into Hasura. PR 4's
- * `PoolDailyVolumeSnapshot` rollup will fix this properly.
+ * `limit` / `offset` are exposed because `PoolDailyVolumeSnapshot`
+ * cardinality is pool × day; 90d/all windows can exceed Hasura's 1000-row
+ * cap even after pre-rolling. The page fetches this with a paginated hook.
  */
 export const POOL_DAILY_VOLUME = /* GraphQL */ `
-  query PoolDailyVolume($afterTimestamp: numeric!, $limit: Int!) {
-    TraderPoolDailySnapshot(
+  query PoolDailyVolume(
+    $afterTimestamp: numeric!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    PoolDailyVolumeSnapshot(
       where: { timestamp: { _gte: $afterTimestamp } }
-      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }, { id: asc }]
+      order_by: [{ timestamp: asc }, { poolId: asc }, { id: asc }]
       limit: $limit
+      offset: $offset
     ) {
       id
       chainId
-      trader
       poolId
       timestamp
+      swapCount
+      swapCountIncludingSystem
       volumeUsdWei
+      volumeUsdWeiIncludingSystem
     }
   }
 `;
@@ -366,6 +364,46 @@ export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       firstDaySwapCountIncludingSystem
       firstDayExclusiveUniqueTraders
       firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+// Isolated exact trader-set query. These arrays let the dashboard de-dupe
+// window-snapshot traders against yesterday + today trader rows. Keeping
+// them out of the primary hero query preserves the legacy approximate count
+// during hosted-Hasura schema rollout.
+export const LEADERBOARD_WINDOW_TRADER_SETS_LATEST = /* GraphQL */ `
+  query LeaderboardWindowTraderSetsLatest($windowKey: String!) {
+    LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      traders
+      tradersIncludingSystem
+      firstDayExclusiveTraders
+      firstDayExclusiveTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST = /* GraphQL */ `
+  query BrokerLeaderboardWindowTraderSetsLatest($windowKey: String!) {
+    BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      traders
+      tradersIncludingSystem
+      firstDayExclusiveTraders
+      firstDayExclusiveTradersIncludingSystem
     }
   }
 `;

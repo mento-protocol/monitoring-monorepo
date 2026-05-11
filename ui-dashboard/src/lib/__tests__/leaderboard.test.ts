@@ -15,6 +15,7 @@ import {
   type BrokerTraderDailyRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
+  type LeaderboardWindowTraderSetRow,
   type LeaderboardWindowRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
@@ -399,15 +400,17 @@ describe("aggregatePoolDailyVolume", () => {
     poolId: string,
     timestamp: string,
     volumeUsd: number,
-    trader = "0x0",
+    volumeUsdIncludingSystem = volumeUsd,
   ) {
     return {
-      id: `${chainId}-${trader}-${poolId}-${timestamp}`,
+      id: `${chainId}-${poolId}-${timestamp}`,
       chainId,
-      trader,
       poolId,
       timestamp,
+      swapCount: volumeUsd > 0 ? 1 : 0,
+      swapCountIncludingSystem: volumeUsdIncludingSystem > 0 ? 1 : 0,
       volumeUsdWei: usd(volumeUsd),
+      volumeUsdWeiIncludingSystem: usd(volumeUsdIncludingSystem),
     };
   }
 
@@ -486,45 +489,24 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[0]!.name).toBe("USDC/USDm");
   });
 
-  it("filters by traderAllowList when provided (system-toggle parity)", () => {
-    // Two traders contributing to the same pool, but only `0xUser` is in
-    // the allowlist — system trader's volume must NOT contribute to
-    // the chart.
+  it("uses primary volume by default and *IncludingSystem volume when toggled on", () => {
+    // The pool-day rollup carries both branches. System-off reads the
+    // primary field; system-on reads the including-system sibling.
     const rows = [
-      row(42220, "0xA", day(1), 100, "0xUser"),
-      row(42220, "0xA", day(1), 50, "0xSystem"),
+      row(42220, "0xA", day(1), 100, 150),
+      row(42220, "0xB", day(1), 0, 50),
     ];
-    // Day-scoped allowlist: `${chainId}-${trader}-${day}`.
-    const allowList = new Set([`42220-0xUser-${day(1)}`]);
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
+    const r = aggregatePoolDailyVolume(rows, noLabel);
     expect(r.totalSeries[0]!.value).toBeCloseTo(100, 4);
-    // Without the allowlist, the same input includes both traders.
-    const rUnfiltered = aggregatePoolDailyVolume(rows, noLabel);
-    expect(rUnfiltered.totalSeries[0]!.value).toBeCloseTo(150, 4);
-  });
-
-  it("allowlist is day-scoped — same trader can have system + non-system days", () => {
-    // Trader 0xFlip flipped from system to non-system between day 1 and
-    // day 2. System volume must NOT leak from day 1 even though the
-    // trader is admitted on day 2.
-    const rows = [
-      row(42220, "0xA", day(1), 100, "0xFlip"), // system day → excluded
-      row(42220, "0xA", day(2), 80, "0xFlip"), // non-system day → admitted
-    ];
-    const allowList = new Set([`42220-0xFlip-${day(2)}`]);
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
-    // Only day 2's 80 contributes; day 1's 100 is dropped.
-    const day2 = r.totalSeries.find((p) => p.timestamp === Number(day(2)))!;
-    expect(day2.value).toBeCloseTo(80, 4);
-    const day1 = r.totalSeries.find((p) => p.timestamp === Number(day(1)));
-    if (day1) expect(day1.value).toBe(0);
+    const withSystem = aggregatePoolDailyVolume(rows, noLabel, true);
+    expect(withSystem.totalSeries[0]!.value).toBeCloseTo(200, 4);
   });
 
   it("zero-fills every day in windowRange even when no row touched it", () => {
     // Only day 2 has any activity; days 1 and 3 must still appear in the
     // series with value=0 so the stacked area's x-axis stays contiguous.
     const SECONDS_PER_DAY = 86_400;
-    const rows = [row(42220, "0xA", day(2), 100, "0xUser")];
+    const rows = [row(42220, "0xA", day(2), 100)];
     const r = aggregatePoolDailyVolume(rows, noLabel, undefined, {
       fromSec: Number(day(1)),
       toSec: Number(day(3)),
@@ -571,11 +553,9 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[1]!.key).toBe(r.poolRanking[1]!.poolId);
   });
 
-  it("returns empty series when allowlist excludes every row", () => {
-    // Same short-circuit when an allowlist filters everything out.
-    const rows = [row(42220, "0xA", day(1), 100, "0xUser")];
-    const allowList = new Set<string>(); // empty allowlist
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList, {
+  it("returns empty series when system-off volume is zero for every row", () => {
+    const rows = [row(42220, "0xA", day(1), 0, 100)];
+    const r = aggregatePoolDailyVolume(rows, noLabel, false, {
       fromSec: Number(day(1)),
       toSec: Number(day(7)),
     });
@@ -878,6 +858,20 @@ describe("mergeHeroSnapshot", () => {
       ...overrides,
     };
   }
+  function traderSet(
+    overrides: Partial<LeaderboardWindowTraderSetRow> & { chainId: number },
+  ): LeaderboardWindowTraderSetRow {
+    const snapshotDay = overrides.snapshotDay ?? String(YESTERDAY_MIDNIGHT);
+    return {
+      snapshotDay,
+      traders: [],
+      tradersIncludingSystem: overrides.traders ?? [],
+      firstDayExclusiveTraders: [],
+      firstDayExclusiveTradersIncludingSystem:
+        overrides.firstDayExclusiveTraders ?? [],
+      ...overrides,
+    };
+  }
   function today(
     overrides: Partial<LeaderboardTodayTraderRow> & {
       chainId: number;
@@ -927,6 +921,90 @@ describe("mergeHeroSnapshot", () => {
     expect(out.totalSwapCount).toBe(50);
     expect(out.uniqueTraders).toBe(10);
     expect(out.staleChains).toEqual([]);
+  });
+
+  it("uses exact trader sets to de-dupe snapshot and today's partial rows", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      traderSetRows: [traderSet({ chainId: 42220, traders: ["0xa", "0xb"] })],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(3);
+  });
+
+  it("falls back to legacy approximate unique counts when trader sets are missing", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(4);
+  });
+
+  it("uses exact trader sets through degraded-chain slice subtraction", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 3,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      traderSetRows: [
+        traderSet({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          traders: ["0xa", "0xb", "0xc"],
+          firstDayExclusiveTraders: ["0xa"],
+        }),
+      ],
+      yesterdayRows: [
+        today({ chainId: 42220, trader: "0xb", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xd", volumeUsdWei: USD(10) }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xe", volumeUsdWei: USD(10) }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(4);
+    expect(out.degradedChains).toEqual([]);
   });
 
   it("today-only (cold start): returns today's totals", () => {

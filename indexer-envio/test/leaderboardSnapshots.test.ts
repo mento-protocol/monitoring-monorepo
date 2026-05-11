@@ -6,6 +6,7 @@ import type {
   LeaderboardChainState,
   LeaderboardWindowSnapshot,
   Pool,
+  PoolDailyVolumeSnapshot,
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
@@ -38,6 +39,7 @@ function makeContext(): {
   store: {
     TraderDailySnapshot: Map<string, TraderDailySnapshot>;
     TraderPoolDailySnapshot: Map<string, TraderPoolDailySnapshot>;
+    PoolDailyVolumeSnapshot: Map<string, PoolDailyVolumeSnapshot>;
     AggregatorDailySnapshot: Map<string, AggregatorDailySnapshot>;
     TraderPoolDayMarker: Map<string, TraderPoolDayMarker>;
     AggregatorTraderDayMarker: Map<string, AggregatorTraderDayMarker>;
@@ -48,6 +50,7 @@ function makeContext(): {
   const store = {
     TraderDailySnapshot: new Map<string, TraderDailySnapshot>(),
     TraderPoolDailySnapshot: new Map<string, TraderPoolDailySnapshot>(),
+    PoolDailyVolumeSnapshot: new Map<string, PoolDailyVolumeSnapshot>(),
     AggregatorDailySnapshot: new Map<string, AggregatorDailySnapshot>(),
     TraderPoolDayMarker: new Map<string, TraderPoolDayMarker>(),
     AggregatorTraderDayMarker: new Map<string, AggregatorTraderDayMarker>(),
@@ -74,6 +77,7 @@ function makeContext(): {
         },
       },
       TraderPoolDailySnapshot: wrap(store.TraderPoolDailySnapshot),
+      PoolDailyVolumeSnapshot: wrap(store.PoolDailyVolumeSnapshot),
       AggregatorDailySnapshot: wrap(store.AggregatorDailySnapshot),
       TraderPoolDayMarker: wrap(store.TraderPoolDayMarker),
       AggregatorTraderDayMarker: wrap(store.AggregatorTraderDayMarker),
@@ -187,6 +191,7 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(td.swapCount, 1);
     assert.equal(td.uniquePools, 1);
     assert.deepEqual(td.aggregatorKeys, ["squid"]);
+    assert.deepEqual(td.poolIds, [POOL_ID_1]);
     assert.equal(td.volumeUsdWei, 1_000n * ONE_USD);
     assert.equal(td.feesPaidUsdWei, (1_000n * ONE_USD * 30n) / 10_000n); // 3.0 USD
     assert.equal(td.isSystemAddress, false);
@@ -204,6 +209,16 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(tpd.inflowToken1UsdWei, 1_000n * ONE_USD);
     assert.equal(tpd.inflowToken0UsdWei, 0n);
     assert.equal(tpd.outflowToken1UsdWei, 0n);
+
+    // PoolDailyVolumeSnapshot — chart-facing rollup matches the pool/day total.
+    const pd = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
+    );
+    assert.ok(pd);
+    assert.equal(pd.swapCount, 1);
+    assert.equal(pd.swapCountIncludingSystem, 1);
+    assert.equal(pd.volumeUsdWei, 1_000n * ONE_USD);
+    assert.equal(pd.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
 
     // AggregatorDailySnapshot — txTo was Squid
     const ad = store.AggregatorDailySnapshot.get(
@@ -427,6 +442,13 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(ad.uniqueTradersIncludingSystem, 1);
     assert.equal(ad.volumeUsdWei, 0n);
     assert.equal(ad.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    const pd = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(pd.swapCount, 0);
+    assert.equal(pd.swapCountIncludingSystem, 1);
+    assert.equal(pd.volumeUsdWei, 0n);
+    assert.equal(pd.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
   });
 
   it("isSystemAddress is sticky across multiple swaps in a day", async () => {
@@ -476,6 +498,9 @@ describe("applyLeaderboardSnapshots", () => {
       true,
       "sticky: once flagged, stays flagged for the day",
     );
+    assert.deepEqual(td.aggregatorKeys, ["squid"]);
+    assert.deepEqual(td.poolIds, [POOL_ID_1, POOL_ID_2]);
+
     const ad = store.AggregatorDailySnapshot.get(
       `${CHAIN}-squid-${DAY_2026_05_04}`,
     )!;
@@ -483,6 +508,22 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(ad.swapCountIncludingSystem, 2);
     assert.equal(ad.volumeUsdWei, 0n);
     assert.equal(ad.volumeUsdWeiIncludingSystem, 200n * ONE_USD);
+
+    const firstPoolDay = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(firstPoolDay.volumeUsdWei, 0n);
+    assert.equal(firstPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
+
+    const secondPoolDay = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_2}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(
+      secondPoolDay.volumeUsdWei,
+      0n,
+      "later same-day swaps stay system once the trader-day flag is sticky",
+    );
+    assert.equal(secondPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
   });
 
   it("aggregator rollup subtracts prior same-day volume when a trader flips system", async () => {
@@ -541,6 +582,70 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(lifi.swapCountIncludingSystem, 1);
     assert.equal(lifi.uniqueTradersIncludingSystem, 1);
     assert.equal(lifi.volumeUsdWeiIncludingSystem, 25n * ONE_USD);
+  });
+
+  it("pool daily rollup subtracts prior same-day pool volume when a trader flips system", async () => {
+    const { context, store } = makeContext();
+    const normalPool = fakePool({
+      id: POOL_ID_1,
+      rebalancerAddress: "0x0000000000000000000000000000000000000000",
+    });
+    const systemPool = fakePool({
+      id: POOL_ID_2,
+      rebalancerAddress: TRADER_A,
+    });
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_1,
+      pool: normalPool,
+      caller: TRADER_A,
+      txTo: SQUID,
+      volumeUsdWei: 100n * ONE_USD,
+      amounts: buyToken1,
+      blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
+    });
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_2,
+      pool: systemPool,
+      caller: TRADER_A,
+      txTo: SQUID,
+      volumeUsdWei: 25n * ONE_USD,
+      amounts: buyToken1,
+      blockTimestamp: DAY_2026_05_04 + 200n,
+      blockNumber: 1n,
+    });
+
+    const td = store.TraderDailySnapshot.get(
+      `${CHAIN}-${TRADER_A}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(td.isSystemAddress, true);
+    assert.deepEqual(td.poolIds, [POOL_ID_1, POOL_ID_2]);
+
+    const normalPoolDay = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(
+      normalPoolDay.volumeUsdWei,
+      0n,
+      "prior primary volume is removed once the trader-day becomes system",
+    );
+    assert.equal(normalPoolDay.swapCount, 0);
+    assert.equal(normalPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
+    assert.equal(normalPoolDay.swapCountIncludingSystem, 1);
+
+    const systemPoolDay = store.PoolDailyVolumeSnapshot.get(
+      `${CHAIN}-${POOL_ID_2}-${DAY_2026_05_04}`,
+    )!;
+    assert.equal(systemPoolDay.volumeUsdWei, 0n);
+    assert.equal(systemPoolDay.swapCount, 0);
+    assert.equal(systemPoolDay.volumeUsdWeiIncludingSystem, 25n * ONE_USD);
+    assert.equal(systemPoolDay.swapCountIncludingSystem, 1);
   });
 
   it("missing caller (empty string) is dropped — no entities created", async () => {

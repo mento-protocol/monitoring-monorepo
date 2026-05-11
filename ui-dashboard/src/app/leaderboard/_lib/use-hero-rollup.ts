@@ -6,10 +6,12 @@ import {
   BROKER_LEADERBOARD_TODAY_TRADERS,
   BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   BROKER_LEADERBOARD_WINDOW_LATEST,
+  BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST,
   BROKER_LEADERBOARD_YESTERDAY_TRADERS,
   LEADERBOARD_TODAY_TRADERS,
   LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
+  LEADERBOARD_WINDOW_TRADER_SETS_LATEST,
   LEADERBOARD_YESTERDAY_TRADERS,
 } from "@/lib/queries/leaderboard";
 import {
@@ -19,6 +21,7 @@ import {
   type LeaderboardRangeKey,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
+  type LeaderboardWindowTraderSetRow,
   type LeaderboardWindowRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
@@ -144,6 +147,27 @@ export function useHeroRollup({
       ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
       : heroFirstDayV2Result.data?.BrokerLeaderboardWindowSnapshot;
 
+  const heroTraderSetsV3Result = useGQL<{
+    LeaderboardWindowSnapshot: LeaderboardWindowTraderSetRow[];
+  }>(
+    venue === "v3" ? LEADERBOARD_WINDOW_TRADER_SETS_LATEST : null,
+    { windowKey: range },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const heroTraderSetsV2Result = useGQL<{
+    BrokerLeaderboardWindowSnapshot: LeaderboardWindowTraderSetRow[];
+  }>(
+    venue === "v2" ? BROKER_LEADERBOARD_WINDOW_TRADER_SETS_LATEST : null,
+    { windowKey: range },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const traderSetRows =
+    venue === "v3"
+      ? heroTraderSetsV3Result.data?.LeaderboardWindowSnapshot
+      : heroTraderSetsV2Result.data?.BrokerLeaderboardWindowSnapshot;
+
   // First-pass merge — without `yesterdayRows`. Used solely to discover
   // which chains are in the DEGRADED state (snapshotDay = today - 2 days),
   // so we can gate the yesterday-traders query on them. Cheap (one
@@ -200,6 +224,7 @@ export function useHeroRollup({
       mergeHeroSnapshot({
         snapshotRows,
         todayRows: todayPartialRows,
+        traderSetRows,
         firstDayRows,
         yesterdayRows: yesterdayPartialRows,
         showSystem,
@@ -208,6 +233,7 @@ export function useHeroRollup({
     [
       snapshotRows,
       todayPartialRows,
+      traderSetRows,
       firstDayRows,
       yesterdayPartialRows,
       showSystem,

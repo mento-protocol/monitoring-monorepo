@@ -2,6 +2,7 @@ import type {
   AggregatorDailySnapshot,
   AggregatorTraderDayMarker,
   Pool,
+  PoolDailyVolumeSnapshot,
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
@@ -26,6 +27,10 @@ export type LeaderboardContext = V3FlushContext & {
   TraderPoolDailySnapshot: {
     get: (id: string) => Promise<TraderPoolDailySnapshot | undefined>;
     set: (entity: TraderPoolDailySnapshot) => void;
+  };
+  PoolDailyVolumeSnapshot: {
+    get: (id: string) => Promise<PoolDailyVolumeSnapshot | undefined>;
+    set: (entity: PoolDailyVolumeSnapshot) => void;
   };
   AggregatorDailySnapshot: {
     get: (id: string) => Promise<AggregatorDailySnapshot | undefined>;
@@ -119,6 +124,7 @@ export async function applyLeaderboardSnapshots(
   const dayKey = day.toString();
   const traderDayId = `${chainId}-${caller}-${dayKey}`;
   const traderPoolDayId = `${chainId}-${caller}-${poolId}-${dayKey}`;
+  const poolDayId = `${chainId}-${poolId}-${dayKey}`;
 
   const aggregator = classifyAggregator(
     chainId,
@@ -172,6 +178,7 @@ export async function applyLeaderboardSnapshots(
     existingTraderDay?.aggregatorKeys ?? [],
     aggregator,
   );
+  const poolIds = appendUnique(existingTraderDay?.poolIds ?? [], poolId);
   context.TraderDailySnapshot.set({
     id: traderDayId,
     chainId,
@@ -181,6 +188,7 @@ export async function applyLeaderboardSnapshots(
     uniquePools:
       (existingTraderDay?.uniquePools ?? 0) + (traderPoolFirstTouch ? 1 : 0),
     aggregatorKeys,
+    poolIds,
     volumeUsdWei: (existingTraderDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
     feesPaidUsdWei: (existingTraderDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
     // Sticky once true: a trader flagged as system at any point in a day
@@ -213,7 +221,77 @@ export async function applyLeaderboardSnapshots(
       (existingTraderPoolDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
   });
 
-  // 5. AggregatorDailySnapshot upsert. Primary fields exclude system callers;
+  // 5. PoolDailyVolumeSnapshot upsert. This is the chart-facing pool/day
+  //    rollup, so the dashboard no longer has to scan trader-pool rows and
+  //    then intersect them with the trader-day system-address allowlist. If
+  //    the trader flips into day-sticky system classification, remove their
+  //    earlier same-day pool contributions from the primary branch.
+  const primaryCorrectionsByPool = new Map<
+    string,
+    { swapCount: number; volumeUsdWei: bigint }
+  >();
+  if (traderDayBecameSystem) {
+    for (const touchedPoolId of poolIds) {
+      const priorTraderPoolDay =
+        touchedPoolId === poolId
+          ? existingTraderPoolDay
+          : await context.TraderPoolDailySnapshot.get(
+              `${chainId}-${caller}-${touchedPoolId}-${dayKey}`,
+            );
+      if (!priorTraderPoolDay) continue;
+      primaryCorrectionsByPool.set(touchedPoolId, {
+        swapCount: priorTraderPoolDay.swapCount,
+        volumeUsdWei: priorTraderPoolDay.volumeUsdWei,
+      });
+    }
+    for (const [touchedPoolId, correction] of primaryCorrectionsByPool) {
+      if (touchedPoolId === poolId) continue;
+      const touchedPoolDayId = `${chainId}-${touchedPoolId}-${dayKey}`;
+      const touchedPoolDay =
+        await context.PoolDailyVolumeSnapshot.get(touchedPoolDayId);
+      if (!touchedPoolDay) continue;
+      context.PoolDailyVolumeSnapshot.set({
+        ...touchedPoolDay,
+        swapCount: subtractCount(
+          touchedPoolDay.swapCount,
+          correction.swapCount,
+        ),
+        volumeUsdWei: subtractWei(
+          touchedPoolDay.volumeUsdWei,
+          correction.volumeUsdWei,
+        ),
+        blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
+  }
+  const existingPoolDay = await context.PoolDailyVolumeSnapshot.get(poolDayId);
+  const currentPoolCorrection = primaryCorrectionsByPool.get(poolId);
+  const poolPrimarySwapBase = subtractCount(
+    existingPoolDay?.swapCount ?? 0,
+    currentPoolCorrection?.swapCount ?? 0,
+  );
+  const poolPrimaryVolumeBase = subtractWei(
+    existingPoolDay?.volumeUsdWei ?? 0n,
+    currentPoolCorrection?.volumeUsdWei ?? 0n,
+  );
+  context.PoolDailyVolumeSnapshot.set({
+    id: poolDayId,
+    chainId,
+    poolId,
+    timestamp: day,
+    swapCount: poolPrimarySwapBase + (traderDayIsSystem ? 0 : 1),
+    swapCountIncludingSystem:
+      (existingPoolDay?.swapCountIncludingSystem ?? 0) + 1,
+    volumeUsdWei:
+      poolPrimaryVolumeBase + (traderDayIsSystem ? 0n : volumeUsdWei),
+    volumeUsdWeiIncludingSystem:
+      (existingPoolDay?.volumeUsdWeiIncludingSystem ?? 0n) + volumeUsdWei,
+    blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
+
+  // 6. AggregatorDailySnapshot upsert. Primary fields exclude system callers;
   //    *IncludingSystem siblings preserve the toggle path. If this swap made
   //    the trader-day sticky-system, subtract all earlier same-day aggregator
   //    contributions from primary fields before applying the current event.
@@ -271,8 +349,8 @@ export async function applyLeaderboardSnapshots(
     }
   }
 
-  //    `lastSeenAggregatorAddress` is the
-  //    raw txTo so the dashboard can surface the actual router contract
+  //    `lastSeenAggregatorAddress` is the raw txTo so the dashboard can
+  //    surface the actual router contract
   //    (useful when an aggregator has multiple deployed addresses on a chain
   //    and we want to know which one drove this row).
   const existingAggDay = await context.AggregatorDailySnapshot.get(aggDayId);
@@ -329,7 +407,7 @@ export async function applyLeaderboardSnapshots(
       (existingAggTraderMarker?.isSystemAddress ?? false) || traderDayIsSystem,
   });
 
-  // 6. Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC
+  // 7. Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC
   //    days since the last flush. Reads only TraderDailySnapshot
   //    (already-written including this swap's row), filters by
   //    [windowStartDay, snapshotDay] inclusive — today's row is excluded

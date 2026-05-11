@@ -201,21 +201,28 @@ export function buildLeaderboardWindowSnapshot(
   let totalSwapCount = 0;
   let totalSwapCountIncludingSystem = 0;
   let nonSystemCount = 0;
+  const traders: string[] = [];
+  const tradersIncludingSystem: string[] = [];
   let firstDayVolumeUsdWei = 0n;
   let firstDayVolumeUsdWeiIncludingSystem = 0n;
   let firstDaySwapCount = 0;
   let firstDaySwapCountIncludingSystem = 0;
   let firstDayExclusiveUniqueTraders = 0;
   let firstDayExclusiveUniqueTradersIncludingSystem = 0;
+  const firstDayExclusiveTraders: string[] = [];
+  const firstDayExclusiveTradersIncludingSystem: string[] = [];
   for (const a of args.aggregates) {
+    tradersIncludingSystem.push(a.trader);
     totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
     totalSwapCountIncludingSystem += a.swapCount;
     firstDayVolumeUsdWeiIncludingSystem += a.firstDayVolumeUsdWei;
     firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
     if (!a.activeOutsideFirstDay) {
       firstDayExclusiveUniqueTradersIncludingSystem += 1;
+      firstDayExclusiveTradersIncludingSystem.push(a.trader);
     }
     if (!a.isSystemAddress) {
+      traders.push(a.trader);
       totalVolumeUsdWei += a.volumeUsdWei;
       totalSwapCount += a.swapCount;
       nonSystemCount += 1;
@@ -223,9 +230,14 @@ export function buildLeaderboardWindowSnapshot(
       firstDaySwapCount += a.firstDaySwapCount;
       if (!a.activeOutsideFirstDay) {
         firstDayExclusiveUniqueTraders += 1;
+        firstDayExclusiveTraders.push(a.trader);
       }
     }
   }
+  traders.sort();
+  tradersIncludingSystem.sort();
+  firstDayExclusiveTraders.sort();
+  firstDayExclusiveTradersIncludingSystem.sort();
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
     chainId: args.chainId,
@@ -238,12 +250,16 @@ export function buildLeaderboardWindowSnapshot(
     totalSwapCountIncludingSystem,
     uniqueTraders: nonSystemCount,
     uniqueTradersIncludingSystem: args.aggregates.length,
+    traders,
+    tradersIncludingSystem,
     firstDayVolumeUsdWei,
     firstDayVolumeUsdWeiIncludingSystem,
     firstDaySwapCount,
     firstDaySwapCountIncludingSystem,
     firstDayExclusiveUniqueTraders,
     firstDayExclusiveUniqueTradersIncludingSystem,
+    firstDayExclusiveTraders,
+    firstDayExclusiveTradersIncludingSystem,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };
