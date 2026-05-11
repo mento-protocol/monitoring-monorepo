@@ -114,4 +114,33 @@ describe("AuthStatus sign-in href", () => {
       "/sign-in?callbackUrl=%2Fleaderboard%3FleaderboardWindow%3D7d",
     );
   });
+
+  it("updates the anchor href after browser back emits popstate", async () => {
+    act(() => {
+      root.render(<AuthStatus />);
+    });
+
+    act(() => {
+      window.history.pushState(
+        window.history.state,
+        "",
+        "/leaderboard?leaderboardWindow=7d",
+      );
+    });
+    expect(signInLink().getAttribute("href")).toBe(
+      "/sign-in?callbackUrl=%2Fleaderboard%3FleaderboardWindow%3D7d",
+    );
+
+    await act(async () => {
+      const popped = new Promise<void>((resolve) => {
+        window.addEventListener("popstate", () => resolve(), { once: true });
+      });
+      window.history.back();
+      await popped;
+    });
+
+    expect(signInLink().getAttribute("href")).toBe(
+      "/sign-in?callbackUrl=%2Fpools",
+    );
+  });
 });

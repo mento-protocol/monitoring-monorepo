@@ -18,7 +18,6 @@ function dispatchLocationChange() {
 function patchHistoryMethods() {
   if (typeof window === "undefined") return;
   if (window.__mentoLocationChangePatched) return;
-  window.__mentoLocationChangePatched = true;
 
   const originalPushState = window.history.pushState;
   const originalReplaceState = window.history.replaceState;
@@ -36,6 +35,8 @@ function patchHistoryMethods() {
     originalReplaceState.apply(this, args);
     dispatchLocationChange();
   };
+
+  window.__mentoLocationChangePatched = true;
 }
 
 function subscribeToLocationChange(callback: () => void) {

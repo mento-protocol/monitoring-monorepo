@@ -28,10 +28,6 @@ export function buildSignInHref(pathname: string, search: string): string {
 }
 
 export function AuthStatus() {
-  return <AuthStatusInner />;
-}
-
-function AuthStatusInner() {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
   const liveLocation = useLiveLocation();
