@@ -3,6 +3,7 @@ import type { Redis } from "@upstash/redis";
 // Upstash REST rejects requests around 10 MB. Keep the replacement budget below
 // that ceiling because a restore EVAL wraps the payload in a JSON request body.
 export const MAX_REDIS_HASH_REPLACE_BYTES = 8 * 1024 * 1024;
+export const REDIS_HSET_FIELD_CHUNK_SIZE = 500;
 
 type RedisEvalClient = Pick<Redis, "eval">;
 
@@ -12,6 +13,7 @@ export type RedisHashReplacement = {
 };
 
 const REPLACE_HASHES_SCRIPT = `
+local hsetFieldChunkSize = ${REDIS_HSET_FIELD_CHUNK_SIZE}
 local argIndex = 1
 for keyIndex = 1, #KEYS do
   local key = KEYS[keyIndex]
@@ -20,9 +22,14 @@ for keyIndex = 1, #KEYS do
 
   redis.call('DEL', key)
   if fieldCount > 0 then
-    local lastFieldArg = argIndex + (fieldCount * 2) - 1
-    redis.call('HSET', key, unpack(ARGV, argIndex, lastFieldArg))
-    argIndex = lastFieldArg + 1
+    local remainingFields = fieldCount
+    while remainingFields > 0 do
+      local chunkFieldCount = math.min(remainingFields, hsetFieldChunkSize)
+      local chunkEndArg = argIndex + (chunkFieldCount * 2) - 1
+      redis.call('HSET', key, unpack(ARGV, argIndex, chunkEndArg))
+      argIndex = chunkEndArg + 1
+      remainingFields = remainingFields - chunkFieldCount
+    end
   end
 end
 return 1

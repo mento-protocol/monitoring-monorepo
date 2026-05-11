@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   flattenHashReplacements,
   MAX_REDIS_HASH_REPLACE_BYTES,
+  REDIS_HSET_FIELD_CHUNK_SIZE,
   replaceRedisHashes,
 } from "@/lib/redis-hash";
 
@@ -16,10 +17,31 @@ describe("replaceRedisHashes", () => {
 
     expect(evalMock).toHaveBeenCalledOnce();
     const [script, keys, argv] = evalMock.mock.calls[0]!;
-    expect(script).toContain("unpack(ARGV, argIndex, lastFieldArg)");
+    expect(script).toContain(
+      `local hsetFieldChunkSize = ${REDIS_HSET_FIELD_CHUNK_SIZE}`,
+    );
+    expect(script).toContain("while remainingFields > 0 do");
+    expect(script).toContain("unpack(ARGV, argIndex, chunkEndArg)");
+    expect(script).not.toContain("lastFieldArg");
     expect(script).not.toContain("ARGV[argIndex], ARGV[argIndex + 1]");
     expect(keys).toEqual(["labels", "reports"]);
     expect(argv).toEqual(["1", "0xaaa", "label", "1", "0xbbb", "report"]);
+  });
+
+  it("keeps HSET chunks below the Redis Lua unpack stack ceiling", async () => {
+    const evalMock = vi.fn().mockResolvedValue(1);
+    const fields = Object.fromEntries(
+      Array.from({ length: REDIS_HSET_FIELD_CHUNK_SIZE + 1 }, (_, index) => [
+        `0x${index.toString(16).padStart(40, "0")}`,
+        `label-${index}`,
+      ]),
+    );
+
+    await replaceRedisHashes({ eval: evalMock }, [{ key: "labels", fields }]);
+
+    const [, , argv] = evalMock.mock.calls[0]!;
+    expect(argv[0]).toBe(String(REDIS_HSET_FIELD_CHUNK_SIZE + 1));
+    expect(argv).toHaveLength(1 + (REDIS_HSET_FIELD_CHUNK_SIZE + 1) * 2);
   });
 
   it("encodes empty replacements as zero-field hash clears", () => {
