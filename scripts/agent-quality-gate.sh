@@ -86,33 +86,67 @@ if [[ ! -s "$changed_paths_file" ]]; then
   exit 0
 fi
 
-commands=()
+preflight_commands=()
+codegen_commands=()
+post_codegen_commands=()
+quality_commands=()
 checklists=()
 surfaces=()
 
 has_command() {
   local command="$1"
   local entry
-  for entry in "${commands[@]}"; do
-    if [[ "${entry%%|*}" == "$command" ]]; then
-      return 0
-    fi
+  for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
+    [[ "${entry%%|*}" == "$command" ]] && return 0
+  done
+  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+    [[ "${entry%%|*}" == "$command" ]] && return 0
+  done
+  for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
+    [[ "${entry%%|*}" == "$command" ]] && return 0
+  done
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    [[ "${entry%%|*}" == "$command" ]] && return 0
   done
   return 1
+}
+
+add_preflight_command() {
+  local command="$1"
+  local reason="$2"
+  if ! has_command "$command"; then
+    preflight_commands+=("${command}|${reason}")
+  fi
+}
+
+add_codegen_command() {
+  local command="$1"
+  local reason="$2"
+  if ! has_command "$command"; then
+    codegen_commands+=("${command}|${reason}")
+  fi
+}
+
+add_post_codegen_command() {
+  local command="$1"
+  local reason="$2"
+  if ! has_command "$command"; then
+    post_codegen_commands+=("${command}|${reason}")
+  fi
 }
 
 add_command() {
   local command="$1"
   local reason="$2"
   if ! has_command "$command"; then
-    commands+=("${command}|${reason}")
+    quality_commands+=("${command}|${reason}")
   fi
 }
 
 has_checklist() {
   local checklist="$1"
   local entry
-  for entry in "${checklists[@]}"; do
+  for entry in "${checklists[@]+"${checklists[@]}"}"; do
     if [[ "${entry%%|*}" == "$checklist" ]]; then
       return 0
     fi
@@ -131,7 +165,7 @@ add_checklist() {
 has_surface() {
   local surface="$1"
   local entry
-  for entry in "${surfaces[@]}"; do
+  for entry in "${surfaces[@]+"${surfaces[@]}"}"; do
     if [[ "$entry" == "$surface" ]]; then
       return 0
     fi
@@ -158,19 +192,56 @@ add_package_quality_commands() {
   add_command "pnpm --filter ${package_name} test" "$reason"
 }
 
+add_workspace_quality_commands() {
+  local reason="$1"
+  add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
+  add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
+  add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
+  add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
+}
+
+add_indexer_post_codegen_install() {
+  add_post_codegen_command "pnpm install --frozen-lockfile" "link generated package after indexer codegen"
+}
+
+add_indexer_mainnet_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm indexer:codegen" "$reason"
+  add_indexer_post_codegen_install
+}
+
+add_indexer_testnet_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm indexer:testnet:codegen" "$reason"
+  add_indexer_post_codegen_install
+}
+
+add_indexer_bridge_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen" "$reason"
+  add_indexer_post_codegen_install
+}
+
+add_all_indexer_codegen() {
+  local reason="$1"
+  add_indexer_testnet_codegen "$reason"
+  add_indexer_mainnet_codegen "$reason"
+  add_indexer_bridge_codegen "$reason"
+}
+
 add_command "./tools/trunk check" "changed files should pass repo-wide Trunk linters"
 
 while IFS= read -r path; do
   case "$path" in
-    ui-dashboard/*)
-      add_surface "ui-dashboard"
-      add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
-      add_command "pnpm dashboard:react-doctor:diff" "ui-dashboard client code should keep React Doctor clean"
-      case "$path" in
-        ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts)
-          add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
-          ;;
-      esac
+	ui-dashboard/*)
+	  add_surface "ui-dashboard"
+	  add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
+	  add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
+	  case "$path" in
+	    ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts)
+	      add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
+	      ;;
+	  esac
       case "$path" in
         ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/*)
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "dashboard data or UI flow changed"
@@ -187,33 +258,46 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    indexer-envio/*)
-      add_surface "indexer-envio"
-      add_package_quality_commands "@mento-protocol/indexer-envio" "indexer-envio changed"
-      case "$path" in
-        indexer-envio/schema.graphql|indexer-envio/config.*.yaml|indexer-envio/src/*|indexer-envio/src/handlers/*|indexer-envio/src/rpc/*)
-          add_command "pnpm indexer:codegen" "indexer schema/config/handler path changed"
-          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
-          ;;
-      esac
-      case "$path" in
-        indexer-envio/config.multichain.testnet.yaml)
-          add_command "pnpm indexer:testnet:codegen" "testnet indexer config changed"
-          ;;
-        indexer-envio/config.multichain.bridge-only.yaml)
-          add_command "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen" "bridge-only indexer config changed"
-          ;;
-      esac
-      ;;
+	indexer-envio/*)
+	  add_surface "indexer-envio"
+	  case "$path" in
+	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/src/handlers/*|indexer-envio/src/rpc/*|indexer-envio/abis/*|indexer-envio/package.json)
+	      add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
+	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+	      ;;
+	  esac
+	  case "$path" in
+	    indexer-envio/config.multichain.mainnet.yaml)
+	      add_indexer_mainnet_codegen "mainnet indexer config changed"
+	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+	      ;;
+	    indexer-envio/config.multichain.testnet.yaml)
+	      add_indexer_testnet_codegen "testnet indexer config changed"
+	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+	      ;;
+	    indexer-envio/config.multichain.bridge-only.yaml)
+	      add_indexer_bridge_codegen "bridge-only indexer config changed"
+	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+	      ;;
+	  esac
+	  add_package_quality_commands "@mento-protocol/indexer-envio" "indexer-envio changed"
+	  ;;
     metrics-bridge/*)
       add_surface "metrics-bridge"
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
-    shared-config/*)
-      add_surface "shared-config"
-      add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
-      add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
-      ;;
+	shared-config/*)
+	  add_surface "shared-config"
+	  add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
+	  add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
+	  add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
+	  add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
+	  case "$path" in
+	    shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
+	      add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
+	      ;;
+	  esac
+	  ;;
     .github/workflows/*|.github/actions/*)
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
@@ -239,16 +323,21 @@ while IFS= read -r path; do
     scripts/*|tools/*)
       add_surface "scripts"
       ;;
-    package.json)
-      add_surface "workspace"
-      ;;
-    pnpm-lock.yaml|pnpm-workspace.yaml)
-      add_surface "workspace"
-      add_package_quality_commands "@mento-protocol/ui-dashboard" "workspace dependency/config changed"
-      add_package_quality_commands "@mento-protocol/indexer-envio" "workspace dependency/config changed"
-      add_package_quality_commands "@mento-protocol/metrics-bridge" "workspace dependency/config changed"
-      add_package_quality_commands "@mento-protocol/monitoring-config" "workspace dependency/config changed"
-      ;;
+	package.json)
+	  add_surface "workspace"
+	  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+	  add_workspace_quality_commands "workspace dependency/config changed"
+	  ;;
+	pnpm-lock.yaml|pnpm-workspace.yaml)
+	  add_surface "workspace"
+	  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+	  add_workspace_quality_commands "workspace dependency/config changed"
+	  ;;
+	.node-version)
+	  add_surface "workspace"
+	  add_preflight_command "pnpm install --frozen-lockfile" "Node version changed"
+	  add_workspace_quality_commands "Node version changed"
+	  ;;
   esac
 done < "$changed_paths_file"
 
@@ -264,7 +353,7 @@ echo
 
 if [[ ${#surfaces[@]} -gt 0 ]]; then
   echo "Detected surfaces:"
-  for surface in "${surfaces[@]}"; do
+  for surface in "${surfaces[@]+"${surfaces[@]}"}"; do
     echo "- ${surface}"
   done
   echo
@@ -272,14 +361,23 @@ fi
 
 if [[ ${#checklists[@]} -gt 0 ]]; then
   echo "Required checklist review:"
-  for entry in "${checklists[@]}"; do
+  for entry in "${checklists[@]+"${checklists[@]}"}"; do
     echo "- ${entry%%|*} (${entry#*|})"
   done
   echo
 fi
 
 echo "Mapped safe local commands:"
-for entry in "${commands[@]}"; do
+for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
+  echo "- ${entry%%|*} (${entry#*|})"
+done
+for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+  echo "- ${entry%%|*} (${entry#*|})"
+done
+for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
+  echo "- ${entry%%|*} (${entry#*|})"
+done
+for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
   echo "- ${entry%%|*} (${entry#*|})"
 done
 echo
@@ -290,7 +388,10 @@ if [[ "$mode" == "dry-run" ]]; then
 fi
 
 failures=0
-for entry in "${commands[@]}"; do
+for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}" \
+  "${codegen_commands[@]+"${codegen_commands[@]}"}" \
+  "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}" \
+  "${quality_commands[@]+"${quality_commands[@]}"}"; do
   command="${entry%%|*}"
   echo
   echo "+ ${command}"
