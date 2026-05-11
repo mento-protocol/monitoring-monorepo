@@ -21,7 +21,18 @@ import {
   type TraderDailyRow,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
+  type TraderWindowRow,
 } from "../leaderboard";
+import {
+  buildCorridorRows,
+  buildTraderCohortSummary,
+  computeLpFriendliness,
+  filterSwapOutliers,
+  parseUsdWei,
+  previousLeaderboardWindowBounds,
+  traderDayKey,
+  type SwapOutlierRow,
+} from "../leaderboard-insights";
 
 const ZERO_WEI = "0";
 const USD = (n: number) =>
@@ -342,6 +353,247 @@ describe("computeFlow", () => {
       }),
     );
     expect(r.direction).toBe(1);
+  });
+});
+
+describe("leaderboard insights", () => {
+  function windowRow(
+    partial: Partial<TraderWindowRow> & {
+      chainId: number;
+      trader: string;
+      volumeUsdWei: bigint;
+    },
+  ): TraderWindowRow {
+    return {
+      swapCount: 1,
+      uniquePoolsApprox: 1,
+      feesPaidUsdWei: BigInt(0),
+      isSystemAddress: false,
+      lastSeenTimestamp: 1,
+      ...partial,
+    };
+  }
+
+  function swap(partial: Partial<SwapOutlierRow>): SwapOutlierRow {
+    return {
+      id: "swap-1",
+      chainId: 42220,
+      poolId: "42220-0xpool",
+      caller: "0xa",
+      txTo: "0xrouter",
+      recipient: "0xa",
+      volumeUsdWei: USD(100),
+      txHash: "0xhash",
+      blockTimestamp: "1000",
+      ...partial,
+    };
+  }
+
+  it("splits current traders into new, returning, and dormant cohorts", () => {
+    const current = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xnew",
+        volumeUsdWei: BigInt(USD(300)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xkeep",
+        volumeUsdWei: BigInt(USD(200)),
+      }),
+    ];
+    const previous = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xkeep",
+        volumeUsdWei: BigInt(USD(150)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xdormant",
+        volumeUsdWei: BigInt(USD(120)),
+      }),
+    ];
+    const summary = buildTraderCohortSummary({ current, previous });
+    expect(summary.newCount).toBe(1);
+    expect(summary.returningCount).toBe(1);
+    expect(summary.dormantCount).toBe(1);
+    expect(summary.topNewTrader?.trader).toBe("0xnew");
+    expect(summary.topReturningTrader?.trader).toBe("0xkeep");
+    expect(summary.topDormantTrader?.trader).toBe("0xdormant");
+  });
+
+  it("scores LP friendliness from low imbalance plus fee revenue", () => {
+    const friendly = {
+      chainId: 42220,
+      trader: "0xa",
+      poolId: "42220-0xpool",
+      swapCount: 2,
+      volumeUsdWei: BigInt(USD(100)),
+      inflowToken0UsdWei: BigInt(USD(50)),
+      outflowToken0UsdWei: BigInt(USD(49)),
+      inflowToken1UsdWei: BigInt(USD(49)),
+      outflowToken1UsdWei: BigInt(USD(50)),
+      feesPaidUsdWei: BigInt(USD(0.1)),
+    } satisfies TraderPoolWindowRow;
+    const extractive = {
+      ...friendly,
+      inflowToken0UsdWei: BigInt(USD(100)),
+      outflowToken0UsdWei: BigInt(0),
+      inflowToken1UsdWei: BigInt(0),
+      outflowToken1UsdWei: BigInt(USD(100)),
+      feesPaidUsdWei: BigInt(0),
+    } satisfies TraderPoolWindowRow;
+
+    expect(computeLpFriendliness(friendly).band).toBe("friendly");
+    expect(computeLpFriendliness(friendly).ratio).toBeCloseTo(0.1, 4);
+    expect(computeLpFriendliness(extractive).band).toBe("extractive");
+    expect(computeLpFriendliness(friendly).score).toBeGreaterThan(
+      computeLpFriendliness(extractive).score,
+    );
+  });
+
+  it("handles zero-volume and zero-pressure LP score edges", () => {
+    const zeroVolume = {
+      chainId: 42220,
+      trader: "0xa",
+      poolId: "42220-0xpool",
+      swapCount: 0,
+      volumeUsdWei: BigInt(0),
+      inflowToken0UsdWei: BigInt(0),
+      outflowToken0UsdWei: BigInt(0),
+      inflowToken1UsdWei: BigInt(0),
+      outflowToken1UsdWei: BigInt(0),
+      feesPaidUsdWei: BigInt(USD(1)),
+    } satisfies TraderPoolWindowRow;
+    const zeroPressure = {
+      ...zeroVolume,
+      swapCount: 2,
+      volumeUsdWei: BigInt(USD(100)),
+      inflowToken0UsdWei: BigInt(USD(50)),
+      outflowToken0UsdWei: BigInt(USD(50)),
+      inflowToken1UsdWei: BigInt(USD(50)),
+      outflowToken1UsdWei: BigInt(USD(50)),
+    } satisfies TraderPoolWindowRow;
+
+    expect(computeLpFriendliness(zeroVolume)).toMatchObject({
+      score: 0,
+      ratio: 0,
+      band: "extractive",
+    });
+    expect(computeLpFriendliness(zeroPressure)).toMatchObject({
+      score: 100,
+      ratio: 1,
+      band: "friendly",
+    });
+  });
+
+  it("parses USD-wei strings defensively", () => {
+    expect(parseUsdWei("123")).toBe(BigInt(123));
+    expect(parseUsdWei("123.4")).toBe(BigInt(123));
+    expect(parseUsdWei("123.5")).toBe(BigInt(124));
+    expect(parseUsdWei("")).toBeNull();
+    expect(parseUsdWei("not-a-number")).toBeNull();
+  });
+
+  it("computes the previous bounded leaderboard window", () => {
+    const cutoff = 3_000_000;
+    expect(previousLeaderboardWindowBounds("all", cutoff)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", 0)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", cutoff)).toEqual({
+      afterTimestamp: cutoff - 30 * 86_400,
+      beforeTimestamp: cutoff,
+    });
+  });
+
+  it("builds directional corridors and filters to allowed traders", () => {
+    const rows = [
+      poolDay({
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(100),
+        inflowToken0UsdWei: USD(100),
+        outflowToken1UsdWei: USD(100),
+      }),
+      poolDay({
+        chainId: 42220,
+        trader: "0xb",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(80),
+        outflowToken0UsdWei: USD(80),
+        inflowToken1UsdWei: USD(80),
+      }),
+    ];
+    const corridors = buildCorridorRows({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
+    });
+
+    expect(corridors).toHaveLength(1);
+    expect(corridors[0]!.direction).toBe(0);
+    expect(corridors[0]!.traderCount).toBe(1);
+    expect(weiToUsd(corridors[0]!.netPressureUsdWei)).toBeCloseTo(100, 4);
+  });
+
+  it("filters swap outliers through the current trader set", () => {
+    const rows = [
+      swap({ id: "keep", caller: "0xabc" }),
+      swap({ id: "drop", caller: "0xdef" }),
+    ];
+    const outliers = filterSwapOutliers({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
+    });
+    expect(outliers.map((r) => r.id)).toEqual(["keep"]);
+  });
+
+  it("keeps corridor filtering scoped to the trader day", () => {
+    const rows = [
+      poolDay({
+        id: "visible-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(100),
+        inflowToken0UsdWei: USD(100),
+      }),
+      poolDay({
+        id: "hidden-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "86400",
+        volumeUsdWei: USD(500),
+        outflowToken0UsdWei: USD(500),
+      }),
+    ];
+
+    const corridors = buildCorridorRows({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
+    });
+
+    expect(corridors).toHaveLength(1);
+    expect(corridors[0]!.direction).toBe(0);
+    expect(weiToUsd(corridors[0]!.volumeUsdWei)).toBeCloseTo(100, 4);
+  });
+
+  it("keeps outlier filtering scoped to the trader day", () => {
+    const rows = [
+      swap({ id: "visible-day", caller: "0xabc", blockTimestamp: "1000" }),
+      swap({ id: "hidden-day", caller: "0xabc", blockTimestamp: "86400" }),
+    ];
+
+    const outliers = filterSwapOutliers({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
+    });
+
+    expect(outliers.map((r) => r.id)).toEqual(["visible-day"]);
   });
 });
 
