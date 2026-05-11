@@ -106,6 +106,27 @@ assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
 
+validator_repo="$(mktemp -d)"
+(
+  cd "$validator_repo"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "true",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+  }
+}
+JSON
+  set +e
+  bash "$repo_root/scripts/check-agent-quality-gate-package-scripts.sh" > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$validator_repo"
+assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agent-quality-gate.sh"'
+
 run_gate "ui-dashboard/package.json"
 assert_contains "- ./tools/trunk check --all (changed files should pass the same full-repo Trunk scope as CI)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
@@ -191,6 +212,7 @@ NODE
 )
 rm -rf "$package_json_repo"
 assert_contains "- tooling"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package agent quality gate script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package agent quality gate script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
@@ -226,6 +248,7 @@ NODE
 rm -rf "$package_script_repo"
 assert_contains "- workspace"
 assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
@@ -499,6 +522,11 @@ assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping chan
 
 run_gate "scripts/check-react-doctor-score.sh"
 assert_contains "- bash -n scripts/check-react-doctor-score.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+
+run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "- bash -n scripts/check-agent-quality-gate-package-scripts.sh (shell script changed)"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (agent quality gate package script validator changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
 run_gate ".trunk/trunk.yaml"

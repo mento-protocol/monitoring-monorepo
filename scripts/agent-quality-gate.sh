@@ -389,6 +389,12 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
 }
 
+add_agent_quality_gate_package_script_checks() {
+  local reason="$1"
+  add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
+  add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
+}
+
 add_indexer_post_codegen_install() {
   add_post_codegen_command "pnpm install --frozen-lockfile" "link generated package after indexer codegen"
 }
@@ -483,13 +489,13 @@ while IFS= read -r path; do
       case "$root_package_json_class" in
         agent-quality-gate-scripts)
           add_surface "tooling"
-          add_command "bash scripts/agent-quality-gate.test.sh" "root package agent quality gate script changed"
+          add_agent_quality_gate_package_script_checks "root package agent quality gate script changed"
           ;;
         package-scripts)
           package_script_risk_changed=true
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "root package script changed"
-          add_command "bash scripts/agent-quality-gate.test.sh" "root package script changed"
+          add_agent_quality_gate_package_script_checks "root package script changed"
           add_workspace_quality_commands "root package script changed"
           ;;
         *)
@@ -666,6 +672,10 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
+        scripts/check-agent-quality-gate-package-scripts.sh)
+          add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "agent quality gate package script validator changed"
+          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          ;;
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
