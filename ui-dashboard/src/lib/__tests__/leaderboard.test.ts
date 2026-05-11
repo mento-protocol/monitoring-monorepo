@@ -28,6 +28,8 @@ import {
   buildTraderCohortSummary,
   computeLpFriendliness,
   filterSwapOutliers,
+  parseUsdWei,
+  previousLeaderboardWindowBounds,
   traderIdentityKey,
   type SwapOutlierRow,
 } from "../leaderboard-insights";
@@ -449,6 +451,55 @@ describe("leaderboard insights", () => {
     expect(computeLpFriendliness(friendly).score).toBeGreaterThan(
       computeLpFriendliness(extractive).score,
     );
+  });
+
+  it("handles zero-volume and zero-pressure LP score edges", () => {
+    const zeroVolume = {
+      chainId: 42220,
+      trader: "0xa",
+      poolId: "42220-0xpool",
+      swapCount: 0,
+      volumeUsdWei: BigInt(0),
+      inflowToken0UsdWei: BigInt(0),
+      outflowToken0UsdWei: BigInt(0),
+      inflowToken1UsdWei: BigInt(0),
+      outflowToken1UsdWei: BigInt(0),
+      feesPaidUsdWei: BigInt(USD(1)),
+    } satisfies TraderPoolWindowRow;
+    const zeroPressure = {
+      ...zeroVolume,
+      swapCount: 2,
+      volumeUsdWei: BigInt(USD(100)),
+      inflowToken0UsdWei: BigInt(USD(50)),
+      outflowToken0UsdWei: BigInt(USD(50)),
+      inflowToken1UsdWei: BigInt(USD(50)),
+      outflowToken1UsdWei: BigInt(USD(50)),
+    } satisfies TraderPoolWindowRow;
+
+    expect(computeLpFriendliness(zeroVolume)).toMatchObject({
+      score: 0,
+      ratio: 0,
+      band: "extractive",
+    });
+    expect(computeLpFriendliness(zeroPressure).score).toBe(100);
+  });
+
+  it("parses USD-wei strings defensively", () => {
+    expect(parseUsdWei("123")).toBe(BigInt(123));
+    expect(parseUsdWei("123.4")).toBe(BigInt(123));
+    expect(parseUsdWei("123.5")).toBe(BigInt(124));
+    expect(parseUsdWei("")).toBeNull();
+    expect(parseUsdWei("not-a-number")).toBeNull();
+  });
+
+  it("computes the previous bounded leaderboard window", () => {
+    const cutoff = 3_000_000;
+    expect(previousLeaderboardWindowBounds("all", cutoff)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", 0)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", cutoff)).toEqual({
+      afterTimestamp: cutoff - 30 * 86_400,
+      beforeTimestamp: cutoff,
+    });
   });
 
   it("builds directional corridors and filters to allowed traders", () => {

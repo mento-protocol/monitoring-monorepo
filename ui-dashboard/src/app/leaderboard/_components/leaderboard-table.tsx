@@ -23,6 +23,7 @@ import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/leaderboard";
 import { FlowBadge } from "./flow-badge";
+import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 import { SystemAddressChip } from "./system-address-chip";
 
 const SORT_KEYS = ["volume", "swaps", "pools", "fees", "lastSeen"] as const;
@@ -418,15 +419,7 @@ function ExpandedBreakdown({
                   {formatUSD(weiToUsd(p.feesPaidUsdWei))}
                 </td>
                 <td className="px-3 py-1.5 text-right">
-                  <span
-                    className={
-                      "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium " +
-                      lpClass(lp.band)
-                    }
-                    title={`LP-friendliness ${lp.score}/100 · ${lp.ratio.toFixed(4)} fee/pressure`}
-                  >
-                    {lp.score}
-                  </span>
+                  <LpFriendlinessBadge value={lp} />
                 </td>
               </tr>
             );
@@ -440,12 +433,4 @@ function ExpandedBreakdown({
       )}
     </div>
   );
-}
-
-function lpClass(
-  band: ReturnType<typeof computeLpFriendliness>["band"],
-): string {
-  if (band === "friendly") return "bg-emerald-500/15 text-emerald-300";
-  if (band === "balanced") return "bg-sky-500/15 text-sky-300";
-  return "bg-amber-500/15 text-amber-300";
 }

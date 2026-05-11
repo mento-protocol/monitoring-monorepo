@@ -2,10 +2,13 @@ import {
   aggregateTraderPoolsByWindow,
   computeFlow,
   cmpBigInt,
+  rangeDays,
+  type LeaderboardRangeKey,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
   type TraderWindowRow,
 } from "@/lib/leaderboard";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 export type LpFriendlinessBand = "friendly" | "balanced" | "extractive";
 
@@ -72,6 +75,33 @@ const ZERO = BigInt(0);
 
 export function traderIdentityKey(chainId: number, trader: string): string {
   return `${chainId}-${trader.toLowerCase()}`;
+}
+
+export function parseUsdWei(value: string): bigint | null {
+  const trimmed = value.trim();
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) return null;
+  const sign = match[1] === "-" ? -BigInt(1) : BigInt(1);
+  const whole = BigInt(match[2]!);
+  const fraction = match[3];
+  const rounded =
+    fraction && fraction[0] !== undefined && Number(fraction[0]) >= 5
+      ? whole + BigInt(1)
+      : whole;
+  return sign * rounded;
+}
+
+export function previousLeaderboardWindowBounds(
+  range: LeaderboardRangeKey,
+  cutoff: number,
+): { afterTimestamp: number; beforeTimestamp: number } | null {
+  const days = rangeDays(range);
+  if (days === null || cutoff <= 0) return null;
+  const spanSeconds = days * SECONDS_PER_DAY;
+  return {
+    afterTimestamp: Math.max(0, cutoff - spanSeconds),
+    beforeTimestamp: cutoff,
+  };
 }
 
 export function computeLpFriendliness(
@@ -190,6 +220,8 @@ export function buildCorridorRows({
 
   return Array.from(corridors.entries())
     .map(([key, c]) => {
+      // `computeLpFriendliness` ignores the trader field; the sentinel keeps
+      // the aggregated corridor shaped like a normal trader-pool window row.
       const poolLike: TraderPoolWindowRow = {
         chainId: c.chainId,
         trader: "__corridor__",

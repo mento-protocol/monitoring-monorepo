@@ -7,12 +7,8 @@ import {
   AggregatorBreakdownSection,
   type AggregatorChartProps,
 } from "./aggregator-breakdown-section";
+import type { PoolMeta } from "../_lib/types";
 import { V3FlowInsights } from "./v3-flow-insights";
-
-type PoolMeta = ReadonlyMap<
-  string,
-  { token0: string | null; token1: string | null }
->;
 
 export function V3LeaderboardSection({
   rangeLabel,

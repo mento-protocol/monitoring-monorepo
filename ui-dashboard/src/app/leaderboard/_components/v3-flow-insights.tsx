@@ -10,7 +10,6 @@ import { Skeleton } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateTradersByWindow,
-  rangeDays,
   weiToUsd,
   type LeaderboardRangeKey,
   type TraderDailyRow,
@@ -21,9 +20,10 @@ import {
   buildCorridorRows,
   buildTraderCohortSummary,
   filterSwapOutliers,
+  parseUsdWei,
+  previousLeaderboardWindowBounds,
   traderIdentityKey,
   type CorridorRow,
-  type LpFriendliness,
   type SwapOutlierRow,
   type TraderCohortSummary,
 } from "@/lib/leaderboard-insights";
@@ -34,15 +34,11 @@ import {
 } from "@/lib/queries/leaderboard";
 import { networkForChainId } from "@/lib/networks";
 import { explorerTxUrl, poolName } from "@/lib/tokens";
-import { SECONDS_PER_DAY } from "@/lib/time-series";
-
-type PoolMeta = ReadonlyMap<
-  string,
-  { token0: string | null; token1: string | null }
->;
+import type { PoolMeta } from "../_lib/types";
+import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 
 const INSIGHT_ROW_LIMIT = 10;
-const SWAP_OUTLIER_LIMIT = 50;
+const SWAP_OUTLIER_FETCH_LIMIT = 50;
 
 export function V3FlowInsights({
   range,
@@ -66,7 +62,7 @@ export function V3FlowInsights({
   tableHasError: boolean;
 }) {
   const previousBounds = useMemo(
-    () => previousWindowBounds(range, cutoff),
+    () => previousLeaderboardWindowBounds(range, cutoff),
     [range, cutoff],
   );
   const previousTradersResult = useGQL<{
@@ -96,7 +92,7 @@ export function V3FlowInsights({
     SwapEvent: SwapOutlierRow[];
   }>(
     SWAP_EVENT_OUTLIERS,
-    { afterTimestamp: cutoff, limit: SWAP_OUTLIER_LIMIT },
+    { afterTimestamp: cutoff, limit: SWAP_OUTLIER_FETCH_LIMIT },
     60_000,
     { timeoutMs: 8_000 },
   );
@@ -363,7 +359,7 @@ function InsightPanel({
 
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-slate-800/70 bg-slate-950/40 p-3">
+    <div className="min-w-0">
       <p className="text-[11px] text-slate-500">{label}</p>
       <p className="mt-1 font-mono text-lg font-semibold text-white">
         {value.toLocaleString()}
@@ -444,7 +440,7 @@ function CorridorTableRow({
         {formatUSD(weiToUsd(row.netPressureUsdWei))}
       </td>
       <td className="py-2 pl-3 text-right">
-        <LpBadge value={row.lpFriendliness} />
+        <LpFriendlinessBadge value={row.lpFriendliness} />
       </td>
     </tr>
   );
@@ -469,7 +465,7 @@ function OutlierTableRow({
       </td>
       <td className="px-3 py-2 text-slate-300">{label}</td>
       <td className="px-3 py-2 text-right font-mono text-slate-300">
-        {formatUSD(weiToUsd(BigInt(row.volumeUsdWei)))}
+        <OutlierVolume value={row.volumeUsdWei} />
       </td>
       <td className="py-2 pl-3 text-right">
         {txUrl ? (
@@ -490,46 +486,30 @@ function OutlierTableRow({
   );
 }
 
-function LpBadge({ value }: { value: LpFriendliness }) {
-  const cls =
-    value.band === "friendly"
-      ? "bg-emerald-500/15 text-emerald-300"
-      : value.band === "balanced"
-        ? "bg-sky-500/15 text-sky-300"
-        : "bg-amber-500/15 text-amber-300";
-  return (
-    <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
-      title={`${value.feeRateBps.toFixed(2)} bps fees · ${value.ratio.toFixed(4)} fee/pressure`}
-    >
-      {value.score}
-    </span>
-  );
-}
-
 function directionText(
   row: CorridorRow,
   meta: { token0: string | null; token1: string | null } | undefined,
 ): string {
   const network = networkForChainId(row.chainId);
-  if (!network || !meta) return row.direction === 0 ? "Token0" : "Token1";
+  if (!network || !meta)
+    return row.direction === 0 ? "Into token0" : "Into token1";
   const symbols = network.tokenSymbols;
   const token =
     row.direction === 0
       ? symbols[(meta.token0 ?? "").toLowerCase()]
       : symbols[(meta.token1 ?? "").toLowerCase()];
-  return token ? `+${token}` : row.direction === 0 ? "Token0" : "Token1";
+  return token
+    ? `Into ${token}`
+    : row.direction === 0
+      ? "Into token0"
+      : "Into token1";
 }
 
-function previousWindowBounds(
-  range: LeaderboardRangeKey,
-  cutoff: number,
-): { afterTimestamp: number; beforeTimestamp: number } | null {
-  const days = rangeDays(range);
-  if (days === null || cutoff <= 0) return null;
-  const spanSeconds = days * SECONDS_PER_DAY;
-  return {
-    afterTimestamp: Math.max(0, cutoff - spanSeconds),
-    beforeTimestamp: cutoff,
-  };
+function OutlierVolume({ value }: { value: string }) {
+  const parsed = parseUsdWei(value);
+  return parsed === null ? (
+    <span className="text-slate-500">—</span>
+  ) : (
+    <>{formatUSD(weiToUsd(parsed))}</>
+  );
 }
