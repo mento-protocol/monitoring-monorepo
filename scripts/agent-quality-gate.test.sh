@@ -6,7 +6,7 @@ cd "$repo_root"
 
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
-trap 'rm -f "$paths_file" "$output_file"' EXIT
+trap 'rm -f "$paths_file" "$output_file" "$output_file.pnpm-args"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -391,6 +391,38 @@ assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping chan
 run_gate "scripts/check-react-doctor-score.sh"
 assert_contains "- bash -n scripts/check-react-doctor-score.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+
+react_doctor_repo="$(mktemp -d)"
+(
+  cd "$react_doctor_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  git add README.md
+  git commit -qm init
+  original_head="$(git rev-parse --verify HEAD)"
+  mkdir -p bin scripts
+  cp "$repo_root/scripts/check-react-doctor-diff.sh" scripts/check-react-doctor-diff.sh
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$PNPM_ARGS_FILE"
+STUB
+  chmod +x bin/pnpm
+  git switch --detach HEAD >/dev/null 2>&1
+  PNPM_ARGS_FILE="$output_file.pnpm-args" PATH="$PWD/bin:$PATH" bash scripts/check-react-doctor-diff.sh origin/test
+  [[ "$(git rev-parse --abbrev-ref HEAD)" == "HEAD" ]] ||
+    fail "React Doctor diff helper did not restore detached HEAD"
+  [[ "$(git rev-parse --verify HEAD)" == "$original_head" ]] ||
+    fail "React Doctor diff helper did not restore original commit"
+  [[ -z "$(git for-each-ref --format='%(refname:short)' refs/heads/__react_doctor_scan*)" ]] ||
+    fail "React Doctor diff helper left a temporary branch behind"
+  grep -Fxq -- "--diff" "$output_file.pnpm-args" ||
+    fail "React Doctor diff helper did not forward --diff"
+  grep -Fxq -- "origin/test" "$output_file.pnpm-args" ||
+    fail "React Doctor diff helper did not forward the base ref"
+)
+rm -rf "$react_doctor_repo"
 
 rename_repo="$(mktemp -d)"
 (
