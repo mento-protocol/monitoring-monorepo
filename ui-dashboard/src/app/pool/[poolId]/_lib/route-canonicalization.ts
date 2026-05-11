@@ -12,6 +12,13 @@ function isRoutableChainId(chainId: number): boolean {
   return networkId !== null && isConfiguredNetworkId(networkId);
 }
 
+function parseNamespacedChainId(poolId: string): number | null {
+  const [chainId] = poolId.split("-", 1);
+  if (!chainId || !/^\d+$/.test(chainId)) return null;
+  const parsed = Number(chainId);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function parseRouteChainId(
   value: string | string[] | undefined,
 ): number | null {
@@ -27,7 +34,7 @@ export function routeCanonicalPoolId(
   chainId: number | null,
 ): string {
   if (isNamespacedPoolId(poolId)) {
-    const routeChainId = extractChainIdFromPoolId(poolId);
+    const routeChainId = parseNamespacedChainId(poolId);
     if (routeChainId !== null) {
       return normalizePoolIdForChain(
         stripChainIdFromPoolId(poolId),

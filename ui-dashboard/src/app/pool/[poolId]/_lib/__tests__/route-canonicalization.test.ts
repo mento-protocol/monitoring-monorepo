@@ -68,6 +68,14 @@ describe("pool route canonicalization", () => {
     ).toBe("143-0xaaa0000000000000000000000000000000000001");
   });
 
+  it("does not canonicalize unsafe namespaced chain prefixes", () => {
+    const unsafeId = `${Number.MAX_SAFE_INTEGER + 1}-0xAaa0000000000000000000000000000000000001`;
+    expect(routeCanonicalPoolId(unsafeId, null)).toBe(
+      `${Number.MAX_SAFE_INTEGER + 1}-0xaaa0000000000000000000000000000000000001`,
+    );
+    expect(isRoutablePoolId(unsafeId)).toBe(false);
+  });
+
   it("only marks namespaced ids as routable", () => {
     expect(isRoutablePoolId("0xaaa0000000000000000000000000000000000001")).toBe(
       false,
