@@ -10,7 +10,7 @@ import {
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 
-export type LpFriendlinessBand = "friendly" | "balanced" | "extractive";
+type LpFriendlinessBand = "friendly" | "balanced" | "extractive";
 
 export type LpFriendliness = {
   score: number;
@@ -73,7 +73,7 @@ type CorridorAccumulator = {
 
 const ZERO = BigInt(0);
 
-export function traderIdentityKey(chainId: number, trader: string): string {
+function traderIdentityKey(chainId: number, trader: string): string {
   return `${chainId}-${trader.toLowerCase()}`;
 }
 

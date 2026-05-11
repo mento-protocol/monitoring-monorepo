@@ -30,9 +30,12 @@ export async function fetchPoolVolumeSnapshots(
   const seen = new Set<string>();
   const signal = AbortSignal.timeout(POLL_TIMEOUT_MS);
 
+  // Sequential pagination keeps the poll bounded by one shared timeout and
+  // stops as soon as Hasura returns a short page.
   for (let page = 0; page <= MAX_PAGES; page += 1) {
     let batch: PoolDailyVolumeRow[];
     try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const result = await client.request<PoolVolumePage>({
         document: POOL_DAILY_VOLUME,
         variables: {
