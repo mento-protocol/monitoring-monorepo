@@ -9,6 +9,7 @@
     "dashboard:react-doctor": "pnpm --filter @mento-protocol/ui-dashboard react-doctor",
     "dashboard:react-doctor:diff": "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/main --fail-on warning --offline",
     "deploy:dashboard": "./scripts/deploy-dashboard.sh",
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "deploy:indexer": "./scripts/deploy-indexer.sh",
     "deploy:indexer:status": "./scripts/deploy-indexer-status.sh",
     "deploy:indexer:promote": "./scripts/deploy-indexer-promote.sh",

@@ -29,6 +29,26 @@ then you are expected to run the dedicated PR checklist before opening or updati
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
+## Agent Quality Gate
+
+Before opening or updating an agent-authored PR, run:
+
+```bash
+pnpm agent:quality-gate
+```
+
+The gate defaults to dry-run mode and maps changed paths to the package checks
+and PR checklists that apply. Review the checklist output, then run the mapped
+safe local commands with:
+
+```bash
+pnpm agent:quality-gate --run
+```
+
+The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
+Trunk, and formatting/validation commands. It never runs deploy commands or
+Terraform apply.
+
 ## Recurring PR-review patterns — fix locally, not in review
 
 Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. Each rule is a hard must/never — if your change touches one of these areas, follow the linked checklist before opening the PR.
