@@ -423,6 +423,59 @@ describe("leaderboard insights", () => {
     expect(summary.topDormantTrader?.trader).toBe("0xdormant");
   });
 
+  it("selects top cohort traders by volume, not input order", () => {
+    const current = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-new",
+        volumeUsdWei: BigInt(USD(10)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-returning",
+        volumeUsdWei: BigInt(USD(20)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-new",
+        volumeUsdWei: BigInt(USD(500)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-returning",
+        volumeUsdWei: BigInt(USD(400)),
+      }),
+    ];
+    const previous = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-dormant",
+        volumeUsdWei: BigInt(USD(15)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-returning",
+        volumeUsdWei: BigInt(USD(100)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-dormant",
+        volumeUsdWei: BigInt(USD(600)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-returning",
+        volumeUsdWei: BigInt(USD(300)),
+      }),
+    ];
+
+    const summary = buildTraderCohortSummary({ current, previous });
+
+    expect(summary.topNewTrader?.trader).toBe("0xlarge-new");
+    expect(summary.topReturningTrader?.trader).toBe("0xlarge-returning");
+    expect(summary.topDormantTrader?.trader).toBe("0xlarge-dormant");
+  });
+
   it("scores LP friendliness from low imbalance plus fee revenue", () => {
     const friendly = {
       chainId: 42220,

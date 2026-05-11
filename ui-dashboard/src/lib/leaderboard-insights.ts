@@ -177,10 +177,39 @@ export function buildTraderCohortSummary({
     newCount: newTraders.length,
     returningCount: returningTraders.length,
     dormantCount: dormantTraders.length,
-    topNewTrader: newTraders[0] ?? null,
-    topReturningTrader: returningTraders[0] ?? null,
-    topDormantTrader: dormantTraders[0] ?? null,
+    topNewTrader: topTraderByVolume(newTraders),
+    topReturningTrader: topTraderByVolume(returningTraders),
+    topDormantTrader: topTraderByVolume(dormantTraders),
   };
+}
+
+function topTraderByVolume(
+  rows: readonly TraderWindowRow[],
+): TraderWindowRow | null {
+  let top: TraderWindowRow | null = null;
+  for (const row of rows) {
+    if (!top) {
+      top = row;
+      continue;
+    }
+    if (row.volumeUsdWei > top.volumeUsdWei) {
+      top = row;
+      continue;
+    }
+    if (row.volumeUsdWei === top.volumeUsdWei) {
+      if (row.chainId < top.chainId) {
+        top = row;
+        continue;
+      }
+      if (
+        row.chainId === top.chainId &&
+        row.trader.localeCompare(top.trader) < 0
+      ) {
+        top = row;
+      }
+    }
+  }
+  return top;
 }
 
 export function buildCorridorRows({
