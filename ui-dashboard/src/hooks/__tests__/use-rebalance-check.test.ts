@@ -8,12 +8,12 @@ import type { Network } from "@/lib/networks";
 
 // Capture SWR's key argument per call so we can assert gating — null means
 // "don't fetch", a URL string means the hook decided to fetch.
-const useSWRMock = vi.fn();
+const swrMock = vi.fn();
 vi.mock("swr", () => ({
   default: (
     key: string | null,
   ): { data: undefined; error: undefined; isLoading: boolean } => {
-    useSWRMock(key);
+    swrMock(key);
     return { data: undefined, error: undefined, isLoading: false };
   },
 }));
@@ -27,7 +27,7 @@ vi.mock("@/lib/health", () => ({
 import { useRebalanceCheck } from "../use-rebalance-check";
 
 function captureKey(pool: Pool, network: Network): string | null | undefined {
-  useSWRMock.mockClear();
+  swrMock.mockClear();
   function Probe() {
     useRebalanceCheck(pool, network);
     return null;
@@ -39,7 +39,7 @@ function captureKey(pool: Pool, network: Network): string | null | undefined {
   });
   root.unmount();
   // Last observed key argument passed to useSWR.
-  return useSWRMock.mock.calls[0]?.[0];
+  return swrMock.mock.calls[0]?.[0];
 }
 
 const CRITICAL_POOL: Pool = {
@@ -75,7 +75,7 @@ const NETWORK_WITH_RPC: Network = {
 };
 
 beforeEach(() => {
-  useSWRMock.mockReset();
+  swrMock.mockReset();
 });
 
 describe("useRebalanceCheck RPC-availability gate", () => {
