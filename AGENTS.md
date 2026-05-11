@@ -29,9 +29,46 @@ then you are expected to run the dedicated PR checklist before opening or updati
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
+## Agent Quality Gate
+
+Before opening or updating an agent-authored PR, run:
+
+```bash
+pnpm agent:quality-gate
+```
+
+The gate defaults to dry-run mode and maps changed paths to the package checks
+and PR checklists that apply. Review the checklist output, then run the mapped
+safe local commands with:
+
+```bash
+pnpm agent:quality-gate --run
+```
+
+The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
+Trunk, and formatting/validation commands. It never runs deploy commands or
+Terraform apply. If any package manifest, `pnpm-lock.yaml`,
+`pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
+execute until you review package scripts/lifecycle hooks and pass
+`--allow-package-script-changes`.
+
+The Trunk pre-push hook delegates to this same path-aware gate with
+`--fail-fast`, so the hook stops on the first failed mapped command instead of
+burning through the rest of the suite. For a push that intentionally changes
+package scripts or package-manager config, review the script/lifecycle diff
+first, then temporarily set
+`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
+push.
+
 ## PR feedback sweep rule
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
+
+## Review-loop discipline
+
+Treat code review as a batch-boundary verifier, not as the inner edit loop. When a reviewer finds one instance of a hazard, audit the sibling surfaces before pushing: adjacent commands, package-manager files, workflow paths, deploy scripts, shared helpers, parallel components, docs, and tests that encode the same rule.
+
+For process or policy-router PRs, build a coverage matrix before implementation. Use `AGENTS.md`, `docs/pr-checklists/*`, CI path filters, package scripts, and existing command docs to map each changed-path class to its required commands, checklist prompts, refusal guards, and regression tests. Run cheap targeted checks while editing; reserve broad local reviews and external bot reviews for completed batches.
 
 ## Recurring PR-review patterns — fix locally, not in review
 
