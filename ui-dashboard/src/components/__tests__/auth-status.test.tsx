@@ -44,6 +44,8 @@ vi.mock("next/link", () => ({
 
 let container: HTMLElement | null = null;
 let root: Root | null = null;
+let originalPushState: History["pushState"];
+let originalReplaceState: History["replaceState"];
 let previousActEnvironment: boolean | undefined;
 
 function setup(url: string) {
@@ -78,6 +80,8 @@ function signInLink() {
 }
 
 beforeEach(() => {
+  originalPushState = window.history.pushState;
+  originalReplaceState = window.history.replaceState;
   previousActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
@@ -95,6 +99,9 @@ afterEach(() => {
   }
   root = null;
   container = null;
+  window.history.pushState = originalPushState;
+  window.history.replaceState = originalReplaceState;
+  delete window.__mentoLocationChangePatched;
   window.history.replaceState(window.history.state, "", "/");
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
 });
