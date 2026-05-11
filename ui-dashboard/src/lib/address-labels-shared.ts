@@ -61,6 +61,7 @@ export type AddressLabelsSnapshot = {
 /** Tally of newly-imported labels returned by the import API. */
 export type ImportedCounts = {
   addresses: number;
+  reports?: number;
 };
 
 /**

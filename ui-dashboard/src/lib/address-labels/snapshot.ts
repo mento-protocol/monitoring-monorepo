@@ -4,6 +4,7 @@ import {
   importLabels,
   getLabels,
   mergeEntries,
+  replaceLabels,
   upgradeEntries,
   type AddressEntry,
   type AddressLabelsSnapshot,
@@ -12,6 +13,7 @@ import {
   importReports,
   MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
   MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
+  replaceReports,
   type AddressReport,
 } from "@/lib/address-reports";
 import { upgradeReport } from "@/lib/address-reports-shared";
@@ -19,6 +21,8 @@ import { isValidAddress } from "@/lib/format";
 import { mergeWithExisting, sanitizeAndFilter } from "./import-helpers";
 
 type SnapshotReportMetadataMode = "restamp" | "preserve";
+type SnapshotLabelProvenanceMode = "strip" | "preserve";
+type SnapshotWriteMode = "merge" | "replace";
 
 /**
  * Snapshot import options.
@@ -31,11 +35,17 @@ type SnapshotReportMetadataMode = "restamp" | "preserve";
  * `reportMetadataMode: "preserve"` is for server-side restores from the
  * private Vercel Blob backup store. Those snapshots are produced by our cron,
  * so restores preserve report author/timestamp/version metadata verbatim.
+ *
+ * `labelProvenanceMode: "preserve"` and `writeMode: "replace"` are also
+ * reserved for those trusted restores. User-uploaded imports keep stripping
+ * server-owned label provenance and merge into the existing Redis hashes.
  */
 type SnapshotImportOptions = {
   /** Email of the authenticated user driving a user-uploaded import. */
   importerEmail: string;
   reportMetadataMode?: SnapshotReportMetadataMode;
+  labelProvenanceMode?: SnapshotLabelProvenanceMode;
+  writeMode?: SnapshotWriteMode;
   /** Sentry/log route tag for server errors. */
   errorTag?: string;
 };
@@ -128,35 +138,56 @@ export async function handleSnapshot(
   }
   const reportsToImport: Record<string, AddressReport> =
     reportsValidation.reports;
+  const importedReports = Object.keys(reportsToImport).length;
+  const writeMode = options.writeMode ?? "merge";
+  const labelProvenanceMode = options.labelProvenanceMode ?? "strip";
+  const hasLabelPayload =
+    body.addresses !== undefined ||
+    body.global !== undefined ||
+    body.chains !== undefined;
+  const hasReportPayload = body.reports !== undefined;
 
   if (
     Object.keys(merged).length === 0 &&
-    Object.keys(reportsToImport).length === 0
+    importedReports === 0 &&
+    !(writeMode === "replace" && (hasLabelPayload || hasReportPayload))
   ) {
-    return NextResponse.json({ ok: true, imported: { addresses: 0 } });
+    return NextResponse.json({
+      ok: true,
+      imported: { addresses: 0, reports: 0 },
+    });
   }
 
   try {
     let importedAddresses = 0;
-    if (Object.keys(merged).length > 0) {
+    if (writeMode === "replace" && hasLabelPayload) {
+      const finalLabels = sanitizeAndFilter(merged);
+      await replaceLabels(finalLabels);
+      importedAddresses = Object.keys(finalLabels).length;
+    } else if (Object.keys(merged).length > 0) {
       let existing: Record<string, AddressEntry>;
       try {
         existing = await getLabels();
       } catch (err) {
         return serverError(err, options.errorTag);
       }
-      const finalLabels = sanitizeAndFilter(
-        mergeWithExisting(merged, existing),
-      );
+      const mergedLabels =
+        labelProvenanceMode === "preserve"
+          ? mergePreservingProvenance(merged, existing)
+          : mergeWithExisting(merged, existing);
+      const finalLabels = sanitizeAndFilter(mergedLabels);
       await importLabels(finalLabels);
       importedAddresses = Object.keys(finalLabels).length;
     }
-    if (Object.keys(reportsToImport).length > 0) {
+
+    if (writeMode === "replace" && hasReportPayload) {
+      await replaceReports(reportsToImport);
+    } else if (importedReports > 0) {
       await importReports(reportsToImport);
     }
     return NextResponse.json({
       ok: true,
-      imported: { addresses: importedAddresses },
+      imported: { addresses: importedAddresses, reports: importedReports },
     });
   } catch (err) {
     return serverError(err, options.errorTag);
@@ -231,6 +262,13 @@ export function validateSnapshotReports(
     }
 
     if (mode === "preserve") {
+      if (
+        p.authorEmail !== undefined &&
+        p.authorEmail !== null &&
+        (typeof p.authorEmail !== "string" || !/@/.test(p.authorEmail))
+      ) {
+        return { error: `Report for ${addr} has invalid authorEmail` };
+      }
       const restored = upgradeReport(p);
       result[addr.toLowerCase()] = {
         ...restored,
@@ -268,7 +306,8 @@ export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
 /**
  * Validates that a value is a map of address → entry objects.
  * Accepts both v1 (label field) and v2 (name field) entry shapes.
- * Entries where both name/label is empty and tags is empty are excluded.
+ * This is only a structural gate; sanitizeAndFilter handles content filtering
+ * after legacy entries are upgraded.
  */
 export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
@@ -283,6 +322,34 @@ export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
       return hasName || hasTags;
     },
   );
+}
+
+function mergePreservingProvenance(
+  incoming: Record<string, AddressEntry>,
+  existing: Record<string, AddressEntry>,
+): Record<string, AddressEntry> {
+  const out: Record<string, AddressEntry> = {};
+  for (const [addr, entry] of Object.entries(incoming)) {
+    const prev = existing[addr.toLowerCase()];
+    if (!prev) {
+      out[addr] = entry;
+      continue;
+    }
+    const incomingDefined: Partial<AddressEntry> = {};
+    for (const [k, v] of Object.entries(entry) as Array<
+      [keyof AddressEntry, unknown]
+    >) {
+      if (v !== undefined) {
+        (incomingDefined as Record<string, unknown>)[k] = v;
+      }
+    }
+    out[addr] = {
+      ...prev,
+      ...incomingDefined,
+      tags: entry.tags,
+    } as AddressEntry;
+  }
+  return out;
 }
 
 function serverError(err: unknown, routeTag = "address-labels/import") {

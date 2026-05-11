@@ -95,13 +95,15 @@ describe("POST /api/address-labels/restore", () => {
     expect(res.status).toBe(200);
     expect(mockGet).toHaveBeenCalledWith(
       "address-labels-backup-2026-05-11.json",
-      expect.objectContaining({ access: "private" }),
+      expect.objectContaining({ access: "private", useCache: false }),
     );
     expect(mockHandleSnapshot).toHaveBeenCalledWith(
       snapshot,
       expect.objectContaining({
         importerEmail: "restore@cron",
         reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
         errorTag: "address-labels/restore",
       }),
     );
@@ -136,6 +138,21 @@ describe("POST /api/address-labels/restore", () => {
       }),
     );
     expect(res.status).toBe(404);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized Blob before reading the stream", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult({ addresses: {} }, 32 * 1024 * 1024 + 1) as Awaited<
+        ReturnType<typeof get>
+      >,
+    );
+    const res = await POST(
+      req("address-labels-backup-2026-05-11.json", {
+        authorization: "Bearer secret",
+      }),
+    );
+    expect(res.status).toBe(413);
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 

@@ -16,6 +16,7 @@ vi.mock("@/lib/address-labels", async () => {
   return {
     ...shared,
     importLabels: vi.fn().mockResolvedValue(undefined),
+    replaceLabels: vi.fn().mockResolvedValue(undefined),
     getLabels: vi.fn().mockResolvedValue({}),
   };
 });
@@ -26,6 +27,7 @@ vi.mock("@/lib/address-reports", async () => {
   >("@/lib/address-reports-shared");
   return {
     importReports: vi.fn().mockResolvedValue(undefined),
+    replaceReports: vi.fn().mockResolvedValue(undefined),
     upgradeReports: shared.upgradeReports,
     MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
     MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,
@@ -33,10 +35,12 @@ vi.mock("@/lib/address-reports", async () => {
 });
 
 import type { AddressEntry } from "@/lib/address-labels";
-import { getLabels } from "@/lib/address-labels";
+import { getLabels, importLabels, replaceLabels } from "@/lib/address-labels";
+import { importReports, replaceReports } from "@/lib/address-reports";
 
 import {
   emptyCounts,
+  handleSnapshot,
   isEntriesMap,
   isGnosisSafeFormat,
   isSnapshot,
@@ -62,6 +66,10 @@ function entry(overrides: Partial<AddressEntry> = {}): AddressEntry {
 beforeEach(() => {
   vi.clearAllMocks();
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (replaceLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (replaceReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 });
 
 describe("splitCsvLine", () => {
@@ -603,6 +611,27 @@ describe("validateSnapshotReports", () => {
     expect(r.version).toBe(7);
   });
 
+  it("rejects malformed authorEmail when preserving trusted report metadata", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    expect(
+      validateSnapshotReports(
+        {
+          [ADDR_A]: {
+            body: "investigation",
+            authorEmail: "not-an-email",
+          },
+        },
+        {
+          importerEmail: "restore@cron",
+          reportMetadataMode: "preserve",
+        },
+      ),
+    ).toEqual({
+      error: `Report for ${ADDR_A} has invalid authorEmail`,
+    });
+  });
+
   it("accepts valid input and lower-cases addresses", async () => {
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
@@ -710,5 +739,87 @@ describe("isEntriesMap", () => {
 describe("emptyCounts", () => {
   it("returns the zero state with the new flat `addresses` count", () => {
     expect(emptyCounts()).toEqual({ addresses: 0 });
+  });
+});
+
+describe("handleSnapshot trusted restore mode", () => {
+  it("replaces labels and reports while preserving trusted provenance metadata", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({
+            name: "Arkham label",
+            tags: ["exchange"],
+            source: "arkham",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          }),
+        },
+        reports: {
+          [ADDR_B]: {
+            body: "report",
+            authorEmail: "analyst@mentolabs.xyz",
+            source: "claude",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+            version: 3,
+          },
+        },
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      imported: { addresses: 1, reports: 1 },
+    });
+    expect(getLabels).not.toHaveBeenCalled();
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+    expect(replaceLabels).toHaveBeenCalledWith({
+      [ADDR_A]: expect.objectContaining({
+        source: "arkham",
+        tags: ["exchange"],
+      }),
+    });
+    expect(replaceReports).toHaveBeenCalledWith({
+      [ADDR_B]: expect.objectContaining({
+        authorEmail: "analyst@mentolabs.xyz",
+        source: "claude",
+        version: 3,
+      }),
+    });
+  });
+
+  it("clears present snapshot hashes when a trusted restore contains empty records", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {},
+        reports: {},
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      imported: { addresses: 0, reports: 0 },
+    });
+    expect(replaceLabels).toHaveBeenCalledWith({});
+    expect(replaceReports).toHaveBeenCalledWith({});
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
   });
 });

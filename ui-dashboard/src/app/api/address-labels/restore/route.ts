@@ -43,6 +43,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   try {
     const result = await get(pathname, {
       access: "private",
+      useCache: false,
       abortSignal: AbortSignal.timeout(30_000),
     });
     if (result?.statusCode !== 200 || !result.stream) {
@@ -87,7 +88,11 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     return handleSnapshot(body, {
       importerEmail: auth.importerEmail,
+      // Workspace sessions get the same trusted-restore mode as cron because
+      // this route only reads allowlisted first-party private Blob snapshots.
       reportMetadataMode: "preserve",
+      labelProvenanceMode: "preserve",
+      writeMode: "replace",
       errorTag: "address-labels/restore",
     });
   } catch (err) {

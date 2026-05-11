@@ -22,6 +22,14 @@ import {
 // caused recurring scope-mismatch bugs that the model itself doesn't
 // justify (PR #330).
 const REPORTS_KEY = "reports";
+const REPLACE_HASH_SCRIPT = `
+local key = KEYS[1]
+redis.call('DEL', key)
+for i = 1, #ARGV, 2 do
+  redis.call('HSET', key, ARGV[i], ARGV[i + 1])
+end
+return 1
+`;
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -185,9 +193,33 @@ export async function importReports(
   const entries = Object.entries(reports);
   if (entries.length === 0) return;
   const redis = getRedis();
+  await redis.hset(REPORTS_KEY, encodeReportFields(entries));
+}
+
+/**
+ * Replace the reports hash with the trusted snapshot contents. Used by the
+ * private Blob restore path so deleted reports in the chosen backup are not
+ * left behind in Redis.
+ */
+export async function replaceReports(
+  reports: Record<string, AddressReport>,
+): Promise<void> {
+  const entries = Object.entries(reports);
+  const redis = getRedis();
+  const fields = entries.length > 0 ? encodeReportFields(entries) : {};
+  await redis.eval(REPLACE_HASH_SCRIPT, [REPORTS_KEY], flattenFields(fields));
+}
+
+function encodeReportFields(
+  entries: Array<[string, AddressReport]>,
+): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const [addr, report] of entries) {
     fields[addr.toLowerCase()] = JSON.stringify(report);
   }
-  await redis.hset(REPORTS_KEY, fields);
+  return fields;
+}
+
+function flattenFields(fields: Record<string, string>): string[] {
+  return Object.entries(fields).flatMap(([field, value]) => [field, value]);
 }
