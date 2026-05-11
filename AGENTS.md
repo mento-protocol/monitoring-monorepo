@@ -50,7 +50,11 @@ Trunk, and formatting/validation commands. It never runs deploy commands or
 Terraform apply. If any package manifest, `pnpm-lock.yaml`,
 `pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
 execute until you review package scripts/lifecycle hooks and pass
-`--allow-package-script-changes`.
+`--allow-package-script-changes`. The narrow exception is a root `package.json`
+edit limited to `scripts.agent:quality-gate` or
+`scripts.agent:quality-gate:test`; the gate treats that as tooling-only and runs
+an entrypoint validator plus the gate regression tests instead of the
+package-script refusal path.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast`, so the hook stops on the first failed mapped command instead of
