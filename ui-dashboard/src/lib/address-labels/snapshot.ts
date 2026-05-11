@@ -328,6 +328,8 @@ function mergePreservingProvenance(
   incoming: Record<string, AddressEntry>,
   existing: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
+  // Future-proofing for non-replace trusted restore callers. The current Blob
+  // restore uses writeMode="replace", so it preserves provenance via replaceLabels.
   const out: Record<string, AddressEntry> = {};
   for (const [addr, entry] of Object.entries(incoming)) {
     const prev = existing[addr.toLowerCase()];

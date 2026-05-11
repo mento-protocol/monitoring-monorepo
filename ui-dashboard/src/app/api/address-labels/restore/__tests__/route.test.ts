@@ -36,13 +36,13 @@ function req(
   return new NextRequest(url, { method: "POST", headers });
 }
 
-function blobResult(body: unknown, size?: number) {
+function blobResult(body: unknown, size?: number | null) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
     statusCode: 200,
     stream: new Response(text).body,
     blob: {
-      size: size ?? Buffer.byteLength(text, "utf8"),
+      size: size === undefined ? Buffer.byteLength(text, "utf8") : size,
     },
   };
 }
@@ -154,6 +154,24 @@ describe("POST /api/address-labels/restore", () => {
     );
     expect(res.status).toBe(413);
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized Blob after reading when metadata size is unavailable", async () => {
+    const byteLengthSpy = vi
+      .spyOn(Buffer, "byteLength")
+      .mockImplementation(() => 32 * 1024 * 1024 + 1);
+    mockGet.mockResolvedValueOnce(
+      blobResult({ addresses: {} }, null) as Awaited<ReturnType<typeof get>>,
+    );
+    const res = await POST(
+      req("address-labels-backup-2026-05-11.json", {
+        authorization: "Bearer secret",
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(byteLengthSpy).toHaveBeenCalledWith(expect.any(String), "utf8");
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+    byteLengthSpy.mockRestore();
   });
 
   it("rejects invalid JSON blobs", async () => {

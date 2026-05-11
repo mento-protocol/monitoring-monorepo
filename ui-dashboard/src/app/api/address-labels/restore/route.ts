@@ -21,6 +21,10 @@ type RestoreActor =
  * store, so forensic-report metadata is preserved verbatim instead of
  * re-stamped to the current session. The uploaded import route deliberately
  * keeps re-stamping to prevent forged authorship in untrusted files.
+ *
+ * Labels and reports are separate Redis hashes, so replace-mode restore writes
+ * them in two operations. If a restore is interrupted between those writes,
+ * rerun the same pathname to converge both hashes to the selected snapshot.
  */
 export async function POST(req: NextRequest): Promise<Response> {
   const auth = await requireRestoreAuth(req);
