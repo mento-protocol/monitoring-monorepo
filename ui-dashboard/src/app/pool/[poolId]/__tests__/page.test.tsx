@@ -137,6 +137,16 @@ function gqlResult(data: unknown, error?: Error) {
   };
 }
 
+function loadingGqlResult() {
+  return {
+    data: undefined,
+    error: undefined,
+    isLoading: true,
+    mutate: vi.fn(),
+    isValidating: false,
+  };
+}
+
 describe("Pool detail LPs tab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -249,9 +259,97 @@ describe("Pool detail LPs tab", () => {
     const html = renderToStaticMarkup(<PoolDetailPage />);
     expect(html).toContain("Token decimals are unverified for this pool");
     expect(html).toContain(
-      "Token amount data is hidden because token decimals are unverified for this pool.",
+      "Token amount tab data is hidden because token decimals are unverified for this pool.",
     );
     expect(html).toContain('role="alert"');
+    expect(html).not.toContain("0xreserve");
+    expect(firedOperationNames()).not.toContain("PoolReserves");
+  });
+
+  it("gates rebalances tab content when token decimals are unverified", () => {
+    mockSearchParams.set("tab", "rebalances");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return gqlResult({
+          Pool: [{ id: BASE_POOL.id, tokenDecimalsKnown: false }],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolRebalances")) {
+        return gqlResult({
+          RebalanceEvent: [
+            {
+              id: "rebalance-1",
+              txHash: "0xrebalance",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Token decimals are unverified for this pool");
+    expect(html).toContain(
+      "Token amount tab data is hidden because token decimals are unverified for this pool.",
+    );
+    expect(html).not.toContain("0xrebalance");
+    expect(firedOperationNames()).not.toContain("PoolRebalancesCount");
+    expect(firedOperationNames()).not.toContain("PoolRebalancesPage");
+  });
+
+  it("shows a loading gate without firing amount tab queries while decimal trust loads", () => {
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return loadingGqlResult();
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({
+          ReserveUpdate: [
+            {
+              id: "reserve-1",
+              chainId: 42220,
+              poolId: BASE_POOL.id,
+              reserve0: "1000000",
+              reserve1: "2000000",
+              blockTimestampInPool: "1700000000",
+              txHash: "0xreserve",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain(
+      "Checking token decimal metadata before rendering token amount tab data.",
+    );
+    expect(html).toContain("loading");
     expect(html).not.toContain("0xreserve");
     expect(firedOperationNames()).not.toContain("PoolReserves");
   });
@@ -295,7 +393,7 @@ describe("Pool detail LPs tab", () => {
     const html = renderToStaticMarkup(<PoolDetailPage />);
     expect(html).toContain("Token decimal metadata is unavailable");
     expect(html).toContain(
-      "Token amount data is hidden until token decimal metadata can be verified.",
+      "Token amount tab data is hidden until token decimal metadata can be verified.",
     );
     expect(html).toContain('role="alert"');
     expect(html).not.toContain("0xreserve");
