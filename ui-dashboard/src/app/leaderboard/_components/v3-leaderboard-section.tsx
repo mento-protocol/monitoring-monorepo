@@ -1,25 +1,30 @@
 "use client";
 
-import type { TraderWindowRow } from "@/lib/leaderboard";
+import type {
+  LeaderboardRangeKey,
+  TraderDailyRow,
+  TraderWindowRow,
+} from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import { LeaderboardTable } from "./leaderboard-table";
 import {
   AggregatorBreakdownSection,
   type AggregatorChartProps,
 } from "./aggregator-breakdown-section";
-
-type PoolMeta = ReadonlyMap<
-  string,
-  { token0: string | null; token1: string | null }
->;
+import type { PoolMeta } from "../_lib/types";
+import { V3FlowInsights } from "./v3-flow-insights";
 
 export function V3LeaderboardSection({
   rangeLabel,
+  range,
   cutoff,
+  traderRows,
   traders,
   pools,
+  isSystemAddressIn,
   tableIsLoading,
   tableHasError,
+  isTraderCapHit,
   aggregators,
   aggIsLoading,
   aggHasError,
@@ -27,11 +32,15 @@ export function V3LeaderboardSection({
   chart,
 }: {
   rangeLabel: string;
+  range: LeaderboardRangeKey;
   cutoff: number;
+  traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
+  isSystemAddressIn: ReadonlyArray<boolean>;
   tableIsLoading: boolean;
   tableHasError: boolean;
+  isTraderCapHit: boolean;
   aggregators: readonly AggregatorWindowRow[];
   aggIsLoading: boolean;
   aggHasError: boolean;
@@ -40,6 +49,18 @@ export function V3LeaderboardSection({
 }) {
   return (
     <>
+      <V3FlowInsights
+        range={range}
+        rangeLabel={rangeLabel}
+        cutoff={cutoff}
+        traderRows={traderRows}
+        traders={traders}
+        pools={pools}
+        isSystemAddressIn={isSystemAddressIn}
+        isTraderCapHit={isTraderCapHit}
+        tableIsLoading={tableIsLoading}
+        tableHasError={tableHasError}
+      />
       <section>
         <h2 className="mb-3 text-sm font-medium text-slate-300">
           Top traders ({rangeLabel})

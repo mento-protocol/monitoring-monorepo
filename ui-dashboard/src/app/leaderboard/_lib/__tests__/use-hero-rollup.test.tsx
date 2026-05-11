@@ -35,6 +35,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   LEADERBOARD_TODAY_TRADERS,
   LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
@@ -276,6 +277,8 @@ describe("useHeroRollup orchestration", () => {
     expect(result!.totalSwaps).toBe(47);
     // uniqueTraders: snapshot 10 - exclusive 1 + yesterday's 2 distinct = 11
     expect(result!.totalTraders).toBe(11);
+    const overlapVars = lastVariables.get(LEADERBOARD_PARTIAL_OVERLAP_TRADERS);
+    expect(overlapVars?.limit).toBe(4);
   });
 
   it("phase 3: firstDay query errors out → chain stays degraded, tiles stay rendered with conservative totals", () => {

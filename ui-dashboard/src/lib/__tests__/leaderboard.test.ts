@@ -6,6 +6,7 @@ import {
   aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
+  buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
   rangeCutoffSeconds,
@@ -13,13 +14,25 @@ import {
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
+  type TraderWindowRow,
 } from "../leaderboard";
+import {
+  buildCorridorRows,
+  buildTraderCohortSummary,
+  computeLpFriendliness,
+  filterSwapOutliers,
+  parseUsdWei,
+  previousLeaderboardWindowBounds,
+  traderDayKey,
+  type SwapOutlierRow,
+} from "../leaderboard-insights";
 
 const ZERO_WEI = "0";
 const USD = (n: number) =>
@@ -343,6 +356,300 @@ describe("computeFlow", () => {
   });
 });
 
+describe("leaderboard insights", () => {
+  function windowRow(
+    partial: Partial<TraderWindowRow> & {
+      chainId: number;
+      trader: string;
+      volumeUsdWei: bigint;
+    },
+  ): TraderWindowRow {
+    return {
+      swapCount: 1,
+      uniquePoolsApprox: 1,
+      feesPaidUsdWei: BigInt(0),
+      isSystemAddress: false,
+      lastSeenTimestamp: 1,
+      ...partial,
+    };
+  }
+
+  function swap(partial: Partial<SwapOutlierRow>): SwapOutlierRow {
+    return {
+      id: "swap-1",
+      chainId: 42220,
+      poolId: "42220-0xpool",
+      caller: "0xa",
+      txTo: "0xrouter",
+      recipient: "0xa",
+      volumeUsdWei: USD(100),
+      txHash: "0xhash",
+      blockTimestamp: "1000",
+      ...partial,
+    };
+  }
+
+  it("splits current traders into new, returning, and dormant cohorts", () => {
+    const current = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xnew",
+        volumeUsdWei: BigInt(USD(300)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xkeep",
+        volumeUsdWei: BigInt(USD(200)),
+      }),
+    ];
+    const previous = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xkeep",
+        volumeUsdWei: BigInt(USD(150)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xdormant",
+        volumeUsdWei: BigInt(USD(120)),
+      }),
+    ];
+    const summary = buildTraderCohortSummary({ current, previous });
+    expect(summary.newCount).toBe(1);
+    expect(summary.returningCount).toBe(1);
+    expect(summary.dormantCount).toBe(1);
+    expect(summary.topNewTrader?.trader).toBe("0xnew");
+    expect(summary.topReturningTrader?.trader).toBe("0xkeep");
+    expect(summary.topDormantTrader?.trader).toBe("0xdormant");
+  });
+
+  it("selects top cohort traders by volume, not input order", () => {
+    const current = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-new",
+        volumeUsdWei: BigInt(USD(10)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-returning",
+        volumeUsdWei: BigInt(USD(20)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-new",
+        volumeUsdWei: BigInt(USD(500)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-returning",
+        volumeUsdWei: BigInt(USD(400)),
+      }),
+    ];
+    const previous = [
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-dormant",
+        volumeUsdWei: BigInt(USD(15)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xsmall-returning",
+        volumeUsdWei: BigInt(USD(100)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-dormant",
+        volumeUsdWei: BigInt(USD(600)),
+      }),
+      windowRow({
+        chainId: 42220,
+        trader: "0xlarge-returning",
+        volumeUsdWei: BigInt(USD(300)),
+      }),
+    ];
+
+    const summary = buildTraderCohortSummary({ current, previous });
+
+    expect(summary.topNewTrader?.trader).toBe("0xlarge-new");
+    expect(summary.topReturningTrader?.trader).toBe("0xlarge-returning");
+    expect(summary.topDormantTrader?.trader).toBe("0xlarge-dormant");
+  });
+
+  it("scores LP friendliness from low imbalance plus fee revenue", () => {
+    const friendly = {
+      chainId: 42220,
+      trader: "0xa",
+      poolId: "42220-0xpool",
+      swapCount: 2,
+      volumeUsdWei: BigInt(USD(100)),
+      inflowToken0UsdWei: BigInt(USD(50)),
+      outflowToken0UsdWei: BigInt(USD(49)),
+      inflowToken1UsdWei: BigInt(USD(49)),
+      outflowToken1UsdWei: BigInt(USD(50)),
+      feesPaidUsdWei: BigInt(USD(0.1)),
+    } satisfies TraderPoolWindowRow;
+    const extractive = {
+      ...friendly,
+      inflowToken0UsdWei: BigInt(USD(100)),
+      outflowToken0UsdWei: BigInt(0),
+      inflowToken1UsdWei: BigInt(0),
+      outflowToken1UsdWei: BigInt(USD(100)),
+      feesPaidUsdWei: BigInt(0),
+    } satisfies TraderPoolWindowRow;
+
+    expect(computeLpFriendliness(friendly).band).toBe("friendly");
+    expect(computeLpFriendliness(friendly).ratio).toBeCloseTo(0.1, 4);
+    expect(computeLpFriendliness(extractive).band).toBe("extractive");
+    expect(computeLpFriendliness(friendly).score).toBeGreaterThan(
+      computeLpFriendliness(extractive).score,
+    );
+  });
+
+  it("handles zero-volume and zero-pressure LP score edges", () => {
+    const zeroVolume = {
+      chainId: 42220,
+      trader: "0xa",
+      poolId: "42220-0xpool",
+      swapCount: 0,
+      volumeUsdWei: BigInt(0),
+      inflowToken0UsdWei: BigInt(0),
+      outflowToken0UsdWei: BigInt(0),
+      inflowToken1UsdWei: BigInt(0),
+      outflowToken1UsdWei: BigInt(0),
+      feesPaidUsdWei: BigInt(USD(1)),
+    } satisfies TraderPoolWindowRow;
+    const zeroPressure = {
+      ...zeroVolume,
+      swapCount: 2,
+      volumeUsdWei: BigInt(USD(100)),
+      inflowToken0UsdWei: BigInt(USD(50)),
+      outflowToken0UsdWei: BigInt(USD(50)),
+      inflowToken1UsdWei: BigInt(USD(50)),
+      outflowToken1UsdWei: BigInt(USD(50)),
+    } satisfies TraderPoolWindowRow;
+
+    expect(computeLpFriendliness(zeroVolume)).toMatchObject({
+      score: 0,
+      ratio: 0,
+      band: "extractive",
+    });
+    expect(computeLpFriendliness(zeroPressure)).toMatchObject({
+      score: 100,
+      ratio: 1,
+      band: "friendly",
+    });
+  });
+
+  it("parses USD-wei strings defensively", () => {
+    expect(parseUsdWei("123")).toBe(BigInt(123));
+    expect(parseUsdWei("123.4")).toBe(BigInt(123));
+    expect(parseUsdWei("123.5")).toBe(BigInt(124));
+    expect(parseUsdWei("")).toBeNull();
+    expect(parseUsdWei("not-a-number")).toBeNull();
+  });
+
+  it("computes the previous bounded leaderboard window", () => {
+    const cutoff = 3_000_000;
+    expect(previousLeaderboardWindowBounds("all", cutoff)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", 0)).toBeNull();
+    expect(previousLeaderboardWindowBounds("30d", cutoff)).toEqual({
+      afterTimestamp: cutoff - 30 * 86_400,
+      beforeTimestamp: cutoff,
+    });
+  });
+
+  it("builds directional corridors and filters to allowed traders", () => {
+    const rows = [
+      poolDay({
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(100),
+        inflowToken0UsdWei: USD(100),
+        outflowToken1UsdWei: USD(100),
+      }),
+      poolDay({
+        chainId: 42220,
+        trader: "0xb",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(80),
+        outflowToken0UsdWei: USD(80),
+        inflowToken1UsdWei: USD(80),
+      }),
+    ];
+    const corridors = buildCorridorRows({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
+    });
+
+    expect(corridors).toHaveLength(1);
+    expect(corridors[0]!.direction).toBe(0);
+    expect(corridors[0]!.traderCount).toBe(1);
+    expect(weiToUsd(corridors[0]!.netPressureUsdWei)).toBeCloseTo(100, 4);
+  });
+
+  it("filters swap outliers through the current trader set", () => {
+    const rows = [
+      swap({ id: "keep", caller: "0xabc" }),
+      swap({ id: "drop", caller: "0xdef" }),
+    ];
+    const outliers = filterSwapOutliers({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
+    });
+    expect(outliers.map((r) => r.id)).toEqual(["keep"]);
+  });
+
+  it("keeps corridor filtering scoped to the trader day", () => {
+    const rows = [
+      poolDay({
+        id: "visible-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(100),
+        inflowToken0UsdWei: USD(100),
+      }),
+      poolDay({
+        id: "hidden-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "86400",
+        volumeUsdWei: USD(500),
+        outflowToken0UsdWei: USD(500),
+      }),
+    ];
+
+    const corridors = buildCorridorRows({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
+    });
+
+    expect(corridors).toHaveLength(1);
+    expect(corridors[0]!.direction).toBe(0);
+    expect(weiToUsd(corridors[0]!.volumeUsdWei)).toBeCloseTo(100, 4);
+  });
+
+  it("keeps outlier filtering scoped to the trader day", () => {
+    const rows = [
+      swap({ id: "visible-day", caller: "0xabc", blockTimestamp: "1000" }),
+      swap({ id: "hidden-day", caller: "0xabc", blockTimestamp: "86400" }),
+    ];
+
+    const outliers = filterSwapOutliers({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
+    });
+
+    expect(outliers.map((r) => r.id)).toEqual(["visible-day"]);
+  });
+});
+
 describe("rangeCutoffSeconds", () => {
   const SECONDS_PER_DAY = 86_400;
   // Pin "now" mid-day UTC so we can prove the cutoff aligns to UTC midnight.
@@ -399,15 +706,17 @@ describe("aggregatePoolDailyVolume", () => {
     poolId: string,
     timestamp: string,
     volumeUsd: number,
-    trader = "0x0",
+    volumeUsdIncludingSystem = volumeUsd,
   ) {
     return {
-      id: `${chainId}-${trader}-${poolId}-${timestamp}`,
+      id: `${chainId}-${poolId}-${timestamp}`,
       chainId,
-      trader,
       poolId,
       timestamp,
+      swapCount: volumeUsd > 0 ? 1 : 0,
+      swapCountIncludingSystem: volumeUsdIncludingSystem > 0 ? 1 : 0,
       volumeUsdWei: usd(volumeUsd),
+      volumeUsdWeiIncludingSystem: usd(volumeUsdIncludingSystem),
     };
   }
 
@@ -486,45 +795,24 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[0]!.name).toBe("USDC/USDm");
   });
 
-  it("filters by traderAllowList when provided (system-toggle parity)", () => {
-    // Two traders contributing to the same pool, but only `0xUser` is in
-    // the allowlist — system trader's volume must NOT contribute to
-    // the chart.
+  it("uses primary volume by default and *IncludingSystem volume when toggled on", () => {
+    // The pool-day rollup carries both branches. System-off reads the
+    // primary field; system-on reads the including-system sibling.
     const rows = [
-      row(42220, "0xA", day(1), 100, "0xUser"),
-      row(42220, "0xA", day(1), 50, "0xSystem"),
+      row(42220, "0xA", day(1), 100, 150),
+      row(42220, "0xB", day(1), 0, 50),
     ];
-    // Day-scoped allowlist: `${chainId}-${trader}-${day}`.
-    const allowList = new Set([`42220-0xUser-${day(1)}`]);
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
+    const r = aggregatePoolDailyVolume(rows, noLabel);
     expect(r.totalSeries[0]!.value).toBeCloseTo(100, 4);
-    // Without the allowlist, the same input includes both traders.
-    const rUnfiltered = aggregatePoolDailyVolume(rows, noLabel);
-    expect(rUnfiltered.totalSeries[0]!.value).toBeCloseTo(150, 4);
-  });
-
-  it("allowlist is day-scoped — same trader can have system + non-system days", () => {
-    // Trader 0xFlip flipped from system to non-system between day 1 and
-    // day 2. System volume must NOT leak from day 1 even though the
-    // trader is admitted on day 2.
-    const rows = [
-      row(42220, "0xA", day(1), 100, "0xFlip"), // system day → excluded
-      row(42220, "0xA", day(2), 80, "0xFlip"), // non-system day → admitted
-    ];
-    const allowList = new Set([`42220-0xFlip-${day(2)}`]);
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
-    // Only day 2's 80 contributes; day 1's 100 is dropped.
-    const day2 = r.totalSeries.find((p) => p.timestamp === Number(day(2)))!;
-    expect(day2.value).toBeCloseTo(80, 4);
-    const day1 = r.totalSeries.find((p) => p.timestamp === Number(day(1)));
-    if (day1) expect(day1.value).toBe(0);
+    const withSystem = aggregatePoolDailyVolume(rows, noLabel, true);
+    expect(withSystem.totalSeries[0]!.value).toBeCloseTo(200, 4);
   });
 
   it("zero-fills every day in windowRange even when no row touched it", () => {
     // Only day 2 has any activity; days 1 and 3 must still appear in the
     // series with value=0 so the stacked area's x-axis stays contiguous.
     const SECONDS_PER_DAY = 86_400;
-    const rows = [row(42220, "0xA", day(2), 100, "0xUser")];
+    const rows = [row(42220, "0xA", day(2), 100)];
     const r = aggregatePoolDailyVolume(rows, noLabel, undefined, {
       fromSec: Number(day(1)),
       toSec: Number(day(3)),
@@ -571,11 +859,9 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[1]!.key).toBe(r.poolRanking[1]!.poolId);
   });
 
-  it("returns empty series when allowlist excludes every row", () => {
-    // Same short-circuit when an allowlist filters everything out.
-    const rows = [row(42220, "0xA", day(1), 100, "0xUser")];
-    const allowList = new Set<string>(); // empty allowlist
-    const r = aggregatePoolDailyVolume(rows, noLabel, allowList, {
+  it("returns empty series when system-off volume is zero for every row", () => {
+    const rows = [row(42220, "0xA", day(1), 0, 100)];
+    const r = aggregatePoolDailyVolume(rows, noLabel, false, {
       fromSec: Number(day(1)),
       toSec: Number(day(7)),
     });
@@ -878,6 +1164,18 @@ describe("mergeHeroSnapshot", () => {
       ...overrides,
     };
   }
+  function overlap(
+    overrides: Partial<LeaderboardPartialOverlapRow> & {
+      chainId: number;
+      trader: string;
+    },
+  ): LeaderboardPartialOverlapRow {
+    return {
+      timestamp: String(YESTERDAY_MIDNIGHT),
+      isSystemAddress: false,
+      ...overrides,
+    };
+  }
   function today(
     overrides: Partial<LeaderboardTodayTraderRow> & {
       chainId: number;
@@ -927,6 +1225,272 @@ describe("mergeHeroSnapshot", () => {
     expect(out.totalSwapCount).toBe(50);
     expect(out.uniqueTraders).toBe(10);
     expect(out.staleChains).toEqual([]);
+  });
+
+  it("uses bounded overlap rows to de-dupe snapshot and today's partial rows", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [overlap({ chainId: 42220, trader: "0xa" })],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(3);
+  });
+
+  it("does not de-dupe hidden-system partial traders excluded from snapshot unique count", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xsticky", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [
+        overlap({ chainId: 42220, trader: "0xsticky" }),
+        overlap({
+          chainId: 42220,
+          trader: "0xsticky",
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(out.uniqueTraders).toBe(3);
+  });
+
+  it("falls back to legacy approximate unique counts when overlap rows are missing", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(4);
+  });
+
+  it("treats partial traders as new when the bounded overlap query returns empty", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(3);
+  });
+
+  it("uses bounded overlap rows through degraded-chain slice subtraction", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 3,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      yesterdayRows: [
+        today({ chainId: 42220, trader: "0xb", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xd", volumeUsdWei: USD(10) }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
+        today({ chainId: 42220, trader: "0xe", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [
+        overlap({ chainId: 42220, trader: "0xb" }),
+        overlap({ chainId: 42220, trader: "0xc" }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(4);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("preserves a first-day-exclusive trader who also appears in today's partial", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+      ],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayVolumeUsdWei: USD(100),
+          firstDaySwapCount: 5,
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      yesterdayRows: [],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+      ],
+      partialOverlapRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(out.uniqueTraders).toBe(2);
+    expect(out.degradedChains).toEqual([]);
+  });
+
+  it("builds bounded overlap query input for retained snapshot ranges", () => {
+    const snapshot = snap({
+      chainId: 42220,
+      snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+      totalVolumeUsdWei: USD(1000),
+      uniqueTraders: 2,
+    });
+    const input = buildHeroPartialOverlapQueryInput({
+      snapshotRows: [snapshot],
+      firstDayRows: [
+        firstDay({
+          chainId: 42220,
+          snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+          firstDayExclusiveUniqueTraders: 1,
+        }),
+      ],
+      yesterdayRows: [
+        today({ chainId: 42220, trader: "0xb", volumeUsdWei: USD(10) }),
+      ],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+        today({
+          chainId: 42220,
+          trader: "0xsys",
+          volumeUsdWei: USD(10),
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(input).toEqual({
+      limit: 4,
+      where: {
+        _or: [
+          {
+            chainId: { _eq: 42220 },
+            trader: { _in: ["0xa", "0xb"] },
+            timestamp: {
+              _gte: Number(snapshot.windowStartDay) + SECONDS_PER_DAY,
+              _lte: Number(snapshot.snapshotDay),
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("disables exact overlap when active partial traders exceed the query cap", () => {
+    const snapshot = snap({
+      chainId: 42220,
+      totalVolumeUsdWei: USD(1000),
+      uniqueTraders: 2,
+    });
+    const input = buildHeroPartialOverlapQueryInput({
+      snapshotRows: [snapshot],
+      todayRows: Array.from({ length: 1001 }, (_, i) =>
+        today({
+          chainId: 42220,
+          trader: `0x${i.toString(16).padStart(40, "0")}`,
+          volumeUsdWei: USD(1),
+        }),
+      ),
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+
+    expect(input).toBeUndefined();
+  });
+
+  it("builds broker overlap query input with caller field", () => {
+    const snapshot = snap({
+      chainId: 42220,
+      snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
+      totalVolumeUsdWei: USD(1000),
+      uniqueTraders: 2,
+    });
+    const input = buildHeroPartialOverlapQueryInput({
+      snapshotRows: [snapshot],
+      todayRows: [
+        today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
+      ],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+      traderField: "caller",
+    });
+
+    expect(input).toEqual({
+      limit: 2,
+      where: {
+        _or: [
+          {
+            chainId: { _eq: 42220 },
+            caller: { _in: ["0xa"] },
+            timestamp: {
+              _gte: Number(snapshot.windowStartDay),
+              _lte: Number(snapshot.snapshotDay),
+            },
+          },
+        ],
+      },
+    });
   });
 
   it("today-only (cold start): returns today's totals", () => {

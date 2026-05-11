@@ -17,11 +17,13 @@ import {
   type TraderPoolWindowRow,
   type TraderWindowRow,
 } from "@/lib/leaderboard";
+import { computeLpFriendliness } from "@/lib/leaderboard-insights";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/leaderboard";
 import { FlowBadge } from "./flow-badge";
+import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 import { SystemAddressChip } from "./system-address-chip";
 
 const SORT_KEYS = ["volume", "swaps", "pools", "fees", "lastSeen"] as const;
@@ -366,6 +368,9 @@ function ExpandedBreakdown({
             <th scope="col" className="px-3 py-2 text-right font-medium">
               Fees paid
             </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium">
+              LP
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -386,6 +391,7 @@ function ExpandedBreakdown({
                   null)
                 : null;
             const flow = computeFlow(p);
+            const lp = computeLpFriendliness(p);
             return (
               <tr
                 key={p.poolId}
@@ -411,6 +417,9 @@ function ExpandedBreakdown({
                 </td>
                 <td className="px-3 py-1.5 text-right font-mono text-slate-400">
                   {formatUSD(weiToUsd(p.feesPaidUsdWei))}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <LpFriendlinessBadge value={lp} />
                 </td>
               </tr>
             );

@@ -207,6 +207,8 @@ export function buildLeaderboardWindowSnapshot(
   let firstDaySwapCountIncludingSystem = 0;
   let firstDayExclusiveUniqueTraders = 0;
   let firstDayExclusiveUniqueTradersIncludingSystem = 0;
+  const firstDayExclusiveTraders: string[] = [];
+  const firstDayExclusiveTradersIncludingSystem: string[] = [];
   for (const a of args.aggregates) {
     totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
     totalSwapCountIncludingSystem += a.swapCount;
@@ -214,6 +216,7 @@ export function buildLeaderboardWindowSnapshot(
     firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
     if (!a.activeOutsideFirstDay) {
       firstDayExclusiveUniqueTradersIncludingSystem += 1;
+      firstDayExclusiveTradersIncludingSystem.push(a.trader);
     }
     if (!a.isSystemAddress) {
       totalVolumeUsdWei += a.volumeUsdWei;
@@ -223,9 +226,12 @@ export function buildLeaderboardWindowSnapshot(
       firstDaySwapCount += a.firstDaySwapCount;
       if (!a.activeOutsideFirstDay) {
         firstDayExclusiveUniqueTraders += 1;
+        firstDayExclusiveTraders.push(a.trader);
       }
     }
   }
+  firstDayExclusiveTraders.sort();
+  firstDayExclusiveTradersIncludingSystem.sort();
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
     chainId: args.chainId,
@@ -244,6 +250,8 @@ export function buildLeaderboardWindowSnapshot(
     firstDaySwapCountIncludingSystem,
     firstDayExclusiveUniqueTraders,
     firstDayExclusiveUniqueTradersIncludingSystem,
+    firstDayExclusiveTraders,
+    firstDayExclusiveTradersIncludingSystem,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };

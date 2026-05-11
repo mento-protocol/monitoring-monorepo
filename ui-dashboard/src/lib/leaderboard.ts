@@ -404,8 +404,10 @@ export { aggregatePoolDailyVolume } from "@/lib/leaderboard-pool";
 // is in `lib/leaderboard-hero.ts` to keep this file under the 600-line
 // soft cap. Re-exported below so existing imports keep working.
 export {
+  buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
   top10Concentration,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
