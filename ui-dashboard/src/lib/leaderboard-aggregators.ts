@@ -16,6 +16,17 @@ export type AggregatorDailyRow = {
   volumeUsdWeiIncludingSystem: string;
 };
 
+export type AggregatorDailyRowBase = Pick<
+  AggregatorDailyRow,
+  | "chainId"
+  | "aggregator"
+  | "lastSeenAggregatorAddress"
+  | "timestamp"
+  | "swapCount"
+  | "uniqueTraders"
+  | "volumeUsdWei"
+>;
+
 export type AggregatorWindowRow = {
   chainId: number;
   aggregator: string;
@@ -53,7 +64,7 @@ const ZERO = BigInt(0);
  * max single-day uniqueTraders count in the window.
  */
 export function aggregateAggregatorsByWindow(
-  rows: readonly AggregatorDailyRow[],
+  rows: readonly AggregatorDailyRowBase[],
 ): AggregatorWindowRow[] {
   const byKey = new Map<string, AggregatorWindowRow>();
   const latestTsByKey = new Map<string, number>();
@@ -94,7 +105,7 @@ export function aggregateAggregatorsByWindow(
 }
 
 export function buildAggregatorDailyVolumeBreakdown(
-  rows: readonly AggregatorDailyRow[],
+  rows: readonly AggregatorDailyRowBase[],
   windowRange?: { fromSec: number; toSec: number },
 ): {
   totalSeries: Array<{ timestamp: number; value: number }>;

@@ -16,7 +16,7 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { weiToUsd as formatWeiToUsd } from "@/lib/format";
 import {
   aggregateAggregatorsByWindow,
-  type AggregatorDailyRow,
+  type AggregatorDailyRowBase,
   type AggregatorWindowRow,
 } from "@/lib/leaderboard-aggregators";
 
@@ -163,7 +163,9 @@ export type BrokerTraderWindowRow = {
   lastSeenTimestamp: number;
 };
 
-export type BrokerAggregatorDailyRow = AggregatorDailyRow;
+export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
+  id: string;
+};
 export type BrokerAggregatorWindowRow = AggregatorWindowRow;
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
