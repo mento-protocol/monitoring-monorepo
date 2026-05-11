@@ -104,8 +104,22 @@ done
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-changed_paths_file="$(mktemp)"
-trap 'rm -f "$changed_paths_file"' EXIT
+tmpfiles=()
+cleanup_tmpfiles() {
+  if [[ ${#tmpfiles[@]} -gt 0 ]]; then
+    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
+  fi
+}
+trap cleanup_tmpfiles EXIT
+
+make_tmpfile() {
+  local tmpfile
+  tmpfile="$(mktemp)"
+  tmpfiles+=("$tmpfile")
+  echo "$tmpfile"
+}
+
+changed_paths_file="$(make_tmpfile)"
 
 if [[ -n "$changed_paths_input_file" ]]; then
   if [[ ! -r "$changed_paths_input_file" ]]; then
@@ -241,21 +255,6 @@ add_surface() {
 
 quote_path() {
   printf "%q" "$1"
-}
-
-tmpfiles=()
-cleanup_tmpfiles() {
-  if [[ ${#tmpfiles[@]} -gt 0 ]]; then
-    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
-  fi
-}
-trap cleanup_tmpfiles EXIT
-
-make_tmpfile() {
-  local tmpfile
-  tmpfile="$(mktemp)"
-  tmpfiles+=("$tmpfile")
-  echo "$tmpfile"
 }
 
 json_change_paths() {

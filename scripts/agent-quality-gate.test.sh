@@ -93,6 +93,19 @@ assert_order() {
     fail "expected '$earlier' before '$later'"
 }
 
+assert_script_occurrences() {
+  local expected_count="$1"
+  local expected="$2"
+  local actual_count
+  actual_count="$(awk -v expected="$expected" 'index($0, expected) { count++ } END { print count + 0 }' scripts/agent-quality-gate.sh)"
+  [[ "$actual_count" == "$expected_count" ]] ||
+    fail "expected $expected_count occurrence(s) of '$expected' in scripts/agent-quality-gate.sh, found $actual_count"
+}
+
+assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
+assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
+assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
+
 run_gate "ui-dashboard/package.json"
 assert_contains "- ./tools/trunk check --all (changed files should pass the same full-repo Trunk scope as CI)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
