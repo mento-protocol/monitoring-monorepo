@@ -903,6 +903,56 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("refreshes the virtual pool volume query when the UTC day changes", () => {
+    vi.setSystemTime(new Date("2026-05-11T23:59:59.500Z"));
+    const seenSince: number[] = [];
+    useGQLMock.mockImplementation(
+      (query: unknown, variables?: { since?: number }) => {
+        if (query === POOL_V2_EXCHANGE)
+          return {
+            data: { BiPoolExchange: [v2ExchangeRow] },
+            error: undefined,
+            isLoading: false,
+          };
+        if (query === VIRTUAL_POOL_LIFECYCLE)
+          return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+        if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H) {
+          if (variables?.since !== undefined) seenSince.push(variables.since);
+          return {
+            data: { BrokerExchangeDailySnapshot: [] },
+            error: undefined,
+            isLoading: false,
+          };
+        }
+        return makeGqlResult({});
+      },
+    );
+
+    interactiveContainer = document.createElement("div");
+    document.body.appendChild(interactiveContainer);
+    interactiveRoot = createRoot(interactiveContainer);
+    act(() => {
+      interactiveRoot?.render(
+        <PoolHeader
+          pool={{
+            ...basePool,
+            source: "virtual_pool",
+            wrappedExchangeId: exchangeId,
+          }}
+          tradingLimits={[]}
+        />,
+      );
+    });
+
+    expect(seenSince.at(-1)).toBe(Date.UTC(2026, 4, 11) / 1000);
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(seenSince.at(-1)).toBe(Date.UTC(2026, 4, 12) / 1000);
+  });
+
   it("degrades the virtual pool exchange volume tile visibly when the rollup query fails", () => {
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_V2_EXCHANGE)

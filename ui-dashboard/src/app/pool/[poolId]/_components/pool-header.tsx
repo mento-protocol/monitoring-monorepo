@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { AddressLink } from "@/components/address-link";
 import { BreakerPanel } from "@/components/breaker-panel";
 import { ChainIcon } from "@/components/chain-icon";
@@ -74,7 +75,7 @@ export function PoolHeader({
     v2Config?.exchangeId ??
     ""
   ).toLowerCase();
-  const volumeSince = currentUtcDayStartSeconds();
+  const volumeSince = useCurrentUtcDayStartSeconds();
   const {
     data: exchangeVolumeData,
     isLoading: exchangeVolumeLoading,
@@ -264,6 +265,32 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 function currentUtcDayStartSeconds(nowMs = Date.now()): number {
   return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+}
+
+function nextUtcDayStartDelayMs(nowMs = Date.now()): number {
+  const nextDayStartSeconds =
+    (Math.floor(nowMs / 1000 / SECONDS_PER_DAY) + 1) * SECONDS_PER_DAY;
+  return Math.max(1_000, nextDayStartSeconds * 1_000 - nowMs);
+}
+
+function subscribeToUtcDayStart(onStoreChange: () => void): () => void {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    timeoutId = setTimeout(() => {
+      onStoreChange();
+      schedule();
+    }, nextUtcDayStartDelayMs());
+  };
+  schedule();
+  return () => clearTimeout(timeoutId);
+}
+
+function useCurrentUtcDayStartSeconds(): number {
+  return useSyncExternalStore(
+    subscribeToUtcDayStart,
+    currentUtcDayStartSeconds,
+    currentUtcDayStartSeconds,
+  );
 }
 
 function statusKey(

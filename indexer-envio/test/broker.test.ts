@@ -317,7 +317,10 @@ describe("Broker.Swap handler", () => {
 
   it("keeps BrokerExchangeDailySnapshot rows separated by exchangeId", async () => {
     const otherExchangeId =
-      "0x2222222222222222222222222222222222222222222222222222222222222222";
+      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    const mixedCaseOtherExchangeId = `0x${otherExchangeId
+      .slice(2)
+      .toUpperCase()}`;
     let mockDb = MockDb.createMockDb();
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
@@ -329,7 +332,7 @@ describe("Broker.Swap handler", () => {
       blockNumber: 101,
       blockTimestamp: 1_700_000_500,
       logIndex: 0,
-      exchangeId: otherExchangeId,
+      exchangeId: mixedCaseOtherExchangeId,
     });
 
     const dayTs = dayBucket(1_700_000_000n);
