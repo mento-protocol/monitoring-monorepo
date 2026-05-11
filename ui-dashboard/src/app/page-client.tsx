@@ -77,9 +77,9 @@ function perPoolTvlWindow(
   return result;
 }
 
-// Component is over the no-giant-component threshold — global hero
-// + multi-section trend layout. Tracked in BACKLOG.md § "Architecture
-// pass" for a focused split PR.
+// Intentional react-doctor suppression: global hero + multi-section trend
+// layout share the same cross-network aggregation state. Revisit only with a
+// focused split that keeps those derived values centralized.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 function GlobalContent({
   initialNetworkData,

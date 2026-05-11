@@ -97,8 +97,8 @@ export type TraderPoolDailyRow = {
 /** Aggregated trader-window row. `uniquePoolsApprox` is union-of-day-counts
  * — Hasura can't `count(distinct pool)` for us, and we don't have a
  * trader-window snapshot entity yet, so we use the *max* daily uniquePools
- * as a lower-bound proxy. (PR 4+: pre-roll a TraderWindowSnapshot if the
- * lower-bound is misleading in practice.) */
+ * as a lower-bound proxy. Pre-roll a TraderWindowSnapshot if the lower-bound
+ * is misleading in practice. */
 export type TraderWindowRow = {
   chainId: number;
   trader: string;
@@ -441,7 +441,7 @@ export type FlowResult = {
 
 /**
  * Score a trader's flow in their primary pool by the absolute net-flow
- * imbalance. Threshold rationale (BACKLOG.md PR 3 spec):
+ * imbalance. Threshold rationale from the leaderboard MVP:
  *   imbalance > 0.7  → one-directional (extractive arb / corridor flow)
  *   imbalance < 0.2  → delta-neutral (round-tripper, MM-like)
  *   else             → mixed

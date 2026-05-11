@@ -338,9 +338,8 @@ interface GlobalPoolsTableProps {
 }
 
 // Component is over the no-giant-component threshold — table with
-// sort/filter logic + per-row formatting. Tracked in BACKLOG.md
-// § "Architecture pass" for a focused split PR (extract row component
-// + sort/filter state hook).
+// sort/filter logic + per-row formatting. Also slightly over the file-size
+// soft budget; see BACKLOG.md "File Size And Lint Hygiene".
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function GlobalPoolsTable({
   entries,
