@@ -18,6 +18,9 @@ type MockDb = {
     BrokerDailySnapshot: {
       get: (id: string) => unknown;
     };
+    BrokerExchangeDailySnapshot: {
+      get: (id: string) => unknown;
+    };
     BrokerTraderDailySnapshot: {
       get: (id: string) => unknown;
     };
@@ -79,6 +82,7 @@ const fireSwap = async (
     blockTimestamp: number;
     logIndex: number;
     exchangeProvider?: string;
+    exchangeId?: string;
     tokenIn?: string;
     tokenOut?: string;
     amountIn?: bigint;
@@ -94,7 +98,7 @@ const fireSwap = async (
 ): Promise<MockDb> => {
   const event = Broker.Swap.createMockEvent({
     exchangeProvider: args.exchangeProvider ?? BIPOOL_MANAGER,
-    exchangeId: EXCHANGE_ID,
+    exchangeId: args.exchangeId ?? EXCHANGE_ID,
     trader: args.brokerCaller ?? SIGNER_EOA,
     tokenIn: args.tokenIn ?? CUSD,
     tokenOut: args.tokenOut ?? USDC,
@@ -267,6 +271,80 @@ describe("Broker.Swap handler", () => {
     // 1000 + 500 = 1500 CUSD in USD-wei.
     assert.equal(snap!.volumeUsdWei, 1_500n * 10n ** 18n);
     assert.equal(snap!.routedViaV3Router, false);
+  });
+
+  it("rolls every Broker.Swap into BrokerExchangeDailySnapshot by (chain, exchangeProvider, exchangeId, day)", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      amountIn: 1_000n * 10n ** 18n,
+      amountOut: 999_500_000n,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      txTo: V3_ROUTER,
+      amountIn: 250n * 10n ** 18n,
+      amountOut: 249_875_000n,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const snapshotId = `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`;
+    const snap = mockDb.entities.BrokerExchangeDailySnapshot.get(snapshotId) as
+      | {
+          chainId: number;
+          exchangeProvider: string;
+          exchangeId: string;
+          timestamp: bigint;
+          swapCount: number;
+          volumeUsdWei: bigint;
+          blockNumber: bigint;
+        }
+      | undefined;
+
+    assert.isOk(snap, "BrokerExchangeDailySnapshot missing");
+    assert.equal(snap!.chainId, CHAIN_CELO);
+    assert.equal(snap!.exchangeProvider, BIPOOL_MANAGER.toLowerCase());
+    assert.equal(snap!.exchangeId, EXCHANGE_ID.toLowerCase());
+    assert.equal(snap!.timestamp, dayTs);
+    assert.equal(snap!.swapCount, 2);
+    assert.equal(snap!.volumeUsdWei, 1_250n * 10n ** 18n);
+    assert.equal(snap!.blockNumber, 101n);
+  });
+
+  it("keeps BrokerExchangeDailySnapshot rows separated by exchangeId", async () => {
+    const otherExchangeId =
+      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    const mixedCaseOtherExchangeId = `0x${otherExchangeId
+      .slice(2)
+      .toUpperCase()}`;
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      exchangeId: EXCHANGE_ID,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      exchangeId: mixedCaseOtherExchangeId,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const first = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    ) as { swapCount: number } | undefined;
+    const second = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${otherExchangeId}-${dayTs}`,
+    ) as { swapCount: number } | undefined;
+
+    assert.equal(first?.swapCount, 1);
+    assert.equal(second?.swapCount, 1);
   });
 
   it("buckets router-driven and broker-direct swaps into separate daily snapshots", async () => {
@@ -487,6 +565,14 @@ describe("Broker.Swap handler", () => {
       "BrokerDailySnapshot should NOT record VirtualPool-routed Broker swaps — the v3 VirtualPool.Swap sibling already counts them",
     );
 
+    const exchangeActivityRow = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    );
+    assert.isOk(
+      exchangeActivityRow,
+      "BrokerExchangeDailySnapshot should record full exchange activity for the VirtualPool header even when the legacy-v2 rollups skip VP-routed swaps",
+    );
+
     // BrokerTraderDailySnapshot: NOT written (the whole point of the fix).
     // Check both the brokerCaller-keyed id (legacy attribution) and the
     // caller-keyed id (current attribution) — neither should exist.
@@ -646,6 +732,20 @@ describe("Broker.Swap handler", () => {
     ) as { swapCount: number } | undefined;
     assert.equal(bipool?.swapCount, 1);
     assert.equal(other?.swapCount, 1);
+
+    const bipoolExchange = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    ) as { exchangeProvider: string; swapCount: number } | undefined;
+    const otherExchange = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${OTHER_PROVIDER}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    ) as { exchangeProvider: string; swapCount: number } | undefined;
+    assert.equal(
+      bipoolExchange?.exchangeProvider,
+      BIPOOL_MANAGER.toLowerCase(),
+    );
+    assert.equal(otherExchange?.exchangeProvider, OTHER_PROVIDER);
+    assert.equal(bipoolExchange?.swapCount, 1);
+    assert.equal(otherExchange?.swapCount, 1);
   });
 });
 

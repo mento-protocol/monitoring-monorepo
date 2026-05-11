@@ -35,6 +35,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DAILY_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_ALL",
   "BROKER_DAILY_SNAPSHOTS_ALL",
+  "BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H",
   "POOL_DAILY_FEE_SNAPSHOTS_PAGE",
   "ALL_TRADING_LIMITS",
   "TRADING_LIMITS",
@@ -51,7 +52,6 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
   "VIRTUAL_POOL_LIFECYCLE",
-  "BROKER_SWAPS_BY_EXCHANGE_ID_PAGE",
 ] as const;
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -303,6 +303,24 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_DAILY_SNAPSHOTS_ALL).toContain("$poolIds: [String!]!");
     expect(normalize(queries.POOL_DAILY_SNAPSHOTS_ALL)).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
+    );
+  });
+
+  it("BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H reads the exchange daily rollup, not raw BrokerSwapEvent rows", () => {
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "BrokerExchangeDailySnapshot",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "exchangeId: { _eq: $exchangeId }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "exchangeProvider: { _eq: $exchangeProvider }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "timestamp: { _gte: $since }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).not.toContain(
+      "BrokerSwapEvent",
     );
   });
 
