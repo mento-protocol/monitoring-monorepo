@@ -253,6 +253,75 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script 
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
+package_scripts_object_repo="$(mktemp -d)"
+(
+  cd "$package_scripts_object_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "postinstall": "node scripts/postinstall.js"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+delete pkg.scripts;
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$package_scripts_object_repo"
+assert_contains "- workspace"
+assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+
+mixed_package_script_repo="$(mktemp -d)"
+(
+  cd "$mixed_package_script_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+  },
+  "dependencies": {
+    "left-pad": "1.3.0"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts["agent:quality-gate"] = "true";
+pkg.dependencies["left-pad"] = "1.2.0";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$mixed_package_script_repo"
+assert_contains "- workspace"
+assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_occurrences 1 "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"

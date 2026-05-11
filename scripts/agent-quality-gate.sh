@@ -324,7 +324,9 @@ NODE
 classify_root_package_json_changes() {
   local change
   local saw_change=false
-  local agent_gate_only=true
+  local saw_agent_gate_script=false
+  local saw_non_agent_script=false
+  local saw_non_script=false
 
   while IFS= read -r change; do
     [[ -n "$change" ]] || continue
@@ -335,19 +337,26 @@ classify_root_package_json_changes() {
         return
         ;;
       /scripts/agent:quality-gate|/scripts/agent:quality-gate:test)
+        saw_agent_gate_script=true
+        ;;
+      /scripts)
+        saw_non_agent_script=true
         ;;
       /scripts/*)
-        echo "package-scripts"
-        return
+        saw_non_agent_script=true
         ;;
       *)
-        agent_gate_only=false
+        saw_non_script=true
         ;;
     esac
   done < <(json_change_paths "package.json")
 
-  if [[ "$saw_change" == true && "$agent_gate_only" == true ]]; then
+  if [[ "$saw_change" != true ]]; then
+    echo "workspace"
+  elif [[ "$saw_agent_gate_script" == true && "$saw_non_agent_script" != true && "$saw_non_script" != true ]]; then
     echo "agent-quality-gate-scripts"
+  elif [[ "$saw_agent_gate_script" == true || "$saw_non_agent_script" == true ]]; then
+    echo "package-scripts"
   else
     echo "workspace"
   fi
