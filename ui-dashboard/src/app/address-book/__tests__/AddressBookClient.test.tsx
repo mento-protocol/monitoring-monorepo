@@ -44,6 +44,7 @@ import type { AddressEntryRow } from "@/components/address-labels-provider";
 // hoists them ahead of any transitive resolution.
 
 let mockCustomEntries: AddressEntryRow[] = [];
+let mockReportAddresses: string[] = [];
 const mockGetEntry = vi.fn();
 const mockRevalidate = vi.fn(async () => {
   /* no-op */
@@ -75,8 +76,9 @@ vi.mock("@/components/address-labels-provider", () => ({
 // remains unchanged.
 vi.mock("@/hooks/use-address-reports-index", () => ({
   useAddressReportsIndex: () => ({
-    data: { global: [], chains: {} },
-    hasReport: () => false,
+    data: { addresses: mockReportAddresses },
+    hasReport: (address: string) =>
+      mockReportAddresses.includes(address.toLowerCase()),
     isLoading: false,
     error: undefined,
     mutate: vi.fn(),
@@ -188,6 +190,7 @@ beforeEach(() => {
   root = createRoot(container);
 
   mockCustomEntries = [];
+  mockReportAddresses = [];
   mockGetEntry.mockReset();
   mockGetEntry.mockReturnValue(undefined);
   mockRevalidate.mockClear();
@@ -377,6 +380,22 @@ describe("AddressBookClient — initial render", () => {
     expect(rowAddresses()).toContain(
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
+  });
+
+  it("renders report-only addresses as reachable rows", () => {
+    const reportOnly = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    mockReportAddresses = [reportOnly];
+    render();
+    expect(rowAddresses()).toContain(reportOnly);
+    expect(tbodyBadges()).toContain("report");
+    const reportRow = Array.from(container.querySelectorAll("tbody tr")).find(
+      (tr) => tr.textContent?.includes("Forensic report"),
+    );
+    expect(
+      reportRow
+        ?.querySelector<HTMLAnchorElement>('a[href^="/address-book/"]')
+        ?.getAttribute("href"),
+    ).toBe(`/address-book/${reportOnly}`);
   });
 
   it("renders the page title and description headings", () => {

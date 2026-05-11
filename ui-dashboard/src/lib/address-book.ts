@@ -20,6 +20,7 @@ export type AddressBookRow = {
   address: string;
   name: string;
   tags: string[];
+  kind?: "contract" | "custom" | "report";
   isCustom: boolean;
   /** Provenance — `"arkham"` for cron-enriched entries, undefined for manual. */
   source?: string;

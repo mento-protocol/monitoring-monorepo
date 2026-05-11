@@ -540,7 +540,7 @@ describe("validateSnapshotReports", () => {
   it("re-stamps server-controlled metadata with importer's email + import source", async () => {
     // Cursor flagged that the verbatim-restore design let any session-
     // authenticated user forge another user's authorEmail/source/version
-    // /timestamps via a crafted snapshot. Restore now treats only `body`
+    // /timestamps via a crafted snapshot. User-uploaded import treats only `body`
     // and `title` as user-controlled — everything else is server-set.
     const { validateSnapshotReports } =
       await import("@/lib/address-labels/import");
@@ -570,6 +570,37 @@ describe("validateSnapshotReports", () => {
     expect(r.createdAt).not.toBe("2020-01-01T00:00:00Z");
     expect(r.updatedAt).not.toBe("2020-01-01T00:00:00Z");
     expect(typeof r.createdAt).toBe("string");
+  });
+
+  it("preserves report metadata for server-side Blob restores", async () => {
+    const { validateSnapshotReports } =
+      await import("@/lib/address-labels/import");
+    const result = validateSnapshotReports(
+      {
+        [ADDR_A]: {
+          body: "investigation",
+          title: " Counterparty ",
+          authorEmail: "analyst@mentolabs.xyz",
+          source: "claude",
+          createdAt: "2026-05-01T00:00:00Z",
+          updatedAt: "2026-05-02T00:00:00Z",
+          version: 7,
+        },
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+      },
+    );
+    if ("error" in result) throw new Error("expected ok");
+    const r = result.reports[ADDR_A];
+    expect(r.body).toBe("investigation");
+    expect(r.title).toBe("Counterparty");
+    expect(r.authorEmail).toBe("analyst@mentolabs.xyz");
+    expect(r.source).toBe("claude");
+    expect(r.createdAt).toBe("2026-05-01T00:00:00Z");
+    expect(r.updatedAt).toBe("2026-05-02T00:00:00Z");
+    expect(r.version).toBe(7);
   });
 
   it("accepts valid input and lower-cases addresses", async () => {

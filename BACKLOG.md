@@ -112,12 +112,6 @@ list have shipped.
 
 - [ ] **24h Volume tile for VPs.** Add per-exchangeId 24h USD volume to the VirtualPool header. Sourcing directly from `BrokerSwapEvent` would hit Hasura's 1000-row cap for active pairs; the proper fix is a new `BrokerExchangeDailySnapshot` entity keyed by `chainId-exchangeId-day`, updated alongside `BrokerDailySnapshot` in the broker handler. Requires a schema bump and full re-sync.
 
-## Address Book
-
-- [ ] **Server-side restore-from-Blob endpoint.** The import body cap is 4MB and Vercel's serverless body limit prevents raising it much further. If snapshots exceed that size, add `POST /api/address-labels/restore?pathname=...` to pull the snapshot directly from Vercel Blob and run the same validation/import pipeline. Decide explicitly whether cron/admin restores should preserve report author/timestamp metadata, since upload imports intentionally re-stamp reports to the importing session.
-- [ ] **Report-only addresses need a UI surface.** The address-book page currently builds rows from `contractRows + customRows`, so an address with a forensic report but no label is not reachable from the index. Either add `/address-book/reports` or include report-only rows in the main address book, deduped against contract + custom rows.
-- [ ] **Drop the legacy dual-read in `getLabels` / `getLabel`.** After production has run `POST /api/address-labels/migrate-flat` and confirmed `legacyDropped: true`, remove legacy reads from `ui-dashboard/src/lib/address-labels.ts`, delete the migration route + tests, and then drop `KNOWN_LEGACY_KEYS`.
-
 ## Dashboard Data Correctness
 
 - [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in PR #389: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates, `pushState` path changes, `popstate` back navigation, and hydration correction.
@@ -135,7 +129,6 @@ comments. Refresh before starting a split.
 | 1567 |   907 | `indexer-envio/src/pool.ts`                          | Highest-priority split before adding more pool behavior; under the effective hard cap but far past the readability budget. |
 |  933 |   708 | `indexer-envio/src/rpc/pool-state.ts`                | Split RPC mocks/caches/fetchers when touching pool-state RPC.                                                              |
 |  750 |   542 | `indexer-envio/src/rpc/effects.ts`                   | Watch; split if adding another effect family.                                                                              |
-|  738 |   530 | `ui-dashboard/src/lib/address-labels/import.ts`      | Watch; split restore/import validators if the Blob restore endpoint lands.                                                 |
 |  738 |   547 | `ui-dashboard/src/lib/queries/pools.ts`              | Watch; split by pool-detail/global/bridge domains if adding more queries.                                                  |
 |  732 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts`      | Watch; split fetch orchestration if another network-wide data source lands.                                                |
 |  690 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`        | Watch; split only with related oracle-handler work.                                                                        |

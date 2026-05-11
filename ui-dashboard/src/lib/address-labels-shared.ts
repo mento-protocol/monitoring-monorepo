@@ -120,10 +120,9 @@ export function derivePreservedSource(
  * it.
  *
  * Used by:
- *   - the migration route, when an address appears in two legacy scope
- *     hashes (e.g. both `labels:42220` and `labels:global`)
  *   - the snapshot import path, when a backup contains the same address in
- *     `addresses` + `global` + `chains` (rollback-from-conflicted-backup)
+ *     `addresses` + `global` + `chains` (including old conflicted backups
+ *     produced before the flat-label migration was retired)
  */
 export function mergeEntries(
   prior: AddressEntry,
