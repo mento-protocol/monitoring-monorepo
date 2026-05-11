@@ -92,7 +92,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       );
     }
 
-    return handleSnapshot(body, {
+    return await handleSnapshot(body, {
       importerEmail: auth.importerEmail,
       // Workspace sessions get the same trusted-restore mode as cron because
       // this route only reads allowlisted first-party private Blob snapshots.

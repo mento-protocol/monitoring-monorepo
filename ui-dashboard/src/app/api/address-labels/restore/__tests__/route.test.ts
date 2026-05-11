@@ -10,6 +10,10 @@ vi.mock("@vercel/blob", () => ({
   get: vi.fn(),
 }));
 
+vi.mock("@sentry/nextjs", () => ({
+  captureException: vi.fn(),
+}));
+
 vi.mock("@/lib/address-labels/snapshot", () => ({
   isSnapshot: vi.fn(() => true),
   handleSnapshot: vi.fn(async () =>
@@ -18,6 +22,7 @@ vi.mock("@/lib/address-labels/snapshot", () => ({
 }));
 
 import { getAuthSession } from "@/auth";
+import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
 import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
@@ -25,6 +30,7 @@ import { POST } from "../route";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGet = vi.mocked(get);
+const mockCaptureException = vi.mocked(Sentry.captureException);
 const mockHandleSnapshot = vi.mocked(handleSnapshot);
 const mockIsSnapshot = vi.mocked(isSnapshot);
 const RESTORE_LIMIT = MAX_REDIS_HASH_REPLACE_BYTES;
@@ -198,5 +204,26 @@ describe("POST /api/address-labels/restore", () => {
     );
     expect(res.status).toBe(400);
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("returns a structured 500 when snapshot handling rejects", async () => {
+    const err = new Error("Redis offline");
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    mockHandleSnapshot.mockRejectedValueOnce(err);
+
+    const res = await POST(
+      req("address-labels-backup-2026-05-11.json", {
+        authorization: "Bearer secret",
+      }),
+    );
+
+    await expect(res.json()).resolves.toEqual({ error: "Restore failed" });
+    expect(res.status).toBe(500);
+    expect(mockCaptureException).toHaveBeenCalledWith(err, {
+      tags: { route: "address-labels/restore" },
+    });
+    consoleError.mockRestore();
   });
 });
