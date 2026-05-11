@@ -122,10 +122,9 @@ interface TimeSeriesChartCardProps {
   ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
 }
 
-// Component is over the no-giant-component threshold — chart shell
-// + hover overlay + trace builder + range picker. Tracked in
-// BACKLOG.md § "Architecture pass" for a focused split PR (extract
-// HoverOverlay / TraceBuilder / RangePicker).
+// Intentional react-doctor suppression: chart shell + hover overlay + trace
+// builder + range picker are tightly coupled to Plotly layout state. Revisit
+// only with a focused chart-component split.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function TimeSeriesChartCard({
   title,

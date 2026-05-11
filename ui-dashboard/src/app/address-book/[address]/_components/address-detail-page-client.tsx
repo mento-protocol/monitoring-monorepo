@@ -11,10 +11,9 @@ import {
 } from "../../_lib/address-book-rows";
 import { AddressDetailHeader } from "./address-detail-header";
 
-// Component is over the no-giant-component threshold. Tracked in
-// BACKLOG.md § "Architecture pass" for a focused split PR — splitting
-// it cleanly into LabelPanel / ReportPanel sub-components alongside the
-// other 10 giant-component sites is its own architecture refactor.
+// Intentional react-doctor suppression: label panel, report panel, and
+// pending-ledger ownership are coupled on this detail page. Split only with a
+// focused component-ownership refactor.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function AddressDetailPageClient({ address }: { address: string }) {
   const {

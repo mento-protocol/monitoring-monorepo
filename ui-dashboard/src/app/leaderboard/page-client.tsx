@@ -51,10 +51,9 @@ type PoolRow = {
 // stacked bars of varying widths that look noisy).
 const RANGES_WITH_CHART = new Set<LeaderboardRangeKey>(["30d", "90d", "all"]);
 
-// Component is over the no-giant-component threshold — venue toggle
-// + range filter + multi-table layout. Tracked in BACKLOG.md
-// § "Architecture pass" for a focused split PR (extract
-// LeaderboardFilters / V3Tables / V2Tables).
+// Intentional react-doctor suppression: venue toggle + range filter +
+// multi-table layout share query state that feeds hero KPIs, charts, and
+// tables. Revisit with a focused split only if this grows again.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function LeaderboardClient() {
   const {
@@ -93,7 +92,8 @@ export function LeaderboardClient() {
   // Per-pool stacked chart data (v3-only). Separate query from
   // `TRADER_DAILY_TOP` because the chart needs (poolId, day) granularity
   // that the trader-day rollup throws away. Pre-rolling
-  // `PoolDailyVolumeSnapshot` is the proper fix at scale (BACKLOG PR 4).
+  // `PoolDailyVolumeSnapshot` is the proper fix at scale (BACKLOG.md
+  // "Volume Leaderboard").
   // Skip the query entirely on v2 — broker-direct swaps don't carry
   // pool decomposition, so there's nothing to chart, and the query
   // would just churn an unused 1000-row response.
@@ -266,8 +266,8 @@ export function LeaderboardClient() {
   // The per-pool POOL_DAILY_VOLUME query can also hit the 1000-row cap on
   // longer windows; smallest pool-days drop first, so the visual stack's
   // top-N stays intact. We don't surface a separate banner for it — the
-  // pre-rolled PoolDailyVolumeSnapshot (BACKLOG.md PR 4) is the structural
-  // fix and the cap rarely affects the readable signal at 7d/30d.
+  // pre-rolled PoolDailyVolumeSnapshot is the structural fix and the cap
+  // rarely affects the readable signal at 7d/30d.
   //
   // BROKER_AGGREGATOR_DAILY_TOP is a top-N-volume cut. If it saturates
   // we'd silently drop long-tail aggregators from the table; surface it

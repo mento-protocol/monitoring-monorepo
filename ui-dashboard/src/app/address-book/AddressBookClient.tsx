@@ -26,7 +26,8 @@ type AddressBookPageProps = { canEdit?: boolean };
 
 // 6 useState calls — independent UI pieces (search, modal targets,
 // import banners, draft); a reducer would just rename the setters.
-// no-giant-component is also deferred — see BACKLOG.md § "Architecture pass".
+// Keep the table + modal ownership in one component so pending label/report
+// ledgers stay easy to audit.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
 export default function AddressBookPage(props: AddressBookPageProps) {
   const { canEdit: userCanEdit = false } = props;
