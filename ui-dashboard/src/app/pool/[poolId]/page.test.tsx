@@ -34,6 +34,7 @@ import {
   POOL_SWAPS,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
+  POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
   TRADING_LIMITS,
   VIRTUAL_POOL_LIFECYCLE,
@@ -371,6 +372,18 @@ function makeGqlResult(data: unknown) {
   return { data, error: null, isLoading: false };
 }
 
+function makeTrustFlagsResult(pool: Pool = basePool) {
+  return makeGqlResult({
+    Pool: [
+      {
+        id: pool.id,
+        rebalanceThresholdsKnown: true,
+        tokenDecimalsKnown: true,
+      },
+    ],
+  });
+}
+
 function renderWithParams(params: Record<string, string> = {}) {
   currentSearchParams = new URLSearchParams(params);
   return renderToStaticMarkup(<PoolDetailPage />);
@@ -418,6 +431,7 @@ beforeEach(() => {
     (query: unknown, variables?: { offset?: number; limit?: number }) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
       if (query === POOL_DEPLOYMENT)
@@ -820,6 +834,7 @@ describe("Pool detail tab search", () => {
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
       if (query === POOL_DEPLOYMENT)
@@ -996,6 +1011,9 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({
             Pool: [{ ...basePool, source: "virtual_pool" }],
           });
+        if (query === POOL_THRESHOLDS_KNOWN_EXT) {
+          return makeTrustFlagsResult({ ...basePool, source: "virtual_pool" });
+        }
         if (query === TRADING_LIMITS)
           return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
         if (query === POOL_DEPLOYMENT)
@@ -1105,6 +1123,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
       if (query === POOL_REBALANCES_COUNT)
@@ -1178,6 +1197,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
       if (query === POOL_REBALANCES_COUNT)

@@ -29,6 +29,18 @@ interface ReservesPanelProps {
    * permanent pair-incompatibility.
    */
   ratesError?: boolean;
+  /**
+   * True while the isolated token-decimal trust query is still in flight.
+   * Reserve amounts must not be parsed with fallback decimals during this
+   * window, because a 6dp token scaled as 18dp is off by 1e12.
+   */
+  decimalsLoading?: boolean;
+  /**
+   * True when the isolated token-decimal trust query failed. The panel hides
+   * token amounts until the query recovers instead of rendering fallback
+   * decimal math.
+   */
+  decimalsError?: boolean;
 }
 
 export function ReservesPanel({
@@ -36,18 +48,21 @@ export function ReservesPanel({
   rates,
   ratesLoading = false,
   ratesError = false,
+  decimalsLoading = false,
+  decimalsError = false,
 }: ReservesPanelProps) {
   const { network } = useNetwork();
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
+  const decimalsTrusted = pool.tokenDecimalsKnown === true;
 
   // null/undefined → null (not yet indexed); "0" → 0 (valid empty reserve)
   const r0 =
-    pool.reserves0 != null
+    decimalsTrusted && pool.reserves0 != null
       ? parseWei(pool.reserves0, pool.token0Decimals ?? 18)
       : null;
   const r1 =
-    pool.reserves1 != null
+    decimalsTrusted && pool.reserves1 != null
       ? parseWei(pool.reserves1, pool.token1Decimals ?? 18)
       : null;
 
@@ -103,7 +118,8 @@ export function ReservesPanel({
   // during oracle outages on USDm-leg pools, so we gate on `canValueTvl`
   // (USD-convertible legs AND a usable oracle price) to avoid showing a
   // confident-looking percentage that's silently off.
-  const priceable = canValueTvl(pool, network, rates ?? new Map());
+  const priceable =
+    decimalsTrusted && canValueTvl(pool, network, rates ?? new Map());
   const showTanks = hasReserves && !isEmptyPool && priceable;
   const showThresholdLegend = showTanks && thresholds !== null;
 
@@ -131,7 +147,17 @@ export function ReservesPanel({
         )}
       </div>
 
-      {!hasReserves ? (
+      {decimalsLoading ? (
+        <p className="text-sm text-slate-400">Loading reserves…</p>
+      ) : decimalsError ? (
+        <p className="text-sm text-red-400">
+          Couldn't load reserves — try again later.
+        </p>
+      ) : !decimalsTrusted ? (
+        <p className="text-sm text-slate-400">
+          Reserves hidden until token decimals are verified.
+        </p>
+      ) : !hasReserves ? (
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
       ) : isEmptyPool ? (
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
