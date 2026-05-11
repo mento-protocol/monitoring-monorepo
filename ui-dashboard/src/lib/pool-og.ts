@@ -81,11 +81,10 @@ export type PoolOgData = {
 };
 
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses
-// would need cross-network probing here, but the pool page at
-// app/pool/[poolId]/page.tsx normalizes bare addresses against
-// DEFAULT_NETWORK only and redirects on miss — probing in this route would
-// make OG previews point to a chain the page won't load. All canonical
-// URLs from buildPoolDetailHref are namespaced anyway.
+// would need cross-network probing here. The pool page resolves bare
+// addresses against the active client network, which crawler metadata cannot
+// observe, so OG previews stay namespaced-only rather than selecting a
+// default chain the page might not load.
 function resolvePoolId(
   rawPoolId: string,
 ): { poolId: string; chainId: number } | null {

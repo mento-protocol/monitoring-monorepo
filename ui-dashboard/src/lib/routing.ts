@@ -29,8 +29,8 @@ export function buildPoolsFilterUrl(
 }
 
 /**
- * In-page URL updates (tab/limit/search, raw→namespaced canonicalization).
- * Preserves existing params (tab, limit, etc.).
+ * Pool-detail URL updates for tab/limit/search state. The caller owns any
+ * pool-id normalization because raw addresses need active-network context.
  */
 export function buildPoolDetailUrl(
   poolId: string,

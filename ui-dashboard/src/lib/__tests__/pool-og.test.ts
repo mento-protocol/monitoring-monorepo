@@ -196,8 +196,8 @@ describe("fetchPoolOgDataUncached", () => {
 
   it("rejects bare-address URLs — OG must not resolve differently from page", async () => {
     // Bare 0x addresses would need cross-chain probing, but the pool page
-    // uses DEFAULT_NETWORK only. Accepting them here would produce OG
-    // previews for a chain the page can't load.
+    // resolves them against client-only network state. Accepting them here
+    // would produce OG previews for a chain crawler metadata has to guess.
     expect(await fetchPoolOgDataUncached(ADDR_CUSD)).toBeNull();
   });
 
