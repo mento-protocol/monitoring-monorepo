@@ -1,5 +1,6 @@
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { networkForChainId } from "@/lib/networks";
+import { weiToUsd } from "@/lib/format";
 
 export type AggregatorDailyRow = {
   id: string;
@@ -148,7 +149,7 @@ export function buildAggregatorDailyVolumeBreakdown(
     color: AGGREGATOR_PALETTE[idx % AGGREGATOR_PALETTE.length]!,
     series: sortedDays.map((day) => ({
       timestamp: day,
-      value: usdWeiToUsd(byAggregatorDay.get(`${key}|${day}`) ?? ZERO),
+      value: weiToUsd(byAggregatorDay.get(`${key}|${day}`) ?? ZERO),
     })),
   }));
 
@@ -163,7 +164,7 @@ export function buildAggregatorDailyVolumeBreakdown(
         for (const key of otherKeys) {
           total += byAggregatorDay.get(`${key}|${day}`) ?? ZERO;
         }
-        return { timestamp: day, value: usdWeiToUsd(total) };
+        return { timestamp: day, value: weiToUsd(total) };
       }),
     });
   }
@@ -171,7 +172,7 @@ export function buildAggregatorDailyVolumeBreakdown(
   return {
     totalSeries: sortedDays.map((day) => ({
       timestamp: day,
-      value: usdWeiToUsd(totalsByDay.get(day) ?? ZERO),
+      value: weiToUsd(totalsByDay.get(day) ?? ZERO),
     })),
     breakdown,
   };
@@ -184,23 +185,4 @@ function aggregatorNameFromKey(key: string): string {
   const name = key.slice(firstDash + 1);
   const network = networkForChainId(chainId);
   return network ? `${name} (${network.label})` : name;
-}
-
-function usdWeiToUsd(wei: bigint): number {
-  const decimals = 18;
-  const s = wei.toString();
-  if (s === "0") return 0;
-  const negative = s.startsWith("-");
-  const digits = negative ? s.slice(1) : s;
-  if (digits.length <= decimals) {
-    const padded = digits.padStart(decimals + 1, "0");
-    const whole = padded.slice(0, -decimals);
-    const frac = padded.slice(-decimals).slice(0, 6);
-    const n = Number(`${whole}.${frac}`);
-    return negative ? -n : n;
-  }
-  const whole = digits.slice(0, -decimals);
-  const frac = digits.slice(-decimals).slice(0, 6);
-  const n = Number(`${whole}.${frac}`);
-  return negative ? -n : n;
 }

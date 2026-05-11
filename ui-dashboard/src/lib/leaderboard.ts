@@ -13,14 +13,14 @@
  */
 
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import { weiToUsd as formatWeiToUsd } from "@/lib/format";
 import {
   aggregateAggregatorsByWindow,
   type AggregatorDailyRow,
   type AggregatorWindowRow,
 } from "@/lib/leaderboard-aggregators";
 
-/** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
-const USD_WEI_DECIMALS = 18;
+export { formatWeiToUsd as weiToUsd };
 
 /** Window selection for the leaderboard view. The full range set covers
  * both v3 and v2 venues; the per-pool chart is hidden for `<30d` windows
@@ -322,7 +322,7 @@ export function aggregateDailyVolume(
   }
   return Array.from(byDay.entries())
     .sort(([a], [b]) => a - b)
-    .map(([timestamp, wei]) => ({ timestamp, value: weiToUsd(wei) }));
+    .map(([timestamp, wei]) => ({ timestamp, value: formatWeiToUsd(wei) }));
 }
 
 /** Three-way comparator for BigInts. Used by table sort handlers that need
@@ -331,30 +331,6 @@ export function cmpBigInt(a: bigint, b: bigint): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
-}
-
-// ─── Display conversions ──────────────────────────────────────────────────
-
-/** USD-wei BigInt → number. Loses precision past ~$9 quadrillion (Number's
- * 2^53 cap). Acceptable for display; never use for further accumulation. */
-export function weiToUsd(wei: bigint): number {
-  // Convert via decimal-shift through string to keep precision under Number's
-  // 2^53 ceiling (`Number(wei)` rounds large BigInts).
-  const s = wei.toString();
-  if (s === "0") return 0;
-  const negative = s.startsWith("-");
-  const digits = negative ? s.slice(1) : s;
-  if (digits.length <= USD_WEI_DECIMALS) {
-    const padded = digits.padStart(USD_WEI_DECIMALS + 1, "0");
-    const whole = padded.slice(0, -USD_WEI_DECIMALS);
-    const frac = padded.slice(-USD_WEI_DECIMALS).slice(0, 6);
-    const n = Number(`${whole}.${frac}`);
-    return negative ? -n : n;
-  }
-  const whole = digits.slice(0, -USD_WEI_DECIMALS);
-  const frac = digits.slice(-USD_WEI_DECIMALS).slice(0, 6);
-  const n = Number(`${whole}.${frac}`);
-  return negative ? -n : n;
 }
 
 // ─── Flow imbalance (drives the FlowBadge) ────────────────────────────────
