@@ -243,12 +243,27 @@ quote_path() {
   printf "%q" "$1"
 }
 
+tmpfiles=()
+cleanup_tmpfiles() {
+  if [[ ${#tmpfiles[@]} -gt 0 ]]; then
+    rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
+  fi
+}
+trap cleanup_tmpfiles EXIT
+
+make_tmpfile() {
+  local tmpfile
+  tmpfile="$(mktemp)"
+  tmpfiles+=("$tmpfile")
+  echo "$tmpfile"
+}
+
 json_change_paths() {
   local path="$1"
   local base_file
   local head_file
-  base_file="$(mktemp)"
-  head_file="$(mktemp)"
+  base_file="$(make_tmpfile)"
+  head_file="$(make_tmpfile)"
 
   if ! git show "${base_ref}:${path}" > "$base_file" 2>/dev/null; then
     rm -f "$base_file" "$head_file"
@@ -337,6 +352,14 @@ classify_root_package_json_changes() {
   else
     echo "workspace"
   fi
+}
+
+root_package_json_class=""
+get_root_package_json_class() {
+  if [[ -z "$root_package_json_class" ]]; then
+    root_package_json_class="$(classify_root_package_json_changes)"
+  fi
+  echo "$root_package_json_class"
 }
 
 add_package_quality_commands() {
@@ -457,16 +480,18 @@ add_command "./tools/trunk check --all" "changed files should pass the same full
 while IFS= read -r path; do
   case "$path" in
     package.json)
-      root_package_json_class="$(classify_root_package_json_changes)"
+      root_package_json_class="$(get_root_package_json_class)"
       case "$root_package_json_class" in
         agent-quality-gate-scripts)
           add_surface "tooling"
-          add_command "pnpm agent:quality-gate:test" "root package agent quality gate script changed"
+          add_command "bash scripts/agent-quality-gate.test.sh" "root package agent quality gate script changed"
           ;;
         package-scripts)
           package_script_risk_changed=true
           add_surface "workspace"
-          add_command "pnpm agent:quality-gate:test" "root package script changed"
+          add_preflight_command "pnpm install --frozen-lockfile" "root package script changed"
+          add_command "bash scripts/agent-quality-gate.test.sh" "root package script changed"
+          add_workspace_quality_commands "root package script changed"
           ;;
         *)
           package_script_risk_changed=true
@@ -530,11 +555,17 @@ while IFS= read -r path; do
           add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
-        indexer-envio/src/EventHandlersBridgeOnly.ts|indexer-envio/src/handlers/wormhole/*)
+        indexer-envio/src/EventHandlersBridgeOnly.ts)
           add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
+        indexer-envio/src/handlers/wormhole/*)
+          add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
+          add_indexer_testnet_codegen "indexer handler registration path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
         indexer-envio/src/EventHandlers.ts|indexer-envio/src/handlers/*)
+          add_indexer_testnet_codegen "indexer handler registration path changed"
           add_indexer_mainnet_codegen "indexer handler registration path changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
@@ -648,7 +679,7 @@ while IFS= read -r path; do
       add_surface "scripts"
       ;;
     package.json)
-      root_package_json_class="$(classify_root_package_json_changes)"
+      root_package_json_class="$(get_root_package_json_class)"
       case "$root_package_json_class" in
         agent-quality-gate-scripts)
           ;;
@@ -657,7 +688,7 @@ while IFS= read -r path; do
         *)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-          add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
+          add_command "bash scripts/agent-quality-gate.test.sh" "agent quality gate package script changed"
           add_workspace_quality_commands "workspace dependency/config changed"
           ;;
       esac
@@ -762,7 +793,7 @@ filter_expected_output() {
 
     if [[ "$skip_expected_stack" == true ]]; then
       case "$line" in
-        Error:*|TypeError:*|*" at "*|"    at "*)
+        Error:*|TypeError:*|"    at "*)
           continue
           ;;
         "")
@@ -770,6 +801,8 @@ filter_expected_output() {
           continue
           ;;
       esac
+      echo "$line"
+      continue
     fi
 
     skip_expected_stack=false
@@ -788,6 +821,7 @@ print_command_summary() {
   local entry
   local status
   local elapsed
+  local elapsed_and_command
   local command
 
   if [[ ${#command_summaries[@]} -eq 0 ]]; then
@@ -813,7 +847,7 @@ run_mapped_command() {
   local elapsed
   local exit_code
 
-  output_file="$(mktemp)"
+  output_file="$(make_tmpfile)"
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"

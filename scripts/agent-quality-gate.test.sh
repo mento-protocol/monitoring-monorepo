@@ -141,7 +141,7 @@ assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio lint (package manager config changed)"
 
 run_gate "package.json"
-assert_contains "- pnpm agent:quality-gate:test (agent quality gate package script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (workspace dependency/config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (workspace dependency/config changed)"
 assert_order \
@@ -178,10 +178,44 @@ NODE
 )
 rm -rf "$package_json_repo"
 assert_contains "- tooling"
-assert_contains "- pnpm agent:quality-gate:test (root package agent quality gate script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package agent quality gate script changed)"
+assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+
+package_script_repo="$(mktemp -d)"
+(
+  cd "$package_script_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "postinstall": "node scripts/postinstall.js"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts.postinstall = "node scripts/postinstall-updated.js";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$package_script_repo"
+assert_contains "- workspace"
+assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -210,9 +244,10 @@ assert_not_contains "indexer:testnet:codegen"
 assert_not_contains "pnpm indexer:codegen"
 
 run_gate "indexer-envio/src/EventHandlers.ts"
-assert_contains "- pnpm indexer:codegen (indexer handler registration path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer handler registration path changed)" \
+  "- pnpm indexer:codegen (indexer handler registration path changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
-assert_not_contains "- pnpm indexer:testnet:codegen"
 
 run_gate "indexer-envio/src/EventHandlersBridgeOnly.ts"
 assert_order \
@@ -221,15 +256,18 @@ assert_order \
 assert_not_contains "- pnpm indexer:testnet:codegen"
 
 run_gate "indexer-envio/src/handlers/fpmm.ts"
-assert_contains "- pnpm indexer:codegen (indexer handler registration path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer handler registration path changed)" \
+  "- pnpm indexer:codegen (indexer handler registration path changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
-assert_not_contains "- pnpm indexer:testnet:codegen"
 
 run_gate "indexer-envio/src/handlers/wormhole/nttManager.ts"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge handler registration path changed)" \
+  "- pnpm indexer:testnet:codegen (indexer handler registration path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer handler registration path changed)" \
   "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
-assert_not_contains "- pnpm indexer:testnet:codegen"
 
 run_gate "indexer-envio/scripts/run-envio-with-env.mjs"
 assert_order \
@@ -244,8 +282,11 @@ assert_order \
 
 run_gate "indexer-envio/config.multichain.mainnet.yaml" "indexer-envio/src/handlers/fpmm.ts"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
-assert_not_contains "- pnpm indexer:testnet:codegen"
+assert_contains "- pnpm indexer:testnet:codegen (indexer handler registration path changed)"
 assert_contains "- pnpm indexer:codegen (mainnet indexer config changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer handler registration path changed)" \
+  "- pnpm indexer:codegen (mainnet indexer config changed)"
 assert_order \
   "- pnpm indexer:codegen (mainnet indexer config changed)" \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
@@ -531,6 +572,36 @@ assert_contains "Command failed after"
 assert_contains "real failure line"
 assert_contains "Command elapsed-time summary:"
 assert_not_contains "expected fixture failure that should be filtered"
+
+quiet_stack_repo="$(mktemp -d)"
+(
+  cd "$quiet_stack_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+echo "[address-labels] expected API failure"
+echo "Command failed at step 3"
+echo "    at Object.fixture (/tmp/fixture.js:1:1)"
+exit 1
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> README.md
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run --fail-fast > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$quiet_stack_repo"
+assert_contains "Command failed at step 3"
+assert_not_contains "[address-labels] expected API failure"
+assert_not_contains "Object.fixture"
 
 react_doctor_repo="$(mktemp -d)"
 (
