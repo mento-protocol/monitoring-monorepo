@@ -144,6 +144,31 @@ describe("Pool detail LPs tab", () => {
     mockSearchParams.set("tab", "providers");
   });
 
+  it("renders a missing pool without tab chrome or tab content queries", () => {
+    const seenQueries: string[] = [];
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query) seenQueries.push(query);
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [] });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Pool 0xpool not found.");
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('role="tabpanel"');
+    expect(seenQueries.some((query) => query.includes("PoolLpPositions"))).toBe(
+      false,
+    );
+  });
+
   it("renders indexed LiquidityPosition data when available", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (!query) return gqlResult(undefined);

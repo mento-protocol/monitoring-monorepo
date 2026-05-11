@@ -114,13 +114,14 @@ function mockRequest(impl: (query: string) => unknown | Promise<unknown>) {
   });
 }
 
-function bootHook() {
+function ProtocolFeesProbe() {
   capturedFetcher = null;
   useProtocolFees();
+  return null;
 }
 
 async function runFetcher(): Promise<NetworkData[]> {
-  bootHook();
+  ProtocolFeesProbe();
   if (!capturedFetcher) throw new Error("SWR fetcher was never captured");
   return capturedFetcher();
 }
