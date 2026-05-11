@@ -356,6 +356,24 @@ type BrokerDailySnapshot
   blockNumber: BigInt!
 }
 
+# Per-exchange daily rollup for the v2 exchange backing a VirtualPool.
+# Unlike BrokerDailySnapshot, this intentionally includes EVERY Broker.Swap for
+# the exchangeId: direct v2 swaps, Router -> VirtualPool sibling Broker rows,
+# and third-party aggregator -> VirtualPool -> Broker rows. The VirtualPool
+# detail header uses this as a bounded current-day volume source; do not use it
+# for the homepage legacy-v2 split, which must keep excluding v3 siblings.
+type BrokerExchangeDailySnapshot
+  @index(fields: ["chainId", "exchangeProvider", "exchangeId", "timestamp"]) {
+  id: ID! # `{chainId}-{exchangeProvider}-{exchangeId}-{day}`
+  chainId: Int! @index
+  exchangeId: String! @index # bytes32 hex; normalized lowercase
+  exchangeProvider: String! @index
+  timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  blockNumber: BigInt!
+}
+
 # -----------------------------------------------------------------------------
 # Legacy-v2 producer leaderboard. Mirrors TraderDailySnapshot /
 # AggregatorDailySnapshot (further down in this file) but sourced from

@@ -45,6 +45,7 @@ Broker.Swap.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const exchangeProvider = asAddress(event.params.exchangeProvider);
+  const exchangeId = event.params.exchangeId.toLowerCase();
   // `event.params.trader` from Broker.Swap = `msg.sender` to Broker. For
   // routed swaps this is a router/aggregator/wrapper contract; for direct
   // trades from a UI/SDK this equals tx.from. We track it as `brokerCaller`
@@ -95,7 +96,7 @@ Broker.Swap.handler(async ({ event, context }) => {
     id,
     chainId: event.chainId,
     exchangeProvider,
-    exchangeId: event.params.exchangeId,
+    exchangeId,
     brokerCaller,
     caller,
     tokenIn,
@@ -112,6 +113,20 @@ Broker.Swap.handler(async ({ event, context }) => {
   context.BrokerSwapEvent.set(swap);
 
   const dayTs = dayBucket(blockTimestamp);
+
+  const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
+  const existingExchangeSnapshot =
+    await context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId);
+  context.BrokerExchangeDailySnapshot.set({
+    id: exchangeSnapshotId,
+    chainId: event.chainId,
+    exchangeId,
+    exchangeProvider,
+    timestamp: dayTs,
+    swapCount: (existingExchangeSnapshot?.swapCount ?? 0) + 1,
+    volumeUsdWei: (existingExchangeSnapshot?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    blockNumber,
+  });
 
   // VirtualPool-routed Broker.Swap detection. Mento's Broker emits
   // `event.params.trader = msg.sender` — we track this as `brokerCaller` on

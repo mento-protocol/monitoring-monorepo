@@ -195,6 +195,15 @@ export type BiPoolExchangeRow = {
   wrappedByPoolId: string | null;
 };
 
+export type BrokerExchangeDailySnapshotRow = {
+  id: string;
+  /** UTC-day bucket as unix seconds. */
+  timestamp: string;
+  /** 18-decimal USD-wei. */
+  volumeUsdWei: string;
+  swapCount: number;
+};
+
 export type SwapEvent = {
   id: string;
   chainId: number;
