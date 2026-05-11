@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -13,6 +13,8 @@ Options:
   --run          Execute the mapped safe local commands.
   --base <ref>   Base ref for changed-path detection. Default: origin/main.
   --head <ref>   Head ref for changed-path detection. Default: HEAD.
+  --changed-paths-file <file>
+                 Read changed paths from a newline-delimited file instead of git.
   -h, --help     Show this help.
 
 Environment:
@@ -24,6 +26,7 @@ USAGE
 mode="dry-run"
 base_ref="${AGENT_QUALITY_BASE:-origin/main}"
 head_ref="${AGENT_QUALITY_HEAD:-HEAD}"
+changed_paths_input_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,6 +54,14 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --changed-paths-file)
+      changed_paths_input_file="${2:-}"
+      if [[ -z "$changed_paths_input_file" ]]; then
+        echo "error: --changed-paths-file requires a file path" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -69,17 +80,25 @@ cd "$repo_root"
 changed_paths_file="$(mktemp)"
 trap 'rm -f "$changed_paths_file"' EXIT
 
-{
-  if ! git diff --name-only "${base_ref}...${head_ref}" 2>/dev/null; then
-    git diff --name-only "$base_ref" "$head_ref"
+if [[ -n "$changed_paths_input_file" ]]; then
+  if [[ ! -f "$changed_paths_input_file" ]]; then
+    echo "error: changed paths file not found: ${changed_paths_input_file}" >&2
+    exit 2
   fi
+  sed '/^$/d' "$changed_paths_input_file" | sort -u > "$changed_paths_file"
+else
+  {
+    if ! git diff --name-only "${base_ref}...${head_ref}" 2>/dev/null; then
+      git diff --name-only "$base_ref" "$head_ref"
+    fi
 
-  if [[ "$head_ref" == "HEAD" ]]; then
-    git diff --name-only
-    git diff --cached --name-only
-    git ls-files --others --exclude-standard
-  fi
-} | sed '/^$/d' | sort -u > "$changed_paths_file"
+    if [[ "$head_ref" == "HEAD" ]]; then
+      git diff --name-only
+      git diff --cached --name-only
+      git ls-files --others --exclude-standard
+    fi
+  } | sed '/^$/d' | sort -u > "$changed_paths_file"
+fi
 
 if [[ ! -s "$changed_paths_file" ]]; then
   echo "No changed paths detected against ${base_ref}...${head_ref}."
@@ -95,26 +114,38 @@ surfaces=()
 
 has_command() {
   local command="$1"
+  shift
   local entry
-  for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
-    [[ "${entry%%|*}" == "$command" ]] && return 0
-  done
-  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
-    [[ "${entry%%|*}" == "$command" ]] && return 0
-  done
-  for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
-    [[ "${entry%%|*}" == "$command" ]] && return 0
-  done
-  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+  for entry in "$@"; do
     [[ "${entry%%|*}" == "$command" ]] && return 0
   done
   return 1
 }
 
+has_preflight_command() {
+  local command="$1"
+  has_command "$command" "${preflight_commands[@]+"${preflight_commands[@]}"}"
+}
+
+has_codegen_command() {
+  local command="$1"
+  has_command "$command" "${codegen_commands[@]+"${codegen_commands[@]}"}"
+}
+
+has_post_codegen_command() {
+  local command="$1"
+  has_command "$command" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
+}
+
+has_quality_command() {
+  local command="$1"
+  has_command "$command" "${quality_commands[@]+"${quality_commands[@]}"}"
+}
+
 add_preflight_command() {
   local command="$1"
   local reason="$2"
-  if ! has_command "$command"; then
+  if ! has_preflight_command "$command"; then
     preflight_commands+=("${command}|${reason}")
   fi
 }
@@ -122,7 +153,7 @@ add_preflight_command() {
 add_codegen_command() {
   local command="$1"
   local reason="$2"
-  if ! has_command "$command"; then
+  if ! has_codegen_command "$command"; then
     codegen_commands+=("${command}|${reason}")
   fi
 }
@@ -130,7 +161,7 @@ add_codegen_command() {
 add_post_codegen_command() {
   local command="$1"
   local reason="$2"
-  if ! has_command "$command"; then
+  if ! has_post_codegen_command "$command"; then
     post_codegen_commands+=("${command}|${reason}")
   fi
 }
@@ -138,7 +169,7 @@ add_post_codegen_command() {
 add_command() {
   local command="$1"
   local reason="$2"
-  if ! has_command "$command"; then
+  if ! has_quality_command "$command"; then
     quality_commands+=("${command}|${reason}")
   fi
 }
@@ -233,6 +264,19 @@ add_command "./tools/trunk check" "changed files should pass repo-wide Trunk lin
 
 while IFS= read -r path; do
   case "$path" in
+    */package.json)
+      add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
+      ;;
+  esac
+  case "$path" in
+    *.sh)
+      add_surface "scripts"
+      if [[ -f "$path" ]]; then
+        add_command "bash -n $(quote_path "$path")" "shell script changed"
+      fi
+      ;;
+  esac
+  case "$path" in
 	ui-dashboard/*)
 	  add_surface "ui-dashboard"
 	  add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
@@ -264,6 +308,11 @@ while IFS= read -r path; do
 	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/src/handlers/*|indexer-envio/src/rpc/*|indexer-envio/abis/*|indexer-envio/package.json)
 	      add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
 	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+	      ;;
+	  esac
+	  case "$path" in
+	    indexer-envio/config/*.json)
+	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer config data flow changed"
 	      ;;
 	  esac
 	  case "$path" in
@@ -319,6 +368,11 @@ while IFS= read -r path; do
       if [[ -f "$path" ]]; then
         add_command "bash -n $(quote_path "$path")" "shell script changed"
       fi
+      case "$path" in
+        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
+          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          ;;
+      esac
       ;;
     scripts/*|tools/*)
       add_surface "scripts"
@@ -326,6 +380,7 @@ while IFS= read -r path; do
 	package.json)
 	  add_surface "workspace"
 	  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+	  add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
 	  add_workspace_quality_commands "workspace dependency/config changed"
 	  ;;
 	pnpm-lock.yaml|pnpm-workspace.yaml)
