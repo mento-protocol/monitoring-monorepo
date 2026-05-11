@@ -35,6 +35,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo } from "react";
 import { PoolHeader } from "./pool-header";
 import { PoolTablist } from "./pool-tablist";
+import { TokenDecimalsTrustNotice } from "./token-decimals-trust-notice";
 import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "../_lib/constants";
 import {
   decodePoolId,
@@ -291,6 +292,8 @@ function PoolDetail() {
             tradingLimitsError={tradingLimitsError}
             fpmmPool={fpmmPool}
             network={network}
+            thresholdsLoading={thresholdsLoading}
+            thresholdsError={thresholdsError}
           />
         </>
       )}
@@ -474,6 +477,8 @@ function PoolTabPanel({
   tradingLimitsError,
   fpmmPool,
   network,
+  thresholdsLoading,
+  thresholdsError,
 }: {
   tab: Tab;
   normalizedPoolId: string;
@@ -485,9 +490,16 @@ function PoolTabPanel({
   tradingLimitsError: boolean;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
+  thresholdsLoading: boolean;
+  thresholdsError: Error | undefined;
 }) {
   return (
     <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+      <TokenDecimalsTrustNotice
+        pool={pool}
+        thresholdsLoading={thresholdsLoading}
+        thresholdsError={thresholdsError}
+      />
       {tab === "swaps" && (
         <SwapsTab
           poolId={normalizedPoolId}
