@@ -18,17 +18,29 @@ import {
 import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import {
+  formatTimestamp,
+  formatUSD,
+  relativeTime,
+  weiToUsd,
+} from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
-import { POOL_V2_EXCHANGE } from "@/lib/queries";
+import {
+  BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+  POOL_V2_EXCHANGE,
+} from "@/lib/queries";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import {
   isVirtualPool,
   type BiPoolExchangeRow,
+  type BrokerExchangeDailySnapshotRow,
   type Pool,
   type TradingLimit,
 } from "@/lib/types";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
 import { V2ExchangePanel } from "./v2-exchange-panel";
 
@@ -57,6 +69,32 @@ export function PoolHeader({
     { poolId: pool.id, chainId: pool.chainId },
   );
   const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
+  const exchangeIdForVolume = (
+    pool.wrappedExchangeId ??
+    v2Config?.exchangeId ??
+    ""
+  ).toLowerCase();
+  const volumeSince = currentUtcDayStartSeconds();
+  const {
+    data: exchangeVolumeData,
+    isLoading: exchangeVolumeLoading,
+    error: exchangeVolumeError,
+  } = useGQL<{
+    BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
+  }>(
+    isVirtual && exchangeIdForVolume
+      ? BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H
+      : null,
+    {
+      chainId: pool.chainId,
+      exchangeId: exchangeIdForVolume,
+      since: volumeSince,
+    },
+    SNAPSHOT_REFRESH_MS,
+    { timeoutMs: HASURA_TIMEOUT_MS },
+  );
+  const exchangeVolumeRows =
+    exchangeVolumeData?.BrokerExchangeDailySnapshot ?? [];
   // The Hasura "field not found" error during the indexer deploy+resync
   // window collapses to `v2Error`; surface as a degraded panel rather
   // than silently rendering nothing.
@@ -136,6 +174,10 @@ export function PoolHeader({
             network={network}
             v2Config={v2Config}
             hasError={v2HasError}
+            exchangeVolumeRows={exchangeVolumeRows}
+            exchangeVolumeLoading={exchangeVolumeLoading}
+            exchangeVolumeError={exchangeVolumeError !== undefined}
+            hasExchangeId={Boolean(exchangeIdForVolume)}
           />
         ) : (
           <>
@@ -220,6 +262,10 @@ const STATUS_TILE = {
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
+function currentUtcDayStartSeconds(nowMs = Date.now()): number {
+  return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+}
+
 function statusKey(
   v2Config: BiPoolExchangeRow | null,
   hasError: boolean,
@@ -248,11 +294,19 @@ function VirtualPoolHeaderTiles({
   network,
   v2Config,
   hasError,
+  exchangeVolumeRows,
+  exchangeVolumeLoading,
+  exchangeVolumeError,
+  hasExchangeId,
 }: {
   pool: Pool;
   network: Network;
   v2Config: BiPoolExchangeRow | null;
   hasError: boolean;
+  exchangeVolumeRows: BrokerExchangeDailySnapshotRow[];
+  exchangeVolumeLoading: boolean;
+  exchangeVolumeError: boolean;
+  hasExchangeId: boolean;
 }) {
   const status = STATUS_TILE[statusKey(v2Config, hasError)];
   // Render Oracle Price for VPs only when the feedID is populated. The
@@ -293,6 +347,26 @@ function VirtualPoolHeaderTiles({
         value={(pool.swapCount ?? 0).toLocaleString()}
         mono
       />
+      <Stat
+        label={
+          <span className="inline-flex items-center gap-1">
+            24h Volume
+            <InfoPopover
+              label="24h Volume"
+              content="Current UTC-day USD volume for the backing v2 exchange. Includes direct v2 swaps and VirtualPool-routed Broker swaps, sourced from the per-exchange daily rollup."
+            />
+          </span>
+        }
+        value={
+          <VirtualPoolVolumeValue
+            rows={exchangeVolumeRows}
+            isLoading={exchangeVolumeLoading}
+            hasError={exchangeVolumeError}
+            hasExchangeId={hasExchangeId}
+          />
+        }
+        mono
+      />
       {hasOracleFeed ? (
         <Stat
           label="Oracle Price"
@@ -307,5 +381,39 @@ function VirtualPoolHeaderTiles({
         <Stat label="Oracle Price" value="—" className="invisible" />
       )}
     </>
+  );
+}
+
+function VirtualPoolVolumeValue({
+  rows,
+  isLoading,
+  hasError,
+  hasExchangeId,
+}: {
+  rows: BrokerExchangeDailySnapshotRow[];
+  isLoading: boolean;
+  hasError: boolean;
+  hasExchangeId: boolean;
+}) {
+  if (hasError) {
+    return (
+      <span className="text-rose-400" title="Failed to load exchange volume">
+        —
+      </span>
+    );
+  }
+  if (!hasExchangeId || isLoading) {
+    return <span className="text-slate-500">—</span>;
+  }
+
+  const volumeUsdWei = rows.reduce(
+    (sum, row) => sum + BigInt(row.volumeUsdWei),
+    BigInt(0),
+  );
+  const swapCount = rows.reduce((sum, row) => sum + row.swapCount, 0);
+  return (
+    <span title={`${swapCount.toLocaleString()} swaps since UTC midnight`}>
+      {formatUSD(weiToUsd(volumeUsdWei))}
+    </span>
   );
 }

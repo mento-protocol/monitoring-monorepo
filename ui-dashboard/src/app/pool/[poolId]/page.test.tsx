@@ -15,6 +15,7 @@ import type {
   TradingLimit,
 } from "@/lib/types";
 import {
+  BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -33,9 +34,12 @@ import {
   POOL_SWAPS,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
+  POOL_V2_EXCHANGE,
   TRADING_LIMITS,
+  VIRTUAL_POOL_LIFECYCLE,
 } from "@/lib/queries";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
 const replaceMock = vi.fn();
 const redirectMock = vi.fn();
@@ -198,6 +202,7 @@ vi.mock("@/components/tx-hash-cell", () => ({
 }));
 
 import PoolDetailPage, { decodePoolId, parseTabLimit } from "./page";
+import { PoolHeader } from "./_components/pool-header";
 import { POOL_NOT_FOUND_DEST } from "@/lib/routing";
 
 let currentSearchParams = new URLSearchParams();
@@ -338,6 +343,29 @@ const poolSnapshots: PoolSnapshot[] = [
     blockNumber: "200",
   },
 ];
+
+const exchangeId =
+  "0x1111111111111111111111111111111111111111111111111111111111111111";
+const v2ExchangeRow = {
+  id: `42220-${exchangeId}`,
+  chainId: 42220,
+  exchangeId,
+  exchangeProvider: "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901",
+  asset0: "token0",
+  asset1: "token1",
+  pricingModule: "0xpricingmodule",
+  pricingModuleName: "ConstantSum",
+  spread: "5000000000000000000000",
+  referenceRateFeedID: "0xfeed000000000000000000000000000000000000",
+  referenceRateResetFrequency: "300",
+  minimumReports: "1",
+  stablePoolResetSize: "1000000000000000000000",
+  bucket0: "1000000000000000000000",
+  bucket1: "2000000000000000000000",
+  lastBucketUpdate: "1700000000",
+  isDeprecated: false,
+  wrappedByPoolId: "pool-1",
+};
 
 function makeGqlResult(data: unknown) {
   return { data, error: null, isLoading: false };
@@ -819,6 +847,95 @@ describe("Pool detail tab search", () => {
       SNAPSHOT_REFRESH_MS,
     );
     expect(html).toContain("liquidity-chart");
+  });
+
+  it("renders virtual pool current UTC-day exchange volume from the broker exchange rollup", () => {
+    vi.setSystemTime(new Date("2026-05-11T12:34:00Z"));
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_V2_EXCHANGE)
+        return {
+          data: { BiPoolExchange: [v2ExchangeRow] },
+          error: undefined,
+          isLoading: false,
+        };
+      if (query === VIRTUAL_POOL_LIFECYCLE)
+        return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+      if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H)
+        return {
+          data: {
+            BrokerExchangeDailySnapshot: [
+              {
+                id: `42220-${exchangeId}-1778457600`,
+                timestamp: "1778457600",
+                volumeUsdWei: "42000000000000000000",
+                swapCount: 3,
+              },
+            ],
+          },
+          error: undefined,
+          isLoading: false,
+        };
+      return makeGqlResult({});
+    });
+
+    const html = renderToStaticMarkup(
+      <PoolHeader
+        pool={{
+          ...basePool,
+          source: "virtual_pool",
+          wrappedExchangeId: exchangeId,
+        }}
+        tradingLimits={[]}
+      />,
+    );
+    expect(html).toContain("24h Volume");
+    expect(html).toContain("$42.00");
+    expect(html).toContain("3 swaps since UTC midnight");
+    expect(useGQLMock).toHaveBeenCalledWith(
+      BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+      {
+        chainId: 42220,
+        exchangeId,
+        since: Date.UTC(2026, 4, 11) / 1000,
+      },
+      SNAPSHOT_REFRESH_MS,
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    );
+  });
+
+  it("degrades the virtual pool exchange volume tile visibly when the rollup query fails", () => {
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_V2_EXCHANGE)
+        return {
+          data: { BiPoolExchange: [v2ExchangeRow] },
+          error: undefined,
+          isLoading: false,
+        };
+      if (query === VIRTUAL_POOL_LIFECYCLE)
+        return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+      if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H) {
+        return {
+          data: null,
+          error: new Error("field BrokerExchangeDailySnapshot not found"),
+          isLoading: false,
+        };
+      }
+      return makeGqlResult({});
+    });
+
+    const html = renderToStaticMarkup(
+      <PoolHeader
+        pool={{
+          ...basePool,
+          source: "virtual_pool",
+          wrappedExchangeId: exchangeId,
+        }}
+        tradingLimits={[]}
+      />,
+    );
+    expect(html).toContain("24h Volume");
+    expect(html).toContain("Failed to load exchange volume");
+    expect(html).not.toContain("$42.00");
   });
 
   it("skips snapshot chart query for virtual pools", () => {
