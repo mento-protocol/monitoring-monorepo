@@ -13,7 +13,11 @@ import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
 import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
-import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
+import {
+  VolumeOverTimeChart,
+  buildDailyVolumeSeries,
+  type DailyVolumeSeriesResult,
+} from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
 
 export default function GlobalPage({
@@ -77,9 +81,9 @@ function perPoolTvlWindow(
   return result;
 }
 
-// Component is over the no-giant-component threshold — global hero
-// + multi-section trend layout. Tracked in BACKLOG.md § "Architecture
-// pass" for a focused split PR.
+// Intentional react-doctor suppression: global hero + multi-section trend
+// layout share the same cross-network aggregation state. Revisit only with a
+// focused split that keeps those derived values centralized.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 function GlobalContent({
   initialNetworkData,
@@ -165,6 +169,8 @@ function GlobalContent({
     let hasSuccessfulLpResult = false;
     const unpricedSymbolSet = new Set<string>();
     let totalUnresolvedCount = 0;
+    const volumeSeries: DailyVolumeSeriesResult =
+      buildDailyVolumeSeries(networkData);
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
@@ -256,6 +262,7 @@ function GlobalContent({
       //   - `false` (every priceable pool had a value) → headline = USD total
       //   - `true` (≥1 priceable pool returned null) → headline = USD total + "(partial)"
       tvlPartial: priceableTvlPools === 0 ? null : unknownTvlPools > 0,
+      volumeSeries,
       unknownTvlPools,
       totalSwapsAllTime,
       totalFeesAllTime,
@@ -320,6 +327,7 @@ function GlobalContent({
             anyBrokerSnapshotsAllDailyError ||
             anyBrokerSnapshotsAllDailyTruncated
           }
+          fullVolumeSeries={aggregated.volumeSeries}
         />
       </div>
 

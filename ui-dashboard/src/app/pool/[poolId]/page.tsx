@@ -1,16 +1,15 @@
 import type { Metadata } from "next";
 import { fetchPoolForMetadata, type PoolOgData } from "@/lib/pool-og";
 import { formatUSD } from "@/lib/format";
-import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
-import {
-  extractChainIdFromPoolId,
-  isNamespacedPoolId,
-  normalizePoolIdForChain,
-} from "@/lib/pool-id";
 import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
 import { redirect } from "next/navigation";
 import { PoolDetailPageClient } from "./_components/pool-detail-page-client";
 import { decodePoolId } from "./_lib/helpers";
+import {
+  isRoutablePoolId,
+  parseRouteChainId,
+  routeCanonicalPoolId,
+} from "./_lib/route-canonicalization";
 
 // 60s — incident-time state flips should propagate in minutes, not hours.
 export const revalidate = 60;
@@ -65,12 +64,6 @@ function toURLSearchParams(searchParams: PageSearchParams): URLSearchParams {
     }
   }
   return params;
-}
-
-function routeCanonicalPoolId(poolId: string): string {
-  const chainId =
-    extractChainIdFromPoolId(poolId) ?? NETWORKS[DEFAULT_NETWORK].chainId;
-  return normalizePoolIdForChain(poolId, chainId);
 }
 
 export async function generateMetadata({
@@ -136,17 +129,15 @@ async function CanonicalPoolDetailPage({
     searchParams,
   ]);
   const decodedId = decodePoolId(poolId);
-  const canonicalPoolId = routeCanonicalPoolId(decodedId);
+  const explicitChainId = parseRouteChainId(resolvedSearchParams.chainId);
+  const canonicalPoolId = routeCanonicalPoolId(decodedId, explicitChainId);
 
   if (canonicalPoolId !== decodedId) {
-    redirect(
-      buildPoolDetailUrl(
-        canonicalPoolId,
-        toURLSearchParams(resolvedSearchParams),
-      ),
-    );
+    const redirectParams = toURLSearchParams(resolvedSearchParams);
+    redirectParams.delete("chainId");
+    redirect(buildPoolDetailUrl(canonicalPoolId, redirectParams));
   }
-  if (!isNamespacedPoolId(canonicalPoolId)) {
+  if (!isRoutablePoolId(canonicalPoolId)) {
     redirect(POOL_NOT_FOUND_DEST);
   }
 

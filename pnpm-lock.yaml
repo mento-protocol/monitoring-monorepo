@@ -253,7 +253,7 @@ importers:
         specifier: ^6.10.2
         version: 6.10.2(eslint@10.0.3(jiti@2.7.0))
       eslint-plugin-react-you-might-not-need-an-effect:
-        specifier: ^0.10.1
+        specifier: 0.10.1
         version: 0.10.1(eslint@10.0.3(jiti@2.7.0))
       eslint-plugin-unused-imports:
         specifier: ^4.2.0

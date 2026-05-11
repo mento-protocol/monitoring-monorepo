@@ -124,6 +124,7 @@ const BASE_POOL: Pool = {
   oraclePrice: "1000000000000000000000000",
   reserves0: "1",
   reserves1: "1",
+  tokenDecimalsKnown: true,
 };
 
 function gqlResult(data: unknown, error?: Error) {
@@ -205,6 +206,35 @@ describe("Pool detail LPs tab", () => {
     expect(html).not.toContain(
       "LP provider data is unavailable until this environment is reindexed",
     );
+  });
+
+  it("warns tab users when token decimals are unverified", () => {
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return gqlResult({
+          Pool: [{ id: BASE_POOL.id, tokenDecimalsKnown: false }],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({ ReserveUpdate: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Token decimals are unverified for this pool");
+    expect(html).toContain('role="alert"');
   });
 
   it("hides USD-specific columns when the pool has no USDm side", () => {

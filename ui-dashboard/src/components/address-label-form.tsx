@@ -152,10 +152,10 @@ type Props = {
   externallyDisabled?: boolean;
 };
 
-// 8 useState calls — independent form fields plus orthogonal flow
-// flags; a reducer would rename the same setters without grouping any
-// related transitions. no-giant-component is also deferred — see
-// BACKLOG.md § "Architecture pass".
+// 8 useState calls — independent form fields plus orthogonal flow flags; a
+// reducer would rename the same setters without grouping any related
+// transitions. Keep one form component so pending-ledger ownership remains
+// local and explicit.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
 export function AddressLabelForm(props: Props) {
   const {
