@@ -122,7 +122,7 @@ post_codegen_commands=()
 quality_commands=()
 checklists=()
 surfaces=()
-package_manifest_changed=false
+package_script_risk_changed=false
 
 has_command() {
   local command="$1"
@@ -283,8 +283,11 @@ add_command "./tools/trunk check" "changed files should pass repo-wide Trunk lin
 while IFS= read -r path; do
   case "$path" in
     package.json|*/package.json)
-      package_manifest_changed=true
+      package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
+      ;;
+    pnpm-lock.yaml)
+      package_script_risk_changed=true
       ;;
   esac
   case "$path" in
@@ -301,7 +304,7 @@ while IFS= read -r path; do
 	  add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
 	  add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
 	  case "$path" in
-	    ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
+	    ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
 	      add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
 	      ;;
 	  esac
@@ -461,9 +464,9 @@ if [[ "$mode" == "dry-run" ]]; then
   exit 0
 fi
 
-if [[ "$package_manifest_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
-  echo "Refusing to run because package manifests changed." >&2
-  echo "Review package scripts and lifecycle hooks first, then re-run with --allow-package-script-changes if they are safe." >&2
+if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
+  echo "Refusing to run because package manifests or lockfile changed." >&2
+  echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
   exit 2
 fi
 

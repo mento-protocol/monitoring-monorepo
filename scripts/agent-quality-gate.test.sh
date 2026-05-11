@@ -82,8 +82,12 @@ assert_order \
   "- pnpm --filter @mento-protocol/ui-dashboard lint (ui-dashboard changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
-assert_contains "Refusing to run because package manifests changed."
+assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "re-run with --allow-package-script-changes if they are safe."
+
+run_gate_expect_failure "pnpm-lock.yaml"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -134,6 +138,15 @@ assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-env
 run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"
+
+run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
+run_gate "ui-dashboard/src/app/pool/[poolId]/_tabs/swaps-tab.tsx"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
+run_gate "ui-dashboard/src/app/pool/[poolId]/_components/pool-detail-page-client.tsx"
+assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 
 run_gate "ui-dashboard/src/lib/fetch-all-networks.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
