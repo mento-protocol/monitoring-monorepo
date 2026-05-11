@@ -1,16 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { buildSignInHref } from "@/components/auth-status";
 
-// Unit tests for `buildSignInHref`, the helper that powers both the
-// render-time href (from `useSearchParams`) and the click-time href
-// (from `window.location`) on the global "Sign in" link.
+// Unit tests for `buildSignInHref`, the helper that powers the live href
+// (from `useLiveLocation`) on the global "Sign in" link.
 //
-// The two risky behaviors flagged on the addressing review are:
-//   (a) feeding `window.location` into the helper — exercised here via the
-//       "live URL composition" cases; the actual click handler is a thin
-//       wrapper that just calls this with `window.location.pathname` /
-//       `.search`. If the helper round-trips a representative path+search
-//       correctly, the click handler does too.
+// The two risky behaviors are:
+//   (a) feeding the live browser location into the helper — exercised here via
+//       the "live URL composition" cases. If the helper round-trips a
+//       representative path+search correctly, the anchor href does too.
 //   (b) the `/sign-in` self-link branch — exercised directly.
 
 describe("buildSignInHref — non-sign-in path (default branch)", () => {
@@ -27,8 +24,8 @@ describe("buildSignInHref — non-sign-in path (default branch)", () => {
   });
 
   it("round-trips a sort+dir search via the live-URL composition path", () => {
-    // This is what the click handler does:
-    //   buildSignInHref(window.location.pathname, window.location.search)
+    // This is what AuthStatus does with `useLiveLocation()`:
+    //   buildSignInHref(liveLocation.pathname, liveLocation.search)
     // Simulating a /pools page that wrote `?poolsSort=tvl&poolsDir=desc` via
     // `window.history.replaceState` (see lib/use-table-sort.ts). The render-
     // time `useSearchParams()` snapshot would miss this; the live-URL path
