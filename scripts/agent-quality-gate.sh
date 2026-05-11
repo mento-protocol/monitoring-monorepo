@@ -167,7 +167,7 @@ while IFS= read -r path; do
       add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
       add_command "pnpm dashboard:react-doctor:diff" "ui-dashboard client code should keep React Doctor clean"
       case "$path" in
-        ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries/*)
+        ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts)
           add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
           ;;
       esac
@@ -200,6 +200,9 @@ while IFS= read -r path; do
         indexer-envio/config.multichain.testnet.yaml)
           add_command "pnpm indexer:testnet:codegen" "testnet indexer config changed"
           ;;
+        indexer-envio/config.multichain.bridge-only.yaml)
+          add_command "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen" "bridge-only indexer config changed"
+          ;;
       esac
       ;;
     metrics-bridge/*)
@@ -217,7 +220,7 @@ while IFS= read -r path; do
       ;;
     terraform/*)
       add_surface "terraform"
-      add_command "terraform -chdir=terraform fmt -check" "Terraform changed"
+      add_command "terraform -chdir=terraform fmt -check -recursive" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
     cloudbuild.yaml)
@@ -229,7 +232,9 @@ while IFS= read -r path; do
       ;;
     scripts/*.sh)
       add_surface "scripts"
-      add_command "bash -n $(quote_path "$path")" "shell script changed"
+      if [[ -f "$path" ]]; then
+        add_command "bash -n $(quote_path "$path")" "shell script changed"
+      fi
       ;;
     scripts/*|tools/*)
       add_surface "scripts"
