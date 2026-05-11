@@ -1,5 +1,6 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
+import { readFileSync } from "node:fs";
 import {
   classifyAggregator,
   getClusterMetadata,
@@ -7,6 +8,7 @@ import {
   _allClusterNames,
   _directEntriesForChain,
 } from "../src/aggregators";
+import { CONTRACT_NAMESPACE_BY_CHAIN } from "../src/contractAddresses";
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;
@@ -28,6 +30,9 @@ const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
 
 const NOT_LABELED = "0xab5801a7d398351b8be11c439e05c5b3259aec9b";
+const SHARED_CLUSTER_METADATA = JSON.parse(
+  readFileSync("../shared-config/aggregator-clusters.json", "utf8"),
+) as Record<string, { chainId: number; deployer: string; explorerUrl: string }>;
 
 describe("classifyAggregator", () => {
   it("Celo: matches known aggregators by address", () => {
@@ -186,14 +191,41 @@ describe("cluster classification", () => {
     }
   });
 
+  it("shared dashboard metadata covers every indexer cluster", () => {
+    const indexerClusterNames = _allClusterNames().toSorted();
+    assert.deepEqual(
+      Object.keys(SHARED_CLUSTER_METADATA).sort(),
+      indexerClusterNames,
+    );
+    for (const name of indexerClusterNames) {
+      const indexerMeta = getClusterMetadata(name);
+      assert.ok(indexerMeta, `${name} should have indexer cluster metadata`);
+      const sharedMeta = SHARED_CLUSTER_METADATA[name];
+      assert.ok(sharedMeta, `${name} should have shared cluster metadata`);
+      assert.deepEqual(
+        {
+          chainId: indexerMeta.chainId,
+          deployer: indexerMeta.deployer,
+          explorerUrl: indexerMeta.explorerUrl,
+        },
+        {
+          chainId: sharedMeta.chainId,
+          deployer: sharedMeta.deployer,
+          explorerUrl: sharedMeta.explorerUrl,
+        },
+      );
+    }
+  });
+
   it("every cluster-* name in per-chain entries has a matching $clusters block entry", () => {
     // Catches typos like `cluster-7dc08ec28f299c07` (off-by-one) in
     // aggregators.json — without this test, classifyAggregator would happily
     // return the bad name and the leaderboard's PR-3 tooltip would silently
     // break (getClusterMetadata returns undefined).
     const knownClusters = new Set(_allClusterNames());
-    // Iterate every chain that has aggregator entries (mainnet + testnet).
-    const chainsWithAggregators = [CHAIN_CELO, CHAIN_MONAD, 11142220, 10143];
+    const chainsWithAggregators = Object.keys(CONTRACT_NAMESPACE_BY_CHAIN).map(
+      Number,
+    );
     for (const chainId of chainsWithAggregators) {
       const map = _aggregatorAddressesForChain(chainId);
       for (const [addr, name] of map) {

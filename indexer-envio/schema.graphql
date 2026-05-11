@@ -1144,6 +1144,11 @@ type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   timestamp: BigInt! @index
   swapCount: Int!
   uniquePools: Int!
+  # Aggregator names this trader touched on this UTC day. Used to keep
+  # AggregatorDailySnapshot's primary fields consistent with the day-sticky
+  # isSystemAddress flag if a trader flips into system classification after
+  # earlier same-day non-system swaps.
+  aggregatorKeys: [String!]!
   volumeUsdWei: BigInt!
   feesPaidUsdWei: BigInt!
   isSystemAddress: Boolean! @index
@@ -1198,16 +1203,31 @@ type AggregatorDailySnapshot
   # across days if multiple routers map to the same canonical name.
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
+  # Primary fields exclude system-address callers and drive the dashboard's
+  # default view. The *IncludingSystem siblings back the page-level toggle.
   swapCount: Int!
+  swapCountIncludingSystem: Int!
   uniqueTraders: Int!
+  uniqueTradersIncludingSystem: Int!
   volumeUsdWei: BigInt!
+  volumeUsdWeiIncludingSystem: BigInt!
   feesPaidUsdWei: BigInt!
+  feesPaidUsdWeiIncludingSystem: BigInt!
 }
 
-# Existence-only marker entities used to dedupe first-touch increments of
-# `uniqueTraders` and `uniquePools`. Cheaper than scanning the parent table.
+# Marker entities used to dedupe first-touch increments of `uniqueTraders` and
+# keep enough per-trader contribution state to correct AggregatorDailySnapshot
+# primary fields if a trader flips into day-sticky system classification.
 type AggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+  chainId: Int!
+  aggregator: String!
+  trader: String!
+  timestamp: BigInt!
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  feesPaidUsdWei: BigInt!
+  isSystemAddress: Boolean!
 }
 
 type TraderPoolDayMarker {

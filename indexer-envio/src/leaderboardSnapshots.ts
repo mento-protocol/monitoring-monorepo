@@ -61,6 +61,19 @@ export interface ApplyLeaderboardSnapshotsArgs {
   blockNumber: bigint; // for the LeaderboardWindowSnapshot heartbeat flush
 }
 
+function appendUnique(values: readonly string[], value: string): string[] {
+  if (values.includes(value)) return [...values];
+  return [...values, value].sort();
+}
+
+function subtractCount(value: number, amount: number): number {
+  return Math.max(0, value - amount);
+}
+
+function subtractWei(value: bigint, amount: bigint): bigint {
+  return value > amount ? value - amount : 0n;
+}
+
 /**
  * Update all leaderboard rollup entities for one swap. Idempotent at the (id)
  * level — re-running on the same event yields the same final state because:
@@ -121,6 +134,7 @@ export async function applyLeaderboardSnapshots(
   // double-count fees.
   const feeBpsTotal = Math.max(0, pool.lpFee) + Math.max(0, pool.protocolFee);
   const feesPaidUsdWei = applyFeeBps(volumeUsdWei, feeBpsTotal);
+  const callerIsSystem = isSystemAddress(chainId, caller, pool);
 
   // Direction-split USD-wei. In standard Uniswap-V2 swaps exactly one of
   // {In, Out} per side is non-zero; the other check is the "callback flow"
@@ -142,16 +156,22 @@ export async function applyLeaderboardSnapshots(
   }
 
   // 2. AggregatorTraderDayMarker → first-touch dedup for
-  //    AggregatorDailySnapshot.uniqueTraders.
+  //    AggregatorDailySnapshot.uniqueTraders plus per-trader counters used
+  //    if the day-sticky system flag flips after earlier same-day swaps.
   const existingAggTraderMarker =
     await context.AggregatorTraderDayMarker.get(aggTraderDayMarkerId);
   const aggTraderFirstTouch = existingAggTraderMarker === undefined;
-  if (aggTraderFirstTouch) {
-    context.AggregatorTraderDayMarker.set({ id: aggTraderDayMarkerId });
-  }
 
   // 3. TraderDailySnapshot upsert.
   const existingTraderDay = await context.TraderDailySnapshot.get(traderDayId);
+  const traderDayWasSystem = existingTraderDay?.isSystemAddress ?? false;
+  const traderDayIsSystem = traderDayWasSystem || callerIsSystem;
+  const traderDayBecameSystem =
+    existingTraderDay !== undefined && !traderDayWasSystem && callerIsSystem;
+  const aggregatorKeys = appendUnique(
+    existingTraderDay?.aggregatorKeys ?? [],
+    aggregator,
+  );
   context.TraderDailySnapshot.set({
     id: traderDayId,
     chainId,
@@ -160,15 +180,13 @@ export async function applyLeaderboardSnapshots(
     swapCount: (existingTraderDay?.swapCount ?? 0) + 1,
     uniquePools:
       (existingTraderDay?.uniquePools ?? 0) + (traderPoolFirstTouch ? 1 : 0),
+    aggregatorKeys,
     volumeUsdWei: (existingTraderDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
     feesPaidUsdWei: (existingTraderDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
-    isSystemAddress: existingTraderDay
-      ? // Sticky once true: a trader flagged as system at any point in a day
-        // stays system for the full day's snapshot. Rebalancer EOAs that swap
-        // once via a third-party router would otherwise toggle.
-        existingTraderDay.isSystemAddress ||
-        isSystemAddress(chainId, caller, pool)
-      : isSystemAddress(chainId, caller, pool),
+    // Sticky once true: a trader flagged as system at any point in a day
+    // stays system for the full day's snapshot. Rebalancer EOAs that swap
+    // once via a third-party router would otherwise toggle.
+    isSystemAddress: traderDayIsSystem,
     lastSeenTimestamp: blockTimestamp,
   });
 
@@ -195,22 +213,120 @@ export async function applyLeaderboardSnapshots(
       (existingTraderPoolDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
   });
 
-  // 5. AggregatorDailySnapshot upsert. `lastSeenAggregatorAddress` is the
+  // 5. AggregatorDailySnapshot upsert. Primary fields exclude system callers;
+  //    *IncludingSystem siblings preserve the toggle path. If this swap made
+  //    the trader-day sticky-system, subtract all earlier same-day aggregator
+  //    contributions from primary fields before applying the current event.
+  const primaryCorrectionsByAggregator = new Map<
+    string,
+    {
+      swapCount: number;
+      uniqueTraders: number;
+      volumeUsdWei: bigint;
+      feesPaidUsdWei: bigint;
+    }
+  >();
+  if (traderDayBecameSystem) {
+    for (const touchedAggregator of aggregatorKeys) {
+      const marker =
+        touchedAggregator === aggregator
+          ? existingAggTraderMarker
+          : await context.AggregatorTraderDayMarker.get(
+              `${chainId}-${touchedAggregator}-${caller}-${dayKey}`,
+            );
+      if (!marker || marker.isSystemAddress) continue;
+      primaryCorrectionsByAggregator.set(touchedAggregator, {
+        swapCount: marker.swapCount,
+        uniqueTraders: 1,
+        volumeUsdWei: marker.volumeUsdWei,
+        feesPaidUsdWei: marker.feesPaidUsdWei,
+      });
+    }
+
+    for (const [
+      touchedAggregator,
+      correction,
+    ] of primaryCorrectionsByAggregator) {
+      if (touchedAggregator === aggregator) continue;
+      const touchedAggDayId = `${chainId}-${touchedAggregator}-${dayKey}`;
+      const touchedAggDay =
+        await context.AggregatorDailySnapshot.get(touchedAggDayId);
+      if (!touchedAggDay) continue;
+      context.AggregatorDailySnapshot.set({
+        ...touchedAggDay,
+        swapCount: subtractCount(touchedAggDay.swapCount, correction.swapCount),
+        uniqueTraders: subtractCount(
+          touchedAggDay.uniqueTraders,
+          correction.uniqueTraders,
+        ),
+        volumeUsdWei: subtractWei(
+          touchedAggDay.volumeUsdWei,
+          correction.volumeUsdWei,
+        ),
+        feesPaidUsdWei: subtractWei(
+          touchedAggDay.feesPaidUsdWei,
+          correction.feesPaidUsdWei,
+        ),
+      });
+    }
+  }
+
+  //    `lastSeenAggregatorAddress` is the
   //    raw txTo so the dashboard can surface the actual router contract
   //    (useful when an aggregator has multiple deployed addresses on a chain
   //    and we want to know which one drove this row).
   const existingAggDay = await context.AggregatorDailySnapshot.get(aggDayId);
+  const currentAggCorrection = primaryCorrectionsByAggregator.get(aggregator);
+  const primarySwapBase = subtractCount(
+    existingAggDay?.swapCount ?? 0,
+    currentAggCorrection?.swapCount ?? 0,
+  );
+  const primaryUniqueBase = subtractCount(
+    existingAggDay?.uniqueTraders ?? 0,
+    currentAggCorrection?.uniqueTraders ?? 0,
+  );
+  const primaryVolumeBase = subtractWei(
+    existingAggDay?.volumeUsdWei ?? 0n,
+    currentAggCorrection?.volumeUsdWei ?? 0n,
+  );
+  const primaryFeesBase = subtractWei(
+    existingAggDay?.feesPaidUsdWei ?? 0n,
+    currentAggCorrection?.feesPaidUsdWei ?? 0n,
+  );
   context.AggregatorDailySnapshot.set({
     id: aggDayId,
     chainId,
     aggregator,
     lastSeenAggregatorAddress: txTo,
     timestamp: day,
-    swapCount: (existingAggDay?.swapCount ?? 0) + 1,
+    swapCount: primarySwapBase + (traderDayIsSystem ? 0 : 1),
+    swapCountIncludingSystem:
+      (existingAggDay?.swapCountIncludingSystem ?? 0) + 1,
     uniqueTraders:
-      (existingAggDay?.uniqueTraders ?? 0) + (aggTraderFirstTouch ? 1 : 0),
-    volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    feesPaidUsdWei: (existingAggDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
+      primaryUniqueBase + (!traderDayIsSystem && aggTraderFirstTouch ? 1 : 0),
+    uniqueTradersIncludingSystem:
+      (existingAggDay?.uniqueTradersIncludingSystem ?? 0) +
+      (aggTraderFirstTouch ? 1 : 0),
+    volumeUsdWei: primaryVolumeBase + (traderDayIsSystem ? 0n : volumeUsdWei),
+    volumeUsdWeiIncludingSystem:
+      (existingAggDay?.volumeUsdWeiIncludingSystem ?? 0n) + volumeUsdWei,
+    feesPaidUsdWei: primaryFeesBase + (traderDayIsSystem ? 0n : feesPaidUsdWei),
+    feesPaidUsdWeiIncludingSystem:
+      (existingAggDay?.feesPaidUsdWeiIncludingSystem ?? 0n) + feesPaidUsdWei,
+  });
+
+  context.AggregatorTraderDayMarker.set({
+    id: aggTraderDayMarkerId,
+    chainId,
+    aggregator,
+    trader: caller,
+    timestamp: day,
+    swapCount: (existingAggTraderMarker?.swapCount ?? 0) + 1,
+    volumeUsdWei: (existingAggTraderMarker?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    feesPaidUsdWei:
+      (existingAggTraderMarker?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
+    isSystemAddress:
+      (existingAggTraderMarker?.isSystemAddress ?? false) || traderDayIsSystem,
   });
 
   // 6. Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC
