@@ -100,7 +100,7 @@ list have shipped.
 
 ## Dashboard Data Correctness
 
-- [ ] **Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.** The unmodified-click path recomputes `callbackUrl` from `window.location`, but the anchor `href` remains frozen at the render-time `useSearchParams()` snapshot. Proper fix likely needs a root-level `history.pushState` / `replaceState` patch that emits `locationchange`, plus a `useSyncExternalStore` consumer in `AuthStatus`.
+- [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in PR #389: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates, `pushState` path changes, `popstate` back navigation, and hydration correction.
 - [ ] **Volume chart partial signal on the homepage.** Strict `tokenDecimalsKnown !== true` gating now exists in the valuation helpers, but `VolumeOverTimeChart` only receives `hasSnapshotError`. When untrusted-decimal pools are skipped, the headline can still look like a confident low/zero value. Add `volumePartial` alongside the existing `tvlPartial` plumbing.
 - [ ] **Pool detail tab panels gate on decimal trust state.** The top overview charts now receive `thresholdsLoading` / `thresholdsError`, but tab-local charts and tables still parse raw amounts with `pool.tokenNDecimals ?? 18`. Under an EXT query failure or `tokenDecimalsKnown=false`, those tabs can render schema-default-scaled balances. Add a page-level trust banner or per-tab gating.
 
