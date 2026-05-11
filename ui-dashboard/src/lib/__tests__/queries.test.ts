@@ -314,6 +314,9 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
       "exchangeId: { _eq: $exchangeId }",
     );
     expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "exchangeProvider: { _eq: $exchangeProvider }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
       "timestamp: { _gte: $since }",
     );
     expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).not.toContain(

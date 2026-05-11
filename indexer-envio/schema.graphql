@@ -363,8 +363,8 @@ type BrokerDailySnapshot
 # detail header uses this as a bounded current-day volume source; do not use it
 # for the homepage legacy-v2 split, which must keep excluding v3 siblings.
 type BrokerExchangeDailySnapshot
-  @index(fields: ["chainId", "exchangeId", "timestamp"]) {
-  id: ID! # `{chainId}-{exchangeId}-{day}`
+  @index(fields: ["chainId", "exchangeProvider", "exchangeId", "timestamp"]) {
+  id: ID! # `{chainId}-{exchangeProvider}-{exchangeId}-{day}`
   chainId: Int! @index
   exchangeId: String! @index # bytes32 hex; normalized lowercase
   exchangeProvider: String! @index

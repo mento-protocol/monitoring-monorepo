@@ -75,6 +75,9 @@ export function PoolHeader({
     v2Config?.exchangeId ??
     ""
   ).toLowerCase();
+  const exchangeProviderForVolume = (
+    v2Config?.exchangeProvider ?? ""
+  ).toLowerCase();
   const volumeSince = useCurrentUtcDayStartSeconds();
   const {
     data: exchangeVolumeData,
@@ -83,11 +86,12 @@ export function PoolHeader({
   } = useGQL<{
     BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
   }>(
-    isVirtual && exchangeIdForVolume
+    isVirtual && exchangeIdForVolume && exchangeProviderForVolume
       ? BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H
       : null,
     {
       chainId: pool.chainId,
+      exchangeProvider: exchangeProviderForVolume,
       exchangeId: exchangeIdForVolume,
       since: volumeSince,
     },
@@ -178,7 +182,9 @@ export function PoolHeader({
             exchangeVolumeRows={exchangeVolumeRows}
             exchangeVolumeLoading={exchangeVolumeLoading}
             exchangeVolumeError={exchangeVolumeError !== undefined}
-            hasExchangeId={Boolean(exchangeIdForVolume)}
+            hasExchangeId={Boolean(
+              exchangeIdForVolume && exchangeProviderForVolume,
+            )}
           />
         ) : (
           <>

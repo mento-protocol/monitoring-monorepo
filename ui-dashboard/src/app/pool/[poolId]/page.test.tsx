@@ -895,6 +895,7 @@ describe("Pool detail tab search", () => {
       BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
       {
         chainId: 42220,
+        exchangeProvider: v2ExchangeRow.exchangeProvider,
         exchangeId,
         since: Date.UTC(2026, 4, 11) / 1000,
       },

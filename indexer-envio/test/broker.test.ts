@@ -273,7 +273,7 @@ describe("Broker.Swap handler", () => {
     assert.equal(snap!.routedViaV3Router, false);
   });
 
-  it("rolls every Broker.Swap into BrokerExchangeDailySnapshot by (chain, exchangeId, day)", async () => {
+  it("rolls every Broker.Swap into BrokerExchangeDailySnapshot by (chain, exchangeProvider, exchangeId, day)", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
@@ -292,7 +292,7 @@ describe("Broker.Swap handler", () => {
     });
 
     const dayTs = dayBucket(1_700_000_000n);
-    const snapshotId = `${CHAIN_CELO}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`;
+    const snapshotId = `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`;
     const snap = mockDb.entities.BrokerExchangeDailySnapshot.get(snapshotId) as
       | {
           chainId: number;
@@ -337,10 +337,10 @@ describe("Broker.Swap handler", () => {
 
     const dayTs = dayBucket(1_700_000_000n);
     const first = mockDb.entities.BrokerExchangeDailySnapshot.get(
-      `${CHAIN_CELO}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
     ) as { swapCount: number } | undefined;
     const second = mockDb.entities.BrokerExchangeDailySnapshot.get(
-      `${CHAIN_CELO}-${otherExchangeId}-${dayTs}`,
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${otherExchangeId}-${dayTs}`,
     ) as { swapCount: number } | undefined;
 
     assert.equal(first?.swapCount, 1);
@@ -566,7 +566,7 @@ describe("Broker.Swap handler", () => {
     );
 
     const exchangeActivityRow = mockDb.entities.BrokerExchangeDailySnapshot.get(
-      `${CHAIN_CELO}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
     );
     assert.isOk(
       exchangeActivityRow,
@@ -732,6 +732,20 @@ describe("Broker.Swap handler", () => {
     ) as { swapCount: number } | undefined;
     assert.equal(bipool?.swapCount, 1);
     assert.equal(other?.swapCount, 1);
+
+    const bipoolExchange = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    ) as { exchangeProvider: string; swapCount: number } | undefined;
+    const otherExchange = mockDb.entities.BrokerExchangeDailySnapshot.get(
+      `${CHAIN_CELO}-${OTHER_PROVIDER}-${EXCHANGE_ID.toLowerCase()}-${dayTs}`,
+    ) as { exchangeProvider: string; swapCount: number } | undefined;
+    assert.equal(
+      bipoolExchange?.exchangeProvider,
+      BIPOOL_MANAGER.toLowerCase(),
+    );
+    assert.equal(otherExchange?.exchangeProvider, OTHER_PROVIDER);
+    assert.equal(bipoolExchange?.swapCount, 1);
+    assert.equal(otherExchange?.swapCount, 1);
   });
 });
 

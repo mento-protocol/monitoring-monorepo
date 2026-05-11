@@ -34,17 +34,19 @@ export const BROKER_DAILY_SNAPSHOTS_ALL = `
 // Current UTC-day volume for the v2 exchange backing a VirtualPool. This reads
 // the bounded per-exchange rollup, not BrokerSwapEvent, so active exchanges do
 // not hit Hasura's 1000-row per-query cap. The row includes all Broker.Swap
-// paths for the exchangeId: direct v2, Router -> VirtualPool sibling rows, and
-// aggregator -> VirtualPool -> Broker.
+// paths for the provider-scoped exchangeId: direct v2, Router -> VirtualPool
+// sibling rows, and aggregator -> VirtualPool -> Broker.
 export const BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H = `
   query BrokerExchangeDailySnapshots24h(
     $chainId: Int!
+    $exchangeProvider: String!
     $exchangeId: String!
     $since: numeric!
   ) {
     BrokerExchangeDailySnapshot(
       where: {
         chainId: { _eq: $chainId }
+        exchangeProvider: { _eq: $exchangeProvider }
         exchangeId: { _eq: $exchangeId }
         timestamp: { _gte: $since }
       }

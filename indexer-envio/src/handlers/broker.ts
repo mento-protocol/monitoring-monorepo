@@ -114,7 +114,7 @@ Broker.Swap.handler(async ({ event, context }) => {
 
   const dayTs = dayBucket(blockTimestamp);
 
-  const exchangeSnapshotId = `${event.chainId}-${exchangeId}-${dayTs}`;
+  const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
   const existingExchangeSnapshot =
     await context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId);
   context.BrokerExchangeDailySnapshot.set({
