@@ -1,4 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/networks", () => ({
+  networkIdForChainId: (chainId: number) =>
+    chainId === 42220
+      ? "celo-mainnet"
+      : chainId === 143
+        ? "monad-mainnet"
+        : null,
+  isConfiguredNetworkId: (networkId: string) =>
+    networkId === "celo-mainnet" || networkId === "monad-mainnet",
+}));
+
 import {
   isRoutablePoolId,
   parseRouteChainId,
@@ -17,6 +29,11 @@ describe("pool route chain context", () => {
     expect(parseRouteChainId("143.5")).toBeNull();
     expect(parseRouteChainId("0")).toBeNull();
     expect(parseRouteChainId(String(Number.MAX_SAFE_INTEGER + 1))).toBeNull();
+  });
+
+  it("rejects unsupported chain ids", () => {
+    expect(parseRouteChainId("1")).toBeNull();
+    expect(parseRouteChainId("10143")).toBeNull();
   });
 });
 
@@ -49,6 +66,12 @@ describe("pool route canonicalization", () => {
     expect(
       isRoutablePoolId("42220-0xaaa0000000000000000000000000000000000001"),
     ).toBe(true);
+  });
+
+  it("rejects unsupported namespaced chain ids", () => {
+    expect(
+      isRoutablePoolId("1-0xaaa0000000000000000000000000000000000001"),
+    ).toBe(false);
   });
 
   it("leaves malformed ids for the not-found redirect gate", () => {

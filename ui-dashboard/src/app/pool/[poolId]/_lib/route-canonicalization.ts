@@ -1,5 +1,15 @@
-import { isNamespacedPoolId, normalizePoolIdForChain } from "@/lib/pool-id";
+import { isConfiguredNetworkId, networkIdForChainId } from "@/lib/networks";
+import {
+  extractChainIdFromPoolId,
+  isNamespacedPoolId,
+  normalizePoolIdForChain,
+} from "@/lib/pool-id";
 import { isValidAddress } from "@/lib/validators";
+
+function isRoutableChainId(chainId: number): boolean {
+  const networkId = networkIdForChainId(chainId);
+  return networkId !== null && isConfiguredNetworkId(networkId);
+}
 
 export function parseRouteChainId(
   value: string | string[] | undefined,
@@ -7,7 +17,8 @@ export function parseRouteChainId(
   const chainId = Array.isArray(value) ? value[0] : value;
   if (!chainId || !/^\d+$/.test(chainId)) return null;
   const parsed = Number(chainId);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return null;
+  return isRoutableChainId(parsed) ? parsed : null;
 }
 
 export function routeCanonicalPoolId(
@@ -22,5 +33,6 @@ export function routeCanonicalPoolId(
 }
 
 export function isRoutablePoolId(poolId: string): boolean {
-  return isNamespacedPoolId(poolId);
+  const chainId = extractChainIdFromPoolId(poolId);
+  return chainId !== null && isRoutableChainId(chainId);
 }
