@@ -162,8 +162,11 @@ export const AGGREGATOR_DAILY_TOP = /* GraphQL */ `
       lastSeenAggregatorAddress
       timestamp
       swapCount
+      swapCountIncludingSystem
       uniqueTraders
+      uniqueTradersIncludingSystem
       volumeUsdWei
+      volumeUsdWeiIncludingSystem
     }
   }
 `;

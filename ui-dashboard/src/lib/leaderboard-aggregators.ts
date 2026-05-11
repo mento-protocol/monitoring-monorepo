@@ -9,8 +9,11 @@ export type AggregatorDailyRow = {
   lastSeenAggregatorAddress: string;
   timestamp: string;
   swapCount: number;
+  swapCountIncludingSystem: number;
   uniqueTraders: number;
+  uniqueTradersIncludingSystem: number;
   volumeUsdWei: string;
+  volumeUsdWeiIncludingSystem: string;
 };
 
 export type AggregatorWindowRow = {

@@ -155,7 +155,12 @@ export function LeaderboardClient() {
   const filteredV3AggregatorRows = useMemo(
     () =>
       showSystem
-        ? v3AggregatorRows
+        ? v3AggregatorRows.map((r) => ({
+            ...r,
+            swapCount: r.swapCountIncludingSystem,
+            uniqueTraders: r.uniqueTradersIncludingSystem,
+            volumeUsdWei: r.volumeUsdWeiIncludingSystem,
+          }))
         : v3AggregatorRows.filter((r) => r.aggregator !== "system"),
     [v3AggregatorRows, showSystem],
   );
@@ -165,12 +170,8 @@ export function LeaderboardClient() {
   );
   const v2AggregatorAggregated = useMemo(
     () =>
-      // Honour the page-level `Show system addresses` toggle on the
-      // aggregator section too — `BrokerAggregatorDailySnapshot` uses
-      // the canonical aggregator name, so the filter is on the
-      // `"system"` bucket rather than an `isSystemAddress` flag. Filter
-      // client-side because the schema doesn't carry an indexed
-      // boolean for the aggregator side.
+      // Aggregator snapshots carry canonical buckets, so system filtering
+      // happens on the "system" bucket for the v2 panel.
       aggregateAggregatorsByWindow(
         showSystem
           ? v2AggregatorRows

@@ -649,6 +649,7 @@ function fakeTraderDay(
     timestamp,
     swapCount: 1,
     uniquePools: 1,
+    aggregatorKeys: ["squid"],
     volumeUsdWei: volumeUsd * ONE_USD,
     feesPaidUsdWei: 0n,
     isSystemAddress: isSystem,

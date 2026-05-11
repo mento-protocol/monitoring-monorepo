@@ -16,8 +16,11 @@ function row(overrides: Partial<AggregatorDailyRow>): AggregatorDailyRow {
     lastSeenAggregatorAddress: "0xrouter",
     timestamp: "1000",
     swapCount: 1,
+    swapCountIncludingSystem: 1,
     uniqueTraders: 1,
+    uniqueTradersIncludingSystem: 1,
     volumeUsdWei: USD(1),
+    volumeUsdWeiIncludingSystem: USD(1),
     ...overrides,
   };
 }
