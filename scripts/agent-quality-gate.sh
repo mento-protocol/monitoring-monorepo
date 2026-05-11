@@ -431,7 +431,7 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        metrics-bridge/Dockerfile)
+        metrics-bridge/Dockerfile|metrics-bridge/.dockerignore)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
       esac

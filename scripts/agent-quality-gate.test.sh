@@ -253,6 +253,10 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Clou
 run_gate "metrics-bridge/Dockerfile"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
+run_gate "metrics-bridge/.dockerignore"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics-bridge changed)"
+
 run_gate "metrics-bridge/src/main.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
