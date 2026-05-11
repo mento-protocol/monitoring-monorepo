@@ -55,6 +55,15 @@ assert_contains() {
     fail "expected output to contain: $expected"
 }
 
+assert_occurrences() {
+  local expected_count="$1"
+  local expected="$2"
+  local actual_count
+  actual_count="$(awk -v expected="$expected" 'index($0, expected) { count++ } END { print count + 0 }' "$output_file")"
+  [[ "$actual_count" == "$expected_count" ]] ||
+    fail "expected $expected_count occurrence(s) of '$expected', found $actual_count"
+}
+
 line_number() {
   local needle="$1"
   grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
@@ -76,6 +85,7 @@ assert_order() {
 }
 
 run_gate "ui-dashboard/package.json"
+assert_contains "- ./tools/trunk check --all (changed files should pass the same full-repo Trunk scope as CI)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
@@ -201,11 +211,18 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data f
 
 run_gate "metrics-bridge/src/poller.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
 run_gate "metrics-bridge/src/metrics.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 
 run_gate "metrics-bridge/Dockerfile"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/main.ts"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/config.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 
 run_gate "metrics-bridge/src/server.ts"
@@ -241,17 +258,36 @@ assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query pa
 
 run_gate "terraform/main.tf"
 assert_contains "- terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
+assert_contains "- terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
+assert_contains "- terraform -chdir=terraform validate -no-color (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts fmt -check -recursive (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts init -backend=false -input=false (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts validate -no-color (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
+
+run_gate "terraform/alerts/rules-fpmms.tf"
+assert_contains "- terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
+assert_contains "- terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
+assert_contains "- terraform -chdir=terraform validate -no-color (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts fmt -check -recursive (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts init -backend=false -input=false (Terraform changed)"
+assert_contains "- terraform -chdir=terraform/alerts validate -no-color (Terraform changed)"
 
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+
+run_gate ".gcloudignore"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Build ignore file changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics bridge build context changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test (metrics bridge build context changed)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
 
 run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
+assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
 
 rename_repo="$(mktemp -d)"
 (

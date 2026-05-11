@@ -278,6 +278,14 @@ add_bridge_codegen_then_restore_mainnet() {
   add_indexer_mainnet_codegen "restore full multichain generated package after non-mainnet codegen"
 }
 
+add_terraform_validate_commands() {
+  local module="$1"
+  local reason="$2"
+  add_command "terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "terraform -chdir=${module} init -backend=false -input=false" "$reason"
+  add_command "terraform -chdir=${module} validate -no-color" "$reason"
+}
+
 sort_codegen_commands() {
   local sorted=()
   local known_command
@@ -320,7 +328,7 @@ sort_codegen_commands() {
   done
 }
 
-add_command "./tools/trunk check" "changed files should pass repo-wide Trunk linters"
+add_command "./tools/trunk check --all" "changed files should pass the same full-repo Trunk scope as CI"
 
 while IFS= read -r path; do
   case "$path" in
@@ -345,15 +353,15 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
-	ui-dashboard/*)
-	  add_surface "ui-dashboard"
-	  add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
-	  add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
-	  case "$path" in
-	    ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
-	      add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
-	      ;;
-	  esac
+    ui-dashboard/*)
+      add_surface "ui-dashboard"
+      add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
+      add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
+      case "$path" in
+        ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
+          add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
+          ;;
+      esac
       case "$path" in
         ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/*)
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "dashboard data or UI flow changed"
@@ -370,35 +378,35 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-	indexer-envio/*)
-	  add_surface "indexer-envio"
-	  case "$path" in
-	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/scripts/*|indexer-envio/package.json)
-	      add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
-	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
-	      ;;
-	  esac
-	  case "$path" in
-	    indexer-envio/config/*.json)
-	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer config data flow changed"
-	      ;;
-	  esac
-	  case "$path" in
-	    indexer-envio/config.multichain.mainnet.yaml)
-	      add_indexer_mainnet_codegen "mainnet indexer config changed"
-	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
-	      ;;
-	    indexer-envio/config.multichain.testnet.yaml)
-	      add_indexer_testnet_codegen "testnet indexer config changed"
-	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
-	      ;;
-	    indexer-envio/config.multichain.bridge-only.yaml)
-	      add_bridge_codegen_then_restore_mainnet "bridge-only indexer config changed"
-	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
-	      ;;
-	  esac
-	  add_package_quality_commands "@mento-protocol/indexer-envio" "indexer-envio changed"
-	  ;;
+    indexer-envio/*)
+      add_surface "indexer-envio"
+      case "$path" in
+        indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/scripts/*|indexer-envio/package.json)
+          add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+      esac
+      case "$path" in
+        indexer-envio/config/*.json)
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer config data flow changed"
+          ;;
+      esac
+      case "$path" in
+        indexer-envio/config.multichain.mainnet.yaml)
+          add_indexer_mainnet_codegen "mainnet indexer config changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/config.multichain.testnet.yaml)
+          add_indexer_testnet_codegen "testnet indexer config changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/config.multichain.bridge-only.yaml)
+          add_bridge_codegen_then_restore_mainnet "bridge-only indexer config changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+      esac
+      add_package_quality_commands "@mento-protocol/indexer-envio" "indexer-envio changed"
+      ;;
     metrics-bridge/*)
       add_surface "metrics-bridge"
       case "$path" in
@@ -407,24 +415,24 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        metrics-bridge/Dockerfile|metrics-bridge/src/server.ts)
+        metrics-bridge/Dockerfile|metrics-bridge/src/config.ts|metrics-bridge/src/main.ts|metrics-bridge/src/poller.ts|metrics-bridge/src/server.ts)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
       esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
-	shared-config/*)
-	  add_surface "shared-config"
-	  add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
-	  add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
-	  add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
-	  add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
-	  case "$path" in
-	    shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
-	      add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
-	      ;;
-	  esac
-	  ;;
+    shared-config/*)
+      add_surface "shared-config"
+      add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
+      add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
+      add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
+      add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
+      case "$path" in
+        shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
+          add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
+          ;;
+      esac
+      ;;
     .github/workflows/*|.github/actions/*)
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
@@ -436,21 +444,24 @@ while IFS= read -r path; do
       ;;
     terraform/*)
       add_surface "terraform"
-      add_command "terraform -chdir=terraform fmt -check -recursive" "Terraform changed"
+      add_terraform_validate_commands "terraform" "Terraform changed"
+      add_terraform_validate_commands "terraform/alerts" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
     cloudbuild.yaml)
       add_surface "cloudbuild"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Build config changed"
       ;;
+    .gcloudignore)
+      add_surface "cloudbuild"
+      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Build ignore file changed"
+      add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics bridge build context changed"
+      ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
       ;;
     scripts/*.sh)
       add_surface "scripts"
-      if [[ -f "$path" ]]; then
-        add_command "bash -n $(quote_path "$path")" "shell script changed"
-      fi
       case "$path" in
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
@@ -463,23 +474,23 @@ while IFS= read -r path; do
     scripts/*|tools/*)
       add_surface "scripts"
       ;;
-	package.json)
-	  add_surface "workspace"
-	  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-	  add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
-	  add_workspace_quality_commands "workspace dependency/config changed"
-	  ;;
-	pnpm-lock.yaml|pnpm-workspace.yaml)
-	  add_surface "workspace"
-	  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-	  add_workspace_quality_commands "workspace dependency/config changed"
-	  ;;
-	.node-version)
-	  add_surface "workspace"
-	  add_preflight_command "pnpm install --frozen-lockfile" "Node version changed"
-	  add_workspace_quality_commands "Node version changed"
-	  ;;
-	esac
+    package.json)
+      add_surface "workspace"
+      add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+      add_command "pnpm agent:quality-gate:test" "agent quality gate package script changed"
+      add_workspace_quality_commands "workspace dependency/config changed"
+      ;;
+    pnpm-lock.yaml|pnpm-workspace.yaml)
+      add_surface "workspace"
+      add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+      add_workspace_quality_commands "workspace dependency/config changed"
+      ;;
+    .node-version)
+      add_surface "workspace"
+      add_preflight_command "pnpm install --frozen-lockfile" "Node version changed"
+      add_workspace_quality_commands "Node version changed"
+      ;;
+  esac
 done < "$changed_paths_file"
 
 sort_codegen_commands
