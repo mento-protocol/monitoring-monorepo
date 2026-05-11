@@ -22,10 +22,23 @@ import {
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
 
-export type ChainVolumeSeries = {
-  network: Network;
+export type VolumePartialState = boolean | null;
+
+export type DailyVolumeSeriesResult = {
   series: SeriesPoint[];
+  byChain: Array<{
+    network: Network;
+    series: SeriesPoint[];
+  }>;
+  /**
+   * Trust-state of the v3 volume series:
+   * - `null` — only untrusted-decimal snapshots were present, so render v3 as unavailable
+   * - `false` — no snapshots were skipped for decimal-trust reasons
+   * - `true` — at least one untrusted-decimal snapshot was skipped
+   */
+  volumePartial: VolumePartialState;
 };
+type ChainVolumeSeries = DailyVolumeSeriesResult["byChain"][number];
 
 // Mento-protocol indigo for v3 (Router-driven) and a teal contrast for v2
 // (legacy Broker → BiPoolManager). v3 dominates today, so it sits at the
@@ -82,7 +95,7 @@ const USD_WEI_PER_CENT = BigInt(10) ** BigInt(16);
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
   window?: TimeRange,
-): { series: SeriesPoint[]; byChain: ChainVolumeSeries[] } {
+): DailyVolumeSeriesResult {
   type PerChain = {
     network: Network;
     bucketTotals: Map<number, number>;
@@ -92,6 +105,7 @@ export function buildDailyVolumeSeries(
   const perChain = new Map<string, PerChain>();
   const totalBuckets = new Map<number, number>();
   let minSnapshotBucket = Infinity;
+  let skippedUntrustedDecimalSnapshot = false;
 
   for (const netData of networkData) {
     // Only skip on top-level failure. `snapshotsAllDailyError` may be set
@@ -106,6 +120,10 @@ export function buildDailyVolumeSeries(
         if (timestamp < window.from || timestamp >= window.to) continue;
       }
       const pool = poolById.get(snapshot.poolId);
+      if (pool && pool.tokenDecimalsKnown !== true) {
+        skippedUntrustedDecimalSnapshot = true;
+        continue;
+      }
       const volume = getSnapshotVolumeInUsd(
         snapshot,
         pool,
@@ -128,7 +146,14 @@ export function buildDailyVolumeSeries(
     }
   }
 
-  if (!Number.isFinite(minSnapshotBucket)) return { series: [], byChain: [] };
+  const volumePartial = skippedUntrustedDecimalSnapshot
+    ? Number.isFinite(minSnapshotBucket)
+      ? true
+      : null
+    : false;
+
+  if (!Number.isFinite(minSnapshotBucket))
+    return { series: [], byChain: [], volumePartial };
 
   // Use ceil so the emission range starts at the first full UTC day that begins
   // at or after window.from — prevents a synthetic zero bar for any partial day
@@ -166,7 +191,7 @@ export function buildDailyVolumeSeries(
       i++;
     }
   }
-  return { series, byChain };
+  return { series, byChain, volumePartial };
 }
 
 /**
@@ -291,6 +316,7 @@ function computeHeadline(
   hasError: boolean,
   hasSnapshotError: boolean,
   hasBrokerSnapshotError: boolean,
+  v3Partial: VolumePartialState,
   v3Points: SeriesPoint[],
   v2Points: SeriesPoint[],
   v3Total: number,
@@ -300,13 +326,25 @@ function computeHeadline(
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
+  const v3Display =
+    v3Partial === null
+      ? "—"
+      : v3Partial
+        ? `≈ ${formatUSD(v3Total)}`
+        : formatUSD(v3Total);
   // Visual layout has no whitespace/punctuation between values and pill
   // badges, and gap-x-3 between the v3 and v2 cells is rendering-only.
   // Without an explicit `aria-label`, screen readers read the headline as
   // "$3.00v3$0.00v2"; the explicit label restores the original
   // "$X v3 · $Y v2" reading.
   const v2Display = hasBrokerSnapshotError ? "—" : formatUSD(v2Total);
-  const ariaLabel = `${formatUSD(v3Total)} v3 · ${v2Display} v2`;
+  const v3AriaLabel =
+    v3Partial === null
+      ? "— v3"
+      : v3Partial
+        ? `approximately ${formatUSD(v3Total)} partial v3`
+        : `${formatUSD(v3Total)} v3`;
+  const ariaLabel = `${v3AriaLabel} · ${v2Display} v2`;
   // `role="group"` is required: a bare `<span>` has the implicit `generic`
   // role, which doesn't honor `aria-label` per WAI-ARIA. NVDA/JAWS skip the
   // label and the headline becomes silent for screen-reader users (every
@@ -327,10 +365,16 @@ function computeHeadline(
     <span role="group" aria-label={ariaLabel}>
       <span
         aria-hidden="true"
-        title="New Mento (v3): swaps routed through the v3 Router — the path used by app.mento.org today."
+        title={
+          v3Partial === null
+            ? "New Mento (v3): unavailable because token decimals are unverified for every v3 pool in this window."
+            : v3Partial
+              ? "New Mento (v3): partial because one or more pool snapshots were skipped until token decimals are verified."
+              : "New Mento (v3): swaps routed through the v3 Router — the path used by app.mento.org today."
+        }
         className="relative pr-9"
       >
-        {formatUSD(v3Total)}
+        {v3Display}
         <VersionBadge version="v3" />
       </span>
       {/* CSS-drawn dot rather than a `·` glyph (U+00B7 renders ~5px below
@@ -365,6 +409,7 @@ interface VolumeOverTimeChartProps {
    * doesn't masquerade as a confident `$0 v2` when v3 loaded normally.
    */
   hasBrokerSnapshotError: boolean;
+  fullVolumeSeries: DailyVolumeSeriesResult;
 }
 
 // Same independent-flags rationale as FeeOverTimeChart — see that file.
@@ -375,27 +420,20 @@ export function VolumeOverTimeChart({
   hasError,
   hasSnapshotError,
   hasBrokerSnapshotError,
+  fullVolumeSeries,
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
-
-  // Full-history v3 pass kept for the WoW delta (≥15 UTC-day buckets) and the
-  // "all" range tab. v3 = Router-driven volume, sourced from PoolDailySnapshot
-  // (FPMM + VirtualPool, summed since both are downstream of the v3 Router).
-  const fullV3Result = useMemo(
-    () => buildDailyVolumeSeries(networkData),
-    [networkData],
-  );
 
   // v3 WoW pill — v2 has a separate trajectory but is much smaller today, so
   // tracking the dominant-side delta keeps the headline meaningful. v2 WoW
   // can be added once v2 volumes are large enough to read at chart scale.
   const fullV3Series = useMemo<TimeSeriesPoint[]>(
     () =>
-      fullV3Result.series.map((p) => ({
+      fullVolumeSeries.series.map((p) => ({
         timestamp: p.timestamp,
         value: p.volumeUSD,
       })),
-    [fullV3Result],
+    [fullVolumeSeries],
   );
 
   const activeWindow = useMemo<TimeRange | undefined>(() => {
@@ -416,13 +454,15 @@ export function VolumeOverTimeChart({
 
   // v3 series for the active window — reuses fullV3Result on the "all" tab
   // since the window matches.
-  const visibleV3Points = useMemo<SeriesPoint[]>(
+  const visibleV3Result = useMemo<DailyVolumeSeriesResult>(
     () =>
       range === "all"
-        ? fullV3Result.series
-        : buildDailyVolumeSeries(networkData, activeWindow).series,
-    [networkData, range, activeWindow, fullV3Result],
+        ? fullVolumeSeries
+        : buildDailyVolumeSeries(networkData, activeWindow),
+    [networkData, range, activeWindow, fullVolumeSeries],
   );
+  const visibleV3Points = visibleV3Result.series;
+  const visibleVolumePartial = visibleV3Result.volumePartial;
 
   // v2 series for the active window — sourced from BrokerDailySnapshot
   // (already filtered to routedViaV3Router=false server-side). Empty until
@@ -487,6 +527,7 @@ export function VolumeOverTimeChart({
     hasError,
     hasSnapshotError,
     hasBrokerSnapshotError,
+    visibleVolumePartial,
     visibleV3Points,
     visibleV2Points,
     v3RangeTotal,
@@ -499,7 +540,9 @@ export function VolumeOverTimeChart({
     ? "Unable to load volume history"
     : hasSnapshotError
       ? "Historical data partial — some chains failed to load"
-      : "Not enough history yet";
+      : visibleVolumePartial === null
+        ? "Historical volume unavailable — token decimals unverified"
+        : "Not enough history yet";
 
   return (
     <TimeSeriesChartCard
@@ -515,7 +558,7 @@ export function VolumeOverTimeChart({
       changeLabel="v3 week-over-week"
       isLoading={isLoading}
       hasError={hasError}
-      hasSnapshotError={hasSnapshotError}
+      hasSnapshotError={hasSnapshotError || visibleVolumePartial === true}
       emptyMessage={emptyMessage}
     />
   );

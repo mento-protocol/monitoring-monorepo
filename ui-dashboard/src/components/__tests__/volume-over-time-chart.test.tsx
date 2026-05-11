@@ -60,12 +60,14 @@ function makeVolumeNetworkData(
 function renderChart(
   overrides: Partial<React.ComponentProps<typeof VolumeOverTimeChart>> = {},
 ): string {
+  const networkData = overrides.networkData ?? [];
   const props: React.ComponentProps<typeof VolumeOverTimeChart> = {
-    networkData: [],
+    networkData,
     isLoading: false,
     hasError: false,
     hasSnapshotError: false,
     hasBrokerSnapshotError: false,
+    fullVolumeSeries: buildDailyVolumeSeries(networkData),
     ...overrides,
   };
 
@@ -286,6 +288,55 @@ describe("buildDailyVolumeSeries", () => {
 
     expect(byChain).toHaveLength(1);
     expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
+  });
+
+  it("marks the v3 series partial when untrusted-decimal snapshots are skipped", () => {
+    const today = dayAlignedNow();
+    const { series, volumePartial } = buildDailyVolumeSeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [
+          makeTvlPool({ id: "pool-a" }),
+          makeTvlPool({ id: "pool-b", tokenDecimalsKnown: false }),
+        ],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: today,
+            swapVolume0: "1000000000000000000",
+          }),
+          makeSnapshot({
+            poolId: "pool-b",
+            timestamp: today,
+            swapVolume0: "9000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(volumePartial).toBe(true);
+    expect(series).toEqual([{ timestamp: today, volumeUSD: 1 }]);
+  });
+
+  it("marks v3 volume unavailable when every in-window snapshot has untrusted decimals", () => {
+    const today = dayAlignedNow();
+    const { series, byChain, volumePartial } = buildDailyVolumeSeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [makeTvlPool({ id: "pool-a", tokenDecimalsKnown: false })],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: today,
+            swapVolume0: "1000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(volumePartial).toBeNull();
+    expect(series).toEqual([]);
+    expect(byChain).toEqual([]);
   });
 });
 
@@ -532,6 +583,71 @@ describe("VolumeOverTimeChart render", () => {
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
     expect(html).not.toContain("week-over-week");
+  });
+
+  it("renders partial v3 volume explicitly when untrusted-decimal snapshots were skipped", () => {
+    const today = dayAlignedNow();
+    const html = renderChart({
+      networkData: [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [
+            makeTvlPool({ id: "pool-a" }),
+            makeTvlPool({ id: "pool-b", tokenDecimalsKnown: false }),
+          ],
+          snapshots30d: [
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: today,
+              swapVolume0: "1000000000000000000",
+            }),
+            makeSnapshot({
+              poolId: "pool-b",
+              timestamp: today,
+              swapVolume0: "9000000000000000000",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    expect(html).toMatch(/≈ \$1\.00.*?<[^>]*>v3</);
+    expect(html).toContain(
+      'aria-label="approximately $1.00 partial v3 · $0.00 v2"',
+    );
+    expect(html).toContain("· partial data");
+  });
+
+  it("renders v3 as unavailable when all v3 snapshots are skipped for untrusted decimals", () => {
+    const today = dayAlignedNow();
+    const html = renderChart({
+      networkData: [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [makeTvlPool({ id: "pool-a", tokenDecimalsKnown: false })],
+          snapshots30d: [
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: today,
+              swapVolume0: "1000000000000000000",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    expect(html).toMatch(/—.*?<[^>]*>v3</);
+    expect(html).toContain('aria-label="— v3 · $0.00 v2"');
+    expect(html).toContain(
+      "New Mento (v3): unavailable because token decimals are unverified",
+    );
+    expect(html).toContain(
+      "Historical volume unavailable — token decimals unverified",
+    );
+    expect(html).not.toContain("· partial data");
+    expect(html).not.toMatch(
+      /title="New Mento \(v3\):[^"]*" class="relative pr-9">\$0\.00<span[^>]*>v3</,
+    );
   });
 
   it("renders `— v2` (not $0.00 v2) when the broker rollup errored", () => {
