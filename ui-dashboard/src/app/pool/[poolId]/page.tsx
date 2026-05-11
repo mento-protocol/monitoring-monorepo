@@ -7,6 +7,7 @@ import { PoolDetailPageClient } from "./_components/pool-detail-page-client";
 import { decodePoolId } from "./_lib/helpers";
 import {
   isRoutablePoolId,
+  parseRouteChainId,
   routeCanonicalPoolId,
 } from "./_lib/route-canonicalization";
 
@@ -128,15 +129,13 @@ async function CanonicalPoolDetailPage({
     searchParams,
   ]);
   const decodedId = decodePoolId(poolId);
-  const canonicalPoolId = routeCanonicalPoolId(decodedId);
+  const explicitChainId = parseRouteChainId(resolvedSearchParams.chainId);
+  const canonicalPoolId = routeCanonicalPoolId(decodedId, explicitChainId);
 
   if (canonicalPoolId !== decodedId) {
-    redirect(
-      buildPoolDetailUrl(
-        canonicalPoolId,
-        toURLSearchParams(resolvedSearchParams),
-      ),
-    );
+    const redirectParams = toURLSearchParams(resolvedSearchParams);
+    redirectParams.delete("chainId");
+    redirect(buildPoolDetailUrl(canonicalPoolId, redirectParams));
   }
   if (!isRoutablePoolId(canonicalPoolId)) {
     redirect(POOL_NOT_FOUND_DEST);

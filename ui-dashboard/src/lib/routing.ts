@@ -30,7 +30,8 @@ export function buildPoolsFilterUrl(
 
 /**
  * Pool-detail URL updates for tab/limit/search state. The caller owns any
- * pool-id normalization because raw addresses need active-network context.
+ * pool-id normalization; detail routes expect namespaced ids unless a caller
+ * is still carrying explicit chain context during a raw-address redirect.
  */
 export function buildPoolDetailUrl(
   poolId: string,
@@ -42,7 +43,7 @@ export function buildPoolDetailUrl(
 
 /**
  * Pool detail link from a listing. Pool IDs are namespaced `{chainId}-{addr}`
- * so the chain is recoverable from the path — no extra query params needed.
+ * so the chain is recoverable from the path.
  */
 export function buildPoolDetailHref(poolId: string): string {
   return `/pool/${encodeURIComponent(poolId)}`;

@@ -81,10 +81,10 @@ export type PoolOgData = {
 };
 
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses
-// would need cross-network probing here. The pool page resolves bare
-// addresses against the active client network, which crawler metadata cannot
-// observe, so OG previews stay namespaced-only rather than selecting a
-// default chain the page might not load.
+// require explicit route chain context before the page canonicalizes them;
+// OG metadata receives only the path segment here, so previews stay
+// namespaced-only rather than selecting a default chain the page might not
+// load.
 function resolvePoolId(
   rawPoolId: string,
 ): { poolId: string; chainId: number } | null {
