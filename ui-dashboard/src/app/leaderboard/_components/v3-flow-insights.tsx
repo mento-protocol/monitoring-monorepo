@@ -38,7 +38,7 @@ import type { PoolMeta } from "../_lib/types";
 import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 
 const INSIGHT_ROW_LIMIT = 10;
-const SWAP_OUTLIER_FETCH_LIMIT = 50;
+const SWAP_OUTLIER_FETCH_LIMIT = ENVIO_MAX_ROWS;
 
 export function V3FlowInsights({
   range,
@@ -136,10 +136,14 @@ export function V3FlowInsights({
       }),
     [swapOutliersResult.data, allowedTraderKeys],
   );
+  const isSwapOutlierFetchCapHit =
+    (swapOutliersResult.data?.SwapEvent.length ?? 0) ===
+    SWAP_OUTLIER_FETCH_LIMIT;
   const insightPartial =
     isTraderCapHit ||
     (traderPoolResult.data?.TraderPoolDailySnapshot.length ?? 0) ===
-      ENVIO_MAX_ROWS;
+      ENVIO_MAX_ROWS ||
+    isSwapOutlierFetchCapHit;
 
   return (
     <section className="space-y-3">
@@ -177,6 +181,7 @@ export function V3FlowInsights({
           pools={pools}
           isLoading={tableIsLoading || swapOutliersResult.isLoading}
           hasError={tableHasError || !!swapOutliersResult.error}
+          isPartial={isSwapOutlierFetchCapHit}
         />
       </div>
     </section>
@@ -295,11 +300,13 @@ function OutlierPanel({
   pools,
   isLoading,
   hasError,
+  isPartial,
 }: {
   rows: readonly SwapOutlierRow[];
   pools: PoolMeta;
   isLoading: boolean;
   hasError: boolean;
+  isPartial: boolean;
 }) {
   return (
     <InsightPanel title="Outlier swaps">
@@ -334,6 +341,12 @@ function OutlierPanel({
               ))}
             </tbody>
           </table>
+          {isPartial && (
+            <p className="pt-2 text-[11px] text-amber-300">
+              Top-query subset; eligible outliers beyond the fetch cap may be
+              absent.
+            </p>
+          )}
         </div>
       )}
     </InsightPanel>
