@@ -522,11 +522,14 @@ export function LeaderboardClient() {
       {venue === "v3" ? (
         <V3LeaderboardSection
           rangeLabel={rangeLabel(range)}
+          range={range}
           cutoff={cutoff}
           traders={aggregated}
           pools={poolMeta}
+          isSystemAddressIn={isSystemAddressIn}
           tableIsLoading={tableIsLoading}
           tableHasError={tableHasError}
+          isTraderCapHit={isTableCapHit}
           aggregators={v3AggregatorAggregated}
           aggIsLoading={v3AggIsLoading}
           aggHasError={v3AggHasError}

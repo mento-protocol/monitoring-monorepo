@@ -17,6 +17,7 @@ import {
   type TraderPoolWindowRow,
   type TraderWindowRow,
 } from "@/lib/leaderboard";
+import { computeLpFriendliness } from "@/lib/leaderboard-insights";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
@@ -366,6 +367,9 @@ function ExpandedBreakdown({
             <th scope="col" className="px-3 py-2 text-right font-medium">
               Fees paid
             </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium">
+              LP
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -386,6 +390,7 @@ function ExpandedBreakdown({
                   null)
                 : null;
             const flow = computeFlow(p);
+            const lp = computeLpFriendliness(p);
             return (
               <tr
                 key={p.poolId}
@@ -412,6 +417,17 @@ function ExpandedBreakdown({
                 <td className="px-3 py-1.5 text-right font-mono text-slate-400">
                   {formatUSD(weiToUsd(p.feesPaidUsdWei))}
                 </td>
+                <td className="px-3 py-1.5 text-right">
+                  <span
+                    className={
+                      "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium " +
+                      lpClass(lp.band)
+                    }
+                    title={`LP-friendliness ${lp.score}/100 · ${lp.ratio.toFixed(4)} fee/pressure`}
+                  >
+                    {lp.score}
+                  </span>
+                </td>
               </tr>
             );
           })}
@@ -424,4 +440,12 @@ function ExpandedBreakdown({
       )}
     </div>
   );
+}
+
+function lpClass(
+  band: ReturnType<typeof computeLpFriendliness>["band"],
+): string {
+  if (band === "friendly") return "bg-emerald-500/15 text-emerald-300";
+  if (band === "balanced") return "bg-sky-500/15 text-sky-300";
+  return "bg-amber-500/15 text-amber-300";
 }

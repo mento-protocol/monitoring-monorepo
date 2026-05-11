@@ -93,6 +93,78 @@ export const TRADER_POOL_DAILY_FOR_TRADER = /* GraphQL */ `
   }
 `;
 
+export const TRADER_DAILY_WINDOW_TOP = /* GraphQL */ `
+  query TraderDailyWindowTop(
+    $afterTimestamp: numeric!
+    $beforeTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp, _lt: $beforeTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      timestamp
+      swapCount
+      uniquePools
+      volumeUsdWei
+      feesPaidUsdWei
+      isSystemAddress
+      lastSeenTimestamp
+    }
+  }
+`;
+
+export const TRADER_POOL_DAILY_TOP = /* GraphQL */ `
+  query TraderPoolDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    TraderPoolDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      poolId
+      timestamp
+      swapCount
+      volumeUsdWei
+      inflowToken0UsdWei
+      outflowToken0UsdWei
+      inflowToken1UsdWei
+      outflowToken1UsdWei
+      feesPaidUsdWei
+    }
+  }
+`;
+
+export const SWAP_EVENT_OUTLIERS = /* GraphQL */ `
+  query SwapEventOutliers($afterTimestamp: numeric!, $limit: Int!) {
+    SwapEvent(
+      where: { blockTimestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { blockTimestamp: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      poolId
+      caller
+      txTo
+      recipient
+      volumeUsdWei
+      txHash
+      blockTimestamp
+    }
+  }
+`;
+
 /**
  * Pool metadata for resolving poolId → display name. Mento has ~30 pools
  * total, well under the 1000-row cap. Loaded once and joined client-side.
