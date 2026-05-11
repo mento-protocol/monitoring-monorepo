@@ -240,6 +240,11 @@ add_ui_react_doctor_full_score() {
   add_command "bash scripts/check-react-doctor-score.sh" "$reason"
 }
 
+add_ui_react_doctor_diff() {
+  local reason="$1"
+  add_command "bash scripts/check-react-doctor-diff.sh $(quote_path "$base_ref")" "$reason"
+}
+
 add_workspace_quality_commands() {
   local reason="$1"
   add_all_indexer_codegen "$reason"
@@ -365,7 +370,7 @@ while IFS= read -r path; do
     ui-dashboard/*)
       add_surface "ui-dashboard"
       add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
-      add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
+      add_ui_react_doctor_diff "ui-dashboard client code should keep React Doctor clean"
       add_ui_react_doctor_full_score "ui-dashboard React Doctor score should stay 100"
       case "$path" in
         ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
@@ -440,6 +445,7 @@ while IFS= read -r path; do
       add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
       case "$path" in
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
+          add_all_indexer_codegen "shared-config vendored indexer fixture changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
           ;;
       esac
@@ -467,6 +473,7 @@ while IFS= read -r path; do
     cloudbuild.yaml)
       add_surface "cloudbuild"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Build config changed"
+      add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics bridge build context changed"
       ;;
     .gcloudignore)
       add_surface "cloudbuild"

@@ -264,11 +264,11 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Clou
 
 run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"
+assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 
 run_gate "ui-dashboard/react-doctor.config.json"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"
+assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
@@ -332,6 +332,34 @@ run_gate ".gcloudignore"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Build ignore file changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics bridge build context changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test (metrics bridge build context changed)"
+
+run_gate "cloudbuild.yaml"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Build config changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics bridge build context changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics bridge build context changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test (metrics bridge build context changed)"
+
+run_gate "shared-config/deployment-namespaces.json"
+assert_order \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
+  "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)" \
+  "- pnpm indexer:codegen (shared-config vendored indexer fixture changed)"
+assert_order \
+  "- pnpm indexer:codegen (shared-config vendored indexer fixture changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+assert_order \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
+  "- pnpm --filter @mento-protocol/indexer-envio lint (shared-config vendored indexer fixture changed)"
+
+run_gate "shared-config/fx-calendar.json"
+assert_order \
+  "- pnpm indexer:codegen (shared-config vendored indexer fixture changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+assert_order \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
+  "- pnpm --filter @mento-protocol/indexer-envio typecheck (shared-config vendored indexer fixture changed)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
