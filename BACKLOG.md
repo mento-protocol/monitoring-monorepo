@@ -41,6 +41,26 @@ Cursor/Codex findings.
 Acceptance: script is readable, supports dry-run, and catches or prevents at
 least one issue before review.
 
+### Agent Quality Gate Performance Follow-Ups
+
+Why: PR #388 made agent pre-push validation path-aware, but the first real
+rounds showed a few remaining sources of wasted wall time and noisy failure
+diagnosis.
+
+- [ ] Parse `package.json` diffs by changed JSON path so root agent-script-only
+      changes do not automatically trigger every package/codegen gate.
+- [ ] De-duplicate Envio codegen setup so bridge-only, testnet, and mainnet
+      codegen do not each pay a full install/postinstall cost when one prepared
+      workspace is enough.
+- [ ] Quiet expected test-fixture logs, especially indexer RPC failure fixtures
+      and expected API error-path stderr, so real failures are faster to spot.
+- [ ] Print a per-command elapsed-time summary from `scripts/agent-quality-gate.sh`
+      to make future gate tuning evidence-based.
+
+Acceptance: a representative agent-quality-gate pre-push on tooling/workspace
+changes is measurably faster, and failures show the first relevant error
+without pages of expected fixture noise.
+
 ### `mise` Toolchain Management Trial
 
 Why: tool versions are currently spread across `.node-version`,

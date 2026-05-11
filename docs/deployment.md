@@ -197,7 +197,9 @@ envio
 
 ### Deploy cancelled with "Ignored Build Step"
 
-The `ignore_command` (`git diff HEAD^ HEAD --quiet -- ui-dashboard`) cancelled the build because no `ui-dashboard/` files changed. This is correct behaviour for infra-only commits. To force a deploy:
+The dashboard project is configured to build on every Git push. If Vercel
+reports "Ignored Build Step", check for stale project settings or a reintroduced
+`ignoreCommand` in `ui-dashboard/vercel.json`. To force a deploy:
 
 ```bash
 vercel deploy --prod --force
