@@ -89,6 +89,26 @@ run_gate_expect_failure "pnpm-lock.yaml"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
 
+run_gate_expect_failure "pnpm-workspace.yaml"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
+run_gate_expect_failure ".npmrc"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
+run_gate_expect_failure "indexer-envio/.npmrc"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
+run_gate_expect_failure "pnpmfile.cjs"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
+run_gate_expect_failure ".pnpmfile.cjs"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_order \
@@ -129,14 +149,44 @@ assert_order \
   "- pnpm indexer:codegen (indexer schema/source/ABI/package path changed)" \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 
-run_gate "indexer-envio/config.multichain.bridge-only.yaml"
-assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)"
-assert_contains "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)"
+run_gate "indexer-envio/config.multichain.mainnet.yaml" "indexer-envio/src/handlers/fpmm.ts"
+assert_order \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
+assert_order \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:codegen (mainnet indexer config changed)"
+assert_order \
+  "- pnpm indexer:codegen (mainnet indexer config changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+
+run_gate "indexer-envio/config.multichain.bridge-only.yaml" "indexer-envio/src/bridge.ts"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)" \
-  "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)"
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)"
 assert_order \
-  "- pnpm indexer:codegen (restore full multichain generated package after bridge-only codegen)" \
+  "- pnpm indexer:testnet:codegen (indexer schema/source/ABI/package path changed)" \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
+assert_order \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+
+run_gate "indexer-envio/config.multichain.mainnet.yaml" "indexer-envio/config.multichain.testnet.yaml"
+assert_order \
+  "- pnpm indexer:testnet:codegen (testnet indexer config changed)" \
+  "- pnpm indexer:codegen (mainnet indexer config changed)"
+assert_order \
+  "- pnpm indexer:codegen (mainnet indexer config changed)" \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
+
+run_gate "indexer-envio/config.multichain.bridge-only.yaml"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)"
+assert_contains "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
+assert_order \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (bridge-only indexer config changed)" \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)"
+assert_order \
+  "- pnpm indexer:codegen (restore full multichain generated package after non-mainnet codegen)" \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
@@ -155,12 +205,21 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data f
 run_gate "metrics-bridge/src/metrics.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 
+run_gate "metrics-bridge/Dockerfile"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
+run_gate "metrics-bridge/src/server.ts"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+
 run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/test --fail-on warning --offline (ui-dashboard client code should keep React Doctor clean)"
 
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
+
+run_gate "ui-dashboard/src/lib/use-roving-tab-index.ts"
+assert_contains "- docs/pr-checklists/keyboard-a11y-controlled-widgets.md (controlled dashboard component changed)"
 
 run_gate "ui-dashboard/src/app/pool/[poolId]/_tabs/swaps-tab.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
@@ -184,8 +243,77 @@ run_gate "terraform/main.tf"
 assert_contains "- terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
 
+run_gate ".github/workflows/metrics-bridge.yml"
+assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
+
+run_gate "scripts/deploy-bridge.sh"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
+
+rename_repo="$(mktemp -d)"
+(
+  cd "$rename_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  printf '#!/usr/bin/env bash\n' > scripts/deploy-bridge.sh
+  git add .
+  git commit -qm init
+  git mv scripts/deploy-bridge.sh docs.md
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$rename_repo"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
+
+rename_repo="$(mktemp -d)"
+(
+  cd "$rename_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .github/workflows
+  printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
+  git add .
+  git commit -qm init
+  git mv .github/workflows/metrics-bridge.yml docs.md
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$rename_repo"
+assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+
+rename_repo="$(mktemp -d)"
+(
+  cd "$rename_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p indexer-envio/src/rpc
+  printf 'module.exports = {}\n' > pnpmfile.cjs
+  printf 'export {}\n' > indexer-envio/src/rpc/client.ts
+  git add .
+  git commit -qm init
+  git mv pnpmfile.cjs docs.md
+  printf 'export const changed = true;\n' >> indexer-envio/src/rpc/client.ts
+  set +e
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+rm -rf "$rename_repo"
+assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "dependency install scripts"
+
+scripts/agent-quality-gate.sh \
+  --changed-paths-file <(printf '%s\n' "docs/process.md") \
+  --base origin/test \
+  > "$output_file"
+assert_contains "- docs"
 
 run_gate "docs/process.md"
 assert_contains "Detected surfaces:"

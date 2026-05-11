@@ -92,20 +92,20 @@ changed_paths_file="$(mktemp)"
 trap 'rm -f "$changed_paths_file"' EXIT
 
 if [[ -n "$changed_paths_input_file" ]]; then
-  if [[ ! -f "$changed_paths_input_file" ]]; then
+  if [[ ! -r "$changed_paths_input_file" ]]; then
     echo "error: changed paths file not found: ${changed_paths_input_file}" >&2
     exit 2
   fi
   sed '/^$/d' "$changed_paths_input_file" | sort -u > "$changed_paths_file"
 else
   {
-    if ! git diff --name-only "${base_ref}...${head_ref}" 2>/dev/null; then
-      git diff --name-only "$base_ref" "$head_ref"
+    if ! git diff --name-only --no-renames "${base_ref}...${head_ref}" 2>/dev/null; then
+      git diff --name-only --no-renames "$base_ref" "$head_ref"
     fi
 
     if [[ "$head_ref" == "HEAD" ]]; then
-      git diff --name-only
-      git diff --cached --name-only
+      git diff --name-only --no-renames
+      git diff --cached --name-only --no-renames
       git ls-files --others --exclude-standard
     fi
   } | sed '/^$/d' | sort -u > "$changed_paths_file"
@@ -275,7 +275,49 @@ add_all_indexer_codegen() {
 add_bridge_codegen_then_restore_mainnet() {
   local bridge_reason="$1"
   add_indexer_bridge_codegen "$bridge_reason"
-  add_indexer_mainnet_codegen "restore full multichain generated package after bridge-only codegen"
+  add_indexer_mainnet_codegen "restore full multichain generated package after non-mainnet codegen"
+}
+
+sort_codegen_commands() {
+  local sorted=()
+  local known_command
+  local entry
+  local is_known
+  # Envio codegen variants all overwrite indexer-envio/generated. When multiple
+  # variants are needed, keep mainnet last so package checks validate the normal
+  # linked generated package; single-config changes still run only that config.
+  local known_codegen_commands=(
+    "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+    "pnpm indexer:testnet:codegen"
+    "pnpm indexer:codegen"
+  )
+
+  for known_command in "${known_codegen_commands[@]}"; do
+    for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+      if [[ "${entry%%|*}" == "$known_command" ]]; then
+        sorted+=("$entry")
+        break
+      fi
+    done
+  done
+
+  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+    is_known=false
+    for known_command in "${known_codegen_commands[@]}"; do
+      if [[ "${entry%%|*}" == "$known_command" ]]; then
+        is_known=true
+        break
+      fi
+    done
+    if [[ "$is_known" == false ]]; then
+      sorted+=("$entry")
+    fi
+  done
+
+  codegen_commands=()
+  for entry in "${sorted[@]+"${sorted[@]}"}"; do
+    codegen_commands+=("$entry")
+  done
 }
 
 add_command "./tools/trunk check" "changed files should pass repo-wide Trunk linters"
@@ -286,8 +328,12 @@ while IFS= read -r path; do
       package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
       ;;
-    pnpm-lock.yaml)
+    pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true
+      ;;
+    .npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs)
+      package_script_risk_changed=true
+      add_preflight_command "pnpm install --frozen-lockfile" "package manager config changed"
       ;;
   esac
   case "$path" in
@@ -319,7 +365,7 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        ui-dashboard/src/components/*|ui-dashboard/src/app/*/_components/*)
+        ui-dashboard/src/components/*|ui-dashboard/src/app/*/_components/*|ui-dashboard/src/lib/use-roving-*)
           add_checklist "docs/pr-checklists/keyboard-a11y-controlled-widgets.md" "controlled dashboard component changed"
           ;;
       esac
@@ -360,6 +406,11 @@ while IFS= read -r path; do
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "metrics bridge data flow changed"
           ;;
       esac
+      case "$path" in
+        metrics-bridge/Dockerfile|metrics-bridge/src/server.ts)
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
+          ;;
+      esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
 	shared-config/*)
@@ -377,6 +428,11 @@ while IFS= read -r path; do
     .github/workflows/*|.github/actions/*)
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
+      case "$path" in
+        .github/workflows/metrics-bridge.yml)
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
+          ;;
+      esac
       ;;
     terraform/*)
       add_surface "terraform"
@@ -399,6 +455,9 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
+        scripts/deploy-bridge.sh)
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
+          ;;
       esac
       ;;
     scripts/*|tools/*)
@@ -420,8 +479,10 @@ while IFS= read -r path; do
 	  add_preflight_command "pnpm install --frozen-lockfile" "Node version changed"
 	  add_workspace_quality_commands "Node version changed"
 	  ;;
-  esac
+	esac
 done < "$changed_paths_file"
+
+sort_codegen_commands
 
 echo "Agent quality gate"
 echo

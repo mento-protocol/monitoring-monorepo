@@ -47,8 +47,9 @@ pnpm agent:quality-gate --run
 
 The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
 Trunk, and formatting/validation commands. It never runs deploy commands or
-Terraform apply. If any `package.json` or `pnpm-lock.yaml` changed, `--run`
-refuses to execute until you review package scripts/lifecycle hooks and pass
+Terraform apply. If any package manifest, `pnpm-lock.yaml`,
+`pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
+execute until you review package scripts/lifecycle hooks and pass
 `--allow-package-script-changes`.
 
 ## PR feedback sweep rule
