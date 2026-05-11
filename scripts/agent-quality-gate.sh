@@ -454,6 +454,11 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       case "$path" in
+        .github/workflows/ci.yml)
+          add_surface "workspace"
+          add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
+          add_workspace_quality_commands "central CI workflow changed"
+          ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
           ;;
@@ -486,7 +491,7 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
-        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
+        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
         scripts/deploy-bridge.sh)

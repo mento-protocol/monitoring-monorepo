@@ -320,6 +320,18 @@ run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
 
+run_gate ".github/workflows/ci.yml"
+assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
+assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
+assert_order \
+  "- pnpm install --frozen-lockfile (central CI workflow changed)" \
+  "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
+assert_order \
+  "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
+  "- pnpm --filter @mento-protocol/indexer-envio lint (central CI workflow changed)"
+
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (pnpm install action changed)"
@@ -371,6 +383,14 @@ assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
 run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
+
+run_gate "scripts/check-react-doctor-diff.sh"
+assert_contains "- bash -n scripts/check-react-doctor-diff.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+
+run_gate "scripts/check-react-doctor-score.sh"
+assert_contains "- bash -n scripts/check-react-doctor-score.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
 rename_repo="$(mktemp -d)"
 (
