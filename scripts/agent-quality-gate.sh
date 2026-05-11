@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -15,11 +15,17 @@ Options:
   --head <ref>   Head ref for changed-path detection. Default: HEAD.
   --changed-paths-file <file>
                  Read changed paths from a newline-delimited file instead of git.
+  --allow-package-script-changes
+                 With --run, acknowledge that changed package manifests may
+                 alter lifecycle/package scripts before they execute.
   -h, --help     Show this help.
 
 Environment:
   AGENT_QUALITY_BASE  Override the default base ref.
   AGENT_QUALITY_HEAD  Override the default head ref.
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES
+                      Same acknowledgement as --allow-package-script-changes
+                      when set to 1 or true.
 USAGE
 }
 
@@ -27,6 +33,7 @@ mode="dry-run"
 base_ref="${AGENT_QUALITY_BASE:-origin/main}"
 head_ref="${AGENT_QUALITY_HEAD:-HEAD}"
 changed_paths_input_file=""
+allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,6 +68,10 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       shift 2
+      ;;
+    --allow-package-script-changes)
+      allow_package_script_changes="true"
+      shift
       ;;
     -h|--help)
       usage
@@ -111,6 +122,7 @@ post_codegen_commands=()
 quality_commands=()
 checklists=()
 surfaces=()
+package_manifest_changed=false
 
 has_command() {
   local command="$1"
@@ -270,7 +282,8 @@ add_command "./tools/trunk check" "changed files should pass repo-wide Trunk lin
 
 while IFS= read -r path; do
   case "$path" in
-    */package.json)
+    package.json|*/package.json)
+      package_manifest_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
       ;;
   esac
@@ -288,7 +301,7 @@ while IFS= read -r path; do
 	  add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
 	  add_command "pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff $(quote_path "$base_ref") --fail-on warning --offline" "ui-dashboard client code should keep React Doctor clean"
 	  case "$path" in
-	    ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
+	    ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
 	      add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"
 	      ;;
 	  esac
@@ -446,6 +459,12 @@ echo
 if [[ "$mode" == "dry-run" ]]; then
   echo "Dry run only. Re-run with --run to execute the mapped commands."
   exit 0
+fi
+
+if [[ "$package_manifest_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
+  echo "Refusing to run because package manifests changed." >&2
+  echo "Review package scripts and lifecycle hooks first, then re-run with --allow-package-script-changes if they are safe." >&2
+  exit 2
 fi
 
 failures=0
