@@ -74,8 +74,8 @@ resource "vercel_project" "dashboard" {
   install_command = "pnpm install"
   build_command   = "pnpm build"
 
-  # No ignore_command — always build on every push.
-  # A "smart skip" caused production to be silently stuck for weeks.
+  # The path-aware build skip lives in ui-dashboard/vercel.json so it can be
+  # tested and reviewed with app changes.
 
   git_repository = {
     type              = "github"
@@ -615,4 +615,3 @@ resource "google_project_iam_member" "ci_deployer" {
 
   depends_on = [google_project_iam_member.terraform_owner]
 }
-

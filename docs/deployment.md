@@ -57,7 +57,7 @@ git push origin main:envio
 
 ## Dashboard Deployment (Vercel)
 
-**Vercel's native Git integration watches `main`** — every push that changes files under `ui-dashboard/` triggers an automatic production deploy. Pushes that only touch other directories (e.g. `terraform/`, `indexer-envio/`) are skipped by the ignore command.
+**Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`.
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
@@ -197,9 +197,13 @@ envio
 
 ### Deploy cancelled with "Ignored Build Step"
 
-The dashboard project is configured to build on every Git push. If Vercel
-reports "Ignored Build Step", check for stale project settings or a reintroduced
-`ignoreCommand` in `ui-dashboard/vercel.json`. To force a deploy:
+The dashboard project intentionally skips builds when no dashboard-affecting
+files changed since the last successful Vercel deployment for the branch. The
+skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`; it watches
+`ui-dashboard/`, `shared-config/`, and workspace dependency metadata. If a
+dashboard-affecting change was skipped, check that Vercel provided
+`VERCEL_GIT_PREVIOUS_SHA` and that the referenced commit is present in the
+shallow clone. To force a deploy:
 
 ```bash
 vercel deploy --prod --force
