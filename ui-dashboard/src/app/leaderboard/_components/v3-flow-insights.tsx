@@ -22,7 +22,7 @@ import {
   filterSwapOutliers,
   parseUsdWei,
   previousLeaderboardWindowBounds,
-  traderIdentityKey,
+  traderDayKey,
   type CorridorRow,
   type SwapOutlierRow,
   type TraderCohortSummary,
@@ -44,6 +44,7 @@ export function V3FlowInsights({
   range,
   rangeLabel,
   cutoff,
+  traderRows,
   traders,
   pools,
   isSystemAddressIn,
@@ -54,6 +55,7 @@ export function V3FlowInsights({
   range: LeaderboardRangeKey;
   rangeLabel: string;
   cutoff: number;
+  traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
   isSystemAddressIn: ReadonlyArray<boolean>;
@@ -97,10 +99,14 @@ export function V3FlowInsights({
     { timeoutMs: 8_000 },
   );
 
-  const allowedTraderKeys = useMemo(
-    () => new Set(traders.map((t) => traderIdentityKey(t.chainId, t.trader))),
-    [traders],
-  );
+  const allowedTraderDayKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of traderRows) {
+      const key = traderDayKey(row.chainId, row.trader, row.timestamp);
+      if (key !== null) keys.add(key);
+    }
+    return keys;
+  }, [traderRows]);
   const previousTraders = useMemo(
     () =>
       aggregateTradersByWindow(
@@ -122,28 +128,33 @@ export function V3FlowInsights({
     () =>
       buildCorridorRows({
         rows: traderPoolResult.data?.TraderPoolDailySnapshot ?? [],
-        allowedTraderKeys,
+        allowedTraderDayKeys,
         limit: INSIGHT_ROW_LIMIT,
       }),
-    [traderPoolResult.data, allowedTraderKeys],
+    [traderPoolResult.data, allowedTraderDayKeys],
   );
   const swapOutliers = useMemo(
     () =>
       filterSwapOutliers({
         rows: swapOutliersResult.data?.SwapEvent ?? [],
-        allowedTraderKeys,
+        allowedTraderDayKeys,
         limit: INSIGHT_ROW_LIMIT,
       }),
-    [swapOutliersResult.data, allowedTraderKeys],
+    [swapOutliersResult.data, allowedTraderDayKeys],
   );
   const isSwapOutlierFetchCapHit =
     (swapOutliersResult.data?.SwapEvent.length ?? 0) ===
     SWAP_OUTLIER_FETCH_LIMIT;
+  const isCohortCapHit =
+    isTraderCapHit ||
+    (previousTradersResult.data?.TraderDailySnapshot.length ?? 0) ===
+      ENVIO_MAX_ROWS;
   const isCorridorCapHit =
     isTraderCapHit ||
     (traderPoolResult.data?.TraderPoolDailySnapshot.length ?? 0) ===
       ENVIO_MAX_ROWS;
-  const insightPartial = isCorridorCapHit || isSwapOutlierFetchCapHit;
+  const isOutlierPartial = isTraderCapHit || isSwapOutlierFetchCapHit;
+  const insightPartial = isCohortCapHit || isCorridorCapHit || isOutlierPartial;
 
   return (
     <section className="space-y-3">
@@ -163,11 +174,7 @@ export function V3FlowInsights({
           summary={cohortSummary}
           isLoading={tableIsLoading || previousTradersResult.isLoading}
           hasError={tableHasError || !!previousTradersResult.error}
-          isPartial={
-            isTraderCapHit ||
-            (previousTradersResult.data?.TraderDailySnapshot.length ?? 0) ===
-              ENVIO_MAX_ROWS
-          }
+          isPartial={isCohortCapHit}
         />
         <CorridorPanel
           rows={corridorRows}
@@ -181,7 +188,7 @@ export function V3FlowInsights({
           pools={pools}
           isLoading={tableIsLoading || swapOutliersResult.isLoading}
           hasError={tableHasError || !!swapOutliersResult.error}
-          isPartial={isSwapOutlierFetchCapHit}
+          isPartial={isOutlierPartial}
         />
       </div>
     </section>

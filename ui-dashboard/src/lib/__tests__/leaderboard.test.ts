@@ -30,7 +30,7 @@ import {
   filterSwapOutliers,
   parseUsdWei,
   previousLeaderboardWindowBounds,
-  traderIdentityKey,
+  traderDayKey,
   type SwapOutlierRow,
 } from "../leaderboard-insights";
 
@@ -529,7 +529,7 @@ describe("leaderboard insights", () => {
     ];
     const corridors = buildCorridorRows({
       rows,
-      allowedTraderKeys: new Set([traderIdentityKey(42220, "0xa")]),
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
     });
 
     expect(corridors).toHaveLength(1);
@@ -545,9 +545,55 @@ describe("leaderboard insights", () => {
     ];
     const outliers = filterSwapOutliers({
       rows,
-      allowedTraderKeys: new Set([traderIdentityKey(42220, "0xabc")]),
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
     });
     expect(outliers.map((r) => r.id)).toEqual(["keep"]);
+  });
+
+  it("keeps corridor filtering scoped to the trader day", () => {
+    const rows = [
+      poolDay({
+        id: "visible-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "100",
+        volumeUsdWei: USD(100),
+        inflowToken0UsdWei: USD(100),
+      }),
+      poolDay({
+        id: "hidden-day",
+        chainId: 42220,
+        trader: "0xa",
+        poolId: "42220-0xpool",
+        timestamp: "86400",
+        volumeUsdWei: USD(500),
+        outflowToken0UsdWei: USD(500),
+      }),
+    ];
+
+    const corridors = buildCorridorRows({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xa", "100")!]),
+    });
+
+    expect(corridors).toHaveLength(1);
+    expect(corridors[0]!.direction).toBe(0);
+    expect(weiToUsd(corridors[0]!.volumeUsdWei)).toBeCloseTo(100, 4);
+  });
+
+  it("keeps outlier filtering scoped to the trader day", () => {
+    const rows = [
+      swap({ id: "visible-day", caller: "0xabc", blockTimestamp: "1000" }),
+      swap({ id: "hidden-day", caller: "0xabc", blockTimestamp: "86400" }),
+    ];
+
+    const outliers = filterSwapOutliers({
+      rows,
+      allowedTraderDayKeys: new Set([traderDayKey(42220, "0xabc", "1000")!]),
+    });
+
+    expect(outliers.map((r) => r.id)).toEqual(["visible-day"]);
   });
 });
 

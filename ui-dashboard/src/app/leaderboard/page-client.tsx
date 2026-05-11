@@ -524,6 +524,7 @@ export function LeaderboardClient() {
           rangeLabel={rangeLabel(range)}
           range={range}
           cutoff={cutoff}
+          traderRows={traderRows}
           traders={aggregated}
           pools={poolMeta}
           isSystemAddressIn={isSystemAddressIn}

@@ -77,6 +77,17 @@ export function traderIdentityKey(chainId: number, trader: string): string {
   return `${chainId}-${trader.toLowerCase()}`;
 }
 
+export function traderDayKey(
+  chainId: number,
+  trader: string,
+  timestamp: string,
+): string | null {
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds)) return null;
+  const day = Math.floor(seconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  return `${traderIdentityKey(chainId, trader)}-${day}`;
+}
+
 export function parseUsdWei(value: string): bigint | null {
   const trimmed = value.trim();
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
@@ -174,17 +185,22 @@ export function buildTraderCohortSummary({
 
 export function buildCorridorRows({
   rows,
-  allowedTraderKeys,
+  allowedTraderDayKeys,
   limit = 8,
 }: {
   rows: readonly TraderPoolDailyRow[];
-  allowedTraderKeys?: ReadonlySet<string>;
+  allowedTraderDayKeys?: ReadonlySet<string>;
   limit?: number;
 }): CorridorRow[] {
   const aggregated = aggregateTraderPoolsByWindow(
-    allowedTraderKeys
+    allowedTraderDayKeys
       ? rows.filter((r) =>
-          allowedTraderKeys.has(traderIdentityKey(r.chainId, r.trader)),
+          hasAllowedTraderDay(
+            allowedTraderDayKeys,
+            r.chainId,
+            r.trader,
+            r.timestamp,
+          ),
         )
       : rows,
   );
@@ -261,20 +277,35 @@ export function buildCorridorRows({
 
 export function filterSwapOutliers({
   rows,
-  allowedTraderKeys,
+  allowedTraderDayKeys,
   limit = 10,
 }: {
   rows: readonly SwapOutlierRow[];
-  allowedTraderKeys?: ReadonlySet<string>;
+  allowedTraderDayKeys?: ReadonlySet<string>;
   limit?: number;
 }): SwapOutlierRow[] {
   return (
-    allowedTraderKeys
+    allowedTraderDayKeys
       ? rows.filter((r) =>
-          allowedTraderKeys.has(traderIdentityKey(r.chainId, r.caller)),
+          hasAllowedTraderDay(
+            allowedTraderDayKeys,
+            r.chainId,
+            r.caller,
+            r.blockTimestamp,
+          ),
         )
       : rows
   ).slice(0, limit);
+}
+
+function hasAllowedTraderDay(
+  allowedTraderDayKeys: ReadonlySet<string>,
+  chainId: number,
+  trader: string,
+  timestamp: string,
+): boolean {
+  const key = traderDayKey(chainId, trader, timestamp);
+  return key !== null && allowedTraderDayKeys.has(key);
 }
 
 function netPressureUsdWei(row: TraderPoolWindowRow): bigint {

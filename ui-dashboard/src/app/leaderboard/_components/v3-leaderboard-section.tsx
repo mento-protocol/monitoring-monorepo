@@ -1,6 +1,10 @@
 "use client";
 
-import type { LeaderboardRangeKey, TraderWindowRow } from "@/lib/leaderboard";
+import type {
+  LeaderboardRangeKey,
+  TraderDailyRow,
+  TraderWindowRow,
+} from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import { LeaderboardTable } from "./leaderboard-table";
 import {
@@ -14,6 +18,7 @@ export function V3LeaderboardSection({
   rangeLabel,
   range,
   cutoff,
+  traderRows,
   traders,
   pools,
   isSystemAddressIn,
@@ -29,6 +34,7 @@ export function V3LeaderboardSection({
   rangeLabel: string;
   range: LeaderboardRangeKey;
   cutoff: number;
+  traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
   isSystemAddressIn: ReadonlyArray<boolean>;
@@ -47,6 +53,7 @@ export function V3LeaderboardSection({
         range={range}
         rangeLabel={rangeLabel}
         cutoff={cutoff}
+        traderRows={traderRows}
         traders={traders}
         pools={pools}
         isSystemAddressIn={isSystemAddressIn}
