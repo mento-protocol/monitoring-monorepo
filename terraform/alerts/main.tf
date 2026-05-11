@@ -17,6 +17,11 @@ resource "grafana_folder" "metrics_bridge" {
   uid   = "metrics-bridge"
 }
 
+resource "grafana_folder" "indexer" {
+  title = "Indexer"
+  uid   = "indexer"
+}
+
 locals {
   # Common evaluation window for instant queries. 10 minutes is enough to absorb
   # one missed scrape (30s) and still produce a fresh value on every 60s eval.

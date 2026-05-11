@@ -468,7 +468,12 @@ type BiPoolExchange {
   # poolId of the VirtualPool that wraps this exchange, if any. Set when
   # `VirtualPoolDeployed` fires AFTER the exchange. Null for v2 exchanges
   # that don't have a v3 wrapper (they're still tradable via Broker).
-  wrappedByPoolId: String
+  # Indexed because the dashboard's POOL_V2_EXCHANGE query filters by this.
+  wrappedByPoolId: String @index
+  # True once a BiPoolManager handler has looked for a wrapping Pool and
+  # either found one or intentionally stopped retrying the v2-only orphan path.
+  # Late VP-side self-heal can still set wrappedByPoolId directly.
+  wrappedByPoolIdChecked: Boolean!
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!

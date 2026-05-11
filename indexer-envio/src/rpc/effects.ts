@@ -47,6 +47,7 @@ import {
   fetchBreakerList,
   type BreakerKindRpc,
 } from "./breakers";
+import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken";
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
@@ -127,6 +128,11 @@ const poolExchangeShape = S.schema({
 const vpExchangeIdShape = S.schema({
   exchangeProvider: S.string,
   exchangeId: S.string,
+});
+
+const feeTokenMetaShape = S.schema({
+  symbol: S.string,
+  decimals: S.int32,
 });
 
 // ---------------------------------------------------------------------------
@@ -353,6 +359,33 @@ export const feesEffect = createEffect(
       protocolFee: result.protocolFee,
       rebalanceReward: result.rebalanceReward,
     };
+  },
+);
+
+export const feeTokenMetaEffect = createEffect(
+  {
+    name: "feeTokenMeta",
+    input: { chainId: S.int32, tokenAddress: S.string },
+    output: feeTokenMetaShape,
+    rateLimit: { calls: 200, per: "second" },
+    cache: true,
+  },
+  // `resolveFeeTokenMeta` returns UNKNOWN/18 only for transient RPC failure
+  // with no static fallback. Let the handler persist that degraded event, but
+  // don't save it to Envio's durable effect cache — the next event must retry.
+  async ({ input, context }) => {
+    const result = await resolveFeeTokenMeta(
+      input.chainId,
+      input.tokenAddress,
+      context.log,
+    );
+    if (
+      result.symbol === UNKNOWN_FEE_TOKEN_META.symbol &&
+      result.decimals === UNKNOWN_FEE_TOKEN_META.decimals
+    ) {
+      context.cache = false;
+    }
+    return result;
   },
 );
 

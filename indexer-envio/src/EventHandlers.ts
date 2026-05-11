@@ -16,7 +16,7 @@ import { runStartupChecks } from "./startupChecks";
 // See src/startupChecks.ts for details and rationale.
 runStartupChecks();
 
-// Effect registrations (side-effect import — registers the 16 RPC effects
+// Effect registrations (side-effect import — registers RPC effects
 // with the Envio runtime so they're available via `context.effect(...)`).
 import "./rpc/effects";
 

@@ -328,6 +328,7 @@ describe("BiPoolManager handlers", () => {
             lastBucketUpdate: bigint;
             isDeprecated: boolean;
             wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(row, "BiPoolExchange row should be created");
@@ -346,6 +347,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.lastBucketUpdate, 1_700_001_000n);
       assert.equal(row!.isDeprecated, false);
       assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
 
     it("falls through to event params + zero stubs when RPC backfill fails", async function () {
@@ -375,6 +377,7 @@ describe("BiPoolManager handlers", () => {
             referenceRateFeedID: string;
             bucket0: bigint;
             pricingModuleName?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(row);
@@ -389,6 +392,7 @@ describe("BiPoolManager handlers", () => {
         "0x0000000000000000000000000000000000000000",
       );
       assert.equal(row!.bucket0, 0n);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -460,6 +464,7 @@ describe("BiPoolManager handlers", () => {
             referenceRateFeedID: string;
             spread: bigint;
             wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
           }
         | undefined;
       assert.ok(
@@ -480,6 +485,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.spread, 0n);
       // No matching VP self-healed yet → wrappedByPoolId stays undefined.
       assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -548,6 +554,40 @@ describe("BiPoolManager handlers", () => {
       assert.equal(exchange!.bucket1, 18_000_000n);
       assert.equal(exchange!.lastBucketUpdate, 1_700_002_000n);
       assert.equal(exchange!.updatedAtBlock, 300n);
+    });
+
+    it("marks self-healed v2-only exchanges as wrapper-checked", async function () {
+      this.timeout(10_000);
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      let mockDb = MockDb.createMockDb();
+
+      const update = BiPoolManager.BucketsUpdated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        bucket0: 9_000_000n,
+        bucket1: 18_000_000n,
+        mockEventData: mockEventData(2, 300, 1_700_002_000),
+      });
+      mockDb = await BiPoolManager.BucketsUpdated.processEvent({
+        event: update,
+        mockDb,
+      });
+
+      const exchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as
+        | {
+            wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
+          }
+        | undefined;
+      assert.ok(exchange);
+      assert.equal(exchange!.wrappedByPoolId, undefined);
+      assert.equal(exchange!.wrappedByPoolIdChecked, true);
     });
   });
 
@@ -657,6 +697,100 @@ describe("BiPoolManager handlers", () => {
         | undefined;
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
+    });
+
+    it("repairs a checked exchange-first row that missed the VP back-reference once the Pool is otherwise fully healed", async function () {
+      this.timeout(10_000);
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const deploy = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+        pool: VP_ADDRESS,
+        token0: ASSET0,
+        token1: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000),
+      });
+      mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+        event: deploy,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const poolBefore = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0?: string;
+            token1?: string;
+            wrappedExchangeId?: string;
+          }
+        | undefined;
+      assert.ok(poolBefore);
+      assert.equal(poolBefore!.token0, ASSET0);
+      assert.equal(poolBefore!.token1, ASSET1);
+      assert.equal(poolBefore!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as
+        | {
+            wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
+            [key: string]: unknown;
+          }
+        | undefined;
+      assert.ok(linkedExchange);
+      assert.equal(linkedExchange!.wrappedByPoolId, poolId);
+
+      // Simulate the historical exchange-first negative sentinel state:
+      // the Pool is fully healed, but the exchange row was checked before
+      // the VP back-reference was visible. The next VP event must not
+      // short-circuit just because both sides otherwise look populated.
+      mockDb = mockDb.entities.BiPoolExchange.set({
+        ...linkedExchange!,
+        wrappedByPoolId: undefined,
+        wrappedByPoolIdChecked: true,
+      });
+
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const repairedExchange = mockDb.entities.BiPoolExchange.get(
+        exchangeRowId(EXCHANGE_ID),
+      ) as
+        | { wrappedByPoolId?: string; wrappedByPoolIdChecked: boolean }
+        | undefined;
+      assert.ok(repairedExchange);
+      assert.equal(repairedExchange!.wrappedByPoolId, poolId);
+      assert.equal(repairedExchange!.wrappedByPoolIdChecked, true);
     });
 
     it("self-heals wrappedExchangeId when first event is VirtualPool.Swap (fpmm_* source override)", async function () {
@@ -935,9 +1069,16 @@ describe("BiPoolManager handlers", () => {
       // BiPoolExchange row was inline-seeded with wrappedByPoolId already set.
       const exchange = mockDb.entities.BiPoolExchange.get(
         exchangeRowId(EXCHANGE_ID),
-      ) as { wrappedByPoolId?: string; asset0: string } | undefined;
+      ) as
+        | {
+            wrappedByPoolId?: string;
+            wrappedByPoolIdChecked: boolean;
+            asset0: string;
+          }
+        | undefined;
       assert.ok(exchange);
       assert.equal(exchange!.wrappedByPoolId, poolId);
+      assert.equal(exchange!.wrappedByPoolIdChecked, true);
       assert.equal(exchange!.asset0, ASSET0);
     });
 
