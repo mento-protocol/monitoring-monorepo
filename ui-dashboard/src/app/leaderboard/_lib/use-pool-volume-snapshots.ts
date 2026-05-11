@@ -29,7 +29,7 @@ export async function fetchPoolVolumeSnapshots(
   const rows: PoolDailyVolumeRow[] = [];
   const seen = new Set<string>();
 
-  for (let page = 0; page < MAX_PAGES; page += 1) {
+  for (let page = 0; page <= MAX_PAGES; page += 1) {
     let batch: PoolDailyVolumeRow[];
     try {
       const result = await client.request<PoolVolumePage>({
@@ -45,6 +45,10 @@ export async function fetchPoolVolumeSnapshots(
     } catch (err) {
       if (rows.length === 0) throw err;
       return { rows, partial: true };
+    }
+
+    if (page === MAX_PAGES) {
+      return { rows, partial: batch.length > 0 };
     }
 
     for (const row of batch) {

@@ -865,10 +865,13 @@ describe("mergeHeroSnapshot", () => {
     return {
       snapshotDay,
       traders: [],
-      tradersIncludingSystem: overrides.traders ?? [],
+      tradersIncludingSystem:
+        overrides.tradersIncludingSystem ?? overrides.traders ?? [],
       firstDayExclusiveTraders: [],
       firstDayExclusiveTradersIncludingSystem:
-        overrides.firstDayExclusiveTraders ?? [],
+        overrides.firstDayExclusiveTradersIncludingSystem ??
+        overrides.firstDayExclusiveTraders ??
+        [],
       ...overrides,
     };
   }
@@ -962,6 +965,30 @@ describe("mergeHeroSnapshot", () => {
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(4);
+  });
+
+  it("falls back to approximate counts when trader sets are missing for one chain", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 2,
+        }),
+        snap({
+          chainId: 44787,
+          totalVolumeUsdWei: USD(2000),
+          totalSwapCount: 80,
+          uniqueTraders: 3,
+        }),
+      ],
+      traderSetRows: [traderSet({ chainId: 42220, traders: ["0xa", "0xb"] })],
+      todayRows: [],
+      showSystem: false,
+      todayMidnightSeconds: TODAY_MIDNIGHT,
+    });
+    expect(out.uniqueTraders).toBe(5);
   });
 
   it("uses exact trader sets through degraded-chain slice subtraction", () => {

@@ -88,4 +88,27 @@ describe("fetchPoolVolumeSnapshots", () => {
     expect(result.partial).toBe(true);
     expect(result.rows).toHaveLength(1000);
   });
+
+  it("does not mark the result partial when the max page boundary is exact", async () => {
+    requestMock.mockImplementation(({ variables }) => {
+      const offset = variables.offset as number;
+      if (offset === 100_000) {
+        return Promise.resolve({ PoolDailyVolumeSnapshot: [] });
+      }
+      return Promise.resolve({
+        PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
+          row(String(offset + i)),
+        ),
+      });
+    });
+
+    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+
+    expect(result.partial).toBe(false);
+    expect(result.rows).toHaveLength(100_000);
+    expect(requestMock).toHaveBeenCalledTimes(101);
+    expect(requestMock.mock.calls.at(-1)![0].variables).toMatchObject({
+      offset: 100_000,
+    });
+  });
 });
