@@ -327,7 +327,7 @@ while IFS= read -r path; do
 	indexer-envio/*)
 	  add_surface "indexer-envio"
 	  case "$path" in
-	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/package.json)
+	    indexer-envio/schema.graphql|indexer-envio/src/*|indexer-envio/abis/*|indexer-envio/scripts/*|indexer-envio/package.json)
 	      add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
 	      add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
 	      ;;
