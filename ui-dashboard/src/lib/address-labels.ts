@@ -1,4 +1,5 @@
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./redis";
+import { encodeLabelFields, LABELS_KEY } from "./address-label-fields";
 
 // Re-export all isomorphic types and utilities from the shared module.
 // This keeps backward-compat for existing imports from "@/lib/address-labels"
@@ -23,29 +24,6 @@ import {
   upgradeEntries,
   type AddressEntry,
 } from "./address-labels-shared";
-
-// Single `labels` hash keyed by lowercase address — same EVM address means
-// same entity, so a single label applies wherever the address appears.
-const LABELS_KEY = "labels";
-const REPLACE_HASH_SCRIPT = `
-local key = KEYS[1]
-redis.call('DEL', key)
-for i = 1, #ARGV, 2 do
-  redis.call('HSET', key, ARGV[i], ARGV[i + 1])
-end
-return 1
-`;
-
-function getRedis(): Redis {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    throw new Error(
-      "Upstash Redis not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
-    );
-  }
-  return new Redis({ url, token });
-}
 
 // Data access helpers (all server-side)
 
@@ -108,39 +86,4 @@ export async function importLabels(
   const redis = getRedis();
   const fields = encodeLabelFields(entries);
   await redis.hset(LABELS_KEY, fields);
-}
-
-/**
- * Replace the entire flat label hash with the provided snapshot payload.
- * Trusted Blob restores use this instead of importLabels' merge semantics so
- * labels absent from the selected snapshot do not survive the restore.
- */
-export async function replaceLabels(
-  labels: Record<string, AddressEntry>,
-): Promise<void> {
-  const entries = Object.entries(labels);
-  const redis = getRedis();
-  const fields = entries.length > 0 ? encodeLabelFields(entries) : {};
-  await redis.eval(REPLACE_HASH_SCRIPT, [LABELS_KEY], flattenFields(fields));
-}
-
-function encodeLabelFields(
-  entries: Array<[string, AddressEntry]>,
-): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const now = new Date().toISOString();
-  for (const [addr, entry] of entries) {
-    const normalized: AddressEntry = {
-      ...entry,
-      isPublic: entry.isPublic === true,
-      createdAt: entry.createdAt ?? now,
-      updatedAt: entry.updatedAt ?? now,
-    };
-    fields[addr.toLowerCase()] = JSON.stringify(normalized);
-  }
-  return fields;
-}
-
-function flattenFields(fields: Record<string, string>): string[] {
-  return Object.entries(fields).flatMap(([field, value]) => [field, value]);
 }

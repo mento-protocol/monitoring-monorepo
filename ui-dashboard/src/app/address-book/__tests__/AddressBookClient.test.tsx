@@ -45,8 +45,12 @@ import type { AddressEntryRow } from "@/components/address-labels-provider";
 
 let mockCustomEntries: AddressEntryRow[] = [];
 let mockReportAddresses: string[] = [];
+let mockReportsIndexError: Error | undefined;
 const mockGetEntry = vi.fn();
 const mockRevalidate = vi.fn(async () => {
+  /* no-op */
+});
+const mockRetryReportsIndex = vi.fn(async () => {
   /* no-op */
 });
 
@@ -80,8 +84,8 @@ vi.mock("@/hooks/use-address-reports-index", () => ({
     hasReport: (address: string) =>
       mockReportAddresses.includes(address.toLowerCase()),
     isLoading: false,
-    error: undefined,
-    mutate: vi.fn(),
+    error: mockReportsIndexError,
+    mutate: mockRetryReportsIndex,
   }),
   ADDRESS_REPORTS_INDEX_SWR_KEY: "address-reports:index",
 }));
@@ -191,9 +195,11 @@ beforeEach(() => {
 
   mockCustomEntries = [];
   mockReportAddresses = [];
+  mockReportsIndexError = undefined;
   mockGetEntry.mockReset();
   mockGetEntry.mockReturnValue(undefined);
   mockRevalidate.mockClear();
+  mockRetryReportsIndex.mockClear();
   // Reset `useAddressLabels` to its default (loaded, no error) shape so
   // per-test overrides (loading/error branches) don't bleed across tests.
   mockUseAddressLabels.mockReset();
@@ -396,6 +402,22 @@ describe("AddressBookClient — initial render", () => {
         ?.querySelector<HTMLAnchorElement>('a[href^="/address-book/"]')
         ?.getAttribute("href"),
     ).toBe(`/address-book/${reportOnly}`);
+  });
+
+  it("warns and exposes retry when the report-only index fails", () => {
+    mockReportsIndexError = new Error("Redis offline");
+    render();
+    expect(container.textContent).toContain(
+      "Forensic report index failed to load",
+    );
+    const retry = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Retry",
+    );
+    expect(retry).toBeTruthy();
+    act(() => {
+      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mockRetryReportsIndex).toHaveBeenCalled();
   });
 
   it("renders the page title and description headings", () => {

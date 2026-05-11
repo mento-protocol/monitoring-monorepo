@@ -3,11 +3,12 @@ import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
+import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const MAX_RESTORE_BLOB_BYTES = 32 * 1024 * 1024;
+const MAX_RESTORE_BLOB_BYTES = MAX_REDIS_HASH_REPLACE_BYTES;
 
 type RestoreActor =
   | { kind: "cron"; importerEmail: "restore@cron" }
@@ -22,9 +23,10 @@ type RestoreActor =
  * re-stamped to the current session. The uploaded import route deliberately
  * keeps re-stamping to prevent forged authorship in untrusted files.
  *
- * Labels and reports are separate Redis hashes, so replace-mode restore writes
- * them in two operations. If a restore is interrupted between those writes,
- * rerun the same pathname to converge both hashes to the selected snapshot.
+ * Restore replaces the labels/reports hashes in one Redis script when both are
+ * present, so Redis never lands on a mixed snapshot across those hashes. The
+ * Blob size cap is kept below Upstash's request ceiling because the script
+ * carries all replacement fields in one request.
  */
 export async function POST(req: NextRequest): Promise<Response> {
   const auth = await requireRestoreAuth(req);

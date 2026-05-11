@@ -4,7 +4,6 @@ import {
   importLabels,
   getLabels,
   mergeEntries,
-  replaceLabels,
   upgradeEntries,
   type AddressEntry,
   type AddressLabelsSnapshot,
@@ -13,11 +12,11 @@ import {
   importReports,
   MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
   MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
-  replaceReports,
   type AddressReport,
 } from "@/lib/address-reports";
 import { upgradeReport } from "@/lib/address-reports-shared";
 import { isValidAddress } from "@/lib/format";
+import { replaceSnapshotHashes } from "@/lib/address-label-restore-writes";
 import { mergeWithExisting, sanitizeAndFilter } from "./import-helpers";
 
 type SnapshotReportMetadataMode = "restamp" | "preserve";
@@ -160,10 +159,19 @@ export async function handleSnapshot(
 
   try {
     let importedAddresses = 0;
-    if (writeMode === "replace" && hasLabelPayload) {
-      const finalLabels = sanitizeAndFilter(merged);
-      await replaceLabels(finalLabels);
-      importedAddresses = Object.keys(finalLabels).length;
+    if (writeMode === "replace") {
+      const finalLabels = hasLabelPayload
+        ? sanitizeAndFilter(merged)
+        : undefined;
+      if (finalLabels !== undefined) {
+        importedAddresses = Object.keys(finalLabels).length;
+      }
+      if (hasLabelPayload || hasReportPayload) {
+        await replaceSnapshotHashes({
+          ...(finalLabels !== undefined ? { labels: finalLabels } : {}),
+          ...(hasReportPayload ? { reports: reportsToImport } : {}),
+        });
+      }
     } else if (Object.keys(merged).length > 0) {
       let existing: Record<string, AddressEntry>;
       try {
@@ -180,9 +188,7 @@ export async function handleSnapshot(
       importedAddresses = Object.keys(finalLabels).length;
     }
 
-    if (writeMode === "replace" && hasReportPayload) {
-      await replaceReports(reportsToImport);
-    } else if (importedReports > 0) {
+    if (writeMode !== "replace" && importedReports > 0) {
       await importReports(reportsToImport);
     }
     return NextResponse.json({
@@ -329,7 +335,8 @@ function mergePreservingProvenance(
   existing: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
   // Future-proofing for non-replace trusted restore callers. The current Blob
-  // restore uses writeMode="replace", so it preserves provenance via replaceLabels.
+  // restore uses writeMode="replace", so it preserves provenance via
+  // replaceSnapshotHashes.
   const out: Record<string, AddressEntry> = {};
   for (const [addr, entry] of Object.entries(incoming)) {
     const prev = existing[addr.toLowerCase()];

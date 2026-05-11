@@ -34,9 +34,14 @@ vi.mock("@/lib/address-reports", async () => {
   };
 });
 
+vi.mock("@/lib/address-label-restore-writes", () => ({
+  replaceSnapshotHashes: vi.fn().mockResolvedValue(undefined),
+}));
+
 import type { AddressEntry } from "@/lib/address-labels";
-import { getLabels, importLabels, replaceLabels } from "@/lib/address-labels";
-import { importReports, replaceReports } from "@/lib/address-reports";
+import { getLabels, importLabels } from "@/lib/address-labels";
+import { importReports } from "@/lib/address-reports";
+import { replaceSnapshotHashes } from "@/lib/address-label-restore-writes";
 
 import {
   emptyCounts,
@@ -67,9 +72,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-  (replaceLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-  (replaceReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (replaceSnapshotHashes as ReturnType<typeof vi.fn>).mockResolvedValue(
+    undefined,
+  );
 });
 
 describe("splitCsvLine", () => {
@@ -782,18 +788,20 @@ describe("handleSnapshot trusted restore mode", () => {
     expect(getLabels).not.toHaveBeenCalled();
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
-    expect(replaceLabels).toHaveBeenCalledWith({
-      [ADDR_A]: expect.objectContaining({
-        source: "arkham",
-        tags: ["exchange"],
-      }),
-    });
-    expect(replaceReports).toHaveBeenCalledWith({
-      [ADDR_B]: expect.objectContaining({
-        authorEmail: "analyst@mentolabs.xyz",
-        source: "claude",
-        version: 3,
-      }),
+    expect(replaceSnapshotHashes).toHaveBeenCalledWith({
+      labels: {
+        [ADDR_A]: expect.objectContaining({
+          source: "arkham",
+          tags: ["exchange"],
+        }),
+      },
+      reports: {
+        [ADDR_B]: expect.objectContaining({
+          authorEmail: "analyst@mentolabs.xyz",
+          source: "claude",
+          version: 3,
+        }),
+      },
     });
   });
 
@@ -817,8 +825,10 @@ describe("handleSnapshot trusted restore mode", () => {
       ok: true,
       imported: { addresses: 0, reports: 0 },
     });
-    expect(replaceLabels).toHaveBeenCalledWith({});
-    expect(replaceReports).toHaveBeenCalledWith({});
+    expect(replaceSnapshotHashes).toHaveBeenCalledWith({
+      labels: {},
+      reports: {},
+    });
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
   });

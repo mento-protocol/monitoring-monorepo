@@ -1,4 +1,5 @@
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./redis";
+import { encodeReportFields, REPORTS_KEY } from "./address-report-fields";
 
 // Re-export isomorphic types and helpers so callers can import from a single
 // path. Mirrors the address-labels split.
@@ -21,27 +22,6 @@ import {
 // report applies wherever the address appears. Earlier per-scope storage
 // caused recurring scope-mismatch bugs that the model itself doesn't
 // justify (PR #330).
-const REPORTS_KEY = "reports";
-const REPLACE_HASH_SCRIPT = `
-local key = KEYS[1]
-redis.call('DEL', key)
-for i = 1, #ARGV, 2 do
-  redis.call('HSET', key, ARGV[i], ARGV[i + 1])
-end
-return 1
-`;
-
-function getRedis(): Redis {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    throw new Error(
-      "Upstash Redis not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
-    );
-  }
-  return new Redis({ url, token });
-}
-
 // Atomic upsert script. Reads prior, increments version, preserves
 // createdAt, writes. Atomicity guards the version monotonicity invariant
 // against concurrent writers — without the script, two simultaneous saves
@@ -194,32 +174,4 @@ export async function importReports(
   if (entries.length === 0) return;
   const redis = getRedis();
   await redis.hset(REPORTS_KEY, encodeReportFields(entries));
-}
-
-/**
- * Replace the reports hash with the trusted snapshot contents. Used by the
- * private Blob restore path so deleted reports in the chosen backup are not
- * left behind in Redis.
- */
-export async function replaceReports(
-  reports: Record<string, AddressReport>,
-): Promise<void> {
-  const entries = Object.entries(reports);
-  const redis = getRedis();
-  const fields = entries.length > 0 ? encodeReportFields(entries) : {};
-  await redis.eval(REPLACE_HASH_SCRIPT, [REPORTS_KEY], flattenFields(fields));
-}
-
-function encodeReportFields(
-  entries: Array<[string, AddressReport]>,
-): Record<string, string> {
-  const fields: Record<string, string> = {};
-  for (const [addr, report] of entries) {
-    fields[addr.toLowerCase()] = JSON.stringify(report);
-  }
-  return fields;
-}
-
-function flattenFields(fields: Record<string, string>): string[] {
-  return Object.entries(fields).flatMap(([field, value]) => [field, value]);
 }

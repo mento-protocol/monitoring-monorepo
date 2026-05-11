@@ -20,12 +20,14 @@ vi.mock("@/lib/address-labels/snapshot", () => ({
 import { getAuthSession } from "@/auth";
 import { get } from "@vercel/blob";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
+import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
 import { POST } from "../route";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGet = vi.mocked(get);
 const mockHandleSnapshot = vi.mocked(handleSnapshot);
 const mockIsSnapshot = vi.mocked(isSnapshot);
+const RESTORE_LIMIT = MAX_REDIS_HASH_REPLACE_BYTES;
 
 function req(
   pathname = "address-labels-backup-2026-05-11.json",
@@ -143,7 +145,7 @@ describe("POST /api/address-labels/restore", () => {
 
   it("rejects an oversized Blob before reading the stream", async () => {
     mockGet.mockResolvedValueOnce(
-      blobResult({ addresses: {} }, 32 * 1024 * 1024 + 1) as Awaited<
+      blobResult({ addresses: {} }, RESTORE_LIMIT + 1) as Awaited<
         ReturnType<typeof get>
       >,
     );
@@ -159,7 +161,7 @@ describe("POST /api/address-labels/restore", () => {
   it("rejects an oversized Blob after reading when metadata size is unavailable", async () => {
     const byteLengthSpy = vi
       .spyOn(Buffer, "byteLength")
-      .mockImplementation(() => 32 * 1024 * 1024 + 1);
+      .mockImplementation(() => RESTORE_LIMIT + 1);
     mockGet.mockResolvedValueOnce(
       blobResult({ addresses: {} }, null) as Awaited<ReturnType<typeof get>>,
     );
