@@ -25,42 +25,6 @@ for the flows that matter.
 Acceptance: headless run is stable, fixture-driven, and adds <2m if promoted
 to a PR-required check.
 
-### Feedback Sensors for Coding Agents
-
-Why: repo knowledge currently lives in `AGENTS.md` and PR checklists, but
-agents/humans still have to remember which gates apply. Path-aware feedback
-should make the repo tell agents what to run before review, reducing repeated
-Cursor/Codex findings.
-
-- [ ] Add `scripts/agent-quality-gate.sh` with a dry-run mode that maps changed paths to required commands/checklists.
-- [ ] Cover the main path groups: `indexer-envio`, `ui-dashboard`, `metrics-bridge`, `shared-config`, workflows, Terraform, docs.
-- [ ] In execution mode, run only safe local checks: codegen, lint, typecheck, tests, Trunk checks as applicable. Never run deploys or Terraform apply.
-- [ ] Link the script from `AGENTS.md` as the expected pre-PR handoff gate for agent-authored code changes.
-- [ ] Trial on the next three PRs and note whether it prevents repeat review findings.
-
-Acceptance: script is readable, supports dry-run, and catches or prevents at
-least one issue before review.
-
-### Agent Quality Gate Performance Follow-Ups
-
-Why: PR #388 made agent pre-push validation path-aware, but the first real
-rounds showed a few remaining sources of wasted wall time and noisy failure
-diagnosis.
-
-- [ ] Parse `package.json` diffs by changed JSON path so root agent-script-only
-      changes do not automatically trigger every package/codegen gate.
-- [ ] De-duplicate Envio codegen setup so bridge-only, testnet, and mainnet
-      codegen do not each pay a full install/postinstall cost when one prepared
-      workspace is enough.
-- [ ] Quiet expected test-fixture logs, especially indexer RPC failure fixtures
-      and expected API error-path stderr, so real failures are faster to spot.
-- [ ] Print a per-command elapsed-time summary from `scripts/agent-quality-gate.sh`
-      to make future gate tuning evidence-based.
-
-Acceptance: a representative agent-quality-gate pre-push on tooling/workspace
-changes is measurably faster, and failures show the first relevant error
-without pages of expected fixture noise.
-
 ### `mise` Toolchain Management Trial
 
 Why: tool versions are currently spread across `.node-version`,
@@ -93,21 +57,6 @@ weak assertions.
 Acceptance: finds at least one real assertion gap or gives high confidence on
 a critical module with acceptable manual/nightly runtime.
 
-## Volume Leaderboard
-
-Current state: v3/v2 daily rollups, window snapshots, system-address
-classification, aggregator config, the `/leaderboard` page, v2 aggregator
-breakdown, per-row pool breakdown, top-10 concentration, and the v3 top-pools
-list have shipped.
-
-- [ ] **V3 aggregator flow surface.** Add table/chart coverage for `AggregatorDailySnapshot`, equivalent to the current v2 aggregator table. Surface `unknown` `txTo` addresses prominently for ongoing curation.
-- [ ] **Cluster label UI parity.** The dashboard currently styles `cluster-*` as a plain pill in the v2 aggregator table, while `getClusterMetadata()` lives indexer-side. Expose cluster metadata to the dashboard (likely shared config or query field), then render an info tooltip and deployer explorer link wherever aggregator rows appear. See `docs/notes/volume-leaderboard-aggregator-clusters.md`.
-- [ ] **Cohort + dormancy tiles.** Cohort breakdown joins `trader` against Arkham labels in Redis. New/dormant counts compare current-vs-previous window first-seen data.
-- [ ] **Dedicated outlier-swaps drilldown.** The top-pools list exists for the v3 chart; the remaining gap is an outlier-swap surface for unusually large or skewed trades.
-- [ ] **Pre-roll pool daily volume if the v3 stacked chart hits Hasura caps.** The current chart reads capped `TraderPoolDailySnapshot` rows. If this becomes visible at longer windows, add a `PoolDailyVolumeSnapshot` rollup keyed by `chainId-poolId-day`.
-- [ ] **Corridor map + LP-friendliness column.** Net-direction graph from `TraderPoolDailySnapshot`; `lpScore = feesPaidUsdWei / max(imbalance * volumeUsdWei, epsilon)`.
-- [ ] **Exact window-unique trader counts.** `mergeHeroSnapshot` adds snapshot, yesterday catch-up, and today's distinct trader counts without de-duplicating across those sources. Volume and swap counts are exact; unique traders remain approximate. Fix when needed by shipping distinct-trader sets or another compact overlap representation on `LeaderboardWindowSnapshot`.
-
 ## Virtual Pool Metrics
 
 - [x] ~~**24h Volume tile for VPs.**~~ Done on `virtual-pools`: `BrokerExchangeDailySnapshot` now rolls up per-`chainId-exchangeId-day` Broker volume in the indexer, and the VirtualPool header reads that isolated daily rollup for the current UTC-day 24h volume tile with visible query-failure degradation. Requires a schema bump and full re-sync.
@@ -126,12 +75,13 @@ comments. Refresh before starting a split.
 
 |  Raw | Rough | File                                                 | Action                                                                                                                     |
 | ---: | ----: | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1567 |   907 | `indexer-envio/src/pool.ts`                          | Highest-priority split before adding more pool behavior; under the effective hard cap but far past the readability budget. |
-|  933 |   708 | `indexer-envio/src/rpc/pool-state.ts`                | Split RPC mocks/caches/fetchers when touching pool-state RPC.                                                              |
-|  750 |   542 | `indexer-envio/src/rpc/effects.ts`                   | Watch; split if adding another effect family.                                                                              |
-|  738 |   547 | `ui-dashboard/src/lib/queries/pools.ts`              | Watch; split by pool-detail/global/bridge domains if adding more queries.                                                  |
-|  732 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts`      | Watch; split fetch orchestration if another network-wide data source lands.                                                |
-|  690 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`        | Watch; split only with related oracle-handler work.                                                                        |
-|  675 |   605 | `ui-dashboard/src/components/global-pools-table.tsx` | Split if touching the table; it is just over the effective soft budget.                                                    |
+| 1566 |   907 | `indexer-envio/src/pool.ts`                          | Highest-priority split before adding more pool behavior; under the effective hard cap but far past the readability budget. |
+|  932 |   708 | `indexer-envio/src/rpc/pool-state.ts`                | Split RPC mocks/caches/fetchers when touching pool-state RPC.                                                              |
+|  749 |   542 | `indexer-envio/src/rpc/effects.ts`                   | Watch; split if adding another effect family.                                                                              |
+|  731 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts`      | Watch; split fetch orchestration if another network-wide data source lands.                                                |
+|  689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`        | Watch; split only with related oracle-handler work.                                                                        |
+|  673 |   605 | `ui-dashboard/src/components/global-pools-table.tsx` | Split if touching the table; it is just over the effective soft budget.                                                    |
+|  627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`           | Watch; split if hero KPI fallback or overlap logic grows again.                                                            |
+|  608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`        | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands.                                   |
 
 - [ ] **Enable `tseslint.configs.recommended` on `indexer-envio`.** The current config deliberately omits the preset so the gating PR did not surface unrelated pre-existing nits. Flipping it on requires fixing `no-explicit-any`, `no-unused-vars`, and `no-require-imports` issues, adding `globals: globals.node`, and restoring the needed `@eslint/js` + `globals` devDeps.
