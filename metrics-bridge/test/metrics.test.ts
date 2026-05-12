@@ -394,29 +394,6 @@ describe("updateMetrics", () => {
     ).toBe(1713199000);
   });
 
-  it("publishes latest rebalance tx info for Slack links", async () => {
-    updateMetrics([makePool()]);
-    expect(
-      await getGaugeValue(register, "mento_pool_last_rebalance_tx_info", {
-        ...poolLabels,
-        tx_hash:
-          "0x1111111111111111111111111111111111111111111111111111111111111111",
-        tx_hash_short: "0x1111…1111",
-        tx_url:
-          "https://celoscan.io/tx/0x1111111111111111111111111111111111111111111111111111111111111111",
-      }),
-    ).toBe(1);
-  });
-
-  it("skips latest rebalance tx info before the first rebalance", async () => {
-    updateMetrics([makePool({ latestRebalanceTxHash: "" })]);
-    expect(
-      await getGaugeValue(register, "mento_pool_last_rebalance_tx_info", {
-        ...poolLabels,
-      }),
-    ).toBeUndefined();
-  });
-
   it("publishes swap_fee_bps as lpFee + protocolFee", async () => {
     updateMetrics([makePool({ lpFee: 10, protocolFee: 5 })]);
     expect(

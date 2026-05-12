@@ -63,38 +63,20 @@ const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
   }
 `;
 
-const BRIDGE_LATEST_REBALANCES_QUERY = gql`
-  query BridgeLatestRebalances {
-    RebalanceEvent(
-      distinct_on: poolId
-      order_by: [{ poolId: asc }, { blockTimestamp: desc }]
-    ) {
-      poolId
-      txHash
-    }
-  }
-`;
-
 type OracleLineageRow = Pick<
   PoolRow,
   "id" | "prevMedianPrice" | "prevMedianAt"
 >;
 
 type BridgePoolsBaseResponse = {
-  Pool: Omit<
-    PoolRow,
-    "prevMedianPrice" | "prevMedianAt" | "latestRebalanceTxHash"
-  >[];
+  Pool: Omit<PoolRow, "prevMedianPrice" | "prevMedianAt">[];
 };
 
 type BridgePoolsOracleLineageResponse = { Pool: OracleLineageRow[] };
-type LatestRebalanceRow = { poolId: string; txHash: string };
-type BridgeLatestRebalancesResponse = { RebalanceEvent: LatestRebalanceRow[] };
 
 const LINEAGE_DEFAULTS = {
   prevMedianPrice: "0",
   prevMedianAt: "0",
-  latestRebalanceTxHash: "",
 } as const;
 
 const client = new GraphQLClient(HASURA_URL);
@@ -115,11 +97,10 @@ function isUnknownFieldError(err: unknown): boolean {
 }
 
 let unknownFieldWarned = false;
-let latestRebalancesWarned = false;
 
 export async function fetchPools(): Promise<BridgePoolsResponse> {
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const [base, lineage, latestRebalances] = await Promise.all([
+  const [base, lineage] = await Promise.all([
     client.request<BridgePoolsBaseResponse>({
       document: BRIDGE_POOLS_QUERY,
       signal,
@@ -139,33 +120,14 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
         }
         return { Pool: [] as OracleLineageRow[] };
       }),
-    client
-      .request<BridgeLatestRebalancesResponse>({
-        document: BRIDGE_LATEST_REBALANCES_QUERY,
-        signal,
-      })
-      .catch((err: unknown) => {
-        if (!latestRebalancesWarned) {
-          latestRebalancesWarned = true;
-          console.warn(
-            "[metrics-bridge] Latest rebalance tx query failed; Slack tx links disabled until the next successful poll.",
-            err,
-          );
-        }
-        return { RebalanceEvent: [] as LatestRebalanceRow[] };
-      }),
   ]);
 
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
-  const latestRebalanceByPoolId = new Map(
-    latestRebalances.RebalanceEvent.map((r) => [r.poolId, r.txHash]),
-  );
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
       ...LINEAGE_DEFAULTS,
       ...lineageById.get(p.id),
-      latestRebalanceTxHash: latestRebalanceByPoolId.get(p.id) ?? "",
     })),
   };
 }

@@ -34,7 +34,6 @@ export interface PoolRow {
   // (`indexer-envio/schema.graphql:95`), so this field is always populated
   // in the GraphQL response.
   rebalancerAddress: string;
-  latestRebalanceTxHash: string;
 }
 
 export interface BridgePoolsResponse {

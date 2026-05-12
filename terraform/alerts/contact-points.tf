@@ -73,8 +73,8 @@ locals {
   #
   #      Deviation-breach alerts deliberately render in operator triage order:
   #      message, deviation, reserves, rebalance-blocked reason, then start
-  #      time. Rebalancer alerts may add Last Rebalance / Root Cause / Last
-  #      Rebalance TX rows when the rule exposes those annotations.
+  #      time. Rebalancer alerts may add Last Rebalance / Root Cause rows
+  #      when the rule exposes those annotations.
   #   5. Metadata row: start time only. The per-row `View alert` link was
   #      removed — Grafana's attachment title still links to grafana.com via
   #      the (unconfigurable) `title_link`, so operators retain that path
@@ -126,9 +126,6 @@ locals {
     {{ end -}}
     {{ if .Annotations.root_cause -}}
     *Root Cause:* {{ .Annotations.root_cause }}
-    {{ end -}}
-    {{ if .Annotations.last_rebalance_tx -}}
-    *Last Rebalance TX:* {{ .Annotations.last_rebalance_tx }}
     {{ end -}}
     {{ if .Annotations.current_oracle_price -}}
     *Current Oracle Price:* {{ .Annotations.current_oracle_price }}

@@ -2,7 +2,6 @@ import { Gauge, Counter, Registry } from "prom-client";
 import {
   chainSlug,
   explorerAddressUrl,
-  explorerTxUrl,
   hasChain,
 } from "@mento-protocol/monitoring-config/chains";
 import {
@@ -102,12 +101,6 @@ const rebalanceBlockedLabels = [
   "reason_code",
   "reason_message",
 ] as const;
-const lastRebalanceTxLabels = [
-  ...poolLabels,
-  "tx_hash",
-  "tx_hash_short",
-  "tx_url",
-] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
@@ -179,12 +172,6 @@ export const gauges = {
     name: "mento_pool_rebalance_effectiveness",
     help: "Last observed rebalance effectiveness ratio: (priceDiff_before - priceDiff_after) / (priceDiff_before - rebalanceThreshold). 1.0 = rebalance landed exactly on the rebalance boundary (ideal); >1.0 = overshoot past the boundary (e.g. all the way to the oracle, which is over-correction); 0 = no reduction; <0 = rebalance made deviation WORSE. -1 indexer sentinel (degenerate case — zero pre-deviation, missing threshold, or pool was already in-band) is skipped.",
     labelNames: poolLabels,
-    registers: [register],
-  }),
-  lastRebalanceTxInfo: new Gauge({
-    name: "mento_pool_last_rebalance_tx_info",
-    help: "Info gauge for the latest RebalanceEvent transaction. Value is always 1; labels carry tx_hash and tx_url for Slack annotations. Emitted only after a pool has at least one rebalance.",
-    labelNames: lastRebalanceTxLabels,
     registers: [register],
   }),
   swapFeeBps: new Gauge({
@@ -315,17 +302,6 @@ export function updateMetrics(pools: PoolRow[]): void {
       gauges.rebalanceEffectiveness.set(
         labels,
         fp(pool.lastEffectivenessRatio),
-      );
-    }
-    if (pool.latestRebalanceTxHash) {
-      gauges.lastRebalanceTxInfo.set(
-        {
-          ...labels,
-          tx_hash: pool.latestRebalanceTxHash,
-          tx_hash_short: shortAddress(pool.latestRebalanceTxHash),
-          tx_url: explorerTxUrl(pool.chainId, pool.latestRebalanceTxHash) ?? "",
-        },
-        1,
       );
     }
     // Swap fee — skip the `-1` sentinel the indexer writes when the initial

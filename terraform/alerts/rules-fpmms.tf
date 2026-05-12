@@ -346,7 +346,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "mento_pool_deviation_ratio unless ${local.fx_weekend_suppressed_deviation_ratio_promql}"
+        expr    = "mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})"
         instant = true
       })
     }
@@ -414,7 +414,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless ${local.fx_weekend_suppressed_breach_start_promql}"
+        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
         instant = true
       })
     }
@@ -527,7 +527,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless ${local.fx_weekend_suppressed_breach_start_promql}"
+        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (${local.fx_weekend_suppressed_breach_start_promql})"
         instant = true
       })
     }
@@ -670,7 +670,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless ${local.fx_weekend_suppressed_breach_start_promql}"
+        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
         instant = true
       })
     }
@@ -899,7 +899,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       model = jsonencode({
         refId = "A"
         expr = format(
-          "%s unless %s",
+          "%s unless (%s)",
           join(" and ", [
             "(time() - mento_pool_last_rebalanced_at)",
             "(mento_pool_deviation_breach_start > 0)",
@@ -1007,12 +1007,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      summary             = "Last rebalance effectiveness only {{ if $values.EffPct }}{{ printf \"%.1f%%\" $values.EffPct.Value }}{{ else }}{{ printf \"%.2f\" $values.A.Value }}{{ end }} — rebalancer is not closing the deviation breach."
-      description         = "Most recent in-breach rebalance closed less than 50% of the gap to the rebalance boundary AND no better rebalance has landed in the past 15 min. Effectiveness is measured against the boundary (`rebalanceThreshold`), not the oracle midpoint — 100% means the rebalance landed exactly on the boundary (ideal); values > 100% = overshoot; < 100% = under-correction."
-      resolved_title      = "Rebalance effective again"
-      resolved_summary    = "Rebalance effectiveness recovered or the deviation breach cleared."
-      root_cause          = local.deviation_critical_rebalance_reason_annotation
-      last_rebalance_tx   = "{{ if $values.Tx }}<{{ $values.Tx.Labels.tx_url }}|{{ $values.Tx.Labels.tx_hash_short }}>{{ end }}"
+      summary          = "Last rebalance effectiveness only {{ if $values.EffPct }}{{ printf \"%.1f%%\" $values.EffPct.Value }}{{ else }}{{ printf \"%.2f\" $values.A.Value }}{{ end }} — rebalancer is not closing the deviation breach."
+      description      = "Most recent in-breach rebalance closed less than 50% of the gap to the rebalance boundary AND no better rebalance has landed in the past 15 min. Effectiveness is measured against the boundary (`rebalanceThreshold`), not the oracle midpoint — 100% means the rebalance landed exactly on the boundary (ideal); values > 100% = overshoot; < 100% = under-correction."
+      resolved_title   = "Rebalance effective again"
+      resolved_summary = "Rebalance effectiveness recovered or the deviation breach cleared."
+      root_cause       = local.deviation_critical_rebalance_reason_annotation
     }
 
     labels = {
@@ -1092,20 +1091,6 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
           "(mento_pool_last_rebalanced_at >= mento_pool_deviation_breach_start)",
           "((time() - mento_pool_last_rebalanced_at) < 3600)",
         ])
-        instant = true
-      })
-    }
-
-    data {
-      ref_id         = "Tx"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
-      }
-      model = jsonencode({
-        refId   = "Tx"
-        expr    = "mento_pool_last_rebalance_tx_info"
         instant = true
       })
     }
