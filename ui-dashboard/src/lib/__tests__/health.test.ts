@@ -283,8 +283,10 @@ describe("computeHealthStatus", () => {
     ).toBe("WARN");
   });
 
-  it("uses fallback threshold of 10000 when rebalanceThreshold is 0", () => {
-    // ratio = 9000/10000 = 0.9 — still OK under the new rule.
+  it("uses fallback threshold of 10000 when rebalanceThreshold is 0 and unknown", () => {
+    // ratio = 9000/10000 = 0.9 — still OK under the under-bound fallback.
+    // No `rebalanceThresholdsKnown` field (or false) means the indexer hasn't
+    // read the on-chain value; under-bound preserves breach safety.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -294,6 +296,85 @@ describe("computeHealthStatus", () => {
         rebalanceThreshold: 0,
       }),
     ).toBe("OK");
+  });
+
+  it("dual-sentinel: known-zero rebalanceThreshold stays OK at high deviation (mirrors indexer)", () => {
+    // `rebalanceThreshold=0` AND `rebalanceThresholdsKnown=true` = governance
+    // configured to never rebalance. Short-circuits to OK regardless of
+    // priceDifference. Mirrored test in indexer-envio/test/healthStatusParity.test.ts.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "20000", // 200%
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+      }),
+    ).toBe("OK");
+  });
+
+  it("dual-sentinel: known-zero short-circuits even past the 1e12 cushion", () => {
+    // Mirrored from healthStatusParity.test.ts. Pins the explicit short-
+    // circuit beats the 1e12 effectiveThreshold cushion at extreme magnitudes.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: String(2e12),
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("OK");
+  });
+
+  it("asymmetric (above=0, below>0) does NOT count as never-rebalance (mirrors indexer)", () => {
+    // The active `rebalanceThreshold` alone can be 0 on a half-disabled
+    // pool. The predicate must require BOTH split sides to be 0; this
+    // fixture has below>0 so the pool DOES rebalance and the deviation
+    // path runs normally. 12000bps / 10000 fallback = 1.2 → CRITICAL.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "12000",
+        rebalanceThreshold: 0,
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 300,
+        rebalanceThresholdsKnown: true,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("dual-sentinel: unknown-zero with high deviation goes CRITICAL via 10000 fallback (mirrors indexer)", () => {
+    // Same diff, unknown-zero. 20000/10000 = 2.0, past 1.05 critical magnitude
+    // and past the 1h grace. Pinned so a regression collapsing both
+    // branches to 1e12 (or both to 10000) is caught by parity.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "20000",
+        rebalanceThreshold: 0,
+        rebalanceThresholdsKnown: false,
+        deviationBreachStartedAt: String(
+          Math.floor(Date.now() / 1000) - 2 * 3600,
+        ),
+      }),
+    ).toBe("CRITICAL");
   });
 
   it("handles missing fields gracefully (defaults to CRITICAL for stale oracle)", () => {
@@ -326,6 +407,73 @@ describe("computeHealthStatus", () => {
         oracleTimestamp: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
+  // --- PR 1.6: hasHealthData=false short-circuit -----------------------------
+  // codex P2 #3214513402: indexer flags `hasHealthData=false` while token
+  // decimals are unknown (the deviation accrual is untrusted). Without this
+  // gate, an OracleReported event with a fresh timestamp + default-zero
+  // priceDifference would render OK on the homepage table and OG card, even
+  // though `priceDifference` is the schema-default zero.
+
+  it("returns 'N/A' when pool.hasHealthData === false (decimals-unknown defense in depth)", () => {
+    // Fresh oracle, default-zero priceDifference, valid-looking threshold —
+    // would normally classify OK. The hasHealthData gate forces N/A.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+      }),
+    ).toBe("N/A");
+  });
+
+  it("oracle-staleness still surfaces as CRITICAL even when hasHealthData=false (codex P2 PR #370 #3214756051)", () => {
+    // Stale-oracle is an alertable freshness incident — it must NOT be
+    // masked into N/A by the hasHealthData gate. Untrusted deviation is
+    // less important than a missing-oracle incident for ops alerting.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: false,
+        oracleTimestamp: STALE_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("treats missing hasHealthData as the prior behaviour (no implicit gating)", () => {
+    // Older queries that don't fetch the field must not flip to N/A.
+    // Strict `=== false` check in the implementation; missing is allowed
+    // through to the normal pipeline.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        // hasHealthData omitted — pre-PR 1.6 query shape
+      }),
+    ).toBe("OK");
+  });
+
+  it("hasHealthData=true does NOT short-circuit (normal pipeline runs)", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        hasHealthData: true,
       }),
     ).toBe("OK");
   });
@@ -594,6 +742,26 @@ describe("computeEffectiveStatus", () => {
         limitPressure1: "1.5",
       }),
     ).toBe("N/A");
+  });
+
+  it("propagates the hasHealthData=false short-circuit through worstStatus (PR 1.6)", () => {
+    // Even with WARN-level limit pressure, hasHealthData=false drags health
+    // to N/A, and `worstStatus(N/A, WARN) = WARN`. The PR's defense-in-depth
+    // intent is for the homepage table — `computeHealthStatus` returning
+    // N/A removes the misleading "OK" rendering even though the limit
+    // status remains visible. This test pins that the short-circuit takes
+    // effect and limit pressure isn't masked.
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+        limitPressure0: "0.85",
+        limitPressure1: "0",
+      }),
+    ).toBe("WARN"); // limit WARN wins over health N/A
   });
 });
 

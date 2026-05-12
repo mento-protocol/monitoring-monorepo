@@ -31,13 +31,17 @@ afterEach(() => {
 
 describe("network constants stay in sync", () => {
   it("MAINNET_CHAIN_IDS matches production mainnet networks", () => {
+    const seen = new Set<number>();
     const prodMainnetChainIds = Object.values(NETWORKS)
-      .filter((net) => !net.local && !net.testnet)
-      .map((net) => net.chainId)
-      .filter((chainId, idx, arr) => arr.indexOf(chainId) === idx)
-      .sort((a, b) => a - b);
+      .flatMap((net) => {
+        if (net.local || net.testnet) return [];
+        if (seen.has(net.chainId)) return [];
+        seen.add(net.chainId);
+        return [net.chainId];
+      })
+      .toSorted((a, b) => a - b);
 
-    expect([...MAINNET_CHAIN_IDS].sort((a, b) => a - b)).toEqual(
+    expect(MAINNET_CHAIN_IDS.toSorted((a, b) => a - b)).toEqual(
       prodMainnetChainIds,
     );
   });

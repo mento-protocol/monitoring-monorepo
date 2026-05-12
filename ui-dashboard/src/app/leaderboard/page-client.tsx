@@ -9,13 +9,12 @@ import { formatUSD } from "@/lib/format";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_TRADER_DAILY_TOP,
-  POOL_DAILY_VOLUME,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
+  aggregatorDailyTopQuery,
 } from "@/lib/queries/leaderboard";
 import {
   LEADERBOARD_RANGES,
-  aggregateBrokerAggregatorsByWindow,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
@@ -25,19 +24,26 @@ import {
   type LeaderboardRangeKey,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
-import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
+import {
+  aggregateAggregatorsByWindow,
+  buildAggregatorDailyVolumeBreakdown,
+  selectAggregatorRowsForSystemToggle,
+  type AggregatorDailyRow,
+} from "@/lib/leaderboard-aggregators";
 import {
   LEADERBOARD_CHART_RANGES,
   LEADERBOARD_FALLBACK_CHART_RANGES,
+  SECONDS_PER_DAY,
   type RangeKey,
 } from "@/lib/time-series";
 import { HeroDataQualityBanners } from "./_components/hero-data-quality-banners";
-import { LeaderboardTable } from "./_components/leaderboard-table";
 import { TopPoolsList } from "./_components/top-pools-list";
 import { V2LeaderboardSection } from "./_components/v2-leaderboard-section";
+import { V3LeaderboardSection } from "./_components/v3-leaderboard-section";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
 import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useLeaderboardUrlState } from "./_lib/url-state";
+import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
 
 type PoolRow = {
   id: string;
@@ -51,6 +57,10 @@ type PoolRow = {
 // stacked bars of varying widths that look noisy).
 const RANGES_WITH_CHART = new Set<LeaderboardRangeKey>(["30d", "90d", "all"]);
 
+// Intentional react-doctor suppression: venue toggle + range filter +
+// multi-table layout share query state that feeds hero KPIs, charts, and
+// tables. Revisit with a focused split only if this grows again.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function LeaderboardClient() {
   const {
     range,
@@ -85,20 +95,21 @@ export function LeaderboardClient() {
     300_000, // pool metadata barely changes; refresh every 5 min
   );
 
-  // Per-pool stacked chart data (v3-only). Separate query from
-  // `TRADER_DAILY_TOP` because the chart needs (poolId, day) granularity
-  // that the trader-day rollup throws away. Pre-rolling
-  // `PoolDailyVolumeSnapshot` is the proper fix at scale (BACKLOG PR 4).
-  // Skip the query entirely on v2 — broker-direct swaps don't carry
-  // pool decomposition, so there's nothing to chart, and the query
-  // would just churn an unused 1000-row response.
+  // Per-pool stacked chart data (v3-only). Separate from `TRADER_DAILY_TOP`
+  // because the chart needs pre-rolled pool/day granularity.
   const showChart = venue === "v3" && RANGES_WITH_CHART.has(range);
-  const poolVolumeResult = useGQL<{
-    TraderPoolDailySnapshot: PoolDailyVolumeRow[];
-  }>(showChart ? POOL_DAILY_VOLUME : null, {
+  const poolVolumeResult = usePoolVolumeSnapshots({
+    enabled: showChart,
     afterTimestamp: cutoff,
-    limit: ENVIO_MAX_ROWS,
   });
+  const v3AggregatorsResult = useGQL<{
+    AggregatorDailySnapshot: AggregatorDailyRow[];
+  }>(
+    venue === "v3" ? aggregatorDailyTopQuery(showSystem) : null,
+    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
 
   const v2TradersResult = useGQL<{
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
@@ -116,7 +127,9 @@ export function LeaderboardClient() {
 
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
-  const poolVolumeRows = poolVolumeResult.data?.TraderPoolDailySnapshot ?? [];
+  const poolVolumeRows = poolVolumeResult.rows;
+  const v3AggregatorRows =
+    v3AggregatorsResult.data?.AggregatorDailySnapshot ?? [];
   const v2TraderRows = v2TradersResult.data?.BrokerTraderDailySnapshot ?? [];
   const v2AggregatorRows =
     v2AggregatorsResult.data?.BrokerAggregatorDailySnapshot ?? [];
@@ -133,15 +146,19 @@ export function LeaderboardClient() {
     () => aggregateBrokerTradersByWindow(v2TraderRows),
     [v2TraderRows],
   );
+  const filteredV3AggregatorRows = useMemo(
+    () => selectAggregatorRowsForSystemToggle(v3AggregatorRows, showSystem),
+    [v3AggregatorRows, showSystem],
+  );
+  const v3AggregatorAggregated = useMemo(
+    () => aggregateAggregatorsByWindow(filteredV3AggregatorRows),
+    [filteredV3AggregatorRows],
+  );
   const v2AggregatorAggregated = useMemo(
     () =>
-      // Honour the page-level `Show system addresses` toggle on the
-      // aggregator section too — `BrokerAggregatorDailySnapshot` uses
-      // the canonical aggregator name, so the filter is on the
-      // `"system"` bucket rather than an `isSystemAddress` flag. Filter
-      // client-side because the schema doesn't carry an indexed
-      // boolean for the aggregator side.
-      aggregateBrokerAggregatorsByWindow(
+      // Aggregator snapshots carry canonical buckets, so system filtering
+      // happens on the "system" bucket for the v2 panel.
+      aggregateAggregatorsByWindow(
         showSystem
           ? v2AggregatorRows
           : v2AggregatorRows.filter((r) => r.aggregator !== "system"),
@@ -166,22 +183,36 @@ export function LeaderboardClient() {
     return m;
   }, [poolRows]);
 
-  // Per-pool stacked chart + Top Pools list view-model. Bundled in a
-  // hook so the page client doesn't carry the full derivation chain
-  // (allowlist → window → aggregation → chain decoration → list).
-  // System-address toggle parity is preserved inside the hook —
-  // TraderPoolDailySnapshot doesn't carry isSystemAddress, so the
-  // hook day-scopes a `(chainId, trader, day)` allowlist against the
-  // parent trader query's filtered rows.
+  // Per-pool stacked chart + Top Pools list view-model. Bundled in a hook
+  // so the page client doesn't carry the full derivation chain.
   const { poolVolumeBreakdown, chartBreakdown, topPoolsListEntries } =
     usePoolChartViewModel({
       showSystem,
-      traderRows,
       poolVolumeRows,
       poolMeta,
       cutoff,
       utcDayKey,
     });
+
+  const aggregatorWindowRange = useMemo(() => {
+    const todayMidnightUtc =
+      Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    return cutoff > 0
+      ? { fromSec: cutoff, toSec: todayMidnightUtc }
+      : undefined;
+  }, [cutoff, utcDayKey]);
+  const v3AggregatorChart = useMemo(
+    () =>
+      buildAggregatorDailyVolumeBreakdown(
+        filteredV3AggregatorRows,
+        aggregatorWindowRange,
+      ),
+    [filteredV3AggregatorRows, aggregatorWindowRange],
+  );
+  const v3AggregatorChartTotal = useMemo(
+    () => v3AggregatorChart.totalSeries.reduce((sum, p) => sum + p.value, 0),
+    [v3AggregatorChart],
+  );
 
   // Hero KPIs — totals come from the pre-rolled LeaderboardWindowSnapshot
   // plus today's partial (both exact, no Hasura row cap). Top-10
@@ -221,12 +252,13 @@ export function LeaderboardClient() {
     [updateRange],
   );
 
-  // Page chrome / KPIs / chart / producer table all read from the
+  // Page chrome / KPIs / chart / trader table all read from the
   // trader-side query for the active venue. The v2 aggregator query is
   // independent — its loading/error feed only the aggregator table below
   // so a slow or erroring `BrokerAggregatorDailySnapshot` (e.g. during the
   // post-deploy resync window for that new entity) doesn't take down the
-  // producer view that's the actual outreach driver. Codex review:
+  // trader view (the aggregator panel is the migration-outreach surface;
+  // the trader table is a retention-metrics view). Codex review:
   // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
   const tableIsLoading =
     venue === "v3"
@@ -240,6 +272,14 @@ export function LeaderboardClient() {
   // in isolated queries that degrade independently.
   const v2AggIsLoading = v2AggregatorsResult.isLoading;
   const v2AggHasError = !!v2AggregatorsResult.error;
+  const v3AggIsLoading = v3AggregatorsResult.isLoading;
+  const v3AggHasError = !!v3AggregatorsResult.error;
+  // The pool chart now reads PoolDailyVolumeSnapshot, not the top-trader
+  // query. Keep its degraded mode isolated so a capped/failing trader table
+  // does not blank the pre-rolled pool breakdown.
+  const poolChartIsLoading = poolVolumeResult.isLoading;
+  const poolChartHasError =
+    !!poolVolumeResult.error || poolVolumeResult.partial;
   // Independent Hasura cap signals.
   //
   // Hero tiles (total volume / unique traders / total swaps) are EXACT
@@ -257,12 +297,6 @@ export function LeaderboardClient() {
       : !!v2TradersResult.data &&
         (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
           ENVIO_MAX_ROWS;
-  // The per-pool POOL_DAILY_VOLUME query can also hit the 1000-row cap on
-  // longer windows; smallest pool-days drop first, so the visual stack's
-  // top-N stays intact. We don't surface a separate banner for it — the
-  // pre-rolled PoolDailyVolumeSnapshot (BACKLOG.md PR 4) is the structural
-  // fix and the cap rarely affects the readable signal at 7d/30d.
-  //
   // BROKER_AGGREGATOR_DAILY_TOP is a top-N-volume cut. If it saturates
   // we'd silently drop long-tail aggregators from the table; surface it
   // with a separate banner above the aggregator section.
@@ -270,6 +304,11 @@ export function LeaderboardClient() {
     venue === "v2" &&
     !!v2AggregatorsResult.data &&
     (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
+      ENVIO_MAX_ROWS;
+  const isV3AggregatorCapHit =
+    venue === "v3" &&
+    !!v3AggregatorsResult.data &&
+    (v3AggregatorsResult.data.AggregatorDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
 
   // Headline reads `totalVolume` from the hero snapshot, so it follows
@@ -288,7 +327,7 @@ export function LeaderboardClient() {
           <p className="mt-1 text-sm text-slate-400">
             {venue === "v3"
               ? "Top traders on Mento by USD volume — system addresses hidden by default."
-              : "Top legacy-v2 producers — wallets and integrators we want to migrate to v3."}
+              : "Top legacy-v2 traders on Mento by USD volume — system addresses hidden by default."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -431,8 +470,8 @@ export function LeaderboardClient() {
               ranges={LEADERBOARD_CHART_RANGES}
               headline={headline}
               change={null}
-              isLoading={tableIsLoading || poolVolumeResult.isLoading}
-              hasError={tableHasError || !!poolVolumeResult.error}
+              isLoading={poolChartIsLoading}
+              hasError={poolChartHasError}
               hasSnapshotError={false}
               emptyMessage="No pool volume in this window."
               // Plot height tuned to roughly match the Top Pools list
@@ -451,8 +490,8 @@ export function LeaderboardClient() {
           <div className="h-full lg:col-span-1">
             <TopPoolsList
               entries={topPoolsListEntries}
-              isLoading={tableIsLoading || poolVolumeResult.isLoading}
-              hasError={tableHasError || !!poolVolumeResult.error}
+              isLoading={poolChartIsLoading}
+              hasError={poolChartHasError}
               windowLabel={rangeLabel(range)}
             />
           </div>
@@ -481,18 +520,34 @@ export function LeaderboardClient() {
       ) : null}
 
       {venue === "v3" ? (
-        <section>
-          <h2 className="mb-3 text-sm font-medium text-slate-300">
-            Top traders ({rangeLabel(range)})
-          </h2>
-          <LeaderboardTable
-            cutoff={cutoff}
-            traders={aggregated}
-            pools={poolMeta}
-            isLoading={tableIsLoading}
-            hasError={tableHasError}
-          />
-        </section>
+        <V3LeaderboardSection
+          rangeLabel={rangeLabel(range)}
+          range={range}
+          cutoff={cutoff}
+          traderRows={traderRows}
+          traders={aggregated}
+          pools={poolMeta}
+          isSystemAddressIn={isSystemAddressIn}
+          tableIsLoading={tableIsLoading}
+          tableHasError={tableHasError}
+          isTraderCapHit={isTableCapHit}
+          aggregators={v3AggregatorAggregated}
+          aggIsLoading={v3AggIsLoading}
+          aggHasError={v3AggHasError}
+          isAggregatorCapHit={isV3AggregatorCapHit}
+          chart={
+            range === "24h"
+              ? undefined
+              : {
+                  series: v3AggregatorChart.totalSeries,
+                  breakdown: v3AggregatorChart.breakdown,
+                  range: chartRange,
+                  onRangeChange: onChartRangeChange,
+                  ranges: LEADERBOARD_FALLBACK_CHART_RANGES,
+                  headline: formatUSD(v3AggregatorChartTotal),
+                }
+          }
+        />
       ) : (
         <V2LeaderboardSection
           rangeLabel={rangeLabel(range)}

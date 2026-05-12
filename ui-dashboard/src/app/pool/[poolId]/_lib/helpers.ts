@@ -51,10 +51,11 @@ export function selectActiveOlsPool(
   const activeRows = rows.filter((row) => row.isActive);
   if (activeRows.length === 0) return null;
 
-  return (
-    [...activeRows].sort(
-      (a, b) => Number(b.updatedAtTimestamp) - Number(a.updatedAtTimestamp),
-    )[0] ?? null
+  // Single-pass reduce instead of sort()[0] — O(n) vs O(n log n).
+  return activeRows.reduce((latest, row) =>
+    Number(row.updatedAtTimestamp) > Number(latest.updatedAtTimestamp)
+      ? row
+      : latest,
   );
 }
 

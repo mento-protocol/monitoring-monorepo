@@ -125,9 +125,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // Drop anything already labelled by any source. MiniPay writes only
     // to fresh addresses to avoid stomping Arkham/manual labels.
-    const candidates = addresses
-      .map((a: string) => a.toLowerCase())
-      .filter((a: string) => !existing[a]);
+    const candidates = (addresses as string[]).flatMap((a) => {
+      const lower = a.toLowerCase();
+      return existing[lower] ? [] : [lower];
+    });
 
     // Intersect before slicing: `discoverMentoAddresses` returns
     // alphabetically-sorted addresses, so a `.slice(0, maxAddresses)`

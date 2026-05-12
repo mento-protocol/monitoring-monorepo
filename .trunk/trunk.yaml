@@ -56,35 +56,16 @@ actions:
     - trunk-announce
     - trunk-check-pre-push # Use custom pre-push below
   definitions:
-    - id: trunk-check-all-pre-push
-      display_name: Trunk Check All Pre-Push
-      run: trunk check --all
-      triggers:
-        - git_hooks: [pre-push]
-    - id: typecheck-pre-push
-      display_name: TypeCheck Pre-Push
+    - id: agent-quality-gate-pre-push
+      display_name: Agent Quality Gate Pre-Push
       description: >
-        Runs codegen for indexer-envio (to produce the generated/ types) then
-        typechecks both workspaces. Combined into one action so the generated
-        module is guaranteed to exist before tsc runs.
-      run: pnpm indexer:codegen && pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio --filter @mento-protocol/metrics-bridge typecheck
-      triggers:
-        - git_hooks: [pre-push]
-    - id: test-pre-push
-      display_name: Test Pre-Push
-      run: pnpm --filter @mento-protocol/ui-dashboard test:coverage && pnpm --filter @mento-protocol/metrics-bridge test
-      triggers:
-        - git_hooks: [pre-push]
-    - id: trunk-fmt-pre-push
-      display_name: Trunk Format Pre-Push
-      description: Runs trunk fmt --all before push so formatting issues are caught locally, not in CI.
-      run: trunk fmt --all
+        Runs the path-aware agent quality gate before push. The gate maps the
+        branch diff to the required local checks instead of always running the
+        full monorepo pre-push suite.
+      run: git fetch --quiet origin main && bash scripts/agent-quality-gate.sh --run --fail-fast --base origin/main
       triggers:
         - git_hooks: [pre-push]
   enabled:
     - trunk-fmt-pre-commit
-    - trunk-fmt-pre-push
-    - trunk-check-all-pre-push
-    - typecheck-pre-push
-    - test-pre-push
+    - agent-quality-gate-pre-push
     - trunk-upgrade-available

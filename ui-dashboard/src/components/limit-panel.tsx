@@ -1,6 +1,6 @@
 "use client";
 
-import type { Pool, TradingLimit } from "@/lib/types";
+import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import { LimitBadge } from "@/components/badges";
 import { computeLimitStatus, pressureColorClass } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
@@ -77,7 +77,7 @@ export function LimitPanel({
   hasError = false,
 }: LimitPanelProps) {
   const { network } = useNetwork();
-  const isVirtual = pool.source?.includes("virtual");
+  const isVirtual = isVirtualPool(pool);
   const status = isVirtual ? "N/A" : computeLimitStatus(pool);
 
   return (

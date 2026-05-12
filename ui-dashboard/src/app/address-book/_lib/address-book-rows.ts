@@ -4,6 +4,7 @@ import {
   isConfiguredNetworkId,
   type Network,
 } from "@/lib/networks";
+import { isValidAddress } from "@/lib/format";
 import {
   isArkhamSourced,
   isMiniPaySourced,
@@ -98,6 +99,7 @@ export function buildContractRows(): AddressRow[] {
         address,
         name,
         tags: [],
+        kind: "contract",
         isCustom: false,
         network: net,
       });
@@ -122,12 +124,53 @@ export function buildCustomRows(
     address: r.address,
     name: r.name,
     tags: r.tags,
+    kind: "custom",
     isCustom: true,
     source: r.source,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     network: globalDisplayNetwork,
   }));
+}
+
+/**
+ * Build rows for addresses that have a forensic report but no contract/custom
+ * label row. These rows make report-only investigations reachable from the
+ * address-book index without pretending a label exists.
+ */
+export function buildReportOnlyRows(
+  reportAddresses: string[],
+  globalDisplayNetwork: Network,
+  existingRows: AddressRow[],
+): AddressRow[] {
+  const existingAddresses = new Set(
+    existingRows.map((row) => row.address.toLowerCase()),
+  );
+  const seenReports = new Set<string>();
+  return reportAddresses
+    .flatMap((address) => {
+      const lower = address.toLowerCase();
+      if (
+        seenReports.has(lower) ||
+        existingAddresses.has(lower) ||
+        !isValidAddress(lower)
+      ) {
+        return [];
+      }
+      seenReports.add(lower);
+      return [
+        {
+          key: `report:${lower}`,
+          address: lower,
+          name: "Forensic report",
+          tags: [],
+          kind: "report" as const,
+          isCustom: false,
+          network: globalDisplayNetwork,
+        },
+      ];
+    })
+    .sort((a, b) => a.address.localeCompare(b.address));
 }
 
 /**
@@ -143,19 +186,23 @@ export function filterRows(rows: AddressRow[], search: string): AddressRow[] {
   if (!search) return rows;
   const q = search.toLowerCase();
   return rows.filter((row) => {
-    const chainText = row.isCustom ? "all chains" : row.network.label;
+    const chainText =
+      row.isCustom || row.kind === "report" ? "all chains" : row.network.label;
     // Match the rendered SOURCE badge text so users can search by it
     // (e.g. "arkham" no longer lives in tags after the source-field
     // migration; without this, the search box can't surface those rows).
     // Use the same `isArkhamSourced` dual-check the badge renderer uses
     // — it handles both new-shape (source) and legacy (tag-only) rows.
-    const sourceText = row.isCustom
-      ? isArkhamSourced({ source: row.source, tags: row.tags })
-        ? "arkham"
-        : isMiniPaySourced({ source: row.source })
-          ? "minipay"
-          : "custom"
-      : "contract";
+    const sourceText =
+      row.kind === "report"
+        ? "report"
+        : row.isCustom
+          ? isArkhamSourced({ source: row.source, tags: row.tags })
+            ? "arkham"
+            : isMiniPaySourced({ source: row.source })
+              ? "minipay"
+              : "custom"
+          : "contract";
     return (
       row.address.toLowerCase().includes(q) ||
       row.name.toLowerCase().includes(q) ||

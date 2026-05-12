@@ -27,6 +27,21 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     ...DEFAULT_ORACLE_FIELDS,
     oracleOk: true,
     rebalanceThreshold: 5000,
+    // Default fixture is a "real, symmetric, fully-indexed" threshold so
+    // tests exercising the standard breach/health path don't have to
+    // populate four separate fields. Tests exercising never-rebalance
+    // (`above=below=0`), asymmetric (`above=0, below=300`), or unread
+    // (`rebalanceThresholdsKnown=false`) must override these explicitly.
+    rebalanceThresholdAbove: 5000,
+    rebalanceThresholdBelow: 5000,
+    rebalanceThresholdsKnown: true,
+    // `DEFAULT_ORACLE_FIELDS` (production-realistic for a fresh pool) sets
+    // `hasHealthData: false`. The shared test fixture represents a fully-
+    // indexed healthy pool — override here so the new
+    // `computeHealthStatus → "N/A"` gate (PR 1.6) doesn't short-circuit
+    // every parity/health test. Tests exercising the no-data gate must
+    // override `hasHealthData: false` explicitly.
+    hasHealthData: true,
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,
     updatedAtBlock: 0n,

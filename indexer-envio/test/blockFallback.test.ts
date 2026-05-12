@@ -109,6 +109,38 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(callCount, 5);
   });
 
+  it("tries secondary at the same block before latest after block-lag retries", async () => {
+    const primaryCalls: Record<string, unknown>[] = [];
+    const fallbackCalls: Record<string, unknown>[] = [];
+    const primary = mockClient(async (args) => {
+      primaryCalls.push({ ...args });
+      if ((args as any).blockNumber !== undefined) {
+        throw new Error("header not found");
+      }
+      return "latest-result";
+    });
+    const fallback = mockClient(async (args) => {
+      fallbackCalls.push({ ...args });
+      return "secondary-block-result";
+    });
+
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+
+    assert.equal(res.result, "secondary-block-result");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+    // 1 initial + 3 retries; no latest read because secondary succeeded.
+    assert.equal(primaryCalls.length, 4);
+    assert.equal(fallbackCalls.length, 1);
+    assert.equal((fallbackCalls[0] as any).blockNumber, 100n);
+  });
+
   it("succeeds on second retry without falling back", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {

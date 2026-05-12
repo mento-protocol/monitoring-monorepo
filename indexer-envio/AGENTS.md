@@ -107,6 +107,22 @@ These rules come from PRs #184 and #194 — Codex flagged both as P1.
 - Suggested seams when splitting: per-method handlers in `rpc.ts` (one helper per RPC family); per-event handlers under `src/handlers/<entity>/` for big handler files.
 - Rationale + monthly drift detector: see `/AGENTS.md` §"File-size budget".
 
+### Self-heal pipeline coordination
+
+PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how the heal pipeline interacts with downstream consumers. When adding a new self-heal helper that updates Pool fields (or a similar multi-flag entity heal), the checklist:
+
+- **Widen ALL gate-style predicates that read those fields.** Source-only checks like `pool.source?.includes("virtual")` exist in many places: `ui-dashboard/src/lib/health.ts` (`computeHealthStatus`, `computeLimitStatus`, `computeRebalancerLiveness`, `computePoolUptimePct`), `ui-dashboard/src/lib/pool-og.ts` (`computeHealthReasons`, `computeOracleFreshness`), every detail panel (`HealthPanel`, `LimitPanel`, `OracleTab`), `use-rebalance-check`, `global-pools-table.tsx`'s row `isVirtual` gate, `indexer-envio/src/handlers/sortedOracles.ts` (both `OracleReported` and `MedianUpdated`). If the new heal widens what counts as the entity-kind being healed, every such predicate must also widen, or healed rows get FPMM-only rendering / FPMM-only RPC probes downstream. Grep for the old shape of the predicate before calling the work done.
+- **Plumb new fields into every GraphQL query that consumes them.** Detail queries (`POOL_DETAIL_WITH_HEALTH`) AND list queries (`ALL_POOLS_WITH_HEALTH`) AND OG metadata queries — a healed VP shows correctly on the detail page but as an unhealthy FPMM in the global pools table if the list query doesn't fetch the new field.
+- **Decide cross-pass coordination semantics up front.** If a flag (e.g. `tokenDecimalsKnown`) requires both legs of a pair to be set, AND the legs may land in separate events, the helper must either (a) re-validate via cache:true effects on every call (cheap), or (b) coordinate via a separate cross-pass helper (`selfHealTokenDecimals`-style). Don't pin the flag based on `value > 0` truthy checks — schema defaults satisfy them.
+- **Gate-vs-retry: the gate must not short-circuit on partial state.** A gate like `if (wrappedExchangeId && token0 && token1) return pool;` fires after a transient `poolExchangeEffect` failure leaves the row mid-state (token addresses pinned but no `BiPoolExchange` row + no `referenceRateFeedID` mirrored). The fully-healed condition must include downstream side effects, not just the entity's own fields. PR #369 ended up checking `BiPoolExchange.get(exchangeRowId)` in the gate — extra DB read per event is the cost of correct retry semantics.
+- **Test setup must mock every RPC effect the merged-in heal pipeline can hit.** Upstream merges add new heal steps (e.g. `selfHealTokenDecimals` was added by PR #370 mid-PR-#369) — existing tests that drove `upsertPool` for an unmocked code path then time out in CI (locally fine because forno.celo.org is reachable from dev machines, not from blacksmith CI runners). When extending a heal-driven test, re-check what RPC paths the heal touches NOW, not when the test was written.
+
+### Mocha timeout under c8 coverage
+
+- `.mocharc.cjs` sets a 30s default timeout, but the CI `Test with coverage` job wraps mocha in `c8` and the wrapped run sometimes ignores the rc default — observed brushing against the bare 15s mocha default on slower CI runners.
+- Multi-event integration tests (anything that fires multiple `processEvent` calls in sequence and waits for state) should add inline `this.timeout(60_000)` defensively at the top of the `it(...)` body. Locally these tests resolve in 0.5–2s, so the higher ceiling is purely defensive against CI variance under coverage.
+- Bit us on PR #366 round-9 (`feeUpdated`, `dailySnapshot`, `biPoolManager`) and PR #372 (`OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators`).
+
 ### Cross-checks before opening a PR
 
 - Run the queries the dashboard depends on against your local Hasura with a representative pool (one with hundreds of events) to catch silent truncation

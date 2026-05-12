@@ -19,6 +19,7 @@ export default defineConfig({
       "test/blockFallback.test.ts",
       "test/breakerBootstrapBackoff.test.ts",
       "test/breakerHandlers.test.ts",
+      "test/biPoolManager.test.ts",
       "test/bridgeHandlers.test.ts",
       "test/broker.test.ts",
       "test/dailySnapshot.test.ts",

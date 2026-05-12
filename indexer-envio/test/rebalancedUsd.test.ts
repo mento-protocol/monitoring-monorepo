@@ -1,28 +1,89 @@
+/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import { createTestIndexer } from "envio";
-import { makePool } from "./helpers/makePool.js";
-import { makePoolId } from "../src/helpers.js";
+import generated from "generated";
+import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
   _clearMockReserves,
   _clearMockRebalancingStates,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,
-} from "../src/rpc.js";
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
+} from "../src/rpc.ts";
+
+type MockDb = {
+  entities: {
+    Pool: {
+      get: (id: string) => unknown;
+      set: (e: unknown) => MockDb;
+    };
+    RebalanceEvent: { get: (id: string) => unknown };
+    [key: string]: { get: (id: string) => unknown };
+  };
+};
+
+type EventProcessor<E> = {
+  createMockEvent: (args: E) => unknown;
+  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+};
+
+type MockEventData = {
+  chainId: number;
+  logIndex: number;
+  srcAddress: string;
+  block: { number: number; timestamp: number };
+  transaction?: { hash?: string; from?: string };
+};
+
+type RebalancedArgs = {
+  sender: string;
+  priceDifferenceBefore: bigint;
+  priceDifferenceAfter: bigint;
+  mockEventData: MockEventData;
+};
+
+type DeployedArgs = {
+  token0: string;
+  token1: string;
+  fpmmProxy: string;
+  fpmmImplementation: string;
+  mockEventData: MockEventData;
+};
+
+type GeneratedModule = {
+  TestHelpers: {
+    MockDb: { createMockDb: () => MockDb };
+    FPMMFactory: { FPMMDeployed: EventProcessor<DeployedArgs> };
+    FPMM: { Rebalanced: EventProcessor<RebalancedArgs> };
+  };
+};
+
+const { TestHelpers } = generated as unknown as GeneratedModule;
+const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 // Real Celo mainnet addresses — resolvable via KNOWN_TOKEN_META so
 // computeRebalanceUsd's symbol lookup succeeds.
 const CHAIN_CELO = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";
+const FACTORY = "0x00000000000000000000000000000000000000cc";
 const USDM = "0x765de816845861e75a25fca122bb6898b8b1282a"; // 18dp, pegged
 const CELO = "0x471ece3750da237f93b8e339c536989b8978a438"; // 18dp, NOT pegged
 const STRATEGY = "0x0000000000000000000000000000000000000099";
 const TX_FROM = "0x000000000000000000000000000000000000ca11";
 
-type TestIndexer = ReturnType<typeof createTestIndexer>;
+function rebalancedEventData(blockNumber: number, logIndex = 5): MockEventData {
+  return {
+    chainId: CHAIN_CELO,
+    logIndex,
+    srcAddress: POOL,
+    block: { number: blockNumber, timestamp: 1_700_010_000 },
+    transaction: { hash: `0x${"ab".repeat(32)}`, from: TX_FROM },
+  };
+}
 
-function seedRebalanceablePool(
-  ti: TestIndexer,
+async function seedRebalanceablePool(
+  mockDb: MockDb,
   options: {
     rebalanceReward: number;
     reserves0: bigint;
@@ -32,59 +93,40 @@ function seedRebalanceablePool(
     token0Decimals?: number;
     token1Decimals?: number;
   },
-): void {
-  ti.Pool.set(
-    makePool({
-      id: makePoolId(CHAIN_CELO, POOL),
+): Promise<MockDb> {
+  const deploy = FPMMFactory.FPMMDeployed.createMockEvent({
+    token0: options.token0 ?? USDM,
+    token1: options.token1 ?? CELO,
+    fpmmProxy: POOL,
+    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+    mockEventData: {
       chainId: CHAIN_CELO,
-      token0: options.token0 ?? USDM,
-      token1: options.token1 ?? CELO,
-      token0Decimals: options.token0Decimals ?? 18,
-      token1Decimals: options.token1Decimals ?? 18,
-      reserves0: options.reserves0,
-      reserves1: options.reserves1,
-      rebalanceReward: options.rebalanceReward,
-      oraclePrice: 1_000_000_000_000_000_000_000_000n,
-      invertRateFeed: false,
-      invertRateFeedKnown: true,
-      source: "fpmm_update_reserves",
-    }),
-  );
-}
-
-async function processRebalanced(
-  ti: TestIndexer,
-  args: {
-    blockNumber: number;
-    logIndex?: number;
-    priceDifferenceBefore: bigint;
-    priceDifferenceAfter: bigint;
-  },
-): Promise<void> {
-  await ti.process({
-    chains: {
-      [CHAIN_CELO]: {
-        startBlock: args.blockNumber,
-        simulate: [
-          {
-            contract: "FPMM",
-            event: "Rebalanced",
-            params: {
-              sender: STRATEGY as `0x${string}`,
-              priceDifferenceBefore: args.priceDifferenceBefore,
-              priceDifferenceAfter: args.priceDifferenceAfter,
-            },
-            block: { number: args.blockNumber, timestamp: 1_700_010_000 },
-            transaction: {
-              hash: `0x${"ab".repeat(32)}` as `0x${string}`,
-              from: TX_FROM as `0x${string}`,
-            },
-            srcAddress: POOL as `0x${string}`,
-            logIndex: args.logIndex ?? 5,
-          },
-        ],
-      },
+      logIndex: 0,
+      srcAddress: FACTORY,
+      block: { number: 100, timestamp: 1_700_000_000 },
     },
+  });
+  mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+    event: deploy,
+    mockDb,
+  });
+
+  const seeded = mockDb.entities.Pool.get(makePoolId(CHAIN_CELO, POOL)) as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(seeded, "Pool must exist after FPMMDeployed");
+  return mockDb.entities.Pool.set({
+    ...seeded,
+    token0: options.token0 ?? USDM,
+    token1: options.token1 ?? CELO,
+    token0Decimals: options.token0Decimals ?? 18,
+    token1Decimals: options.token1Decimals ?? 18,
+    reserves0: options.reserves0,
+    reserves1: options.reserves1,
+    rebalanceReward: options.rebalanceReward,
+    oraclePrice: 1_000_000_000_000_000_000_000_000n,
+    invertRateFeed: false,
+    source: "fpmm_update_reserves",
   });
 }
 
@@ -93,18 +135,25 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
+    _clearMockRebalanceThresholds();
+    // Seed mock thresholds for the test pool so the factory's
+    // rebalanceThresholdsEffect (now block-scoped, cache: false) doesn't
+    // hit live RPC during FPMMDeployed processing.
+    _setMockRebalanceThresholds(CHAIN_CELO, POOL, { above: 100, below: 100 });
   });
 
-  afterAll(() => {
+  after(() => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
+    _clearMockRebalanceThresholds();
   });
 
-  it("stamps amount deltas + USD fields from block-scoped incentive read", async () => {
-    const ti = createTestIndexer();
+  it("stamps amount deltas + USD fields from block-scoped incentive read", async function () {
+    this.timeout(10_000);
+    let mockDb = MockDb.createMockDb();
     // Pool reserves AFTER the rebalance: pool received 1000 USDM, gave away 500 CELO.
-    seedRebalanceablePool(ti, {
+    mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 999, // would be wrong if used — block-scoped read should win
       reserves0: 101_000n * 10n ** 18n,
       reserves1: 49_500n * 10n ** 18n,
@@ -118,14 +167,24 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     // so we can prove the handler used the block-scoped value.
     _setMockRebalanceIncentiveAtBlock(CHAIN_CELO, POOL, 25);
 
-    await processRebalanced(ti, {
-      blockNumber: 601,
+    const event = FPMM.Rebalanced.createMockEvent({
+      sender: STRATEGY,
       priceDifferenceBefore: 50n,
       priceDifferenceAfter: 5n,
+      mockEventData: rebalancedEventData(601, 5),
     });
+    mockDb = await FPMM.Rebalanced.processEvent({ event, mockDb });
 
     const id = `${CHAIN_CELO}_601_5`;
-    const rebalance = await ti.RebalanceEvent.get(id);
+    const rebalance = mockDb.entities.RebalanceEvent.get(id) as
+      | {
+          amount0Delta: bigint;
+          amount1Delta: bigint;
+          rewardBps: number;
+          notionalUsd: string;
+          rewardUsd: string;
+        }
+      | undefined;
     assert.ok(rebalance, "RebalanceEvent must be persisted");
     assert.equal(rebalance.amount0Delta, 1_000n * 10n ** 18n);
     assert.equal(rebalance.amount1Delta, -500n * 10n ** 18n);
@@ -138,9 +197,10 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     assert.equal(rebalance.rewardUsd, "2.5000");
   });
 
-  it("short-circuits the incentive RPC when Pool.rebalanceReward = -2 sentinel", async () => {
-    const ti = createTestIndexer();
-    seedRebalanceablePool(ti, {
+  it("short-circuits the incentive RPC when Pool.rebalanceReward = -2 sentinel", async function () {
+    this.timeout(10_000);
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: -2, // getter missing on this contract
       reserves0: 101_000n * 10n ** 18n,
       reserves1: 49_500n * 10n ** 18n,
@@ -153,14 +213,17 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     // value. The assertion below proves the call was skipped.
     _setMockRebalanceIncentiveAtBlock(CHAIN_CELO, POOL, 999);
 
-    await processRebalanced(ti, {
-      blockNumber: 602,
+    const event = FPMM.Rebalanced.createMockEvent({
+      sender: STRATEGY,
       priceDifferenceBefore: 50n,
       priceDifferenceAfter: 5n,
+      mockEventData: rebalancedEventData(602, 5),
     });
+    mockDb = await FPMM.Rebalanced.processEvent({ event, mockDb });
 
-    const rebalance = await ti.RebalanceEvent.get(`${CHAIN_CELO}_602_5`);
-    assert.ok(rebalance);
+    const rebalance = mockDb.entities.RebalanceEvent.get(
+      `${CHAIN_CELO}_602_5`,
+    ) as { rewardBps: number; rewardUsd: string; notionalUsd: string };
     assert.equal(
       rebalance.rewardBps,
       0,
@@ -170,9 +233,10 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     assert.equal(rebalance.notionalUsd, "1000.0000");
   });
 
-  it("stamps rewardUsd = '' when block-scoped incentive RPC fails (preserves notional, no fallback)", async () => {
-    const ti = createTestIndexer();
-    seedRebalanceablePool(ti, {
+  it("stamps rewardUsd = '' when block-scoped incentive RPC fails (preserves notional, no fallback)", async function () {
+    this.timeout(10_000);
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 50, // NOT -2 — handler will attempt the RPC
       reserves0: 101_000n * 10n ** 18n,
       reserves1: 49_500n * 10n ** 18n,
@@ -188,14 +252,17 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     // Notional is reserves-derived and stays valid.
     _setMockRebalanceIncentiveAtBlock(CHAIN_CELO, POOL, null);
 
-    await processRebalanced(ti, {
-      blockNumber: 603,
+    const event = FPMM.Rebalanced.createMockEvent({
+      sender: STRATEGY,
       priceDifferenceBefore: 50n,
       priceDifferenceAfter: 5n,
+      mockEventData: rebalancedEventData(603, 5),
     });
+    mockDb = await FPMM.Rebalanced.processEvent({ event, mockDb });
 
-    const rebalance = await ti.RebalanceEvent.get(`${CHAIN_CELO}_603_5`);
-    assert.ok(rebalance);
+    const rebalance = mockDb.entities.RebalanceEvent.get(
+      `${CHAIN_CELO}_603_5`,
+    ) as { rewardBps: number; rewardUsd: string; notionalUsd: string };
     assert.equal(
       rebalance.rewardBps,
       0,
@@ -213,9 +280,10 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     );
   });
 
-  it("zero deltas (RPC fallback for pre-reserves) → '' sentinel for both USD fields", async () => {
-    const ti = createTestIndexer();
-    seedRebalanceablePool(ti, {
+  it("zero deltas (RPC fallback for pre-reserves) → '' sentinel for both USD fields", async function () {
+    this.timeout(10_000);
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 25,
       reserves0: 100_000n * 10n ** 18n,
       reserves1: 50_000n * 10n ** 18n,
@@ -224,14 +292,22 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     _setMockReserves(CHAIN_CELO, POOL, null);
     _setMockRebalanceIncentiveAtBlock(CHAIN_CELO, POOL, 25);
 
-    await processRebalanced(ti, {
-      blockNumber: 604,
+    const event = FPMM.Rebalanced.createMockEvent({
+      sender: STRATEGY,
       priceDifferenceBefore: 50n,
       priceDifferenceAfter: 5n,
+      mockEventData: rebalancedEventData(604, 5),
     });
+    mockDb = await FPMM.Rebalanced.processEvent({ event, mockDb });
 
-    const rebalance = await ti.RebalanceEvent.get(`${CHAIN_CELO}_604_5`);
-    assert.ok(rebalance);
+    const rebalance = mockDb.entities.RebalanceEvent.get(
+      `${CHAIN_CELO}_604_5`,
+    ) as {
+      amount0Delta: bigint;
+      amount1Delta: bigint;
+      notionalUsd: string;
+      rewardUsd: string;
+    };
     assert.equal(rebalance.amount0Delta, 0n);
     assert.equal(rebalance.amount1Delta, 0n);
     assert.equal(rebalance.notionalUsd, "");

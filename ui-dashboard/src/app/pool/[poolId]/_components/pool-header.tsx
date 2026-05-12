@@ -1,8 +1,10 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { AddressLink } from "@/components/address-link";
 import { BreakerPanel } from "@/components/breaker-panel";
 import { ChainIcon } from "@/components/chain-icon";
+import { InfoPopover } from "@/components/info-popover";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import { useNetwork } from "@/components/network-provider";
 import { PoolConfigPanel } from "@/components/pool-config-panel";
@@ -16,10 +18,32 @@ import {
 } from "@/components/pool-header/uptime-value";
 import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import { useGQL } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import {
+  formatTimestamp,
+  formatUSD,
+  relativeTime,
+  weiToUsd,
+} from "@/lib/format";
+import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import {
+  BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+  POOL_V2_EXCHANGE,
+} from "@/lib/queries";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
-import type { Pool, TradingLimit } from "@/lib/types";
+import {
+  isVirtualPool,
+  type BiPoolExchangeRow,
+  type BrokerExchangeDailySnapshotRow,
+  type Pool,
+  type TradingLimit,
+} from "@/lib/types";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
+import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
+import { V2ExchangePanel } from "./v2-exchange-panel";
 
 export function PoolHeader({
   pool,
@@ -33,7 +57,53 @@ export function PoolHeader({
   tradingLimitsError?: boolean;
 }) {
   const { network } = useNetwork();
-  const isVirtual = pool.source?.includes("virtual");
+  const isVirtual = isVirtualPool(pool);
+  // Single subscription point for v2 exchange state — children consume via
+  // props so SWR (under useGQL) has one subscriber, not three. Skip the
+  // query entirely on FPMM pools to avoid a wasted round-trip.
+  const {
+    data: v2Data,
+    isLoading: v2Loading,
+    error: v2Error,
+  } = useGQL<{ BiPoolExchange: BiPoolExchangeRow[] }>(
+    isVirtual ? POOL_V2_EXCHANGE : null,
+    { poolId: pool.id, chainId: pool.chainId },
+  );
+  const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
+  const exchangeIdForVolume = (
+    pool.wrappedExchangeId ??
+    v2Config?.exchangeId ??
+    ""
+  ).toLowerCase();
+  const exchangeProviderForVolume = (
+    v2Config?.exchangeProvider ?? ""
+  ).toLowerCase();
+  const volumeSince = useCurrentUtcDayStartSeconds();
+  const {
+    data: exchangeVolumeData,
+    isLoading: exchangeVolumeLoading,
+    error: exchangeVolumeError,
+  } = useGQL<{
+    BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
+  }>(
+    isVirtual && exchangeIdForVolume && exchangeProviderForVolume
+      ? BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H
+      : null,
+    {
+      chainId: pool.chainId,
+      exchangeProvider: exchangeProviderForVolume,
+      exchangeId: exchangeIdForVolume,
+      since: volumeSince,
+    },
+    SNAPSHOT_REFRESH_MS,
+    { timeoutMs: HASURA_TIMEOUT_MS },
+  );
+  const exchangeVolumeRows =
+    exchangeVolumeData?.BrokerExchangeDailySnapshot ?? [];
+  // The Hasura "field not found" error during the indexer deploy+resync
+  // window collapses to `v2Error`; surface as a degraded panel rather
+  // than silently rendering nothing.
+  const v2HasError = v2Error !== undefined;
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -76,7 +146,15 @@ export function PoolHeader({
         <span className="text-sm">
           <AddressLink address={poolContractAddress} readOnly />
         </span>
-        <SourceBadge source={pool.source} />
+        <SourceBadge
+          source={pool.source}
+          wrappedExchangeId={pool.wrappedExchangeId}
+        />
+        {v2Config?.isDeprecated && (
+          <span className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-xs font-medium text-amber-300">
+            Deprecated
+          </span>
+        )}
         <MarketHoursPill pool={pool} />
         {deployTxHash ? (
           <a
@@ -95,58 +173,76 @@ export function PoolHeader({
         )}
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
-        <Stat
-          label={
-            <span className="inline-flex items-center gap-1">
-              Uptime
-              <UptimeInfoIcon pool={pool} />
-            </span>
-          }
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <UptimeValue pool={pool} />
-            )
-          }
-        />
-        <Stat
-          label="Oracle Price"
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <OraclePriceValue pool={pool} network={network} />
-            )
-          }
-        />
-        <Stat
-          label="Trading Limits"
-          value={
-            <LimitStatusValue
-              pool={pool}
-              tradingLimits={tradingLimits}
-              hasError={tradingLimitsError}
+        {isVirtual ? (
+          <VirtualPoolHeaderTiles
+            pool={pool}
+            network={network}
+            v2Config={v2Config}
+            hasError={v2HasError}
+            exchangeVolumeRows={exchangeVolumeRows}
+            exchangeVolumeLoading={exchangeVolumeLoading}
+            exchangeVolumeError={exchangeVolumeError !== undefined}
+            hasExchangeId={Boolean(
+              exchangeIdForVolume && exchangeProviderForVolume,
+            )}
+          />
+        ) : (
+          <>
+            <Stat
+              label={
+                <span className="inline-flex items-center gap-1">
+                  Uptime
+                  <UptimeInfoIcon pool={pool} />
+                </span>
+              }
+              value={<UptimeValue pool={pool} />}
             />
-          }
-        />
-        <Stat
-          label="Rebalance Status"
-          value={
-            isVirtual || !pool.rebalancerAddress ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <RebalanceStatusValue
-                pool={pool}
-                network={network}
-                strategyAddress={pool.rebalancerAddress}
-              />
-            )
-          }
-        />
-        <DeviationCell pool={pool} network={network} />
+            <Stat
+              label="Oracle Price"
+              value={<OraclePriceValue pool={pool} network={network} />}
+            />
+            <Stat
+              label="Trading Limits"
+              value={
+                <LimitStatusValue
+                  pool={pool}
+                  tradingLimits={tradingLimits}
+                  hasError={tradingLimitsError}
+                />
+              }
+            />
+            <Stat
+              label="Rebalance Status"
+              value={
+                pool.rebalancerAddress ? (
+                  <RebalanceStatusValue
+                    pool={pool}
+                    network={network}
+                    strategyAddress={pool.rebalancerAddress}
+                  />
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )
+              }
+            />
+            <DeviationCell pool={pool} network={network} />
+          </>
+        )}
       </dl>
-      {!isVirtual && (
+      {isVirtual ? (
+        <>
+          <div className="my-5 h-px bg-slate-800" />
+          <V2ExchangePanel
+            pool={pool}
+            network={network}
+            v2Config={v2Config}
+            isLoading={v2Loading}
+            hasError={v2HasError}
+          />
+          <div className="my-5 h-px bg-slate-800" />
+          <PoolLifecyclePanel pool={pool} />
+        </>
+      ) : (
         <>
           <div className="my-5 h-px bg-slate-800" />
           <PoolConfigPanel pool={pool} />
@@ -154,5 +250,203 @@ export function PoolHeader({
         </>
       )}
     </div>
+  );
+}
+
+// Status pill style — keyed off the resolved exchange state so the same
+// table drives label + color consistently. `null` v2Config means "still
+// loading" (treated as "—" so the badge doesn't briefly flash "Active"
+// for a deprecated pool while SWR is fetching). `error` covers both
+// hook-level fetch failures and structured `ok:false` responses from the
+// route — operators see a distinct "—" + tooltip rather than a perpetual
+// loading state.
+const STATUS_TILE = {
+  loading: { label: "—", color: "text-slate-500" },
+  active: { label: "Active", color: "text-emerald-300" },
+  deprecated: { label: "Deprecated", color: "text-amber-300" },
+  error: { label: "—", color: "text-rose-400" },
+} as const;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function currentUtcDayStartSeconds(nowMs = Date.now()): number {
+  return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+}
+
+function nextUtcDayStartDelayMs(nowMs = Date.now()): number {
+  const nextDayStartSeconds =
+    (Math.floor(nowMs / 1000 / SECONDS_PER_DAY) + 1) * SECONDS_PER_DAY;
+  return Math.max(1_000, nextDayStartSeconds * 1_000 - nowMs);
+}
+
+function subscribeToUtcDayStart(onStoreChange: () => void): () => void {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    timeoutId = setTimeout(() => {
+      onStoreChange();
+      schedule();
+    }, nextUtcDayStartDelayMs());
+  };
+  schedule();
+  return () => clearTimeout(timeoutId);
+}
+
+function useCurrentUtcDayStartSeconds(): number {
+  return useSyncExternalStore(
+    subscribeToUtcDayStart,
+    currentUtcDayStartSeconds,
+    currentUtcDayStartSeconds,
+  );
+}
+
+function statusKey(
+  v2Config: BiPoolExchangeRow | null,
+  hasError: boolean,
+): keyof typeof STATUS_TILE {
+  if (hasError) return "error";
+  if (!v2Config) return "loading";
+  if (v2Config.isDeprecated) return "deprecated";
+  // Zero-feed sentinel = stub row from a transient ExchangeCreated RPC
+  // miss; same "indexer hasn't fully linked the exchange yet" UX as the
+  // panel's `V2ExchangeSyncingNote`. Without this, the header tile would
+  // say "Active" while the panel renders the syncing note — confusing
+  // operators about whether the v2 exchange is actually live.
+  if (v2Config.referenceRateFeedID === ZERO_ADDRESS) return "loading";
+  return "active";
+}
+
+/**
+ * Header KPIs for VirtualPools. The v3 metrics (uptime, oracle, deviation,
+ * trading limits, rebalance) are FPMM-only — virtual pools wrap a v2
+ * BiPoolManager exchange where those concepts don't apply. Show pair
+ * activity instead: lifetime swap count via the wrapper, age, and the
+ * underlying exchange status (active/deprecated/error).
+ */
+function VirtualPoolHeaderTiles({
+  pool,
+  network,
+  v2Config,
+  hasError,
+  exchangeVolumeRows,
+  exchangeVolumeLoading,
+  exchangeVolumeError,
+  hasExchangeId,
+}: {
+  pool: Pool;
+  network: Network;
+  v2Config: BiPoolExchangeRow | null;
+  hasError: boolean;
+  exchangeVolumeRows: BrokerExchangeDailySnapshotRow[];
+  exchangeVolumeLoading: boolean;
+  exchangeVolumeError: boolean;
+  hasExchangeId: boolean;
+}) {
+  const status = STATUS_TILE[statusKey(v2Config, hasError)];
+  // Render Oracle Price for VPs only when the feedID is populated. The
+  // Phase 2 indexer mirrors `BiPoolExchange.referenceRateFeedID` onto the
+  // wrapped Pool's `referenceRateFeedID` (forward + reverse links from
+  // VirtualPoolDeployed and BiPoolManager.ExchangeCreated handlers), so
+  // SortedOracles writes `oraclePrice` / `oracleTimestamp` on every
+  // OracleReported / MedianUpdated event. Until the link lands the field
+  // is empty and the real tile would render "—". We render an invisible
+  // placeholder Stat in that pre-link interval so the grid slot is held;
+  // when self-heal lands the populated tile pops in without reflowing
+  // the rest of the header. `OraclePriceValue` itself renders the
+  // staleness color + tooltip the same as the FPMM path.
+  const hasOracleFeed = !!pool.referenceRateFeedID;
+  return (
+    <>
+      <Stat
+        label="v2 Exchange Status"
+        value={
+          <span
+            className={status.color}
+            title={hasError ? "Failed to load v2 exchange config" : undefined}
+          >
+            {status.label}
+          </span>
+        }
+      />
+      <Stat
+        label={
+          <span className="inline-flex items-center gap-1">
+            Wrapper Swaps
+            <InfoPopover
+              label="Wrapper Swaps"
+              content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in a follow-up."
+            />
+          </span>
+        }
+        value={(pool.swapCount ?? 0).toLocaleString()}
+        mono
+      />
+      <Stat
+        label={
+          <span className="inline-flex items-center gap-1">
+            24h Volume
+            <InfoPopover
+              label="24h Volume"
+              content="Current UTC-day USD volume for the backing v2 exchange. Includes direct v2 swaps and VirtualPool-routed Broker swaps, sourced from the per-exchange daily rollup."
+            />
+          </span>
+        }
+        value={
+          <VirtualPoolVolumeValue
+            rows={exchangeVolumeRows}
+            isLoading={exchangeVolumeLoading}
+            hasError={exchangeVolumeError}
+            hasExchangeId={hasExchangeId}
+          />
+        }
+        mono
+      />
+      {hasOracleFeed ? (
+        <Stat
+          label="Oracle Price"
+          value={<OraclePriceValue pool={pool} network={network} />}
+        />
+      ) : (
+        // `invisible` (Tailwind → `visibility: hidden`) keeps the slot in
+        // the grid layout (same width + height as the populated tile)
+        // without rendering anything visible — screen readers also skip
+        // `visibility: hidden` content, so the empty "Oracle Price" label
+        // isn't announced during the pre-link interval.
+        <Stat label="Oracle Price" value="—" className="invisible" />
+      )}
+    </>
+  );
+}
+
+function VirtualPoolVolumeValue({
+  rows,
+  isLoading,
+  hasError,
+  hasExchangeId,
+}: {
+  rows: BrokerExchangeDailySnapshotRow[];
+  isLoading: boolean;
+  hasError: boolean;
+  hasExchangeId: boolean;
+}) {
+  if (hasError) {
+    return (
+      <span className="text-rose-400" title="Failed to load exchange volume">
+        —
+      </span>
+    );
+  }
+  if (!hasExchangeId || isLoading) {
+    return <span className="text-slate-500">—</span>;
+  }
+
+  const volumeUsdWei = rows.reduce(
+    (sum, row) => sum + BigInt(row.volumeUsdWei),
+    BigInt(0),
+  );
+  const swapCount = rows.reduce((sum, row) => sum + row.swapCount, 0);
+  return (
+    <span title={`${swapCount.toLocaleString()} swaps since UTC midnight`}>
+      {formatUSD(weiToUsd(volumeUsdWei))}
+    </span>
   );
 }

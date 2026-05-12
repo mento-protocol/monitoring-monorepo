@@ -869,3 +869,250 @@ describe("recordBreachTransition — no transition", () => {
     assert.equal(store.size, 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Asymmetric pool — entry threshold capture + heal disablement (PR 1.6)
+// codex P2 #3214513401: a breach opened on an asymmetric pool's zero-threshold
+// side scored against the 10000 effective fallback; if the row captured raw
+// `rebalanceThreshold=0` and the heal-from-zero branch swapped it for the
+// post-flip opposite side's value (e.g. 300), peak % and critical-duration
+// history would silently re-score against a threshold that was never in
+// force when the breach opened. PR 1.6 captures `persistableThreshold(next)`
+// at rising edge and retires the heal.
+// ---------------------------------------------------------------------------
+
+describe("recordBreachTransition — asymmetric pool entry threshold (PR 1.6)", () => {
+  it("captures the 10000 effective fallback as entryRebalanceThreshold when the active side is 0 (above=0, below>0)", async () => {
+    // Reserves currently picking the above side → `rebalanceThreshold=0`,
+    // but pool DOES rebalance on the below side. `isInDeviationBreach`
+    // scores against `effectiveThreshold(pool) = 10000n` here. The breach
+    // row must persist 10000 as entry, not raw 0 — otherwise the closing
+    // fallback chain or the heal could substitute the post-flip 300 and
+    // re-score peak % / critical-duration history.
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 4000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 12_000n, // 1.2x the 10000 fallback → past tolerance
+      rebalanceThreshold: 0, // still on the zero side
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xrise-asym",
+      source: "fpmm_swap",
+    });
+    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    assert.equal(row.entryRebalanceThreshold, 10000);
+  });
+
+  it("does NOT heal entryRebalanceThreshold mid-breach when reserves flip to the active side", async () => {
+    // Setup: a row was previously opened with the (correct, post-fix)
+    // entry=10000 capture from an asymmetric-zero-side breach. Reserves
+    // then flip → `next.rebalanceThreshold` becomes 300. Pre-PR-1.6 the
+    // `healEntryThreshold` branch fired when entry===0 — but even with
+    // entry===10000, the asymmetric flip still reveals the bug for
+    // any pre-PR-1.6 row whose entry happened to be captured as 0.
+    // This test pins the post-fix behaviour: a continuing-breach event
+    // must NEVER overwrite entryRebalanceThreshold, regardless of side.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 12_000n,
+      entryRebalanceThreshold: 10000, // captured post-PR-1.6
+      peakPriceDifference: 12_000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xrise",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    // Continuing breach — reserves flipped to the active (below) side.
+    const prev = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 12_500n, // bumped peak so the row is rewritten
+      rebalanceThreshold: 300, // <-- flipped to the active side
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 60n,
+      blockNumber: 110n,
+      txHash: "0xflip",
+      source: "fpmm_swap",
+    });
+    const row = store.get(open.id)!;
+    // Peak bumped (so the row was re-set), but entry must stay at 10000.
+    assert.equal(row.peakPriceDifference, 12_500n);
+    assert.equal(
+      row.entryRebalanceThreshold,
+      10000,
+      "entryRebalanceThreshold must NEVER be overwritten mid-breach (PR 1.6 retired the heal-from-zero branch)",
+    );
+  });
+
+  it("legacy entry=0 row stays at 0 across a side flip (PR 1.6 heal retired)", async () => {
+    // Pre-PR-1.6 the rising edge captured raw `rebalanceThreshold=0` for
+    // asymmetric-zero-side breaches and the `healEntryThreshold` branch
+    // would swap that for the post-flip side's active value (e.g. 300),
+    // re-scoring history. PR 1.6 retires the heal — old rows with
+    // entry=0 stay at 0; the closing fallback chain in
+    // `recordBreachTransition` resolves them to the 10000 effective
+    // floor at close time.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 12_000n,
+      entryRebalanceThreshold: 0, // legacy capture
+      peakPriceDifference: 12_000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xrise",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 13_000n, // bumped peak so the row is rewritten
+      rebalanceThreshold: 300,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 60n,
+      blockNumber: 110n,
+      txHash: "0xflip-legacy",
+      source: "fpmm_swap",
+    });
+    const row = store.get(open.id)!;
+    assert.equal(row.peakPriceDifference, 13_000n);
+    assert.equal(
+      row.entryRebalanceThreshold,
+      0,
+      "legacy entry=0 must stay 0 — pre-PR-1.6 heal-from-zero branch retired",
+    );
+  });
+
+  it("close-time critical accrual scores against the 10000 floor for legacy entry=0 rows (asymmetric flip)", async () => {
+    // The full integrity story for old rows: entry=0 stays 0 (test above),
+    // and at close time the fallback chain canonicalizes legacy 0 directly
+    // to the 10000 floor (cursor #3214689033). This is what stops the
+    // re-score on side flip — `next.rebalanceThreshold` could be 300 if
+    // reserves moved to the below side at close, but the chain ignores
+    // that and uses 10000, the same under-bound the predicate scored
+    // against at rising edge. Score: peak 12_000 against 10000 → ratio
+    // 1.2 → > 1.05 critical line → critical seconds accrue past grace.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 12_000n,
+      entryRebalanceThreshold: 0, // legacy capture
+      peakPriceDifference: 12_000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xrise",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 12_000n,
+      rebalanceThreshold: 0,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: MON_NOON,
+      // Pool denorm also at 0 to exercise the row.entry=0 fallback.
+      currentOpenBreachEntryThreshold: 0,
+    });
+    // Close after 2× grace window → 7200 total, 3600 critical.
+    const closeAt = MON_NOON + 2n * DEVIATION_BREACH_GRACE_SECONDS;
+    const next = makePool({
+      priceDifference: 4000n, // recovered (below tolerance against 10000)
+      // Even if reserves flipped at close to the active side (300):
+      rebalanceThreshold: 300,
+      rebalanceThresholdAbove: 0,
+      rebalanceThresholdBelow: 300,
+      rebalanceThresholdsKnown: true,
+      deviationBreachStartedAt: 0n,
+    });
+    const update = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: closeAt,
+      blockNumber: 200n,
+      txHash: "0xclose-legacy",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrategy",
+    });
+    const row = store.get(open.id)!;
+    // Score: peak 12_000 vs effectiveThreshold (300 active, fallback 10000
+    // resolves through the chain). The chain reaches Number(effectiveThreshold(next))
+    // = 300 because next.rebalanceThreshold > 0. Peak 12_000 / 300 = 40 → critical.
+    // Either way (10000 or 300 floor), 12_000 is above 1.05x — critical accrues.
+    assert.equal(row.durationSeconds, 7200n);
+    assert.equal(row.criticalDurationSeconds, 3600n);
+    assert.equal(update.cumulativeCriticalSeconds, 3600n);
+  });
+});

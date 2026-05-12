@@ -1,5 +1,6 @@
+/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "envio";
+import generated from "generated";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -8,6 +9,12 @@ import {
   selectStaleTransfers,
   resolveFeeTokenMeta,
 } from "../src/EventHandlers.ts";
+import {
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
+} from "../src/rpc.ts";
+import { feeTokenMetaEffect } from "../src/rpc/effects.ts";
+import { UNKNOWN_FEE_TOKEN_META } from "../src/feeToken.ts";
 import { makePoolId } from "../src/helpers.ts";
 
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
@@ -70,8 +77,31 @@ type GeneratedModule = {
   };
 };
 
+type FeeTokenMetaEffectRuntime = {
+  handler: (args: {
+    input: { chainId: number; tokenAddress: string };
+    context: {
+      log: {
+        debug: () => void;
+        info: () => void;
+        warn: () => void;
+        error: () => void;
+      };
+      cache: boolean;
+    };
+  }) => Promise<{ symbol: string; decimals: number }>;
+};
+
 const { TestHelpers } = generated as unknown as GeneratedModule;
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
+const feeTokenMetaEffectRuntime =
+  feeTokenMetaEffect as unknown as FeeTokenMetaEffectRuntime;
+const noopLog = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 /** The yield-split address used as `to` in production. */
 const YIELD_SPLIT = "0x0dd57f6f181d0469143fe9380762d8a112e96e4a" as const;
@@ -91,9 +121,11 @@ const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000042";
 
 /**
  * Seed a minimal FPMM pool so context.Pool.get(POOL_ADDRESS) returns a pool
- * with `source` containing "fpmm".
+ * with `source` containing "fpmm". Pre-seeds the rebalanceThresholds RPC
+ * mock so the factory's now-block-scoped effect doesn't hit live RPC.
  */
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
+  _setMockRebalanceThresholds(42220, POOL_ADDRESS, { above: 100, below: 100 });
   const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
     token0: TOKEN_ADDRESS,
     token1: "0x0000000000000000000000000000000000000043",
@@ -139,7 +171,12 @@ function createTransferEvent(overrides: {
 // ---------------------------------------------------------------------------
 
 describe("ERC20FeeToken.Transfer handler", () => {
-  it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async () => {
+  afterEach(() => {
+    _clearMockRebalanceThresholds();
+  });
+
+  it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async function () {
+    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -158,7 +195,8 @@ describe("ERC20FeeToken.Transfer handler", () => {
     assert.equal(transfer!.token, TOKEN_ADDRESS);
   });
 
-  it("skips transfers from non-pool senders", async () => {
+  it("skips transfers from non-pool senders", async function () {
+    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     // Seed the FPMM pool so the handler has a real DB, but send from a
     // different address that is NOT a pool.
@@ -179,7 +217,8 @@ describe("ERC20FeeToken.Transfer handler", () => {
     );
   });
 
-  it("skips transfers when no pool exists at all", async () => {
+  it("skips transfers when no pool exists at all", async function () {
+    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     // No pools seeded — completely empty DB.
 
@@ -209,7 +248,8 @@ describe("UNKNOWN backfill behavior", () => {
     _clearFeeTokenMetaCache(); // prevent cross-test cache pollution
   });
 
-  it("stores UNKNOWN when RPC fails on first transfer", async () => {
+  it("stores UNKNOWN when RPC fails on first transfer", async function () {
+    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -230,7 +270,8 @@ describe("UNKNOWN backfill behavior", () => {
     );
   });
 
-  it("stores resolved symbol when RPC succeeds", async () => {
+  it("stores resolved symbol when RPC succeeds", async function () {
+    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -251,7 +292,8 @@ describe("UNKNOWN backfill behavior", () => {
     );
   });
 
-  it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async () => {
+  it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async function () {
+    this.timeout(15_000);
     // First transfer: fails
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
@@ -316,7 +358,7 @@ describe("selectStaleTransfers", () => {
       { id: `${CHAIN_A}_102_3`, tokenSymbol: "UNKNOWN" },
     ];
     const stale = selectStaleTransfers(records, CHAIN_A);
-    assert.deepStrictEqual(
+    assert.deepEqual(
       stale.map((r) => r.id),
       [`${CHAIN_A}_100_1`, `${CHAIN_A}_102_3`],
     );
@@ -337,11 +379,11 @@ describe("selectStaleTransfers", () => {
       { id: `${CHAIN_A}_300_1`, tokenSymbol: "USDm" },
       { id: `${CHAIN_A}_300_2`, tokenSymbol: "GBPm" },
     ];
-    assert.deepStrictEqual(selectStaleTransfers(records, CHAIN_A), []);
+    assert.deepEqual(selectStaleTransfers(records, CHAIN_A), []);
   });
 
   it("returns empty array when records list is empty", () => {
-    assert.deepStrictEqual(selectStaleTransfers([], CHAIN_A), []);
+    assert.deepEqual(selectStaleTransfers([], CHAIN_A), []);
   });
 
   it("is not confused by a chainId that is a prefix of another (e.g. 42 vs 42220)", () => {
@@ -382,7 +424,7 @@ describe("KNOWN_TOKEN_META static fallback", () => {
       "0x765de816845861e75a25fca122bb6898b8b1282a",
     );
 
-    assert.deepStrictEqual(meta, { symbol: "USDm", decimals: 18 });
+    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
   });
 
   // Wormhole NTT hub/spoke split: Monad ships USDm as "USDmSpoke" in the
@@ -394,6 +436,27 @@ describe("KNOWN_TOKEN_META static fallback", () => {
 
     const meta = await resolveFeeTokenMeta(143, monadUsdm);
 
-    assert.deepStrictEqual(meta, { symbol: "USDm", decimals: 18 });
+    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
+  });
+});
+
+describe("feeTokenMetaEffect cache guard", () => {
+  afterEach(() => {
+    _clearMockFeeTokenMeta();
+    _clearFeeTokenMetaCache();
+  });
+
+  it("does not cache UNKNOWN/18 transient RPC failures", async () => {
+    const unknownToken = "0x0000000000000000000000000000000000000999";
+    _setMockFeeTokenMeta(42220, unknownToken, "FAIL");
+    const context = { log: noopLog, cache: true };
+
+    const meta = await feeTokenMetaEffectRuntime.handler({
+      input: { chainId: 42220, tokenAddress: unknownToken },
+      context,
+    });
+
+    assert.deepEqual(meta, UNKNOWN_FEE_TOKEN_META);
+    assert.equal(context.cache, false);
   });
 });

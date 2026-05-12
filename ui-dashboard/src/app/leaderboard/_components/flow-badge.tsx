@@ -3,7 +3,7 @@
 import type { FlowResult } from "@/lib/leaderboard";
 
 /**
- * Visualizes a trader's flow in their primary pool (BACKLOG.md PR 3 spec):
+ * Visualizes a trader's flow in their primary pool:
  *   one-directional → 🡆 (extractive arb / corridor flow)
  *   delta-neutral   → ⇌ (round-tripping, MM-like)
  *   mixed           → ⤺

@@ -1,9 +1,10 @@
 // ===========================================================================
-// EventHandlers.ts — Envio entry point.
+// EventHandlers.ts — Envio entry point (primary, full multichain configs)
 //
 // Both `config.multichain.mainnet.yaml` and `config.multichain.testnet.yaml`
 // declare `handler: src/EventHandlers.ts`, so every handler registration in
-// this file fires at module load time.
+// this file fires at module load time for those configs.
+//
 // ===========================================================================
 
 import { runStartupChecks } from "./startupChecks.js";
@@ -12,7 +13,7 @@ import { runStartupChecks } from "./startupChecks.js";
 // See src/startupChecks.ts for details and rationale.
 runStartupChecks();
 
-// Effect registrations (side-effect import — registers the 16 RPC effects
+// Effect registrations (side-effect import — registers RPC effects
 // with the Envio runtime so they're available via `context.effect(...)`).
 import "./rpc/effects.js";
 
@@ -25,6 +26,7 @@ import "./handlers/fpmm/state-sync.js";
 import "./handlers/fpmm/limits-and-fees.js";
 import "./handlers/sortedOracles.js";
 import "./handlers/virtualPool.js";
+import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/breakerBox.js";
@@ -34,11 +36,9 @@ import "./handlers/wormhole/nttManager.js";
 import "./handlers/wormhole/wormholeTransceiver.js";
 
 // ---------------------------------------------------------------------------
-// Re-exports for the active vitest suites that import RPC/fee-token mock
-// helpers and bootstrap-cache resetters from "../src/EventHandlers.js".
-// The 19 v2 MockDb-pattern tests quarantined in vitest.config.ts won't need
-// these once they migrate to msw-based mocking (BACKLOG.md), at which point
-// most of these re-exports can be dropped.
+// Re-exports for backwards compatibility with existing tests.
+// Tests import from "../src/EventHandlers.js" — these re-exports ensure that
+// all existing import paths continue to work without modification.
 // ---------------------------------------------------------------------------
 
 // RPC test mocks
@@ -49,6 +49,8 @@ export {
   _clearMockReserves,
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
+  _setMockTokenDecimalsScaling,
+  _clearMockTokenDecimalsScaling,
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
@@ -60,6 +62,10 @@ export {
   _setMockBreakerFeedState,
   _setMockBreakerList,
   _clearBreakerMocks,
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
 } from "./rpc.js";
 
 export { _clearBootstrapCaches } from "./breakers.js";

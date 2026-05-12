@@ -105,6 +105,29 @@ export function formatUSD(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** USD-wei BigInt -> number. Loses precision past ~$9 quadrillion (Number's
+ * 2^53 cap). Acceptable for display; never use for further accumulation. */
+export function weiToUsd(wei: bigint): number {
+  // Convert via decimal-shift through string to keep precision under Number's
+  // 2^53 ceiling (`Number(wei)` rounds large BigInts).
+  const decimals = 18;
+  const s = wei.toString();
+  if (s === "0") return 0;
+  const negative = s.startsWith("-");
+  const digits = negative ? s.slice(1) : s;
+  if (digits.length <= decimals) {
+    const padded = digits.padStart(decimals + 1, "0");
+    const whole = padded.slice(0, -decimals);
+    const frac = padded.slice(-decimals).slice(0, 6);
+    const n = Number(`${whole}.${frac}`);
+    return negative ? -n : n;
+  }
+  const whole = digits.slice(0, -decimals);
+  const frac = digits.slice(-decimals).slice(0, 6);
+  const n = Number(`${whole}.${frac}`);
+  return negative ? -n : n;
+}
+
 // Oracle price formatting
 
 /** Set of USD-stable token symbols. If token0 is in this set, the SortedOracles

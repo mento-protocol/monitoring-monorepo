@@ -29,6 +29,51 @@ then you are expected to run the dedicated PR checklist before opening or updati
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
+## Agent Quality Gate
+
+Before opening or updating an agent-authored PR, run:
+
+```bash
+pnpm agent:quality-gate
+```
+
+The gate defaults to dry-run mode and maps changed paths to the package checks
+and PR checklists that apply. Review the checklist output, then run the mapped
+safe local commands with:
+
+```bash
+pnpm agent:quality-gate --run
+```
+
+The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
+Trunk, and formatting/validation commands. It never runs deploy commands or
+Terraform apply. If any package manifest, `pnpm-lock.yaml`,
+`pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
+execute until you review package scripts/lifecycle hooks and pass
+`--allow-package-script-changes`. The narrow exception is a root `package.json`
+edit limited to `scripts.agent:quality-gate` or
+`scripts.agent:quality-gate:test`; the gate treats that as tooling-only and runs
+an entrypoint validator plus the gate regression tests instead of the
+package-script refusal path.
+
+The Trunk pre-push hook delegates to this same path-aware gate with
+`--fail-fast`, so the hook stops on the first failed mapped command instead of
+burning through the rest of the suite. For a push that intentionally changes
+package scripts or package-manager config, review the script/lifecycle diff
+first, then temporarily set
+`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
+push.
+
+## PR feedback sweep rule
+
+Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
+
+## Review-loop discipline
+
+Treat code review as a batch-boundary verifier, not as the inner edit loop. When a reviewer finds one instance of a hazard, audit the sibling surfaces before pushing: adjacent commands, package-manager files, workflow paths, deploy scripts, shared helpers, parallel components, docs, and tests that encode the same rule.
+
+For process or policy-router PRs, build a coverage matrix before implementation. Use `AGENTS.md`, `docs/pr-checklists/*`, CI path filters, package scripts, and existing command docs to map each changed-path class to its required commands, checklist prompts, refusal guards, and regression tests. Run cheap targeted checks while editing; reserve broad local reviews and external bot reviews for completed batches.
+
 ## Recurring PR-review patterns — fix locally, not in review
 
 Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. Each rule is a hard must/never — if your change touches one of these areas, follow the linked checklist before opening the PR.
@@ -106,6 +151,26 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 - Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
 
+### Dynamic-route metadata + private data — `docs/pr-checklists/dynamic-route-metadata.md`
+
+- Any Next.js dynamic route whose `generateMetadata` reads access-controlled data (`getLabel`, `findReport`, anything Redis-backed) MUST gate on an explicit "is public" flag (`isPublic === true`) before emitting any field into title / og / twitter tags. `generateMetadata` runs without a session and the rendered tags are visible to every crawler / shared-link preview — without a privacy gate you've leaked PII to anyone who guesses the URL. Caused PR #345's only P1 (codex round 4)
+- `export const revalidate = 0` when the metadata source is access-controlled. Non-zero ISR caching means an editor toggling a label from public → private leaves the prior public tags served from the edge cache for the cache window. Privacy revocation must be honoured immediately; per-request Redis cost is bounded by `withTimeout` and only fires for crawler unfurls
+- Put the metadata-fetching body in a dedicated helper file (e.g. `_lib/og-metadata.ts`) the layout/page imports — NOT directly in `layout.tsx`. The RSC label-leak guard test (`rsc-label-leak-guard.test.ts`) allowlists files that legitimately read Redis; allowlisting a whole layout means a future edit can quietly add an untrusted call inside the default render path. Helper-file scope keeps the guard tight (PR #345 commit `b476776`)
+
+### SWR optimistic-update + React-key remount races
+
+- When a child component is React-keyed by a field your optimistic update also writes to (e.g. `key={entry.updatedAt}` while `upsertEntry` bumps `updatedAt` synchronously in `mutate(...)`), you've created a self-remount race against your own writes. Mid-PUT the form unmounts and a fresh mount (with `saving=false`) re-enables the Save button, opening a double-submit window. Reach for the pending-ledger architecture shipped in PR #345 (`address-labels-provider.tsx` + `address-book/[address]/page.tsx`) before re-deriving these through 15 review rounds:
+  - **Per-mount instance ID via counter-backed ref** — NOT `useId`. `useId` is tree-position-stable, so a remount at the same key path returns the same id and stale-callback dedup falsely accepts old `(false)` calls.
+  - **Separate save / delete owner refs** — a single shared `mutationOwnerRef` breaks under cross-flow timing (Save→Remove fast-click); each flow needs its own owner.
+  - **Pending ledger lifted to provider state** — page-mount-scoped state dies on navigation; a user who saves → bounces to the index → re-enters the same address sees a fresh empty ledger and an enabled Save button. Survive page mounts by living in `AddressLabelsProvider`.
+  - **Synchronous `inFlightRef` guards** — React's `setSaving(true)` is async; a fast double-click slips past the disabled state. A `useRef({ saving: false, deleting: false })` flipped synchronously inside the handler before any state setter is the only thing that prevents two PUTs from leaving the form for the same Save click.
+  - **`<fieldset disabled>` cascade** — disabling Save/Remove without disabling the inputs lets users type into a "would-be-discarded" form; on the optimistic→settled `updatedAt` transition the remount drops their edits. Wrap inputs+buttons in a fieldset.
+  - **Content fingerprint always in keys** — not just when `updatedAt` is empty. Imports preserve a non-empty `updatedAt` even when content changed; `JSON.stringify([name, tags, notes, isPublic])` in the key catches that case.
+
+### Sibling-audit rule for multi-component flows
+
+- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
+
 ## Quick Commands
 
 ```bash
@@ -177,7 +242,7 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - **Styling:** Tailwind CSS 4
 - **Multi-chain:** Network selector switches between celo-mainnet, celo-sepolia, monad-mainnet, monad-testnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
 - **Contract labels:** token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge); `src/lib/networks.ts` layers per-network `addressLabels` overrides on top. Explorer base URLs default from `@mento-protocol/monitoring-config/chains`; each network keeps its env-var override (`NEXT_PUBLIC_EXPLORER_URL_*`) for local dev
-- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis under a single `labels` hash keyed by lowercase address (no chain/global scope — same EVM address means same entity, so a single label applies wherever the address appears). Backed up daily to Vercel Blob alongside forensic reports (same blob, `addresses` + `reports` keys); custom labels override/extend the package-derived ones. **Migration:** `POST /api/address-labels/migrate-flat` (cron-secret or session) collapses any legacy `labels:{chainId}` + `labels:global` hashes into the flat `labels` hash; idempotent, snapshots to Blob before mutating
+- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis under a single `labels` hash keyed by lowercase address (no chain/global scope — same EVM address means same entity, so a single label applies wherever the address appears). Backed up daily to Vercel Blob alongside forensic reports (same blob, `addresses` + `reports` keys); custom labels override/extend the package-derived ones. Large restores use `POST /api/address-labels/restore?pathname=<blob-pathname>` (cron-secret or session) so the server pulls the private Blob snapshot directly and preserves forensic-report author/timestamp/version metadata from first-party backups. User-uploaded imports through `/api/address-labels/import` still re-stamp report metadata to the importing session.
 - **Forensic reports:** long-form markdown investigations attached to an address (separate from the 500-char `notes` field). Stored in Upstash under a single `reports` hash keyed by lowercase address. Reports are address-keyed only — no chain/global scope. Same EVM address means same entity (same private key derives the same address across every chain), so a single report applies wherever the address appears. Backed up daily inside the same Vercel Blob snapshot as labels (`reports` key in the snapshot JSON; restorable via `/api/address-labels/import`). Never write deep investigations into `notes` — use the address detail page's report editor or the `/forensic-report` skill. Body cap is 50KB; auth-gated, never public. Drafts live in the gitignored `.investigations/` folder at the repo root; the skill produces them and can push the finished draft directly to Upstash so the prose never round-trips through copy-paste
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
@@ -271,12 +336,16 @@ Standalone investigation drafts live under the gitignored `.investigations/<addr
 
 Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code loads when you type `/<filename>`. Add a new one by dropping a markdown file in that directory; remove one by deleting the file.
 
-| Command                              | Purpose                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to `localhost:3000`; pass `prod` to verify against `monitoring.mento.org`.                                                    |
-| `/babysit-indexer-deploy [<commit>]` | Poll Envio's deployment registry every 5min, surface per-chain sync %, and prompt for `pnpm deploy:indexer:promote <commit>` once every chain is caught up. Never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. |
+| Command                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to `localhost:3000`; pass `prod` to verify against `monitoring.mento.org`.                                                                                                                                                                                                                                                                          |
+| `/babysit-indexer-deploy [<commit>]` | Arm a `Monitor` that polls Envio's deployment registry every 45s internally but only emits on state change (`REGISTERED` / `READY_TO_PROMOTE` / `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR`). Prompts for `pnpm deploy:indexer:promote <commit>` once every chain is caught up — never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. Replaces the prior `/loop 5m` cron version, which produced ~12 idle macOS notifications per sync. |
 
 To use them you need [Claude Code](https://claude.com/claude-code). Personal/local-only commands belong in your own `~/.claude/commands/` (or in `.git/info/exclude` if you want to keep them in this directory but not share).
+
+### Status-polling commands use `Monitor`, not `/loop`
+
+For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.
 
 ## Envio Gotchas
 
@@ -304,11 +373,17 @@ This installs deps and runs Envio codegen (required for `indexer-envio` TypeScri
 
 ## Pre-Push Checklist (MANDATORY for server-side work)
 
-> ⚠️ **Git hooks don't run on the server.** Trunk's pre-push hooks live in the Mac's common `.git/hooks/` dir. When pushing from the server, they are silently skipped. CI is the first place checks run — and CI failures are far more expensive than local checks. Always run these manually before pushing:
+> ⚠️ **Do not assume git hooks are installed.** `./scripts/setup.sh` points
+> `core.hooksPath` at `.trunk/hooks`, but fresh worktrees, server clones, and
+> unusual git setups can miss that configuration. When hooks are absent or
+> uncertain, CI becomes the first place checks run — and CI failures are far
+> more expensive than local checks. Always run these manually before pushing:
 
 ```bash
+git fetch origin main
 ./tools/trunk fmt --all
 ./tools/trunk check --all
+pnpm dashboard:react-doctor:diff
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 pnpm --filter @mento-protocol/indexer-envio test

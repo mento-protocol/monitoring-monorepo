@@ -1,230 +1,65 @@
 // ---------------------------------------------------------------------------
-// Pool and PoolSnapshot upsert logic, health status computation
+// Pool upsert logic and public pool-module re-exports
 // ---------------------------------------------------------------------------
 
-import type { EffectCaller } from "envio";
-import type {
-  Pool,
-  PoolSnapshot,
-  PoolDailySnapshot,
-  DeviationThresholdBreach,
-} from "envio";
-import {
-  hourBucket,
-  dayBucket,
-  snapshotId,
-  dailySnapshotId,
-  extractAddressFromPoolId,
-} from "./helpers.js";
+import type { Pool } from "envio";
+import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import { computePriceDifference } from "./priceDifference.js";
 import {
   compactFees,
   feesEffect,
-  invertRateFeedEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
 } from "./rpc/effects.js";
-import { isVirtualPool } from "./helpers.js";
 import { recordBreachTransition } from "./deviationBreach.js";
+import {
+  computeHealthStatus,
+  isNeverRebalance,
+  nextDeviationBreachStartedAt,
+  nextOpenBreachEntryThreshold,
+  nextOpenBreachPeak,
+} from "./pool/health.js";
+import { pickPreferredSource, type PoolUpdateSource } from "./pool/sources.js";
+import {
+  selfHealInvertRateFeed,
+  selfHealTokenDecimals,
+  selfHealWrappedExchangeId,
+} from "./pool/self-heal.js";
+import type { PoolContext } from "./pool/types.js";
 
-// ---------------------------------------------------------------------------
-// Health status computation
-// ---------------------------------------------------------------------------
-
-/**
- * How long a pool may sit above the critical magnitude (5% over threshold)
- * before the status escalates from WARN to CRITICAL. Mirrors
- * `DEVIATION_BREACH_GRACE_SECONDS` in `ui-dashboard/src/lib/health.ts`.
- */
-export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
-
-/**
- * Tolerance + critical-magnitude thresholds as `num/den` pairs over the
- * rebalance threshold. Integer math avoids float pathology at the boundaries.
- *
- * Float-form mirrors live in `@mento-protocol/monitoring-config/thresholds`
- * (canonical for the dashboard + metrics-bridge probe). Parity with the
- * dashboard's float comparison is enforced by `test/healthStatusParity.test.ts`.
- * Any change here must update that file too.
- */
-export const DEVIATION_TOLERANCE_NUM = 101n;
-export const DEVIATION_TOLERANCE_DEN = 100n;
-export const DEVIATION_CRITICAL_NUM = 105n;
-export const DEVIATION_CRITICAL_DEN = 100n;
-
-/**
- * Health-status union the indexer can emit. Narrower than the dashboard's
- * `HealthStatus` (no "WEEKEND" — that's a render-time reclassification of
- * stale-oracle CRITICAL).
- */
-export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
-
-/** Resolve the effective threshold in bps. The schema-default of 0 means the
- * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
- * pools don't trip the breach predicate while we wait for the RPC self-heal.
- */
-export const effectiveThreshold = (
-  pool: Pick<Pool, "rebalanceThreshold">,
-): bigint =>
-  BigInt(pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000);
-
-/** True when `priceDifference` is strictly above the 5% critical-magnitude
- * line, integer-safe. Used by both the live status branch (here) and the
- * cumulative `criticalDurationSeconds` accrual in `deviationBreach.ts` to
- * keep them in lockstep. */
-export const isAboveCriticalMagnitude = (
-  priceDifference: bigint,
-  threshold: bigint,
-): boolean =>
-  priceDifference * DEVIATION_CRITICAL_DEN > threshold * DEVIATION_CRITICAL_NUM;
-
-/**
- * Mirror of `computeHealthStatus` in `ui-dashboard/src/lib/health.ts`; parity
- * is enforced by `test/healthStatusParity.test.ts`. The breach anchor
- * (`deviationBreachStartedAt`) is set at the 1.01x crossing in
- * `isInDeviationBreach`, so the 1h grace counts from when the pool first
- * exceeded tolerance.
- *
- * Intentional divergences NOT covered by the parity suite:
- *  - Oracle staleness: indexer reads the event-time `oracleOk` flag; the UI
- *    reads `oracleTimestamp + oracleExpiry` against wall clock at render time
- *    with per-chain fallbacks.
- *  - Weekend reclassification: only the UI has `isWeekend()` at render time.
- *    Indexed weekend-stale pools surface as CRITICAL here; the UI
- *    reclassifies them to WEEKEND.
- */
-export function computeHealthStatus(
-  pool: Pool,
-  nowSeconds: bigint,
-): IndexerHealthStatus {
-  if (isVirtualPool(pool)) return "N/A";
-  if (!pool.oracleOk) return "CRITICAL";
-  const threshold = effectiveThreshold(pool);
-  const diff = pool.priceDifference;
-  const aboveTolerance =
-    diff * DEVIATION_TOLERANCE_DEN > threshold * DEVIATION_TOLERANCE_NUM;
-  if (!aboveTolerance) return "OK";
-  if (!isAboveCriticalMagnitude(diff, threshold)) return "WARN";
-  // Without a breach-start anchor (indexer hasn't populated it yet), stay
-  // at WARN rather than spuriously escalating to CRITICAL.
-  if (pool.deviationBreachStartedAt <= 0n) return "WARN";
-  const withinGrace =
-    nowSeconds - pool.deviationBreachStartedAt < DEVIATION_BREACH_GRACE_SECONDS;
-  return withinGrace ? "WARN" : "CRITICAL";
-}
-
-// Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle
-// staleness is intentionally NOT counted — this tracks price action only.
-export function isInDeviationBreach(pool: Pool): boolean {
-  if (isVirtualPool(pool)) return false;
-  return (
-    pool.priceDifference * DEVIATION_TOLERANCE_DEN >
-    effectiveThreshold(pool) * DEVIATION_TOLERANCE_NUM
-  );
-}
-
-export function nextDeviationBreachStartedAt(
-  prev: Pool | undefined,
-  next: Pool,
-  blockTimestamp: bigint,
-  source?: PoolUpdateSource,
-): bigint {
-  const wasBreachedPrice = prev ? isInDeviationBreach(prev) : false;
-  const wasBreachedAnchor = prev ? prev.deviationBreachStartedAt > 0n : false;
-  const isBreached = isInDeviationBreach(next);
-  if (!isBreached) {
-    // Defer the close when this transition is being driven by
-    // UpdateReserves. The FPMM contract emits ReservesUpdated inside
-    // swap/rebalance/mint/burn (often MULTIPLE times — pre- and post-
-    // state), so an initial UR can pull priceDifference to / below
-    // threshold before the semantic handler runs. Use the ANCHOR, not
-    // price, to decide "is there an open breach to hold" — price may
-    // already read healthy after UR#1, but the anchor is still set.
-    // Holding it keeps the falling-edge attribution with the eventual
-    // semantic handler (Rebalance → "rebalance", Swap → "swap", etc.)
-    // instead of the generic UR "unknown".
-    if (wasBreachedAnchor && source === "fpmm_update_reserves" && prev) {
-      return prev.deviationBreachStartedAt;
-    }
-    return 0n;
-  }
-  if (!wasBreachedPrice) return blockTimestamp;
-  // Self-heal: a breached row with a 0n sentinel (partial restore, pre-backfill
-  // state, etc) would stay 0n forever. Adopt the current block time as a
-  // best-effort start so the UI stops suppressing the indicator.
-  return prev!.deviationBreachStartedAt > 0n
-    ? prev!.deviationBreachStartedAt
-    : blockTimestamp;
-}
-
-/** Maintain the open-breach peak denormalized on Pool. Mirrors the
- * `peakPriceDifference` tracked on the open `DeviationThresholdBreach`
- * row, but lives on Pool so the rollup query the live uptime tile uses
- * doesn't need to join to the breach row. Resets to 0 when no open
- * breach; otherwise carries `max(prev peak, current diff)`. */
-export function nextOpenBreachPeak(prev: Pool | undefined, next: Pool): bigint {
-  if (next.deviationBreachStartedAt === 0n) return 0n;
-  const prevPeak = prev?.currentOpenBreachPeak ?? 0n;
-  return prevPeak > next.priceDifference ? prevPeak : next.priceDifference;
-}
-
-/** Maintain the open-breach entry threshold denormalized on Pool. Captures
- * `rebalanceThreshold` at the rising edge so the live-uptime gate scores
- * the peak against the same threshold the persisted accrual uses (entry,
- * not current). Resets to 0 when no open breach; held across continuing
- * breach events so a mid-breach `FPMMRebalanceThresholdUpdated` can't
- * shift the live verdict. Self-heals from the 0 sentinel: if the breach
- * opened before RPC backfilled `rebalanceThreshold` and a real value
- * arrives mid-breach, adopt it once and then hold. */
-export function nextOpenBreachEntryThreshold(
-  prev: Pool | undefined,
-  next: Pool,
-): number {
-  if (next.deviationBreachStartedAt === 0n) return 0;
-  const prevAnchor = prev?.deviationBreachStartedAt ?? 0n;
-  if (prevAnchor === 0n) return next.rebalanceThreshold; // rising edge
-  // Continuing: hold the previously-captured entry value, but heal when
-  // the captured value is the 0 RPC-pending sentinel and we now have one.
-  const stored = prev?.currentOpenBreachEntryThreshold ?? 0;
-  return stored > 0 ? stored : next.rebalanceThreshold;
-}
+export {
+  DEVIATION_BREACH_GRACE_SECONDS,
+  DEVIATION_CRITICAL_DEN,
+  DEVIATION_CRITICAL_NUM,
+  DEVIATION_TOLERANCE_DEN,
+  DEVIATION_TOLERANCE_NUM,
+  breachEntryThreshold,
+  computeHealthStatus,
+  effectiveThreshold,
+  isAboveCriticalMagnitude,
+  isInDeviationBreach,
+  isNeverRebalance,
+  nextDeviationBreachStartedAt,
+  nextOpenBreachEntryThreshold,
+  nextOpenBreachPeak,
+  persistableThreshold,
+} from "./pool/health.js";
+export type { IndexerHealthStatus } from "./pool/health.js";
+export type { PoolUpdateSource } from "./pool/sources.js";
+export {
+  mirrorFeedIdToPool,
+  mirrorTokensAndDecimalsToPool,
+  selfHealInvertRateFeed,
+  selfHealRebalanceThresholds,
+  selfHealTokenDecimals,
+  selfHealWrappedExchangeId,
+} from "./pool/self-heal.js";
+export type { PoolContext, SnapshotContext } from "./pool/types.js";
+export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
 
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
-
-const SOURCE_PRIORITY = {
-  virtual_pool_factory: 100,
-  fpmm_factory: 90,
-  fpmm_rebalanced: 50,
-  fpmm_update_reserves: 40,
-  fpmm_swap: 30,
-  fpmm_mint: 20,
-  fpmm_burn: 20,
-} as const;
-
-/** Values the indexer passes as `source` when calling upsertPool / the
- *  breach helpers. Typing this as a union (rather than bare string) means
- *  a typo like "fpmm_update_reseves" is a compile error instead of a
- *  silently-unmatched deferral branch. */
-export type PoolUpdateSource = keyof typeof SOURCE_PRIORITY;
-
-// `existingSource` is typed as `string` because Pool.source is stored as
-// a plain string in the DB (potentially including legacy values not in
-// the current union). Use a safe lookup helper so unknown strings fall
-// through to priority 0 without an unchecked cast.
-const sourcePriority = (source: string): number =>
-  (SOURCE_PRIORITY as Record<string, number>)[source] ?? 0;
-
-const pickPreferredSource = (
-  existingSource: string | undefined,
-  incomingSource: PoolUpdateSource,
-): string => {
-  if (!existingSource) return incomingSource;
-  return sourcePriority(incomingSource) >= sourcePriority(existingSource)
-    ? incomingSource
-    : existingSource;
-};
 
 /**
  * Preload-phase helper used by every event handler that makes direct RPC
@@ -263,66 +98,16 @@ export async function maybePreloadPool(
   return true;
 }
 
-export type PoolContext = {
-  effect: EffectCaller;
-  Pool: {
-    get: (id: string) => Promise<Pool | undefined>;
-    set: (entity: Pool) => void;
-  };
-  DeviationThresholdBreach: {
-    get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
-    set: (entity: DeviationThresholdBreach) => void;
-  };
-};
-
-/** Self-heal `invertRateFeed` when it was never successfully read at pool
- * deployment (factory's RPC fan-out hit a transient blip → the field rode
- * the schema default). Returns the same pool when already healed / not
- * applicable, otherwise returns a copy with `invertRateFeed` corrected and
- * `invertRateFeedKnown: true`.
+/** Default oracle field values (for VirtualPools or when RPC call fails).
  *
- * Must be called before any code path reads `pool.invertRateFeed` to
- * compute oracle/health/priceDifference state — including the
- * `OracleReported`/`MedianUpdated` handlers (which write directly without
- * going through `upsertPool`) and the `UpdateReserves`/`Rebalanced`
- * handlers (which read `existing.invertRateFeed` before `upsertPool` runs).
- *
- * Effect-level dedup means this is one RPC read per (pool, batch) when
- * unhealed; once `invertRateFeedKnown` flips true, subsequent calls are
- * pure object identity returns — no RPC, no Pool.set side-effect. The
- * caller's own Pool.set persists the healed value. */
-export async function selfHealInvertRateFeed(
-  context: { effect: EffectCaller },
-  pool: Pool,
-): Promise<Pool> {
-  if (pool.invertRateFeedKnown || pool.source === "" || isVirtualPool(pool)) {
-    return pool;
-  }
-  const poolAddr = extractAddressFromPoolId(pool.id);
-  const invert = await context.effect(invertRateFeedEffect, {
-    chainId: pool.chainId,
-    poolAddress: poolAddr,
-  });
-  if (invert === null) return pool;
-  return {
-    ...pool,
-    invertRateFeed: invert,
-    invertRateFeedKnown: true,
-  };
-}
-
-export type SnapshotContext = {
-  PoolSnapshot: {
-    get: (id: string) => Promise<PoolSnapshot | undefined>;
-    set: (entity: PoolSnapshot) => void;
-  };
-  PoolDailySnapshot: {
-    get: (id: string) => Promise<PoolDailySnapshot | undefined>;
-    set: (entity: PoolDailySnapshot) => void;
-  };
-};
-
-/** Default oracle field values (for VirtualPools or when RPC call fails) */
+ * Excludes `referenceRateFeedID` on purpose — that's a static-config field
+ * set ONCE at pool creation (factory `referenceRateFeedIDEffect`) or via
+ * the BiPoolExchange→Pool mirror (`mirrorFeedIdToPool`). Including it here
+ * would mean callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}`
+ * as `oracleDelta` would clobber a healed feedID back to "" via the
+ * `next` builder's spread order. `defaultPool` initializes the field
+ * directly below; persisted updates flow via the dedicated mirror /
+ * heal helpers. */
 export const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
@@ -330,9 +115,10 @@ export const DEFAULT_ORACLE_FIELDS = {
   oracleTxHash: "",
   oracleExpiry: 0n,
   oracleNumReporters: 0,
-  referenceRateFeedID: "",
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
+  medianLive: false,
+  lastOracleReportAt: 0n,
   prevMedianPrice: 0n,
   prevMedianAt: 0n,
   lastOracleJumpBps: "0.0000",
@@ -343,6 +129,11 @@ export const DEFAULT_ORACLE_FIELDS = {
   invertRateFeedKnown: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
+  rebalanceThresholdAbove: 0,
+  rebalanceThresholdBelow: 0,
+  // Mirrors `invertRateFeedKnown`: false until factory seed or
+  // `RebalanceThresholdUpdated` lands real values; gates state-sync self-heal.
+  rebalanceThresholdsKnown: false,
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
   currentOpenBreachPeak: 0n,
@@ -358,6 +149,14 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
   token1Decimals: 18,
+  // Mirrors `invertRateFeedKnown`: false until factory seeds real values
+  // (or `selfHealTokenDecimals` lands them); true once persisted. While
+  // false, `selfHealTokenDecimals` retries on every event that touches
+  // this pool so a deploy-time RPC blip doesn't permanently keep
+  // non-18-decimal pools at the schema default 18/18.
+  tokenDecimalsKnown: false,
+  // Diagnostic only — see schema.graphql comment. NOT a freshness signal.
+  lastFreshReporterAt: 0n,
   // Health score accumulators
   healthTotalSeconds: 0n,
   healthBinarySeconds: 0n,
@@ -397,6 +196,13 @@ const defaultPool = (
   notionalVolume1: 0n,
   rebalanceCount: 0,
   ...DEFAULT_ORACLE_FIELDS,
+  // Static-config fields excluded from DEFAULT_ORACLE_FIELDS to avoid
+  // the spread-clobber bug — callers' `oracleDelta` must NOT carry the
+  // power to overwrite these on every event.
+  referenceRateFeedID: "",
+  // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
+  // (factory-direct value or bytecode read). FPMMs never set it.
+  wrappedExchangeId: undefined,
   createdAtBlock: 0n,
   createdAtTimestamp: 0n,
   updatedAtBlock: 0n,
@@ -419,6 +225,7 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  referenceRateFeedID,
   existing: existingOverride,
 }: {
   context: PoolContext;
@@ -441,7 +248,17 @@ export const upsertPool = async ({
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
-  tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  tokenDecimals?: {
+    token0Decimals: number;
+    token1Decimals: number;
+    tokenDecimalsKnown: boolean;
+  };
+  /** Static-config field for the referenced rate feed; explicit param so
+   * callers can't accidentally clobber it via `oracleDelta` spread (see
+   * the doc on `DEFAULT_ORACLE_FIELDS`). Only the FPMM factory + the
+   * BiPoolExchange→Pool mirror set it; all other callers pass undefined
+   * and the persisted value flows through unchanged. */
+  referenceRateFeedID?: string;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -449,19 +266,67 @@ export const upsertPool = async ({
    * from "not passed". When `undefined`, upsertPool does its own lookup. */
   existing?: { pool: Pool | undefined };
 }): Promise<Pool> => {
-  const existingInitial = existingOverride
+  const initialBase = existingOverride
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
-  // Self-heal invertRateFeed up front so every downstream computation
-  // (priceDifference, oraclePrice flip, breach status) sees the corrected
-  // orientation. Same helper that handlers call before reading the field.
-  const existing = await selfHealInvertRateFeed(context, existingInitial);
+  // Carry the caller's intended source into the heal pipeline ONLY when
+  // the persisted source is the empty defaultPool sentinel — otherwise
+  // the unconditional override defeats `pickPreferredSource` below by
+  // making `existing.source === source` regardless of priority. The
+  // VP/FPMM-aware gates (`isVirtualPool`, `pool.source === ""`) need the
+  // first-touch source-fill, but later events on a pool with an already-
+  // ranked source must keep the persisted value through this stage.
+  const existingInitial: Pool = initialBase.source
+    ? initialBase
+    : { ...initialBase, source };
+  // Heal pipeline: invertRateFeed → wrappedExchangeId (VP only) →
+  // tokenDecimals. Each helper short-circuits when its field is already
+  // healed, so the per-event cost is at most a few boolean checks once
+  // a pool is fully seeded. All three back-end effects are `cache: true`
+  // (per-pool-once across the run).
+  const invertHealed = await selfHealInvertRateFeed(context, existingInitial);
+  // Self-heal `wrappedExchangeId` using `vpExchangeIdEffect` (bytecode-
+  // pattern detector) as the authoritative VP test. The previous source-
+  // based gate (`isVirtualPool(pool)` checks `pool.source.includes("virtual")`)
+  // missed pre-start_block VPs whose first observed event is `VirtualPool.Swap`
+  // / `Mint` / `Burn` — those handlers reuse the `fpmm_*` source keys
+  // (intentional: they share priority with FPMM events for `pickPreferredSource`),
+  // so the pool source never gets the "virtual" substring → self-heal was
+  // skipped → `wrappedExchangeId` never populated. Bytecode is immutable
+  // and the effect is `cache: true`. `vpExchangeIdEffect` discriminates
+  // "got bytecode, not a VP" (cached as a permanent miss → FPMM hot path
+  // pays one RPC per address total) from "RPC threw" (transient, NOT
+  // cached → next event for that address retries). See
+  // `vpExchangeIdEffect` in `src/rpc/effects.ts` for the discriminator.
+  // Call site delegates fully to `selfHealWrappedExchangeId` — that
+  // function's internal gate decides whether to short-circuit. We
+  // can't gate at the call site on `wrappedExchangeId && token0 &&
+  // token1` because that would skip the seed-retry path the helper
+  // owns (round 7 codex #3: a `VirtualPoolDeployed` whose seed RPC
+  // fails sets all three fields but leaves `BiPoolExchange` unseeded).
+  // `vpExchangeIdEffect` is `cache:true`, so the helper's bytecode
+  // probe is free on re-entry; the only added work for fully-healed
+  // pools is one DB read for `BiPoolExchange.get`.
+  const wrappedHealed = await selfHealWrappedExchangeId(
+    context,
+    invertHealed,
+    blockNumber,
+    blockTimestamp,
+  );
+  // tokenDecimals heal short-circuits for VPs (the helper checks
+  // `isVirtualPool`) so FPMM-only paths pay the cost.
+  const existing = await selfHealTokenDecimals(context, wrappedHealed);
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
   // Use the raw address (not the namespaced poolId) for RPC calls.
   const poolAddr = extractAddressFromPoolId(poolId);
+  // `healedFeedId` is split from `healedOracleDelta` because
+  // `referenceRateFeedID` is no longer part of `DEFAULT_ORACLE_FIELDS`
+  // (extracted to avoid the spread-clobber bug — see DEFAULT_ORACLE_FIELDS
+  // doc above). Applied directly in the `next` builder below.
+  let healedFeedId: string | undefined;
   let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
   if (
     existing.referenceRateFeedID === "" &&
@@ -473,13 +338,15 @@ export const upsertPool = async ({
       poolAddress: poolAddr,
     });
     if (rateFeedID) {
-      healedOracleDelta = { referenceRateFeedID: rateFeedID };
+      healedFeedId = rateFeedID;
       const expiry = await context.effect(reportExpiryEffect, {
         chainId,
         rateFeedID,
         blockNumber,
       });
-      if (expiry !== null) healedOracleDelta.oracleExpiry = expiry;
+      if (expiry !== null) {
+        healedOracleDelta = { oracleExpiry: expiry };
+      }
     }
   }
 
@@ -528,9 +395,37 @@ export const upsertPool = async ({
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     ...(healedFees ?? {}),
-    // Persist token decimals if provided (set once at pool creation)
-    token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
-    token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
+    // `referenceRateFeedID` is applied AFTER the spread chain so the
+    // value isn't clobbered by an oracleDelta that omits it (the field
+    // is no longer in DEFAULT_ORACLE_FIELDS — callers can't include it
+    // in the spread). Priority: caller-supplied param (FPMM factory) >
+    // self-heal > existing.
+    referenceRateFeedID:
+      referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID,
+    // OR-merge `tokenDecimalsKnown` so a self-healed `true` survives a
+    // later caller passing `false` (e.g. a factory replay that blipped).
+    // Symmetrically, gate the decimal field writes: when the incoming pair
+    // is unknown but the existing pair is known, keep the known values.
+    // Without this gate, a known-6/18 pool getting a re-blipped factory
+    // payload `{18, 18, false}` would clobber the real decimals to 18/18
+    // while the OR-merge held the flag at `true` — locking in wrong scaling.
+    token0Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token0Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token0Decimals
+          : (tokenDecimals?.token0Decimals ?? existing.token0Decimals),
+    token1Decimals:
+      tokenDecimals && tokenDecimals.tokenDecimalsKnown
+        ? tokenDecimals.token1Decimals
+        : existing.tokenDecimalsKnown
+          ? existing.token1Decimals
+          : (tokenDecimals?.token1Decimals ?? existing.token1Decimals),
+    tokenDecimalsKnown:
+      tokenDecimals?.tokenDecimalsKnown || existing.tokenDecimalsKnown,
+    // `wrappedExchangeId` is owned by `selfHealWrappedExchangeId` above —
+    // the helper updates `existing` in place (returns a new object on
+    // healing, original on no-op) so the spread carries the field through.
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:
@@ -544,15 +439,47 @@ export const upsertPool = async ({
   // Use contract-provided priceDifference when available (passed via oracleDelta
   // from fetchRebalancingState). Only fall back to local recomputation when the
   // contract value was not supplied (e.g. oracle-only update events).
+  // `tokenDecimalsKnown=false` blocks the local recomputation: `normalizeTo18`
+  // would silently use the schema-default 18/18 and produce a priceDifference
+  // off by 10^(18 - real_dec) for non-18-decimal pools whose factory +
+  // self-heal both blipped. Preserve `existing.priceDifference` until
+  // self-heal lands real decimals.
   const hasContractPriceDiff =
     oracleDelta != null &&
     "priceDifference" in oracleDelta &&
     oracleDelta.priceDifference !== undefined;
+  const canRecompute =
+    !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !isVirtualPool(next) && next.oraclePrice > 0n
+    : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
+
+  // When priceDifference is frozen (no contract-provided value AND can't
+  // recompute), skip the breach pipeline entirely. Feeding the frozen
+  // value into `nextDeviationBreachStartedAt` / `recordBreachTransition`
+  // would let a same-block threshold update flip breach state from
+  // stale/default deviation data — corrupting `DeviationThresholdBreach`
+  // rows. VirtualPools always take this branch (canRecompute=false for
+  // them) but their breach state stays at default-zero anyway, so the
+  // skip is a no-op for them. Mirrors the SortedOracles handler guard.
+  //
+  // EXCEPTION: when the new state is `isNeverRebalance` (governance just
+  // disabled rebalancing), let the breach pipeline run anyway —
+  // `isInDeviationBreach` short-circuits to false via `isNeverRebalance`,
+  // which lets `recordBreachTransition` close any open DTB row regardless
+  // of the frozen priceDifference. Without this exception, the
+  // limits-and-fees known-zero fallback's `upsertPool` routing would
+  // never close the breach (it relied on the breach pipeline to close it
+  // via the falling-edge logic).
+  const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
+  const becameNeverRebalance = isNeverRebalance(next);
+  if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
+    const persistedNoBreach: Pool = { ...next, priceDifference };
+    context.Pool.set(persistedNoBreach);
+    return persistedNoBreach;
+  }
 
   const withDeviation = { ...next, priceDifference };
   // Compute breach-start BEFORE health, so computeHealthStatus reads the
@@ -596,154 +523,4 @@ export const upsertPool = async ({
 
   context.Pool.set(final);
   return final;
-};
-
-// ---------------------------------------------------------------------------
-// PoolSnapshot upsert
-// ---------------------------------------------------------------------------
-
-export const upsertSnapshot = async ({
-  context,
-  pool,
-  blockTimestamp,
-  blockNumber,
-  swapDelta,
-  rebalanceDelta,
-  mintDelta,
-  burnDelta,
-}: {
-  context: SnapshotContext;
-  pool: Pool;
-  blockTimestamp: bigint;
-  blockNumber: bigint;
-  swapDelta?: { volume0: bigint; volume1: bigint };
-  rebalanceDelta?: boolean;
-  mintDelta?: boolean;
-  burnDelta?: boolean;
-}): Promise<void> => {
-  const hourTs = hourBucket(blockTimestamp);
-  const id = snapshotId(pool.id, hourTs);
-  const existing = await context.PoolSnapshot.get(id);
-
-  const snapshot: PoolSnapshot = existing
-    ? {
-        ...existing,
-        reserves0: pool.reserves0,
-        reserves1: pool.reserves1,
-        swapCount: existing.swapCount + (swapDelta ? 1 : 0),
-        swapVolume0: existing.swapVolume0 + (swapDelta?.volume0 ?? 0n),
-        swapVolume1: existing.swapVolume1 + (swapDelta?.volume1 ?? 0n),
-        rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
-        mintCount: existing.mintCount + (mintDelta ? 1 : 0),
-        burnCount: existing.burnCount + (burnDelta ? 1 : 0),
-        cumulativeSwapCount: pool.swapCount,
-        cumulativeVolume0: pool.notionalVolume0,
-        cumulativeVolume1: pool.notionalVolume1,
-        blockNumber,
-      }
-    : {
-        id,
-        chainId: pool.chainId,
-        poolId: pool.id,
-        timestamp: hourTs,
-        reserves0: pool.reserves0,
-        reserves1: pool.reserves1,
-        swapCount: swapDelta ? 1 : 0,
-        swapVolume0: swapDelta?.volume0 ?? 0n,
-        swapVolume1: swapDelta?.volume1 ?? 0n,
-        rebalanceCount: rebalanceDelta ? 1 : 0,
-        mintCount: mintDelta ? 1 : 0,
-        burnCount: burnDelta ? 1 : 0,
-        cumulativeSwapCount: pool.swapCount,
-        cumulativeVolume0: pool.notionalVolume0,
-        cumulativeVolume1: pool.notionalVolume1,
-        blockNumber,
-      };
-
-  context.PoolSnapshot.set(snapshot);
-
-  // Also write the day-bucketed rollup. Callers never need to invoke this
-  // directly — handlers call upsertSnapshot, both entities get updated.
-  await upsertDailySnapshot({
-    context,
-    pool,
-    blockTimestamp,
-    blockNumber,
-    swapDelta,
-    rebalanceDelta,
-    mintDelta,
-    burnDelta,
-  });
-};
-
-// ---------------------------------------------------------------------------
-// PoolDailySnapshot upsert — same read-merge-write pattern as upsertSnapshot,
-// but bucketed per UTC day. Lets full-history pool charts fit in a single
-// Hasura page (Envio's hosted endpoint caps every query at 1000 rows).
-// Invoked from upsertSnapshot; exported so tests can exercise it directly.
-// ---------------------------------------------------------------------------
-
-export const upsertDailySnapshot = async ({
-  context,
-  pool,
-  blockTimestamp,
-  blockNumber,
-  swapDelta,
-  rebalanceDelta,
-  mintDelta,
-  burnDelta,
-}: {
-  context: SnapshotContext;
-  pool: Pool;
-  blockTimestamp: bigint;
-  blockNumber: bigint;
-  swapDelta?: { volume0: bigint; volume1: bigint };
-  rebalanceDelta?: boolean;
-  mintDelta?: boolean;
-  burnDelta?: boolean;
-}): Promise<void> => {
-  const dayTs = dayBucket(blockTimestamp);
-  const id = dailySnapshotId(pool.id, dayTs);
-  const existing = await context.PoolDailySnapshot.get(id);
-
-  const snapshot: PoolDailySnapshot = existing
-    ? {
-        ...existing,
-        reserves0: pool.reserves0,
-        reserves1: pool.reserves1,
-        swapCount: existing.swapCount + (swapDelta ? 1 : 0),
-        swapVolume0: existing.swapVolume0 + (swapDelta?.volume0 ?? 0n),
-        swapVolume1: existing.swapVolume1 + (swapDelta?.volume1 ?? 0n),
-        rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
-        mintCount: existing.mintCount + (mintDelta ? 1 : 0),
-        burnCount: existing.burnCount + (burnDelta ? 1 : 0),
-        cumulativeSwapCount: pool.swapCount,
-        cumulativeVolume0: pool.notionalVolume0,
-        cumulativeVolume1: pool.notionalVolume1,
-        cumulativeHealthBinarySeconds: pool.healthBinarySeconds,
-        cumulativeHealthTotalSeconds: pool.healthTotalSeconds,
-        blockNumber,
-      }
-    : {
-        id,
-        chainId: pool.chainId,
-        poolId: pool.id,
-        timestamp: dayTs,
-        reserves0: pool.reserves0,
-        reserves1: pool.reserves1,
-        swapCount: swapDelta ? 1 : 0,
-        swapVolume0: swapDelta?.volume0 ?? 0n,
-        swapVolume1: swapDelta?.volume1 ?? 0n,
-        rebalanceCount: rebalanceDelta ? 1 : 0,
-        mintCount: mintDelta ? 1 : 0,
-        burnCount: burnDelta ? 1 : 0,
-        cumulativeSwapCount: pool.swapCount,
-        cumulativeVolume0: pool.notionalVolume0,
-        cumulativeVolume1: pool.notionalVolume1,
-        cumulativeHealthBinarySeconds: pool.healthBinarySeconds,
-        cumulativeHealthTotalSeconds: pool.healthTotalSeconds,
-        blockNumber,
-      };
-
-  context.PoolDailySnapshot.set(snapshot);
 };

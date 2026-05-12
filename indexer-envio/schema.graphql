@@ -5,6 +5,12 @@ type Pool {
   token1: String
   token0Decimals: Int!
   token1Decimals: Int!
+  # Mirrors `invertRateFeedKnown` / `rebalanceThresholdsKnown`: false until the
+  # factory's `decimalsN` reads succeed (or self-heal lands real values),
+  # true once persisted. Distinguishes "schema default 18" from "really 18 on
+  # chain" so non-18-decimal pools whose factory RPC blipped don't silently
+  # keep the wrong scaling. Gates `selfHealTokenDecimals` retries.
+  tokenDecimalsKnown: Boolean!
   source: String!
 
   # Latest reserves (updated on every ReserveUpdate / Swap)
@@ -39,6 +45,30 @@ type Pool {
   # first-ever median). Sole consumer is the next MedianUpdated, which
   # captures it as `prevMedianAt` before overwrite.
   lastMedianAt: BigInt!
+  # True iff the most recent `MedianUpdated` for the feed had a non-zero
+  # value. Stays false during a zero-median outage even though
+  # `lastMedianPrice` retains the prior non-zero value (per
+  # `computeMedianLineageNext`). Gates `tryDeriveRebalanceState` so the
+  # entity-derive path doesn't keep using a stale median during outages —
+  # `oraclePrice` alone isn't enough since `OracleReported` writes reporter
+  # quotes to it.
+  medianLive: Boolean!
+  # Most recent `OracleReported` report time (from `event.params.timestamp`).
+  # Distinct from `oracleTimestamp` (also bumped by state-sync writes) and
+  # `lastMedianAt` (block timestamp of MedianUpdated). The on-chain
+  # `getRebalancingState` checks expiry via reporter `report.timestamp +
+  # oracleExpiry`; gating the entity-derive path on this field gives parity
+  # with that revert.
+  lastOracleReportAt: BigInt!
+  # `max(event.params.timestamp)` across all `OracleReported` events on this
+  # pool's rate feed. Diagnostic only — NOT used in `tryDeriveRebalanceState`'s
+  # freshness gate, because it would over-bound the contract's median-reporter
+  # expiry (a fresh non-median reporter could keep this advancing while the
+  # median reporter is stale). The under-bound `lastOracleReportAt` stays
+  # authoritative for the gate. Surfaces per-reporter freshness data for
+  # future parity work without changing the safe-by-construction current
+  # behaviour. 0n until the first `OracleReported` for the feed.
+  lastFreshReporterAt: BigInt!
   # `lastMedianPrice` / `lastMedianAt` from the prior MedianUpdated, captured
   # before overwrite so the Oracle Jump alert can render "Previous Oracle
   # Price (Xm ago)". 0 until the second non-zero MedianUpdated.
@@ -64,6 +94,20 @@ type Pool {
   invertRateFeedKnown: Boolean!
   priceDifference: BigInt!
   rebalanceThreshold: Int!
+  # Direction-split thresholds (bps) populated from `FPMMRebalanceThresholdUpdated`
+  # events and seeded at FPMMDeployed. `rebalanceThreshold` is the active
+  # threshold for the current reserve direction, refreshed on every
+  # UpdateReserves/Rebalanced. The split fields let state-sync handlers
+  # pick the active side from the entity store without an `eth_call`.
+  # `rebalanceThresholdsKnown` mirrors `invertRateFeedKnown`: false = unread
+  # (pre-seed or RPC failure), true = real on-chain values persisted. While
+  # false, state-sync's self-heal retries the cached effect on every event
+  # so a transient deploy-time blip doesn't permanently disable the
+  # entity-derived path. The two int fields can both be 0 in the legitimate
+  # "configured to never rebalance" case, distinct from "not yet known".
+  rebalanceThresholdAbove: Int!
+  rebalanceThresholdBelow: Int!
+  rebalanceThresholdsKnown: Boolean!
   lastRebalancedAt: BigInt!
   # Rising-edge timestamp: block time when priceDifference crossed strictly
   # above the 1% tolerance line (devRatio > 1.01). Exact-tolerance pools
@@ -113,6 +157,15 @@ type Pool {
   # Rebalancer liveness (FPMM pools only)
   rebalancerAddress: String!
   rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
+  # Linkage to the underlying v2 BiPoolManager exchange for VirtualPools.
+  # Bytes32 hex (no `0x{chainId}-` prefix — `BiPoolExchange.id` is namespaced).
+  # Null for FPMM pools and for VPs we couldn't resolve at deploy time.
+  # Set once at VirtualPoolDeployed via bytecode pattern extraction (the
+  # exchangeId is an immutable PUSH32 in the swap() preamble).
+  # Indexed because `BiPoolManager.ExchangeCreated` does a reverse `getWhere`
+  # to pair pre-existing VP wrappers with their underlying exchange, and the
+  # dashboard's pool-detail GraphQL query joins Pool → BiPoolExchange on it.
+  wrappedExchangeId: String @index
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
@@ -254,7 +307,15 @@ type BrokerSwapEvent
   # Lowercased; classifies the swap path (BiPoolManager → v2 legacy).
   exchangeProvider: String! @index
   exchangeId: String! @index # bytes32 hex; identifies the exchange row inside the provider
-  trader: String! @index # tx-level signer (not just the Broker caller)
+  # `event.params.trader` from Broker.Swap = `msg.sender` to Broker. For
+  # routed swaps this is a router/aggregator/wrapper contract (MentoRouter,
+  # OpenOcean executor, cluster-9fd2 adapters, etc.); for direct trades from
+  # a UI/SDK this equals `tx.from`. Use `caller` for signer-EOA-level
+  # attribution (volume-leaderboard primary key).
+  brokerCaller: String! @index
+  # tx.from — the EOA that signed the tx. Mirrors the v3 SwapEvent.caller
+  # field semantically; this is the volume-leaderboard primary key.
+  caller: String! @index
   tokenIn: String! @index
   tokenOut: String!
   amountIn: BigInt!
@@ -265,7 +326,7 @@ type BrokerSwapEvent
   # tx.to lowercased — the contract the user's transaction was directed to.
   # Used by the dashboard to disambiguate router-driven swaps (where the
   # Broker is invoked transitively via the v3 Router → VirtualPool wrapper)
-  # from broker-direct swaps (legacy v2 path).
+  # from broker-direct swaps (legacy v2 path). Mirrors v3 SwapEvent.txTo.
   txTo: String! @index
   # True iff `txTo == V3 Router (0x4861840C...)`. Denormalized so the chart
   # can sum daily volume without re-checking the router address per row.
@@ -295,6 +356,24 @@ type BrokerDailySnapshot
   blockNumber: BigInt!
 }
 
+# Per-exchange daily rollup for the v2 exchange backing a VirtualPool.
+# Unlike BrokerDailySnapshot, this intentionally includes EVERY Broker.Swap for
+# the exchangeId: direct v2 swaps, Router -> VirtualPool sibling Broker rows,
+# and third-party aggregator -> VirtualPool -> Broker rows. The VirtualPool
+# detail header uses this as a bounded current-day volume source; do not use it
+# for the homepage legacy-v2 split, which must keep excluding v3 siblings.
+type BrokerExchangeDailySnapshot
+  @index(fields: ["chainId", "exchangeProvider", "exchangeId", "timestamp"]) {
+  id: ID! # `{chainId}-{exchangeProvider}-{exchangeId}-{day}`
+  chainId: Int! @index
+  exchangeId: String! @index # bytes32 hex; normalized lowercase
+  exchangeProvider: String! @index
+  timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  blockNumber: BigInt!
+}
+
 # -----------------------------------------------------------------------------
 # Legacy-v2 producer leaderboard. Mirrors TraderDailySnapshot /
 # AggregatorDailySnapshot (further down in this file) but sourced from
@@ -311,17 +390,21 @@ type BrokerDailySnapshot
 # -----------------------------------------------------------------------------
 
 type BrokerTraderDailySnapshot
-  @index(fields: ["chainId", "trader", "timestamp"]) {
-  id: ID! # "{chainId}-{trader}-{day}"
+  @index(fields: ["chainId", "caller", "timestamp"]) {
+  id: ID! # "{chainId}-{caller}-{day}"
   chainId: Int! @index # exposed to getWhere for the BrokerLeaderboardWindowSnapshot heartbeat flush
-  trader: String! @index
+  # tx.from — the EOA that signed the tx. Mirrors TraderDailySnapshot.trader
+  # semantically; the entity is keyed by signer EOA so the v2 producer
+  # leaderboard reflects the actual person/integrator behind a swap rather
+  # than the immediate Broker caller (`msg.sender`, often a router contract).
+  caller: String! @index
   timestamp: BigInt! @index # UTC day bucket
   swapCount: Int!
   volumeUsdWei: BigInt!
   isSystemAddress: Boolean! @index
-  # Block timestamp of the trader's most recent v2-direct swap within this
+  # Block timestamp of the caller's most recent v2-direct swap within this
   # day. Drives "Last active" at sub-day precision (the day bucket alone would
-  # show every active trader as "today").
+  # show every active caller as "today").
   lastSeenTimestamp: BigInt!
 }
 
@@ -344,8 +427,90 @@ type BrokerAggregatorDailySnapshot
 
 # Existence-only marker: dedupes first-touch increments of
 # BrokerAggregatorDailySnapshot.uniqueTraders. Mirrors AggregatorTraderDayMarker.
+# Keyed by `caller` (tx.from / signer EOA) so uniqueTraders counts distinct
+# signer EOAs per day, not distinct msg.sender contracts.
 type BrokerAggregatorTraderDayMarker {
-  id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+  id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
+}
+
+# ============================================================================
+# BiPoolManager exchanges (v2 backend that VirtualPools wrap)
+#
+# A VirtualPool is a thin v3-flavored wrapper over a BiPoolManager exchange:
+# its `swap()` calls `Broker.swapIn(exchangeProvider, exchangeId, ...)` and
+# its `getReserves()` reads the v2 exchange's bucket curve. Liquidity lives
+# in the Mento Reserve, the price curve is bucket-based with a periodic
+# oracle-driven reset.
+#
+# BiPoolExchange persists everything `BiPoolManager.getPoolExchange(exchangeId)`
+# returns (asset0/1, pricingModule, spread, referenceRateFeedID, reset
+# frequency, etc.) plus denormalized latest bucket values for cheap
+# rendering. The dashboard's pool-detail page reads this entity instead of
+# RPC-polling BiPoolManager every render.
+#
+# Linked from `Pool.wrappedExchangeId` (set at VirtualPoolDeployed time);
+# the dashboard joins poolId → exchangeId → BiPoolExchange.
+# ============================================================================
+type BiPoolExchange {
+  id: ID! # "{chainId}-{exchangeId}" — exchangeId is bytes32 hex
+  chainId: Int! @index
+  exchangeId: String! # raw bytes32 hex without chain prefix
+  exchangeProvider: String! # BiPoolManager contract address (lowercased)
+  asset0: String!
+  asset1: String!
+  pricingModule: String!
+  # Friendly name resolved via `contractEntries(chainId)` at write time
+  # (e.g. "ConstantSum"). Null when the deployed pricing module isn't in
+  # @mento-protocol/contracts — the UI renders "—" in that case.
+  pricingModuleName: String
+  # FixidityLib value (1e24 unit). Divide by 1e24 for the swap fee fraction.
+  # Updated on `SpreadUpdated` events.
+  spread: BigInt!
+  # SortedOracles feed used to recompute buckets on each reset. Indexed
+  # because the SortedOracles handler joins on this to write OracleSnapshot
+  # rows for v2-backed feeds (mirroring how it currently joins on
+  # `Pool.referenceRateFeedID`).
+  referenceRateFeedID: String! @index
+  referenceRateResetFrequency: BigInt! # seconds between bucket resets
+  minimumReports: BigInt!
+  stablePoolResetSize: BigInt!
+  # Latest bucket reserves, denormalized from BucketUpdate so the panel
+  # doesn't have to join the time series for the live tile. Updated on
+  # every `BucketsUpdated` event.
+  bucket0: BigInt!
+  bucket1: BigInt!
+  lastBucketUpdate: BigInt!
+  # True after `ExchangeDestroyed` fires. The wrapper VirtualPool stays
+  # deployed but routes nothing — the UI surfaces this prominently.
+  isDeprecated: Boolean!
+  # poolId of the VirtualPool that wraps this exchange, if any. Set when
+  # `VirtualPoolDeployed` fires AFTER the exchange. Null for v2 exchanges
+  # that don't have a v3 wrapper (they're still tradable via Broker).
+  # Indexed because the dashboard's POOL_V2_EXCHANGE query filters by this.
+  wrappedByPoolId: String @index
+  # True once a BiPoolManager handler has looked for a wrapping Pool and
+  # either found one or intentionally stopped retrying the v2-only orphan path.
+  # Late VP-side self-heal can still set wrappedByPoolId directly.
+  wrappedByPoolIdChecked: Boolean!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# Per-event time series of bucket-reserve resets. Captured from
+# `BucketsUpdated` events (cadence is per-exchange `referenceRateResetFrequency`,
+# typically 360s on Celo). Phase 4's spot-price chart consumes this to render
+# the bucket curve over time.
+type BucketUpdate @index(fields: ["exchangeId", "blockTimestamp"]) {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  exchangeId: String! @index
+  bucket0: BigInt!
+  bucket1: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
 }
 
 type FactoryDeployment {
@@ -548,13 +713,13 @@ type PoolDailyFeeSnapshot @index(fields: ["chainId", "poolId", "timestamp"]) {
 # TraderDailySnapshot query (today's rows always fit in 1000).
 #
 # Generated by a per-chain heartbeat on the first swap of a new UTC day:
-# the prior closed day's snapshots are flushed for all four windowKeys.
+# the prior closed day's snapshots are flushed for all five windowKeys.
 # See indexer-envio/src/leaderboardWindowFlush.ts.
 type LeaderboardWindowSnapshot
   @index(fields: ["chainId", "windowKey", "snapshotDay"]) {
   id: ID! # "{chainId}-{windowKey}-{snapshotDay}"
   chainId: Int! @index
-  windowKey: String! @index # "24h" | "7d" | "30d" | "all"
+  windowKey: String! @index # "24h" | "7d" | "30d" | "90d" | "all"
   snapshotDay: BigInt! @index # UTC-midnight day this row was flushed at
   windowStartDay: BigInt! # see leaderboardWindowSnapshot.ts:windowStartDay
   # Totals exclude isSystemAddress=true rows (matches the dashboard's
@@ -589,6 +754,8 @@ type LeaderboardWindowSnapshot
   # exactly what the slice-subtraction merge needs.
   firstDayExclusiveUniqueTraders: Int!
   firstDayExclusiveUniqueTradersIncludingSystem: Int!
+  firstDayExclusiveTraders: [String!]!
+  firstDayExclusiveTradersIncludingSystem: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -616,6 +783,8 @@ type BrokerLeaderboardWindowSnapshot
   firstDaySwapCountIncludingSystem: Int!
   firstDayExclusiveUniqueTraders: Int!
   firstDayExclusiveUniqueTradersIncludingSystem: Int!
+  firstDayExclusiveTraders: [String!]!
+  firstDayExclusiveTradersIncludingSystem: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -625,7 +794,7 @@ type BrokerLeaderboardWindowSnapshot
 # so a long gap in one venue's events doesn't block the other.
 #
 # At the very moment a re-sync catches up to head, the most recent
-# flushed day is "today − 1 UTC day", because the heartbeat fires only
+# flushed day is "today - 1 UTC day", because the heartbeat fires only
 # when an event from a newer day arrives. The dashboard fills the
 # today-partial gap via a direct TraderDailySnapshot query.
 type LeaderboardChainState {
@@ -997,6 +1166,15 @@ type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   timestamp: BigInt! @index
   swapCount: Int!
   uniquePools: Int!
+  # Aggregator names this trader touched on this UTC day. Used to keep
+  # AggregatorDailySnapshot's primary fields consistent with the day-sticky
+  # isSystemAddress flag if a trader flips into system classification after
+  # earlier same-day non-system swaps.
+  aggregatorKeys: [String!]!
+  # Pools this trader touched on this UTC day. Used to keep pool/day rollups
+  # consistent with the day-sticky isSystemAddress flag if a trader flips into
+  # system classification after earlier same-day non-system swaps.
+  poolIds: [String!]!
   volumeUsdWei: BigInt!
   feesPaidUsdWei: BigInt!
   isSystemAddress: Boolean! @index
@@ -1029,6 +1207,22 @@ type TraderPoolDailySnapshot
   feesPaidUsdWei: BigInt!
 }
 
+type PoolDailyVolumeSnapshot
+  @index(fields: ["chainId", "poolId", "timestamp"]) {
+  id: ID! # "{chainId}-{poolId}-{day}"
+  chainId: Int!
+  poolId: String! @index
+  timestamp: BigInt! @index
+  # Primary fields exclude system-address swaps and drive the dashboard's
+  # default view. The *IncludingSystem siblings back the page-level toggle.
+  swapCount: Int!
+  swapCountIncludingSystem: Int!
+  volumeUsdWei: BigInt! @config(precision: 78)
+  volumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 type AggregatorDailySnapshot
   @index(fields: ["chainId", "aggregator", "timestamp"]) {
   id: ID! # "{chainId}-{aggregator}-{day}"
@@ -1051,16 +1245,31 @@ type AggregatorDailySnapshot
   # across days if multiple routers map to the same canonical name.
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
+  # Primary fields exclude system-address callers and drive the dashboard's
+  # default view. The *IncludingSystem siblings back the page-level toggle.
   swapCount: Int!
+  swapCountIncludingSystem: Int!
   uniqueTraders: Int!
+  uniqueTradersIncludingSystem: Int!
   volumeUsdWei: BigInt!
+  volumeUsdWeiIncludingSystem: BigInt!
   feesPaidUsdWei: BigInt!
+  feesPaidUsdWeiIncludingSystem: BigInt!
 }
 
-# Existence-only marker entities used to dedupe first-touch increments of
-# `uniqueTraders` and `uniquePools`. Cheaper than scanning the parent table.
+# Marker entities used to dedupe first-touch increments of `uniqueTraders` and
+# keep enough per-trader contribution state to correct AggregatorDailySnapshot
+# primary fields if a trader flips into day-sticky system classification.
 type AggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+  chainId: Int!
+  aggregator: String!
+  trader: String!
+  timestamp: BigInt!
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  feesPaidUsdWei: BigInt!
+  isSystemAddress: Boolean!
 }
 
 type TraderPoolDayMarker {

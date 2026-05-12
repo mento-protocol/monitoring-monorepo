@@ -131,10 +131,36 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # react-doctor --diff needs the base ref's history to compute the
+          # changed-files set against origin/${{ github.base_ref }}.
+          fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
+      - name: React Doctor (diff vs base)
+        # PR-only: scans files changed vs the PR base and fails on any
+        # warning/error in those files. The full-score floor below keeps the
+        # dashboard at 100 / 100; accepted project-wide silences live in
+        # ui-dashboard/react-doctor.config.json.
+        #
+        # `git switch -c` reattaches HEAD to a named branch:
+        # actions/checkout for PRs leaves us on a detached merge commit, and
+        # react-doctor's `getDiffInfo` returns null when
+        # `git rev-parse --abbrev-ref HEAD` is "HEAD", silently falling back
+        # to a full scan that would surface the entire backlog.
+        if: github.event_name == 'pull_request'
+        run: |
+          git switch -c __react_doctor_scan
+          pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
+      - name: React Doctor score floor
+        run: |
+          score="$(pnpm --filter @mento-protocol/ui-dashboard react-doctor --full --score --offline | tail -n 1 | tr -d '[:space:]')"
+          if [ "$score" != "100" ]; then
+            echo "Expected ui-dashboard react-doctor score 100, got ${score}" >&2
+            exit 1
+          fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0

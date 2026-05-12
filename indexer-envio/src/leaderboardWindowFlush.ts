@@ -5,13 +5,19 @@
 // the dashboard adds today's partial from a small TraderDailySnapshot
 // query (see ui-dashboard/src/lib/queries/leaderboard.ts).
 //
-// Cost: one `getWhere({chainId:{_eq:n}})` per UTC-day rollover per chain
-// (not per event), reused across all 4 in-memory window aggregations.
-// Roughly O(active_traders × days_indexed) memory at flush time, ~21k rows /
+// Cost: one chainId getWhere per UTC-day rollover per chain (not per
+// event), reused across all 4 in-memory window aggregations. Roughly
+// O(active_traders × days_indexed) memory at flush time, ~21k rows /
 // 100ms wall on Celo's "all" window — within Envio's per-event handler
 // budget.
 
-import type { BrokerLeaderboardWindowSnapshot, EvmOnEventContext } from "envio";
+import type {
+  BrokerLeaderboardWindowSnapshot,
+  BrokerTraderDailySnapshot,
+  LeaderboardChainState,
+  LeaderboardWindowSnapshot,
+  TraderDailySnapshot,
+} from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "./helpers.js";
 import {
   WINDOW_KEYS,
@@ -24,7 +30,20 @@ import {
 // v3 — TraderDailySnapshot → LeaderboardWindowSnapshot
 // ────────────────────────────────────────────────────────────────────
 
-export type V3FlushContext = EvmOnEventContext;
+export type V3FlushContext = {
+  TraderDailySnapshot: {
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<TraderDailySnapshot[]>;
+  };
+  LeaderboardChainState: {
+    get: (id: string) => Promise<LeaderboardChainState | undefined>;
+    set: (entity: LeaderboardChainState) => void;
+  };
+  LeaderboardWindowSnapshot: {
+    set: (entity: LeaderboardWindowSnapshot) => void;
+  };
+};
 
 /** Flush all 4 window snapshots for a single (chainId, snapshotDay).
  *  Idempotent: re-running with the same args overwrites with identical rows. */
@@ -97,7 +116,20 @@ export async function maybeHeartbeatFlushV3(args: {
 // v2 — BrokerTraderDailySnapshot → BrokerLeaderboardWindowSnapshot
 // ────────────────────────────────────────────────────────────────────
 
-export type V2FlushContext = EvmOnEventContext;
+export type V2FlushContext = {
+  BrokerTraderDailySnapshot: {
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<BrokerTraderDailySnapshot[]>;
+  };
+  LeaderboardChainState: {
+    get: (id: string) => Promise<LeaderboardChainState | undefined>;
+    set: (entity: LeaderboardChainState) => void;
+  };
+  BrokerLeaderboardWindowSnapshot: {
+    set: (entity: BrokerLeaderboardWindowSnapshot) => void;
+  };
+};
 
 export async function flushV2LeaderboardWindowSnapshots(args: {
   context: V2FlushContext;
@@ -109,7 +141,23 @@ export async function flushV2LeaderboardWindowSnapshots(args: {
   const rows = await args.context.BrokerTraderDailySnapshot.getWhere({
     chainId: { _eq: args.chainId },
   });
-  const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
+  // BrokerTraderDailySnapshot keys by `caller` (tx.from / signer EOA), but
+  // the shared `aggregatePerWindow` helper expects a `trader` field on each
+  // row (named for v3's TraderDailySnapshot). Map `caller → trader` here so
+  // both venues feed identically structured rows into the aggregator.
+  const sharedRows = rows.map((r) => ({
+    chainId: r.chainId,
+    trader: r.caller,
+    timestamp: r.timestamp,
+    volumeUsdWei: r.volumeUsdWei,
+    swapCount: r.swapCount,
+    isSystemAddress: r.isSystemAddress,
+  }));
+  const grouped = aggregatePerWindow(
+    sharedRows,
+    args.chainId,
+    args.snapshotDay,
+  );
   for (const w of WINDOW_KEYS) {
     // BrokerLeaderboardWindowSnapshot is structurally identical to
     // LeaderboardWindowSnapshot — see schema.graphql.

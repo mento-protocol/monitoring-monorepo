@@ -1,6 +1,6 @@
 "use client";
 
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
@@ -19,7 +19,7 @@ interface HealthPanelProps {
  */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
-  const isVirtual = pool.source?.includes("virtual");
+  const isVirtual = isVirtualPool(pool);
   // Trust only `hasHealthData === true` — `pool.healthStatus` is always
   // populated now (indexer's DEFAULT_ORACLE_FIELDS sets it to "N/A" even
   // for no-data pools), so a `!== undefined` check would silently hide

@@ -1,16 +1,13 @@
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./redis";
+import { encodeReportFields, REPORTS_KEY } from "./address-report-fields";
 
 // Re-export isomorphic types and helpers so callers can import from a single
 // path. Mirrors the address-labels split.
 export {
   type AddressReport,
-  type AddressReportRecord,
-  type AddressReportsIndex,
   MAX_BODY_LENGTH,
   MAX_TITLE_LENGTH,
   sanitizeReportInput,
-  upgradeReport,
-  upgradeReports,
 } from "./address-reports-shared";
 
 import {
@@ -25,19 +22,6 @@ import {
 // report applies wherever the address appears. Earlier per-scope storage
 // caused recurring scope-mismatch bugs that the model itself doesn't
 // justify (PR #330).
-const REPORTS_KEY = "reports";
-
-function getRedis(): Redis {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    throw new Error(
-      "Upstash Redis not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
-    );
-  }
-  return new Redis({ url, token });
-}
-
 // Atomic upsert script. Reads prior, increments version, preserves
 // createdAt, writes. Atomicity guards the version monotonicity invariant
 // against concurrent writers — without the script, two simultaneous saves
@@ -189,9 +173,5 @@ export async function importReports(
   const entries = Object.entries(reports);
   if (entries.length === 0) return;
   const redis = getRedis();
-  const fields: Record<string, string> = {};
-  for (const [addr, report] of entries) {
-    fields[addr.toLowerCase()] = JSON.stringify(report);
-  }
-  await redis.hset(REPORTS_KEY, fields);
+  await redis.hset(REPORTS_KEY, encodeReportFields(entries));
 }

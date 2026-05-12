@@ -111,6 +111,13 @@ describe("middleware", () => {
     expect(res).toBeUndefined();
   });
 
+  it("allows unauthenticated /api/address-labels/restore through to route auth", () => {
+    const res = middlewareCallback(
+      makeReq("/api/address-labels/restore", { method: "POST" }),
+    );
+    expect(res).toBeUndefined();
+  });
+
   it("allows authenticated PUT /api/address-labels through", () => {
     const res = middlewareCallback(
       makeReq("/api/address-labels", { method: "PUT", authenticated: true }),

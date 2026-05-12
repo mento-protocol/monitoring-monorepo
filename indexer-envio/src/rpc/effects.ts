@@ -23,18 +23,24 @@
 import { createEffect, S } from "envio";
 import {
   fetchErc20Decimals,
-  fetchFees,
   fetchInvertRateFeed,
-  fetchNumReporters,
-  fetchRebalanceIncentiveAtBlock,
-  fetchRebalanceThreshold,
+  fetchRebalanceThresholds,
   fetchRebalancingState,
-  fetchReferenceRateFeedID,
-  fetchReportExpiry,
   fetchReserves,
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
 } from "./pool-state.js";
+import {
+  fetchNumReporters,
+  fetchReferenceRateFeedID,
+  fetchReportExpiry,
+} from "./oracle-state.js";
+import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees.js";
+import {
+  fetchPoolExchange,
+  fetchVirtualPoolExchangeId,
+  VP_PROBE_RPC_ERROR,
+} from "./biPoolManager.js";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
@@ -42,17 +48,16 @@ import {
   fetchBreakerList,
   type BreakerKindRpc,
 } from "./breakers.js";
+import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
 // re-exports from envio omit `S.literal`, so string-union types like
 // `BreakerKindRpc` ride as `S.string` and get cast at the call site.
 //
-// `S.nullable(T)` accepts null on input but produces `T | undefined` on
-// output (Sury's design). Effect handlers that wrap fetchers returning
-// `T | null` therefore coalesce `null ?? null` before returning. Call
-// sites awaiting `context.effect(...)` see `T | undefined`; legacy callers
-// of `fetch*` continue to see `T | null` until they migrate in commits 2-3.
+// `S.nullable(T)` accepts null on input and produces `T | null` on output.
+// Effect handlers that wrap fetchers returning `T | null` return null on
+// misses; callers skip writes and retry on the next event.
 // ---------------------------------------------------------------------------
 
 const reservesShape = S.schema({
@@ -104,6 +109,31 @@ const breakerFeedStateShape = S.schema({
   referenceValue: S.nullable(S.bigint),
 });
 
+// BiPoolManager.getPoolExchange struct as flattened by `fetchPoolExchange`.
+const poolExchangeShape = S.schema({
+  asset0: S.string,
+  asset1: S.string,
+  pricingModule: S.string,
+  bucket0: S.bigint,
+  bucket1: S.bigint,
+  lastBucketUpdate: S.bigint,
+  spread: S.bigint,
+  referenceRateFeedID: S.string,
+  referenceRateResetFrequency: S.bigint,
+  minimumReports: S.bigint,
+  stablePoolResetSize: S.bigint,
+});
+
+const vpExchangeIdShape = S.schema({
+  exchangeProvider: S.string,
+  exchangeId: S.string,
+});
+
+const feeTokenMetaShape = S.schema({
+  symbol: S.string,
+  decimals: S.int32,
+});
+
 // ---------------------------------------------------------------------------
 // Group A — immutable / governance-rare, address-keyed.
 // `cache: true` on medium tier — these values are per-(chainId, address)
@@ -117,7 +147,7 @@ const breakerFeedStateShape = S.schema({
 // every subsequent self-heal call would receive the cached miss instead
 // of retrying the RPC after the network recovered. The pattern is:
 // fetcher returns null on failure → handler sets cache=false → returns
-// undefined → caller skips the entity write → next event re-fetches.
+// null → caller skips the entity write → next event re-fetches.
 // ---------------------------------------------------------------------------
 
 export const erc20DecimalsEffect = createEffect(
@@ -166,7 +196,7 @@ export const referenceRateFeedIDEffect = createEffect(
 
 // Output is nullable: with `preload_handlers: true` an effect that fabricated
 // `false` on a transient RPC blip during preload would memoize and persist
-// the wrong orientation — call sites must skip the assignment on undefined
+// the wrong orientation — call sites must skip the assignment on null
 // and let the schema default ride until the next event re-fetches.
 export const invertRateFeedEffect = createEffect(
   {
@@ -190,32 +220,36 @@ export const invertRateFeedEffect = createEffect(
   },
 );
 
-// Output nullable so transient RPC failures (`fetchRebalanceThreshold`
-// returns `null`) can opt out of caching. Without this, a single failed
-// read during the first touch would persist a sentinel in Postgres and
-// every subsequent self-heal call would receive the cached miss instead
-// of retrying. Callers (factory.ts) already handle `undefined` via the
-// `> 0` gate that doubles for "not yet known".
-export const rebalanceThresholdEffect = createEffect(
+const rebalanceThresholdsShape = S.schema({
+  above: S.int32,
+  below: S.int32,
+});
+
+// Block-scoped: thresholds are governance-mutable via
+// `RebalanceThresholdUpdated`, so the cached value would have to vary by
+// block. Cross-deploy persistent caching of a per-block result has
+// negligible benefit (the effect runs only at FPMMDeployed and on
+// self-heal, not in the hot path), so stay `cache: false` permanently
+// — same rule as the other Group C block-scoped effects.
+export const rebalanceThresholdsEffect = createEffect(
   {
-    name: "rebalanceThreshold",
-    input: { chainId: S.int32, poolAddress: S.string },
-    output: S.nullable(S.int32),
+    name: "rebalanceThresholds",
+    input: {
+      chainId: S.int32,
+      poolAddress: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(rebalanceThresholdsShape),
     rateLimit: { calls: 200, per: "second" },
-    cache: true,
+    cache: false,
   },
-  async ({ input, context }) => {
-    const result = await fetchRebalanceThreshold(
+  async ({ input, context }) =>
+    (await fetchRebalanceThresholds(
       input.chainId,
       input.poolAddress,
+      input.blockNumber,
       context.log,
-    );
-    if (result === null) {
-      context.cache = false;
-      return null;
-    }
-    return result;
-  },
+    )) ?? null,
 );
 
 export const tokenDecimalsScalingEffect = createEffect(
@@ -327,6 +361,33 @@ export const feesEffect = createEffect(
   },
 );
 
+export const feeTokenMetaEffect = createEffect(
+  {
+    name: "feeTokenMeta",
+    input: { chainId: S.int32, tokenAddress: S.string },
+    output: feeTokenMetaShape,
+    rateLimit: { calls: 200, per: "second" },
+    cache: true,
+  },
+  // `resolveFeeTokenMeta` returns UNKNOWN/18 only for transient RPC failure
+  // with no static fallback. Let the handler persist that degraded event, but
+  // don't save it to Envio's durable effect cache — the next event must retry.
+  async ({ input, context }) => {
+    const result = await resolveFeeTokenMeta(
+      input.chainId,
+      input.tokenAddress,
+      context.log,
+    );
+    if (
+      result.symbol === UNKNOWN_FEE_TOKEN_META.symbol &&
+      result.decimals === UNKNOWN_FEE_TOKEN_META.decimals
+    ) {
+      context.cache = false;
+    }
+    return result;
+  },
+);
+
 /** Convert the `feesEffect` output (explicit `undefined` keys) into a
  * Partial-style object (omits undefined keys). Use this at call sites that
  * spread the result onto a Pool entity whose `lpFee` / `protocolFee` /
@@ -338,6 +399,7 @@ export function compactFees(
         protocolFee: number | undefined;
         rebalanceReward: number | undefined;
       }
+    | null
     | undefined,
 ): Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }> {
   if (!f) return {};
@@ -545,7 +607,11 @@ export const breakerKindEffect = createEffect(
   // classifications and safe to cache. Skip the cache only on null
   // so a flaky probe doesn't poison every later breaker bootstrap.
   async ({ input, context }) => {
-    const result = await fetchBreakerKind(input.chainId, input.breakerAddress);
+    const result = await fetchBreakerKind(
+      input.chainId,
+      input.breakerAddress,
+      context.log,
+    );
     if (result === null) {
       context.cache = false;
       return null;
@@ -601,13 +667,83 @@ export const breakerFeedStateEffect = createEffect(
       context.log,
     );
     if (result === null) return null;
-    // The schema's nullable inner fields output `T | undefined`, but the
-    // fetcher returns `T | null` for kind-specific fields. Map at the boundary.
+    // The schema's nullable inner fields output `T | null`; the fetcher
+    // returns `T | null` for kind-specific fields. Map at the boundary.
     return {
       ...result,
       smoothingFactor: result.smoothingFactor ?? null,
       medianRatesEMA: result.medianRatesEMA ?? null,
       referenceValue: result.referenceValue ?? null,
     };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Group G — BiPoolManager / VirtualPool seed reads.
+//
+// Both effects fire on entity creation or self-heal, so they're not on the
+// per-event hot path for already-healed rows. Caching:
+//   - `poolExchangeEffect`: `cache: false`. The struct is read at the event
+//     block and includes bucket reserves which mutate every
+//     `referenceRateResetFrequency` (~360s); reindexing a block range expects
+//     a fresh block-scoped read, not a cached value from another block.
+//   - `vpExchangeIdEffect`: `cache: true`. Bytecode is immutable for a
+//     deployed contract, so a cache row keyed by (chainId, vpAddress) is
+//     accurate forever and skips an RPC on every full re-sync.
+// ---------------------------------------------------------------------------
+
+export const poolExchangeEffect = createEffect(
+  {
+    name: "poolExchange",
+    input: {
+      chainId: S.int32,
+      exchangeProvider: S.string,
+      exchangeId: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(poolExchangeShape),
+    rateLimit: { calls: 50, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchPoolExchange(
+      input.chainId,
+      input.exchangeProvider,
+      input.exchangeId,
+      input.blockNumber,
+      context.log,
+    )) ?? null,
+);
+
+export const vpExchangeIdEffect = createEffect(
+  {
+    name: "vpExchangeId",
+    input: { chainId: S.int32, vpAddress: S.string },
+    output: S.nullable(vpExchangeIdShape),
+    rateLimit: { calls: 50, per: "second" },
+    cache: true,
+  },
+  // `fetchVirtualPoolExchangeId` returns three discriminated cases:
+  //   1. `VirtualPoolExchangeId` — bytecode matched the VP pattern → cache
+  //      forever (bytecode is immutable per address).
+  //   2. `null` — got bytecode (or `0x`) but pattern didn't match → permanent
+  //      not-VP classification, cache forever as `null`. After PR #369
+  //      dropped the source-string gate in `selfHealWrappedExchangeId`, FPMM
+  //      addresses also reach this effect; caching their not-VP miss is what
+  //      keeps the FPMM hot path from paying an `eth_getCode` per event.
+  //   3. `VP_PROBE_RPC_ERROR` — `getCode` itself rejected → transient,
+  //      `context.cache = false` so a deployment-time RPC blip doesn't
+  //      persist as a permanent miss.
+  async ({ input, context }) => {
+    const result = await fetchVirtualPoolExchangeId(
+      input.chainId,
+      input.vpAddress,
+      context.log,
+    );
+    if (result === VP_PROBE_RPC_ERROR) {
+      context.cache = false;
+      return null;
+    }
+    return result ?? null;
   },
 );

@@ -197,6 +197,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -236,6 +237,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -275,6 +277,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -325,6 +328,7 @@ describe("buildPoolVolumeMap", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -408,6 +412,7 @@ describe("buildPoolVolumeMapInWindow", () => {
         createdAtTimestamp: "0",
         updatedAtBlock: "0",
         updatedAtTimestamp: "0",
+        tokenDecimalsKnown: true,
       },
     ];
 
@@ -462,6 +467,72 @@ describe("getSnapshotVolumeInUsd", () => {
       ),
     ).toBeNull();
   });
+
+  it("returns null when tokenDecimalsKnown is false (avoid 18/18 fake-scale on USDC leg)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-usdc",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm (USD-pegged)
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18, // schema-default — actual would be 6 for USDC etc.
+      tokenDecimalsKnown: false,
+    };
+    expect(
+      getSnapshotVolumeInUsd(
+        {
+          poolId: "pool-usdc",
+          timestamp: "0",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000", // 1 USDm in 18dp
+          swapVolume1: "0",
+        },
+        pool,
+        network,
+        EMPTY_RATES,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when tokenDecimalsKnown is undefined (strict gate — fail closed)", () => {
+    // Strict `!== true`: undefined signals either a legacy schema OR a
+    // transient EXT-query failure. Both should fail closed because the
+    // current indexer populates the field on every pool, so undefined
+    // is no longer a "deploy-window default" worth trusting.
+    const pool: Pool = {
+      id: "pool-legacy",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      source: "fpmm_factory",
+      createdAtBlock: "0",
+      createdAtTimestamp: "0",
+      updatedAtBlock: "0",
+      updatedAtTimestamp: "0",
+      token0Decimals: 18,
+      token1Decimals: 18,
+      // tokenDecimalsKnown intentionally undefined — must fail closed.
+    };
+    expect(
+      getSnapshotVolumeInUsd(
+        {
+          poolId: "pool-legacy",
+          timestamp: "0",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000",
+          swapVolume1: "0",
+        },
+        pool,
+        network,
+        EMPTY_RATES,
+      ),
+    ).toBeNull();
+  });
 });
 
 const BASE_POOL_FIELDS = {
@@ -470,6 +541,10 @@ const BASE_POOL_FIELDS = {
   createdAtTimestamp: "0",
   updatedAtBlock: "0",
   updatedAtTimestamp: "0",
+  // PR 1.7: USD math now requires `tokenDecimalsKnown === true` (strict).
+  // Default the shared fixture to a fully-indexed-trusted pool; tests
+  // exercising the untrusted gate explicitly override `false` / undefined.
+  tokenDecimalsKnown: true,
 };
 
 describe("poolTotalVolumeUSD", () => {
@@ -514,6 +589,22 @@ describe("poolTotalVolumeUSD", () => {
       token1Decimals: 18,
       notionalVolume0: "1000000000000000000",
       notionalVolume1: "2000000000000000000",
+    };
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeNull();
+  });
+
+  it("returns null when tokenDecimalsKnown is false (cumulative variant of getSnapshotVolumeInUsd gate)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-untrusted",
+      chainId: 42220,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18, // schema-default — actual could be 6
+      tokenDecimalsKnown: false,
+      notionalVolume0: "5000000000000000000",
+      notionalVolume1: "0",
     };
     expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeNull();
   });

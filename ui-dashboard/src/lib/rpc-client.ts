@@ -9,15 +9,24 @@
 import { createPublicClient, http, parseAbi, type PublicClient } from "viem";
 import { ERC20_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
 
-// Client cache — keyed by RPC URL (typically 1-2 entries per network)
+// Client cache — keyed by RPC URL + transport timeout (typically 1-2 entries
+// per network). Without the timeout in the key, callers that need a tighter
+// per-request deadline would silently inherit whichever timeout landed
+// first.
 
 const clientCache = new Map<string, PublicClient>();
 
-export function getViemClient(rpcUrl: string): PublicClient {
-  let client = clientCache.get(rpcUrl);
+export function getViemClient(
+  rpcUrl: string,
+  opts: { timeoutMs?: number } = {},
+): PublicClient {
+  const key = `${rpcUrl}|${opts.timeoutMs ?? 0}`;
+  let client = clientCache.get(key);
   if (client) return client;
-  client = createPublicClient({ transport: http(rpcUrl) });
-  clientCache.set(rpcUrl, client);
+  client = createPublicClient({
+    transport: http(rpcUrl, { timeout: opts.timeoutMs }),
+  });
+  clientCache.set(key, client);
   return client;
 }
 

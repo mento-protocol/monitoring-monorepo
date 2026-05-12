@@ -6,6 +6,7 @@ import {
 } from "@/lib/rebalance-check";
 import { NETWORKS, isConfiguredNetworkId } from "@/lib/networks";
 import { isValidAddress } from "@/lib/format";
+import { redactRpcUrl } from "@/lib/redact-rpc-url";
 
 const CACHE_TTL_MS = 30_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 500;
@@ -42,6 +43,41 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
   cache.set(key, entry);
 }
 
+type DedupOutcome<T> =
+  | { kind: "hit"; result: T }
+  | { kind: "saturated" }
+  | { kind: "fresh"; promise: Promise<T> };
+
+/**
+ * Cache + in-flight dedup for read-only GET responses. Encapsulates the
+ * `inFlight.set/delete` mutations so the GET handler has no observable
+ * side effects of its own — only `getOrDispatch` does, and it's an
+ * idempotent read-through cache primitive.
+ */
+function getOrDispatch(
+  key: string,
+  produce: () => Promise<RebalanceCheckResult>,
+): DedupOutcome<RebalanceCheckResult> {
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { kind: "hit", result: cached.result };
+  }
+  const existing = inFlight.get(key);
+  if (existing) return { kind: "fresh", promise: existing };
+  if (inFlight.size >= INFLIGHT_MAX_ENTRIES) return { kind: "saturated" };
+
+  const promise = produce()
+    .then((result) => {
+      setCacheEntry(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+      return result;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+  inFlight.set(key, promise);
+  return { kind: "fresh", promise };
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const network = req.nextUrl.searchParams.get("network");
   const pool = req.nextUrl.searchParams.get("pool");
@@ -72,36 +108,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const key = `${network}:${pool.toLowerCase()}:${strategy.toLowerCase()}`;
-  const now = Date.now();
 
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > now) {
-    return NextResponse.json(cached.result);
+  const outcome = getOrDispatch(key, () =>
+    runWithRetry(pool, strategy, rpcUrl),
+  );
+  if (outcome.kind === "hit") {
+    return NextResponse.json(outcome.result);
   }
-
-  let pending = inFlight.get(key);
-  if (!pending) {
-    // Refuse new upstream calls once we're saturated so attacker-controlled
-    // keys can't blow memory/RPC quota. Existing in-flight keys still resolve.
-    if (inFlight.size >= INFLIGHT_MAX_ENTRIES) {
-      return NextResponse.json({ error: "Server busy" }, { status: 503 });
-    }
-    // Populate the cache INSIDE the promise chain (before .finally clears
-    // inFlight) so we never leave a window where a new request sees neither
-    // inFlight nor cache and fires a duplicate upstream RPC.
-    pending = runWithRetry(pool, strategy, rpcUrl)
-      .then((result) => {
-        setCacheEntry(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
-        return result;
-      })
-      .finally(() => {
-        inFlight.delete(key);
-      });
-    inFlight.set(key, pending);
+  if (outcome.kind === "saturated") {
+    return NextResponse.json({ error: "Server busy" }, { status: 503 });
   }
 
   try {
-    const result = await pending;
+    const result = await outcome.promise;
     return NextResponse.json(result);
   } catch (err) {
     // Ship the upstream error to Sentry after redacting the RPC URL from
@@ -119,34 +138,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-/** Exported for testing. See redact-rpc-url.test.ts. */
-export function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
-  if (!(err instanceof Error)) {
-    if (typeof err === "string") return err.replaceAll(rpcUrl, "[RPC_URL]");
-    return err;
-  }
-  if (!containsRpcUrl(err, rpcUrl)) return err;
-  const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
-  // V8 stacks start with `Error: <message>\n    at …`, so the original
-  // URL is embedded in the stack's first line. Scrub the stack string too.
-  copy.stack = err.stack?.replaceAll(rpcUrl, "[RPC_URL]");
-  copy.name = err.name;
-  // viem / ethers wrap the transport error as `cause`; recurse so the URL
-  // can't leak through the cause chain (Sentry serializes `cause`).
-  if ("cause" in err && err.cause !== undefined) {
-    copy.cause = redactRpcUrl(err.cause, rpcUrl);
-  }
-  return copy;
-}
-
-/** Exported for testing. See redact-rpc-url.test.ts. */
-export function containsRpcUrl(err: Error, rpcUrl: string): boolean {
-  if (err.message.includes(rpcUrl)) return true;
-  if (err.stack?.includes(rpcUrl)) return true;
-  if (err.cause instanceof Error) return containsRpcUrl(err.cause, rpcUrl);
-  if (typeof err.cause === "string") return err.cause.includes(rpcUrl);
-  return false;
-}
+// Lifted to `@/lib/redact-rpc-url` so future routes that need the same
+// redaction discipline don't re-implement it. Re-exported here for
+// backwards-compat with `__tests__/redact-rpc-url.test.ts`.
+export { redactRpcUrl, containsRpcUrl } from "@/lib/redact-rpc-url";
 
 async function runWithRetry(
   pool: string,

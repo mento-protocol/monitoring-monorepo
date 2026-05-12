@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  ARKHAM_TAG,
   ArkhamAuthError,
   ArkhamRateLimitedError,
   RATE_LIMIT_BACKOFF_MS,
@@ -14,6 +13,7 @@ import {
   type ArkhamEnrichedAddress,
 } from "@/lib/arkham";
 import {
+  ARKHAM_TAG,
   isArkhamSourced,
   normalizeArkhamLegacy,
 } from "@/lib/address-labels-shared";

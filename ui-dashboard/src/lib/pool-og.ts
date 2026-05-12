@@ -19,9 +19,14 @@ import {
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
-import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import {
+  ALL_POOLS_WITH_HEALTH,
+  POOL_DETAIL_WITH_HEALTH,
+  POOL_THRESHOLDS_KNOWN_EXT,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
-import type { Pool, PoolSnapshot } from "@/lib/types";
+import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
 
 // Lean, OG-specific daily snapshot query. Only pulls the fields and row count
 // needed for the sparkline + 7d WoW — a fraction of POOL_DAILY_SNAPSHOTS_CHART's
@@ -76,11 +81,10 @@ export type PoolOgData = {
 };
 
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses
-// would need cross-network probing here, but the pool page at
-// app/pool/[poolId]/page.tsx normalizes bare addresses against
-// DEFAULT_NETWORK only and redirects on miss — probing in this route would
-// make OG previews point to a chain the page won't load. All canonical
-// URLs from buildPoolDetailHref are namespaced anyway.
+// require explicit route chain context before the page canonicalizes them;
+// OG metadata receives only the path segment here, so previews stay
+// namespaced-only rather than selecting a default chain the page might not
+// load.
 function resolvePoolId(
   rawPoolId: string,
 ): { poolId: string; chainId: number } | null {
@@ -109,33 +113,71 @@ export async function fetchPoolOgDataUncached(
   // from resolving and the OG route blocks until Vercel's function timeout.
   // 5s is generous for a public Hasura lookup and short enough that crawler
   // unfurls fall back to the generic card promptly on indexer issues.
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Fail-open: only the detail query is load-bearing. If daily snapshots or
   // the all-pools rate-map query transiently fail (including timeout), still
   // render a card with real title/chain/health — degraded cards beat generic
   // ones, and a hard fail here would be cached for an hour by unstable_cache.
-  const [detailResult, dailyResult, allPoolsResult] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: POOL_DETAIL_WITH_HEALTH,
-      variables: { id: poolId, chainId },
-      signal,
-    }),
-    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-      document: POOL_OG_DAILY_SNAPSHOTS,
-      variables: { poolId },
-      signal,
-    }),
-    client.request<{ Pool: Pool[] }>({
-      document: ALL_POOLS_WITH_HEALTH,
-      variables: { chainId },
-      signal,
-    }),
-  ]);
+  // Parallelizing all four (vs. await-detail-then-await-others) saves ~200ms
+  // p50 on the success path. react-doctor's "skip-path stays fast"
+  // optimization would only help if the detail query failed, which is < 1% of
+  // calls — not worth the latency hit on the common case.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
+  const [detailResult, dailyResult, allPoolsResult, thresholdsResult] =
+    await Promise.allSettled([
+      client.request<{ Pool: Pool[] }>({
+        document: POOL_DETAIL_WITH_HEALTH,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+      client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+        document: POOL_OG_DAILY_SNAPSHOTS,
+        variables: { poolId },
+        signal,
+      }),
+      client.request<{ Pool: Pool[] }>({
+        document: ALL_POOLS_WITH_HEALTH,
+        variables: { chainId },
+        signal,
+      }),
+      // Threshold-known triple — isolated for the same schema-lag
+      // resilience as `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Fail-open:
+      // on transient miss the fields stay undefined and `isNeverRebalance`
+      // returns false (safe under-bound) — card renders WARN/CRITICAL
+      // instead of OK/never-rebalance until the next refresh, but
+      // doesn't fail the unfurl.
+      client.request<{
+        Pool: {
+          id: string;
+          rebalanceThresholdAbove?: number;
+          rebalanceThresholdBelow?: number;
+          rebalanceThresholdsKnown?: boolean;
+          tokenDecimalsKnown?: boolean;
+        }[];
+      }>({
+        document: POOL_THRESHOLDS_KNOWN_EXT,
+        variables: { id: poolId, chainId },
+        signal,
+      }),
+    ]);
 
   if (detailResult.status !== "fulfilled") return null;
-  const pool = detailResult.value.Pool[0];
-  if (!pool) return null;
+  const rawPool = detailResult.value.Pool[0];
+  if (!rawPool) return null;
+  const thresholdsExt =
+    thresholdsResult.status === "fulfilled"
+      ? (thresholdsResult.value.Pool[0] ?? null)
+      : null;
+  const pool: Pool = thresholdsExt
+    ? {
+        ...rawPool,
+        rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+        rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+        rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+        tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+      }
+    : rawPool;
 
   const dailyRows =
     dailyResult.status === "fulfilled"
@@ -156,8 +198,10 @@ export async function fetchPoolOgDataUncached(
   // ALL_POOLS_WITH_HEALTH query leaves `rates` empty and poolTvlUSD silently
   // returns 0. Suppress TVL-derived fields (null, not 0) so consumers can
   // distinguish "unpriceable" from "genuinely empty pool".
+  // `rawTvlUsd === null` also covers untrusted-decimals (poolTvlUSD now
+  // returns null for those).
   const priceable = canValueTvl(pool, network, rates);
-  const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : 0;
+  const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : null;
   const nowSec = Math.floor(Date.now() / 1000);
   const volume7dUsd = priceable
     ? sumVolumeInWindow(
@@ -185,9 +229,10 @@ export async function fetchPoolOgDataUncached(
     volume7dUsd != null && priorVolume != null && priorVolume > 0
       ? ((volume7dUsd - priorVolume) / priorVolume) * 100
       : null;
-  const tvlWoWPct = priceable
-    ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
-    : null;
+  const tvlWoWPct =
+    priceable && rawTvlUsd !== null
+      ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
+      : null;
   const tvlSeries = priceable
     ? computeTvlSeries(dailyRows, pool, network, rates)
     : [];
@@ -220,6 +265,12 @@ function computeVolumeSeries(
   pool: Pool,
   rates: OracleRateMap,
 ): number[] {
+  // Same untrusted-decimals defense as the other valuation paths —
+  // `pool.tokenDecimalsKnown !== true` means USD math against schema-default
+  // 18/18 would overstate by ~1e12 for a 6-dp leg. Empty series renders
+  // as "—" in the OG card. Strict gate (PR 1.7): undefined fails closed
+  // since the post-PR-1.6 indexer populates the field on every pool.
+  if (pool.tokenDecimalsKnown !== true) return [];
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
   const d0 = pool.token0Decimals ?? 18;
   const d1 = pool.token1Decimals ?? 18;
@@ -247,7 +298,7 @@ const REASON_CRITICAL = 4;
  * Each reason is a short lowercase phrase suitable for display in meta
  * descriptions and card sublines, sorted by severity descending. */
 function computeHealthReasons(pool: Pool, chainId: number): string[] {
-  if (pool.source?.includes("virtual")) return [];
+  if (isVirtualPool(pool)) return [];
   if (computeEffectiveStatus(pool, chainId) === "WEEKEND") return [];
 
   const items: { text: string; severity: number }[] = [];
@@ -297,6 +348,8 @@ function sumVolumeInWindow(
   fromSec: number,
   toSec: number,
 ): number | null {
+  // Untrusted-decimals defense — see computeVolumeSeries for rationale.
+  if (pool.tokenDecimalsKnown !== true) return null;
   const rows = daily.filter((s) => {
     const ts = Number(s.timestamp);
     return ts >= fromSec && ts < toSec;
@@ -350,7 +403,7 @@ function computeTvlWoW(
     network,
     rates,
   );
-  if (tvlAgo <= 0) return null;
+  if (tvlAgo === null || tvlAgo <= 0) return null;
   return ((tvlNow - tvlAgo) / tvlAgo) * 100;
 }
 
@@ -361,14 +414,19 @@ function computeTvlSeries(
   rates: OracleRateMap,
 ): number[] {
   // Daily rows arrive newest-first; take up to 14 and reverse to chronological.
+  // Skip rows where TVL is unknowable (untrusted decimals → null) — the
+  // sparkline shows what we can compute and gaps are honest about gaps.
   const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
-  return slice.map((row) =>
-    poolTvlUSD(
+  const series: number[] = [];
+  for (const row of slice) {
+    const v = poolTvlUSD(
       { ...pool, reserves0: row.reserves0, reserves1: row.reserves1 },
       network,
       rates,
-    ),
-  );
+    );
+    if (v !== null) series.push(v);
+  }
+  return series;
 }
 
 function computeOracleFreshness(
@@ -376,7 +434,7 @@ function computeOracleFreshness(
   chainId: number,
 ): { ageSeconds: number | null; fresh: boolean } {
   const oracleTs = Number(pool.oracleTimestamp ?? "0");
-  if (!oracleTs || pool.source?.includes("virtual")) {
+  if (!oracleTs || isVirtualPool(pool)) {
     return { ageSeconds: null, fresh: false };
   }
   const now = Math.floor(Date.now() / 1000);

@@ -61,6 +61,10 @@ export function BridgeTokenBreakdownChart({
   isCapped = false,
   defaultRange = "30d",
 }: BridgeTokenBreakdownChartProps) {
+  // `defaultRange` is the seed value only — `range` is owned locally and
+  // mutated by the range-picker controls. We don't want subsequent
+  // `defaultRange` prop changes to clobber the user's choice.
+  // react-doctor-disable-next-line react-doctor/no-derived-useState
   const [range, setRange] = useState<RangeKey>(defaultRange);
   // Range independent from BridgeVolumeChart — the sibling card uses its own
   // local state. The tile label underneath shows the active window for

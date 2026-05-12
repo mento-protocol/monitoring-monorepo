@@ -19,7 +19,7 @@ type AllNetworksResult = {
 // (`import { NetworkData, fetchAllNetworks, warnedCapKeys, ... } from
 // "@/hooks/use-all-networks-data"`). New code should import directly from
 // `@/lib/fetch-all-networks`.
-export type { NetworkData, SnapshotPageResult } from "@/lib/fetch-all-networks";
+export type { NetworkData } from "@/lib/fetch-all-networks";
 export {
   fetchAllNetworks,
   fetchNetworkData,

@@ -1,4 +1,11 @@
+import type { Metadata } from "next";
 import { signIn } from "@/auth";
+
+export const metadata: Metadata = {
+  title: "Sign in — Mento Analytics",
+  description: "Sign in to the Mento Analytics dashboard.",
+  robots: { index: false, follow: false },
+};
 
 export function sanitizeCallbackUrl(raw?: string): string {
   const DEFAULT = "/";

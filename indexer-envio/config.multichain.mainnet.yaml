@@ -72,6 +72,7 @@ contracts:
       - event: LPFeeUpdated
       - event: ProtocolFeeUpdated
       - event: RebalanceIncentiveUpdated
+      - event: RebalanceThresholdUpdated
 
   - name: VirtualPool
     abi_file_path: abis/FPMM.json
@@ -98,6 +99,19 @@ contracts:
       - event: MedianUpdated
       - event: ReportExpirySet
       - event: TokenReportExpirySet
+
+  # BiPoolManager — v2 exchange registry that VirtualPools wrap.
+  # ExchangeCreated/Destroyed track the registry; BucketsUpdated emits the
+  # post-reset reserve curve every `referenceRateResetFrequency` (typically
+  # 360s on Celo). SpreadUpdated tracks per-exchange fee changes.
+  - name: BiPoolManager
+    abi_file_path: abis/BiPoolManager.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ExchangeCreated
+      - event: ExchangeDestroyed
+      - event: BucketsUpdated
+      - event: SpreadUpdated
 
   - name: OpenLiquidityStrategy
     abi_file_path: abis/OpenLiquidityStrategy.json
@@ -203,6 +217,9 @@ chains:
       - name: SortedOracles
         address:
           - "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33"
+      - name: BiPoolManager
+        address:
+          - 0x22d9DB95e6Ae61C104A7b6F6c78d7993b94ec901 # Proxy:BiPoolManager
       - name: OpenLiquidityStrategy
         address:
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f

@@ -83,7 +83,7 @@ export function CustomLegend({
   );
 }
 
-export type SortedHoverPoint = {
+type SortedHoverPoint = {
   name: string;
   value: number;
   color: string;

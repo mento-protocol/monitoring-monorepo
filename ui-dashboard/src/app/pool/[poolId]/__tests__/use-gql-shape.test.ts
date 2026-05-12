@@ -132,7 +132,7 @@ vi.mock("@/components/table", () => ({
     React.createElement("th", null, children),
 }));
 
-import PoolDetailPage from "../page";
+import { PoolDetailPageClient as PoolDetailPage } from "../_components/pool-detail-page-client";
 
 const BASE_POOL: Pool = {
   id: "42220-0xpool",

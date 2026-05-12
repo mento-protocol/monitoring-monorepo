@@ -20,7 +20,10 @@
  *    default ("All") and a status-active state, since axe alone doesn't
  *    flag the "two radios checked" anti-pattern.
  *
- * 3. `PoolTablist` — the real production component (extracted from
+ * 3. `BucketFilter` — `role="radiogroup"` with duration filter pills that
+ *    share the same roving-tabindex helper as `BridgeStatusFilter`.
+ *
+ * 4. `PoolTablist` — the real production component (extracted from
  *    `pool/[poolId]/page.tsx` so the test mounts the actual JSX, not a
  *    re-implementation). Pins the `role="tablist"` + `role="tab"` +
  *    `aria-selected` + `aria-controls` contract. If the page-side
@@ -29,11 +32,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
 import { LimitSelect } from "@/components/controls";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
+import {
+  BucketFilter,
+  type DurationBucket,
+} from "@/components/breach-history/bucket-filter";
 import { PoolTablist } from "@/app/pool/[poolId]/_components/pool-tablist";
 import { TABS, type Tab } from "@/app/pool/[poolId]/_lib/constants";
 import type { BridgeStatus } from "@/lib/types";
@@ -323,6 +330,112 @@ describe("BridgeStatusFilter a11y", () => {
       const results = await axe(container);
       expect(results.violations).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BucketFilter — radiogroup contract
+// ---------------------------------------------------------------------------
+
+describe("BucketFilter a11y", () => {
+  function renderBucketFilterHarness(
+    initial: DurationBucket = "all",
+    onChange: (next: DurationBucket) => void = () => undefined,
+  ) {
+    function BucketFilterHarness() {
+      const [selected, setSelected] = useState<DurationBucket>(initial);
+      return (
+        <BucketFilter
+          selected={selected}
+          onChange={(next) => {
+            onChange(next);
+            setSelected(next);
+          }}
+        />
+      );
+    }
+
+    render(<BucketFilterHarness />);
+  }
+
+  function radios(): HTMLButtonElement[] {
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+    );
+  }
+
+  function pillByLabel(label: string): HTMLButtonElement {
+    const match = radios().find((r) => r.textContent?.trim() === label);
+    if (!match) throw new Error(`No bucket pill with label ${label}`);
+    return match;
+  }
+
+  function dispatch(el: HTMLElement, key: string) {
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    });
+  }
+
+  it("single tab stop: exactly one tabIndex=0 (selected bucket); the rest are tabIndex=-1", () => {
+    renderBucketFilterHarness("long");
+    const tabbable = radios().filter((r) => r.tabIndex === 0);
+    const untabbable = radios().filter((r) => r.tabIndex === -1);
+    expect(tabbable).toHaveLength(1);
+    expect(untabbable).toHaveLength(4);
+    expect(tabbable[0].textContent?.trim()).toBe("Over 1d");
+  });
+
+  it("ArrowRight moves focus + selection to the next bucket", () => {
+    const onChange = vi.fn();
+    renderBucketFilterHarness("all", onChange);
+    const all = pillByLabel("All");
+    all.focus();
+    dispatch(all, "ArrowRight");
+    expect(document.activeElement).toBe(pillByLabel("≤1h"));
+    expect(onChange).toHaveBeenCalledWith("in_grace");
+    expect(pillByLabel("≤1h").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("ArrowLeft from All wraps focus + selection to Ongoing", () => {
+    const onChange = vi.fn();
+    renderBucketFilterHarness("all", onChange);
+    const all = pillByLabel("All");
+    all.focus();
+    dispatch(all, "ArrowLeft");
+    expect(document.activeElement).toBe(pillByLabel("Ongoing"));
+    expect(onChange).toHaveBeenCalledWith("ongoing");
+  });
+
+  it("Home and End jump to the first and last bucket", () => {
+    const onChange = vi.fn();
+    renderBucketFilterHarness("short", onChange);
+    const short = pillByLabel("1h – 1d");
+    short.focus();
+    dispatch(short, "End");
+    expect(document.activeElement).toBe(pillByLabel("Ongoing"));
+    expect(onChange).toHaveBeenCalledWith("ongoing");
+
+    dispatch(pillByLabel("Ongoing"), "Home");
+    expect(document.activeElement).toBe(pillByLabel("All"));
+    expect(onChange).toHaveBeenCalledWith("all");
+  });
+
+  it("roving tabindex follows focus even while the controlled selected prop is stale", () => {
+    render(<BucketFilter selected="all" onChange={() => undefined} />);
+    const all = pillByLabel("All");
+    expect(all.tabIndex).toBe(0);
+    all.focus();
+    dispatch(all, "ArrowRight");
+    expect(document.activeElement).toBe(pillByLabel("≤1h"));
+    expect(pillByLabel("≤1h").tabIndex).toBe(0);
+    expect(pillByLabel("All").tabIndex).toBe(-1);
+    expect(pillByLabel("All").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("axe passes with the keyboard contract in place", async () => {
+    renderBucketFilterHarness("short");
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
   });
 });
 

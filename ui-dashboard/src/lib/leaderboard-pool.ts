@@ -4,10 +4,12 @@ import { weiToUsd } from "@/lib/leaderboard";
 export type PoolDailyVolumeRow = {
   id: string;
   chainId: number;
-  trader: string;
   poolId: string;
   timestamp: string;
+  swapCount: number;
+  swapCountIncludingSystem: number;
   volumeUsdWei: string;
+  volumeUsdWeiIncludingSystem: string;
 };
 
 /** A series ready for `TimeSeriesChartCard` `breakdown`. `key` is the
@@ -51,18 +53,7 @@ const OTHER_KEY = "__other__";
 export function aggregatePoolDailyVolume(
   rows: readonly PoolDailyVolumeRow[],
   poolLabel: (poolId: string) => string,
-  /**
-   * Optional set of `${chainId}-${trader}-${day}` keys that are allowed
-   * to contribute. When provided, rows whose `(chainId, trader, day)`
-   * is NOT in the set are dropped. Used to keep the chart consistent
-   * with the trader-keyed headline when the system-address toggle is
-   * off: `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress`
-   * column, so Hasura can't filter at query time. Day-scoped because
-   * `TraderDailySnapshot.isSystemAddress` is itself day-scoped — a
-   * trader can flip system-flag mid-window if the indexer's classifier
-   * config changes.
-   */
-  traderAllowList?: ReadonlySet<string>,
+  showSystem = false,
   /**
    * UTC-day window the chart covers, as `[cutoffSec, todayMidnightSec]`.
    * When provided, the output series is zero-filled across every UTC
@@ -100,15 +91,12 @@ export function aggregatePoolDailyVolume(
   const days = new Set<number>();
   let admittedRowCount = 0;
   for (const r of rows) {
-    if (
-      traderAllowList !== undefined &&
-      !traderAllowList.has(`${r.chainId}-${r.trader}-${r.timestamp}`)
-    ) {
-      continue;
-    }
     const day = Number(r.timestamp);
     days.add(day);
-    const wei = BigInt(r.volumeUsdWei);
+    const wei = BigInt(
+      showSystem ? r.volumeUsdWeiIncludingSystem : r.volumeUsdWei,
+    );
+    if (wei === BigInt(0)) continue;
     const k = `${r.poolId}|${day}`;
     byPoolDay.set(k, (byPoolDay.get(k) ?? BigInt(0)) + wei);
     totalsByPool.set(r.poolId, (totalsByPool.get(r.poolId) ?? BigInt(0)) + wei);

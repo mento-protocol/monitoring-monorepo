@@ -59,16 +59,30 @@ export function useLeaderboardUrlState(): {
   updateShowSystem: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
 } {
+  // `useSearchParams()` here is load-bearing for direct page loads —
+  // `useState` lazy initializers serialize their result on SSR and don't
+  // re-run on hydration, so reading `window.location.search` only would
+  // discard `?range=90d&venue=v2` when a user lands on the page directly
+  // (Cursor Bugbot bbc20b5f, PR #371). All consumers of this hook are
+  // wrapped in <Suspense> at `app/layout.tsx` line 51 and at the route's
+  // own `page.tsx`, so the rule's "wrap consumer in Suspense" guidance
+  // is satisfied — the rule's static check just can't see across files.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
 
+  const initialReadParams =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : searchParams;
+
   const [range, setRange] = useState<LeaderboardRangeKey>(() =>
-    readRangeFromParams(searchParams),
+    readRangeFromParams(initialReadParams),
   );
   const [showSystem, setShowSystem] = useState<boolean>(() =>
-    readShowSystemFromParams(searchParams),
+    readShowSystemFromParams(initialReadParams),
   );
   const [venue, setVenue] = useState<Venue>(() =>
-    readVenueFromParams(searchParams),
+    readVenueFromParams(initialReadParams),
   );
 
   const writeUrl = useCallback(
@@ -118,6 +132,10 @@ export function useLeaderboardUrlState(): {
   // Browser back/forward fires `popstate`. `replaceState` itself doesn't,
   // and `useSearchParams` doesn't observe our writes — popstate is the only
   // signal that real navigation moved the URL out from under us.
+  // The 3 setters below all update from the same single URL snapshot in a
+  // single event handler, so React's auto-batching collapses them to one
+  // re-render. A useReducer rewrite would just rename the same operation.
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onPopState = () => {

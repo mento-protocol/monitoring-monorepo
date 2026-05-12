@@ -2,7 +2,11 @@ export function Skeleton({ rows }: { rows: number }) {
   return (
     <div className="space-y-2" role="status" aria-label="Loading">
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="h-10 animate-pulse rounded bg-slate-800/50" />
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+        <div
+          key={`skel-row-${i}`}
+          className="h-10 animate-pulse rounded bg-slate-800/50"
+        />
       ))}
     </div>
   );

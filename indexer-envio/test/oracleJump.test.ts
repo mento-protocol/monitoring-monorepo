@@ -1,9 +1,10 @@
-import assert from "node:assert/strict";
+/// <reference types="mocha" />
+import { assert } from "chai";
 import {
   computeMedianLineageNext,
   computeOracleJumpBps,
   type MedianLineageState,
-} from "../src/oracleJump.js";
+} from "../src/oracleJump";
 
 // SortedOracles stores prices at 24dp; the helper works on raw values so we
 // use 1e24 to represent "price = 1.0".
@@ -16,15 +17,16 @@ const EMPTY_LINEAGE: MedianLineageState = {
   prevMedianAt: 0n,
   lastOracleJumpBps: "0.0000",
   lastOracleJumpAt: 0n,
+  medianLive: false,
 };
 
 describe("computeOracleJumpBps", () => {
   it("returns null when no prior median (prevMedian == 0)", () => {
-    assert.equal(computeOracleJumpBps(0n, ONE, null));
+    assert.isNull(computeOracleJumpBps(0n, ONE));
   });
 
   it("returns null when new median is 0 (transient outage — don't record 100%-down)", () => {
-    assert.equal(computeOracleJumpBps(ONE, 0n, null));
+    assert.isNull(computeOracleJumpBps(ONE, 0n));
   });
 
   it("returns '0.0000' for an unchanged median", () => {
@@ -106,7 +108,7 @@ describe("computeMedianLineageNext", () => {
     assert.equal(next.lastOracleJumpAt, 2_000n);
   });
 
-  it("zero new median freezes every field (transient outage path)", () => {
+  it("zero new median freezes price/timestamp fields and flips medianLive false (transient outage)", () => {
     const seeded: MedianLineageState = {
       lastMedianPrice: (ONE * 112n) / 100n,
       lastMedianAt: 2_000n,
@@ -114,9 +116,14 @@ describe("computeMedianLineageNext", () => {
       prevMedianAt: 1_000n,
       lastOracleJumpBps: "1200.0000",
       lastOracleJumpAt: 2_000n,
+      medianLive: true,
     };
     const next = computeMedianLineageNext(seeded, 0n, 3_000n);
-    assert.deepStrictEqual(next, seeded);
+    // Price + timestamp + jump fields freeze (transient outage). The new
+    // `medianLive` flag flips to false so derive paths can detect that
+    // the contract treats the feed as down even though `lastMedianPrice`
+    // is preserved.
+    assert.deepEqual(next, { ...seeded, medianLive: false });
   });
 
   it("post-outage non-zero median promotes the frozen lastMedian into prev*", () => {
@@ -131,6 +138,7 @@ describe("computeMedianLineageNext", () => {
       prevMedianAt: 1_000n,
       lastOracleJumpBps: "1200.0000",
       lastOracleJumpAt: 2_000n,
+      medianLive: false,
     };
     const newMedian = (ONE * 115n) / 100n;
     const next = computeMedianLineageNext(seededAfterOutage, newMedian, 4_000n);

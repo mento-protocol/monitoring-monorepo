@@ -1,4 +1,4 @@
-import type { Pool } from "./types";
+import { isVirtualPool, type Pool } from "./types";
 import type { Network } from "./networks";
 import { truncateAddress, parseWei } from "./format";
 
@@ -125,9 +125,17 @@ export function poolName(
   return `${sym0}/${sym1}`;
 }
 
-/** Returns true if the pool is an FPMM (as opposed to a VirtualPool). */
-export function isFpmm(pool: Pick<Pool, "source">): boolean {
-  return pool.source.toLowerCase().includes("fpmm");
+/** Returns true if the pool is an FPMM (as opposed to a VirtualPool).
+ *
+ * Healed VirtualPools intentionally retain their `fpmm_*` source for
+ * pickPreferredSource priority alignment (see `isVirtualPool` doc), so
+ * a source-only check would incorrectly classify them as FPMM and
+ * render FPMM-only Health/TVL/Volume/Reserves panels alongside the
+ * VP header. Disjoint with `isVirtualPool` by construction. */
+export function isFpmm(
+  pool: Pick<Pool, "source"> & { wrappedExchangeId?: string | null },
+): boolean {
+  return pool.source.toLowerCase().includes("fpmm") && !isVirtualPool(pool);
 }
 
 /**
@@ -208,7 +216,31 @@ export function canValueTvl(
 
 /**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
- * Returns 0 if oracle price or reserves are missing.
+ *
+ * Returns:
+ *  - `null` when the indexer hasn't confirmed on-chain decimals
+ *    (`tokenDecimalsKnown !== true`). USD math against the schema-default
+ *    18 would overstate by ~1e12 for a 6-dp leg. Callers MUST skip null
+ *    from sums and render `—` instead — sorting/aggregating null as 0
+ *    treats the pool as if it has no value, which is misleading for what
+ *    is actually "value unknown." Strict `!== true` (not `=== false`)
+ *    so EXT-query failures and pre-PR-1.7 indexer schemas degrade safely.
+ *  - `0` for legitimate "no value yet" — missing oracle price OR both
+ *    reserves zero OR neither leg priceable via oracle/FX. These are
+ *    pools that are computable but evaluate to nothing.
+ *  - The computed USD value otherwise.
+ *
+ * Caller pattern for sums:
+ *     let sum = 0;
+ *     for (const p of pools) {
+ *       const v = poolTvlUSD(p, n, r);
+ *       if (v !== null) sum += v;
+ *     }
+ *
+ * Caller pattern for sorts (untrusted to bottom of descending order):
+ *     pools.toSorted((a, b) =>
+ *       (poolTvlUSD(b) ?? Number.NEGATIVE_INFINITY) -
+ *       (poolTvlUSD(a) ?? Number.NEGATIVE_INFINITY))
  */
 export function poolTvlUSD(
   pool: {
@@ -216,13 +248,15 @@ export function poolTvlUSD(
     reserves1?: string;
     token0Decimals?: number;
     token1Decimals?: number;
+    tokenDecimalsKnown?: boolean;
     oraclePrice?: string;
     token0?: string | null;
     token1?: string | null;
   },
   network: Network,
   rates?: OracleRateMap,
-): number {
+): number | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
   if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
   if (!pool.reserves0 && !pool.reserves1) return 0;
   const r0 = parseWei(pool.reserves0 ?? "0", pool.token0Decimals ?? 18);

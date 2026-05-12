@@ -6,8 +6,7 @@
 // `./rpc/block-fallback`. Breaker RPC self-heal lives in `./rpc/breakers`.
 // ---------------------------------------------------------------------------
 
-import type { EvmOnEventContext } from "envio";
-import type { Pool, BreakerConfig } from "envio";
+import type { EvmOnEventContext, Pool, BreakerConfig } from "envio";
 
 // Re-export the client/log/rate-limit primitives so existing callers
 // (feeToken.ts, EventHandlers.ts, breakers.ts, hyperRpcToken.test.ts, etc.)
@@ -32,34 +31,52 @@ export {
   _clearMockRebalancingStates,
   _setMockReserves,
   _clearMockReserves,
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
-  _setMockFees,
-  _clearMockFees,
+  _setMockTokenDecimalsScaling,
+  _clearMockTokenDecimalsScaling,
+  fetchRebalancingState,
+  fetchReserves,
+  fetchInvertRateFeed,
+  fetchRebalanceThresholds,
+  fetchTokenDecimalsScaling,
+  fetchErc20Decimals,
+  fetchTradingLimits,
+} from "./rpc/pool-state.js";
+export {
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
-  fetchRebalancingState,
-  fetchReserves,
-  fetchInvertRateFeed,
-  fetchRebalanceThreshold,
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchReportExpiry,
-  fetchTokenDecimalsScaling,
-  fetchErc20Decimals,
-  fetchTradingLimits,
+} from "./rpc/oracle-state.js";
+export {
+  _setMockFees,
+  _clearMockFees,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
-} from "./rpc/pool-state.js";
+} from "./rpc/pool-fees.js";
+export {
+  _setMockPoolExchange,
+  _clearMockPoolExchanges,
+  _setMockVpExchangeId,
+  _clearMockVpExchangeIds,
+  fetchPoolExchange,
+  fetchVirtualPoolExchangeId,
+  extractVpExchangeIdFromBytecode,
+} from "./rpc/biPoolManager.js";
+export type { RebalancingState } from "./rpc/pool-state.js";
+export type { FeeGetterMock, FetchFeesMock } from "./rpc/pool-fees.js";
 export type {
-  RebalancingState,
-  FeeGetterMock,
-  FetchFeesMock,
-} from "./rpc/pool-state.js";
+  PoolExchangeStruct,
+  VirtualPoolExchangeId,
+} from "./rpc/biPoolManager.js";
 
 // Re-export breaker RPC self-heal symbols so existing callers that import from
 // "./rpc" (breakers.ts handler and all breaker test files) keep working.
@@ -109,8 +126,8 @@ export async function updatePoolsOracleExpiry(
   context: EvmOnEventContext,
   poolIds: string[],
   // Accept null and undefined so callers can pass the `reportExpiryEffect`
-  // result (now `T | null` in v3) directly, plus historical paths that
-  // surface undefined, without normalizing at every call site.
+  // result directly, plus historical paths that surface undefined, without
+  // normalizing at every call site.
   oracleExpiry: bigint | null | undefined,
   blockNumber: bigint,
   blockTimestamp: bigint,

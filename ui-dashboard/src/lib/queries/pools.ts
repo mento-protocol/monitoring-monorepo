@@ -15,6 +15,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       token0Decimals
       token1Decimals
       source
+      wrappedExchangeId
       createdAtBlock
       createdAtTimestamp
       updatedAtBlock
@@ -45,6 +46,38 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves1
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Per-pool data-trust flags — `rebalanceThresholdsKnown` triple
+// (above/below/known) plus `tokenDecimalsKnown`. Kept OFF
+// `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
+// `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
+// the new fields before the prod indexer has them would otherwise reject
+// the entire pools query. Isolating means consumers (`isNeverRebalance`,
+// `effectiveThreshold` in `health.ts`, `getSnapshotVolumeInUsd` in
+// `volume.ts`) degrade safely (10000-bps under-bound for thresholds, null
+// USD volume for unknown decimals) until the merge lands.
+//
+// `rebalanceThresholdAbove` / `rebalanceThresholdBelow` ride alongside
+// the Known flag because `isNeverRebalance` requires BOTH split sides to
+// be 0 (the active `rebalanceThreshold` on the main query is just the
+// side `pickActiveThreshold` chose at index time — can be 0 on an
+// asymmetric `above=0, below>0` pool that DOES rebalance; see indexer
+// `pool.ts:isNeverRebalance`). `tokenDecimalsKnown` distinguishes
+// schema-default 18/18 from on-chain-trusted decimals so dashboard USD
+// math doesn't silently scale a 6-dp USDC leg as 18-dp. Triggered by
+// Cursor's learned rule "Isolate new Envio/Hasura entity fields in
+// separate queries for schema-lag resilience".
+export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
+  query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
+      rebalanceThresholdsKnown
+      tokenDecimalsKnown
     }
   }
 `;
@@ -306,222 +339,6 @@ export const POOL_LIQUIDITY_COUNT = `
   }
 `;
 
-export const POOL_DETAIL_WITH_HEALTH = `
-  query PoolDetailWithHealth($id: String!, $chainId: Int!) {
-    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
-      id chainId token0 token1 token0Decimals token1Decimals source
-      createdAtBlock createdAtTimestamp
-      updatedAtBlock updatedAtTimestamp
-      healthStatus
-      oracleOk
-      oraclePrice
-      oracleTimestamp
-      oracleTxHash
-      oracleExpiry
-      oracleNumReporters
-      referenceRateFeedID
-      priceDifference
-      rebalanceThreshold
-      lastRebalancedAt
-      deviationBreachStartedAt
-      lpFee
-      protocolFee
-      limitStatus
-      limitPressure0
-      limitPressure1
-      rebalancerAddress
-      reserves0
-      reserves1
-      healthTotalSeconds
-      hasHealthData
-    }
-  }
-`;
-
-// Isolated from POOL_DETAIL_WITH_HEALTH (same rationale as POOL_BREACH_ROLLUP):
-// new indexer field, hosted Hasura rejects it during the deploy+resync window,
-// so the page survives and the reward tile degrades to "—".
-export const POOL_CONFIG_EXT = `
-  query PoolConfigExt($id: String!, $chainId: Int!) {
-    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
-      id
-      rebalanceReward
-    }
-  }
-`;
-
-// Uptime / breach-count rollups. Isolated from POOL_DETAIL_WITH_HEALTH on
-// purpose: these fields are brand-new on the indexer side, so during the
-// deploy+resync window the hosted Hasura will reject them with "field not
-// found". Keeping them in their own query means the pool page doesn't die
-// — only the uptime tile degrades to "N/A". Uptime is sourced from the
-// pool-level rollup (not the breach-row list) so the "% time critical"
-// SLO stays accurate past Hasura's 1000-row cap on the breach list itself.
-export const POOL_BREACH_ROLLUP = `
-  query PoolBreachRollup($id: String!, $chainId: Int!) {
-    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
-      id
-      breachCount
-      healthBinarySeconds
-      healthTotalSeconds
-    }
-  }
-`;
-
-// 7d-window anchor for the Uptime tile's "X.XX% last 7d" subtitle. Isolated
-// from POOL_BREACH_ROLLUP so a hosted-Hasura schema lag on the new
-// `cumulativeHealth*` fields degrades JUST the 7d subtitle to "—" — the
-// all-time line stays rendered. Same isolation pattern as POOL_BREACH_ROLLUP
-// itself uses against POOL_DETAIL_WITH_HEALTH.
-export const POOL_HEALTH_7D_ANCHOR = `
-  query PoolHealth7dAnchor($id: String!, $chainId: Int!, $sevenDaysAgo: numeric!) {
-    PoolDailySnapshot(
-      where: {
-        poolId: { _eq: $id }
-        chainId: { _eq: $chainId }
-        timestamp: { _lte: $sevenDaysAgo }
-      }
-      order_by: [{ timestamp: desc }]
-      limit: 1
-    ) {
-      timestamp
-      cumulativeHealthBinarySeconds
-      cumulativeHealthTotalSeconds
-    }
-  }
-`;
-
-// Single-row lookup of the *open* breach for a pool, keyed off the
-// `pool.deviationBreachStartedAt` anchor. Returns just the trip tx hash so
-// the DeviationCell can link "breach Xh ago" to the explorer. We can't fold
-// this into POOL_BREACH_ROLLUP because the rollup is on the Pool entity
-// (scalars only) — the tx hash lives on the DeviationThresholdBreach row.
-export const POOL_OPEN_BREACH_TX = `
-  query PoolOpenBreachTx(
-    $poolId: String!
-    $startedAt: numeric!
-  ) {
-    DeviationThresholdBreach(
-      where: {
-        poolId: { _eq: $poolId }
-        startedAt: { _eq: $startedAt }
-      }
-      limit: 1
-    ) {
-      startedByTxHash
-    }
-  }
-`;
-
-// Paginated + sortable breach history for the Breaches tab. `$orderBy`
-// and `$where` let the server do the heavy lifting so pagination stays
-// authoritative regardless of user-selected sort and duration filter.
-// Isolated from POOL_DETAIL_WITH_HEALTH for the same reason
-// POOL_BREACH_ROLLUP is — new entity type, resync window needs to land
-// first.
-export const POOL_DEVIATION_BREACHES_PAGE = `
-  query PoolDeviationBreachesPage(
-    $poolId: String!
-    $limit: Int!
-    $offset: Int!
-    $orderBy: [DeviationThresholdBreach_order_by!]
-    $where: DeviationThresholdBreach_bool_exp!
-  ) {
-    DeviationThresholdBreach(
-      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
-      order_by: $orderBy
-      limit: $limit
-      offset: $offset
-    ) {
-      id chainId poolId
-      startedAt startedAtBlock
-      endedAt endedAtBlock
-      durationSeconds criticalDurationSeconds
-      entryPriceDifference entryRebalanceThreshold
-      peakPriceDifference peakAt peakAtBlock
-      startedByEvent startedByTxHash
-      endedByEvent endedByTxHash endedByStrategy
-      rebalanceCountDuring
-    }
-  }
-`;
-
-// Row-count for the Breaches-tab pagination. Hasura aggregates are
-// disabled on hosted, so we fetch id-only rows up to ENVIO_MAX_ROWS and
-// measure `.length` — same trick POOL_SWAPS_COUNT uses. Applies the
-// active filter so page count reflects it.
-export const POOL_DEVIATION_BREACHES_COUNT = `
-  query PoolDeviationBreachesCount(
-    $poolId: String!
-    $where: DeviationThresholdBreach_bool_exp!
-    $limit: Int!
-  ) {
-    DeviationThresholdBreach(
-      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
-      limit: $limit
-    ) {
-      id
-    }
-  }
-`;
-
-// Unpaginated feed for the scatter chart — chart shows FREQUENCY over
-// time, so a page-sized slice would misrepresent it. Kept at 1000
-// (Hasura's row cap) and reuses the same $where so the chart reflects
-// whatever filter the table has applied.
-export const POOL_DEVIATION_BREACHES_ALL = `
-  query PoolDeviationBreachesAll(
-    $poolId: String!
-    $where: DeviationThresholdBreach_bool_exp!
-  ) {
-    DeviationThresholdBreach(
-      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
-      order_by: [{ startedAt: desc }]
-      limit: 1000
-    ) {
-      id startedAt endedAt durationSeconds criticalDurationSeconds
-      peakPriceDifference entryRebalanceThreshold
-    }
-  }
-`;
-
-export const POOL_SNAPSHOTS_CHART = `
-  query PoolSnapshotsChart($poolId: String!) {
-    PoolSnapshot(
-      where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: desc }
-      limit: 50000
-    ) {
-      id poolId timestamp
-      reserves0 reserves1
-      swapCount swapVolume0 swapVolume1
-      rebalanceCount cumulativeSwapCount
-      cumulativeVolume0 cumulativeVolume1
-      blockNumber
-    }
-  }
-`;
-
-// Daily rollup of PoolSnapshot — one row per pool per UTC day. At ~365 rows per
-// pool per year the full history fits in Hasura's 1000-row cap for ~2.7 years.
-// Older pools lose oldest rows first — fetching newest-first means the chart
-// always shows the most recent history and reverses client-side to chronological.
-export const POOL_DAILY_SNAPSHOTS_CHART = `
-  query PoolDailySnapshotsChart($poolId: String!) {
-    PoolDailySnapshot(
-      where: { poolId: { _eq: $poolId } }
-      order_by: [{ timestamp: desc }, { id: desc }]
-    ) {
-      id poolId timestamp
-      reserves0 reserves1
-      swapCount swapVolume0 swapVolume1
-      rebalanceCount cumulativeSwapCount
-      cumulativeVolume0 cumulativeVolume1
-      blockNumber
-    }
-  }
-`;
-
 // Daily rollup across all pools on a chain — used for the homepage volume-over-time
 // chart. Still paginated (across all pools the row count exceeds 1000 after a few
 // years), but pagination cost is ~20× lower than the hourly cross-pool query.
@@ -540,36 +357,6 @@ export const POOL_DAILY_SNAPSHOTS_ALL = `
       swapCount
       swapVolume0
       swapVolume1
-    }
-  }
-`;
-
-// Daily rollup of legacy v2 (Broker → BiPoolManager) volume on a chain. Filters
-// out router-driven Broker.Swap events (the sibling-of-VirtualPool case where
-// the v3 Router transitively invokes the Broker — counted as v3 already via
-// VirtualPool.Swap). chainId is filtered server-side because only Celo has a
-// Broker today; Monad returns 0 rows.
-//
-// `id` is selected so the paginated fetcher can dedup on the canonical key
-// (offset pagination over an append-only table is not stable under concurrent
-// inserts). The schema id is `{chainId}-{provider}-{router|direct}-{day}`,
-// which uniquely identifies a row across providers — required because two
-// providers can share `(timestamp, volumeUsdWei, swapCount)`.
-export const BROKER_DAILY_SNAPSHOTS_ALL = `
-  query BrokerDailySnapshotsAll($chainId: Int!, $limit: Int!, $offset: Int!) {
-    BrokerDailySnapshot(
-      where: {
-        chainId: { _eq: $chainId }
-        routedViaV3Router: { _eq: false }
-      }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: $limit
-      offset: $offset
-    ) {
-      id
-      timestamp
-      volumeUsdWei
-      swapCount
     }
   }
 `;

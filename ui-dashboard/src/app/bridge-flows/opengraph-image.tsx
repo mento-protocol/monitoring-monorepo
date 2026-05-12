@@ -104,6 +104,7 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
       : "Wormhole";
 
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",

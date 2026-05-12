@@ -107,7 +107,7 @@ vi.mock("@/components/table", () => ({
   Th: ({ children }: { children: ReactNode }) => <th>{children}</th>,
 }));
 
-import PoolDetailPage from "../page";
+import { PoolDetailPageClient as PoolDetailPage } from "../_components/pool-detail-page-client";
 
 const BASE_POOL: Pool = {
   id: "42220-0xpool",
@@ -124,6 +124,7 @@ const BASE_POOL: Pool = {
   oraclePrice: "1000000000000000000000000",
   reserves0: "1",
   reserves1: "1",
+  tokenDecimalsKnown: true,
 };
 
 function gqlResult(data: unknown, error?: Error) {
@@ -136,12 +137,47 @@ function gqlResult(data: unknown, error?: Error) {
   };
 }
 
+function loadingGqlResult() {
+  return {
+    data: undefined,
+    error: undefined,
+    isLoading: true,
+    mutate: vi.fn(),
+    isValidating: false,
+  };
+}
+
 describe("Pool detail LPs tab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPoolId = "0xpool";
     mockSearchParams.forEach((_, key) => mockSearchParams.delete(key));
     mockSearchParams.set("tab", "providers");
+  });
+
+  it("renders a missing pool without tab chrome or tab content queries", () => {
+    const seenQueries: string[] = [];
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query) seenQueries.push(query);
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [] });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Pool 0xpool not found.");
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('role="tabpanel"');
+    expect(seenQueries.some((query) => query.includes("PoolLpPositions"))).toBe(
+      false,
+    );
   });
 
   it("renders indexed LiquidityPosition data when available", () => {
@@ -180,6 +216,188 @@ describe("Pool detail LPs tab", () => {
     expect(html).not.toContain(
       "LP provider data is unavailable until this environment is reindexed",
     );
+  });
+
+  it("gates token amount tab content when token decimals are unverified", () => {
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return gqlResult({
+          Pool: [{ id: BASE_POOL.id, tokenDecimalsKnown: false }],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({
+          ReserveUpdate: [
+            {
+              id: "reserve-1",
+              chainId: 42220,
+              poolId: BASE_POOL.id,
+              reserve0: "1000000",
+              reserve1: "2000000",
+              blockTimestampInPool: "1700000000",
+              txHash: "0xreserve",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Token decimals are unverified for this pool");
+    expect(html).toContain(
+      "Token amount tab data is hidden because token decimals are unverified for this pool.",
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("0xreserve");
+    expect(firedOperationNames()).not.toContain("PoolReserves");
+  });
+
+  it("gates rebalances tab content when token decimals are unverified", () => {
+    mockSearchParams.set("tab", "rebalances");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return gqlResult({
+          Pool: [{ id: BASE_POOL.id, tokenDecimalsKnown: false }],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolRebalances")) {
+        return gqlResult({
+          RebalanceEvent: [
+            {
+              id: "rebalance-1",
+              txHash: "0xrebalance",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Token decimals are unverified for this pool");
+    expect(html).toContain(
+      "Token amount tab data is hidden because token decimals are unverified for this pool.",
+    );
+    expect(html).not.toContain("0xrebalance");
+    expect(firedOperationNames()).not.toContain("PoolRebalancesCount");
+    expect(firedOperationNames()).not.toContain("PoolRebalancesPage");
+  });
+
+  it("shows a loading gate without firing amount tab queries while decimal trust loads", () => {
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return loadingGqlResult();
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({
+          ReserveUpdate: [
+            {
+              id: "reserve-1",
+              chainId: 42220,
+              poolId: BASE_POOL.id,
+              reserve0: "1000000",
+              reserve1: "2000000",
+              blockTimestampInPool: "1700000000",
+              txHash: "0xreserve",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain(
+      "Checking token decimal metadata before rendering token amount tab data.",
+    );
+    expect(html).toContain("loading");
+    expect(html).not.toContain("0xreserve");
+    expect(firedOperationNames()).not.toContain("PoolReserves");
+  });
+
+  it("gates token amount tab content when the trust query fails", () => {
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return gqlResult(undefined, new Error("field not found"));
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({
+          ReserveUpdate: [
+            {
+              id: "reserve-1",
+              chainId: 42220,
+              poolId: BASE_POOL.id,
+              reserve0: "1000000",
+              reserve1: "2000000",
+              blockTimestampInPool: "1700000000",
+              txHash: "0xreserve",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain("Token decimal metadata is unavailable");
+    expect(html).toContain(
+      "Token amount tab data is hidden until token decimal metadata can be verified.",
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("0xreserve");
+    expect(firedOperationNames()).not.toContain("PoolReserves");
   });
 
   it("hides USD-specific columns when the pool has no USDm side", () => {
@@ -342,14 +560,12 @@ describe("Pool detail LPs tab", () => {
   // avoids substring collisions — e.g. "OracleSnapshots" would otherwise match
   // the header-hook query `OracleSnapshotsWindow` which is not tab-scoped.
   function firedOperationNames(): string[] {
-    return mockUseGQL.mock.calls
-      .map((args) => args[0])
-      .filter((q): q is string => typeof q === "string")
-      .map((q) => {
-        const m = q.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
-        return m ? m[1] : "";
-      })
-      .filter(Boolean);
+    return mockUseGQL.mock.calls.flatMap((args) => {
+      const q = args[0];
+      if (typeof q !== "string") return [];
+      const m = q.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
+      return m && m[1] ? [m[1]] : [];
+    });
   }
 
   // Operation names for each tab's tab-scoped queries. Header/panel queries

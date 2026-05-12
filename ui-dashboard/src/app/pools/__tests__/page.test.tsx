@@ -82,7 +82,7 @@ vi.mock("@/components/global-pools-table", () => ({
 
 import { useGQL } from "@/lib/graphql";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
-import PoolsPage from "../page";
+import { PoolsPageClient as PoolsPage } from "../_components/pools-page-client";
 
 function makeNetwork(id: string, chainId: number, label = id): Network {
   return {

@@ -11,6 +11,11 @@ import _namespaces from "../config/deployment-namespaces.json" with { type: "jso
 export const YIELD_SPLIT_ADDRESS =
   "0x0dd57f6f181d0469143fe9380762d8a112e96e4a" as const;
 
+export const UNKNOWN_FEE_TOKEN_META = {
+  symbol: "UNKNOWN",
+  decimals: 18,
+} as const;
+
 /** Map of cacheKey → mock metadata, used in tests to bypass RPC. */
 const _testFeeTokenMeta = new Map<
   string,
@@ -188,7 +193,7 @@ export async function resolveFeeTokenMeta(
       `[ERC20FeeToken] Failed to read decimals/symbol for ${tokenAddress} on chain ${chainId}. ` +
         `No static fallback available. Using (18dp / UNKNOWN) for this event only — will retry on next transfer.`,
     );
-    return { symbol: "UNKNOWN", decimals: 18 };
+    return UNKNOWN_FEE_TOKEN_META;
   }
 }
 

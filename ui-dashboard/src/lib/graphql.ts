@@ -2,7 +2,13 @@ import { GraphQLClient } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Network } from "@/lib/networks";
+
+// Re-export for backward compatibility — but new server-side imports
+// should target `@/lib/hasura-timeout` directly to avoid pulling
+// useSWR / useNetwork into the server bundle (codex P1 PR #372).
+export { HASURA_TIMEOUT_MS };
 
 // Cache clients per Hasura URL so we don't recreate on every render
 const clientCache = new Map<string, GraphQLClient>();
@@ -37,25 +43,44 @@ export function useGQL<T>(
    *  re-enable focus revalidation for a one-shot read). Focus/reconnect
    *  revalidation is OFF by default for this hook — pool pages fan out
    *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
-   *  that many requests at once on top of the 30s polling cycle. */
+   *  that many requests at once on top of the 30s polling cycle.
+   *
+   *  `timeoutMs` attaches an `AbortSignal.timeout(...)` to the request.
+   *  Useful for fail-open extension queries (trust flags, isolated
+   *  rollups) where a wedged Hasura connection would otherwise stick the
+   *  SWR poll until the underlying socket times out (minutes). Primary
+   *  page queries should leave it unset — users care about that data,
+   *  so SWR's retry/dedup is the right behavior, not auto-cancel. */
   swrOptions?: {
     revalidateOnFocus?: boolean;
     revalidateOnReconnect?: boolean;
+    timeoutMs?: number;
   },
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
 
+  // Split `timeoutMs` (custom, fetcher-only) from genuine SWR options before
+  // spreading. SWR ignores unknown properties but the partition keeps the
+  // config object honest for any future config-validating SWR plugin.
+  const { timeoutMs, ...swrConfigOverrides } = swrOptions ?? {};
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
-    () => client.request<T>(query!, variables),
+    () =>
+      timeoutMs == null
+        ? client.request<T>(query!, variables)
+        : client.request<T>({
+            document: query!,
+            variables,
+            signal: AbortSignal.timeout(timeoutMs),
+          }),
     {
       refreshInterval,
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
-      ...swrOptions,
+      ...swrConfigOverrides,
     },
   );
 

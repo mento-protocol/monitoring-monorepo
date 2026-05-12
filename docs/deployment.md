@@ -57,7 +57,7 @@ git push origin main:envio
 
 ## Dashboard Deployment (Vercel)
 
-**Vercel's native Git integration watches `main`** — every push that changes files under `ui-dashboard/` triggers an automatic production deploy. Pushes that only touch other directories (e.g. `terraform/`, `indexer-envio/`) are skipped by the ignore command.
+**Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`.
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
@@ -95,7 +95,7 @@ All env vars are managed by Terraform (set for `production` and `preview` target
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.
 
-A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape on the restore path. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
+A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape for user-uploaded restores. For snapshots too large to upload through Vercel's request body limit, call `POST /api/address-labels/restore?pathname=<blob-pathname>` with either a workspace session or `Authorization: Bearer $CRON_SECRET`; this server-side Blob restore preserves report `authorEmail`, `createdAt`, `updatedAt`, `source`, and `version` metadata from trusted first-party backups. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
 
 ### Security Posture — Preview Deployments
 
@@ -197,7 +197,13 @@ envio
 
 ### Deploy cancelled with "Ignored Build Step"
 
-The `ignore_command` (`git diff HEAD^ HEAD --quiet -- ui-dashboard`) cancelled the build because no `ui-dashboard/` files changed. This is correct behaviour for infra-only commits. To force a deploy:
+The dashboard project intentionally skips builds when no dashboard-affecting
+files changed since the last successful Vercel deployment for the branch. The
+skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`; it watches
+`ui-dashboard/`, `shared-config/`, and workspace dependency metadata. If a
+dashboard-affecting change was skipped, check that Vercel provided
+`VERCEL_GIT_PREVIOUS_SHA` and that the referenced commit is present in the
+shallow clone. To force a deploy:
 
 ```bash
 vercel deploy --prod --force

@@ -37,53 +37,283 @@ export function scalingFactorToDecimals(scaling: bigint): number | null {
 }
 
 /**
- * Computes priceDifference in basis points (bps) from reserves and oracle price,
- * matching the on-chain FPMM formula: |reservePrice - oraclePrice| / oraclePrice.
- *
- * CORRECTED: The FPMM contract computes reservePrice as token1/token0:
- *   reservePrice = (reserve1 * tpm1) / (reserve0 * tpm0)
- *   where tpm = tokenPrecisionMultiplier = 10^(18 - decimals)
- *
- * After normalization to 18dp this simplifies to norm1/norm0.
- *
- * Oracle price is stored in **feed direction** (24dp SortedOracles rate).
- * The invertRateFeed flag determines whether the oracle needs to be inverted.
- *
- * Returns 0n when oracle price or reserves are missing/zero.
+ * Parse a (decimals0, decimals1) RPC pair into the Pool fields. Centralizes
+ * the both-or-neither rule: `tokenDecimalsKnown=true` only when both reads
+ * succeeded AND parsed to a valid power of ten. Partial healed states are
+ * indistinguishable from both-defaulted to downstream consumers, so we hold
+ * off on flipping the flag until the full pair lands. Used by FPMMFactory,
+ * virtualPool factory, and `selfHealTokenDecimals`.
  */
-export function computePriceDifference(pool: {
+export function parseDecimalsPair(
+  dec0Raw: bigint | null | undefined,
+  dec1Raw: bigint | null | undefined,
+): {
+  token0Decimals: number;
+  token1Decimals: number;
+  tokenDecimalsKnown: boolean;
+} {
+  // `!= null` rather than truthy check: `0n` is falsy in JS, and while
+  // `scalingFactorToDecimals(0n)` already returns null on its own guard, the
+  // explicit form makes the bigint-unaware reader's life easier.
+  const dec0Parsed = dec0Raw != null ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw != null ? scalingFactorToDecimals(dec1Raw) : null;
+  return {
+    token0Decimals: dec0Parsed ?? 18,
+    token1Decimals: dec1Parsed ?? 18,
+    tokenDecimalsKnown: dec0Parsed !== null && dec1Parsed !== null,
+  };
+}
+
+/** Shared inputs for `reservePriceVsOracleRef`, `computePriceDifference`,
+ * and `pickActiveThreshold`. Identical fields to the FPMM `getRebalancingState`
+ * contract reads but kept structural (no `Pool` type dependency) so callers
+ * can pass synthetic objects in tests. */
+type RatioInputs = {
   reserves0: bigint;
   reserves1: bigint;
   oraclePrice: bigint;
   invertRateFeed: boolean;
   token0Decimals: number;
   token1Decimals: number;
-}): bigint {
-  if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
-    return 0n;
+};
 
-  const SCALE = 10n ** 24n;
-  // Normalize reserves to 18 decimals before computing ratio.
+const SCALE_24DP = 10n ** 24n;
+
+/** Compute the (reserveRatio, oracleRef) pair both `computePriceDifference`
+ * and `pickActiveThreshold` need. Returns `null` for any zero-reserve or
+ * zero-oracle input — caller decides what the absent value means. The FPMM
+ * contract computes reservePrice as `(reserve1 * tpm1) / (reserve0 * tpm0)`
+ * where `tpm = 10^(18 - decimals)`; after normalizing to 18dp this is
+ * `norm1/norm0`. `invertRateFeed` flips the oracle to `1/feedRate`. */
+function reservePriceVsOracleRef(
+  pool: RatioInputs,
+): { reserveRatio: bigint; oracleRef: bigint } | null {
+  if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
+    return null;
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
-  // Guard against normalization flooring to zero (possible when decimals > 18).
-  if (norm0 === 0n || norm1 === 0n) return 0n;
-
-  // CORRECTED: The FPMM contract computes reservePrice as token1/token0 (norm1/norm0).
-  const reserveRatio = (norm1 * SCALE) / norm0;
-
-  // oraclePrice is stored in feed direction (raw SortedOracles rate at 24dp).
-  // When invertRateFeed is true, the contract compares reserves against 1/feedRate.
+  // Normalization can floor to zero when decimals > 18.
+  if (norm0 === 0n || norm1 === 0n) return null;
+  const reserveRatio = (norm1 * SCALE_24DP) / norm0;
   const oracleRef = pool.invertRateFeed
-    ? (SCALE * SCALE) / pool.oraclePrice
+    ? (SCALE_24DP * SCALE_24DP) / pool.oraclePrice
     : pool.oraclePrice;
+  return { reserveRatio, oracleRef };
+}
 
-  // priceDiff in bps: |reserveRatio - oracleRef| * 10000 / oracleRef
+/**
+ * Computes priceDifference in basis points (bps) from reserves and oracle price,
+ * matching the on-chain FPMM formula: |reservePrice - oraclePrice| / oraclePrice.
+ *
+ * Oracle price is stored in **feed direction** (24dp SortedOracles rate).
+ * The invertRateFeed flag determines whether the oracle needs to be inverted.
+ *
+ * Returns 0n when oracle price or reserves are missing/zero.
+ */
+export function computePriceDifference(pool: RatioInputs): bigint {
+  const r = reservePriceVsOracleRef(pool);
+  if (!r) return 0n;
   const diff =
-    reserveRatio > oracleRef
-      ? reserveRatio - oracleRef
-      : oracleRef - reserveRatio;
-  return (diff * 10000n) / oracleRef;
+    r.reserveRatio > r.oracleRef
+      ? r.reserveRatio - r.oracleRef
+      : r.oracleRef - r.reserveRatio;
+  return (diff * 10000n) / r.oracleRef;
+}
+
+/**
+ * Direction-correct active threshold: matches the on-chain
+ * `getRebalancingState` selection of `rebalanceThreshold` based on
+ * `reservePriceAboveOraclePrice`. `>` picks `above`, `<=` picks `below`
+ * (mirrors contract: equality resolves as `below`, which we follow exactly
+ * so derived values match `getRebalancingState` to the bps). Falls back to
+ * `above` when reserves are degenerate so an uninitialized pool doesn't
+ * silently bias toward `below`.
+ */
+export function pickActiveThreshold(
+  pool: RatioInputs,
+  thresholds: { above: number; below: number },
+): number {
+  const r = reservePriceVsOracleRef(pool);
+  if (!r) return thresholds.above;
+  return r.reserveRatio > r.oracleRef ? thresholds.above : thresholds.below;
+}
+
+/**
+ * Resolved rebalance state shared by the entity-derived path and the
+ * `getRebalancingState` RPC fallback path. Downstream consumers
+ * (state-sync handlers) treat both sources identically.
+ */
+export type ResolvedRebalanceState = {
+  oraclePrice: bigint;
+  rebalanceThreshold: number;
+  priceDifference: bigint;
+};
+
+/**
+ * Apply the OracleAdapter SCALE_FACTOR + invertRateFeed flip to a raw
+ * `getRebalancingState` RPC result, producing the `ResolvedRebalanceState`
+ * scalar. Kept here next to `tryDeriveRebalanceState` so both code paths
+ * agree on the OracleAdapter convention without re-encoding it in handlers.
+ */
+export function scaleRpcRebalanceState(
+  rs: {
+    oraclePriceNumerator: bigint;
+    oraclePriceDenominator: bigint;
+    rebalanceThreshold: number;
+    priceDifference: bigint;
+  },
+  existing: { invertRateFeed: boolean } | undefined,
+): ResolvedRebalanceState {
+  const isInverted = existing?.invertRateFeed ?? false;
+  return {
+    oraclePrice: isInverted
+      ? rs.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rs.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+    rebalanceThreshold: rs.rebalanceThreshold,
+    priceDifference: rs.priceDifference,
+  };
+}
+
+/**
+ * Derive `getRebalancingState`'s relevant outputs from the entity store.
+ * Returns `null` when the required inputs aren't yet populated; caller
+ * falls back to RPC.
+ *
+ * Required inputs:
+ *   - `lastMedianPrice > 0`: at least one non-zero `MedianUpdated` for
+ *     the rate feed has been indexed. Gates on the median rather than
+ *     `oraclePrice` because `OracleReported` overwrites `oraclePrice`
+ *     with individual reporter quotes (not what `getRebalancingState`
+ *     reads on chain — the contract uses the median).
+ *   - `oraclePrice > 0`: the current oracle value is live. During a
+ *     `MedianUpdated` outage (event emits 0), `lastMedianPrice` retains
+ *     the prior non-zero value but the contract would treat the feed as
+ *     down. Gating on the current `oraclePrice` matches contract
+ *     behaviour during outages.
+ *   - `rebalanceThresholdsKnown`: factory seed succeeded or a
+ *     `RebalanceThresholdUpdated` event has been seen. Both fields can
+ *     legitimately be 0 ("configured to never rebalance"); the boolean
+ *     distinguishes that from "not yet read".
+ *   - `invertRateFeedKnown`: the orientation has been read on chain.
+ *     Without this, an inverted pool deployed during an RPC blip would
+ *     compute priceDifference / direction in the wrong frame. Caller
+ *     runs `selfHealInvertRateFeed` first; if that's still null we must
+ *     fall through to RPC.
+ *   - `tokenDecimalsKnown`: both token decimals have been read on chain.
+ *     Without this, a non-18-decimal pool whose factory + self-heal RPC
+ *     blipped would compute `normalizeTo18` against the schema-default
+ *     18/18 — wrong by `10^(18 - real_dec)`. Falling through to RPC
+ *     here is safe-by-construction: contract `getRebalancingState`
+ *     returns the real priceDifference at this block.
+ *   - `oracleOk` AND `oracleExpiry > 0` AND
+ *     `lastOracleReportAt + oracleExpiry > eventTimestamp`: the
+ *     on-chain `getRebalancingState` reverts on stale oracle, so
+ *     derive must mirror that. Use `lastOracleReportAt` (advanced
+ *     only inside `MedianUpdated` using `blockTimestamp`, frozen on
+ *     zero-median outages) — NOT `oracleTimestamp` (bumped by
+ *     `OracleReported` and state-sync writes, so it tracks "last
+ *     entity touch") and NOT `lastMedianAt` (jump-detection lineage
+ *     field, not gated for outages). This is an under-bound on the
+ *     contract's median-reporter expiry: when reporters refresh but
+ *     the median hasn't moved, derive falls through to RPC.
+ *
+ * `reservesOverride` lets UpdateReserves pass the event's new reserves
+ * (the contract's `getRebalancingState` reads post-event state); Rebalanced
+ * passes nothing because the prior 2× UpdateReserves handlers in the same
+ * tx have already written post-rebalance reserves to the entity.
+ */
+export function tryDeriveRebalanceState(
+  pool: {
+    reserves0: bigint;
+    reserves1: bigint;
+    lastMedianPrice: bigint;
+    lastOracleReportAt: bigint;
+    medianLive: boolean;
+    oracleOk: boolean;
+    oracleExpiry: bigint;
+    invertRateFeed: boolean;
+    invertRateFeedKnown: boolean;
+    rebalanceThresholdAbove: number;
+    rebalanceThresholdBelow: number;
+    rebalanceThresholdsKnown: boolean;
+    token0Decimals: number;
+    token1Decimals: number;
+    tokenDecimalsKnown: boolean;
+  },
+  ctx: {
+    eventTimestamp: bigint;
+    reservesOverride?: { reserve0: bigint; reserve1: bigint };
+  },
+): ResolvedRebalanceState | null {
+  if (!pool.rebalanceThresholdsKnown) return null;
+  if (!pool.invertRateFeedKnown) return null;
+  // Gate on `tokenDecimalsKnown` for the same reason as `invertRateFeedKnown`:
+  // `computePriceDifference` calls `normalizeTo18` against the on-entity
+  // decimals; if those are still at the schema default 18/18 because the
+  // factory + self-heal both blipped, derive would silently produce a
+  // priceDifference off by `10^(18 - real_dec)`. RPC fallback is the safe
+  // path — the contract carries the real value at this block.
+  if (!pool.tokenDecimalsKnown) return null;
+  if (pool.lastMedianPrice <= 0n) return null;
+  // Zero-median outage gate: only `medianLive` is reliable here.
+  // `oraclePrice > 0n` would also pass after a non-median `OracleReported`
+  // following a zero `MedianUpdated`, because the reporter quote gets
+  // written into `oraclePrice`. `medianLive` is set only by
+  // `MedianUpdated` (true on non-zero, false on zero) so it's the
+  // median-only signal we need for parity with the contract's outage
+  // behaviour.
+  if (!pool.medianLive) return null;
+  if (!pool.oracleOk) return null;
+  // Stale-oracle revert mirror: require a known expiry window (zero =
+  // pre-seed; fall through to RPC) AND `lastOracleReportAt` to be
+  // within that window. `lastOracleReportAt` is advanced only inside
+  // `MedianUpdated` using `blockTimestamp` (and frozen on zero-median
+  // outages). NOT `oracleTimestamp` (bumped by `OracleReported` and
+  // state-sync writes — tracks last entity touch) and NOT
+  // `lastMedianAt` (jump-detection lineage field that doesn't freeze
+  // on outages). This is an under-bound on the contract's actual
+  // expiry (which uses the median reporter's own `report.timestamp`),
+  // safe by construction: when reporters refresh but the median hasn't
+  // moved recently, derive falls through to RPC instead of letting
+  // potentially-stale data through.
+  if (pool.oracleExpiry <= 0n) return null;
+  if (pool.lastOracleReportAt <= 0n) return null;
+  const expiresAt = pool.lastOracleReportAt + pool.oracleExpiry;
+  if (expiresAt <= ctx.eventTimestamp) return null;
+  const reserves = ctx.reservesOverride
+    ? {
+        reserves0: ctx.reservesOverride.reserve0,
+        reserves1: ctx.reservesOverride.reserve1,
+      }
+    : { reserves0: pool.reserves0, reserves1: pool.reserves1 };
+  // Reject degenerate reserves: with either side at 0, the FPMM
+  // `getRebalancingState` would divide by zero (reservePrice =
+  // norm1/norm0). `computePriceDifference` returns 0n here and
+  // `pickActiveThreshold` falls back to the `above` side, both of which
+  // would silently record a healthy zero-deviation snapshot. Falling
+  // through to RPC matches what the contract would do: revert.
+  if (reserves.reserves0 <= 0n || reserves.reserves1 <= 0n) return null;
+  // Build the math-input view: use `lastMedianPrice` (clean, only set by
+  // MedianUpdated) as the oracle source so derive matches what the
+  // contract's `getRebalancingState()` would compute. `oraclePrice` on
+  // the entity may be a reporter quote (OracleReported overwrites it).
+  const poolForCalc = {
+    ...reserves,
+    oraclePrice: pool.lastMedianPrice,
+    invertRateFeed: pool.invertRateFeed,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
+  };
+  const priceDifference = computePriceDifference(poolForCalc);
+  const rebalanceThreshold = pickActiveThreshold(poolForCalc, {
+    above: pool.rebalanceThresholdAbove,
+    below: pool.rebalanceThresholdBelow,
+  });
+  return {
+    oraclePrice: pool.lastMedianPrice,
+    rebalanceThreshold,
+    priceDifference,
+  };
 }
 
 /**

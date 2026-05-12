@@ -8,11 +8,12 @@
  * `SECONDS_PER_DAY` from `@/lib/time-series` to share constants with the
  * rest of the codebase.
  *
- * Implements the WAI-ARIA radio button keyboard contract: arrow keys move
- * focus + selection between options; Tab leaves the group.
+ * Implements the WAI-ARIA radio button keyboard contract: one radio is in
+ * the tab order, arrow keys/Home/End move focus + selection, and Tab leaves
+ * the group.
  */
 
-import type React from "react";
+import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,7 +27,7 @@ import type React from "react";
  */
 export type DurationBucket = "all" | "in_grace" | "short" | "long" | "ongoing";
 
-export const BUCKET_LABEL: Record<DurationBucket, string> = {
+const BUCKET_LABEL: Record<DurationBucket, string> = {
   all: "All",
   in_grace: "≤1h",
   short: "1h – 1d",
@@ -54,45 +55,36 @@ export function BucketFilter({
   selected: DurationBucket;
   onChange: (next: DurationBucket) => void;
 }) {
-  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (
-      e.key !== "ArrowDown" &&
-      e.key !== "ArrowRight" &&
-      e.key !== "ArrowUp" &&
-      e.key !== "ArrowLeft"
-    )
-      return;
-    e.preventDefault();
-    const radios = Array.from(
-      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
-    );
-    const idx = radios.indexOf(e.target as HTMLButtonElement);
-    if (idx === -1) return;
-    const next =
-      e.key === "ArrowDown" || e.key === "ArrowRight"
-        ? (idx + 1) % radios.length
-        : (idx - 1 + radios.length) % radios.length;
-    radios[next].focus();
-    const newBucket = BUCKET_OPTIONS[next];
-    if (newBucket !== selected) onChange(newBucket);
-  }
+  const activeIndex = Math.max(0, BUCKET_OPTIONS.indexOf(selected));
+  const { groupRef, getItemProps, handleKeyDown } = useRovingTabIndex({
+    activeIndex,
+    itemCount: BUCKET_OPTIONS.length,
+    activation: "automatic",
+    arrowKeys: "all",
+    onActivate: (index) => onChange(BUCKET_OPTIONS[index]),
+  });
 
   return (
     <div
+      ref={groupRef}
       role="radiogroup"
       aria-label="Filter breaches by duration"
       className="flex flex-wrap gap-1.5"
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      {BUCKET_OPTIONS.map((b) => {
+      {BUCKET_OPTIONS.map((b, index) => {
         const active = b === selected;
+        const rovingProps = getItemProps(index);
         return (
           <button
             key={b}
+            ref={rovingProps.ref}
             role="radio"
             type="button"
             aria-checked={active}
+            tabIndex={rovingProps.tabIndex}
+            onFocus={rovingProps.onFocus}
             onClick={() => !active && onChange(b)}
             className={
               "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +

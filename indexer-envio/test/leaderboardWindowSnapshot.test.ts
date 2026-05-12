@@ -223,11 +223,16 @@ describe("buildLeaderboardWindowSnapshot", () => {
     assert.equal(snap.firstDaySwapCount, 2);
     // Only A is exclusive on day 1 (no other-day activity).
     assert.equal(snap.firstDayExclusiveUniqueTraders, 1);
+    assert.deepEqual(snap.firstDayExclusiveTraders, [TRADER_A]);
     // *IncludingSystem: also fold in system trader C's $7.
     assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 57n * ONE_USD);
     assert.equal(snap.firstDaySwapCountIncludingSystem, 3);
     // C also exclusive on day 1 → system-included count is 2.
     assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 2);
+    assert.deepEqual(snap.firstDayExclusiveTradersIncludingSystem, [
+      TRADER_A,
+      TRADER_C,
+    ]);
   });
 });
 
@@ -648,6 +653,8 @@ function fakeTraderDay(
     timestamp,
     swapCount: 1,
     uniquePools: 1,
+    aggregatorKeys: ["squid"],
+    poolIds: [`${CHAIN}-0xpool`],
     volumeUsdWei: volumeUsd * ONE_USD,
     feesPaidUsdWei: 0n,
     isSystemAddress: isSystem,
@@ -884,15 +891,15 @@ function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
 }
 
 function fakeBrokerTraderDay(
-  trader: string,
+  caller: string,
   timestamp: bigint,
   volumeUsd: bigint,
   isSystem = false,
 ): BrokerTraderDailySnapshot {
   return {
-    id: `${CHAIN}-${trader}-${timestamp}`,
+    id: `${CHAIN}-${caller}-${timestamp}`,
     chainId: CHAIN,
-    trader,
+    caller,
     timestamp,
     swapCount: 1,
     volumeUsdWei: volumeUsd * ONE_USD,

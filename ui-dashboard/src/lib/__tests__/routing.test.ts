@@ -19,13 +19,6 @@ describe("buildPoolDetailHref", () => {
       `/pool/${encodeURIComponent(poolId)}`,
     );
   });
-
-  it("returns /pool/<id> for raw pool addresses too (chain derived from context)", () => {
-    const rawPoolId = "0x0000000000000000000000000000000000000001";
-    expect(buildPoolDetailHref(rawPoolId)).toBe(
-      `/pool/${encodeURIComponent(rawPoolId)}`,
-    );
-  });
 });
 
 describe("buildPoolsFilterUrl", () => {

@@ -89,3 +89,55 @@ export function buildAddressMap(
   }
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Pricing-module name resolution (BiPoolManager exchanges)
+//
+// Each BiPoolManager exchange names a pricing-module contract that drives
+// its swap curve. Today only ConstantSumPricingModule ships; the dashboard
+// renders the friendly label ("ConstantSum") instead of the raw address.
+// We resolve via reverse-lookup against `@mento-protocol/contracts.json` so
+// new pricing modules (governance-deployed) are picked up automatically on
+// the next package bump — no hand-edited address-keyed map.
+// ---------------------------------------------------------------------------
+
+const PRICING_MODULE_LABELS: Record<string, string> = {
+  ConstantSumPricingModule: "ConstantSum",
+};
+
+/** Reverse lookup: pricing-module address (lowercase) → friendly name.
+ * Built lazily per chain on first call, then memoized. Returns null when
+ * the address isn't one of the labeled pricing modules — handler stamps
+ * `pricingModuleName: undefined` and the dashboard renders an em-dash. */
+const _pricingModuleIndex = new Map<number, Map<string, string>>();
+
+export function lookupPricingModuleName(
+  chainId: number,
+  address: string,
+): string | null {
+  let index = _pricingModuleIndex.get(chainId);
+  if (!index) {
+    index = new Map<string, string>();
+    const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
+    if (ns) {
+      const chainEntries = (_contractsJson as ContractsJson)[String(chainId)]?.[
+        ns
+      ];
+      if (chainEntries) {
+        for (const [rawName, entry] of Object.entries(chainEntries)) {
+          const label = PRICING_MODULE_LABELS[rawName];
+          if (label && entry.address) {
+            index.set(entry.address.toLowerCase(), label);
+          }
+        }
+      }
+    }
+    _pricingModuleIndex.set(chainId, index);
+  }
+  return index.get(address.toLowerCase()) ?? null;
+}
+
+/** @internal Test-only: clear the pricing-module index between tests. */
+export function _clearPricingModuleIndex(): void {
+  _pricingModuleIndex.clear();
+}

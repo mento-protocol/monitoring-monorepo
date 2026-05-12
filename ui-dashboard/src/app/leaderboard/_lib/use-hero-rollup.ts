@@ -3,20 +3,24 @@
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
+  BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   BROKER_LEADERBOARD_TODAY_TRADERS,
   BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   BROKER_LEADERBOARD_WINDOW_LATEST,
   BROKER_LEADERBOARD_YESTERDAY_TRADERS,
+  LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   LEADERBOARD_TODAY_TRADERS,
   LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
   LEADERBOARD_WINDOW_LATEST,
   LEADERBOARD_YESTERDAY_TRADERS,
 } from "@/lib/queries/leaderboard";
 import {
+  buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
   top10Concentration,
   weiToUsd,
   type LeaderboardRangeKey,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,
@@ -195,6 +199,56 @@ export function useHeroRollup({
       ? yesterdayV3Result.data?.TraderDailySnapshot
       : yesterdayV2Result.data?.BrokerTraderDailySnapshot;
 
+  const partialOverlapInput = useMemo(
+    () =>
+      buildHeroPartialOverlapQueryInput({
+        snapshotRows,
+        todayRows: todayPartialRows,
+        firstDayRows,
+        yesterdayRows: yesterdayPartialRows,
+        showSystem,
+        todayMidnightSeconds: todayMidnight,
+        traderField: venue === "v2" ? "caller" : "trader",
+      }),
+    [
+      snapshotRows,
+      todayPartialRows,
+      firstDayRows,
+      yesterdayPartialRows,
+      showSystem,
+      todayMidnight,
+      venue,
+    ],
+  );
+  const partialOverlapV3Result = useGQL<{
+    TraderDailySnapshot: LeaderboardPartialOverlapRow[];
+  }>(
+    venue === "v3" && partialOverlapInput
+      ? LEADERBOARD_PARTIAL_OVERLAP_TRADERS
+      : null,
+    partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const partialOverlapV2Result = useGQL<{
+    BrokerTraderDailySnapshot: LeaderboardPartialOverlapRow[];
+  }>(
+    venue === "v2" && partialOverlapInput
+      ? BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS
+      : null,
+    partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
+    undefined,
+    { timeoutMs: 8_000 },
+  );
+  const partialOverlapRows =
+    partialOverlapInput === null
+      ? []
+      : partialOverlapInput === undefined
+        ? undefined
+        : venue === "v3"
+          ? partialOverlapV3Result.data?.TraderDailySnapshot
+          : partialOverlapV2Result.data?.BrokerTraderDailySnapshot;
+
   const heroTotals = useMemo(
     () =>
       mergeHeroSnapshot({
@@ -202,6 +256,7 @@ export function useHeroRollup({
         todayRows: todayPartialRows,
         firstDayRows,
         yesterdayRows: yesterdayPartialRows,
+        partialOverlapRows,
         showSystem,
         todayMidnightSeconds: todayMidnight,
       }),
@@ -210,6 +265,7 @@ export function useHeroRollup({
       todayPartialRows,
       firstDayRows,
       yesterdayPartialRows,
+      partialOverlapRows,
       showSystem,
       todayMidnight,
     ],

@@ -3,8 +3,8 @@
 /**
  * Row-level cell sub-components for the bridge-flows transfers table. Purely
  * presentational: no query calls, no sort state. They receive typed props
- * and return JSX. `RouteCell` and `Dash` are also consumed by
- * `RouteDeliveryTile` in `page.tsx`, so both are exported from this module.
+ * and return JSX. `RouteCell` is consumed by `RouteDeliveryTile`; the
+ * remaining helpers (Dash, TxPill, …) are file-private.
  *
  * `"use client"` is explicit because `AddressLink` mounts the
  * `AddressLabelEditor` dialog (`useState`/`useEffect`) and `BridgeRedeemPill`
@@ -32,7 +32,7 @@ import type { BridgeProvider, BridgeTransfer } from "@/lib/types";
 // Primitive helpers
 // ---------------------------------------------------------------------------
 
-export function Dash() {
+function Dash() {
   return <span className="text-slate-600">{"—"}</span>;
 }
 
@@ -219,7 +219,7 @@ export function TransferSenderCell({
 // Tx link cells
 // ---------------------------------------------------------------------------
 
-export function TxPill({
+function TxPill({
   href,
   label,
   title,

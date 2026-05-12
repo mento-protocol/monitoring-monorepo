@@ -5,6 +5,7 @@ import * as queries from "@/lib/queries";
 const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_WITH_HEALTH",
   "ALL_POOLS_BREACH_ROLLUP",
+  "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ORACLE_RATES",
   "RECENT_SWAPS",
   "POOL_SWAPS",
@@ -21,7 +22,9 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_LIQUIDITY_PAGE",
   "POOL_LIQUIDITY_COUNT",
   "POOL_DETAIL_WITH_HEALTH",
+  "POOL_THRESHOLDS_KNOWN_EXT",
   "POOL_CONFIG_EXT",
+  "POOL_V2_EXCHANGE",
   "POOL_BREACH_ROLLUP",
   "POOL_HEALTH_7D_ANCHOR",
   "POOL_OPEN_BREACH_TX",
@@ -32,6 +35,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DAILY_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_ALL",
   "BROKER_DAILY_SNAPSHOTS_ALL",
+  "BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H",
   "POOL_DAILY_FEE_SNAPSHOTS_PAGE",
   "ALL_TRADING_LIMITS",
   "TRADING_LIMITS",
@@ -47,6 +51,7 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_OLS_POOLS",
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
+  "VIRTUAL_POOL_LIFECYCLE",
 ] as const;
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -54,7 +59,7 @@ const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 describe("@/lib/queries — surface contract", () => {
   it("exports every expected query name", () => {
     const actual = Object.keys(queries).sort();
-    const expected = [...EXPECTED_EXPORT_NAMES].sort();
+    const expected = EXPECTED_EXPORT_NAMES.toSorted();
     expect(actual).toEqual(expected);
   });
 
@@ -92,6 +97,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             token0Decimals
             token1Decimals
             source
+            wrappedExchangeId
             createdAtBlock
             createdAtTimestamp
             updatedAtBlock
@@ -126,6 +132,47 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
         }
       `),
     );
+  });
+
+  it("ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN is isolated (rationale: schema-lag resilience)", () => {
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdsKnown",
+    );
+    // Split sides accompany the Known flag because the never-rebalance
+    // predicate requires BOTH `above === 0 && below === 0` (active
+    // `rebalanceThreshold` alone can't disambiguate asymmetric pools).
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdAbove",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "rebalanceThresholdBelow",
+    );
+    // No heavy / unrelated fields piggybacking — isolation must stay tight
+    // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
+    // not the entire pools page.
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "healthStatus",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "oraclePrice",
+    );
+  });
+
+  it("POOL_THRESHOLDS_KNOWN_EXT mirrors the all-pools triple for single-pool fetches", () => {
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdsKnown",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdAbove",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
+      "rebalanceThresholdBelow",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("healthStatus");
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("oraclePrice");
+    // Keyed by id + chainId — single-pool variant of the all-pools query.
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$id: String!");
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$chainId: Int!");
   });
 
   it("ALL_POOLS_BREACH_ROLLUP is isolated (rationale: phased schema rollout)", () => {
@@ -256,6 +303,24 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_DAILY_SNAPSHOTS_ALL).toContain("$poolIds: [String!]!");
     expect(normalize(queries.POOL_DAILY_SNAPSHOTS_ALL)).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
+    );
+  });
+
+  it("BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H reads the exchange daily rollup, not raw BrokerSwapEvent rows", () => {
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "BrokerExchangeDailySnapshot",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "exchangeId: { _eq: $exchangeId }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "exchangeProvider: { _eq: $exchangeProvider }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).toContain(
+      "timestamp: { _gte: $since }",
+    );
+    expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).not.toContain(
+      "BrokerSwapEvent",
     );
   });
 

@@ -1,5 +1,10 @@
+/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "envio";
+import generated from "generated";
+import {
+  _setMockERC20Decimals,
+  _clearMockERC20Decimals,
+} from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
 type MockDb = {
@@ -62,6 +67,12 @@ const TOKEN1 = "0x00000000000000000000000000000000000000b1";
 const FACTORY = "0x00000000000000000000000000000000000000cc";
 
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
+  // Mock the ERC20 decimals fallback so the FPMMDeployed handler doesn't
+  // hit real RPC during the decimals0/decimals1 fetcher fall-through.
+  // Without this, the test occasionally times out on slower CI runners
+  // waiting on Forno when the test addresses don't exist on-chain.
+  _setMockERC20Decimals(42220, TOKEN0, 18);
+  _setMockERC20Decimals(42220, TOKEN1, 18);
   const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
     token0: TOKEN0,
     token1: TOKEN1,
@@ -87,7 +98,12 @@ function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
 }
 
 describe("FPMM fee-config event handlers", () => {
-  it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async () => {
+  beforeEach(() => {
+    _clearMockERC20Decimals();
+  });
+
+  it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async function () {
+    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -106,7 +122,8 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 250n);
   });
 
-  it("ProtocolFeeUpdated writes newFee to Pool.protocolFee without touching lpFee", async () => {
+  it("ProtocolFeeUpdated writes newFee to Pool.protocolFee without touching lpFee", async function () {
+    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -125,10 +142,11 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 300n);
     // lpFee not touched — stays at the seed-time sentinel (-1) or whatever
     // fetchFees returned; the point is ProtocolFeeUpdated must not clobber it.
-    assert.notStrictEqual(pool!.lpFee, 7);
+    assert.notEqual(pool!.lpFee, 7);
   });
 
-  it("RebalanceIncentiveUpdated writes newIncentive to Pool.rebalanceReward", async () => {
+  it("RebalanceIncentiveUpdated writes newIncentive to Pool.rebalanceReward", async function () {
+    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -150,7 +168,8 @@ describe("FPMM fee-config event handlers", () => {
     assert.equal(pool!.updatedAtBlock, 350n);
   });
 
-  it("returns silently when Pool does not exist (no-op on unknown pool)", async () => {
+  it("returns silently when Pool does not exist (no-op on unknown pool)", async function () {
+    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     // Do NOT seed — pool is unknown.
 

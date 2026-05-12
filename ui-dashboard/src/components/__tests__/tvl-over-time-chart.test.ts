@@ -649,6 +649,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: false,
@@ -665,6 +666,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: true,
@@ -690,6 +692,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: false,
@@ -706,6 +709,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 1_234_567,
+        tvlPartial: false,
         change7d: null,
         isLoading: true,
         hasError: false,
@@ -723,6 +727,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: 2.13,
         isLoading: false,
         hasError: false,
@@ -739,6 +744,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: -5.14,
         isLoading: false,
         hasError: false,
@@ -772,6 +778,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
+        tvlPartial: false,
         change7d: 5.5,
         isLoading: false,
         hasError: true,
@@ -788,6 +795,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: true,
@@ -804,6 +812,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: 5.0,
         isLoading: true,
         hasError: false,
@@ -819,6 +828,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: true,
@@ -848,6 +858,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: false,
@@ -876,6 +887,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
+        tvlPartial: false,
         change7d: null,
         isLoading: false,
         hasError: false,

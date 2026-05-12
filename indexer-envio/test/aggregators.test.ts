@@ -1,11 +1,14 @@
+/// <reference types="mocha" />
 import { strict as assert } from "assert";
+import { readFileSync } from "node:fs";
 import {
   classifyAggregator,
   getClusterMetadata,
   _aggregatorAddressesForChain,
   _allClusterNames,
   _directEntriesForChain,
-} from "../src/aggregators.js";
+} from "../src/aggregators";
+import { CONTRACT_NAMESPACE_BY_CHAIN } from "../src/contractAddresses";
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;
@@ -27,6 +30,9 @@ const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
 
 const NOT_LABELED = "0xab5801a7d398351b8be11c439e05c5b3259aec9b";
+const SHARED_CLUSTER_METADATA = JSON.parse(
+  readFileSync("../shared-config/aggregator-clusters.json", "utf8"),
+) as Record<string, { chainId: number; deployer: string; explorerUrl: string }>;
 
 describe("classifyAggregator", () => {
   it("Celo: matches known aggregators by address", () => {
@@ -89,10 +95,16 @@ describe("classifyAggregator", () => {
 });
 
 describe("_aggregatorAddressesForChain", () => {
-  it("Celo has 4 verified aggregators + 4 cluster-7dc08ec28f299c06 contracts", () => {
+  it("Celo has 5 verified aggregators (incl. OpenOcean executor) + 16 cluster-7dc08ec28f299c06 contracts", () => {
     const map = _aggregatorAddressesForChain(CHAIN_CELO);
-    assert.equal(map.size, 8);
+    assert.equal(map.size, 21);
     assert.equal(map.get(SQUID_CELO), "squid");
+    // OpenOcean per-leg executor classifies under the same `openocean` name
+    // as the user-facing Exchange Proxy that delegates to it.
+    assert.equal(
+      map.get("0xdec876911cbe9428265af0d12132c52ee8642a99"),
+      "openocean",
+    );
   });
 
   it("Monad has 3 verified aggregators (no Squid, no default LI.FI)", () => {
@@ -103,16 +115,30 @@ describe("_aggregatorAddressesForChain", () => {
 });
 
 describe("cluster classification", () => {
-  // The 4 contracts in cluster-7dc08ec28f299c06 (deployer 0x7dc08ec2…df8f022).
-  // Source: celoscan creator field on each contract, verified 2026-05-04.
+  // The 16 contracts in cluster-7dc08ec28f299c06 (deployer 0x7dc08ec2…df8f022),
+  // ordered by deploy time. Source: celoscan creator field on each contract,
+  // verified 2026-05-08. All share `owner() = 0x7dc08ec2…df8f022` and were
+  // deployed via the CREATE3 factory 0xba5Ed099…ba5Ed.
   const CLUSTER_CONTRACTS = [
-    "0xef6956414006e161fca5f048331d91e472077e9b",
-    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
-    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+    "0xf184a8498f4bad5ca6ef538b72142411588792a3",
+    "0xea99a75e309868a59074e9b0441c14ba62c6ea28",
+    "0x953b7173200229f255f83b6f4fa448d753b79301",
+    "0xf023c10a9adb0553ce07d37f367630e4e84a944e",
+    "0x187c35dbbc8055b267303dd7b351e708f4c5d3bf",
+    "0x9bfbcd07ea9c3cdc30057d7629beb589fe2d854d",
     "0xfe8237bcba52339d818c9c9c3c94481196e4b653",
+    "0x35f629410baffd35c482a1f77cfb0ec2f0a75c76",
+    "0x1bbcc3dad88fe33248a9ab6600fe72235c51d7ce",
+    "0x48d5be40f43fd70ed9329dc0e83b8c5d3a3364f4",
+    "0x93acb2d456edeffa2e2ea97efc4fa4d17c39d4b8",
+    "0xef6956414006e161fca5f048331d91e472077e9b",
+    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
+    "0x6f9fe2b0acf50874dcb49faefff62382381bf622",
+    "0xc2068e03ca948f54348899eeda1417a901d76285",
   ];
 
-  it("classifies all 4 fleet contracts under the same cluster name", () => {
+  it("classifies all 16 fleet contracts under the same cluster name", () => {
     for (const addr of CLUSTER_CONTRACTS) {
       assert.equal(
         classifyAggregator(CHAIN_CELO, addr),
@@ -165,14 +191,41 @@ describe("cluster classification", () => {
     }
   });
 
+  it("shared dashboard metadata covers every indexer cluster", () => {
+    const indexerClusterNames = _allClusterNames().toSorted();
+    assert.deepEqual(
+      Object.keys(SHARED_CLUSTER_METADATA).sort(),
+      indexerClusterNames,
+    );
+    for (const name of indexerClusterNames) {
+      const indexerMeta = getClusterMetadata(name);
+      assert.ok(indexerMeta, `${name} should have indexer cluster metadata`);
+      const sharedMeta = SHARED_CLUSTER_METADATA[name];
+      assert.ok(sharedMeta, `${name} should have shared cluster metadata`);
+      assert.deepEqual(
+        {
+          chainId: indexerMeta.chainId,
+          deployer: indexerMeta.deployer,
+          explorerUrl: indexerMeta.explorerUrl,
+        },
+        {
+          chainId: sharedMeta.chainId,
+          deployer: sharedMeta.deployer,
+          explorerUrl: sharedMeta.explorerUrl,
+        },
+      );
+    }
+  });
+
   it("every cluster-* name in per-chain entries has a matching $clusters block entry", () => {
     // Catches typos like `cluster-7dc08ec28f299c07` (off-by-one) in
     // aggregators.json — without this test, classifyAggregator would happily
     // return the bad name and the leaderboard's PR-3 tooltip would silently
     // break (getClusterMetadata returns undefined).
     const knownClusters = new Set(_allClusterNames());
-    // Iterate every chain that has aggregator entries (mainnet + testnet).
-    const chainsWithAggregators = [CHAIN_CELO, CHAIN_MONAD, 11142220, 10143];
+    const chainsWithAggregators = Object.keys(CONTRACT_NAMESPACE_BY_CHAIN).map(
+      Number,
+    );
     for (const chainId of chainsWithAggregators) {
       const map = _aggregatorAddressesForChain(chainId);
       for (const [addr, name] of map) {

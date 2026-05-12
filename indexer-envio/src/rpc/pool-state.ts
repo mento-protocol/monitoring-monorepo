@@ -1,10 +1,8 @@
-// Pool/reserves/decimals/fees fetchers + caches + test mocks.
+// Pool/reserves/decimals/oracle fetchers + caches + test mocks.
 // Deps flow: pool-state → client, block-fallback, abis, contractAddresses, tradingLimits.
 
 import {
-  SortedOraclesContract,
   FPMM_MINIMAL_ABI,
-  FPMM_FEE_ABI,
   FPMM_TRADING_LIMITS_ABI,
   ERC20_DECIMALS_ABI,
 } from "../abis.js";
@@ -80,6 +78,26 @@ export function _clearMockERC20Decimals(): void {
   _testERC20Decimals.clear();
 }
 
+/** @internal Test-only: pre-set mock decimals0()/decimals1() scaling.
+ * Pass `null` to simulate a transient RPC failure. */
+const _testTokenDecimalsScaling = new Map<string, bigint | null>();
+
+export function _setMockTokenDecimalsScaling(
+  chainId: number,
+  poolAddress: string,
+  fn: "decimals0" | "decimals1",
+  value: bigint | null,
+): void {
+  _testTokenDecimalsScaling.set(
+    `${chainId}:${poolAddress.toLowerCase()}:${fn}`,
+    value,
+  );
+}
+
+export function _clearMockTokenDecimalsScaling(): void {
+  _testTokenDecimalsScaling.clear();
+}
+
 /**
  * Fetch a token's `decimals()` value as an integer (e.g., 18 for cUSD, 6 for
  * USDC). Production-safe: consults the test-only mock map first, then RPC.
@@ -124,80 +142,6 @@ export async function fetchErc20Decimals(
   }
 }
 
-/** Per-getter mock behavior for fetchFees. */
-export type FeeGetterMock =
-  | { fulfilled: bigint }
-  /** Simulate a transient RPC failure — pool.ts self-heal will retry. */
-  | { rejected: "transient" }
-  /** Simulate the viem "returned no data (0x)" error that fires when a
-   *  getter isn't in the contract bytecode — pool.ts self-heal stamps -2
-   *  and stops retrying that field. */
-  | { rejected: "unsupported" };
-
-export type FetchFeesMock = {
-  lpFee?: FeeGetterMock;
-  protocolFee?: FeeGetterMock;
-  rebalanceReward?: FeeGetterMock;
-  /** Simulate getRpcClient throwing (unknown chain / missing token). */
-  rpcClientThrows?: true;
-};
-
-const _testFees = new Map<string, FetchFeesMock>();
-
-/** @internal Test-only: override fetchFees' three readContract calls for a
- *  (chain, pool) pair. Pass `null` to clear a specific entry. */
-export function _setMockFees(
-  chainId: number,
-  poolAddress: string,
-  mock: FetchFeesMock | null,
-): void {
-  const key = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (mock === null) {
-    _testFees.delete(key);
-  } else {
-    _testFees.set(key, mock);
-  }
-}
-
-/** @internal Test-only: clear all fetchFees mocks. */
-export function _clearMockFees(): void {
-  _testFees.clear();
-}
-
-// ---------------------------------------------------------------------------
-// Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)
-// ---------------------------------------------------------------------------
-
-const _testRateFeedIDs = new Map<string, string | null>();
-
-/** @internal Test-only: pre-set a mock referenceRateFeedID for a pool. */
-export function _setMockRateFeedID(
-  chainId: number,
-  poolAddress: string,
-  rateFeedID: string | null,
-): void {
-  _testRateFeedIDs.set(`${chainId}:${poolAddress.toLowerCase()}`, rateFeedID);
-}
-
-export function _clearMockRateFeedIDs(): void {
-  _testRateFeedIDs.clear();
-}
-
-const _testReportExpiry = new Map<string, bigint | null>();
-
-/** @internal Test-only: pre-set a mock report expiry for a rateFeedID. */
-export function _setMockReportExpiry(
-  chainId: number,
-  rateFeedID: string,
-  expiry: bigint | null,
-): void {
-  _testReportExpiry.set(`${chainId}:${rateFeedID.toLowerCase()}`, expiry);
-}
-
-export function _clearMockReportExpiry(): void {
-  _testReportExpiry.clear();
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -208,9 +152,6 @@ export type RebalancingState = {
   rebalanceThreshold: number;
   priceDifference: bigint;
 };
-
-/** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
-const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
 // Per-block in-process caches (numReportersCache, reportExpiryCache,
 // reservesCache, _rebalancingStateCache, _reportExpiryInFlight) used to live
@@ -378,18 +319,47 @@ export async function fetchInvertRateFeed(
   }
 }
 
-/** Fetch the pool's rebalance threshold using standalone getters that do NOT
- * require the oracle to be live (unlike getRebalancingState which reverts when
- * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or
- * `null` on transient RPC failure. The pool entity treats absence /
- * `<= 0` as "not yet known" (defaults to the 10000 fallback in `pool.ts`),
- * so callers can persist 0 for "configured to never rebalance" and
- * `undefined`/null for "retry next event" without ambiguity. */
-export async function fetchRebalanceThreshold(
+/** @internal Test-only: pre-set mock thresholds for a pool address. The
+ * factory and self-heal paths read this map first, falling through to the
+ * live RPC only when no mock is set. Call `_clearMockRebalanceThresholds()`
+ * between tests to avoid leaking state. */
+const _testRebalanceThresholds = new Map<
+  string,
+  { above: number; below: number } | null
+>();
+
+export function _setMockRebalanceThresholds(
   chainId: number,
   poolAddress: string,
+  thresholds: { above: number; below: number } | null,
+): void {
+  _testRebalanceThresholds.set(
+    `${chainId}:${poolAddress.toLowerCase()}`,
+    thresholds,
+  );
+}
+
+export function _clearMockRebalanceThresholds(): void {
+  _testRebalanceThresholds.clear();
+}
+
+/** Fetch the pool's rebalance thresholds (above and below) at a specific
+ * block. Standalone getters do NOT require the oracle to be live (unlike
+ * getRebalancingState which reverts on stale/expired oracle data). Returns
+ * `{above, below}` or `null` on transient RPC failure. Block-scoped because
+ * thresholds are governance-mutable via `RebalanceThresholdUpdated`; reading
+ * at chain head would corrupt historical replay (factory at block N would
+ * persist post-update values for pools whose thresholds changed at N+M). */
+export async function fetchRebalanceThresholds(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
   log: RpcLogger = consoleLogger,
-): Promise<number | null> {
+): Promise<{ above: number; below: number } | null> {
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRebalanceThresholds.has(testKey)) {
+    return _testRebalanceThresholds.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
@@ -402,7 +372,7 @@ export async function fetchRebalanceThreshold(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdAbove",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
@@ -414,168 +384,29 @@ export async function fetchRebalanceThreshold(
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdBelow",
         },
-        undefined,
+        blockNumber,
         fallback,
         log,
       ),
     ]);
-    return Math.max(Number(aboveRes.result), Number(belowRes.result));
+    // `latest`-fallback would silently return chain-head thresholds, which
+    // would re-introduce the historical-corruption bug this block-scoped
+    // signature was added to prevent. Reject the read in that case so the
+    // caller's null-handling path runs.
+    if (aboveRes.usedLatestFallback || belowRes.usedLatestFallback) return null;
+    return {
+      above: Number(aboveRes.result),
+      below: Number(belowRes.result),
+    };
   } catch (err) {
     logRpcFailure(
       chainId,
       "rebalanceThreshold",
       poolAddress,
       err,
-      undefined,
-      log,
-    );
-    return null;
-  }
-}
-
-export async function fetchReferenceRateFeedID(
-  chainId: number,
-  poolAddress: string,
-  log: RpcLogger = consoleLogger,
-): Promise<string | null> {
-  const mockKey = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (_testRateFeedIDs.has(mockKey))
-    return _testRateFeedIDs.get(mockKey) ?? null;
-
-  try {
-    const client = getRpcClient(chainId);
-    const { result } = await readContractWithBlockFallback(
-      chainId,
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "referenceRateFeedID",
-      },
-      undefined,
-      getFallbackRpcClient(chainId),
-      log,
-    );
-    return (result as string).toLowerCase();
-  } catch (err) {
-    logRpcFailure(
-      chainId,
-      "referenceRateFeedID",
-      poolAddress,
-      err,
-      undefined,
-      log,
-    );
-    return null;
-  }
-}
-
-/** Returns the number of active oracle reporters for the given rateFeedID at
- * the given block, or null on error. Per-batch dedup is handled by
- * `numReportersEffect` in src/rpc/effects.ts. */
-export async function fetchNumReporters(
-  chainId: number,
-  rateFeedID: string,
-  blockNumber: bigint,
-  log: RpcLogger = consoleLogger,
-): Promise<number | null> {
-  let address: `0x${string}`;
-  try {
-    address = SORTED_ORACLES_ADDRESS(chainId);
-  } catch {
-    return null;
-  }
-  try {
-    const client = getRpcClient(chainId);
-    const { result, usedLatestFallback } = await readContractWithBlockFallback(
-      chainId,
-      client,
-      {
-        address,
-        abi: SortedOraclesContract.abi,
-        functionName: "numRates",
-        args: [rateFeedID as `0x${string}`],
-      },
       blockNumber,
-      getFallbackRpcClient(chainId),
       log,
     );
-    // numRates can change with governance (reporter allowlist updates), so
-    // a `latest`-block fallback is NOT a valid stand-in for the requested
-    // historical block. Reject and let the caller preserve stale state.
-    if (usedLatestFallback) return null;
-    return Number(result);
-  } catch (err) {
-    logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber, log);
-    return null;
-  }
-}
-
-/** Returns the effective oracle report expiry (seconds) for the given
- * rateFeedID. Returns null on RPC/address error so callers can preserve the
- * previous known-good value. Concurrent-call dedup (oracle handlers fan out
- * across pools sharing a feed) is handled upstream by `reportExpiryEffect`
- * in src/rpc/effects.ts — Envio's Effect API memoizes per-batch on
- * identical inputs. */
-export async function fetchReportExpiry(
-  chainId: number,
-  rateFeedID: string,
-  blockNumber: bigint,
-  log: RpcLogger = consoleLogger,
-): Promise<bigint | null> {
-  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
-  if (_testReportExpiry.has(mockKey))
-    return _testReportExpiry.get(mockKey) ?? null;
-
-  let address: `0x${string}`;
-  try {
-    address = SORTED_ORACLES_ADDRESS(chainId);
-  } catch {
-    return null;
-  }
-  try {
-    const client = getRpcClient(chainId);
-    const tokenExpiryRes = await readContractWithBlockFallback(
-      chainId,
-      client,
-      {
-        address,
-        abi: SortedOraclesContract.abi,
-        functionName: "tokenReportExpirySeconds",
-        args: [rateFeedID as `0x${string}`],
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-      log,
-    );
-    // Report expiry can change via governance (TokenReportExpirySet /
-    // ReportExpirySet events); a `latest`-block fallback isn't valid for
-    // the requested historical block.
-    if (tokenExpiryRes.usedLatestFallback) return null;
-    const tokenExpiry = tokenExpiryRes.result as bigint;
-    let expiry: bigint;
-    if (tokenExpiry > 0n) {
-      expiry = tokenExpiry;
-    } else {
-      const globalRes = await readContractWithBlockFallback(
-        chainId,
-        client,
-        {
-          address,
-          abi: SortedOraclesContract.abi,
-          functionName: "reportExpirySeconds",
-        },
-        blockNumber,
-        getFallbackRpcClient(chainId),
-        log,
-      );
-      if (globalRes.usedLatestFallback) return null;
-      expiry = globalRes.result as bigint;
-    }
-    if (expiry <= 0n) return null;
-    return expiry;
-  } catch (err) {
-    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber, log);
     return null;
   }
 }
@@ -591,6 +422,11 @@ export async function fetchTokenDecimalsScaling(
   fn: "decimals0" | "decimals1",
   log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
+  const mockKey = `${chainId}:${poolAddress.toLowerCase()}:${fn}`;
+  if (_testTokenDecimalsScaling.has(mockKey)) {
+    return _testTokenDecimalsScaling.get(mockKey) ?? null;
+  }
+
   try {
     const client = getRpcClient(chainId);
     const { result } = await readContractWithBlockFallback(
@@ -662,209 +498,6 @@ export async function fetchTradingLimits(
       blockNumber,
       log,
     );
-    return null;
-  }
-}
-
-/** viem's `ContractFunctionZeroDataError` (message includes "returned no
- *  data") fires when the called function isn't in the contract bytecode —
- *  distinct from a network / RPC timeout. For fee getters that's the
- *  "older FPMM, getter missing" path, and pool.ts uses -2 to stamp those
- *  fields so self-heal stops retrying. Anything else is treated as
- *  transient and the field keeps the -1 sentinel for retry. */
-function isUnsupportedGetterError(reason: unknown): boolean {
-  const msg = reason instanceof Error ? reason.message : String(reason);
-  return msg.includes("returned no data");
-}
-
-async function readFeeGetter(
-  client: ReturnType<typeof getRpcClient>,
-  chainId: number,
-  poolAddress: string,
-  functionName: "lpFee" | "protocolFee" | "rebalanceIncentive",
-  mock: FeeGetterMock | undefined,
-  log: RpcLogger,
-): Promise<bigint> {
-  if (mock) {
-    if ("fulfilled" in mock) return mock.fulfilled;
-    if (mock.rejected === "unsupported") {
-      throw new Error(
-        `The contract function "${functionName}" returned no data ("0x").`,
-      );
-    }
-    throw new Error("Mock transient RPC failure");
-  }
-  const { result } = await readContractWithBlockFallback(
-    chainId,
-    client,
-    {
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_FEE_ABI,
-      functionName,
-    },
-    undefined,
-    getFallbackRpcClient(chainId),
-    log,
-  );
-  return result as bigint;
-}
-
-/** Test-only sentinel: `null` represents an RPC failure mock, distinct
- * from "no mock set" (which falls through to real RPC). */
-const _testIncentiveAtBlock = new Map<string, number | null>();
-
-/** @internal Test-only: pre-set a mock for `fetchRebalanceIncentiveAtBlock`.
- *  Pass a number (incl. -2) to return that bps; pass `null` to simulate
- *  RPC failure. Call `_clearMockRebalanceIncentivesAtBlock()` to reset. */
-export function _setMockRebalanceIncentiveAtBlock(
-  chainId: number,
-  poolAddress: string,
-  bps: number | null,
-): void {
-  _testIncentiveAtBlock.set(`${chainId}:${poolAddress.toLowerCase()}`, bps);
-}
-
-/** @internal Test-only: clear all `fetchRebalanceIncentiveAtBlock` mocks. */
-export function _clearMockRebalanceIncentivesAtBlock(): void {
-  _testIncentiveAtBlock.clear();
-}
-
-/** Read `rebalanceIncentive()` (bps) at a specific block. Used by the
- * Rebalanced handler to stamp the incentive that was actually in force
- * at the rebalance block, instead of inheriting `Pool.rebalanceReward`
- * (which can carry today's value during full resync — `fetchFees` self-
- * heals from `latest`, not block-scoped). On RPC failure or fallback
- * to `latest`, returns null and the caller falls back to the persisted
- * Pool value. The `-2` return value mirrors the `fetchFees` "getter
- * missing on this contract" sentinel — `Pool.rebalanceReward` uses it
- * to halt the upsertPool self-heal retry loop on older FPMM pools, and
- * propagating it here lets the Rebalanced handler short-circuit on
- * subsequent events for the same pool. */
-export async function fetchRebalanceIncentiveAtBlock(
-  chainId: number,
-  poolAddress: string,
-  blockNumber: bigint,
-  log: RpcLogger = consoleLogger,
-): Promise<number | null> {
-  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (_testIncentiveAtBlock.has(testKey)) {
-    return _testIncentiveAtBlock.get(testKey) ?? null;
-  }
-  try {
-    const client = getRpcClient(chainId);
-    const { result, usedLatestFallback } = await readContractWithBlockFallback(
-      chainId,
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_FEE_ABI,
-        functionName: "rebalanceIncentive",
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-      log,
-    );
-    // Only `latest`-block fallback breaks block-scoping; secondary-RPC
-    // fallback still queries the requested block, so its result is fine.
-    if (usedLatestFallback) return null;
-    return Number(result as bigint);
-  } catch (err) {
-    if (isUnsupportedGetterError(err)) return -2;
-    logRpcFailure(
-      chainId,
-      "rebalanceIncentive",
-      poolAddress,
-      err,
-      blockNumber,
-      log,
-    );
-    return null;
-  }
-}
-
-/** Fetch FPMM fee config (bps): lpFee, protocolFee, rebalanceIncentive.
- * Returns only the fields whose RPC call succeeded so partial failure
- * doesn't overwrite already-populated fields; returns null when every
- * call fails so self-heal retries on the next touch. Fields that reject
- * with the "returned no data" signature get -2 (attempted, unsupported)
- * so self-heal stops retrying permanently-missing getters. */
-export async function fetchFees(
-  chainId: number,
-  poolAddress: string,
-  log: RpcLogger = consoleLogger,
-): Promise<Partial<{
-  lpFee: number;
-  protocolFee: number;
-  rebalanceReward: number;
-}> | null> {
-  // Outer try/catch covers getRpcClient, which throws on unknown chainIds
-  // or missing HyperRPC tokens — those must degrade to null, not escape
-  // into the handler and stall indexing for the rest of the event.
-  try {
-    const mockKey = `${chainId}:${poolAddress.toLowerCase()}`;
-    const mock = _testFees.get(mockKey);
-    if (mock?.rpcClientThrows) {
-      throw new Error("Mock getRpcClient throw");
-    }
-    const client = getRpcClient(chainId);
-    const results = await Promise.allSettled([
-      readFeeGetter(client, chainId, poolAddress, "lpFee", mock?.lpFee, log),
-      readFeeGetter(
-        client,
-        chainId,
-        poolAddress,
-        "protocolFee",
-        mock?.protocolFee,
-        log,
-      ),
-      readFeeGetter(
-        client,
-        chainId,
-        poolAddress,
-        "rebalanceIncentive",
-        mock?.rebalanceReward,
-        log,
-      ),
-    ]);
-    const [lpFeeR, protocolFeeR, rebalanceRewardR] = results;
-    if (
-      lpFeeR.status === "rejected" &&
-      protocolFeeR.status === "rejected" &&
-      rebalanceRewardR.status === "rejected"
-    ) {
-      logRpcFailure(
-        chainId,
-        "fetchFees",
-        poolAddress,
-        lpFeeR.reason,
-        undefined,
-        log,
-      );
-      return null;
-    }
-    const fees: Partial<{
-      lpFee: number;
-      protocolFee: number;
-      rebalanceReward: number;
-    }> = {};
-    if (lpFeeR.status === "fulfilled") {
-      fees.lpFee = Number(lpFeeR.value as bigint);
-    } else if (isUnsupportedGetterError(lpFeeR.reason)) {
-      fees.lpFee = -2;
-    }
-    if (protocolFeeR.status === "fulfilled") {
-      fees.protocolFee = Number(protocolFeeR.value as bigint);
-    } else if (isUnsupportedGetterError(protocolFeeR.reason)) {
-      fees.protocolFee = -2;
-    }
-    if (rebalanceRewardR.status === "fulfilled") {
-      fees.rebalanceReward = Number(rebalanceRewardR.value as bigint);
-    } else if (isUnsupportedGetterError(rebalanceRewardR.reason)) {
-      fees.rebalanceReward = -2;
-    }
-    return fees;
-  } catch (err) {
-    logRpcFailure(chainId, "fetchFees", poolAddress, err, undefined, log);
     return null;
   }
 }

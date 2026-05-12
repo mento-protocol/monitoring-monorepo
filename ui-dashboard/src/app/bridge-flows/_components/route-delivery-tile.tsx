@@ -44,8 +44,9 @@ export function RouteDeliveryTile({
       ) : isLoading ? (
         <div className="space-y-2">
           {[0, 1].map((i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
             <div
-              key={i}
+              key={`skel-route-${i}`}
               className="h-4 animate-pulse rounded bg-slate-800/50"
             />
           ))}

@@ -30,6 +30,7 @@ type AddressRowProps = {
   notes?: string;
   isPublic?: boolean;
   isCustom: boolean;
+  kind?: "contract" | "custom" | "report";
   source?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -53,6 +54,7 @@ export function AddressTableRow({
   notes,
   isPublic,
   isCustom,
+  kind,
   source,
   createdAt,
   updatedAt,
@@ -64,6 +66,7 @@ export function AddressTableRow({
 }: AddressRowProps) {
   const arkhamSourced = isArkhamSourced({ source, tags });
   const minipaySourced = isMiniPaySourced({ source });
+  const isReportOnly = kind === "report";
   // Strip server-provenance tags from the displayed list — the SOURCE badge
   // already conveys this, so showing them as pills duplicates the signal.
   const displayTags = tags.filter(
@@ -89,7 +92,7 @@ export function AddressTableRow({
           />
         )}
         <div className="relative z-10 pointer-events-none">
-          {isCustom ? (
+          {isCustom || isReportOnly ? (
             <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
               All chains
             </span>
@@ -154,7 +157,11 @@ export function AddressTableRow({
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
       <td className="relative z-10 px-4 py-3 pointer-events-none">
-        {isCustom && arkhamSourced ? (
+        {isReportOnly ? (
+          <span className="inline-flex items-center rounded-full bg-sky-950 px-2 py-0.5 text-xs font-medium text-sky-300 ring-1 ring-inset ring-sky-800">
+            report
+          </span>
+        ) : isCustom && arkhamSourced ? (
           <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
             arkham
           </span>
@@ -232,6 +239,15 @@ export function AddressTableRow({
             className="text-xs text-slate-400 hover:text-indigo-300 transition-colors"
           >
             Edit
+          </button>
+        ) : isReportOnly ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            title="Add a label to this report-only address"
+            className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
+          >
+            + Label
           </button>
         ) : (
           <button

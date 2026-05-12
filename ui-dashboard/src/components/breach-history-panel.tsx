@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useReducer } from "react";
 import {
   isVirtualPool,
   type Pool,
@@ -51,24 +51,66 @@ interface Props {
   onSearchChange: (value: string) => void;
 }
 
-export function BreachHistoryPanel({
-  pool,
-  network,
-  limit,
-  search,
-  onSearchChange,
-}: Props) {
+type PanelState = {
+  rawPage: number;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  bucket: DurationBucket;
+  minSeconds: number | null;
+  maxSeconds: number | null;
+};
+
+type PanelAction =
+  | { type: "set-page"; page: number }
+  | { type: "sort"; key: SortKey }
+  | { type: "bucket"; bucket: DurationBucket }
+  | { type: "min"; seconds: number | null }
+  | { type: "max"; seconds: number | null };
+
+const INITIAL_PANEL_STATE: PanelState = {
+  rawPage: 1,
+  sortKey: "startedAt",
+  sortDir: "desc",
+  bucket: "all",
+  minSeconds: null,
+  maxSeconds: null,
+};
+
+function panelReducer(state: PanelState, action: PanelAction): PanelState {
+  switch (action.type) {
+    case "set-page":
+      return { ...state, rawPage: action.page };
+    case "sort":
+      if (state.sortKey === action.key) {
+        return {
+          ...state,
+          rawPage: 1,
+          sortDir: state.sortDir === "asc" ? "desc" : "asc",
+        };
+      }
+      // First click on a new column: descending default (biggest durations
+      // / peaks / most-recent starts at the top — usually what you want).
+      return {
+        ...state,
+        rawPage: 1,
+        sortKey: action.key,
+        sortDir: "desc",
+      };
+    case "bucket":
+      return { ...state, rawPage: 1, bucket: action.bucket };
+    case "min":
+      return { ...state, rawPage: 1, minSeconds: action.seconds };
+    case "max":
+      return { ...state, rawPage: 1, maxSeconds: action.seconds };
+  }
+}
+
+export function BreachHistoryPanel(props: Props) {
+  const { pool, network, limit, search, onSearchChange } = props;
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
-  const [rawPage, setRawPage] = useState(1);
-  const [sortKey, setSortKey] = useState<SortKey>("startedAt");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [bucket, setBucket] = useState<DurationBucket>("all");
-  // Min/max are committed values (numeric seconds, or null when empty /
-  // invalid). The child controls their own draft text — we only see
-  // committed numbers here so re-renders don't fire on every keystroke.
-  const [minSeconds, setMinSeconds] = useState<number | null>(null);
-  const [maxSeconds, setMaxSeconds] = useState<number | null>(null);
+  const [state, dispatch] = useReducer(panelReducer, INITIAL_PANEL_STATE);
+  const { rawPage, sortKey, sortDir, bucket, minSeconds, maxSeconds } = state;
 
   // Any control that changes the result set resets pagination. Without
   // this, clicking "Over 1d" on page 3 of an unfiltered 400-row result
@@ -76,34 +118,22 @@ export function BreachHistoryPanel({
   const handleSearchChange = useCallback(
     (value: string) => {
       onSearchChange(value);
-      setRawPage(1);
+      dispatch({ type: "set-page", page: 1 });
     },
     [onSearchChange],
   );
-  const handleSort = useCallback((key: SortKey) => {
-    setSortKey((prev) => {
-      if (prev === key) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-        return prev;
-      }
-      // First click on a new column: descending default (biggest durations
-      // / peaks / most-recent starts at the top — usually what you want).
-      setSortDir("desc");
-      return key;
-    });
-    setRawPage(1);
-  }, []);
+  const handleSort = useCallback(
+    (key: SortKey) => dispatch({ type: "sort", key }),
+    [],
+  );
   const handleBucket = useCallback((next: DurationBucket) => {
-    setBucket(next);
-    setRawPage(1);
+    dispatch({ type: "bucket", bucket: next });
   }, []);
   const handleMinCommit = useCallback((seconds: number | null) => {
-    setMinSeconds(seconds);
-    setRawPage(1);
+    dispatch({ type: "min", seconds });
   }, []);
   const handleMaxCommit = useCallback((seconds: number | null) => {
-    setMaxSeconds(seconds);
-    setRawPage(1);
+    dispatch({ type: "max", seconds });
   }, []);
 
   const where = useMemo(
@@ -129,7 +159,7 @@ export function BreachHistoryPanel({
       getName={getName}
       getTags={getTags}
       rawPage={rawPage}
-      setRawPage={setRawPage}
+      onPageChange={(page) => dispatch({ type: "set-page", page })}
       sortKey={sortKey}
       sortDir={sortDir}
       onSort={handleSort}
@@ -145,29 +175,7 @@ export function BreachHistoryPanel({
   );
 }
 
-function BreachHistoryPanelInner({
-  pool,
-  network,
-  limit,
-  query,
-  search,
-  onSearchChange,
-  getName,
-  getTags,
-  rawPage,
-  setRawPage,
-  sortKey,
-  sortDir,
-  onSort,
-  bucket,
-  onBucket,
-  minSeconds,
-  onMinCommit,
-  maxSeconds,
-  onMaxCommit,
-  where,
-  orderBy,
-}: {
+type BreachHistoryPanelInnerProps = {
   pool: Pool;
   network: Network;
   limit: number;
@@ -177,7 +185,7 @@ function BreachHistoryPanelInner({
   getName: (addr: string | null, chainId?: number) => string;
   getTags: (addr: string | null) => string[];
   rawPage: number;
-  setRawPage: (n: number) => void;
+  onPageChange: (n: number) => void;
   sortKey: SortKey;
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
@@ -189,7 +197,31 @@ function BreachHistoryPanelInner({
   onMaxCommit: (seconds: number | null) => void;
   where: Record<string, unknown>;
   orderBy: ReturnType<typeof buildOrderBy>;
-}) {
+};
+
+function BreachHistoryPanelInner({
+  pool,
+  network,
+  limit,
+  query,
+  search,
+  onSearchChange,
+  getName,
+  getTags,
+  rawPage,
+  onPageChange,
+  sortKey,
+  sortDir,
+  onSort,
+  bucket,
+  onBucket,
+  minSeconds,
+  onMinCommit,
+  maxSeconds,
+  onMaxCommit,
+  where,
+  orderBy,
+}: BreachHistoryPanelInnerProps) {
   // Count + paginated page run in parallel against the same $where so the
   // pagination controls match what's rendered.
   //
@@ -307,7 +339,7 @@ function BreachHistoryPanelInner({
 
   return (
     <div className="flex flex-col gap-4">
-      <BreachHistoryChart breaches={chartRows} pool={pool} />
+      <BreachHistoryChart breaches={chartRows} />
 
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -359,7 +391,6 @@ function BreachHistoryPanelInner({
         ) : (
           <BreachTable
             rows={filteredRows}
-            pool={pool}
             network={network}
             getName={getName}
             sortKey={sortKey}
@@ -384,7 +415,7 @@ function BreachHistoryPanelInner({
                 : page * limit
               : rawTotal
           }
-          onPageChange={setRawPage}
+          onPageChange={onPageChange}
         />
         {countCapped && (
           <p className="px-1 pt-1 text-xs text-amber-400">

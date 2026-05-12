@@ -48,7 +48,7 @@ const Plot = dynamic(() => import("react-plotly.js"), {
 });
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
-export type BreakdownMode = "lines" | "stacked";
+type BreakdownMode = "lines" | "stacked";
 
 interface TimeSeriesChartCardProps {
   title: string;
@@ -122,6 +122,10 @@ interface TimeSeriesChartCardProps {
   ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
 }
 
+// Intentional react-doctor suppression: chart shell + hover overlay + trace
+// builder + range picker are tightly coupled to Plotly layout state. Revisit
+// only with a focused chart-component split.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function TimeSeriesChartCard({
   title,
   rangeAriaLabel,

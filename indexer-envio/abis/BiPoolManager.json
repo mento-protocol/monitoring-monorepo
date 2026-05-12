@@ -1,0 +1,980 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "test",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "CONSTANT_PRODUCT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "CONSTANT_SUM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "breakerBox",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IBreakerBox"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "broker",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "createExchange",
+    "inputs": [
+      {
+        "name": "_exchange",
+        "type": "tuple",
+        "internalType": "struct IBiPoolManager.PoolExchange",
+        "components": [
+          {
+            "name": "asset0",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "asset1",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pricingModule",
+            "type": "address",
+            "internalType": "contract IPricingModule"
+          },
+          {
+            "name": "bucket0",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bucket1",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastBucketUpdate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "config",
+            "type": "tuple",
+            "internalType": "struct IBiPoolManager.PoolConfig",
+            "components": [
+              {
+                "name": "spread",
+                "type": "tuple",
+                "internalType": "struct FixidityLib.Fraction",
+                "components": [
+                  {
+                    "name": "value",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "referenceRateFeedID",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "referenceRateResetFrequency",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minimumReports",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "stablePoolResetSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "destroyExchange",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "exchangeIdIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "destroyed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "exchangeIds",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "exchanges",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "asset0",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "asset1",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pricingModule",
+        "type": "address",
+        "internalType": "contract IPricingModule"
+      },
+      {
+        "name": "bucket0",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bucket1",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "lastBucketUpdate",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct IBiPoolManager.PoolConfig",
+        "components": [
+          {
+            "name": "spread",
+            "type": "tuple",
+            "internalType": "struct FixidityLib.Fraction",
+            "components": [
+              {
+                "name": "value",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "referenceRateFeedID",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "referenceRateResetFrequency",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minimumReports",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "stablePoolResetSize",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAmountIn",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAmountOut",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeIds",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchanges",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "_exchanges",
+        "type": "tuple[]",
+        "internalType": "struct IExchangeProvider.Exchange[]",
+        "components": [
+          {
+            "name": "exchangeId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "assets",
+            "type": "address[]",
+            "internalType": "address[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPoolExchange",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exchange",
+        "type": "tuple",
+        "internalType": "struct IBiPoolManager.PoolExchange",
+        "components": [
+          {
+            "name": "asset0",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "asset1",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pricingModule",
+            "type": "address",
+            "internalType": "contract IPricingModule"
+          },
+          {
+            "name": "bucket0",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bucket1",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastBucketUpdate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "config",
+            "type": "tuple",
+            "internalType": "struct IBiPoolManager.PoolConfig",
+            "components": [
+              {
+                "name": "spread",
+                "type": "tuple",
+                "internalType": "struct FixidityLib.Fraction",
+                "components": [
+                  {
+                    "name": "value",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "referenceRateFeedID",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "referenceRateResetFrequency",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minimumReports",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "stablePoolResetSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "_broker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_reserve",
+        "type": "address",
+        "internalType": "contract IReserve"
+      },
+      {
+        "name": "_sortedOracles",
+        "type": "address",
+        "internalType": "contract ISortedOracles"
+      },
+      {
+        "name": "_breakerBox",
+        "type": "address",
+        "internalType": "contract IBreakerBox"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "initialized",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isOwner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pricingModules",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserve",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IReserve"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setBreakerBox",
+    "inputs": [
+      {
+        "name": "_breakerBox",
+        "type": "address",
+        "internalType": "contract IBreakerBox"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setBroker",
+    "inputs": [
+      {
+        "name": "_broker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setPricingModules",
+    "inputs": [
+      {
+        "name": "identifiers",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "modules",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setReserve",
+    "inputs": [
+      {
+        "name": "_reserve",
+        "type": "address",
+        "internalType": "contract IReserve"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setSortedOracles",
+    "inputs": [
+      {
+        "name": "_sortedOracles",
+        "type": "address",
+        "internalType": "contract ISortedOracles"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setSpread",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "spread",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sortedOracles",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ISortedOracles"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "swapIn",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "swapOut",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "tokenPrecisionMultipliers",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "BreakerBoxUpdated",
+    "inputs": [
+      {
+        "name": "newBreakerBox",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BrokerUpdated",
+    "inputs": [
+      {
+        "name": "newBroker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BucketsUpdated",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "bucket0",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "bucket1",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExchangeCreated",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "asset0",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset1",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pricingModule",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExchangeDestroyed",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "asset0",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset1",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pricingModule",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PricingModulesUpdated",
+    "inputs": [
+      {
+        "name": "newIdentifiers",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "newAddresses",
+        "type": "address[]",
+        "indexed": false,
+        "internalType": "address[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ReserveUpdated",
+    "inputs": [
+      {
+        "name": "newReserve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SortedOraclesUpdated",
+    "inputs": [
+      {
+        "name": "newSortedOracles",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SpreadUpdated",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "spread",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  }
+]

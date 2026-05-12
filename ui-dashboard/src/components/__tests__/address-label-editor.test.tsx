@@ -44,10 +44,10 @@ vi.mock("@/components/tag-input", () => ({
       value={tags.join(",")}
       onChange={(e) =>
         onChange(
-          e.target.value
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean),
+          e.target.value.split(",").flatMap((t) => {
+            const v = t.trim();
+            return v ? [v] : [];
+          }),
         )
       }
     />

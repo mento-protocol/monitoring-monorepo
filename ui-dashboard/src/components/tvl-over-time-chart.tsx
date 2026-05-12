@@ -136,6 +136,7 @@ export function buildDailySeries(
     timestamp += bucketSeconds
   ) {
     let tvl = 0;
+    let anyContributed = false;
     const perChainTvl = new Map<string, number>();
     for (let i = 0; i < histories.length; i++) {
       const history = histories[i];
@@ -152,11 +153,24 @@ export function buildDailySeries(
         history.network,
         history.rates,
       );
+      // Skip pools whose TVL is unknowable (untrusted decimals → null).
+      // Summing null as 0 would understate aggregate / per-chain TVL.
+      if (poolTvl === null) continue;
       tvl += poolTvl;
+      anyContributed = true;
       const id = history.network.id;
       perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
     }
-    series.push({ timestamp, tvlUSD: tvl });
+    // Aggregate: skip the bucket entirely when no pool contributed.
+    // Emitting `tvlUSD: 0` would render as "$0 TVL" in the historical
+    // line, presenting unknown data as a real zero (codex P2 PR #372).
+    // Per-chain breakdown still emits 0 for chains that didn't
+    // contribute — the breakdown lines need filled timestamps to stay
+    // continuous (existing test "includes chains with zero contribution
+    // in a bucket as 0, not omitted").
+    if (anyContributed) {
+      series.push({ timestamp, tvlUSD: tvl });
+    }
     for (const c of chainsSeen) {
       perChainSeries.get(c.id)!.push({
         timestamp,
@@ -169,6 +183,7 @@ export function buildDailySeries(
   const perChainNowTvl = new Map<string, number>();
   for (const history of histories) {
     const poolTvl = poolTvlUSD(history.pool, history.network, history.rates);
+    if (poolTvl === null) continue;
     nowTvl += poolTvl;
     const id = history.network.id;
     perChainNowTvl.set(id, (perChainNowTvl.get(id) ?? 0) + poolTvl);
@@ -186,6 +201,14 @@ export function buildDailySeries(
 interface TvlOverTimeChartProps {
   networkData: NetworkData[];
   totalTvl: number;
+  /**
+   * Trust-state of `totalTvl`:
+   * - `null` — no priceable pools contributed (render headline as "—")
+   * - `false` — every priceable pool returned a value (render USD total)
+   * - `true` — at least one pool's TVL was unknowable (render USD total
+   *   with a "(partial)" qualifier so the user can see the sum is provisional)
+   */
+  tvlPartial: boolean | null;
   change7d: number | null;
   isLoading: boolean;
   hasError: boolean;
@@ -195,6 +218,7 @@ interface TvlOverTimeChartProps {
 export function TvlOverTimeChart({
   networkData,
   totalTvl,
+  tvlPartial,
   change7d,
   isLoading,
   hasError,
@@ -253,7 +277,13 @@ export function TvlOverTimeChart({
     [fullBreakdown, range],
   );
 
-  const headline = isLoading ? "…" : formatUSD(totalTvl);
+  const headline = isLoading
+    ? "…"
+    : tvlPartial === null
+      ? "—"
+      : tvlPartial
+        ? `${formatUSD(totalTvl)} (partial)`
+        : formatUSD(totalTvl);
   const emptyMessage = hasError
     ? "Unable to load TVL history"
     : hasSnapshotError

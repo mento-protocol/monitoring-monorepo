@@ -13,9 +13,14 @@
  */
 
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import { weiToUsd as formatWeiToUsd } from "@/lib/format";
+import {
+  aggregateAggregatorsByWindow,
+  type AggregatorDailyRowBase,
+  type AggregatorWindowRow,
+} from "@/lib/leaderboard-aggregators";
 
-/** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
-export const USD_WEI_DECIMALS = 18;
+export { formatWeiToUsd as weiToUsd };
 
 /** Window selection for the leaderboard view. The full range set covers
  * both v3 and v2 venues; the per-pool chart is hidden for `<30d` windows
@@ -97,8 +102,8 @@ export type TraderPoolDailyRow = {
 /** Aggregated trader-window row. `uniquePoolsApprox` is union-of-day-counts
  * — Hasura can't `count(distinct pool)` for us, and we don't have a
  * trader-window snapshot entity yet, so we use the *max* daily uniquePools
- * as a lower-bound proxy. (PR 4+: pre-roll a TraderWindowSnapshot if the
- * lower-bound is misleading in practice.) */
+ * as a lower-bound proxy. Pre-roll a TraderWindowSnapshot if the lower-bound
+ * is misleading in practice. */
 export type TraderWindowRow = {
   chainId: number;
   trader: string;
@@ -128,10 +133,18 @@ export type TraderPoolWindowRow = {
 // Mirror of TraderDailyRow / TraderWindowRow but skinnier: BrokerSwapEvent
 // doesn't carry fee bps or pool metadata, so the v2 entity drops fees and
 // per-pool-uniques. See indexer-envio/schema.graphql BrokerTraderDailySnapshot.
+//
+// Note: the underlying entity field is `caller` (tx.from / signer EOA), but
+// the GraphQL queries alias it to `trader` so v2 and v3 row shapes stay
+// uniform — `aggregateBrokerTradersByWindow` / `aggregateDailyVolume` /
+// `mergeHeroSnapshot` can read `row.trader` regardless of venue.
 
 export type BrokerTraderDailyRow = {
   id: string;
   chainId: number;
+  /** Aliased from `caller` in the GraphQL query — semantically the signer
+   *  EOA (tx.from). Keeping the field name `trader` here so this row shape
+   *  stays interchangeable with `TraderDailyRow` for `aggregateDailyVolume`. */
   trader: string;
   timestamp: string;
   swapCount: number;
@@ -142,6 +155,7 @@ export type BrokerTraderDailyRow = {
 
 export type BrokerTraderWindowRow = {
   chainId: number;
+  /** Signer EOA (tx.from) — see `BrokerTraderDailyRow.trader`. */
   trader: string;
   swapCount: number;
   volumeUsdWei: bigint;
@@ -149,30 +163,10 @@ export type BrokerTraderWindowRow = {
   lastSeenTimestamp: number;
 };
 
-export type BrokerAggregatorDailyRow = {
+export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
   id: string;
-  chainId: number;
-  aggregator: string;
-  lastSeenAggregatorAddress: string;
-  timestamp: string;
-  swapCount: number;
-  uniqueTraders: number;
-  volumeUsdWei: string;
 };
-
-export type BrokerAggregatorWindowRow = {
-  chainId: number;
-  aggregator: string;
-  lastSeenAggregatorAddress: string;
-  swapCount: number;
-  /** Lower bound: max single-day uniqueTraders across the window's days for
-   * this (chain, aggregator). True window-unique would need a marker per
-   * (chain, aggregator, trader, window) which isn't worth the indexer
-   * complexity for an outreach view. Same approximation pattern as
-   * `TraderWindowRow.uniquePoolsApprox`. */
-  uniqueTradersApprox: number;
-  volumeUsdWei: bigint;
-};
+export type BrokerAggregatorWindowRow = AggregatorWindowRow;
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
@@ -311,57 +305,7 @@ export function aggregateBrokerTradersByWindow(
   });
 }
 
-/**
- * Group `BrokerAggregatorDailyRow`s by `(chainId, aggregator)`. Volume + swap
- * counts sum; `uniqueTraders` becomes a max-of-day-counts lower bound (see
- * `BrokerAggregatorWindowRow.uniqueTradersApprox` rationale).
- */
-export function aggregateBrokerAggregatorsByWindow(
-  rows: readonly BrokerAggregatorDailyRow[],
-): BrokerAggregatorWindowRow[] {
-  const byKey = new Map<string, BrokerAggregatorWindowRow>();
-  // Tracks the latest day-bucket timestamp seen per key so
-  // `lastSeenAggregatorAddress` reflects the most recent day, not whichever
-  // single-day row happened to come last in iteration order. The
-  // BROKER_AGGREGATOR_DAILY_TOP query orders by `volumeUsdWei desc`, so
-  // iterating without comparing timestamps would surface the lowest-volume
-  // day's router (often a stale or rotated address).
-  const latestTsByKey = new Map<string, number>();
-  for (const r of rows) {
-    const key = `${r.chainId}-${r.aggregator}`;
-    const ts = Number(r.timestamp);
-    const existing = byKey.get(key);
-    if (existing) {
-      existing.swapCount += r.swapCount;
-      existing.volumeUsdWei += BigInt(r.volumeUsdWei);
-      existing.uniqueTradersApprox = Math.max(
-        existing.uniqueTradersApprox,
-        r.uniqueTraders,
-      );
-      const prevLatest = latestTsByKey.get(key) ?? 0;
-      if (ts > prevLatest) {
-        existing.lastSeenAggregatorAddress = r.lastSeenAggregatorAddress;
-        latestTsByKey.set(key, ts);
-      }
-    } else {
-      byKey.set(key, {
-        chainId: r.chainId,
-        aggregator: r.aggregator,
-        lastSeenAggregatorAddress: r.lastSeenAggregatorAddress,
-        swapCount: r.swapCount,
-        uniqueTradersApprox: r.uniqueTraders,
-        volumeUsdWei: BigInt(r.volumeUsdWei),
-      });
-      latestTsByKey.set(key, ts);
-    }
-  }
-  return Array.from(byKey.values()).sort((a, b) => {
-    if (b.volumeUsdWei > a.volumeUsdWei) return 1;
-    if (b.volumeUsdWei < a.volumeUsdWei) return -1;
-    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
-    return a.aggregator.localeCompare(b.aggregator);
-  });
-}
+export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 
 /**
  * Day-keyed totals across all traders in the window. Drives the volume
@@ -380,7 +324,7 @@ export function aggregateDailyVolume(
   }
   return Array.from(byDay.entries())
     .sort(([a], [b]) => a - b)
-    .map(([timestamp, wei]) => ({ timestamp, value: weiToUsd(wei) }));
+    .map(([timestamp, wei]) => ({ timestamp, value: formatWeiToUsd(wei) }));
 }
 
 /** Three-way comparator for BigInts. Used by table sort handlers that need
@@ -391,33 +335,9 @@ export function cmpBigInt(a: bigint, b: bigint): number {
   return 0;
 }
 
-// ─── Display conversions ──────────────────────────────────────────────────
-
-/** USD-wei BigInt → number. Loses precision past ~$9 quadrillion (Number's
- * 2^53 cap). Acceptable for display; never use for further accumulation. */
-export function weiToUsd(wei: bigint): number {
-  // Convert via decimal-shift through string to keep precision under Number's
-  // 2^53 ceiling (`Number(wei)` rounds large BigInts).
-  const s = wei.toString();
-  if (s === "0") return 0;
-  const negative = s.startsWith("-");
-  const digits = negative ? s.slice(1) : s;
-  if (digits.length <= USD_WEI_DECIMALS) {
-    const padded = digits.padStart(USD_WEI_DECIMALS + 1, "0");
-    const whole = padded.slice(0, -USD_WEI_DECIMALS);
-    const frac = padded.slice(-USD_WEI_DECIMALS).slice(0, 6);
-    const n = Number(`${whole}.${frac}`);
-    return negative ? -n : n;
-  }
-  const whole = digits.slice(0, -USD_WEI_DECIMALS);
-  const frac = digits.slice(-USD_WEI_DECIMALS).slice(0, 6);
-  const n = Number(`${whole}.${frac}`);
-  return negative ? -n : n;
-}
-
 // ─── Flow imbalance (drives the FlowBadge) ────────────────────────────────
 
-export type FlowKind = "one-directional" | "delta-neutral" | "mixed";
+type FlowKind = "one-directional" | "delta-neutral" | "mixed";
 
 export type FlowResult = {
   kind: FlowKind;
@@ -432,7 +352,7 @@ export type FlowResult = {
 
 /**
  * Score a trader's flow in their primary pool by the absolute net-flow
- * imbalance. Threshold rationale (BACKLOG.md PR 3 spec):
+ * imbalance. Threshold rationale from the leaderboard MVP:
  *   imbalance > 0.7  → one-directional (extractive arb / corridor flow)
  *   imbalance < 0.2  → delta-neutral (round-tripper, MM-like)
  *   else             → mixed
@@ -478,19 +398,16 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
 // ─── Per-pool stacked chart aggregation ───────────────────────────────────
 // Moved to `lib/leaderboard-pool.ts` to keep this file under the AGENTS.md
 // 600-line soft cap. Re-exported below so existing imports keep working.
-export {
-  aggregatePoolDailyVolume,
-  type PoolBreakdown,
-  type PoolDailyVolumeRow,
-} from "@/lib/leaderboard-pool";
+export { aggregatePoolDailyVolume } from "@/lib/leaderboard-pool";
 
 // Hero KPI rollup (mergeHeroSnapshot, top10Concentration, related types)
 // is in `lib/leaderboard-hero.ts` to keep this file under the 600-line
 // soft cap. Re-exported below so existing imports keep working.
 export {
+  buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
   top10Concentration,
-  type HeroSnapshotTotals,
+  type LeaderboardPartialOverlapRow,
   type LeaderboardTodayTraderRow,
   type LeaderboardWindowFirstDayRow,
   type LeaderboardWindowRow,

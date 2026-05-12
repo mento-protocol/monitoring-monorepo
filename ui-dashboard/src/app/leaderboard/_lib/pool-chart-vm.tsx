@@ -5,7 +5,6 @@ import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { aggregatePoolDailyVolume } from "@/lib/leaderboard-pool";
-import type { TraderDailyRow } from "@/lib/leaderboard";
 import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
 import type { ReactNode } from "react";
 
@@ -50,7 +49,6 @@ function poolDisplayName(
  */
 export function usePoolChartViewModel(args: {
   showSystem: boolean;
-  traderRows: readonly TraderDailyRow[];
   poolVolumeRows: readonly PoolDailyVolumeRow[];
   poolMeta: ReadonlyMap<string, PoolMetaEntry>;
   cutoff: number;
@@ -60,28 +58,7 @@ export function usePoolChartViewModel(args: {
   chartBreakdown: ChartBreakdownEntry[];
   topPoolsListEntries: TopPoolsListEntry[];
 } {
-  const {
-    showSystem,
-    traderRows,
-    poolVolumeRows,
-    poolMeta,
-    cutoff,
-    utcDayKey,
-  } = args;
-
-  // System-toggle parity: drop pool-day rows whose `(chainId, trader, day)`
-  // doesn't appear in the non-system trader allowlist when the toggle is off.
-  // `TraderPoolDailySnapshot` doesn't carry `isSystemAddress`, so we can't
-  // push the filter into Hasura.
-  const traderAllowList = useMemo<ReadonlySet<string> | undefined>(() => {
-    if (showSystem) return undefined;
-    const s = new Set<string>();
-    for (const r of traderRows) {
-      if (r.isSystemAddress) continue;
-      s.add(`${r.chainId}-${r.trader}-${r.timestamp}`);
-    }
-    return s;
-  }, [showSystem, traderRows]);
+  const { showSystem, poolVolumeRows, poolMeta, cutoff, utcDayKey } = args;
 
   // UTC-day window so the chart's x-axis stays contiguous when a day had
   // zero volume protocol-wide. `cutoff` is already aligned to UTC midnight.
@@ -98,10 +75,10 @@ export function usePoolChartViewModel(args: {
     return aggregatePoolDailyVolume(
       poolVolumeRows,
       (poolId) => poolDisplayName(poolId, poolMeta),
-      traderAllowList,
+      showSystem,
       windowRange,
     );
-  }, [poolVolumeRows, poolMeta, traderAllowList, windowRange]);
+  }, [poolVolumeRows, poolMeta, showSystem, windowRange]);
 
   // Decorate breakdown with chain text labels for the legend / tooltip.
   // Chain icons were dropped — at 12px they conflated cross-chain pairs

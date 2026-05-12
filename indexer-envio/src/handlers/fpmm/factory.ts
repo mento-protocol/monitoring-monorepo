@@ -10,13 +10,13 @@ import {
   makePoolId,
   extractAddressFromPoolId,
 } from "../../helpers.js";
-import { scalingFactorToDecimals } from "../../priceDifference.js";
+import { parseDecimalsPair } from "../../priceDifference.js";
 import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
   numReportersEffect,
-  rebalanceThresholdEffect,
+  rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
   tokenDecimalsScalingEffect,
@@ -27,8 +27,7 @@ import {
   upsertPool,
 } from "../../pool.js";
 import { isKnownFeeToken } from "../../feeToken.js";
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+import { ZERO_ADDRESS } from "../../constants.js";
 
 export async function applyLiquidityPositionDelta({
   context,
@@ -96,9 +95,11 @@ export async function applyLiquidityPositionDelta({
 // https://chatgpt.com/codex/cloud/security/findings/bcfbd2e38c388191a52fb85205eb326d
 //
 // Note: contractRegister callbacks are a framework-level hook that Envio
-// invokes before the handler. We mitigate the lack of direct integration
-// coverage by unit-testing `isKnownFeeToken` directly and asserting the
-// callback is registered via the handler-registry introspection tests.
+// invokes before the handler. The Envio test harness (processEvent) only
+// exercises the .handler() path, so this callback has no direct test
+// coverage — this is a framework limitation, not an oversight. We mitigate
+// by unit-testing `isKnownFeeToken` directly and asserting the callback is
+// registered via the handler-registry introspection tests.
 indexer.contractRegister(
   { contract: "FPMMFactory", event: "FPMMDeployed" },
   async ({ event, context }) => {
@@ -150,7 +151,7 @@ indexer.onEvent(
 
     const [
       rateFeedID,
-      rebalanceThreshold,
+      rebalanceThresholds,
       dec0Raw,
       dec1Raw,
       invertRateFeed,
@@ -162,9 +163,12 @@ indexer.onEvent(
       }),
       // Use standalone getters — they work even when the oracle is stale,
       // unlike getRebalancingState() which reverts on stale/expired oracle data.
-      context.effect(rebalanceThresholdEffect, {
+      // Read at the deploy block so historical replay sees the deploy-time
+      // configuration, not whatever governance has changed it to since.
+      context.effect(rebalanceThresholdsEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
+        blockNumber,
       }),
       // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
       context.effect(tokenDecimalsScalingEffect, {
@@ -188,16 +192,9 @@ indexer.onEvent(
         poolAddress: poolAddr,
       }),
     ]);
-    // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
-    const token0Decimals = dec0Raw
-      ? (scalingFactorToDecimals(dec0Raw) ?? 18)
-      : 18;
-    const token1Decimals = dec1Raw
-      ? (scalingFactorToDecimals(dec1Raw) ?? 18)
-      : 18;
+    const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
 
     if (rateFeedID) {
-      oracleDelta.referenceRateFeedID = rateFeedID;
       // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
       // handlers can read them from the DB without per-event RPC calls.
       const [oracleExpiry, numReporters] = await Promise.all([
@@ -219,6 +216,9 @@ indexer.onEvent(
         oracleDelta.oracleNumReporters = numReporters;
       }
     }
+    // `referenceRateFeedID` flows through the dedicated upsertPool param
+    // (not through oracleDelta) so it isn't clobbered by the spread chain
+    // — see DEFAULT_ORACLE_FIELDS doc.
 
     // Only persist invertRateFeed when the RPC actually succeeded, and stamp
     // `invertRateFeedKnown` so upsertPool's self-heal stops retrying. When the
@@ -229,8 +229,23 @@ indexer.onEvent(
       oracleDelta.invertRateFeedKnown = true;
     }
 
-    if (rebalanceThreshold !== null && rebalanceThreshold > 0) {
-      oracleDelta.rebalanceThreshold = rebalanceThreshold;
+    if (rebalanceThresholds !== null) {
+      const { above, below } = rebalanceThresholds;
+      oracleDelta.rebalanceThresholdAbove = above;
+      oracleDelta.rebalanceThresholdBelow = below;
+      oracleDelta.rebalanceThresholdsKnown = true;
+      // Active threshold seed: the contract picks above OR below at evaluation
+      // time based on reservePriceAboveOraclePrice. Pre-first-event we don't
+      // know the direction, so seed with `max(above, below)` (the broadest
+      // band) — the next UpdateReserves/Rebalanced will refresh with the
+      // direction-correct value via `tryDeriveRebalanceState`. Skip when both
+      // are 0 (configured to never rebalance) so the legacy field stays at
+      // its 0 default; the `rebalanceThresholdsKnown: true` flag distinguishes
+      // this legitimate state from "RPC failed".
+      const broadest = Math.max(above, below);
+      if (broadest > 0) {
+        oracleDelta.rebalanceThreshold = broadest;
+      }
     }
 
     const pool = await upsertPool({
@@ -244,7 +259,8 @@ indexer.onEvent(
       blockTimestamp,
       txHash: event.transaction.hash,
       oracleDelta,
-      tokenDecimals: { token0Decimals, token1Decimals },
+      tokenDecimals,
+      referenceRateFeedID: rateFeedID ?? undefined,
     });
 
     // Persist fee config read at pool creation. `compactFees` strips

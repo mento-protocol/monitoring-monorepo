@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "react-doctor": "react-doctor ."
   },
   "dependencies": {
     "@mento-protocol/contracts": "0.8.0",
@@ -21,7 +22,7 @@
     "@web3icons/react": "^4.1.17",
     "graphql": "^16.13.1",
     "graphql-request": "^7.4.0",
-    "next": "16.2.3",
+    "next": "16.2.6",
     "next-auth": "5.0.0-beta.30",
     "plotly.js-basic-dist-min": "^3.4.0",
     "react": "19.2.4",
@@ -55,9 +56,11 @@
     "axe-core": "^4.11.4",
     "eslint": "^10.0.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-you-might-not-need-an-effect": "0.10.1",
     "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",
+    "react-doctor": "0.1.6",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",

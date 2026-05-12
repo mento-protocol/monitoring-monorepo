@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { BRIDGE_DAILY_SNAPSHOT } from "@/lib/bridge-queries";
 import {
@@ -43,9 +44,10 @@ export type BridgeFlowsOgData = {
  * rows that don't carry a pinned `sentUsdValue`.
  */
 function bridgeChains(): Network[] {
-  return NETWORK_IDS.map((id) => NETWORKS[id]).filter(
-    (n) => n.hasuraUrl && !n.local && !n.testnet,
-  );
+  return NETWORK_IDS.flatMap((id) => {
+    const n = NETWORKS[id];
+    return n.hasuraUrl && !n.local && !n.testnet ? [n] : [];
+  });
 }
 
 /** @internal Exported for testing — skips the cache wrapper. */
@@ -55,7 +57,7 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   // Per-request timeout. Without this a hung upstream would block the OG
   // route until Vercel's function timeout fires, stalling crawler unfurls.
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Snapshots live on the multichain endpoint; any configured mainnet
   // network works as the query host (same env var backs both).
@@ -137,9 +139,9 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
   // single timestamp.
   const cutoff30d =
     nowSec - THIRTY_DAYS - ((nowSec - THIRTY_DAYS) % SECONDS_PER_DAY);
-  const volumeSeries = fullSeries
-    .filter((p) => p.timestamp >= cutoff30d)
-    .map((p) => p.value);
+  const volumeSeries = fullSeries.flatMap((p) =>
+    p.timestamp >= cutoff30d ? [p.value] : [],
+  );
 
   // Distinguish "snapshots succeeded but empty" (truly idle bridge → 0) from
   // "snapshots query failed" (handled above with null). The query-failed

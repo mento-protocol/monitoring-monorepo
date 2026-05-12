@@ -32,7 +32,7 @@ type EntriesState = Record<string, AddressEntry>;
 
 /** Full resolved entry (no scope wrapper — kept for API compat with callers
  * that destructure `.entry`). */
-export type ResolvedEntry = {
+type ResolvedEntry = {
   entry: AddressEntry;
 };
 
@@ -136,7 +136,7 @@ function emptyState(): EntriesState {
   return {};
 }
 
-export function AddressLabelsProvider({ children }: { children: ReactNode }) {
+function useAddressLabelsValue(): AddressLabelsContextValue {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
   const { status } = useSession();
@@ -164,9 +164,9 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // value, so the page would render a writable form on the new
   // session's stale fallback data before the new authenticated
   // `/api/address-labels` read lands.
-  const [prevStatus, setPrevStatus] = useState(status);
-  if (prevStatus !== status) {
-    setPrevStatus(status);
+  const prevStatusRef = useRef(status);
+  if (prevStatusRef.current !== status) {
+    prevStatusRef.current = status;
     if (status !== "authenticated" && hasLoaded) {
       setHasLoaded(false);
     }
@@ -437,7 +437,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     [pendingReportMutations],
   );
 
-  const value: AddressLabelsContextValue = {
+  return {
     getName,
     getTags,
     hasName,
@@ -455,7 +455,10 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     markPendingReportMutation,
     isReportMutationPending,
   };
+}
 
+export function AddressLabelsProvider({ children }: { children: ReactNode }) {
+  const value = useAddressLabelsValue();
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;
 }
 

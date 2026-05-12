@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, isValidElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
@@ -15,6 +15,7 @@ import type {
   TradingLimit,
 } from "@/lib/types";
 import {
+  BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -33,11 +34,16 @@ import {
   POOL_SWAPS,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
+  POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_V2_EXCHANGE,
   TRADING_LIMITS,
+  VIRTUAL_POOL_LIFECYCLE,
 } from "@/lib/queries";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
 const replaceMock = vi.fn();
+const redirectMock = vi.fn();
 const useGQLMock = vi.fn();
 const getNameMock = vi.fn((address: string | null | undefined) => {
   if (!address) return "";
@@ -54,6 +60,7 @@ const getNameMock = vi.fn((address: string | null | undefined) => {
 const getTagsMock = vi.fn((_address: string | null) => [] as string[]);
 
 vi.mock("next/navigation", () => ({
+  redirect: (href: string) => redirectMock(href),
   useParams: () => ({ poolId: encodeURIComponent("pool-1") }),
   useRouter: () => ({ replace: replaceMock }),
   useSearchParams: () => currentSearchParams,
@@ -80,6 +87,21 @@ vi.mock("@/components/network-provider", () => ({
     },
   }),
 }));
+
+vi.mock("@/lib/networks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/networks")>();
+  return {
+    ...actual,
+    isConfiguredNetworkId: (networkId: string) =>
+      networkId === "celo-mainnet" || networkId === "monad-mainnet",
+    networkIdForChainId: (chainId: number) =>
+      chainId === 42220
+        ? "celo-mainnet"
+        : chainId === 143
+          ? "monad-mainnet"
+          : null,
+  };
+});
 
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({
@@ -181,6 +203,8 @@ vi.mock("@/components/tx-hash-cell", () => ({
 }));
 
 import PoolDetailPage, { decodePoolId, parseTabLimit } from "./page";
+import { PoolHeader } from "./_components/pool-header";
+import { POOL_NOT_FOUND_DEST } from "@/lib/routing";
 
 let currentSearchParams = new URLSearchParams();
 let interactiveContainer: HTMLDivElement | null = null;
@@ -321,8 +345,43 @@ const poolSnapshots: PoolSnapshot[] = [
   },
 ];
 
+const exchangeId =
+  "0x1111111111111111111111111111111111111111111111111111111111111111";
+const v2ExchangeRow = {
+  id: `42220-${exchangeId}`,
+  chainId: 42220,
+  exchangeId,
+  exchangeProvider: "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901",
+  asset0: "token0",
+  asset1: "token1",
+  pricingModule: "0xpricingmodule",
+  pricingModuleName: "ConstantSum",
+  spread: "5000000000000000000000",
+  referenceRateFeedID: "0xfeed000000000000000000000000000000000000",
+  referenceRateResetFrequency: "300",
+  minimumReports: "1",
+  stablePoolResetSize: "1000000000000000000000",
+  bucket0: "1000000000000000000000",
+  bucket1: "2000000000000000000000",
+  lastBucketUpdate: "1700000000",
+  isDeprecated: false,
+  wrappedByPoolId: "pool-1",
+};
+
 function makeGqlResult(data: unknown) {
   return { data, error: null, isLoading: false };
+}
+
+function makeTrustFlagsResult(pool: Pool = basePool) {
+  return makeGqlResult({
+    Pool: [
+      {
+        id: pool.id,
+        rebalanceThresholdsKnown: true,
+        tokenDecimalsKnown: true,
+      },
+    ],
+  });
 }
 
 function renderWithParams(params: Record<string, string> = {}) {
@@ -330,8 +389,35 @@ function renderWithParams(params: Record<string, string> = {}) {
   return renderToStaticMarkup(<PoolDetailPage />);
 }
 
+type ServerSearchParams = Record<string, string | string[] | undefined>;
+type CanonicalPoolPageElement = ReactElement<{
+  params: Promise<{ poolId: string }>;
+  searchParams: Promise<ServerSearchParams>;
+}>;
+
+async function renderServerPoolPage(
+  poolId: string,
+  searchParams: ServerSearchParams = {},
+) {
+  const element = PoolDetailPage({
+    params: Promise.resolve({ poolId: encodeURIComponent(poolId) }),
+    searchParams: Promise.resolve(searchParams),
+  });
+
+  expect(isValidElement(element)).toBe(true);
+  const canonicalElement = element as CanonicalPoolPageElement;
+  const renderCanonical = canonicalElement.type as (
+    props: CanonicalPoolPageElement["props"],
+  ) => Promise<unknown>;
+  return renderCanonical(canonicalElement.props);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
+  redirectMock.mockReset();
+  redirectMock.mockImplementation((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  });
   replaceMock.mockReset();
   useGQLMock.mockReset();
   getNameMock.mockClear();
@@ -345,6 +431,7 @@ beforeEach(() => {
     (query: unknown, variables?: { offset?: number; limit?: number }) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
       if (query === POOL_DEPLOYMENT)
@@ -430,6 +517,57 @@ describe("pool detail helpers", () => {
     expect(parseTabLimit("NaN")).toBe(25);
     expect(parseTabLimit("50")).toBe(50);
     expect(parseTabLimit("9999")).toBe(200); // capped at MAX_TAB_LIMIT
+  });
+});
+
+describe("pool detail route redirects", () => {
+  const rawPoolId = "0xaaa0000000000000000000000000000000000001";
+
+  it("redirects raw addresses with explicit chain context to namespaced routes", async () => {
+    await expect(
+      renderServerPoolPage(rawPoolId, { chainId: "143", tab: "swaps" }),
+    ).rejects.toThrow(
+      "NEXT_REDIRECT:/pool/143-0xaaa0000000000000000000000000000000000001?tab=swaps",
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/pool/143-0xaaa0000000000000000000000000000000000001?tab=swaps",
+    );
+  });
+
+  it("rejects raw addresses without explicit chain context", async () => {
+    await expect(renderServerPoolPage(rawPoolId)).rejects.toThrow(
+      `NEXT_REDIRECT:${POOL_NOT_FOUND_DEST}`,
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(POOL_NOT_FOUND_DEST);
+  });
+
+  it("rejects namespaced routes for unsupported chains", async () => {
+    await expect(renderServerPoolPage(`10143-${rawPoolId}`)).rejects.toThrow(
+      `NEXT_REDIRECT:${POOL_NOT_FOUND_DEST}`,
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(POOL_NOT_FOUND_DEST);
+  });
+
+  it("redirects leading-zero namespaced routes to the canonical prefix", async () => {
+    await expect(
+      renderServerPoolPage(`00143-${rawPoolId}`, { tab: "reserves" }),
+    ).rejects.toThrow(
+      "NEXT_REDIRECT:/pool/143-0xaaa0000000000000000000000000000000000001?tab=reserves",
+    );
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/pool/143-0xaaa0000000000000000000000000000000000001?tab=reserves",
+    );
+  });
+
+  it("renders supported namespaced routes without redirecting", async () => {
+    const rendered = await renderServerPoolPage(`143-${rawPoolId}`);
+
+    expect(isValidElement(rendered)).toBe(true);
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 });
 
@@ -696,6 +834,7 @@ describe("Pool detail tab search", () => {
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
       if (query === POOL_DEPLOYMENT)
@@ -725,6 +864,146 @@ describe("Pool detail tab search", () => {
     expect(html).toContain("liquidity-chart");
   });
 
+  it("renders virtual pool current UTC-day exchange volume from the broker exchange rollup", () => {
+    vi.setSystemTime(new Date("2026-05-11T12:34:00Z"));
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_V2_EXCHANGE)
+        return {
+          data: { BiPoolExchange: [v2ExchangeRow] },
+          error: undefined,
+          isLoading: false,
+        };
+      if (query === VIRTUAL_POOL_LIFECYCLE)
+        return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+      if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H)
+        return {
+          data: {
+            BrokerExchangeDailySnapshot: [
+              {
+                id: `42220-${exchangeId}-1778457600`,
+                timestamp: "1778457600",
+                volumeUsdWei: "42000000000000000000",
+                swapCount: 3,
+              },
+            ],
+          },
+          error: undefined,
+          isLoading: false,
+        };
+      return makeGqlResult({});
+    });
+
+    const html = renderToStaticMarkup(
+      <PoolHeader
+        pool={{
+          ...basePool,
+          source: "virtual_pool",
+          wrappedExchangeId: exchangeId,
+        }}
+        tradingLimits={[]}
+      />,
+    );
+    expect(html).toContain("24h Volume");
+    expect(html).toContain("$42.00");
+    expect(html).toContain("3 swaps since UTC midnight");
+    expect(useGQLMock).toHaveBeenCalledWith(
+      BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+      {
+        chainId: 42220,
+        exchangeProvider: v2ExchangeRow.exchangeProvider,
+        exchangeId,
+        since: Date.UTC(2026, 4, 11) / 1000,
+      },
+      SNAPSHOT_REFRESH_MS,
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    );
+  });
+
+  it("refreshes the virtual pool volume query when the UTC day changes", () => {
+    vi.setSystemTime(new Date("2026-05-11T23:59:59.500Z"));
+    const seenSince: number[] = [];
+    useGQLMock.mockImplementation(
+      (query: unknown, variables?: { since?: number }) => {
+        if (query === POOL_V2_EXCHANGE)
+          return {
+            data: { BiPoolExchange: [v2ExchangeRow] },
+            error: undefined,
+            isLoading: false,
+          };
+        if (query === VIRTUAL_POOL_LIFECYCLE)
+          return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+        if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H) {
+          if (variables?.since !== undefined) seenSince.push(variables.since);
+          return {
+            data: { BrokerExchangeDailySnapshot: [] },
+            error: undefined,
+            isLoading: false,
+          };
+        }
+        return makeGqlResult({});
+      },
+    );
+
+    interactiveContainer = document.createElement("div");
+    document.body.appendChild(interactiveContainer);
+    interactiveRoot = createRoot(interactiveContainer);
+    act(() => {
+      interactiveRoot?.render(
+        <PoolHeader
+          pool={{
+            ...basePool,
+            source: "virtual_pool",
+            wrappedExchangeId: exchangeId,
+          }}
+          tradingLimits={[]}
+        />,
+      );
+    });
+
+    expect(seenSince.at(-1)).toBe(Date.UTC(2026, 4, 11) / 1000);
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(seenSince.at(-1)).toBe(Date.UTC(2026, 4, 12) / 1000);
+  });
+
+  it("degrades the virtual pool exchange volume tile visibly when the rollup query fails", () => {
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_V2_EXCHANGE)
+        return {
+          data: { BiPoolExchange: [v2ExchangeRow] },
+          error: undefined,
+          isLoading: false,
+        };
+      if (query === VIRTUAL_POOL_LIFECYCLE)
+        return { data: { VirtualPoolLifecycle: [] }, isLoading: false };
+      if (query === BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H) {
+        return {
+          data: null,
+          error: new Error("field BrokerExchangeDailySnapshot not found"),
+          isLoading: false,
+        };
+      }
+      return makeGqlResult({});
+    });
+
+    const html = renderToStaticMarkup(
+      <PoolHeader
+        pool={{
+          ...basePool,
+          source: "virtual_pool",
+          wrappedExchangeId: exchangeId,
+        }}
+        tradingLimits={[]}
+      />,
+    );
+    expect(html).toContain("24h Volume");
+    expect(html).toContain("Failed to load exchange volume");
+    expect(html).not.toContain("$42.00");
+  });
+
   it("skips snapshot chart query for virtual pools", () => {
     useGQLMock.mockImplementation(
       (query: unknown, variables?: { offset?: number; limit?: number }) => {
@@ -732,6 +1011,9 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({
             Pool: [{ ...basePool, source: "virtual_pool" }],
           });
+        if (query === POOL_THRESHOLDS_KNOWN_EXT) {
+          return makeTrustFlagsResult({ ...basePool, source: "virtual_pool" });
+        }
         if (query === TRADING_LIMITS)
           return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
         if (query === POOL_DEPLOYMENT)
@@ -841,6 +1123,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
       if (query === POOL_REBALANCES_COUNT)
@@ -914,6 +1197,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
         return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
       if (query === POOL_REBALANCES_COUNT)

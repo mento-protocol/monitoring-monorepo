@@ -93,6 +93,78 @@ export const TRADER_POOL_DAILY_FOR_TRADER = /* GraphQL */ `
   }
 `;
 
+export const TRADER_DAILY_WINDOW_TOP = /* GraphQL */ `
+  query TraderDailyWindowTop(
+    $afterTimestamp: numeric!
+    $beforeTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp, _lt: $beforeTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      timestamp
+      swapCount
+      uniquePools
+      volumeUsdWei
+      feesPaidUsdWei
+      isSystemAddress
+      lastSeenTimestamp
+    }
+  }
+`;
+
+export const TRADER_POOL_DAILY_TOP = /* GraphQL */ `
+  query TraderPoolDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    TraderPoolDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      poolId
+      timestamp
+      swapCount
+      volumeUsdWei
+      inflowToken0UsdWei
+      outflowToken0UsdWei
+      inflowToken1UsdWei
+      outflowToken1UsdWei
+      feesPaidUsdWei
+    }
+  }
+`;
+
+export const SWAP_EVENT_OUTLIERS = /* GraphQL */ `
+  query SwapEventOutliers($afterTimestamp: numeric!, $limit: Int!) {
+    SwapEvent(
+      where: { blockTimestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { blockTimestamp: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      poolId
+      caller
+      txTo
+      recipient
+      volumeUsdWei
+      txHash
+      blockTimestamp
+    }
+  }
+`;
+
 /**
  * Pool metadata for resolving poolId → display name. Mento has ~30 pools
  * total, well under the 1000-row cap. Loaded once and joined client-side.
@@ -109,50 +181,109 @@ export const POOLS_FOR_LEADERBOARD = /* GraphQL */ `
 `;
 
 /**
- * Trader-pool-day rows in a window, used to drive the per-pool stacked
- * volume chart on `/leaderboard`. The dashboard sums these client-side
- * by `(poolId, day)` to produce one series per pool — pre-rolling
- * `PoolDailyVolumeSnapshot` at the indexer level is the proper fix
- * (`BACKLOG.md` PR 4) but client-side aggregation is fine for the MVP
- * given the 1000-row cap is rarely hit at 7d/30d.
+ * Pool-day rows in a window, used to drive the per-pool stacked volume
+ * chart on `/leaderboard`. Source: pre-rolled PoolDailyVolumeSnapshot,
+ * not TraderPoolDailySnapshot, so long-window pool charts don't depend on
+ * trader-pool row cardinality.
  *
- * Ordered by `volumeUsdWei desc` so the cap, when hit, drops the
- * smallest contributors — the top-5 pools that drive the stacked chart's
- * visual signal stay intact.
- *
- * `trader` is selected so the page can intersect rows against the
- * non-system trader allowlist client-side when the system toggle is
- * off — `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress`
- * column of its own (indexer schema doesn't snapshot it on this
- * entity), so we can't push the filter into Hasura. PR 4's
- * `PoolDailyVolumeSnapshot` rollup will fix this properly.
+ * `limit` / `offset` are exposed because `PoolDailyVolumeSnapshot`
+ * cardinality is pool × day; 90d/all windows can exceed Hasura's 1000-row
+ * cap even after pre-rolling. The page fetches this with a paginated hook.
  */
 export const POOL_DAILY_VOLUME = /* GraphQL */ `
-  query PoolDailyVolume($afterTimestamp: numeric!, $limit: Int!) {
-    TraderPoolDailySnapshot(
+  query PoolDailyVolume(
+    $afterTimestamp: numeric!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    PoolDailyVolumeSnapshot(
       where: { timestamp: { _gte: $afterTimestamp } }
-      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }, { id: asc }]
+      order_by: [{ timestamp: asc }, { poolId: asc }, { id: asc }]
       limit: $limit
+      offset: $offset
     ) {
       id
       chainId
-      trader
       poolId
       timestamp
+      swapCount
+      swapCountIncludingSystem
       volumeUsdWei
+      volumeUsdWeiIncludingSystem
     }
   }
 `;
 
 /**
- * Top legacy-v2 trader-day rows by volume. Source: BrokerTraderDailySnapshot,
+ * Top v3 aggregator-day rows by volume. Isolated from the trader query so
+ * AggregatorDailySnapshot schema rollout or resync issues degrade only the
+ * aggregator outreach panel, not the primary trader leaderboard.
+ */
+export const AGGREGATOR_DAILY_TOP = /* GraphQL */ `
+  query AggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    AggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+export const AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM = /* GraphQL */ `
+  query AggregatorDailyTopIncludingSystem(
+    $afterTimestamp: numeric!
+    $limit: Int!
+  ) {
+    AggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+export function aggregatorDailyTopQuery(showSystem: boolean): string {
+  return showSystem
+    ? AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+    : AGGREGATOR_DAILY_TOP;
+}
+
+/**
+ * Top legacy-v2 producer-day rows by volume. Source: BrokerTraderDailySnapshot,
  * which the broker handler only writes when `routedViaV3Router=false` — so
  * these are *broker-direct* swaps (Mento UI/SDK + third-party aggregators
  * still routing through the legacy Broker). The leaderboard's `venue=v2`
  * tab uses this to surface migration-outreach targets: who's still on v2.
  *
- * No `feesPaidUsdWei`/`uniquePools` (the v2 entity doesn't carry them — see
- * schema.graphql comment on BrokerTraderDailySnapshot for why).
+ * The entity is keyed by `caller` (tx.from / signer EOA) — aliased to
+ * `trader` in the response so the dashboard's row shape stays uniform with
+ * v3's TraderDailySnapshot. No `feesPaidUsdWei`/`uniquePools` (the v2 entity
+ * doesn't carry them — see schema.graphql comment on BrokerTraderDailySnapshot
+ * for why).
  */
 export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
   query BrokerTraderDailyTop(
@@ -170,7 +301,7 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
     ) {
       id
       chainId
-      trader
+      trader: caller
       timestamp
       swapCount
       volumeUsdWei
@@ -309,6 +440,61 @@ export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
   }
 `;
 
+// Isolated bounded overlap query for exact hero unique-trader counts.
+// The caller passes an `_or` where clause scoped to the active yesterday/today
+// partial traders and each chain's retained snapshot range. The query is
+// distinct on `(chainId, trader, isSystemAddress)` so the hidden-system merge
+// can distinguish "had a non-system historical row" from "sticky-system trader
+// excluded from the snapshot unique count" without polling full cumulative
+// trader arrays.
+export const LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query LeaderboardPartialOverlapTraders(
+    $where: TraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: $where
+      order_by: [
+        { chainId: asc }
+        { trader: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, trader, isSystemAddress]
+      limit: $limit
+    ) {
+      chainId
+      trader
+      timestamp
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query BrokerLeaderboardPartialOverlapTraders(
+    $where: BrokerTraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: $where
+      order_by: [
+        { chainId: asc }
+        { caller: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, caller, isSystemAddress]
+      limit: $limit
+    ) {
+      chainId
+      trader: caller
+      timestamp
+      isSystemAddress
+    }
+  }
+`;
+
 /**
  * Today's partial — added on top of the snapshot's [windowStart, yesterday]
  * total to keep hero numbers current to the minute. Today's
@@ -353,7 +539,7 @@ export const BROKER_LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
       limit: 1000
     ) {
       chainId
-      trader
+      trader: caller
       volumeUsdWei
       swapCount
       isSystemAddress
@@ -413,7 +599,7 @@ export const BROKER_LEADERBOARD_YESTERDAY_TRADERS = /* GraphQL */ `
       limit: 1000
     ) {
       chainId
-      trader
+      trader: caller
       volumeUsdWei
       swapCount
       isSystemAddress

@@ -428,6 +428,28 @@ describe("sortGlobalPools — TVL descending (default)", () => {
     const result = sortGlobalPools([high, low], "tvl", "asc", ctx);
     expect(result.map((e) => e.pool.id)).toEqual(["low", "high"]);
   });
+
+  it("sinks null TVL entries to the bottom regardless of direction", () => {
+    // PR 1.7 (codex finding): untrusted-decimals pools surface as `null`
+    // in tvlByKey. Mapping null to ±Infinity would put unknowns *above*
+    // a real $0 pool in ascending order — claiming "lowest TVL." Match
+    // the volume / total-volume / WoW pattern: nulls sink either way.
+    const zero = makeEntry({ id: "zero" });
+    const small = makeEntry({ id: "small" });
+    const unknown = makeEntry({ id: "unknown" });
+    const ctx: GlobalSortContext = {
+      ...BASE_SORT_CTX,
+      tvlByKey: new Map<string, number | null>([
+        [globalPoolKey(zero), 0],
+        [globalPoolKey(small), 5],
+        [globalPoolKey(unknown), null],
+      ]),
+    };
+    const desc = sortGlobalPools([zero, small, unknown], "tvl", "desc", ctx);
+    expect(desc.map((e) => e.pool.id)).toEqual(["small", "zero", "unknown"]);
+    const asc = sortGlobalPools([zero, small, unknown], "tvl", "asc", ctx);
+    expect(asc.map((e) => e.pool.id)).toEqual(["zero", "small", "unknown"]);
+  });
 });
 
 // Strategy badge rendering

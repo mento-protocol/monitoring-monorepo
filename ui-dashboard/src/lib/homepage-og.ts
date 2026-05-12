@@ -12,8 +12,12 @@ import {
   USDM_SYMBOLS,
   type OracleRateMap,
 } from "@/lib/tokens";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
-import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
+import {
+  ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_WITH_HEALTH,
+} from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -66,7 +70,7 @@ const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
   }
 `;
 
-export type AttentionPool = {
+type AttentionPool = {
   name: string;
   chainLabel: string;
   health: HealthStatus;
@@ -120,18 +124,60 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
   const client = makeOgGraphQLClient(network);
 
-  let pools: Pool[];
-  try {
-    const res = await client.request<{ Pool: Pool[] }>({
+  // Fire main pools query + isolated trust-flag query in parallel — the
+  // trust-flag fetch is fail-open so its 5s timeout shouldn't tack on to
+  // the homepage OG critical path. Pool query is the only required
+  // result; if that one fails, treat the chain as offline.
+  type ThresholdsRow = {
+    id: string;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    rebalanceThresholdsKnown?: boolean;
+    tokenDecimalsKnown?: boolean;
+  };
+  // Parallelizing both saves ~200ms p50 on the success path; serializing
+  // would only help if `poolsResult` failed, which is < 1% of calls.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
+  const [poolsResult, thresholdsResult] = await Promise.allSettled([
+    client.request<{ Pool: Pool[] }>({
       document: ALL_POOLS_WITH_HEALTH,
       variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(5000),
-    });
-    pools = res.Pool ?? [];
-  } catch {
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: ThresholdsRow[] }>({
+      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+  ]);
+
+  if (poolsResult.status !== "fulfilled") {
     // Chain pool query failed entirely — treat as offline. Aggregator
     // will surface this via `partial` / `offlineChains`.
     return null;
+  }
+  let pools: Pool[] = poolsResult.value.Pool ?? [];
+
+  // Merge trust flags fail-open — on miss/schema-lag, the fields stay
+  // undefined and `isNeverRebalance` returns false (under-bound).
+  // Without this merge, a 0/0 never-rebalance pool would appear in
+  // WARN/CRITICAL attention lists on the homepage OG card.
+  if (thresholdsResult.status === "fulfilled") {
+    const thresholdsById = new Map(
+      (thresholdsResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const t = thresholdsById.get(p.id);
+      return t == null
+        ? p
+        : {
+            ...p,
+            rebalanceThresholdAbove: t.rebalanceThresholdAbove,
+            rebalanceThresholdBelow: t.rebalanceThresholdBelow,
+            rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
+            tokenDecimalsKnown: t.tokenDecimalsKnown,
+          };
+    });
   }
 
   if (pools.length === 0) {
@@ -158,7 +204,11 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   const daily: PoolSnapshot[] = [];
   let dailyDegraded = false;
   try {
+    // Sequential pagination — each iteration's `break` depends on the
+    // previous page's row count (early-exit on short page). Can't
+    // parallelize without an upfront count query.
     for (let page = 0; page < DAILY_MAX_PAGES; page++) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
         document: HOMEPAGE_OG_DAILY_SNAPSHOTS,
         variables: {
@@ -167,7 +217,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
           limit: DAILY_PAGE_SIZE,
           offset: page * DAILY_PAGE_SIZE,
         },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
       });
       const rows = res.PoolDailySnapshot ?? [];
       for (const row of rows) {
@@ -194,9 +244,10 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
 }
 
 export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> {
-  const configuredChains = NETWORK_IDS.map((id) => NETWORKS[id]).filter(
-    (n) => n.hasuraUrl && !n.local && !n.testnet,
-  );
+  const configuredChains = NETWORK_IDS.flatMap((id) => {
+    const n = NETWORKS[id];
+    return n.hasuraUrl && !n.local && !n.testnet ? [n] : [];
+  });
   if (configuredChains.length === 0) return null;
 
   const sliceResults = await Promise.all(
@@ -207,21 +258,29 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   );
   // Track chains whose pool query failed entirely so consumers can surface
   // "partial overview" rather than ship surviving-chain numbers as complete.
-  const offlineChains = sliceResults
-    .filter((r) => r.slice === null)
-    .map((r) => r.network.label);
-  const slices = sliceResults
-    .map((r) => r.slice)
-    .filter((s): s is ChainSlice => s !== null);
+  const offlineChains = sliceResults.flatMap((r) =>
+    r.slice === null ? [r.network.label] : [],
+  );
+  const slices = sliceResults.flatMap((r) =>
+    r.slice !== null ? [r.slice] : [],
+  );
   if (slices.length === 0) return null;
-  const partial = offlineChains.length > 0;
+  // OR-extend `partial` to include "any pool's decimals are untrusted":
+  // strict-gate USD math returns null for those pools, every aggregation
+  // below silently skips them, and consumers labeling the card as
+  // "complete" would mis-report a 1e12-overstated 6-dp leg as missing.
+  // Cheaper to flag once at the top than thread through every helper.
+  const anyPoolUntrusted = slices.some((s) =>
+    s.pools.some((p) => p.tokenDecimalsKnown !== true),
+  );
+  const partial = offlineChains.length > 0 || anyPoolUntrusted;
 
   // TVL aggregation uses only FPMM pools with a live oracle price —
   // VirtualPools have no reserves and can't be TVL-counted. `canValueTvl`
   // already requires `oraclePrice`, so virtual and oracle-stale pools
   // drop out here.
   const fpmmEntries = slices.flatMap((s) =>
-    s.pools.filter(isFpmm).map((pool) => ({ pool, slice: s })),
+    s.pools.flatMap((pool) => (isFpmm(pool) ? [{ pool, slice: s }] : [])),
   );
   const priceable = fpmmEntries.filter(({ pool, slice }) =>
     canValueTvl(pool, slice.network, slice.rates),
@@ -233,14 +292,22 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     s.pools.map((pool) => ({ pool, slice: s })),
   );
 
-  const totalTvlUsd =
-    priceable.length === 0
-      ? null
-      : priceable.reduce(
-          (acc, { pool, slice }) =>
-            acc + poolTvlUSD(pool, slice.network, slice.rates),
-          0,
-        );
+  // Skip pools whose TVL is unknowable (untrusted decimals → null) so a
+  // 1e12-overstated 6-dp leg can't poison the protocol-wide total.
+  // See `poolTvlUSD` in `lib/tokens.ts`.
+  let totalTvlUsd: number | null = null;
+  if (priceable.length > 0) {
+    let sum = 0;
+    let any = false;
+    for (const { pool, slice } of priceable) {
+      const v = poolTvlUSD(pool, slice.network, slice.rates);
+      if (v !== null) {
+        sum += v;
+        any = true;
+      }
+    }
+    totalTvlUsd = any ? sum : null;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   // If any chain's daily-snapshot fetch failed or truncated, the cross-chain
@@ -253,24 +320,34 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   // snapshot in [now-14d, now-7d] (matches pool-card bounded-window rule).
   const upperCutoff = now - SEVEN_DAYS;
   const lowerCutoff = now - FOURTEEN_DAYS;
+  // Pre-index the WoW row per (slice, poolId) so the loop below does an
+  // O(1) Map lookup instead of an O(n) scan over slice.daily for each pool.
+  type AgoRow = ChainSlice["daily"][number];
+  const agoRowByKey = new Map<string, AgoRow>();
+  for (const slice of slices) {
+    for (const d of slice.daily) {
+      const ts = Number(d.timestamp);
+      if (ts > upperCutoff || ts < lowerCutoff) continue;
+      const key = `${slice.network.id}:${d.poolId}`;
+      if (!agoRowByKey.has(key)) agoRowByKey.set(key, d);
+    }
+  }
   let priorTvlSum = 0;
   let currentSubsetSum = 0;
   let anyPrior = false;
   for (const { pool, slice } of priceable) {
-    const agoRow = slice.daily.find((d) => {
-      if (d.poolId !== pool.id) return false;
-      const ts = Number(d.timestamp);
-      return ts <= upperCutoff && ts >= lowerCutoff;
-    });
+    const agoRow = agoRowByKey.get(`${slice.network.id}:${pool.id}`);
     if (!agoRow) continue;
     const agoTvl = poolTvlUSD(
       { ...pool, reserves0: agoRow.reserves0, reserves1: agoRow.reserves1 },
       slice.network,
       slice.rates,
     );
-    if (agoTvl <= 0) continue;
+    if (agoTvl === null || agoTvl <= 0) continue;
+    const currentTvl = poolTvlUSD(pool, slice.network, slice.rates);
+    if (currentTvl === null) continue;
     priorTvlSum += agoTvl;
-    currentSubsetSum += poolTvlUSD(pool, slice.network, slice.rates);
+    currentSubsetSum += currentTvl;
     anyPrior = true;
   }
   const tvlWoWPct =
@@ -356,6 +433,14 @@ function rowUsdVolume(
   pool: Pool,
   slice: ChainSlice,
 ): number | null {
+  // Same untrusted-decimals defense as `getSnapshotVolumeInUsd` /
+  // `poolTotalVolumeUSD` / `poolTvlUSD`. A non-18-dp leg with
+  // `tokenDecimalsKnown !== true` would parse `swapVolume*` against the
+  // schema-default 18 and inflate the daily USD figure by 1e12.
+  // Strict gate (PR 1.7): undefined fails closed since the post-PR-1.6
+  // indexer populates the field on every pool — `undefined` represents
+  // either a transient EXT-query failure or a legacy/unindexed pool.
+  if (pool.tokenDecimalsKnown !== true) return null;
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;
@@ -425,13 +510,12 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
   const histories: History[] = [];
   for (const { pool, slice } of entries) {
     const points = slice.daily
-      .filter((d) => d.poolId === pool.id)
-      .map((d) => ({
-        ts: Number(d.timestamp),
-        r0: d.reserves0,
-        r1: d.reserves1,
-      }))
-      .sort((a, b) => a.ts - b.ts);
+      .flatMap((d) =>
+        d.poolId === pool.id
+          ? [{ ts: Number(d.timestamp), r0: d.reserves0, r1: d.reserves1 }]
+          : [],
+      )
+      .toSorted((a, b) => a.ts - b.ts);
     // Pool has no snapshots in the 35d window. Since PoolDailySnapshot is
     // written on swap activity, zero snapshots means the pool has been
     // dormant — reserves in `pool.reserves0/1` haven't changed since the
@@ -470,11 +554,12 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
       }
       if (cursors[i] < 0) continue;
       const point = h.points[cursors[i]];
-      tvl += poolTvlUSD(
+      const v = poolTvlUSD(
         { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
         h.slice.network,
         h.slice.rates,
       );
+      if (v !== null) tvl += v;
     }
     series.push(tvl);
   }

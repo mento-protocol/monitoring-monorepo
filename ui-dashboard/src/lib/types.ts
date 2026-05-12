@@ -8,10 +8,27 @@
 export const MAINNET_CHAIN_IDS = [42220, 143] as const;
 
 /** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
- * mechanics). Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`;
- * keep both in lockstep. */
-export function isVirtualPool(pool: { source?: string }): boolean {
-  return pool.source?.includes("virtual") ?? false;
+ * mechanics).
+ *
+ * Two positive signals — either is sufficient:
+ *   1. `source.includes("virtual")` — set by VirtualPoolDeployed-driven
+ *      paths.
+ *   2. `wrappedExchangeId` populated — set by `selfHealWrappedExchangeId`
+ *      after the bytecode pattern match in `vpExchangeIdEffect` proves
+ *      VP identity. Required for the Swap/Mint/Burn-first scenario
+ *      where the persisted source is `fpmm_*` (intentional reuse for
+ *      pickPreferredSource priority alignment) but the pool IS a VP.
+ *
+ * Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`; keep both
+ * in lockstep. */
+export function isVirtualPool(pool: {
+  source?: string;
+  wrappedExchangeId?: string | null;
+}): boolean {
+  return (
+    (pool.source?.includes("virtual") ?? false) ||
+    Boolean(pool.wrappedExchangeId)
+  );
 }
 
 export type Pool = {
@@ -35,6 +52,9 @@ export type Pool = {
   referenceRateFeedID?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
   lpFee?: number;
@@ -46,6 +66,7 @@ export type Pool = {
   rebalancerAddress?: string;
   token0Decimals?: number;
   token1Decimals?: number;
+  tokenDecimalsKnown?: boolean;
   swapCount?: number;
   rebalanceCount?: number;
   notionalVolume0?: string;
@@ -56,6 +77,12 @@ export type Pool = {
   healthBinarySeconds?: string;
   hasHealthData?: boolean;
   breachCount?: number;
+  // Set on VirtualPools at deploy time via bytecode extraction (PUSH32
+  // immediates in swap() preamble). Joins to BiPoolExchange.exchangeId in
+  // the POOL_V2_EXCHANGE query. Null on FPMM pools and on VPs whose
+  // deploy-time RPC failed (the next event's self-heal is not wired here —
+  // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
+  wrappedExchangeId?: string;
 };
 
 /**
@@ -122,6 +149,59 @@ export type OracleSnapshot = {
   txHash: string;
   deviationRatio?: string;
   hasHealthData?: boolean;
+};
+
+type VirtualPoolLifecycleAction = "DEPLOYED" | "DEPRECATED";
+
+export type VirtualPoolLifecycle = {
+  id: string;
+  action: VirtualPoolLifecycleAction;
+  factoryAddress: string;
+  txHash: string;
+  blockNumber: string;
+  blockTimestamp: string;
+};
+
+// Mento v2 BiPoolManager exchange row, returned by the POOL_V2_EXCHANGE
+// GraphQL query (joined to Pool via `Pool.wrappedExchangeId`). All BigInt
+// fields ride as decimal strings — that's how Hasura serializes
+// `precision:78` columns over JSON; convert with `BigInt(...)` at the use
+// site when arithmetic is needed.
+export type BiPoolExchangeRow = {
+  id: string;
+  chainId: number;
+  exchangeId: string;
+  exchangeProvider: string;
+  asset0: string;
+  asset1: string;
+  pricingModule: string;
+  /** Friendly label resolved by the indexer at write time (e.g.
+   * "ConstantSum"). `null`/missing for pricing modules not in the
+   * `@mento-protocol/contracts` package — UI renders an em-dash. */
+  pricingModuleName: string | null;
+  /** FixidityLib 1e24 unit. Divide by 1e24 for the swap-fee fraction
+   * (e.g. `5e21 = 0.005 = 50 bps`). */
+  spread: string;
+  referenceRateFeedID: string;
+  referenceRateResetFrequency: string;
+  minimumReports: string;
+  stablePoolResetSize: string;
+  bucket0: string;
+  bucket1: string;
+  lastBucketUpdate: string;
+  isDeprecated: boolean;
+  /** poolId of the VirtualPool that wraps this exchange. `null` for v2-only
+   * exchanges (legacy direct trading via Broker, no v3 wrapper). */
+  wrappedByPoolId: string | null;
+};
+
+export type BrokerExchangeDailySnapshotRow = {
+  id: string;
+  /** UTC-day bucket as unix seconds. */
+  timestamp: string;
+  /** 18-decimal USD-wei. */
+  volumeUsdWei: string;
+  swapCount: number;
 };
 
 export type SwapEvent = {
@@ -381,11 +461,11 @@ export type BridgeBridger = {
 // Circuit breakers — see indexer-envio/schema.graphql for the source of truth.
 // =============================================================================
 
-export type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
-export type BreakerStatus = "OK" | "TRIPPED";
+type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+type BreakerStatus = "OK" | "TRIPPED";
 
 /** One row per (chainId, breakerAddress). */
-export type Breaker = {
+type Breaker = {
   id: string;
   address: string;
   kind: BreakerKind;

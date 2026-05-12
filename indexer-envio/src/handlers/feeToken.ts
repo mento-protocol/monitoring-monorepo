@@ -6,11 +6,12 @@ import { indexer, type ProtocolFeeTransfer } from "envio";
 import { eventId, asAddress, makePoolId } from "../helpers.js";
 import {
   YIELD_SPLIT_ADDRESS,
-  resolveFeeTokenMeta,
+  UNKNOWN_FEE_TOKEN_META,
   selectStaleTransfers,
   backfilledTokens,
 } from "../feeToken.js";
 import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot.js";
+import { feeTokenMetaEffect } from "../rpc/effects.js";
 
 indexer.onEvent(
   {
@@ -32,11 +33,11 @@ indexer.onEvent(
 
     const { chainId } = event;
     const tokenAddress = event.srcAddress;
-    const { symbol, decimals } = await resolveFeeTokenMeta(
-      chainId,
-      tokenAddress,
-      context.log,
-    );
+    const { symbol, decimals } =
+      (await context.effect(feeTokenMetaEffect, {
+        chainId,
+        tokenAddress,
+      })) ?? UNKNOWN_FEE_TOKEN_META;
 
     const id = eventId(chainId, event.block.number, event.logIndex);
     const normalizedToken = asAddress(tokenAddress);

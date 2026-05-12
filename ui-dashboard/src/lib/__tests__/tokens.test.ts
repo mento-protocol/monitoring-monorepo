@@ -101,6 +101,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000000000000000", // 2 USDm
         reserves1: "3000000000000000000", // 3 KESm
         oraclePrice: "500000000000000000000000", // 0.5
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -119,6 +120,7 @@ describe("poolTvlUSD", () => {
         reserves0: "4000000000000000000", // 4 KESm
         reserves1: "1000000000000000000", // 1 USDm
         oraclePrice: "500000000000000000000000", // 0.5
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -134,6 +136,7 @@ describe("poolTvlUSD", () => {
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
         reserves0: "1000000000000000000",
         reserves1: "1000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -147,6 +150,7 @@ describe("poolTvlUSD", () => {
         token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
         oraclePrice: "1000000000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -164,6 +168,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000000000000000",
         reserves1: "3000000000000000000",
         oraclePrice: "500000000000000000000000",
+        tokenDecimalsKnown: true,
       },
       sepolia,
     );
@@ -187,6 +192,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000", // 2 axlEUROC (6 decimals)
         reserves1: "3000000000000000000", // 3 EURm
         oraclePrice: "500000000000000000000000", // feedVal = 0.5
+        tokenDecimalsKnown: true,
       },
       mainnet,
       rates,
@@ -212,6 +218,7 @@ describe("poolTvlUSD", () => {
         reserves0: "2000000", // 2 axlEUROC
         reserves1: "3000000000000000000", // 3 EURm
         oraclePrice: "500000000000000000000000", // feedVal = 0.5
+        tokenDecimalsKnown: true,
       },
       mainnet,
       rates,
@@ -220,6 +227,51 @@ describe("poolTvlUSD", () => {
     // feedVal = 0.5, sym0 (axlEUROC) has rate 1.10
     // TVL = (r0 + r1 * feedVal) * usd0 = (2 + 3 * 0.5) * 1.10 = 3.85
     expect(tvl).toBeCloseTo(3.85, 8);
+  });
+
+  it("returns null when tokenDecimalsKnown is false (avoid 18/18 fake-scale on USDC leg)", () => {
+    // PR 1.7 contract change: poolTvlUSD now returns `number | null`.
+    // `null` = TVL unknowable (untrusted decimals); callers MUST skip these
+    // from sums and sorts rather than coerce to 0. See `poolTvlUSD` doc in
+    // tokens.ts for the caller patterns. The 18-default scale would inflate
+    // a 6-dp leg (e.g. axlUSDC) by 1e12 — a silent overstatement we'd rather
+    // render as `—` than ship as a believable USD figure.
+    const tvl = poolTvlUSD(
+      {
+        token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+        token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+        token0Decimals: 18,
+        token1Decimals: 18,
+        reserves0: "2000000000000000000",
+        reserves1: "3000000000000000000",
+        oraclePrice: "500000000000000000000000",
+        tokenDecimalsKnown: false,
+      },
+      sepolia,
+    );
+    expect(tvl).toBeNull();
+  });
+
+  it("returns null when tokenDecimalsKnown is undefined (strict gate — fail closed)", () => {
+    // Strict `!== true`: undefined signals either a legacy schema OR a
+    // transient EXT-query failure. Both should fail closed because the
+    // post-PR-1.6 indexer populates the field on every pool, so undefined
+    // is no longer a "deploy-window default" worth trusting. Mirror of the
+    // matching gate in `getSnapshotVolumeInUsd` / `poolTotalVolumeUSD`.
+    const tvl = poolTvlUSD(
+      {
+        token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+        token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+        token0Decimals: 18,
+        token1Decimals: 18,
+        reserves0: "2000000000000000000",
+        reserves1: "3000000000000000000",
+        oraclePrice: "500000000000000000000000",
+        // tokenDecimalsKnown intentionally undefined — must fail closed.
+      },
+      sepolia,
+    );
+    expect(tvl).toBeNull();
   });
 });
 
