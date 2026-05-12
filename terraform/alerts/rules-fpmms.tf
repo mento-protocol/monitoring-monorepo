@@ -931,24 +931,6 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       })
     }
 
-    # BreachAge = seconds since breach started. Used in the annotation —
-    # "breached for X" reports *breach* duration, not idle duration (those
-    # can differ: a breach might be 2h old while the rebalancer tried
-    # 45m ago).
-    data {
-      ref_id         = "BreachAge"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
-      }
-      model = jsonencode({
-        refId   = "BreachAge"
-        expr    = "(time() - mento_pool_deviation_breach_start) and (mento_pool_deviation_breach_start > 0)"
-        instant = true
-      })
-    }
-
     dynamic "data" {
       for_each = local.deviation_critical_annotation_queries
       content {
