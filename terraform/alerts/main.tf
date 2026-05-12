@@ -121,33 +121,33 @@ locals {
   #         notation above 1e4, which is the regime we explicitly want
   #         humanize for instead.
   #   - `current_reserves` reads `$values.R0.Value` / `$values.R1.Value`
-  #     (already in [0, 1]) plus `.Labels.token_symbol` from each series
-  #     to render "axlUSDC / USDm". Map access is a Go template builtin.
-  #   - `humanizePercentage` on values like `0.5` renders "50%". For
-  #     values < 0.005 (rounding to "0%") this still passes the diagnostic
-  #     "100% USDT / 0% USDm" intent — small-share legs are functionally
-  #     drained. (Reserves are by-construction in [0, 1] so the scientific-
-  #     notation path that bit `current_deviation` doesn't apply here.)
+  #     from queries that pre-compute reserve shares as integer-percent
+  #     inputs in PromQL (`share * 100`) plus `.Labels.token_symbol` from
+  #     each series to render "axlUSDC / USDm". Map access is a Go template
+  #     builtin.
+  #   - `printf "%.0f%%"` keeps tiny drained legs as "0%" instead of
+  #     `humanizePercentage` scientific notation like "8.227e-05%".
+  #     Rounding to whole percentages is intentional here: the diagnostic
+  #     alert signal is "100% USDT / 0% USDm", not tiny dust precision.
   #   - `rebalance_reason` reads `$values.B.Labels.reason_message` for the
-  #     bounded Solidity-error explanation (terminated with a period in the
-  #     template since the messages themselves are bare phrases — keeps
-  #     ERROR_MESSAGES uncluttered for the dashboard tooltip's
-  #     em-dash-joined render path), then OPTIONALLY appends
-  #     ` Reserve Balance: X.XX <token>` when the firing pool's `pair`
-  #     matches a USD-pegged stable we have Aegis coverage for (USDC /
-  #     USDT / axlUSDC, all on Celo). The balance value is read from
-  #     Aegis's existing per-token `${TOKEN}_balanceOf{owner="Reserve",
-  #     chain="celo"}` series — production-stable for years and refreshed
-  #     every 10s — rather than a metrics-bridge probe (the in-bridge
-  #     enrichment shipped in PR #237 failed in production with
-  #     `[REBALANCE_PROBE_FAILED]: Missing or invalid parameters`, leaving
-  #     the gauges absent, which propagated NoData through this rule and
-  #     stuck the critical alerts in Normal for ~9h on 2026-04-28).
-  #     The all-caps `reason_code` is intentionally NOT rendered: it
-  #     duplicated the human message without adding actionable info and
-  #     muddied the message visually. The label is still emitted on the
-  #     gauge for log/diagnostic spelunking. Monad reserves aren't in
-  #     Aegis yet — see the Aegis Monad coverage entry in BACKLOG.md.
+  #     bounded Solidity-error explanation and `$values.B.Labels.reason_code`
+  #     for the decoded custom-error code (for example
+  #     `CDPLS_STABILITY_POOL_BALANCE_TOO_LOW`). The message is terminated
+  #     with a period in the template since ERROR_MESSAGES entries are bare
+  #     phrases — keeps the shared dashboard tooltip's em-dash-joined render
+  #     path uncluttered.
+  #   - For Celo reserve-strategy pools, `rebalance_reason` OPTIONALLY appends
+  #     ` Reserve Balance: X.XX <token>` when the firing pool's `pair` matches
+  #     a USD-pegged stable we have Aegis coverage for (USDC / USDT / axlUSDC).
+  #     The balance value is read from Aegis's existing per-token
+  #     `${TOKEN}_balanceOf{owner="Reserve",chain="celo"}` series —
+  #     production-stable for years and refreshed every 10s — rather than a
+  #     metrics-bridge probe (the in-bridge enrichment shipped in PR #237
+  #     failed in production with `[REBALANCE_PROBE_FAILED]: Missing or
+  #     invalid parameters`, leaving the gauges absent, which propagated
+  #     NoData through this rule and stuck the critical alerts in Normal for
+  #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
+  #     Aegis Monad coverage entry in BACKLOG.md.
   deviation_critical_current_deviation_annotation = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
@@ -160,7 +160,11 @@ locals {
       {{- end -}}
     {{- end -}}
   EOT
-  deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
+  deviation_critical_current_reserves_annotation  = <<-EOT
+    {{- if and $values.R0 $values.R1 -}}
+      {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
+    {{- end -}}
+  EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
   # trim markers strip ALL surrounding whitespace (including newlines), so
   # the output collapses to a single line at render time.
@@ -169,10 +173,10 @@ locals {
   #   - outer `{{ if $values.B }}` — guards on the rebalance-blocked gauge
   #     producing a series at all (probe didn't run / RPC down → no
   #     annotation line).
-  #   - `{{ if $rm }}` — `reason_message` is 1:1 with the gauge by
+  #   - `{{ if $rm }}` — `reason_message` is 1:1 with `reason_code` by
   #     construction; the nil-and-emptystring guard is defensive against
   #     a misconfigured probe writing the gauge without the label.
-  #     Renders the bounded message followed by a period.
+  #     Renders the bounded message, decoded custom-error code, then a period.
   #   - inner Aegis dispatch — each ResX query is already pair-scoped via
   #     the cross-join (pair="USDC/USDm" etc.), so only the matching pool
   #     instance sees a non-nil $values.ResX. The chain/pair guards here
@@ -181,8 +185,9 @@ locals {
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
+      {{- $rc := index $values.B.Labels "reason_code" -}}
       {{- if $rm -}}
-        {{- $rm }}.
+        {{- $rm }}{{ if $rc }} (`{{ $rc }}`){{ end }}.
         {{- $pair := index $labels "pair" -}}
         {{- $chain := index $labels "chain_name" -}}
         {{- if and (eq $chain "celo") (eq $pair "USDC/USDm") $values.ResUSDC -}}
@@ -250,11 +255,11 @@ locals {
     },
     {
       ref_id = "R0"
-      expr   = "mento_pool_reserve_share_token0"
+      expr   = "mento_pool_reserve_share_token0 * 100"
     },
     {
       ref_id = "R1"
-      expr   = "mento_pool_reserve_share_token1"
+      expr   = "mento_pool_reserve_share_token1 * 100"
     },
     {
       ref_id = "B"

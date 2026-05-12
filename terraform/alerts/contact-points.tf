@@ -63,8 +63,9 @@ locals {
   #      The *Rebalance Blocked* row is sourced from the metrics-bridge
   #      `mento_pool_rebalance_blocked` gauge (currently set on
   #      `Deviation Breach Critical` and its anchored sibling) so the
-  #      operator sees the bounded Solidity-error explanation (e.g.
-  #      "Reserve has insufficient collateral") inline with the breach.
+  #      operator sees the bounded Solidity-error explanation plus decoded
+  #      custom-error code (e.g. "Reserve has insufficient collateral
+  #      (`RLS_RESERVE_OUT_OF_COLLATERAL`)") inline with the breach.
   #      For Celo USDC/USDT/axlUSDC pools the row also appends the
   #      Reserve's live ERC20 balance from Aegis ("Reserve Balance:
   #      0.05 USDT") so operators can see at a glance how short the
