@@ -77,6 +77,20 @@ locals {
     local.fx_weekend_gate_promql,
   )
 
+  # Shared per-series weekend suppressors for deviation/rebalancer rules.
+  # They intentionally gate only FX pairs (non-USD-pegged pair labels) and
+  # leave USD-pegged pools such as USDC/USDm and USDT/USDm alerting 24/7.
+  fx_weekend_suppressed_deviation_ratio_promql = format(
+    "mento_pool_deviation_ratio{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
+    local.usd_pegged_pair_regex,
+    local.fx_weekend_gate_promql,
+  )
+  fx_weekend_suppressed_breach_start_promql = format(
+    "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
+    local.usd_pegged_pair_regex,
+    local.fx_weekend_gate_promql,
+  )
+
   # ── Deviation Breach Critical annotations ────────────────────────────────
   # Both critical deviation-breach rules (magnitude-gated and anchored)
   # render the same Slack diagnostic lines, so we author them once here.
@@ -258,6 +272,15 @@ locals {
       ref_id = "ResAxlUSDC"
       expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
+  ]
+
+  # Rebalancer liveness/effectiveness alerts only render `rebalance_reason`.
+  # Keep their annotation-only data to the blocked-reason + reserve-balance
+  # subset so unused deviation/reserve-share queries cannot add eval cost or
+  # widen the NoData surface.
+  deviation_rebalancer_annotation_queries = [
+    for query in local.deviation_critical_annotation_queries : query
+    if contains(["B", "ResUSDC", "ResUSDT", "ResAxlUSDC"], query.ref_id)
   ]
 
   # ── Oracle Jump Critical annotation-only data sources ─────────────────────
