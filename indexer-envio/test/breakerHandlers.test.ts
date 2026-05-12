@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "envio";
 import {
   _setMockBreakerKind,
   _setMockBreakerDefaults,
@@ -536,7 +535,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(cfg!.enabled, false);
     assert.equal(cfg!.tradingMode, 0);
     assert.equal(cfg!.status, "OK");
-    assert.notEqual(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
+    assert.notStrictEqual(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
   });
 
   it("SortedOracles.MedianUpdated mirrors EMA + lastMedianRate for enabled MedianDelta configs", async () => {

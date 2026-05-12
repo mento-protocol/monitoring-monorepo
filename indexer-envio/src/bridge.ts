@@ -6,11 +6,7 @@
  * BridgeBridger entities. Provider-specific logic lives in src/wormhole/ (and
  * future sibling directories).
  */
-import type {
-  BridgeTransfer,
-  BridgeDailySnapshot,
-  BridgeBridger,
-} from "generated";
+import type { BridgeTransfer, BridgeDailySnapshot, BridgeBridger } from "envio";
 
 export type BridgeProvider = "WORMHOLE";
 

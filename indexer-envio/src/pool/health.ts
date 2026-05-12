@@ -1,6 +1,6 @@
-import type { Pool } from "generated";
-import { isVirtualPool } from "../helpers";
-import type { PoolUpdateSource } from "./sources";
+import type { Pool } from "envio";
+import { isVirtualPool } from "../helpers.js";
+import type { PoolUpdateSource } from "./sources.js";
 
 /**
  * How long a pool may sit above the critical magnitude (5% over threshold)

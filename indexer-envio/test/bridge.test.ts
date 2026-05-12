@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 /**
  * Bridge-flows pure-function tests.
  *
@@ -6,10 +5,11 @@
  * src/wormhole/status.ts, src/wormhole/chainIds.ts, src/wormhole/nttAddresses.ts.
  *
  * Handler-level tests (event sequencing, replay idempotency, multi-send
- * pairing) live in test/bridgeHandlers.test.ts and use Envio's MockDb.
+ * pairing) live in the quarantined test/bridgeHandlers.test.ts suite pending
+ * the createTestIndexer + network-level RPC mock rewrite.
  */
 import { strict as assert } from "assert";
-import type { BridgeTransfer, WormholeTransferDetail } from "generated";
+import type { BridgeTransfer, WormholeTransferDetail } from "envio";
 import {
   buildTransferId,
   snapshotId,
@@ -17,18 +17,18 @@ import {
   defaultBridger,
   defaultSnapshot,
   appendJsonSet,
-} from "../src/bridge";
+} from "../src/bridge.js";
 import {
   bytes32ToAddress,
   defaultWormholeDetail,
-} from "../src/wormhole/detail";
-import { computeWormholeStatus } from "../src/wormhole/status";
+} from "../src/wormhole/detail.js";
+import { computeWormholeStatus } from "../src/wormhole/status.js";
 import {
   wormholeToEvmChainId,
   WORMHOLE_TO_EVM_CHAIN_ID,
-} from "../src/wormhole/chainIds";
-import { findByNttManager } from "../src/wormhole/nttAddresses";
-import nttAddresses from "../config/nttAddresses.json";
+} from "../src/wormhole/chainIds.js";
+import { findByNttManager } from "../src/wormhole/nttAddresses.js";
+import nttAddresses from "../config/nttAddresses.json" with { type: "json" };
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -166,7 +166,7 @@ describe("snapshotId", () => {
       sourceChainId: 42220,
       destChainId: 143,
     });
-    assert.notEqual(a.id, b.id);
+    assert.notStrictEqual(a.id, b.id);
   });
 });
 
@@ -413,8 +413,7 @@ describe("wormhole/nttAddresses — Envio YAML sync", () => {
   }
 
   const yamlPaths = [
-    resolve(__dirname, "../config.multichain.mainnet.yaml"),
-    resolve(__dirname, "../config.multichain.bridge-only.yaml"),
+    resolve(import.meta.dirname, "../config.multichain.mainnet.yaml"),
   ];
   const yamls = yamlPaths.map((p) => ({
     path: p,

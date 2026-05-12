@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import generated from "generated";
+import assert from "node:assert/strict";
+import generated from "envio";
 import {
   _clearMockReserves,
   _setMockERC20Decimals,

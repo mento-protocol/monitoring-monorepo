@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 /**
  * Fee-token registration allowlist
  *

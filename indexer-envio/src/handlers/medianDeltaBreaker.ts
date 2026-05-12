@@ -10,8 +10,8 @@
 // invokes `_checkAndSetBreakers`, and we know the inputs from that event.
 // ---------------------------------------------------------------------------
 
-import { MedianDeltaBreaker } from "generated";
-import { asAddress, asBigInt } from "../helpers";
+import { indexer } from "envio";
+import { asAddress, asBigInt } from "../helpers.js";
 import {
   ensureBreaker,
   ensureBreakerConfig,
@@ -21,20 +21,27 @@ import {
   handleRateFeedCooldownTimeUpdated,
   makeBreakerId,
   maybePreloadBreaker,
-} from "../breakers";
+} from "../breakers.js";
 
 // Cooldown + threshold config events are shared with ValueDeltaBreaker —
 // both contracts inherit WithCooldown + WithThreshold in mento-core.
-MedianDeltaBreaker.DefaultCooldownTimeUpdated.handler(
+indexer.onEvent(
+  { contract: "MedianDeltaBreaker", event: "DefaultCooldownTimeUpdated" },
   handleDefaultCooldownTimeUpdated,
 );
-MedianDeltaBreaker.DefaultRateChangeThresholdUpdated.handler(
+indexer.onEvent(
+  {
+    contract: "MedianDeltaBreaker",
+    event: "DefaultRateChangeThresholdUpdated",
+  },
   handleDefaultRateChangeThresholdUpdated,
 );
-MedianDeltaBreaker.RateFeedCooldownTimeUpdated.handler(
+indexer.onEvent(
+  { contract: "MedianDeltaBreaker", event: "RateFeedCooldownTimeUpdated" },
   handleRateFeedCooldownTimeUpdated,
 );
-MedianDeltaBreaker.RateChangeThresholdUpdated.handler(
+indexer.onEvent(
+  { contract: "MedianDeltaBreaker", event: "RateChangeThresholdUpdated" },
   handleRateChangeThresholdUpdated,
 );
 
@@ -44,65 +51,71 @@ MedianDeltaBreaker.RateChangeThresholdUpdated.handler(
 
 // NOTE: the contract emits `rateFeedId` (lowercase i) on this event —
 // distinct from the `rateFeedID` casing used everywhere else.
-MedianDeltaBreaker.SmoothingFactorSet.handler(async ({ event, context }) => {
-  const breakerAddress = asAddress(event.srcAddress);
-  const rateFeedID = asAddress(event.params.rateFeedId);
-  const breakerId = makeBreakerId(event.chainId, breakerAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "MedianDeltaBreaker", event: "SmoothingFactorSet" },
+  async ({ event, context }) => {
+    const breakerAddress = asAddress(event.srcAddress);
+    const rateFeedID = asAddress(event.params.rateFeedId);
+    const breakerId = makeBreakerId(event.chainId, breakerAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  if (await maybePreloadBreaker(context, breakerId)) return;
+    if (await maybePreloadBreaker(context, breakerId)) return;
 
-  const breaker = await ensureBreaker(
-    context,
-    event.chainId,
-    breakerAddress,
-    blockNumber,
-    blockTimestamp,
-  );
-  if (!breaker) return;
-  const cfg = await ensureBreakerConfig(
-    context,
-    event.chainId,
-    breaker,
-    rateFeedID,
-    blockNumber,
-  );
-  if (!cfg) return;
+    const breaker = await ensureBreaker(
+      context,
+      event.chainId,
+      breakerAddress,
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!breaker) return;
+    const cfg = await ensureBreakerConfig(
+      context,
+      event.chainId,
+      breaker,
+      rateFeedID,
+      blockNumber,
+    );
+    if (!cfg) return;
 
-  const sf = event.params.smoothingFactor;
-  if (cfg.smoothingFactor === sf) return;
-  context.BreakerConfig.set({ ...cfg, smoothingFactor: sf });
-});
+    const sf = event.params.smoothingFactor;
+    if (cfg.smoothingFactor === sf) return;
+    context.BreakerConfig.set({ ...cfg, smoothingFactor: sf });
+  },
+);
 
-MedianDeltaBreaker.MedianRateEMAReset.handler(async ({ event, context }) => {
-  const breakerAddress = asAddress(event.srcAddress);
-  const rateFeedID = asAddress(event.params.rateFeedID);
-  const breakerId = makeBreakerId(event.chainId, breakerAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "MedianDeltaBreaker", event: "MedianRateEMAReset" },
+  async ({ event, context }) => {
+    const breakerAddress = asAddress(event.srcAddress);
+    const rateFeedID = asAddress(event.params.rateFeedID);
+    const breakerId = makeBreakerId(event.chainId, breakerAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  if (await maybePreloadBreaker(context, breakerId)) return;
+    if (await maybePreloadBreaker(context, breakerId)) return;
 
-  const breaker = await ensureBreaker(
-    context,
-    event.chainId,
-    breakerAddress,
-    blockNumber,
-    blockTimestamp,
-  );
-  if (!breaker) return;
-  const cfg = await ensureBreakerConfig(
-    context,
-    event.chainId,
-    breaker,
-    rateFeedID,
-    blockNumber,
-  );
-  if (!cfg) return;
+    const breaker = await ensureBreaker(
+      context,
+      event.chainId,
+      breakerAddress,
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!breaker) return;
+    const cfg = await ensureBreakerConfig(
+      context,
+      event.chainId,
+      breaker,
+      rateFeedID,
+      blockNumber,
+    );
+    if (!cfg) return;
 
-  // Mirror contract: medianRatesEMA[feed] = 0. Next MedianUpdated will see
-  // EMA == 0 and re-seed it from the new median (sortedOracles handler).
-  if (cfg.medianRatesEMA === 0n) return;
-  context.BreakerConfig.set({ ...cfg, medianRatesEMA: 0n });
-});
+    // Mirror contract: medianRatesEMA[feed] = 0. Next MedianUpdated will see
+    // EMA == 0 and re-seed it from the new median (sortedOracles handler).
+    if (cfg.medianRatesEMA === 0n) return;
+    context.BreakerConfig.set({ ...cfg, medianRatesEMA: 0n });
+  },
+);

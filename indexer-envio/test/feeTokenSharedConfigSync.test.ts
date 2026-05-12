@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { KNOWN_TOKEN_META } from "../src/feeToken";
+import { KNOWN_TOKEN_META } from "../src/feeToken.js";
 
 /**
  * Drift-protection test. `indexer-envio/src/feeToken.ts:buildKnownTokenMeta`

@@ -1,10 +1,10 @@
 // SortedOracles and feed metadata RPC fetchers + test mocks.
 // Deps flow: oracle-state -> client, block-fallback, abis.
 
-import { FPMM_MINIMAL_ABI, SortedOraclesContract } from "../abis";
-import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
-import { readContractWithBlockFallback } from "./block-fallback";
-import { consoleLogger, type RpcLogger } from "./log";
+import { FPMM_MINIMAL_ABI, SortedOraclesContract } from "../abis.js";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
+import { readContractWithBlockFallback } from "./block-fallback.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)

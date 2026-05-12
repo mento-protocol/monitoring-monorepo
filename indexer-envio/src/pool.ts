@@ -2,30 +2,30 @@
 // Pool upsert logic and public pool-module re-exports
 // ---------------------------------------------------------------------------
 
-import type { Pool } from "generated";
-import { extractAddressFromPoolId, isVirtualPool } from "./helpers";
-import { computePriceDifference } from "./priceDifference";
+import type { Pool } from "envio";
+import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
+import { computePriceDifference } from "./priceDifference.js";
 import {
   compactFees,
   feesEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
-} from "./rpc/effects";
-import { recordBreachTransition } from "./deviationBreach";
+} from "./rpc/effects.js";
+import { recordBreachTransition } from "./deviationBreach.js";
 import {
   computeHealthStatus,
   isNeverRebalance,
   nextDeviationBreachStartedAt,
   nextOpenBreachEntryThreshold,
   nextOpenBreachPeak,
-} from "./pool/health";
-import { pickPreferredSource, type PoolUpdateSource } from "./pool/sources";
+} from "./pool/health.js";
+import { pickPreferredSource, type PoolUpdateSource } from "./pool/sources.js";
 import {
   selfHealInvertRateFeed,
   selfHealTokenDecimals,
   selfHealWrappedExchangeId,
-} from "./pool/self-heal";
-import type { PoolContext } from "./pool/types";
+} from "./pool/self-heal.js";
+import type { PoolContext } from "./pool/types.js";
 
 export {
   DEVIATION_BREACH_GRACE_SECONDS,
@@ -43,9 +43,9 @@ export {
   nextOpenBreachEntryThreshold,
   nextOpenBreachPeak,
   persistableThreshold,
-} from "./pool/health";
-export type { IndexerHealthStatus } from "./pool/health";
-export type { PoolUpdateSource } from "./pool/sources";
+} from "./pool/health.js";
+export type { IndexerHealthStatus } from "./pool/health.js";
+export type { PoolUpdateSource } from "./pool/sources.js";
 export {
   mirrorFeedIdToPool,
   mirrorTokensAndDecimalsToPool,
@@ -53,9 +53,9 @@ export {
   selfHealRebalanceThresholds,
   selfHealTokenDecimals,
   selfHealWrappedExchangeId,
-} from "./pool/self-heal";
-export type { PoolContext, SnapshotContext } from "./pool/types";
-export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots";
+} from "./pool/self-heal.js";
+export type { PoolContext, SnapshotContext } from "./pool/types.js";
+export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
 
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)
@@ -344,7 +344,7 @@ export const upsertPool = async ({
         rateFeedID,
         blockNumber,
       });
-      if (expiry !== undefined) {
+      if (expiry !== null) {
         healedOracleDelta = { oracleExpiry: expiry };
       }
     }

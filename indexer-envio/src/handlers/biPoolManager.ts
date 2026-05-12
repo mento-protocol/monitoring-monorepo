@@ -13,33 +13,34 @@
 // ---------------------------------------------------------------------------
 
 import {
-  BiPoolManager,
+  indexer,
+  type EvmOnEventContext,
   type BiPoolExchange,
   type BucketUpdate,
-} from "generated";
-import type { HandlerContext } from "generated/src/Types";
-import { eventId, asAddress, asBigInt } from "../helpers";
-import { ZERO_ADDRESS } from "../constants";
-import { mirrorFeedIdToPool, mirrorTokensAndDecimalsToPool } from "../pool";
-import { poolExchangeEffect } from "../rpc/effects";
-import { lookupPricingModuleName } from "../contractAddresses";
+} from "envio";
+import { eventId, asAddress, asBigInt } from "../helpers.js";
+import { ZERO_ADDRESS } from "../constants.js";
+import { mirrorFeedIdToPool, mirrorTokensAndDecimalsToPool } from "../pool.js";
+import { poolExchangeEffect } from "../rpc/effects.js";
+import { lookupPricingModuleName } from "../contractAddresses.js";
 
 function exchangeRowId(chainId: number, exchangeId: string): string {
   return `${chainId}-${exchangeId.toLowerCase()}`;
 }
 
 async function findWrappedByPoolId(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   exchangeId: string,
 ): Promise<string | undefined> {
-  const wrappingPools =
-    await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+  const wrappingPools = await context.Pool.getWhere({
+    wrappedExchangeId: { _eq: exchangeId },
+  });
   return wrappingPools.find((pool) => pool.chainId === chainId)?.id;
 }
 
 async function preloadBiPoolExchangeLink(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   exchangeId: string,
 ): Promise<void> {
@@ -50,7 +51,7 @@ async function preloadBiPoolExchangeLink(
     !existing ||
     (!existing.wrappedByPoolId && !existing.wrappedByPoolIdChecked)
   ) {
-    await context.Pool.getWhere.wrappedExchangeId.eq(exchangeId);
+    await context.Pool.getWhere({ wrappedExchangeId: { _eq: exchangeId } });
   }
 }
 
@@ -71,7 +72,7 @@ async function preloadBiPoolExchangeLink(
 // ---------------------------------------------------------------------------
 
 async function ensureBiPoolExchange(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   exchangeId: string,
   exchangeProvider: string,
@@ -292,97 +293,100 @@ async function ensureBiPoolExchange(
 // directions without an explicit `.contractRegister` orchestration.
 // ---------------------------------------------------------------------------
 
-BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
-  const id = exchangeRowId(event.chainId, event.params.exchangeId);
-  const exchangeId = event.params.exchangeId.toLowerCase();
-  const exchangeProvider = asAddress(event.srcAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "BiPoolManager", event: "ExchangeCreated" },
+  async ({ event, context }) => {
+    const id = exchangeRowId(event.chainId, event.params.exchangeId);
+    const exchangeId = event.params.exchangeId.toLowerCase();
+    const exchangeProvider = asAddress(event.srcAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Preload phase: warm entity reads only. With `preload_handlers: true`
-  // the same event runs twice (preload + processing); without this guard
-  // the non-cached `poolExchangeEffect` would fire on both passes,
-  // doubling RPC pressure exactly during the transient-RPC window the
-  // backfill is trying to survive.
-  if (context.isPreload) {
-    await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
-    return;
-  }
+    // Preload phase: warm entity reads only. With v3 preload optimization,
+    // the same event runs twice (preload + processing); without this guard
+    // the non-cached `poolExchangeEffect` would fire on both passes,
+    // doubling RPC pressure exactly during the transient-RPC window the
+    // backfill is trying to survive.
+    if (context.isPreload) {
+      await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
+      return;
+    }
 
-  // RPC backfill — `undefined` on transient failure. Caller stamps zeros for
-  // the gap; the next SpreadUpdated / BucketsUpdated event still populates
-  // its own fields incrementally.
-  const struct = await context.effect(poolExchangeEffect, {
-    chainId: event.chainId,
-    exchangeProvider,
-    exchangeId,
-    blockNumber,
-  });
-
-  // Reverse-join a VP that stamped `Pool.wrappedExchangeId` before this exchange.
-  // Envio's getWhere is single-field-only, so chain-filter after the lookup.
-  const wrappedByPoolId = await findWrappedByPoolId(
-    context,
-    event.chainId,
-    exchangeId,
-  );
-
-  const pricingModule =
-    struct?.pricingModule ?? asAddress(event.params.pricingModule);
-
-  const row: BiPoolExchange = {
-    id,
-    chainId: event.chainId,
-    exchangeId,
-    exchangeProvider,
-    asset0: struct?.asset0 ?? asAddress(event.params.asset0),
-    asset1: struct?.asset1 ?? asAddress(event.params.asset1),
-    pricingModule,
-    pricingModuleName:
-      lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
-    spread: struct?.spread ?? BigInt(0),
-    referenceRateFeedID: struct?.referenceRateFeedID ?? ZERO_ADDRESS,
-    referenceRateResetFrequency:
-      struct?.referenceRateResetFrequency ?? BigInt(0),
-    minimumReports: struct?.minimumReports ?? BigInt(0),
-    stablePoolResetSize: struct?.stablePoolResetSize ?? BigInt(0),
-    bucket0: struct?.bucket0 ?? BigInt(0),
-    bucket1: struct?.bucket1 ?? BigInt(0),
-    lastBucketUpdate: struct?.lastBucketUpdate ?? BigInt(0),
-    isDeprecated: false,
-    wrappedByPoolId,
-    wrappedByPoolIdChecked: true,
-    createdAtBlock: blockNumber,
-    createdAtTimestamp: blockTimestamp,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
-
-  context.BiPoolExchange.set(row);
-
-  if (wrappedByPoolId) {
-    await mirrorFeedIdToPool(
-      context,
-      wrappedByPoolId,
-      row.referenceRateFeedID,
+    // RPC backfill — `null` on transient failure. Caller stamps zeros for
+    // the gap; the next SpreadUpdated / BucketsUpdated event still populates
+    // its own fields incrementally.
+    const struct = await context.effect(poolExchangeEffect, {
+      chainId: event.chainId,
+      exchangeProvider,
+      exchangeId,
       blockNumber,
-      blockTimestamp,
-    );
-    // VP-deployed-before-exchange ordering: the wrapping VP self-healed
-    // (or set its forward link via `VirtualPoolDeployed`) before this
-    // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
-    // mirror tokens because the row wasn't there yet — backfill them
-    // now that we just persisted asset0/asset1.
-    await mirrorTokensAndDecimalsToPool(
+    });
+
+    // Reverse-join a VP that stamped `Pool.wrappedExchangeId` before this exchange.
+    // Envio's getWhere is single-field-only, so chain-filter after the lookup.
+    const wrappedByPoolId = await findWrappedByPoolId(
       context,
-      wrappedByPoolId,
-      row.asset0,
-      row.asset1,
-      blockNumber,
-      blockTimestamp,
+      event.chainId,
+      exchangeId,
     );
-  }
-});
+
+    const pricingModule =
+      struct?.pricingModule ?? asAddress(event.params.pricingModule);
+
+    const row: BiPoolExchange = {
+      id,
+      chainId: event.chainId,
+      exchangeId,
+      exchangeProvider,
+      asset0: struct?.asset0 ?? asAddress(event.params.asset0),
+      asset1: struct?.asset1 ?? asAddress(event.params.asset1),
+      pricingModule,
+      pricingModuleName:
+        lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
+      spread: struct?.spread ?? BigInt(0),
+      referenceRateFeedID: struct?.referenceRateFeedID ?? ZERO_ADDRESS,
+      referenceRateResetFrequency:
+        struct?.referenceRateResetFrequency ?? BigInt(0),
+      minimumReports: struct?.minimumReports ?? BigInt(0),
+      stablePoolResetSize: struct?.stablePoolResetSize ?? BigInt(0),
+      bucket0: struct?.bucket0 ?? BigInt(0),
+      bucket1: struct?.bucket1 ?? BigInt(0),
+      lastBucketUpdate: struct?.lastBucketUpdate ?? BigInt(0),
+      isDeprecated: false,
+      wrappedByPoolId,
+      wrappedByPoolIdChecked: true,
+      createdAtBlock: blockNumber,
+      createdAtTimestamp: blockTimestamp,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+
+    context.BiPoolExchange.set(row);
+
+    if (wrappedByPoolId) {
+      await mirrorFeedIdToPool(
+        context,
+        wrappedByPoolId,
+        row.referenceRateFeedID,
+        blockNumber,
+        blockTimestamp,
+      );
+      // VP-deployed-before-exchange ordering: the wrapping VP self-healed
+      // (or set its forward link via `VirtualPoolDeployed`) before this
+      // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
+      // mirror tokens because the row wasn't there yet — backfill them
+      // now that we just persisted asset0/asset1.
+      await mirrorTokensAndDecimalsToPool(
+        context,
+        wrappedByPoolId,
+        row.asset0,
+        row.asset1,
+        blockNumber,
+        blockTimestamp,
+      );
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // BiPoolManager.ExchangeDestroyed
@@ -392,107 +396,110 @@ BiPoolManager.ExchangeCreated.handler(async ({ event, context }) => {
 // the deprecation pill + amber callout based on this flag.
 // ---------------------------------------------------------------------------
 
-BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
-  const id = exchangeRowId(event.chainId, event.params.exchangeId);
-  const exchangeId = event.params.exchangeId.toLowerCase();
-  const exchangeProvider = asAddress(event.srcAddress);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
+indexer.onEvent(
+  { contract: "BiPoolManager", event: "ExchangeDestroyed" },
+  async ({ event, context }) => {
+    const id = exchangeRowId(event.chainId, event.params.exchangeId);
+    const exchangeId = event.params.exchangeId.toLowerCase();
+    const exchangeProvider = asAddress(event.srcAddress);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Preload: warm both entity reads we'll need in the processing pass.
-  if (context.isPreload) {
-    await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
-    return;
-  }
+    // Preload: warm both entity reads we'll need in the processing pass.
+    if (context.isPreload) {
+      await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
+      return;
+    }
 
-  const existing = await context.BiPoolExchange.get(id);
+    const existing = await context.BiPoolExchange.get(id);
 
-  // Retry the wrapping-VP lookup at destroy time so late-seeded deprecated
-  // rows remain queryable by `wrappedByPoolId`.
-  const linkedPoolId =
-    existing?.wrappedByPoolId || existing?.wrappedByPoolIdChecked
-      ? undefined
-      : await findWrappedByPoolId(context, event.chainId, exchangeId);
-  // Existing row's wrappedByPoolId wins over the fresh getWhere if both
-  // resolve — the existing one is already a successful link, fresh
-  // lookup is a fallback.
-  const wrappedByPoolId = existing?.wrappedByPoolId ?? linkedPoolId;
+    // Retry the wrapping-VP lookup at destroy time so late-seeded deprecated
+    // rows remain queryable by `wrappedByPoolId`.
+    const linkedPoolId =
+      existing?.wrappedByPoolId || existing?.wrappedByPoolIdChecked
+        ? undefined
+        : await findWrappedByPoolId(context, event.chainId, exchangeId);
+    // Existing row's wrappedByPoolId wins over the fresh getWhere if both
+    // resolve — the existing one is already a successful link, fresh
+    // lookup is a fallback.
+    const wrappedByPoolId = existing?.wrappedByPoolId ?? linkedPoolId;
 
-  if (existing) {
-    context.BiPoolExchange.set({
-      ...existing,
+    if (existing) {
+      context.BiPoolExchange.set({
+        ...existing,
+        isDeprecated: true,
+        wrappedByPoolId,
+        wrappedByPoolIdChecked: true,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+      // Round 5 codex: mirror tokens + decimals to the wrapping Pool when
+      // the destroy completes the link. Existing row carries asset0/asset1.
+      // Helper is idempotent — fast-bails when both tokens are present.
+      if (wrappedByPoolId) {
+        await mirrorTokensAndDecimalsToPool(
+          context,
+          wrappedByPoolId,
+          existing.asset0,
+          existing.asset1,
+          blockNumber,
+          blockTimestamp,
+        );
+      }
+      return;
+    }
+
+    // Seed-from-destroy: ExchangeCreated fired pre-start_block (or on a
+    // chain we don't index) and Destroyed is the first BiPoolManager event
+    // we see. Without this branch the deprecated state is lost forever.
+    // The `ExchangeDestroyed` ABI carries asset0/asset1/pricingModule —
+    // enough to materialize a deprecated row with config sentinels for
+    // the still-missing fields. `getPoolExchange` reverts on a destroyed
+    // exchange so RPC backfill isn't an option for those.
+    const pricingModule = asAddress(event.params.pricingModule);
+    const seeded: BiPoolExchange = {
+      id,
+      chainId: event.chainId,
+      exchangeId,
+      exchangeProvider,
+      asset0: asAddress(event.params.asset0),
+      asset1: asAddress(event.params.asset1),
+      pricingModule,
+      pricingModuleName:
+        lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
+      spread: BigInt(0),
+      referenceRateFeedID: ZERO_ADDRESS,
+      referenceRateResetFrequency: BigInt(0),
+      minimumReports: BigInt(0),
+      stablePoolResetSize: BigInt(0),
+      bucket0: BigInt(0),
+      bucket1: BigInt(0),
+      lastBucketUpdate: BigInt(0),
       isDeprecated: true,
       wrappedByPoolId,
       wrappedByPoolIdChecked: true,
+      createdAtBlock: blockNumber,
+      createdAtTimestamp: blockTimestamp,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
-    });
-    // Round 5 codex: mirror tokens + decimals to the wrapping Pool when
-    // the destroy completes the link. Existing row carries asset0/asset1.
-    // Helper is idempotent — fast-bails when both tokens are present.
+    };
+    context.BiPoolExchange.set(seeded);
+    // Round 5 codex: seed-from-destroy completes the reverse-link too.
+    // If a VP self-healed before this row existed, no later
+    // BucketsUpdated/SpreadUpdated events will fire on the destroyed
+    // exchange, so this is the LAST chance to mirror tokens + decimals.
     if (wrappedByPoolId) {
       await mirrorTokensAndDecimalsToPool(
         context,
         wrappedByPoolId,
-        existing.asset0,
-        existing.asset1,
+        seeded.asset0,
+        seeded.asset1,
         blockNumber,
         blockTimestamp,
       );
     }
-    return;
-  }
-
-  // Seed-from-destroy: ExchangeCreated fired pre-start_block (or on a
-  // chain we don't index) and Destroyed is the first BiPoolManager event
-  // we see. Without this branch the deprecated state is lost forever.
-  // The `ExchangeDestroyed` ABI carries asset0/asset1/pricingModule —
-  // enough to materialize a deprecated row with config sentinels for
-  // the still-missing fields. `getPoolExchange` reverts on a destroyed
-  // exchange so RPC backfill isn't an option for those.
-  const pricingModule = asAddress(event.params.pricingModule);
-  const seeded: BiPoolExchange = {
-    id,
-    chainId: event.chainId,
-    exchangeId,
-    exchangeProvider,
-    asset0: asAddress(event.params.asset0),
-    asset1: asAddress(event.params.asset1),
-    pricingModule,
-    pricingModuleName:
-      lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
-    spread: BigInt(0),
-    referenceRateFeedID: ZERO_ADDRESS,
-    referenceRateResetFrequency: BigInt(0),
-    minimumReports: BigInt(0),
-    stablePoolResetSize: BigInt(0),
-    bucket0: BigInt(0),
-    bucket1: BigInt(0),
-    lastBucketUpdate: BigInt(0),
-    isDeprecated: true,
-    wrappedByPoolId,
-    wrappedByPoolIdChecked: true,
-    createdAtBlock: blockNumber,
-    createdAtTimestamp: blockTimestamp,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
-  context.BiPoolExchange.set(seeded);
-  // Round 5 codex: seed-from-destroy completes the reverse-link too.
-  // If a VP self-healed before this row existed, no later
-  // BucketsUpdated/SpreadUpdated events will fire on the destroyed
-  // exchange, so this is the LAST chance to mirror tokens + decimals.
-  if (wrappedByPoolId) {
-    await mirrorTokensAndDecimalsToPool(
-      context,
-      wrappedByPoolId,
-      seeded.asset0,
-      seeded.asset1,
-      blockNumber,
-      blockTimestamp,
-    );
-  }
-});
+  },
+);
 
 // ---------------------------------------------------------------------------
 // BiPoolManager.BucketsUpdated
@@ -506,57 +513,60 @@ BiPoolManager.ExchangeDestroyed.handler(async ({ event, context }) => {
 //      `lastBucketUpdate` so the dashboard's tile reads from one row.
 // ---------------------------------------------------------------------------
 
-BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
-  const exchangeId = event.params.exchangeId.toLowerCase();
+indexer.onEvent(
+  { contract: "BiPoolManager", event: "BucketsUpdated" },
+  async ({ event, context }) => {
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    const exchangeId = event.params.exchangeId.toLowerCase();
 
-  // Preload phase: warm BOTH entity reads `ensureBiPoolExchange` may use
-  // in the processing pass — the BiPoolExchange row itself AND the
-  // `Pool.getWhere.wrappedExchangeId` lookup that backfills
-  // `wrappedByPoolId` for orphan rows. Without warming the second one, a
-  // VP linked in the same processing batch could be missed by the cold
-  // getWhere read. The cache:false `poolExchangeEffect` is intentionally
-  // NOT called here (RPC stays in processing only).
-  if (context.isPreload) {
-    await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
-    return;
-  }
+    // Preload phase: warm BOTH entity reads `ensureBiPoolExchange` may use
+    // in the processing pass — the BiPoolExchange row itself AND the
+    // `Pool.getWhere.wrappedExchangeId` lookup that backfills
+    // `wrappedByPoolId` for orphan rows. Without warming the second one, a
+    // VP linked in the same processing batch could be missed by the cold
+    // getWhere read. The cache:false `poolExchangeEffect` is intentionally
+    // NOT called here (RPC stays in processing only).
+    if (context.isPreload) {
+      await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
+      return;
+    }
 
-  const update: BucketUpdate = {
-    id: eventId(event.chainId, event.block.number, event.logIndex),
-    chainId: event.chainId,
-    exchangeId: event.params.exchangeId.toLowerCase(),
-    bucket0: event.params.bucket0,
-    bucket1: event.params.bucket1,
-    txHash: event.transaction.hash,
-    blockNumber,
-    blockTimestamp,
-  };
-  context.BucketUpdate.set(update);
+    const update: BucketUpdate = {
+      id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
+      exchangeId: event.params.exchangeId.toLowerCase(),
+      bucket0: event.params.bucket0,
+      bucket1: event.params.bucket1,
+      txHash: event.transaction.hash,
+      blockNumber,
+      blockTimestamp,
+    };
+    context.BucketUpdate.set(update);
 
-  // Self-heal: pre-start_block ExchangeCreated events never fired, so this
-  // is the first time we're seeing the exchange in our index. ensureRow
-  // RPC-backfills via getPoolExchange + persists; on RPC failure returns
-  // null and we skip the snapshot mutation, retrying on the next event.
-  const existing = await ensureBiPoolExchange(
-    context,
-    event.chainId,
-    event.params.exchangeId.toLowerCase(),
-    asAddress(event.srcAddress),
-    blockNumber,
-    blockTimestamp,
-  );
-  if (!existing) return;
-  context.BiPoolExchange.set({
-    ...existing,
-    bucket0: event.params.bucket0,
-    bucket1: event.params.bucket1,
-    lastBucketUpdate: blockTimestamp,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
-});
+    // Self-heal: pre-start_block ExchangeCreated events never fired, so this
+    // is the first time we're seeing the exchange in our index. ensureRow
+    // RPC-backfills via getPoolExchange + persists; on RPC failure returns
+    // null and we skip the snapshot mutation, retrying on the next event.
+    const existing = await ensureBiPoolExchange(
+      context,
+      event.chainId,
+      event.params.exchangeId.toLowerCase(),
+      asAddress(event.srcAddress),
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!existing) return;
+    context.BiPoolExchange.set({
+      ...existing,
+      bucket0: event.params.bucket0,
+      bucket1: event.params.bucket1,
+      lastBucketUpdate: blockTimestamp,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+  },
+);
 
 // ---------------------------------------------------------------------------
 // BiPoolManager.SpreadUpdated
@@ -565,30 +575,33 @@ BiPoolManager.BucketsUpdated.handler(async ({ event, context }) => {
 // renders this as bps (`spread / 1e24 * 10000`).
 // ---------------------------------------------------------------------------
 
-BiPoolManager.SpreadUpdated.handler(async ({ event, context }) => {
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
-  const exchangeId = event.params.exchangeId.toLowerCase();
-  // Preload: warm both reads ensureBiPoolExchange may use — see
-  // BucketsUpdated for the full rationale.
-  if (context.isPreload) {
-    await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
-    return;
-  }
-  // Self-heal — see BucketsUpdated for the full rationale.
-  const existing = await ensureBiPoolExchange(
-    context,
-    event.chainId,
-    event.params.exchangeId.toLowerCase(),
-    asAddress(event.srcAddress),
-    blockNumber,
-    blockTimestamp,
-  );
-  if (!existing) return;
-  context.BiPoolExchange.set({
-    ...existing,
-    spread: event.params.spread,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
-});
+indexer.onEvent(
+  { contract: "BiPoolManager", event: "SpreadUpdated" },
+  async ({ event, context }) => {
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    const exchangeId = event.params.exchangeId.toLowerCase();
+    // Preload: warm both reads ensureBiPoolExchange may use — see
+    // BucketsUpdated for the full rationale.
+    if (context.isPreload) {
+      await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
+      return;
+    }
+    // Self-heal — see BucketsUpdated for the full rationale.
+    const existing = await ensureBiPoolExchange(
+      context,
+      event.chainId,
+      event.params.exchangeId.toLowerCase(),
+      asAddress(event.srcAddress),
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!existing) return;
+    context.BiPoolExchange.set({
+      ...existing,
+      spread: event.params.spread,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+  },
+);

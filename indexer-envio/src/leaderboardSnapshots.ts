@@ -6,15 +6,15 @@ import type {
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
-} from "generated";
-import { applyFeeBps } from "./usd";
-import { isSystemAddress } from "./system-addresses";
-import { classifyAggregator } from "./aggregators";
-import { dayBucket, extractAddressFromPoolId } from "./helpers";
+} from "envio";
+import { applyFeeBps } from "./usd.js";
+import { isSystemAddress } from "./system-addresses.js";
+import { classifyAggregator } from "./aggregators.js";
+import { dayBucket, extractAddressFromPoolId } from "./helpers.js";
 import {
   maybeHeartbeatFlushV3,
   type V3FlushContext,
-} from "./leaderboardWindowFlush";
+} from "./leaderboardWindowFlush.js";
 
 /** Subset of Envio's handler context that the leaderboard snapshot helper
  *  reads/writes. Both the FPMM and VirtualPool swap handlers' contexts are

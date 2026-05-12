@@ -1,11 +1,10 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { readContractWithBlockFallback, _testHooks } from "../src/rpc";
+import { readContractWithBlockFallback, _testHooks } from "../src/rpc.js";
 import {
   _resetFallbackArchiveDepth,
   fallbackLikelyHasBlock,
   recordFallbackArchiveMiss,
-} from "../src/rpc/client";
+} from "../src/rpc/client.js";
 
 // Most tests don't care which chainId they use — they just need a stable,
 // distinct value so the per-chain archive-horizon Map doesn't bleed state
@@ -37,11 +36,11 @@ describe("readContractWithBlockFallback", () => {
 
   // Replace the delay function with an instant no-op for tests.
   let originalDelayFn: typeof _testHooks.delayFn;
-  before(() => {
+  beforeAll(() => {
     originalDelayFn = _testHooks.delayFn;
     _testHooks.delayFn = async () => {};
   });
-  after(() => {
+  afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
   });
 
@@ -202,7 +201,7 @@ describe("readContractWithBlockFallback", () => {
         baseArgs,
         100n,
       );
-      assert.deepEqual(delays, [500, 1000, 2000]);
+      assert.deepStrictEqual(delays, [500, 1000, 2000]);
     } finally {
       _testHooks.delayFn = async () => {};
     }
@@ -362,12 +361,12 @@ describe("readContractWithBlockFallback", () => {
     for (let i = 0; i < 4; i++) {
       assert.equal((calls[i] as any).blockNumber, 42n);
       assert.equal((calls[i] as any).functionName, "bar");
-      assert.deepEqual((calls[i] as any).args, ["0xfeed"]);
+      assert.deepStrictEqual((calls[i] as any).args, ["0xfeed"]);
     }
     // Fallback: no blockNumber, same args
     assert.equal((calls[4] as any).blockNumber, undefined);
     assert.equal((calls[4] as any).functionName, "bar");
-    assert.deepEqual((calls[4] as any).args, ["0xfeed"]);
+    assert.deepStrictEqual((calls[4] as any).args, ["0xfeed"]);
   });
 
   // -------------------------------------------------------------------------

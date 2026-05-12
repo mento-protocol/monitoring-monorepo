@@ -5,7 +5,7 @@
 // the dashboard adds today's partial from a small TraderDailySnapshot
 // query (see ui-dashboard/src/lib/queries/leaderboard.ts).
 //
-// Cost: one getWhere.chainId.eq() per UTC-day rollover per chain (not per
+// Cost: one chainId getWhere per UTC-day rollover per chain (not per
 // event), reused across all 4 in-memory window aggregations. Roughly
 // O(active_traders × days_indexed) memory at flush time, ~21k rows /
 // 100ms wall on Celo's "all" window — within Envio's per-event handler
@@ -17,14 +17,14 @@ import type {
   LeaderboardChainState,
   LeaderboardWindowSnapshot,
   TraderDailySnapshot,
-} from "generated";
-import { SECONDS_PER_DAY, dayBucket } from "./helpers";
+} from "envio";
+import { SECONDS_PER_DAY, dayBucket } from "./helpers.js";
 import {
   WINDOW_KEYS,
   aggregatePerWindow,
   buildLeaderboardWindowSnapshot,
   windowStartDay,
-} from "./leaderboardWindowSnapshot";
+} from "./leaderboardWindowSnapshot.js";
 
 // ────────────────────────────────────────────────────────────────────
 // v3 — TraderDailySnapshot → LeaderboardWindowSnapshot
@@ -32,9 +32,9 @@ import {
 
 export type V3FlushContext = {
   TraderDailySnapshot: {
-    getWhere: {
-      chainId: { eq: (v: number) => Promise<TraderDailySnapshot[]> };
-    };
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<TraderDailySnapshot[]>;
   };
   LeaderboardChainState: {
     get: (id: string) => Promise<LeaderboardChainState | undefined>;
@@ -54,9 +54,9 @@ export async function flushV3LeaderboardWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.TraderDailySnapshot.getWhere.chainId.eq(
-    args.chainId,
-  );
+  const rows = await args.context.TraderDailySnapshot.getWhere({
+    chainId: { _eq: args.chainId },
+  });
   const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
   for (const w of WINDOW_KEYS) {
     const snap = buildLeaderboardWindowSnapshot({
@@ -118,9 +118,9 @@ export async function maybeHeartbeatFlushV3(args: {
 
 export type V2FlushContext = {
   BrokerTraderDailySnapshot: {
-    getWhere: {
-      chainId: { eq: (v: number) => Promise<BrokerTraderDailySnapshot[]> };
-    };
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<BrokerTraderDailySnapshot[]>;
   };
   LeaderboardChainState: {
     get: (id: string) => Promise<LeaderboardChainState | undefined>;
@@ -138,9 +138,9 @@ export async function flushV2LeaderboardWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.BrokerTraderDailySnapshot.getWhere.chainId.eq(
-    args.chainId,
-  );
+  const rows = await args.context.BrokerTraderDailySnapshot.getWhere({
+    chainId: { _eq: args.chainId },
+  });
   // BrokerTraderDailySnapshot keys by `caller` (tx.from / signer EOA), but
   // the shared `aggregatePerWindow` helper expects a `trader` field on each
   // row (named for v3's TraderDailySnapshot). Map `caller → trader` here so

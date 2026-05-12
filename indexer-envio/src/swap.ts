@@ -1,5 +1,5 @@
-import { asAddress } from "./helpers";
-import { computeSwapUsdWei } from "./usd";
+import { asAddress } from "./helpers.js";
+import { computeSwapUsdWei } from "./usd.js";
 
 /** Subset of an Envio Swap event needed to derive the tx-level address fields
  *  (`caller` = tx.from, `txTo` = tx.to). Loosely typed so the v3 FPMM handler,

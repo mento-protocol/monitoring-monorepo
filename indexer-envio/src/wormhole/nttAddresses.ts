@@ -4,7 +4,7 @@
  * The JSON at config/nttAddresses.json is commit-tracked. Regenerate via
  * `pnpm generate:ntt-addresses` after bumping @mento-protocol/contracts.
  */
-import nttAddresses from "../../config/nttAddresses.json";
+import nttAddresses from "../../config/nttAddresses.json" with { type: "json" };
 
 export type NttAddressEntry = {
   chainId: number;

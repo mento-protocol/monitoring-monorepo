@@ -6,25 +6,24 @@
 // `./rpc/block-fallback`. Breaker RPC self-heal lives in `./rpc/breakers`.
 // ---------------------------------------------------------------------------
 
-import type { HandlerContext } from "generated/src/Types";
-import type { Pool, BreakerConfig } from "generated";
+import type { EvmOnEventContext, Pool, BreakerConfig } from "envio";
 
 // Re-export the client/log/rate-limit primitives so existing callers
 // (feeToken.ts, EventHandlers.ts, breakers.ts, hyperRpcToken.test.ts, etc.)
-// that import from "./rpc" continue to work after the split.
+// that import from "./rpc.js" continue to work after the split.
 export {
   getRpcClient,
   withHyperRpcToken,
   _clearRpcClients,
   _setRpcClientForTests,
-} from "./rpc/client";
+} from "./rpc/client.js";
 export {
   readContractWithBlockFallback,
   _testHooks,
-} from "./rpc/block-fallback";
-export type { BlockFallbackResult } from "./rpc/block-fallback";
+} from "./rpc/block-fallback.js";
+export type { BlockFallbackResult } from "./rpc/block-fallback.js";
 
-// Re-export pool-state symbols so existing callers that import from "./rpc"
+// Re-export pool-state symbols so existing callers that import from "./rpc.js"
 // continue to work without import-path changes (feeToken.ts, EventHandlers.ts,
 // breakers.ts, pool.ts, and all test files).
 export {
@@ -45,7 +44,7 @@ export {
   fetchTokenDecimalsScaling,
   fetchErc20Decimals,
   fetchTradingLimits,
-} from "./rpc/pool-state";
+} from "./rpc/pool-state.js";
 export {
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
@@ -54,7 +53,7 @@ export {
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchReportExpiry,
-} from "./rpc/oracle-state";
+} from "./rpc/oracle-state.js";
 export {
   _setMockFees,
   _clearMockFees,
@@ -62,7 +61,7 @@ export {
   _clearMockRebalanceIncentivesAtBlock,
   fetchRebalanceIncentiveAtBlock,
   fetchFees,
-} from "./rpc/pool-fees";
+} from "./rpc/pool-fees.js";
 export {
   _setMockPoolExchange,
   _clearMockPoolExchanges,
@@ -71,13 +70,13 @@ export {
   fetchPoolExchange,
   fetchVirtualPoolExchangeId,
   extractVpExchangeIdFromBytecode,
-} from "./rpc/biPoolManager";
-export type { RebalancingState } from "./rpc/pool-state";
-export type { FeeGetterMock, FetchFeesMock } from "./rpc/pool-fees";
+} from "./rpc/biPoolManager.js";
+export type { RebalancingState } from "./rpc/pool-state.js";
+export type { FeeGetterMock, FetchFeesMock } from "./rpc/pool-fees.js";
 export type {
   PoolExchangeStruct,
   VirtualPoolExchangeId,
-} from "./rpc/biPoolManager";
+} from "./rpc/biPoolManager.js";
 
 // Re-export breaker RPC self-heal symbols so existing callers that import from
 // "./rpc" (breakers.ts handler and all breaker test files) keep working.
@@ -85,7 +84,7 @@ export type {
   BreakerKindRpc,
   BreakerDefaults,
   BreakerFeedState,
-} from "./rpc/breakers";
+} from "./rpc/breakers.js";
 export {
   _setMockBreakerList,
   fetchBreakerList,
@@ -96,7 +95,7 @@ export {
   fetchBreakerKind,
   fetchBreakerDefaults,
   fetchBreakerFeedState,
-} from "./rpc/breakers";
+} from "./rpc/breakers.js";
 
 // ---------------------------------------------------------------------------
 // Oracle DB query helpers (used by SortedOracles handlers)
@@ -113,19 +112,22 @@ export {
  * pools total across both chains, so the result set is always tiny. Do NOT
  * "simplify" this to a DB query — the API does not support it. */
 export async function getPoolsByFeed(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<string[]> {
-  const pools = await context.Pool.getWhere.referenceRateFeedID.eq(rateFeedID);
+  const pools = await context.Pool.getWhere({
+    referenceRateFeedID: { _eq: rateFeedID },
+  });
   return pools.filter((p) => p.chainId === chainId).map((p) => p.id);
 }
 
 export async function updatePoolsOracleExpiry(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   poolIds: string[],
-  // Accept undefined too so callers can pass the `reportExpiryEffect` result
-  // (Sury maps null → undefined) without normalizing at every call site.
+  // Accept null and undefined so callers can pass the `reportExpiryEffect`
+  // result directly, plus historical paths that surface undefined, without
+  // normalizing at every call site.
   oracleExpiry: bigint | null | undefined,
   blockNumber: bigint,
   blockTimestamp: bigint,
@@ -150,10 +152,12 @@ export async function updatePoolsOracleExpiry(
  * single-field only, so we fetch all pools with a non-empty referenceRateFeedID
  * and filter by chainId locally. Result set is always small. */
 export async function getPoolsWithReferenceFeed(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
 ): Promise<Pool[]> {
-  const pools = await context.Pool.getWhere.referenceRateFeedID.gt("");
+  const pools = await context.Pool.getWhere({
+    referenceRateFeedID: { _gt: "" },
+  });
   return pools.filter((p) => p.chainId === chainId);
 }
 
@@ -162,10 +166,12 @@ export async function getPoolsWithReferenceFeed(
  * single-field getWhere doesn't support compound queries. Result set is
  * always small (≤ 1 trip-able config per feed in production today). */
 export async function getBreakerConfigsByFeed(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<BreakerConfig[]> {
-  const rows = await context.BreakerConfig.getWhere.rateFeedID.eq(rateFeedID);
+  const rows = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: rateFeedID },
+  });
   return rows.filter((r) => r.chainId === chainId);
 }

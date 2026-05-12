@@ -12,8 +12,8 @@ import type {
   WormholeDestPending,
   WormholeTransferDetail,
   WormholeTransferPending,
-  wormholeNttManager as WormholeNttManagerEntity,
-} from "generated";
+  WormholeNttManager as WormholeNttManagerEntity,
+} from "envio";
 
 type EntityRW<T> = {
   get: (id: string) => Promise<T | undefined>;

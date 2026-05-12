@@ -1,6 +1,11 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-testnet
 description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143)
+
+# Disable v3's `src/handlers/` auto-loading — see config.multichain.mainnet.yaml
+# for the rationale. Each contract below explicitly points at
+# `src/EventHandlers.ts`.
+handlers: null
 #
 # Per-chain RPC overrides: ENVIO_RPC_URL_11142220 and ENVIO_RPC_URL_10143.
 # Do NOT use the generic ENVIO_RPC_URL in multichain mode.
@@ -77,8 +82,8 @@ contracts:
 
   # BiPoolManager — see config.multichain.mainnet.yaml for the full
   # rationale. Mirrored here so testnet codegen + handler bindings stay
-  # aligned with mainnet. Per-network address registered under each
-  # `networks:` entry below.
+  # aligned with mainnet. Per-chain address registered under each `chains:`
+  # entry below.
   - name: BiPoolManager
     abi_file_path: abis/BiPoolManager.json
     handler: src/EventHandlers.ts
@@ -105,9 +110,8 @@ contracts:
 
   # Circuit Breakers — see config.multichain.mainnet.yaml for the full
   # rationale + event list. Mirrored here so testnet codegen + handler
-  # bindings stay aligned with mainnet (the breaker handlers in
-  # src/handlers/* always import from `generated`, regardless of which
-  # config is active).
+  # bindings stay aligned with mainnet (EventHandlers.ts imports the same
+  # handler files regardless of which config is active).
   - name: BreakerBox
     abi_file_path: abis/BreakerBox.json
     handler: src/EventHandlers.ts
@@ -142,12 +146,35 @@ contracts:
       - event: RateChangeThresholdUpdated
       - event: ReferenceValueUpdated
 
-networks:
+  # Bridge Flows — Wormhole NTT. Mirrored from mainnet with no testnet
+  # addresses wired today so shared handler imports still typecheck after
+  # `pnpm indexer:testnet:codegen`.
+  - name: WormholeNttManager
+    abi_file_path: abis/wormhole/NttManager.json
+    handler: src/EventHandlers.ts
+    events:
+      # The two TransferSent overloads — aliased here because Envio codegen
+      # needs unique handler symbol names per contract.
+      - event: TransferSent(bytes32 indexed recipient, bytes32 indexed refundAddress, uint256 amount, uint256 fee, uint16 recipientChain, uint64 msgSequence)
+        name: TransferSentDetailed
+      - event: TransferSent(bytes32 indexed digest)
+        name: TransferSentDigest
+      - event: TransferRedeemed(bytes32 indexed digest)
+      - event: MessageAttestedTo(bytes32 digest, address transceiver, uint8 index)
+      - event: InboundTransferQueued(bytes32 digest)
+
+  - name: WormholeTransceiver
+    abi_file_path: abis/wormhole/WormholeTransceiver.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
+
+chains:
   # ---------------------------------------------------------------------------
   # Celo Sepolia (chain 11142220)
   # ---------------------------------------------------------------------------
   - id: 11142220
-    rpc_config:
+    rpc:
       url: ${ENVIO_RPC_URL_CELO_SEPOLIA:-https://forno.celo-sepolia.celo-testnet.org}
     start_block: ${ENVIO_START_BLOCK_CELO_SEPOLIA:-18946570}
     contracts:
@@ -195,6 +222,10 @@ networks:
       - name: ValueDeltaBreaker
         address:
           - 0x03CDf2966185Eb0b980f2481Ad386B8aFdAB4534
+      - name: WormholeNttManager
+        address: [] # No testnet Wormhole NTT addresses wired today
+      - name: WormholeTransceiver
+        address: [] # No testnet Wormhole transceiver addresses wired today
 
   # ---------------------------------------------------------------------------
   # Monad Testnet (chain 10143)
@@ -230,9 +261,11 @@ networks:
         address: [] # Not yet deployed on Monad Testnet — add address when available
       - name: ValueDeltaBreaker
         address: [] # Not yet deployed on Monad Testnet — add address when available
+      - name: WormholeNttManager
+        address: [] # No testnet Wormhole NTT addresses wired today
+      - name: WormholeTransceiver
+        address: [] # No testnet Wormhole transceiver addresses wired today
 
-unordered_multichain_mode: true
-preload_handlers: true
 field_selection:
   transaction_fields:
     - hash

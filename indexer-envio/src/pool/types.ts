@@ -1,11 +1,11 @@
-import type { EffectCaller } from "envio";
 import type {
+  EffectCaller,
+  EvmOnEventContext,
   Pool,
   PoolSnapshot,
   PoolDailySnapshot,
   DeviationThresholdBreach,
-} from "generated";
-import type { HandlerContext } from "generated/src/Types";
+} from "envio";
 
 export type PoolContext = {
   effect: EffectCaller;
@@ -19,7 +19,7 @@ export type PoolContext = {
   };
   // Used by `selfHealWrappedExchangeId` to patch the back-reference on the
   // matching exchange row when a VP heals its `wrappedExchangeId`.
-  BiPoolExchange: HandlerContext["BiPoolExchange"];
+  BiPoolExchange: EvmOnEventContext["BiPoolExchange"];
 };
 
 export type SnapshotContext = {

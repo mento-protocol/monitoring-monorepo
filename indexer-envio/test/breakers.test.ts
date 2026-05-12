@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
 import {
   computeCooldownEndsAt,
@@ -91,12 +90,12 @@ describe("fetchBreakerKind RPC selector probes", () => {
   const BREAKER = "0x00000000000000000000000000000000000000bb";
   let originalDelayFn: typeof _testHooks.delayFn;
 
-  before(() => {
+  beforeAll(() => {
     originalDelayFn = _testHooks.delayFn;
     _testHooks.delayFn = async () => {};
   });
 
-  after(() => {
+  afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
   });
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-18
 **Author:** Giskard (automated analysis)
-**Status:** Draft — awaiting review
+**Status:** Superseded by the Envio v3 multichain config in `indexer-envio/config.multichain.mainnet.yaml`
 
 ---
 
@@ -10,7 +10,7 @@
 
 **Recommendation: Yes, merge into a single multichain indexer. Do it now.**
 
-The codebase is already 95% ready — both chain configs share identical handler code, ABIs, schema, and even both already set `unordered_multichain_mode: true`. The migration is a config-level change (merging two YAML files into one) plus adding chain ID prefixes to entity IDs to avoid collisions. Estimated effort: 1–2 days of engineering work including testing and redeployment.
+The codebase was already 95% ready — both chain configs shared identical handler code, ABIs, and schema. The migration was a config-level change (merging two YAML files into one) plus adding chain ID prefixes to entity IDs to avoid collisions. In Envio v3, unordered multichain indexing and preload optimization are defaults; the old `unordered_multichain_mode` and `preload_handlers` keys no longer exist.
 
 ---
 
@@ -64,11 +64,11 @@ indexer-envio/
 
 ### How It Works
 
-Envio HyperIndex natively supports multichain indexing by listing multiple networks in a single `config.yaml`. From [the docs](https://docs.envio.dev/docs/HyperIndex/multichain-indexing):
+Envio HyperIndex natively supports multichain indexing by listing multiple chains in a single `config.yaml`. From [the docs](https://docs.envio.dev/docs/HyperIndex/multichain-indexing):
 
 1. **Global contract definitions** — define contracts, ABIs, and events once at the top level
-2. **Network-specific entries** — each network block specifies chain ID, start block, and contract addresses
-3. **Same handlers** — handler functions are reused across all networks automatically
+2. **Chain-specific entries** — each chain block specifies chain ID, start block, and contract addresses
+3. **Same handlers** — handler functions are reused across all chains automatically
 
 ```yaml
 contracts:
@@ -78,7 +78,7 @@ contracts:
     events:
       - event: MyEvent
 
-networks:
+chains:
   - id: 42220 # Celo
     start_block: 60664500
     contracts:
@@ -91,12 +91,9 @@ networks:
         address: "0xMonadAddress..."
 ```
 
-### Event Ordering Modes
+### Event Ordering Mode
 
-- **`unordered_multichain_mode: true`** (recommended) — events processed per-chain in order, but cross-chain ordering is not guaranteed. Lower latency.
-- **Ordered mode** — strict cross-chain timestamp ordering. Higher latency, only needed for cross-chain dependencies.
-
-Both our existing configs already set `unordered_multichain_mode: true`, which is correct — our entities from Celo and Monad are independent (no cross-chain interactions).
+Envio v3 uses unordered multichain indexing by default. Events are processed per-chain in order, but cross-chain ordering is not guaranteed. That is correct for this indexer because Celo and Monad entities are independent and have no cross-chain state dependency.
 
 ### Key Constraint
 
@@ -128,7 +125,7 @@ The handler code is 100% chain-agnostic. Both configs reference the same:
 - `handler: src/EventHandlers.ts`
 - Same ABIs (`abis/FPMMFactory.json`, `abis/FPMM.json`, etc.)
 - Same events (Swap, Mint, Burn, UpdateReserves, Rebalanced, etc.)
-- Same `unordered_multichain_mode: true` setting
+- Same v3 unordered multichain default
 
 The `deployment-namespaces.json` already maps both chain IDs:
 
@@ -155,7 +152,7 @@ Merging requires a full reindex of all chains from their start blocks. For Celo 
 
 ### 5.2 Chain Isolation Loss
 
-If the indexer crashes or encounters a bug on one chain's events, it affects all chains. With separate deployments, Celo continues running even if Monad has issues. **Mitigation:** Envio's hosted service is resilient, and `unordered_multichain_mode` means one chain's slowness doesn't block the other.
+If the indexer crashes or encounters a bug on one chain's events, it affects all chains. With separate deployments, Celo continues running even if Monad has issues. **Mitigation:** Envio's hosted service is resilient, and v3's default unordered multichain indexing means one chain's slowness doesn't block the other.
 
 ### 5.3 Entity ID Migration
 
@@ -204,7 +201,7 @@ contracts:
       - event: LiquidityStrategyUpdated
   # ... (VirtualPool, VirtualPoolFactory, SortedOracles, ERC20FeeToken)
 
-networks:
+chains:
   - id: 42220 # Celo Mainnet
     start_block: 60664500
     contracts:
@@ -228,8 +225,6 @@ networks:
           - "0xb0a0264ce6847f101b76ba36a4a3083ba489f501"
       # ... rest of Monad contracts
 
-unordered_multichain_mode: true
-preload_handlers: true
 field_selection:
   transaction_fields:
     - hash
@@ -363,9 +358,9 @@ Update test fixtures and assertions to include chain ID in entity IDs. All exist
 Both configs are structurally identical. Key differences are only:
 
 - `name` field (`celo-mainnet` vs `monad-mainnet`)
-- `networks[0].id` (`42220` vs `143`)
-- `networks[0].start_block`
+- `chains[0].id` (`42220` vs `143`)
+- `chains[0].start_block`
 - Contract addresses (different deployments, same contracts)
 - Monad contracts are live — real addresses in `config.monad.mainnet.yaml` (FPMMFactory, 3 FPMM pools, VirtualPool). VirtualPoolFactory TBD.
 
-Everything else — events, ABIs, handler paths, field selection, `unordered_multichain_mode` — is identical. This confirms the merge is a straightforward config concatenation.
+Everything else — events, ABIs, handler paths, and field selection — is identical. This confirms the merge is a straightforward config concatenation.

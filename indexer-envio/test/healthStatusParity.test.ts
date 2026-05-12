@@ -1,7 +1,6 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import { computeHealthStatus } from "../src/pool";
-import { makePool } from "./helpers/makePool";
+import assert from "node:assert/strict";
+import { computeHealthStatus } from "../src/pool.js";
+import { makePool } from "./helpers/makePool.js";
 
 // ---------------------------------------------------------------------------
 // Cross-package parity for the DEVIATION + TOLERANCE + GRACE branches of

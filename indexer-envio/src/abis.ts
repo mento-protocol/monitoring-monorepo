@@ -2,8 +2,8 @@
 // ABI definitions and contract wrappers
 // ---------------------------------------------------------------------------
 
-import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
-import { requireContractAddress } from "./contractAddresses";
+import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json" with { type: "json" };
+import { requireContractAddress } from "./contractAddresses.js";
 
 export const SortedOraclesContract = {
   /** Returns the SortedOracles address for the given chainId, throwing if missing. */

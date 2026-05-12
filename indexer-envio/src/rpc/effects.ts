@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Envio Effect API wrappers for the 16 RPC fetchers used by handlers.
 //
-// Why effects: with `preload_handlers: true` (config.multichain.mainnet.yaml),
-// Envio runs each handler twice per event (preload + processing). Without the
+// Why effects: with v3 preload optimization enabled by default, Envio runs
+// each handler twice per event (preload + processing). Without the
 // Effect API, every `client.readContract` call inside the fetchers fires twice
 // and is never deduped or batched across concurrent handlers. Wrapping these
 // fetchers in `createEffect` gives us:
@@ -29,37 +29,35 @@ import {
   fetchReserves,
   fetchTokenDecimalsScaling,
   fetchTradingLimits,
-} from "./pool-state";
+} from "./pool-state.js";
 import {
   fetchNumReporters,
   fetchReferenceRateFeedID,
   fetchReportExpiry,
-} from "./oracle-state";
-import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees";
+} from "./oracle-state.js";
+import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees.js";
 import {
   fetchPoolExchange,
   fetchVirtualPoolExchangeId,
   VP_PROBE_RPC_ERROR,
-} from "./biPoolManager";
+} from "./biPoolManager.js";
 import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
   fetchBreakerKind,
   fetchBreakerList,
   type BreakerKindRpc,
-} from "./breakers";
-import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken";
+} from "./breakers.js";
+import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
 // re-exports from envio omit `S.literal`, so string-union types like
 // `BreakerKindRpc` ride as `S.string` and get cast at the call site.
 //
-// `S.nullable(T)` accepts null on input but produces `T | undefined` on
-// output (Sury's design). Effect handlers that wrap fetchers returning
-// `T | null` therefore coalesce `null ?? undefined` before returning. Call
-// sites awaiting `context.effect(...)` see `T | undefined`; legacy callers
-// of `fetch*` continue to see `T | null` until they migrate in commits 2-3.
+// `S.nullable(T)` accepts null on input and produces `T | null` on output.
+// Effect handlers that wrap fetchers returning `T | null` return null on
+// misses; callers skip writes and retry on the next event.
 // ---------------------------------------------------------------------------
 
 const reservesShape = S.schema({
@@ -149,7 +147,7 @@ const feeTokenMetaShape = S.schema({
 // every subsequent self-heal call would receive the cached miss instead
 // of retrying the RPC after the network recovered. The pattern is:
 // fetcher returns null on failure → handler sets cache=false → returns
-// undefined → caller skips the entity write → next event re-fetches.
+// null → caller skips the entity write → next event re-fetches.
 // ---------------------------------------------------------------------------
 
 export const erc20DecimalsEffect = createEffect(
@@ -168,7 +166,7 @@ export const erc20DecimalsEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -190,15 +188,15 @@ export const referenceRateFeedIDEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
 );
 
-// Output is nullable: with `preload_handlers: true` an effect that fabricated
+// Output is nullable: with v3 preload optimization, an effect that fabricated
 // `false` on a transient RPC blip during preload would memoize and persist
-// the wrong orientation — call sites must skip the assignment on undefined
+// the wrong orientation — call sites must skip the assignment on null
 // and let the schema default ride until the next event re-fetches.
 export const invertRateFeedEffect = createEffect(
   {
@@ -216,7 +214,7 @@ export const invertRateFeedEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -251,7 +249,7 @@ export const rebalanceThresholdsEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const tokenDecimalsScalingEffect = createEffect(
@@ -292,15 +290,15 @@ export const tokenDecimalsScalingEffect = createEffect(
     // wrong (default 18) decimals.
     if (!input.fallbackTokenAddress) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     const decimals = await context.effect(erc20DecimalsEffect, {
       chainId: input.chainId,
       tokenAddress: input.fallbackTokenAddress,
     });
-    if (decimals === undefined) {
+    if (decimals === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return 10n ** BigInt(decimals);
   },
@@ -346,7 +344,7 @@ export const feesEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     if (
       result.lpFee === undefined ||
@@ -401,6 +399,7 @@ export function compactFees(
         protocolFee: number | undefined;
         rebalanceReward: number | undefined;
       }
+    | null
     | undefined,
 ): Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }> {
   if (!f) return {};
@@ -440,7 +439,7 @@ export const reservesEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const rebalancingStateEffect = createEffect(
@@ -461,7 +460,7 @@ export const rebalancingStateEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const rebalanceIncentiveAtBlockEffect = createEffect(
@@ -482,7 +481,7 @@ export const rebalanceIncentiveAtBlockEffect = createEffect(
       input.poolAddress,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -508,7 +507,7 @@ export const numReportersEffect = createEffect(
       input.rateFeedID,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const reportExpiryEffect = createEffect(
@@ -529,7 +528,7 @@ export const reportExpiryEffect = createEffect(
       input.rateFeedID,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -564,7 +563,7 @@ export const tradingLimitsEffect = createEffect(
       input.token,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 // ---------------------------------------------------------------------------
@@ -591,7 +590,7 @@ export const breakerListEffect = createEffect(
   },
   async ({ input, context }) =>
     (await fetchBreakerList(input.chainId, input.blockNumber, context.log)) ??
-    undefined,
+    null,
 );
 
 export const breakerKindEffect = createEffect(
@@ -615,7 +614,7 @@ export const breakerKindEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return undefined;
+      return null;
     }
     return result;
   },
@@ -641,7 +640,7 @@ export const breakerDefaultsEffect = createEffect(
       input.kind as BreakerKindRpc,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const breakerFeedStateEffect = createEffect(
@@ -667,14 +666,14 @@ export const breakerFeedStateEffect = createEffect(
       input.blockNumber,
       context.log,
     );
-    if (result === null) return undefined;
-    // The schema's nullable inner fields output `T | undefined`, but the
-    // fetcher returns `T | null` for kind-specific fields. Map at the boundary.
+    if (result === null) return null;
+    // The schema's nullable inner fields output `T | null`; the fetcher
+    // returns `T | null` for kind-specific fields. Map at the boundary.
     return {
       ...result,
-      smoothingFactor: result.smoothingFactor ?? undefined,
-      medianRatesEMA: result.medianRatesEMA ?? undefined,
-      referenceValue: result.referenceValue ?? undefined,
+      smoothingFactor: result.smoothingFactor ?? null,
+      medianRatesEMA: result.medianRatesEMA ?? null,
+      referenceValue: result.referenceValue ?? null,
     };
   },
 );
@@ -713,7 +712,7 @@ export const poolExchangeEffect = createEffect(
       input.exchangeId,
       input.blockNumber,
       context.log,
-    )) ?? undefined,
+    )) ?? null,
 );
 
 export const vpExchangeIdEffect = createEffect(
@@ -728,7 +727,7 @@ export const vpExchangeIdEffect = createEffect(
   //   1. `VirtualPoolExchangeId` — bytecode matched the VP pattern → cache
   //      forever (bytecode is immutable per address).
   //   2. `null` — got bytecode (or `0x`) but pattern didn't match → permanent
-  //      not-VP classification, cache forever as `undefined`. After PR #369
+  //      not-VP classification, cache forever as `null`. After PR #369
   //      dropped the source-string gate in `selfHealWrappedExchangeId`, FPMM
   //      addresses also reach this effect; caching their not-VP miss is what
   //      keeps the FPMM hot path from paying an `eth_getCode` per event.
@@ -743,8 +742,8 @@ export const vpExchangeIdEffect = createEffect(
     );
     if (result === VP_PROBE_RPC_ERROR) {
       context.cache = false;
-      return undefined;
+      return null;
     }
-    return result ?? undefined;
+    return result ?? null;
   },
 );

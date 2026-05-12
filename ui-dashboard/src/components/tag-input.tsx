@@ -115,7 +115,6 @@ export function TagInput({
         <input
           ref={inputRef}
           type="text"
-          role="combobox"
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
@@ -129,12 +128,15 @@ export function TagInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder={tags.length === 0 ? "Add tags…" : ""}
-          aria-label={ariaLabelledBy ? undefined : "Add tag"}
-          aria-labelledby={ariaLabelledBy}
+          // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Keep combobox ownership on the focused input for aria-activedescendant.
+          role="combobox"
           aria-expanded={showDropdown && filtered.length > 0}
           aria-controls={
             showDropdown && filtered.length > 0 ? listboxId : undefined
           }
+          aria-haspopup="listbox"
+          aria-label={ariaLabelledBy ? undefined : "Add tag"}
+          aria-labelledby={ariaLabelledBy}
           aria-activedescendant={activeOptionId}
           aria-autocomplete="list"
           className="flex-1 min-w-[80px] bg-transparent text-sm text-white placeholder-slate-500 outline-none py-0.5"

@@ -15,14 +15,14 @@
 // counted toward `cumulativeBreachSeconds` only.
 // ---------------------------------------------------------------------------
 
-import type { Pool, DeviationThresholdBreach } from "generated";
+import type { Pool, DeviationThresholdBreach } from "envio";
 import {
   breachEntryThreshold,
   DEVIATION_BREACH_GRACE_SECONDS,
   effectiveThreshold,
   isAboveCriticalMagnitude,
-} from "./pool";
-import { tradingSecondsInRange } from "./healthScore";
+} from "./pool.js";
+import { tradingSecondsInRange } from "./healthScore.js";
 
 export type BreachContext = {
   DeviationThresholdBreach: {

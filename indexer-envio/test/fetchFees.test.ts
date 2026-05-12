@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
 import { fetchFees } from "../src/rpc.ts";
 import { _setMockFees, _clearMockFees } from "../src/EventHandlers.ts";
@@ -18,7 +17,11 @@ describe("fetchFees (direct RPC-layer contract)", () => {
       rebalanceReward: { fulfilled: 25n },
     });
     const fees = await fetchFees(CHAIN, POOL);
-    assert.deepEqual(fees, { lpFee: 15, protocolFee: 5, rebalanceReward: 25 });
+    assert.deepStrictEqual(fees, {
+      lpFee: 15,
+      protocolFee: 5,
+      rebalanceReward: 25,
+    });
   });
 
   it("partial fulfill: returns only fulfilled fields; transient rejection leaves the field absent", async () => {
@@ -31,7 +34,7 @@ describe("fetchFees (direct RPC-layer contract)", () => {
     // rebalanceReward must be absent so the caller's spread leaves the
     // existing DB value (or the -1 sentinel) untouched; self-heal will
     // retry next touch.
-    assert.deepEqual(fees, { lpFee: 15, protocolFee: 5 });
+    assert.deepStrictEqual(fees, { lpFee: 15, protocolFee: 5 });
   });
 
   it("stamps -2 on 'returned no data' rejection so self-heal stops retrying", async () => {
@@ -44,7 +47,7 @@ describe("fetchFees (direct RPC-layer contract)", () => {
     // The -2 sentinel tells pool.ts self-heal the getter is permanently
     // missing from the bytecode (older FPMM deployment) — retrying would
     // hammer RPC forever for a pool that will never return data.
-    assert.deepEqual(fees, {
+    assert.deepStrictEqual(fees, {
       lpFee: 15,
       protocolFee: 5,
       rebalanceReward: -2,

@@ -22,8 +22,12 @@ description: |
   invariant in src/startupChecks.ts no-ops here — it only fires when the
   ENVIO_START_BLOCK_CELO / _MONAD env vars are set.
 
-  Note: codegen writes to ./generated/, overwriting mainnet codegen. Switch
-  back with pnpm indexer:multichain:codegen.
+  Note: codegen writes to ./.envio, overwriting the active generated type
+  package. Switch back with pnpm indexer:codegen.
+
+# Disable v3's src/handlers auto-loading. The bridge-only entry point below
+# imports only the Wormhole handlers.
+handlers: null
 
 contracts:
   - name: WormholeNttManager
@@ -44,9 +48,9 @@ contracts:
     events:
       - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
 
-networks:
+chains:
   # Celo Mainnet — start at the NttDeployHelper USDm/GBPm/EURm CREATE3 block
-  # so we skip ~4M blocks of unrelated pool/oracle history.
+  # so we skip millions of blocks of unrelated pool/oracle history.
   - id: 42220
     start_block: 64257176
     contracts:
@@ -84,8 +88,6 @@ networks:
           - 0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093 # CHFm
           - 0x01c9d280150f932d4a2fe11f40b0d72bffbcd339 # JPYm
 
-unordered_multichain_mode: true
-preload_handlers: true
 field_selection:
   transaction_fields:
     - hash

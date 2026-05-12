@@ -1,5 +1,5 @@
-import type { Pool } from "generated";
-import { DEFAULT_ORACLE_FIELDS } from "../../src/pool";
+import type { Pool } from "envio";
+import { DEFAULT_ORACLE_FIELDS } from "../../src/pool.js";
 
 /**
  * Shared Pool fixture builder for indexer tests. Previously duplicated

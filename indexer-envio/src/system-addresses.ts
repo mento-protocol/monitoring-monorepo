@@ -1,9 +1,9 @@
-import _contractsJson from "@mento-protocol/contracts/contracts.json";
-import nttAddressesRaw from "../config/nttAddresses.json";
+import _contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
+import nttAddressesRaw from "../config/nttAddresses.json" with { type: "json" };
 import {
   CONTRACT_NAMESPACE_BY_CHAIN,
   type ContractsJson,
-} from "./contractAddresses";
+} from "./contractAddresses.js";
 
 interface NttEntry {
   chainId: number;

@@ -23,13 +23,13 @@
 // same token collapse into one slot, so they count once.
 // ---------------------------------------------------------------------------
 
-import type { Pool, PoolDailyFeeSnapshot } from "generated";
+import type { Pool, PoolDailyFeeSnapshot } from "envio";
 import {
   dayBucket,
   dailySnapshotId,
   extractAddressFromPoolId,
-} from "./helpers";
-import { computeFeeUsdWei, USD_PEGGED_SYMBOLS } from "./usd";
+} from "./helpers.js";
+import { computeFeeUsdWei, USD_PEGGED_SYMBOLS } from "./usd.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,7 +69,7 @@ function recomputeAllPegged(symbols: ReadonlyArray<string>): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Pure merge function — fully testable without mockDb
+// Pure merge function — fully testable without an Envio test indexer
 // ---------------------------------------------------------------------------
 
 /**

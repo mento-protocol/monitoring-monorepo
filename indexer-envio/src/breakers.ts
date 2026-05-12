@@ -8,16 +8,16 @@
 // hydrate from RPC via `fetchBreakerDefaults` / `fetchBreakerFeedState`.
 // ---------------------------------------------------------------------------
 
-import type { Breaker, BreakerConfig } from "generated";
-import type { HandlerContext } from "generated/src/Types";
-import { asAddress } from "./helpers";
-import { type BreakerKindRpc } from "./rpc";
+import type { Breaker, BreakerConfig } from "envio";
+import type { EvmOnEventContext } from "envio";
+import { asAddress } from "./helpers.js";
+import { type BreakerKindRpc } from "./rpc.js";
 import {
   breakerDefaultsEffect,
   breakerFeedStateEffect,
   breakerKindEffect,
   breakerListEffect,
-} from "./rpc/effects";
+} from "./rpc/effects.js";
 
 /** ID for the per-breaker `Breaker` entity. */
 export function makeBreakerId(chainId: number, breakerAddress: string): string {
@@ -69,7 +69,7 @@ export async function maybePreloadBreaker(
 /** Read or RPC-bootstrap the `Breaker` entity for `(chainId, breakerAddress)`.
  * Caller passes the event block number (used as the bootstrap block). */
 export async function ensureBreaker(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   breakerAddress: string,
   blockNumber: bigint,
@@ -79,7 +79,7 @@ export async function ensureBreaker(
   const existing = await context.Breaker.get(id);
   if (existing) return existing;
 
-  // breakerKindEffect returns undefined on transient RPC failure so we
+  // breakerKindEffect returns null on transient RPC failure so we
   // don't poison the kind (e.g. persisting MARKET_HOURS for a real
   // MedianDelta breaker just because a single probe call timed out).
   // Bail and let the next event retry.
@@ -118,7 +118,7 @@ export async function ensureBreaker(
  * `(chainId, breakerAddress, rateFeedID)`. Always refreshes `cooldownEndsAt`
  * from the loaded state. Returns null if RPC bootstrap fails. */
 export async function ensureBreakerConfig(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   breaker: Breaker,
   rateFeedID: string,
@@ -206,7 +206,7 @@ export function _clearBootstrapCaches(): void {
 }
 
 export async function bootstrapFeedBreakerConfigs(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
@@ -329,7 +329,7 @@ export function effectiveThreshold(
  * cooldownTime` formula uses the EFFECTIVE cooldown (per-feed override else
  * breaker default), so any of those three values changing requires a rerun. */
 export async function refreshCooldownEndsAt(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   cfg: BreakerConfig,
 ): Promise<BreakerConfig> {
   const breaker = await context.Breaker.get(cfg.breaker_id);
@@ -346,12 +346,12 @@ export async function refreshCooldownEndsAt(
  * inherits it (perFeedCooldown == 0) needs `cooldownEndsAt` recomputed.
  * Bounded fan-out: handful of feeds per breaker. */
 export async function refreshAllInheritingCooldowns(
-  context: HandlerContext,
+  context: EvmOnEventContext,
   breaker: Breaker,
 ): Promise<void> {
-  const configs = await context.BreakerConfig.getWhere.breakerAddress.eq(
-    breaker.address,
-  );
+  const configs = await context.BreakerConfig.getWhere({
+    breakerAddress: { _eq: breaker.address },
+  });
   for (const cfg of configs) {
     if (cfg.chainId !== breaker.chainId) continue;
     if (cfg.cooldownTime > 0n) continue; // per-feed override, not affected by default change
@@ -417,7 +417,7 @@ export async function handleDefaultCooldownTimeUpdated({
   context,
 }: {
   event: DefaultCooldownEvent;
-  context: HandlerContext;
+  context: EvmOnEventContext;
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const breakerId = makeBreakerId(event.chainId, breakerAddress);
@@ -444,7 +444,7 @@ export async function handleDefaultRateChangeThresholdUpdated({
   context,
 }: {
   event: DefaultThresholdEvent;
-  context: HandlerContext;
+  context: EvmOnEventContext;
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const breakerId = makeBreakerId(event.chainId, breakerAddress);
@@ -469,7 +469,7 @@ export async function handleRateFeedCooldownTimeUpdated({
   context,
 }: {
   event: RateFeedCooldownEvent;
-  context: HandlerContext;
+  context: EvmOnEventContext;
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const rateFeedID = asAddress(event.params.rateFeedID);
@@ -513,7 +513,7 @@ export async function handleRateChangeThresholdUpdated({
   context,
 }: {
   event: RateFeedThresholdEvent;
-  context: HandlerContext;
+  context: EvmOnEventContext;
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const rateFeedID = asAddress(event.params.rateFeedID);

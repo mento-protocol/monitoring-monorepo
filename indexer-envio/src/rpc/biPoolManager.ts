@@ -7,10 +7,10 @@
 // optional persistent caching automatically. Test mocks live in this
 // module (re-exported via `rpc.ts`).
 
-import { BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI } from "../abis";
-import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
-import { readContractWithBlockFallback } from "./block-fallback";
-import { consoleLogger, type RpcLogger } from "./log";
+import { BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI } from "../abis.js";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
+import { readContractWithBlockFallback } from "./block-fallback.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 // ---------------------------------------------------------------------------
 // BiPoolManager — getPoolExchange backfill

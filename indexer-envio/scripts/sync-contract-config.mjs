@@ -167,16 +167,19 @@ const main = () => {
   const configYaml = `# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: celo
 description: Celo devnet v3 FPMM-focused HyperIndex indexer
-networks:
+
+# Disable v3's \`src/handlers/\` auto-loading — see config.multichain.mainnet.yaml
+# for the rationale (each contract below uses \`handler: src/EventHandlers.ts\`,
+# which side-effect imports the same files; auto-loading would double-register).
+handlers: null
+
+chains:
   - id: 42220
-    rpc_config:
+    rpc:
       url: \${ENVIO_RPC_URL:-${rpcUrl}}
     start_block: \${ENVIO_START_BLOCK:-0}
     contracts:
-${contractsYaml}
-unordered_multichain_mode: true
-preload_handlers: true
-`;
+${contractsYaml}`;
 
   writeFileSync(configOutputPath, configYaml);
 

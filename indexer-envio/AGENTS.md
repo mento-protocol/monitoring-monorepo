@@ -30,7 +30,7 @@ pnpm codegen   # Generate types from schema + config
 pnpm dev       # Start indexer in dev mode (Docker: Postgres + Hasura)
 pnpm start     # Start in production mode
 pnpm stop      # Stop Docker containers
-pnpm test      # Run tests (mocha + chai)
+pnpm test      # Run tests (vitest)
 ```
 
 ## How It Works

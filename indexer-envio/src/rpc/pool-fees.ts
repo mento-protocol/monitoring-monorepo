@@ -1,7 +1,7 @@
-import { FPMM_FEE_ABI } from "../abis";
-import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
-import { readContractWithBlockFallback } from "./block-fallback";
-import { consoleLogger, type RpcLogger } from "./log";
+import { FPMM_FEE_ABI } from "../abis.js";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
+import { readContractWithBlockFallback } from "./block-fallback.js";
+import { consoleLogger, type RpcLogger } from "./log.js";
 
 /** Per-getter mock behavior for fetchFees. */
 export type FeeGetterMock =

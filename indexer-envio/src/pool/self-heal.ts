@@ -1,17 +1,19 @@
-import type { EffectCaller } from "envio";
-import type { Pool } from "generated";
-import { ZERO_ADDRESS } from "../constants";
-import { lookupPricingModuleName } from "../contractAddresses";
-import { extractAddressFromPoolId, isVirtualPool } from "../helpers";
-import { parseDecimalsPair, scalingFactorToDecimals } from "../priceDifference";
+import type { EffectCaller, Pool } from "envio";
+import { ZERO_ADDRESS } from "../constants.js";
+import { lookupPricingModuleName } from "../contractAddresses.js";
+import { extractAddressFromPoolId, isVirtualPool } from "../helpers.js";
+import {
+  parseDecimalsPair,
+  scalingFactorToDecimals,
+} from "../priceDifference.js";
 import {
   invertRateFeedEffect,
   poolExchangeEffect,
   rebalanceThresholdsEffect,
   tokenDecimalsScalingEffect,
   vpExchangeIdEffect,
-} from "../rpc/effects";
-import type { PoolContext } from "./types";
+} from "../rpc/effects.js";
+import type { PoolContext } from "./types.js";
 
 /** Self-heal `invertRateFeed` when it was never successfully read at pool
  * deployment (factory's RPC fan-out hit a transient blip → the field rode
@@ -41,7 +43,7 @@ export async function selfHealInvertRateFeed(
     chainId: pool.chainId,
     poolAddress: poolAddr,
   });
-  if (invert === undefined) return pool;
+  if (invert === null) return pool;
   return {
     ...pool,
     invertRateFeed: invert,
@@ -129,7 +131,7 @@ export async function selfHealRebalanceThresholds(
     poolAddress: poolAddr,
     blockNumber,
   });
-  if (thresholds === undefined) return pool;
+  if (thresholds === null) return pool;
   // Refresh the legacy `rebalanceThreshold` only when at least one side is
   // configured. Both-zero means "never rebalance" — leave the legacy field
   // at whatever the next state-sync event pins.

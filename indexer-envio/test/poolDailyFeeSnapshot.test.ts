@@ -1,6 +1,5 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "envio";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -248,9 +247,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 1: Same-day same-token merge
   // -------------------------------------------------------------------------
-  it("same-day same-token merge: accumulates amounts and feesUsdWei", async function () {
-    this.timeout(15_000);
-
+  it("same-day same-token merge: accumulates amounts and feesUsdWei", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -312,9 +309,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 2: Same-day different tokens
   // -------------------------------------------------------------------------
-  it("same-day different tokens: two entries in parallel arrays", async function () {
-    this.timeout(15_000);
-
+  it("same-day different tokens: two entries in parallel arrays", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -363,9 +358,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 3: Cross-day — two distinct rows
   // -------------------------------------------------------------------------
-  it("cross-day: creates two distinct PoolDailyFeeSnapshot rows", async function () {
-    this.timeout(15_000);
-
+  it("cross-day: creates two distinct PoolDailyFeeSnapshot rows", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -385,13 +378,13 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
 
     const day1Ts = dayBucket(BigInt(TS_DAY1_MORNING));
     const day2Ts = dayBucket(BigInt(TS_DAY2));
-    assert.notEqual(day1Ts, day2Ts, "different day buckets");
+    assert.notStrictEqual(day1Ts, day2Ts, "different day buckets");
 
     const snap1 = getSnapshot(mockDb, POOL_ADDRESS, day1Ts);
     const snap2 = getSnapshot(mockDb, POOL_ADDRESS, day2Ts);
     assert.ok(snap1, "day-1 snapshot exists");
     assert.ok(snap2, "day-2 snapshot exists");
-    assert.notEqual(snap1!.id, snap2!.id, "distinct row IDs");
+    assert.notStrictEqual(snap1!.id, snap2!.id, "distinct row IDs");
     assert.equal(snap1!.transferCount, 1);
     assert.equal(snap2!.transferCount, 1);
   });
@@ -400,8 +393,6 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // Test 4: Non-pegged token (EURm)
   // -------------------------------------------------------------------------
   it("non-pegged token: feesUsdWei === 0, allPegged === false", async function () {
-    this.timeout(15_000);
-
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(
       mockDb,
@@ -440,8 +431,6 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // Test 5: UNKNOWN symbol
   // -------------------------------------------------------------------------
   it("UNKNOWN symbol: unresolvedCount === 1, feesUsdWei === 0", async function () {
-    this.timeout(15_000);
-
     _setMockFeeTokenMeta(CELO_CHAIN, UNKNOWN_TOKEN, "FAIL");
     _addMockAllowedFeeToken(CELO_CHAIN, UNKNOWN_TOKEN);
 
@@ -474,9 +463,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 6: Cross-chain isolation
   // -------------------------------------------------------------------------
-  it("cross-chain: same pool address on Celo and Monad produces distinct snapshots", async function () {
-    this.timeout(15_000);
-
+  it("cross-chain: same pool address on Celo and Monad produces distinct snapshots", async () => {
     // Register mock meta for Monad chain too
     _setMockFeeTokenMeta(MONAD_CHAIN, USDC_ADDRESS, {
       symbol: "USDC",
@@ -531,7 +518,11 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
 
     assert.ok(celoSnap, "Celo snapshot exists");
     assert.ok(monadSnap, "Monad snapshot exists");
-    assert.notEqual(celoSnap!.id, monadSnap!.id, "distinct IDs by chainId");
+    assert.notStrictEqual(
+      celoSnap!.id,
+      monadSnap!.id,
+      "distinct IDs by chainId",
+    );
     assert.equal(celoSnap!.chainId, CELO_CHAIN);
     assert.equal(monadSnap!.chainId, MONAD_CHAIN);
     assert.equal(celoSnap!.amounts[0], AMOUNT_1E6, "Celo amount correct");
@@ -545,9 +536,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 7: Non-pool sender — no snapshot written
   // -------------------------------------------------------------------------
-  it("non-pool sender: no PoolDailyFeeSnapshot row created", async function () {
-    this.timeout(15_000);
-
+  it("non-pool sender: no PoolDailyFeeSnapshot row created", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -571,8 +560,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Replay idempotency: re-processing the same event must not double-count.
   // -------------------------------------------------------------------------
-  it("replay: re-processing the same event leaves snapshot unchanged", async function () {
-    this.timeout(15_000);
+  it("replay: re-processing the same event leaves snapshot unchanged", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -620,8 +608,7 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // below (heal mode reprices the prior accumulated amount and decrements
   // `unresolvedCount` regardless of the day boundary).
 
-  it("replay with newly-resolved symbol: heals snapshot without double-counting", async function () {
-    this.timeout(15_000);
+  it("replay with newly-resolved symbol: heals snapshot without double-counting", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
@@ -715,10 +702,10 @@ describe("mergeFeeSnapshot pure function", () => {
 
     assert.equal(result.id, BASE_ID);
     assert.equal(result.transferCount, 1);
-    assert.deepEqual(result.tokens, [USDC_ADDRESS]);
-    assert.deepEqual(result.tokenSymbols, ["USDC"]);
-    assert.deepEqual(result.tokenDecimals, [USDC_DECIMALS]);
-    assert.deepEqual(result.amounts, [AMOUNT_1E6]);
+    assert.deepStrictEqual(result.tokens, [USDC_ADDRESS]);
+    assert.deepStrictEqual(result.tokenSymbols, ["USDC"]);
+    assert.deepStrictEqual(result.tokenDecimals, [USDC_DECIMALS]);
+    assert.deepStrictEqual(result.amounts, [AMOUNT_1E6]);
     assert.equal(result.feesUsdWei, AMOUNT_1E6_USD_WEI);
     assert.equal(result.allPegged, true);
     assert.equal(result.unresolvedCount, 0);
@@ -1064,7 +1051,7 @@ describe("mergeFeeSnapshot pure function", () => {
       }),
       "heal",
     );
-    assert.deepEqual(result, original);
+    assert.deepStrictEqual(result, original);
   });
 
   it("self-heal preserves allPegged=false when other slots remain unresolved", () => {

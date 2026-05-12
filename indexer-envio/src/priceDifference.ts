@@ -45,20 +45,18 @@ export function scalingFactorToDecimals(scaling: bigint): number | null {
  * virtualPool factory, and `selfHealTokenDecimals`.
  */
 export function parseDecimalsPair(
-  dec0Raw: bigint | undefined,
-  dec1Raw: bigint | undefined,
+  dec0Raw: bigint | null | undefined,
+  dec1Raw: bigint | null | undefined,
 ): {
   token0Decimals: number;
   token1Decimals: number;
   tokenDecimalsKnown: boolean;
 } {
-  // `!== undefined` rather than truthy check: `0n` is falsy in JS, and while
+  // `!= null` rather than truthy check: `0n` is falsy in JS, and while
   // `scalingFactorToDecimals(0n)` already returns null on its own guard, the
   // explicit form makes the bigint-unaware reader's life easier.
-  const dec0Parsed =
-    dec0Raw !== undefined ? scalingFactorToDecimals(dec0Raw) : null;
-  const dec1Parsed =
-    dec1Raw !== undefined ? scalingFactorToDecimals(dec1Raw) : null;
+  const dec0Parsed = dec0Raw != null ? scalingFactorToDecimals(dec0Raw) : null;
+  const dec1Parsed = dec1Raw != null ? scalingFactorToDecimals(dec1Raw) : null;
   return {
     token0Decimals: dec0Parsed ?? 18,
     token1Decimals: dec1Parsed ?? 18,

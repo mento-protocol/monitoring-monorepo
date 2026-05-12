@@ -1,6 +1,11 @@
-import type { Pool, PoolSnapshot, PoolDailySnapshot } from "generated";
-import { dayBucket, dailySnapshotId, hourBucket, snapshotId } from "../helpers";
-import type { SnapshotContext } from "./types";
+import type { Pool, PoolSnapshot, PoolDailySnapshot } from "envio";
+import {
+  dayBucket,
+  dailySnapshotId,
+  hourBucket,
+  snapshotId,
+} from "../helpers.js";
+import type { SnapshotContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // PoolSnapshot upsert

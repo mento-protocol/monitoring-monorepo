@@ -34,7 +34,7 @@ export interface MedianLineageState {
  *     `prev*` BEFORE overwriting, and record the jump.
  *
  * Pure function so the handler stays a thin event glue layer and the
- * three-case lineage invariant can be tested without the mockDb stack.
+ * three-case lineage invariant can be tested as a pure function.
  */
 export function computeMedianLineageNext(
   existing: MedianLineageState,

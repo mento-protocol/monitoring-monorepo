@@ -1,10 +1,9 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
   normalizeTo18,
   scalingFactorToDecimals,
   TRADING_LIMITS_INTERNAL_DECIMALS,
-} from "../src/EventHandlers";
+} from "../src/EventHandlers.js";
 
 describe("normalizeTo18", () => {
   it("is a no-op for 18-decimal tokens", () => {
@@ -97,7 +96,7 @@ import {
   getContractAddress,
   requireContractAddress,
   CONTRACT_NAMESPACE_BY_CHAIN,
-} from "../src/contractAddresses";
+} from "../src/contractAddresses.js";
 
 describe("contractAddresses — deterministic namespace address resolution", () => {
   it("SortedOracles on Celo mainnet (42220) resolves to exact known address", () => {

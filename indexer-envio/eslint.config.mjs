@@ -41,6 +41,9 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "generated/**",
+      ".envio/**",
+      "envio-env.d.ts",
+      "vitest.config.ts",
       "test/Test.ts",
       "scripts/**",
     ],

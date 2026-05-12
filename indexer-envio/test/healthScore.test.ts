@@ -1,11 +1,10 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
+import assert from "node:assert/strict";
 import {
   computeHealthSnapshotFields,
   updateHealthAccumulators,
   recordHealthSample,
-} from "../src/healthScore";
-import { makePool } from "./helpers/makePool";
+} from "../src/healthScore.js";
+import { makePool } from "./helpers/makePool.js";
 
 // ---------------------------------------------------------------------------
 // computeHealthSnapshotFields
@@ -16,7 +15,7 @@ describe("computeHealthSnapshotFields", () => {
     const result = computeHealthSnapshotFields(0n, 5000);
     assert.equal(result.deviationRatio, "0.000000");
     assert.equal(result.healthBinaryValue, "1.000000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("returns healthy for d < 1.0", () => {
@@ -24,14 +23,14 @@ describe("computeHealthSnapshotFields", () => {
     const result = computeHealthSnapshotFields(2500n, 5000);
     assert.equal(result.deviationRatio, "0.500000");
     assert.equal(result.healthBinaryValue, "1.000000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("returns healthy at exact threshold (d = 1.0)", () => {
     const result = computeHealthSnapshotFields(5000n, 5000);
     assert.equal(result.deviationRatio, "1.000000");
     assert.equal(result.healthBinaryValue, "1.000000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("returns unhealthy for d well above tolerance (d = 1.2)", () => {
@@ -39,7 +38,7 @@ describe("computeHealthSnapshotFields", () => {
     const result = computeHealthSnapshotFields(6000n, 5000);
     assert.equal(result.deviationRatio, "1.200000");
     assert.equal(result.healthBinaryValue, "0.000000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("returns unhealthy for large deviation (d >> 1)", () => {
@@ -47,7 +46,7 @@ describe("computeHealthSnapshotFields", () => {
     const result = computeHealthSnapshotFields(100000n, 5000);
     assert.equal(result.deviationRatio, "20.000000");
     assert.equal(result.healthBinaryValue, "0.000000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("handles rebalanceThreshold = 0 (edge case)", () => {
@@ -56,12 +55,12 @@ describe("computeHealthSnapshotFields", () => {
     // hasHealthData=false is the canonical gate; check it before using values.
     assert.equal(result.deviationRatio, "-1");
     assert.equal(result.healthBinaryValue, "0.000000");
-    assert.isFalse(result.hasHealthData);
+    assert.equal(result.hasHealthData, false);
   });
 
   it("handles negative rebalanceThreshold gracefully", () => {
     const result = computeHealthSnapshotFields(5000n, -1);
-    assert.isFalse(result.hasHealthData);
+    assert.equal(result.hasHealthData, false);
   });
 
   it("tiny over-threshold (d = 1.0002) stays healthy under the 1% tolerance dead zone", () => {
@@ -93,7 +92,7 @@ describe("updateHealthAccumulators", () => {
     assert.equal(result.healthBinarySeconds, 0n);
     assert.equal(result.lastOracleSnapshotTimestamp, 1000n);
     assert.equal(result.lastDeviationRatio, "0.500000");
-    assert.isTrue(result.hasHealthData);
+    assert.equal(result.hasHealthData, true);
   });
 
   it("second snapshot: healthy interval accumulated", () => {
@@ -246,7 +245,7 @@ describe("recordHealthSample", () => {
     );
 
     // Snapshot should be flagged as no-data
-    assert.isFalse(snapshotFields.hasHealthData);
+    assert.equal(snapshotFields.hasHealthData, false);
     // Pool accumulators should NOT be modified (except timestamp advances)
     assert.equal(poolUpdate.healthTotalSeconds, 100n);
     assert.equal(poolUpdate.healthBinarySeconds, 100n);
@@ -254,7 +253,7 @@ describe("recordHealthSample", () => {
     assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1200n);
     // lastDeviationRatio set to sentinel so next valid sample skips gap
     assert.equal(poolUpdate.lastDeviationRatio, "-1");
-    assert.isTrue(poolUpdate.hasHealthData); // preserves existing state
+    assert.equal(poolUpdate.hasHealthData, true); // preserves existing state
   });
 
   it("valid -> no-data -> valid: excludes no-data gap from both numerator and denominator", () => {
@@ -320,7 +319,7 @@ describe("recordHealthSample", () => {
     // Snapshot fields
     assert.equal(snapshotFields.deviationRatio, "0.500000");
     assert.equal(snapshotFields.healthBinaryValue, "1.000000");
-    assert.isTrue(snapshotFields.hasHealthData);
+    assert.equal(snapshotFields.hasHealthData, true);
 
     // Pool update
     assert.equal(poolUpdate.healthTotalSeconds, 100n);

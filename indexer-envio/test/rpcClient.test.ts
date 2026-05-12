@@ -1,7 +1,6 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { getRpcClient, _clearRpcClients, _testHooks } from "../src/rpc";
-import { getFallbackRpcClient } from "../src/rpc/client";
+import { getRpcClient, _clearRpcClients, _testHooks } from "../src/rpc.js";
+import { getFallbackRpcClient } from "../src/rpc/client.js";
 
 // ---------------------------------------------------------------------------
 // Env helpers

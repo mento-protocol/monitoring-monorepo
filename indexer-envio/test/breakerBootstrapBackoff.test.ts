@@ -1,10 +1,9 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
+import assert from "node:assert/strict";
 import {
   _clearBootstrapCaches,
   bootstrapFeedBreakerConfigs,
-} from "../src/breakers";
-import { breakerListEffect } from "../src/rpc/effects";
+} from "../src/breakers.js";
+import { breakerListEffect } from "../src/rpc/effects.js";
 
 // Tests the negative-cache state machine added in PR #331:
 //   1. Failure → set TTL, calls within TTL window skip the RPC.

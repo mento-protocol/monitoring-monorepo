@@ -36,10 +36,10 @@
 ### Phase 1: BiPoolManager ABI + Config (est. 30 min)
 
 1. **Get BiPoolManager ABI** from celoscan or mento-core
-2. **Create `config.celo.mainnet.yaml`:**
+2. **Create `config.celo.mainnet.yaml` using Envio v3 `chains`:**
    ```yaml
    name: celo-mainnet
-   networks:
+   chains:
      - id: 42220
        start_block: <find BiPoolManager deployment block>
        contracts:
