@@ -17,7 +17,7 @@ import {
   registerMockRebalancingStateHttp,
   registerMockReservesHttp,
   registerMockTokenDecimalsScalingHttp,
-} from "./pool-state-test-mocks.js";
+} from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.

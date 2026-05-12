@@ -6,10 +6,10 @@ import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 import {
-  clearHttpRpcMockGroup,
-  setHttpRpcErrorMock,
-  setHttpRpcMock,
-} from "./http-test-mocks.js";
+  clearTestRpcMockGroup,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+} from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)
@@ -25,14 +25,14 @@ export function _setMockRateFeedID(
 ): void {
   _testRateFeedIDs.set(`${chainId}:${poolAddress.toLowerCase()}`, rateFeedID);
   if (rateFeedID === null) {
-    setHttpRpcErrorMock({
+    setTestRpcErrorMock({
       group: "rateFeedID",
       chainId,
       address: poolAddress,
       functionName: "referenceRateFeedID",
     });
   } else {
-    setHttpRpcMock({
+    setTestRpcMock({
       group: "rateFeedID",
       chainId,
       address: poolAddress,
@@ -44,7 +44,7 @@ export function _setMockRateFeedID(
 
 export function _clearMockRateFeedIDs(): void {
   _testRateFeedIDs.clear();
-  clearHttpRpcMockGroup("rateFeedID");
+  clearTestRpcMockGroup("rateFeedID");
 }
 
 const _testReportExpiry = new Map<string, bigint | null>();
@@ -63,7 +63,7 @@ export function _setMockReportExpiry(
     return;
   }
   if (expiry === null) {
-    setHttpRpcErrorMock({
+    setTestRpcErrorMock({
       group: "reportExpiry",
       chainId,
       address: sortedOraclesAddress,
@@ -71,7 +71,7 @@ export function _setMockReportExpiry(
       callArgs: [rateFeedID],
     });
   } else {
-    setHttpRpcMock({
+    setTestRpcMock({
       group: "reportExpiry",
       chainId,
       address: sortedOraclesAddress,
@@ -84,7 +84,7 @@ export function _setMockReportExpiry(
 
 export function _clearMockReportExpiry(): void {
   _testReportExpiry.clear();
-  clearHttpRpcMockGroup("reportExpiry");
+  clearTestRpcMockGroup("reportExpiry");
 }
 
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */

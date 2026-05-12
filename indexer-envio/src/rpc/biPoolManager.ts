@@ -12,12 +12,12 @@ import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 import {
-  clearHttpRpcMockGroup,
-  setHttpGetCodeErrorMock,
-  setHttpGetCodeMock,
-  setHttpRpcErrorMock,
-  setHttpRpcMock,
-} from "./http-test-mocks.js";
+  clearTestRpcMockGroup,
+  setTestGetCodeErrorMock,
+  setTestGetCodeMock,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+} from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
 // BiPoolManager — getPoolExchange backfill
@@ -62,7 +62,7 @@ export function _setMockPoolExchange(
   const key = `${chainId}:${exchangeProvider.toLowerCase()}:${exchangeId.toLowerCase()}`;
   _testPoolExchanges.set(key, struct);
   if (struct === null) {
-    setHttpRpcErrorMock({
+    setTestRpcErrorMock({
       group: "poolExchange",
       chainId,
       address: exchangeProvider,
@@ -70,7 +70,7 @@ export function _setMockPoolExchange(
       callArgs: [exchangeId],
     });
   } else {
-    setHttpRpcMock({
+    setTestRpcMock({
       group: "poolExchange",
       chainId,
       address: exchangeProvider,
@@ -98,7 +98,7 @@ export function _setMockPoolExchange(
 /** @internal Test-only: clear all PoolExchange mocks. */
 export function _clearMockPoolExchanges(): void {
   _testPoolExchanges.clear();
-  clearHttpRpcMockGroup("poolExchange");
+  clearTestRpcMockGroup("poolExchange");
 }
 
 export async function fetchPoolExchange(
@@ -219,13 +219,13 @@ export function _setMockVpExchangeId(
   const key = `${chainId}:${vpAddress.toLowerCase()}`;
   _testVpExchangeIds.set(key, result);
   if (result === VP_PROBE_RPC_ERROR) {
-    setHttpGetCodeErrorMock({
+    setTestGetCodeErrorMock({
       group: "vpExchangeId",
       chainId,
       address: vpAddress,
     });
   } else if (result === null) {
-    setHttpGetCodeMock({
+    setTestGetCodeMock({
       group: "vpExchangeId",
       chainId,
       address: vpAddress,
@@ -234,7 +234,7 @@ export function _setMockVpExchangeId(
   } else {
     const provider = result.exchangeProvider.toLowerCase().replace(/^0x/, "");
     const exchangeId = result.exchangeId.toLowerCase().replace(/^0x/, "");
-    setHttpGetCodeMock({
+    setTestGetCodeMock({
       group: "vpExchangeId",
       chainId,
       address: vpAddress,
@@ -246,7 +246,7 @@ export function _setMockVpExchangeId(
 /** @internal Test-only: clear all VirtualPool exchangeId mocks. */
 export function _clearMockVpExchangeIds(): void {
   _testVpExchangeIds.clear();
-  clearHttpRpcMockGroup("vpExchangeId");
+  clearTestRpcMockGroup("vpExchangeId");
 }
 
 // Compiler-emitted opcode sequence between the two PUSH32 constants:

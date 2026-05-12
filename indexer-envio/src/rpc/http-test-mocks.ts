@@ -11,6 +11,7 @@ import {
   type Abi,
 } from "viem";
 
+import { registerHttpTestRpcHandlers } from "./http-test-mock-bridge.js";
 import {
   BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
   BREAKER_BOX_ABI,
@@ -73,6 +74,7 @@ const codeMocks = new Map<string, MockCode>();
 
 let serverUrl: string | undefined;
 let rpcServer: Server | undefined;
+let serverReady: Promise<void> | undefined;
 
 function testRpcPort(): number {
   const explicit = Number(process.env.ENVIO_TEST_RPC_PORT);
@@ -227,7 +229,19 @@ export function ensureHttpTestRpc(): void {
         res.end(JSON.stringify({ error: String(err) }));
       });
     });
-    rpcServer.listen(port, "127.0.0.1");
+    serverReady = new Promise((resolve, reject) => {
+      const onError = (err: Error) => {
+        rpcServer?.off("listening", onListening);
+        reject(err);
+      };
+      const onListening = () => {
+        rpcServer?.off("error", onError);
+        resolve();
+      };
+      rpcServer?.once("error", onError);
+      rpcServer?.once("listening", onListening);
+      rpcServer?.listen(port, "127.0.0.1");
+    });
     serverUrl = `http://127.0.0.1:${port}`;
   }
   for (const chainId of TEST_CHAIN_IDS) {
@@ -235,6 +249,11 @@ export function ensureHttpTestRpc(): void {
     process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`] =
       `${serverUrl}/${chainId}`;
   }
+}
+
+export async function waitForHttpTestRpc(): Promise<void> {
+  ensureHttpTestRpc();
+  await serverReady;
 }
 
 export function setHttpRpcMock(args: {
@@ -248,25 +267,6 @@ export function setHttpRpcMock(args: {
   ensureHttpTestRpc();
   callMocks.set(
     callKey(args.chainId, args.address, args.functionName, args.callArgs),
-    {
-      group: args.group,
-      kind: "result",
-      functionName: args.functionName,
-      result: args.result,
-    },
-  );
-}
-
-export function setHttpRpcWildcardMock(args: {
-  group: string;
-  chainId: number;
-  address: string;
-  functionName: string;
-  result: unknown;
-}): void {
-  ensureHttpTestRpc();
-  callMocks.set(
-    wildcardCallKey(args.chainId, args.address, args.functionName),
     {
       group: args.group,
       kind: "result",
@@ -351,7 +351,11 @@ export function clearHttpRpcMockGroup(group: string): void {
   }
 }
 
-export function clearAllHttpRpcMocks(): void {
-  callMocks.clear();
-  codeMocks.clear();
-}
+registerHttpTestRpcHandlers({
+  setHttpRpcMock,
+  setHttpRpcErrorMock,
+  setHttpRpcRawMock,
+  setHttpGetCodeMock,
+  setHttpGetCodeErrorMock,
+  clearHttpRpcMockGroup,
+});

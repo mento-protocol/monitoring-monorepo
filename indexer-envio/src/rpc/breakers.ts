@@ -19,7 +19,7 @@ import {
   registerMockBreakerFeedStateHttp,
   registerMockBreakerKindHttp,
   registerMockBreakerListHttp,
-} from "./breaker-test-mocks.js";
+} from "./http-test-mock-bridge.js";
 
 export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 

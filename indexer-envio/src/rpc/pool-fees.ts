@@ -3,11 +3,11 @@ import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 import {
-  clearHttpRpcMockGroup,
-  setHttpRpcErrorMock,
-  setHttpRpcMock,
-  setHttpRpcRawMock,
-} from "./http-test-mocks.js";
+  clearTestRpcMockGroup,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+  setTestRpcRawMock,
+} from "./http-test-mock-bridge.js";
 
 /** Per-getter mock behavior for fetchFees. */
 export type FeeGetterMock =
@@ -39,7 +39,7 @@ export function _setMockFees(
   const key = `${chainId}:${poolAddress.toLowerCase()}`;
   if (mock === null) {
     _testFees.delete(key);
-    clearHttpRpcMockGroup(`fees:${chainId}:${poolAddress.toLowerCase()}`);
+    clearTestRpcMockGroup(`fees:${chainId}:${poolAddress.toLowerCase()}`);
   } else {
     _testFees.set(key, mock);
     const group = `fees:${chainId}:${poolAddress.toLowerCase()}`;
@@ -51,7 +51,7 @@ export function _setMockFees(
       const getterMock = mock[field];
       if (!getterMock) continue;
       if ("fulfilled" in getterMock) {
-        setHttpRpcMock({
+        setTestRpcMock({
           group,
           chainId,
           address: poolAddress,
@@ -59,7 +59,7 @@ export function _setMockFees(
           result: getterMock.fulfilled,
         });
       } else if (getterMock.rejected === "unsupported") {
-        setHttpRpcRawMock({
+        setTestRpcRawMock({
           group,
           chainId,
           address: poolAddress,
@@ -67,7 +67,7 @@ export function _setMockFees(
           result: "0x",
         });
       } else {
-        setHttpRpcErrorMock({
+        setTestRpcErrorMock({
           group,
           chainId,
           address: poolAddress,
@@ -81,7 +81,7 @@ export function _setMockFees(
 /** @internal Test-only: clear all fetchFees mocks. */
 export function _clearMockFees(): void {
   _testFees.clear();
-  clearHttpRpcMockGroup("fees");
+  clearTestRpcMockGroup("fees");
 }
 
 /** viem's `ContractFunctionZeroDataError` (message includes "returned no
@@ -141,14 +141,14 @@ export function _setMockRebalanceIncentiveAtBlock(
 ): void {
   _testIncentiveAtBlock.set(`${chainId}:${poolAddress.toLowerCase()}`, bps);
   if (bps === null) {
-    setHttpRpcErrorMock({
+    setTestRpcErrorMock({
       group: "rebalanceIncentiveAtBlock",
       chainId,
       address: poolAddress,
       functionName: "rebalanceIncentive",
     });
   } else {
-    setHttpRpcMock({
+    setTestRpcMock({
       group: "rebalanceIncentiveAtBlock",
       chainId,
       address: poolAddress,
@@ -161,7 +161,7 @@ export function _setMockRebalanceIncentiveAtBlock(
 /** @internal Test-only: clear all `fetchRebalanceIncentiveAtBlock` mocks. */
 export function _clearMockRebalanceIncentivesAtBlock(): void {
   _testIncentiveAtBlock.clear();
-  clearHttpRpcMockGroup("rebalanceIncentiveAtBlock");
+  clearTestRpcMockGroup("rebalanceIncentiveAtBlock");
 }
 
 /** Read `rebalanceIncentive()` (bps) at a specific block. Used by the

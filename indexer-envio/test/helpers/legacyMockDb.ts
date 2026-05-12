@@ -1,7 +1,7 @@
 import { createTestIndexer } from "envio";
 import type { TestIndexer } from "envio";
 
-import { ensureHttpTestRpc } from "../../src/rpc/http-test-mocks.js";
+import { waitForHttpTestRpc } from "../../src/rpc/http-test-mocks.js";
 
 type Entity = { id: string };
 
@@ -144,7 +144,7 @@ function makeEventProcessor(contractName: string, eventName: string) {
       event: LegacyEvent;
       mockDb: LegacyMockDb;
     }): Promise<LegacyMockDb> => {
-      ensureHttpTestRpc();
+      await waitForHttpTestRpc();
       const indexer = createTestIndexer();
       seedIndexer(indexer, mockDb);
       const block = Number(event.block.number);
