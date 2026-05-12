@@ -41,21 +41,15 @@ agent sessions.
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
 
-### Targeted Mutation Testing Baseline
+### Mutation Testing Follow-up Targets
 
-Why: normal coverage can tell us code executed while missing the invariant.
-Monitoring logic has subtle failure modes where mutation testing can expose
-weak assertions.
+The initial dashboard FX-weekend baseline shipped via `pnpm dashboard:mutation`;
+scope, runtime, score, and survivor classification live in
+`docs/mutation-testing.md`. Keep expansion targeted until the scheduled baseline
+stays stable.
 
-- [ ] Evaluate StrykerJS or equivalent against one narrow pure-logic target first, likely `ui-dashboard/src/lib/weekend.ts`.
-- [ ] Keep mutation testing non-blocking and out of required CI until runtime/noise is proven.
-- [ ] Configure the smallest useful scope; exclude generated files, tests, GraphQL barrels, ABIs, config-only files, and runtime-heavy RPC/dev-server paths.
-- [ ] Classify surviving mutants as real test gaps, equivalent mutants/noise, or tool limitations.
-- [ ] Add/improve tests only for real gaps, then record runtime and mutation score.
-- [ ] Consider expanding next to pool ID/helpers and `metrics-bridge` rebalance probe/check logic.
-
-Acceptance: finds at least one real assertion gap or gives high confidence on
-a critical module with acceptable manual/nightly runtime.
+- [ ] Evaluate `ui-dashboard` pool ID/helpers with the same narrow StrykerJS scope.
+- [ ] Evaluate `metrics-bridge` rebalance probe/check logic if it can stay pure and under roughly one minute.
 
 ## Virtual Pool Metrics
 

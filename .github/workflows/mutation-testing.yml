@@ -1,0 +1,26 @@
+name: Mutation Testing
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Non-required baseline signal. Keep this out of pull_request until the
+    # runtime/noise tradeoff is re-evaluated.
+    - cron: 17 5 * * 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-weekend-baseline:
+    name: Dashboard weekend baseline
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Run mutation baseline
+        run: pnpm dashboard:mutation

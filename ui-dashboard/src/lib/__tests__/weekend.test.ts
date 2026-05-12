@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isWeekend,
   FX_CLOSE_HOUR_UTC,
@@ -121,6 +121,28 @@ describe("isWeekendOracleStale", () => {
       ),
     ).toBe(false); // fresh at 360s threshold → NOT weekend-stale
   });
+
+  it("uses the current system time when no explicit now is passed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SAT_NOON);
+
+    try {
+      expect(
+        isWeekendOracleStale(
+          { oracleTimestamp: STALE_TS, oracleExpiry: "300" },
+          isOracleFresh,
+        ),
+      ).toBe(true);
+      expect(
+        isWeekendOracleStale(
+          { oracleTimestamp: FRESH_TS, oracleExpiry: "300" },
+          isOracleFresh,
+        ),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // tradingSecondsInRange / weekendOverlapSeconds
@@ -206,6 +228,12 @@ describe("tradingSecondsInRange", () => {
 });
 
 describe("weekendOverlapSeconds", () => {
+  it("returns 0 when end <= start even inside a weekend window", () => {
+    const start = sec(utc(6, 12));
+    expect(weekendOverlapSeconds(start, start)).toBe(0);
+    expect(weekendOverlapSeconds(start, start - 60)).toBe(0);
+  });
+
   it("returns 0 for a weekday-only range", () => {
     const start = sec(utc(1, 12));
     const end = sec(utc(2, 12));
@@ -225,6 +253,8 @@ describe("nextMarketHoursTransition", () => {
     const wed = utc(3, 12); // Wednesday noon
     const out = nextMarketHoursTransition(wed);
     expect(out.kind).toBe("CLOSE");
+    expect(out.at.toISOString()).toBe("2026-03-13T21:00:00.000Z");
+    expect(out.at.getTime()).toBeGreaterThan(wed.getTime());
     expect(out.at.getUTCDay()).toBe(5); // Friday
     expect(out.at.getUTCHours()).toBe(FX_CLOSE_HOUR_UTC);
   });
@@ -233,6 +263,8 @@ describe("nextMarketHoursTransition", () => {
     const sat = utc(6, 6); // Saturday 06:00
     const out = nextMarketHoursTransition(sat);
     expect(out.kind).toBe("OPEN");
+    expect(out.at.toISOString()).toBe("2026-03-15T23:00:00.000Z");
+    expect(out.at.getTime()).toBeGreaterThan(sat.getTime());
     expect(out.at.getUTCDay()).toBe(0); // Sunday
     expect(out.at.getUTCHours()).toBe(FX_REOPEN_HOUR_UTC);
   });
@@ -249,6 +281,8 @@ describe("nextMarketHoursTransition", () => {
     const sun = utc(0, FX_REOPEN_HOUR_UTC);
     const out = nextMarketHoursTransition(sun);
     expect(out.kind).toBe("CLOSE");
+    expect(out.at.toISOString()).toBe("2026-03-20T21:00:00.000Z");
+    expect(out.at.getTime()).toBeGreaterThan(sun.getTime());
     expect(out.at.getUTCDay()).toBe(5);
   });
 });

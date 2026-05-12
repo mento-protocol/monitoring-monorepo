@@ -476,6 +476,14 @@ run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 
+run_gate "ui-dashboard/src/lib/weekend.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
+run_gate "ui-dashboard/stryker.config.mjs"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 
