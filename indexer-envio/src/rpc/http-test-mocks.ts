@@ -12,6 +12,7 @@ import {
 } from "viem";
 
 import { registerHttpTestRpcHandlers } from "./http-test-mock-bridge.js";
+import { CONTRACT_NAMESPACE_BY_CHAIN } from "../contractAddresses.js";
 import {
   BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
   BREAKER_BOX_ABI,
@@ -24,7 +25,9 @@ import {
   VALUE_DELTA_BREAKER_ABI,
 } from "../abis.js";
 
-const TEST_CHAIN_IDS = [42220, 143, 11142220, 10143] as const;
+const TEST_CHAIN_IDS = Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
+  .map((chainId) => Number(chainId))
+  .filter((chainId) => Number.isFinite(chainId));
 
 const GET_BREAKERS_ABI = [
   {
@@ -111,14 +114,6 @@ function callKey(
   return `${chainId}:${address.toLowerCase()}:${functionName}:${argsKey(args)}`;
 }
 
-function wildcardCallKey(
-  chainId: number,
-  address: string,
-  functionName: string,
-): string {
-  return `${chainId}:${address.toLowerCase()}:${functionName}:*`;
-}
-
 function codeKey(chainId: number, address: string): string {
   return `${chainId}:${address.toLowerCase()}`;
 }
@@ -188,8 +183,7 @@ function handleRpcCall(chainId: number, request: JsonRpcRequest): object {
 
   const functionName = String(decoded.functionName);
   const exact = callKey(chainId, to, functionName, decoded.args);
-  const wildcard = wildcardCallKey(chainId, to, functionName);
-  const mock = callMocks.get(exact) ?? callMocks.get(wildcard);
+  const mock = callMocks.get(exact);
   if (!mock) {
     return jsonError(
       id,

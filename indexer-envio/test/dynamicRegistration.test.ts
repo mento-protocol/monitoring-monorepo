@@ -19,11 +19,22 @@
 import { strict as assert } from "assert";
 import { createTestIndexer } from "envio";
 import generated from "./helpers/legacyMockDb.js";
+import {
+  setHttpRpcErrorMock,
+  waitForHttpTestRpc,
+} from "../src/rpc/http-test-mocks.js";
 
 // Import EventHandlers to trigger handler registrations (side-effect import).
 // This causes fpmm.ts / virtualPool.ts to call their .contractRegister() and
 // .handler() setup — which is what the registration-effect tests below verify.
-import "../src/EventHandlers.ts";
+import {
+  _setMockFees,
+  _setMockRateFeedID,
+  _setMockRebalanceThresholds,
+  _setMockTokenDecimalsScaling,
+  _setMockVpExchangeId,
+} from "../src/EventHandlers.ts";
+import { VP_PROBE_RPC_ERROR } from "../src/rpc/biPoolManager.js";
 
 // The `generated` module ships as CommonJS with its own hand-rolled type
 // definitions in generated/index.d.ts. It does not export clean standalone
@@ -69,10 +80,12 @@ async function processDeployRegistration(
   event: "FPMMDeployed" | "VirtualPoolDeployed",
   params: Record<string, unknown>,
 ): Promise<AddressRegistration[]> {
+  seedDeployRpcMocks(contract, params);
+  await waitForHttpTestRpc();
   const indexer = createTestIndexer();
   const result = await indexer.process({
     chains: {
-      42220: {
+      [CHAIN_ID]: {
         startBlock: 1,
         endBlock: 1,
         simulate: [
@@ -96,6 +109,57 @@ async function processDeployRegistration(
   return result.changes.flatMap((change) => [
     ...((change.addresses?.sets ?? []) as AddressRegistration[]),
   ]);
+}
+
+function seedDeployRpcMocks(
+  contract: "FPMMFactory" | "VirtualPoolFactory",
+  params: Record<string, unknown>,
+): void {
+  const tokenDecimalsScaling = 10n ** 18n;
+  if (contract === "FPMMFactory") {
+    const pool = String(params.fpmmProxy);
+    _setMockRateFeedID(CHAIN_ID, pool, null);
+    _setMockRebalanceThresholds(CHAIN_ID, pool, { above: 100, below: 100 });
+    _setMockTokenDecimalsScaling(
+      CHAIN_ID,
+      pool,
+      "decimals0",
+      tokenDecimalsScaling,
+    );
+    _setMockTokenDecimalsScaling(
+      CHAIN_ID,
+      pool,
+      "decimals1",
+      tokenDecimalsScaling,
+    );
+    _setMockFees(CHAIN_ID, pool, {
+      lpFee: { fulfilled: 0n },
+      protocolFee: { fulfilled: 0n },
+      rebalanceReward: { fulfilled: 0n },
+    });
+    setHttpRpcErrorMock({
+      group: "dynamicRegistration",
+      chainId: CHAIN_ID,
+      address: pool,
+      functionName: "invertRateFeed",
+    });
+    return;
+  }
+
+  const pool = String(params.pool);
+  _setMockTokenDecimalsScaling(
+    CHAIN_ID,
+    pool,
+    "decimals0",
+    tokenDecimalsScaling,
+  );
+  _setMockTokenDecimalsScaling(
+    CHAIN_ID,
+    pool,
+    "decimals1",
+    tokenDecimalsScaling,
+  );
+  _setMockVpExchangeId(CHAIN_ID, pool, VP_PROBE_RPC_ERROR);
 }
 
 describe("Dynamic contract registration — registration effects", () => {
@@ -141,6 +205,7 @@ const POOL_ADDR = "0x1ad2ea06502919f935d9c09028df73a462979e29";
 const VPOOL_ADDR = "0xab945882018b81bdf62629e98ffdafd9495a0076";
 const TOKEN0 = "0x765de816845861e75a25fca122bb6898b8b1282a";
 const TOKEN1 = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
+const CHAIN_ID = 42220;
 
 describe("Dynamic contract registration — handler smoke tests", () => {
   it("FPMMDeployed.handler creates a Pool entity for the deployed pool", async () => {
