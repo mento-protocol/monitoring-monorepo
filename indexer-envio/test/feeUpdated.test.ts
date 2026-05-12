@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "./helpers/legacyMockDb.js";
 import {
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
@@ -103,7 +103,6 @@ describe("FPMM fee-config event handlers", () => {
   });
 
   it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -123,7 +122,6 @@ describe("FPMM fee-config event handlers", () => {
   });
 
   it("ProtocolFeeUpdated writes newFee to Pool.protocolFee without touching lpFee", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -146,7 +144,6 @@ describe("FPMM fee-config event handlers", () => {
   });
 
   it("RebalanceIncentiveUpdated writes newIncentive to Pool.rebalanceReward", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -169,7 +166,6 @@ describe("FPMM fee-config event handlers", () => {
   });
 
   it("returns silently when Pool does not exist (no-op on unknown pool)", async function () {
-    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     // Do NOT seed — pool is unknown.
 

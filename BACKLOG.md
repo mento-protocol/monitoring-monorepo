@@ -91,6 +91,5 @@ Completed on 2026-05-12 in PR #397:
 
 ## Envio v3 Migration Follow-Ups
 
-- [ ] **Migrate the quarantined MockDb integration tests to `createTestIndexer` + HTTP-level RPC mocks.** v3 removes the old MockDb/processEvent path. The current blocker is architectural: `createTestIndexer` runs handlers through Envio's worker context, so the existing `_setMockX` in-process Maps are invisible to handlers. Use `msw` node-mode RPC interception so mocks cross the worker boundary, then re-enable the quarantined handler/integration suites in `indexer-envio/vitest.config.ts`.
 - [ ] **Pin `envio` to stable `^3.0.0` once released.** The migration currently targets `3.0.0-rc.0`; after the stable release, bump the dependency, regenerate code, and rerun codegen/typecheck/tests to catch API drift.
 - [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.

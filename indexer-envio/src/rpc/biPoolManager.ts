@@ -11,6 +11,13 @@ import { BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI } from "../abis.js";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
+import {
+  clearHttpRpcMockGroup,
+  setHttpGetCodeErrorMock,
+  setHttpGetCodeMock,
+  setHttpRpcErrorMock,
+  setHttpRpcMock,
+} from "./http-test-mocks.js";
 
 // ---------------------------------------------------------------------------
 // BiPoolManager — getPoolExchange backfill
@@ -54,11 +61,44 @@ export function _setMockPoolExchange(
 ): void {
   const key = `${chainId}:${exchangeProvider.toLowerCase()}:${exchangeId.toLowerCase()}`;
   _testPoolExchanges.set(key, struct);
+  if (struct === null) {
+    setHttpRpcErrorMock({
+      group: "poolExchange",
+      chainId,
+      address: exchangeProvider,
+      functionName: "getPoolExchange",
+      callArgs: [exchangeId],
+    });
+  } else {
+    setHttpRpcMock({
+      group: "poolExchange",
+      chainId,
+      address: exchangeProvider,
+      functionName: "getPoolExchange",
+      callArgs: [exchangeId],
+      result: {
+        asset0: struct.asset0,
+        asset1: struct.asset1,
+        pricingModule: struct.pricingModule,
+        bucket0: struct.bucket0,
+        bucket1: struct.bucket1,
+        lastBucketUpdate: struct.lastBucketUpdate,
+        config: {
+          spread: { value: struct.spread },
+          referenceRateFeedID: struct.referenceRateFeedID,
+          referenceRateResetFrequency: struct.referenceRateResetFrequency,
+          minimumReports: struct.minimumReports,
+          stablePoolResetSize: struct.stablePoolResetSize,
+        },
+      },
+    });
+  }
 }
 
 /** @internal Test-only: clear all PoolExchange mocks. */
 export function _clearMockPoolExchanges(): void {
   _testPoolExchanges.clear();
+  clearHttpRpcMockGroup("poolExchange");
 }
 
 export async function fetchPoolExchange(
@@ -178,11 +218,35 @@ export function _setMockVpExchangeId(
 ): void {
   const key = `${chainId}:${vpAddress.toLowerCase()}`;
   _testVpExchangeIds.set(key, result);
+  if (result === VP_PROBE_RPC_ERROR) {
+    setHttpGetCodeErrorMock({
+      group: "vpExchangeId",
+      chainId,
+      address: vpAddress,
+    });
+  } else if (result === null) {
+    setHttpGetCodeMock({
+      group: "vpExchangeId",
+      chainId,
+      address: vpAddress,
+      result: "0x6000",
+    });
+  } else {
+    const provider = result.exchangeProvider.toLowerCase().replace(/^0x/, "");
+    const exchangeId = result.exchangeId.toLowerCase().replace(/^0x/, "");
+    setHttpGetCodeMock({
+      group: "vpExchangeId",
+      chainId,
+      address: vpAddress,
+      result: `0x7f${provider.padStart(64, "0")}811660048301527f${exchangeId.padStart(64, "0")}`,
+    });
+  }
 }
 
 /** @internal Test-only: clear all VirtualPool exchangeId mocks. */
 export function _clearMockVpExchangeIds(): void {
   _testVpExchangeIds.clear();
+  clearHttpRpcMockGroup("vpExchangeId");
 }
 
 // Compiler-emitted opcode sequence between the two PUSH32 constants:

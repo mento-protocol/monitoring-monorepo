@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "./helpers/legacyMockDb.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -176,7 +176,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -196,7 +195,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("skips transfers from non-pool senders", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     // Seed the FPMM pool so the handler has a real DB, but send from a
     // different address that is NOT a pool.
@@ -218,7 +216,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("skips transfers when no pool exists at all", async function () {
-    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     // No pools seeded — completely empty DB.
 
@@ -249,7 +246,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("stores UNKNOWN when RPC fails on first transfer", async function () {
-    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -271,7 +267,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("stores resolved symbol when RPC succeeds", async function () {
-    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -293,7 +288,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async function () {
-    this.timeout(15_000);
     // First transfer: fails
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import generated from "envio";
+import generated from "./helpers/legacyMockDb.js";
 import {
   _clearMockReserves,
   _clearMockERC20Decimals,

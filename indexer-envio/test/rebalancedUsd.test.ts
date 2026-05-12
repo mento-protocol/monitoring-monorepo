@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "./helpers/legacyMockDb.js";
 import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
@@ -121,6 +121,7 @@ async function seedRebalanceablePool(
     token1: options.token1 ?? CELO,
     token0Decimals: options.token0Decimals ?? 18,
     token1Decimals: options.token1Decimals ?? 18,
+    tokenDecimalsKnown: true,
     reserves0: options.reserves0,
     reserves1: options.reserves1,
     rebalanceReward: options.rebalanceReward,
@@ -142,7 +143,7 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     _setMockRebalanceThresholds(CHAIN_CELO, POOL, { above: 100, below: 100 });
   });
 
-  after(() => {
+  afterAll(() => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
@@ -150,7 +151,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("stamps amount deltas + USD fields from block-scoped incentive read", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     // Pool reserves AFTER the rebalance: pool received 1000 USDM, gave away 500 CELO.
     mockDb = await seedRebalanceablePool(mockDb, {
@@ -198,7 +198,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("short-circuits the incentive RPC when Pool.rebalanceReward = -2 sentinel", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: -2, // getter missing on this contract
@@ -234,7 +233,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("stamps rewardUsd = '' when block-scoped incentive RPC fails (preserves notional, no fallback)", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 50, // NOT -2 — handler will attempt the RPC
@@ -281,7 +279,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("zero deltas (RPC fallback for pre-reserves) → '' sentinel for both USD fields", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 25,

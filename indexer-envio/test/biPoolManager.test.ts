@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import generated from "./helpers/legacyMockDb.js";
 import {
   _setMockPoolExchange,
   _clearMockPoolExchanges,
@@ -285,7 +285,6 @@ describe("BiPoolManager handlers", () => {
 
   describe("ExchangeCreated", () => {
     it("populates BiPoolExchange from RPC backfill struct + resolves pricingModuleName", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -351,7 +350,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("falls through to event params + zero stubs when RPC backfill fails", async function () {
-      this.timeout(10_000);
       // Mock null = RPC failure simulation
       _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
 
@@ -398,7 +396,6 @@ describe("BiPoolManager handlers", () => {
 
   describe("ExchangeDestroyed", () => {
     it("sets isDeprecated=true on existing row", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -439,7 +436,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("seeds a deprecated row from event params when no existing row exists", async function () {
-      this.timeout(10_000);
       const mockDb = MockDb.createMockDb();
       const event = BiPoolManager.ExchangeDestroyed.createMockEvent({
         exchangeId: EXCHANGE_ID,
@@ -491,7 +487,6 @@ describe("BiPoolManager handlers", () => {
 
   describe("BucketsUpdated", () => {
     it("appends a BucketUpdate row + denormalizes onto BiPoolExchange", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -557,7 +552,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("marks self-healed v2-only exchanges as wrapper-checked", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -593,7 +587,6 @@ describe("BiPoolManager handlers", () => {
 
   describe("SpreadUpdated", () => {
     it("updates spread on the existing row", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -635,7 +628,6 @@ describe("BiPoolManager handlers", () => {
 
   describe("Pool ↔ BiPoolExchange wrappedByPoolId join", () => {
     it("BiPoolManager.ExchangeCreated back-references a pre-existing VP and copies feedID onto the Pool", async function () {
-      this.timeout(10_000);
       // Step 1: VP deploys first (rare but possible). Bytecode extractor mock
       // returns the exchangeId; struct backfill mock omitted because
       // BiPoolExchange doesn't exist yet — the VP handler should still
@@ -700,7 +692,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("repairs a checked exchange-first row that missed the VP back-reference once the Pool is otherwise fully healed", async function () {
-      this.timeout(10_000);
       _setMockPoolExchange(
         CHAIN_ID,
         BIPOOL_MANAGER_ADDRESS,
@@ -794,7 +785,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("self-heals wrappedExchangeId when first event is VirtualPool.Swap (fpmm_* source override)", async function () {
-      this.timeout(10_000);
       // Pre-start_block VP scenario: VirtualPoolDeployed fired before our
       // start_block, so the factory handler never ran. The first event we
       // observe for this VP is `VirtualPool.Swap`, which calls upsertPool
@@ -843,7 +833,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("backfills token0/token1 + decimals from BiPoolExchange when first event is VirtualPool.Swap", async function () {
-      this.timeout(10_000);
       // Codex P2 #3 follow-up: in the pre-start_block scenario above, the
       // Pool is created via `getOrCreate` without `defaults.token0/token1`
       // (Swap/Mint/Burn events don't carry the pair). Without backfill,
@@ -923,7 +912,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {
-      this.timeout(10_000);
       // Codex P2 round 2 #3: the heal-before-exchange ordering. VP self-
       // heals first (via VirtualPool.Swap → `selfHealWrappedExchangeId`)
       // when no `BiPoolExchange` row exists yet, so the heal path can't
@@ -1006,7 +994,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("heal-path inline seed: VirtualPool.Swap-first RPC-seeds BiPoolExchange so the swap valuation has correct decimals", async function () {
-      this.timeout(10_000);
       // Codex P2 round 3 #5: when VP.Swap is the first observed event AND
       // the BiPoolExchange row doesn't exist yet, `selfHealWrappedExchangeId`
       // must RPC-seed the row (via `poolExchangeEffect`) before
@@ -1083,7 +1070,6 @@ describe("BiPoolManager handlers", () => {
     });
 
     it("paired pinning: decimals fetch failure leaves both token AND decimals unset (gate-keeps-retry)", async function () {
-      this.timeout(10_000);
       // Codex P2 round 4 #1: pinning the token address while leaving
       // decimals at the default 18 would lock in mis-scaled valuations
       // for any non-18dp leg. Fix: token + decimals are pinned as a

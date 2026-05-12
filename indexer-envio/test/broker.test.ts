@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
-import { assert } from "chai";
-import generated from "generated";
+import { assert } from "vitest";
+import generated from "./helpers/legacyMockDb.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,

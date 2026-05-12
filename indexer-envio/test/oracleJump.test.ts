@@ -1,5 +1,5 @@
 /// <reference types="mocha" />
-import { assert } from "chai";
+import { assert } from "vitest";
 import {
   computeMedianLineageNext,
   computeOracleJumpBps,

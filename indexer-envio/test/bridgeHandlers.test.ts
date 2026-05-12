@@ -10,7 +10,7 @@
  * MockDb, then assert on the resulting entity rows.
  */
 import { strict as assert } from "assert";
-import generated from "envio";
+import generated from "./helpers/legacyMockDb.js";
 import { findByNttManager } from "../src/wormhole/nttAddresses.js";
 
 // Side-effect: register handlers with Envio.

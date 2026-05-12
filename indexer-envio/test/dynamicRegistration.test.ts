@@ -6,11 +6,10 @@
  *
  * Two complementary test strategies:
  *
- * 1. REGISTRATION INTROSPECTION (new — will catch removed contractRegister calls)
- *    Read the Envio handler registry directly after importing EventHandlers.
- *    If fpmm.ts stops calling FPMMFactory.FPMMDeployed.contractRegister(...),
- *    EventRegister.getContractRegister(handlerRegister) returns undefined and
- *    these tests fail.
+ * 1. REGISTRATION EFFECTS
+ *    Drive factory deploy events through createTestIndexer and assert the
+ *    dynamic address registrations emitted in the block changes. If fpmm.ts or
+ *    virtualPool.ts stops calling .contractRegister(...), these tests fail.
  *
  * 2. HANDLER SMOKE TESTS (existing)
  *    TestHelpers.processEvent() exercises .handler() — proves the handler
@@ -18,11 +17,12 @@
  *    (Envio test harness limitation — no processContractRegister() equivalent).
  */
 import { strict as assert } from "assert";
-import generated from "envio";
+import { createTestIndexer } from "envio";
+import generated from "./helpers/legacyMockDb.js";
 
 // Import EventHandlers to trigger handler registrations (side-effect import).
 // This causes fpmm.ts / virtualPool.ts to call their .contractRegister() and
-// .handler() setup — which is what the introspection tests below verify.
+// .handler() setup — which is what the registration-effect tests below verify.
 import "../src/EventHandlers.ts";
 
 // The `generated` module ships as CommonJS with its own hand-rolled type
@@ -59,57 +59,80 @@ const {
   VirtualPoolFactory: TestVirtualPoolFactory,
 } = TestHelpers;
 
-// ---------------------------------------------------------------------------
-// Registry introspection
-//
-// Access the Envio handler registry directly to assert that contractRegister
-// callbacks are wired up. These tests WILL FAIL if someone removes the
-// contractRegister() calls from fpmm.ts or virtualPool.ts.
-//
-// Envio types.res.js exposes Types.FPMMFactory.FPMMDeployed.handlerRegister
-// and EventRegister.getContractRegister(). We use the internal JS modules
-// since the TypeScript types don't expose these. If the Envio package changes
-// its internal structure, these imports will fail — that's intentional.
-// ---------------------------------------------------------------------------
-
-const EventRegister = require("envio/src/EventRegister.res.js") as {
-  getContractRegister: (reg: unknown) => unknown;
-};
-const GeneratedTypes = require("generated/src/Types.res.js") as {
-  FPMMFactory: { FPMMDeployed: { handlerRegister: unknown } };
-  VirtualPoolFactory: { VirtualPoolDeployed: { handlerRegister: unknown } };
+type AddressRegistration = {
+  contract: string;
+  address: string;
 };
 
-describe("Dynamic contract registration — registry introspection", () => {
-  it("FPMMFactory.FPMMDeployed has a contractRegister callback registered", () => {
-    // This test FAILS if fpmm.ts removes:
-    //   FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
-    //     context.addFPMM(event.params.fpmmProxy);
-    //   })
-    const reg = EventRegister.getContractRegister(
-      GeneratedTypes.FPMMFactory.FPMMDeployed.handlerRegister,
+async function processDeployRegistration(
+  contract: "FPMMFactory" | "VirtualPoolFactory",
+  event: "FPMMDeployed" | "VirtualPoolDeployed",
+  params: Record<string, unknown>,
+): Promise<AddressRegistration[]> {
+  const indexer = createTestIndexer();
+  const result = await indexer.process({
+    chains: {
+      42220: {
+        startBlock: 1,
+        endBlock: 1,
+        simulate: [
+          {
+            contract,
+            event,
+            srcAddress: "0x00000000000000000000000000000000000000cc",
+            logIndex: 0,
+            block: { number: 1, timestamp: 1_700_000_000 },
+            transaction: {
+              hash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+              from: "0x0000000000000000000000000000000000000000",
+              to: "0x00000000000000000000000000000000000000cc",
+            },
+            params,
+          },
+        ],
+      },
+    },
+  });
+  return result.changes.flatMap((change) => [
+    ...((change.addresses?.sets ?? []) as AddressRegistration[]),
+  ]);
+}
+
+describe("Dynamic contract registration — registration effects", () => {
+  it("FPMMFactory.FPMMDeployed dynamically registers the deployed FPMM", async () => {
+    const registrations = await processDeployRegistration(
+      "FPMMFactory",
+      "FPMMDeployed",
+      {
+        fpmmProxy: POOL_ADDR,
+        fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+        token0: TOKEN0,
+        token1: TOKEN1,
+      },
     );
     assert.ok(
-      reg !== undefined && reg !== null,
-      "FPMMFactory.FPMMDeployed must have a contractRegister callback. " +
-        "If this test fails, check that fpmm.ts calls .contractRegister() " +
-        "with context.addFPMM() — removing it silently breaks pool discovery.",
+      registrations.some(
+        (entry) =>
+          entry.contract === "FPMM" &&
+          entry.address.toLowerCase() === POOL_ADDR.toLowerCase(),
+      ),
+      "FPMMFactory.FPMMDeployed must dynamically register the deployed FPMM address.",
     );
   });
 
-  it("VirtualPoolFactory.VirtualPoolDeployed has a contractRegister callback registered", () => {
-    // This test FAILS if virtualPool.ts removes:
-    //   VirtualPoolFactory.VirtualPoolDeployed.contractRegister(({ event, context }) => {
-    //     context.addVirtualPool(event.params.pool);
-    //   })
-    const reg = EventRegister.getContractRegister(
-      GeneratedTypes.VirtualPoolFactory.VirtualPoolDeployed.handlerRegister,
+  it("VirtualPoolFactory.VirtualPoolDeployed dynamically registers the deployed VirtualPool", async () => {
+    const registrations = await processDeployRegistration(
+      "VirtualPoolFactory",
+      "VirtualPoolDeployed",
+      { pool: VPOOL_ADDR, token0: TOKEN0, token1: TOKEN1 },
     );
     assert.ok(
-      reg !== undefined && reg !== null,
-      "VirtualPoolFactory.VirtualPoolDeployed must have a contractRegister callback. " +
-        "If this test fails, check that virtualPool.ts calls .contractRegister() " +
-        "with context.addVirtualPool() — removing it silently breaks VirtualPool discovery.",
+      registrations.some(
+        (entry) =>
+          entry.contract === "VirtualPool" &&
+          entry.address.toLowerCase() === VPOOL_ADDR.toLowerCase(),
+      ),
+      "VirtualPoolFactory.VirtualPoolDeployed must dynamically register the deployed VirtualPool address.",
     );
   });
 });
@@ -122,7 +145,7 @@ const TOKEN1 = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
 describe("Dynamic contract registration — handler smoke tests", () => {
   it("FPMMDeployed.handler creates a Pool entity for the deployed pool", async () => {
     // Tests .handler() path only. .contractRegister() path is verified by the
-    // introspection suite above (registry-level assertion) rather than via
+    // registration-effect suite above rather than via
     // TestHelpers.processEvent, which does not exercise contractRegister.
     let mockDb = MockDb.createMockDb();
     const event = TestFPMMFactory.FPMMDeployed.createMockEvent({
