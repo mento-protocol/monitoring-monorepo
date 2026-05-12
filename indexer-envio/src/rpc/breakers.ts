@@ -23,7 +23,10 @@ import {
   MEDIAN_DELTA_BREAKER_ABI,
   VALUE_DELTA_BREAKER_ABI,
 } from "../abis.js";
-import { requireContractAddress } from "../contractAddresses.js";
+import {
+  lookupBreakerKind,
+  requireContractAddress,
+} from "../contractAddresses.js";
 
 export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 
@@ -223,10 +226,12 @@ async function probeFunction(
   }
 }
 
-/** Classify a breaker by selector probe. Order matters: MarketHours has
- * neither `medianRatesEMA` nor `referenceValues`, so we check MD-specific
- * first, then VD-specific, then default to MARKET_HOURS. The probe address
- * (`0x000…0001`) is a valid input that won't have any state — we only care
+/** Classify a breaker. Known deployment addresses come from
+ * @mento-protocol/contracts; selector probes are only the fallback for
+ * unknown addresses. Probe order matters: MarketHours has neither
+ * `medianRatesEMA` nor `referenceValues`, so we check MD-specific first,
+ * then VD-specific, then default to MARKET_HOURS. The probe address
+ * (`0x000...0001`) is a valid input that won't have any state — we only care
  * whether the function exists in the bytecode. Returns null on transient
  * RPC failure so the caller can retry rather than poisoning the kind. */
 export async function fetchBreakerKind(
@@ -236,6 +241,9 @@ export async function fetchBreakerKind(
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";
+
+  const knownKind = lookupBreakerKind(chainId, breakerAddress);
+  if (knownKind) return knownKind;
 
   const probeAddr = "0x0000000000000000000000000000000000000001";
   const mdProbe = await probeFunction(

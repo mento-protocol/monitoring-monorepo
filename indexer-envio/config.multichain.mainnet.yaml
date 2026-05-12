@@ -281,10 +281,10 @@ chains:
           - 0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722
       - name: MedianDeltaBreaker
         address:
-          - 0xca2e7563dfC30bc94687F3deAcF682E1dBAffA13
+          - 0x3E4F2Bca4f7192Be4C3c5E5bD4840F2E90a8Ba84
       - name: ValueDeltaBreaker
         address:
-          - 0x3E4F2Bca4f7192Be4C3c5E5bD4840F2E90a8Ba84
+          - 0xca2e7563dfC30bc94687F3deAcF682E1dBAffA13
       - name: WormholeNttManager
         # Same proxy addresses as Celo — helpers are CREATE3 across chains and
         # the proxies are derived by CREATE(helper, nonce) which is also
