@@ -488,6 +488,26 @@ run_gate "ui-dashboard/vitest.mutation.config.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
+run_gate "ui-dashboard/src/lib/pool-id.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
+run_gate "metrics-bridge/stryker.config.mjs"
+assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
+assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
+
+run_gate "metrics-bridge/vitest.mutation.config.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
+assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
+
+run_gate "metrics-bridge/src/rebalance-probe.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
+assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
+
+run_gate "metrics-bridge/test/rebalance-probe.test.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
+assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
+
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 

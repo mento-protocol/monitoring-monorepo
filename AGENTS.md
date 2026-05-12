@@ -186,7 +186,8 @@ pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 # Dashboard
 pnpm dashboard:dev            # Dev server
 pnpm dashboard:build          # Production build
-pnpm dashboard:mutation       # Targeted StrykerJS baseline for FX weekend logic
+pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
+pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
 # Infrastructure (Terraform)
 pnpm infra:init               # Init providers (first time or after changes)

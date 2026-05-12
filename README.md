@@ -85,11 +85,13 @@ pnpm dashboard:dev
 
 ```bash
 pnpm dashboard:mutation
+pnpm bridge:mutation
 ```
 
-This runs the non-required StrykerJS baseline for the dashboard FX weekend logic.
-See [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope,
-runtime, score, and survivor classification.
+These run the non-required StrykerJS baselines for targeted dashboard and
+metrics-bridge pure logic. See
+[`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope, runtime,
+score, and survivor classification.
 
 ## Environment Variables
 
