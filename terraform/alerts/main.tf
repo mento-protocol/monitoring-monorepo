@@ -77,6 +77,20 @@ locals {
     local.fx_weekend_gate_promql,
   )
 
+  # Shared per-series weekend suppressors for deviation/rebalancer rules.
+  # They intentionally gate only FX pairs (non-USD-pegged pair labels) and
+  # leave USD-pegged pools such as USDC/USDm and USDT/USDm alerting 24/7.
+  fx_weekend_suppressed_deviation_ratio_promql = format(
+    "mento_pool_deviation_ratio{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
+    local.usd_pegged_pair_regex,
+    local.fx_weekend_gate_promql,
+  )
+  fx_weekend_suppressed_breach_start_promql = format(
+    "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
+    local.usd_pegged_pair_regex,
+    local.fx_weekend_gate_promql,
+  )
+
   # ── Deviation Breach Critical annotations ────────────────────────────────
   # Both critical deviation-breach rules (magnitude-gated and anchored)
   # render the same Slack diagnostic lines, so we author them once here.

@@ -19,6 +19,25 @@ vi.mock("graphql-request", async () => {
     ...actual,
     GraphQLClient: MockGraphQLClient,
   };
+  it("degrades to no tx link when the latest-rebalance companion query fails", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.reject(new Error("latest tx unavailable"));
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      latestRebalanceTxHash: "",
+    });
+  });
+
 });
 
 import { fetchPools } from "../src/graphql.js";
@@ -93,6 +112,17 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.resolve({
+          RebalanceEvent: [
+            {
+              poolId: BASE_POOL.id,
+              txHash:
+                "0x1111111111111111111111111111111111111111111111111111111111111111",
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -103,6 +133,8 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
+      latestRebalanceTxHash:
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
     });
   });
 
@@ -115,6 +147,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
         return Promise.reject(unknownFieldError("prevMedianPrice"));
+      }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.resolve({ RebalanceEvent: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -129,6 +164,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
+      latestRebalanceTxHash: "",
     });
   });
 
@@ -137,6 +173,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
         return Promise.reject(new Error("network down"));
+      }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.resolve({ RebalanceEvent: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -158,6 +197,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.resolve({ RebalanceEvent: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -167,6 +209,26 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "0",
       prevMedianAt: "0",
+      latestRebalanceTxHash: "",
     });
   });
+  it("degrades to no tx link when the latest-rebalance companion query fails", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgeLatestRebalances")) {
+        return Promise.reject(new Error("latest tx unavailable"));
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      latestRebalanceTxHash: "",
+    });
+  });
+
 });

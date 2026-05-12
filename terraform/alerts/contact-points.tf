@@ -71,13 +71,10 @@ locals {
   #      reserve is. Suppressed cleanly when the probe hasn't run yet or
   #      the RPC failed — the breach alert keeps its normal shape.
   #
-  #      *Reserves* and *Deviation* render on a single line separated by
-  #      a `·` so the alert stays compact. *Reserves* leads because the
-  #      pair-share split is the more useful diagnostic (which leg is
-  #      drained); the deviation magnitude is a secondary read. Both
-  #      annotations are independently optional: when only one is
-  #      present the separator drops with it, avoiding a stray
-  #      leading/trailing `·`.
+  #      Deviation-breach alerts deliberately render in operator triage order:
+  #      message, deviation, reserves, rebalance-blocked reason, then start
+  #      time. Rebalancer alerts may add Last Rebalance / Root Cause / Last
+  #      Rebalance TX rows when the rule exposes those annotations.
   #   5. Metadata row: start time only. The per-row `View alert` link was
   #      removed — Grafana's attachment title still links to grafana.com via
   #      the (unconfigurable) `title_link`, so operators retain that path
@@ -101,25 +98,37 @@ locals {
   #   3. Metadata row with start time and Alert ID, as in the pool-scoped layout.
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
+    {{ $isResolved := eq .Status "resolved" -}}
+    {{ $title := .Labels.alertname -}}
+    {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
     {{ if .Labels.pool_id -}}
-    *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ .Labels.alertname }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
+    *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else -}}
-    *{{ .Labels.alertname }}*
+    *{{ $title }}*
     {{ end -}}
-    {{ if .Annotations.summary }}{{ .Annotations.summary }}
+    {{ if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
+    {{ else if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
     {{ end -}}
+    {{ if .Annotations.current_deviation -}}
+    *Deviation:* {{ .Annotations.current_deviation }}
+    {{ end -}}
+    {{ if .Annotations.current_reserves -}}
+    *Reserves:* {{ .Annotations.current_reserves }}
+    {{ end -}}
     {{ if .Annotations.rebalance_reason -}}
     *Rebalance Blocked:* {{ .Annotations.rebalance_reason }}
     {{ end -}}
-    {{ if and .Annotations.current_reserves .Annotations.current_deviation -}}
-    *Reserves:* {{ .Annotations.current_reserves }}   ·   *Deviation:* {{ .Annotations.current_deviation }}
-    {{ else if .Annotations.current_reserves -}}
-    *Reserves:* {{ .Annotations.current_reserves }}
-    {{ else if .Annotations.current_deviation -}}
-    *Deviation:* {{ .Annotations.current_deviation }}
+    {{ if .Annotations.last_rebalance -}}
+    *Last Rebalance:* {{ .Annotations.last_rebalance }}
+    {{ end -}}
+    {{ if .Annotations.root_cause -}}
+    *Root Cause:* {{ .Annotations.root_cause }}
+    {{ end -}}
+    {{ if .Annotations.last_rebalance_tx -}}
+    *Last Rebalance TX:* {{ .Annotations.last_rebalance_tx }}
     {{ end -}}
     {{ if .Annotations.current_oracle_price -}}
     *Current Oracle Price:* {{ .Annotations.current_oracle_price }}
@@ -127,7 +136,7 @@ locals {
     {{ if .Annotations.previous_oracle_price -}}
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
-    *Started:* {{ .StartsAt.Format "Jan 02 15:04 UTC" }}
+    *Started:* {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
     *Alert ID:* `{{ .Fingerprint }}`
     {{ end }}
   EOT

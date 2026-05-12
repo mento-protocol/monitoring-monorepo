@@ -40,6 +40,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     // Test default — real strategy address from FPMM Reserve liquidity
     // strategy on Celo mainnet. Probes hitting RPC are mocked at the
     // viem-client layer in dedicated tests.
+    latestRebalanceTxHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     ...overrides,
   };
