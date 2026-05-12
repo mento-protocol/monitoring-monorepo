@@ -867,10 +867,10 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Rebalancer hasn't acted{{ if and $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }} in {{ humanizeDuration $values.A.Value }}{{ end }} despite ongoing breach."
+      summary          = "Rebalancer hasn't acted{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }} in {{ humanizeDuration $values.A.Value }}{{ end }} despite ongoing breach."
       resolved_title   = "Rebalancer healthy again"
       resolved_summary = "Rebalancer stale condition resolved — the pool was rebalanced or the breach cleared."
-      last_rebalance   = "{{ if and $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}{{ humanizeDuration $values.A.Value }} ago{{ else }}Never{{ end }}"
+      last_rebalance   = "{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}{{ humanizeDuration $values.A.Value }} ago{{ else if and $values.LastRebalancedAt (eq $values.LastRebalancedAt.Value 0.0) }}Never{{ end }}"
       root_cause       = local.deviation_critical_rebalance_reason_annotation
     }
 
