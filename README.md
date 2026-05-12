@@ -81,6 +81,16 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 pnpm dashboard:dev
 ```
 
+### Dashboard Browser Tests
+
+```bash
+pnpm --filter @mento-protocol/ui-dashboard test:browser
+```
+
+The browser suite starts the Next.js app with a local GraphQL fixture server so
+it can exercise routing, focus, hydration, and degraded query states without
+hitting hosted Hasura/Envio.
+
 ## Environment Variables
 
 ### Indexer

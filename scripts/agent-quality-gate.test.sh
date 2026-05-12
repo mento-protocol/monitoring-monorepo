@@ -133,6 +133,9 @@ assert_contains "- pnpm install --frozen-lockfile (workspace package manifest ch
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
   "- pnpm --filter @mento-protocol/ui-dashboard lint (ui-dashboard changed)"
+assert_order \
+  "- pnpm --filter @mento-protocol/ui-dashboard test (ui-dashboard changed)" \
+  "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests or lockfile changed."
@@ -166,6 +169,7 @@ run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
@@ -251,6 +255,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
@@ -285,6 +290,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 mixed_package_script_repo="$(mktemp -d)"
 (
@@ -321,6 +327,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -471,6 +478,7 @@ run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
 
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"

@@ -29,9 +29,20 @@ pnpm dev     # Start dev server
 pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
+pnpm test:browser  # Fixture-driven Playwright browser interaction tests
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
+
+## Browser Interaction Tests
+
+`pnpm test:browser` starts the real Next.js app plus
+`tests/browser/fixtures/hasura-fixture-server.mjs`, then runs Playwright tests
+under `tests/browser/`. The fixture server is the only GraphQL source for these
+tests; never point browser tests at hosted Hasura/Envio. The current pilot
+intentionally uses an app-level harness instead of Playwright Component Testing
+because the covered risks are App Router navigation, URL state, hydration, CSP,
+SWR request behavior, and real browser focus.
 
 ## React Doctor
 

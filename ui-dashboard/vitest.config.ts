@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
+    exclude: ["tests/browser/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
