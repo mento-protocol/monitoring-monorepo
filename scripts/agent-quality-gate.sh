@@ -388,6 +388,11 @@ add_ui_react_doctor_diff() {
   add_command "bash scripts/check-react-doctor-diff.sh $(quote_path "$base_ref")" "$reason"
 }
 
+add_ui_mutation_baseline() {
+  local reason="$1"
+  add_command "pnpm dashboard:mutation" "$reason"
+}
+
 add_workspace_quality_commands() {
   local reason="$1"
   add_all_indexer_codegen "$reason"
@@ -559,6 +564,12 @@ while IFS= read -r path; do
       case "$path" in
         ui-dashboard/src/components/*|ui-dashboard/src/app/*/_components/*|ui-dashboard/src/lib/use-roving-*)
           add_checklist "docs/pr-checklists/keyboard-a11y-controlled-widgets.md" "controlled dashboard component changed"
+          ;;
+      esac
+      case "$path" in
+        ui-dashboard/stryker.config.mjs|ui-dashboard/vitest.mutation.config.ts|ui-dashboard/src/lib/weekend.ts|ui-dashboard/src/lib/__tests__/weekend.test.ts)
+          add_checklist "docs/pr-checklists/mutation-testing.md" "dashboard mutation baseline changed"
+          add_ui_mutation_baseline "dashboard mutation baseline changed"
           ;;
       esac
       ;;

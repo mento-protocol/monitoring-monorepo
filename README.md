@@ -81,6 +81,16 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 pnpm dashboard:dev
 ```
 
+### Targeted Mutation Baseline
+
+```bash
+pnpm dashboard:mutation
+```
+
+This runs the non-required StrykerJS baseline for the dashboard FX weekend logic.
+See [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope,
+runtime, score, and survivor classification.
+
 ## Environment Variables
 
 ### Indexer
