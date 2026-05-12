@@ -480,6 +480,10 @@ run_gate "ui-dashboard/src/lib/weekend.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
+run_gate "ui-dashboard/src/lib/__tests__/weekend.test.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
 run_gate "ui-dashboard/stryker.config.mjs"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
@@ -489,6 +493,10 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation ba
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
 run_gate "ui-dashboard/src/lib/pool-id.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
+run_gate "ui-dashboard/src/lib/__tests__/pool-id.test.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 

@@ -11,6 +11,7 @@ import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
+// This is server-only; local `next start` needs analytics development mode.
 const analyticsMode = process.env.VERCEL ? "auto" : "development";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
