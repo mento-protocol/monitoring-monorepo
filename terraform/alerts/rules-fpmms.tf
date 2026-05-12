@@ -1039,18 +1039,22 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       }
       model = jsonencode({
         refId = "A"
-        expr = join(" and ", [
-          "last_over_time(mento_pool_rebalance_effectiveness[1h])",
-          "(mento_pool_deviation_breach_start > 0)",
-          # `>=` not `>`: both timestamps are block-second granularity written
-          # from the same `blockTimestamp`, so a same-block event where a failed
-          # rebalance tips the pool into breach produces
-          # `last_rebalanced_at == deviation_breach_start` — exactly the KPI 4
-          # control-loop-failure case the alert must catch. Strict `>` silently
-          # dropped it.
-          "(mento_pool_last_rebalanced_at >= mento_pool_deviation_breach_start)",
-          "((time() - mento_pool_last_rebalanced_at) < 3600)",
-        ])
+        expr = format(
+          "%s unless (%s)",
+          join(" and ", [
+            "last_over_time(mento_pool_rebalance_effectiveness[1h])",
+            "(mento_pool_deviation_breach_start > 0)",
+            # `>=` not `>`: both timestamps are block-second granularity written
+            # from the same `blockTimestamp`, so a same-block event where a failed
+            # rebalance tips the pool into breach produces
+            # `last_rebalanced_at == deviation_breach_start` — exactly the KPI 4
+            # control-loop-failure case the alert must catch. Strict `>` silently
+            # dropped it.
+            "(mento_pool_last_rebalanced_at >= mento_pool_deviation_breach_start)",
+            "((time() - mento_pool_last_rebalanced_at) < 3600)",
+          ]),
+          local.fx_weekend_suppressed_breach_start_promql,
+        )
         instant = true
       })
     }
@@ -1067,12 +1071,16 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       }
       model = jsonencode({
         refId = "EffPct"
-        expr = join(" and ", [
-          "last_over_time(mento_pool_rebalance_effectiveness[1h]) * 100",
-          "(mento_pool_deviation_breach_start > 0)",
-          "(mento_pool_last_rebalanced_at >= mento_pool_deviation_breach_start)",
-          "((time() - mento_pool_last_rebalanced_at) < 3600)",
-        ])
+        expr = format(
+          "%s unless (%s)",
+          join(" and ", [
+            "last_over_time(mento_pool_rebalance_effectiveness[1h]) * 100",
+            "(mento_pool_deviation_breach_start > 0)",
+            "(mento_pool_last_rebalanced_at >= mento_pool_deviation_breach_start)",
+            "((time() - mento_pool_last_rebalanced_at) < 3600)",
+          ]),
+          local.fx_weekend_suppressed_breach_start_promql,
+        )
         instant = true
       })
     }
