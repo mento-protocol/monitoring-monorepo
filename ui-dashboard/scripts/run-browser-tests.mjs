@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 
+// `next dev` rewrites this import to `.next/dev`, which would otherwise leave
+// local browser-test runs with a dirty worktree.
 const nextEnvUrl = new URL("../next-env.d.ts", import.meta.url);
 const originalNextEnv = existsSync(nextEnvUrl)
   ? await readFile(nextEnvUrl, "utf8")

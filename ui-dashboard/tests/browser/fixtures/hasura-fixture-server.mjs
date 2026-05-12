@@ -202,6 +202,12 @@ const liquidityPositions = [
   },
 ];
 
+function unhandledOperation(op) {
+  const message = `Unhandled fixture GraphQL operation: ${op}`;
+  process.stderr.write(`${message}\n`);
+  return { __fixtureErrors: [{ message }] };
+}
+
 function operationName(query) {
   return query.match(/\bquery\s+([A-Za-z0-9_]+)/)?.[1] ?? "Unknown";
 }
@@ -303,7 +309,7 @@ function handleGraphQL({ query, variables = {} }) {
     case "PoolRebalances":
       return { RebalanceEvent: [] };
     default:
-      return {};
+      return unhandledOperation(op);
   }
 }
 
@@ -339,7 +345,12 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     try {
       const body = JSON.parse(raw);
-      sendJson(res, 200, { data: handleGraphQL(body) });
+      const result = handleGraphQL(body);
+      if (result.__fixtureErrors) {
+        sendJson(res, 200, { errors: result.__fixtureErrors });
+        return;
+      }
+      sendJson(res, 200, { data: result });
     } catch (error) {
       sendJson(res, 500, {
         errors: [

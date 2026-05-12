@@ -25,6 +25,8 @@ function browserTestConnectSrc(): string[] {
   }
 }
 
+// Next.js dev HMR needs eval during fixture-mode browser tests; Playwright
+// browser instrumentation does not.
 const browserTestScriptSrc =
   process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES === "true"
     ? ["'unsafe-eval'"]
