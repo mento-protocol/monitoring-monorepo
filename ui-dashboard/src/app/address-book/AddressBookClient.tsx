@@ -13,6 +13,7 @@ import { ImportDialog } from "./_components/import-dialog";
 import {
   buildContractRows,
   buildCustomRows,
+  buildReportOnlyRows,
   filterRows,
   findContractInitial,
   hasAmbiguousContractMatches,
@@ -47,7 +48,12 @@ export default function AddressBookPage(props: AddressBookPageProps) {
   // instead of N times (one per row). Cursor flagged the per-row pattern
   // as a perf regression at 200–500 rows; passing `hasReport` down keeps
   // the row component pure.
-  const { hasReport } = useAddressReportsIndex();
+  const {
+    data: reportsIndex,
+    hasReport,
+    error: reportsIndexError,
+    mutate: retryReportsIndex,
+  } = useAddressReportsIndex();
 
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -73,9 +79,22 @@ export default function AddressBookPage(props: AddressBookPageProps) {
     [customEntries, globalDisplayNetwork],
   );
 
+  const reportOnlyRows = useMemo<AddressRow[]>(
+    () =>
+      buildReportOnlyRows(reportsIndex?.addresses ?? [], globalDisplayNetwork, [
+        ...customRows,
+        ...contractRows,
+      ]),
+    [reportsIndex?.addresses, globalDisplayNetwork, customRows, contractRows],
+  );
+
   const allRows = useMemo<AddressRow[]>(
-    () => filterRows(buildAddressBookRows(contractRows, customRows), search),
-    [customRows, contractRows, search],
+    () =>
+      filterRows(
+        buildAddressBookRows(contractRows, [...customRows, ...reportOnlyRows]),
+        search,
+      ),
+    [customRows, reportOnlyRows, contractRows, search],
   );
 
   // Pending-ledger wiring for both modal flows (edit + add-new) —
@@ -238,6 +257,24 @@ export default function AddressBookPage(props: AddressBookPageProps) {
           Error loading custom labels: {error.message}
         </p>
       )}
+      {reportsIndexError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-800 bg-amber-950 px-4 py-2 text-xs text-amber-200"
+        >
+          <span>
+            Forensic report index failed to load; report-only rows may be
+            hidden.
+          </span>
+          <button
+            type="button"
+            onClick={() => void retryReportsIndex()}
+            className="rounded border border-amber-700 px-2 py-1 text-amber-100 hover:border-amber-500 hover:text-white"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {!isLoading && allRows.length === 0 && (
         <p className="text-sm text-slate-500">
@@ -297,6 +334,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
                     notes={resolved?.entry.notes}
                     isPublic={resolved?.entry.isPublic}
                     isCustom={row.isCustom}
+                    kind={row.kind}
                     source={row.source}
                     createdAt={row.createdAt ?? resolved?.entry.createdAt}
                     updatedAt={row.updatedAt ?? resolved?.entry.updatedAt}
@@ -309,7 +347,9 @@ export default function AddressBookPage(props: AddressBookPageProps) {
                       // a Monad-only address would open CeloScan. Suppress
                       // the link entirely; users can still edit, copy, or
                       // open via the inline AddressLink in other tables.
-                      row.isCustom || !row.network.explorerBaseUrl
+                      row.isCustom ||
+                      row.kind === "report" ||
+                      !row.network.explorerBaseUrl
                         ? null
                         : explorerAddressUrl(row.network, row.address)
                     }

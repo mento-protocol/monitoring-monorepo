@@ -15,6 +15,7 @@ vi.mock("@/lib/address-labels", async () => {
   >("@/lib/address-labels-shared");
   return {
     importLabels: vi.fn().mockResolvedValue(undefined),
+    replaceLabels: vi.fn().mockResolvedValue(undefined),
     getLabels: vi.fn().mockResolvedValue({}),
     mergeEntries: shared.mergeEntries,
     upgradeEntries: shared.upgradeEntries,
@@ -30,6 +31,7 @@ vi.mock("@/lib/address-reports", async () => {
   >("@/lib/address-reports-shared");
   return {
     importReports: vi.fn().mockResolvedValue(undefined),
+    replaceReports: vi.fn().mockResolvedValue(undefined),
     upgradeReports: shared.upgradeReports,
     MAX_BODY_LENGTH: shared.MAX_BODY_LENGTH,
     MAX_TITLE_LENGTH: shared.MAX_TITLE_LENGTH,

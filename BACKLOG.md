@@ -61,11 +61,11 @@ a critical module with acceptable manual/nightly runtime.
 
 - [x] ~~**24h Volume tile for VPs.**~~ Done on `virtual-pools`: `BrokerExchangeDailySnapshot` now rolls up per-`chainId-exchangeId-day` Broker volume in the indexer, and the VirtualPool header reads that isolated daily rollup for the current UTC-day 24h volume tile with visible query-failure degradation. Requires a schema bump and full re-sync.
 
-## Address Book
+## Dashboard Data Correctness
 
-- [ ] **Server-side restore-from-Blob endpoint.** The import body cap is 4MB and Vercel's serverless body limit prevents raising it much further. If snapshots exceed that size, add `POST /api/address-labels/restore?pathname=...` to pull the snapshot directly from Vercel Blob and run the same validation/import pipeline. Decide explicitly whether cron/admin restores should preserve report author/timestamp metadata, since upload imports intentionally re-stamp reports to the importing session.
-- [ ] **Report-only addresses need a UI surface.** The address-book page currently builds rows from `contractRows + customRows`, so an address with a forensic report but no label is not reachable from the index. Either add `/address-book/reports` or include report-only rows in the main address book, deduped against contract + custom rows.
-- [ ] **Drop the legacy dual-read in `getLabels` / `getLabel`.** After production has run `POST /api/address-labels/migrate-flat` and confirmed `legacyDropped: true`, remove legacy reads from `ui-dashboard/src/lib/address-labels.ts`, delete the migration route + tests, and then drop `KNOWN_LEGACY_KEYS`.
+- [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in PR #389: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates, `pushState` path changes, `popstate` back navigation, and hydration correction.
+- [x] ~~**Volume chart partial signal on the homepage.**~~ Done in PR #387: `buildDailyVolumeSeries` now returns `volumePartial`, `VolumeOverTimeChart` renders partial/unavailable v3 states explicitly, and tests cover skipped untrusted-decimal snapshots.
+- [x] ~~**Pool detail tab panels gate on decimal trust state.**~~ Token-amount tabs now fail closed behind `TokenAmountTrustGate` until `POOL_THRESHOLDS_KNOWN_EXT` verifies token decimals; page tests cover untrusted decimals and trust-query failure without firing the tab-local reserves query.
 
 ## File Size And Lint Hygiene
 
@@ -78,8 +78,6 @@ comments. Refresh before starting a split.
 | 1566 |   907 | `indexer-envio/src/pool.ts`                          | Highest-priority split before adding more pool behavior; under the effective hard cap but far past the readability budget. |
 |  932 |   708 | `indexer-envio/src/rpc/pool-state.ts`                | Split RPC mocks/caches/fetchers when touching pool-state RPC.                                                              |
 |  749 |   542 | `indexer-envio/src/rpc/effects.ts`                   | Watch; split if adding another effect family.                                                                              |
-|  737 |   547 | `ui-dashboard/src/lib/queries/pools.ts`              | Watch; split by pool-detail/global/bridge domains if adding more queries.                                                  |
-|  737 |   530 | `ui-dashboard/src/lib/address-labels/import.ts`      | Watch; split restore/import validators if the Blob restore endpoint lands.                                                 |
 |  731 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts`      | Watch; split fetch orchestration if another network-wide data source lands.                                                |
 |  689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`        | Watch; split only with related oracle-handler work.                                                                        |
 |  673 |   605 | `ui-dashboard/src/components/global-pools-table.tsx` | Split if touching the table; it is just over the effective soft budget.                                                    |

@@ -73,6 +73,7 @@ vi.mock("@/lib/networks", async () => {
 import {
   buildContractRows,
   buildCustomRows,
+  buildReportOnlyRows,
   filterRows,
   findContractInitial,
   type AddressRow,
@@ -218,6 +219,55 @@ describe("buildCustomRows", () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildReportOnlyRows
+// ---------------------------------------------------------------------------
+
+describe("buildReportOnlyRows", () => {
+  const displayNet = NETWORKS["celo-mainnet"];
+  const reportOnly = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+  it("emits a reachable all-chain row for a report-only address", () => {
+    const rows = buildReportOnlyRows([reportOnly], displayNet, []);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        key: `report:${reportOnly}`,
+        address: reportOnly,
+        name: "Forensic report",
+        tags: [],
+        kind: "report",
+        isCustom: false,
+        network: displayNet,
+      }),
+    ]);
+  });
+
+  it("dedupes against existing contract and custom rows", () => {
+    const rows = buildReportOnlyRows(
+      [
+        "0xcccccccccccccccccccccccccccccccccccccccc",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        reportOnly,
+        reportOnly.toUpperCase(),
+        "not-an-address",
+      ],
+      displayNet,
+      [
+        row({
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          kind: "contract",
+        }),
+        row({
+          address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          kind: "custom",
+          isCustom: true,
+        }),
+      ],
+    );
+    expect(rows.map((r) => r.address)).toEqual([reportOnly]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // filterRows
 // ---------------------------------------------------------------------------
 
@@ -256,7 +306,22 @@ describe("filterRows", () => {
     source: "minipay",
     network: NETWORKS["celo-mainnet"],
   });
-  const all = [contractRow, customRowPlain, customRowArkham, customRowMiniPay];
+  const reportRow = row({
+    key: "report:0xeee",
+    address: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    name: "Forensic report",
+    tags: [],
+    kind: "report",
+    isCustom: false,
+    network: NETWORKS["celo-mainnet"],
+  });
+  const all = [
+    contractRow,
+    customRowPlain,
+    customRowArkham,
+    customRowMiniPay,
+    reportRow,
+  ];
 
   it("returns the input unchanged when the search string is empty", () => {
     expect(filterRows(all, "")).toBe(all);
@@ -279,11 +344,12 @@ describe("filterRows", () => {
 
   it("matches 'all chains' against every custom row", () => {
     const result = filterRows(all, "all chains");
-    // Every custom row reports "all chains" as its chain text.
+    // Every custom/report-only row reports "all chains" as its chain text.
     expect(result.map((r) => r.key).sort()).toEqual([
       "custom:0xaaa",
       "custom:0xbbb",
       "custom:0xddd",
+      "report:0xeee",
     ]);
   });
 
@@ -296,6 +362,11 @@ describe("filterRows", () => {
   it("matches by source-badge text 'contract' for non-custom rows", () => {
     const result = filterRows(all, "contract");
     expect(result.map((r) => r.key)).toEqual(["celo-mainnet:0xCCC"]);
+  });
+
+  it("matches by source-badge text 'report' for report-only rows", () => {
+    const result = filterRows(all, "report");
+    expect(result.map((r) => r.key)).toEqual(["report:0xeee"]);
   });
 
   it("matches by source-badge text 'arkham' for arkham-sourced rows", () => {
