@@ -334,12 +334,25 @@ export function setHttpGetCodeErrorMock(args: {
 
 export function clearHttpRpcMockGroup(group: string): void {
   for (const [key, mock] of callMocks) {
-    if (mock.group === group || mock.group.startsWith(`${group}:`)) {
+    if (mock.group === group) {
       callMocks.delete(key);
     }
   }
   for (const [key, mock] of codeMocks) {
-    if (mock.group === group || mock.group.startsWith(`${group}:`)) {
+    if (mock.group === group) {
+      codeMocks.delete(key);
+    }
+  }
+}
+
+export function clearHttpRpcMockGroupPrefix(prefix: string): void {
+  for (const [key, mock] of callMocks) {
+    if (mock.group.startsWith(prefix)) {
+      callMocks.delete(key);
+    }
+  }
+  for (const [key, mock] of codeMocks) {
+    if (mock.group.startsWith(prefix)) {
       codeMocks.delete(key);
     }
   }
@@ -352,4 +365,5 @@ registerHttpTestRpcHandlers({
   setHttpGetCodeMock,
   setHttpGetCodeErrorMock,
   clearHttpRpcMockGroup,
+  clearHttpRpcMockGroupPrefix,
 });

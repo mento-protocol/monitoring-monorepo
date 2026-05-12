@@ -4,6 +4,7 @@ import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 import {
   clearTestRpcMockGroup,
+  clearTestRpcMockGroupPrefix,
   setTestRpcErrorMock,
   setTestRpcMock,
   setTestRpcRawMock,
@@ -81,7 +82,7 @@ export function _setMockFees(
 /** @internal Test-only: clear all fetchFees mocks. */
 export function _clearMockFees(): void {
   _testFees.clear();
-  clearTestRpcMockGroup("fees");
+  clearTestRpcMockGroupPrefix("fees:");
 }
 
 /** viem's `ContractFunctionZeroDataError` (message includes "returned no

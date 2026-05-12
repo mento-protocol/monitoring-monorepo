@@ -48,6 +48,7 @@ export type HttpTestRpcHandlers = {
   setHttpGetCodeMock: (args: SetTestGetCodeMockArgs) => void;
   setHttpGetCodeErrorMock: (args: SetTestGetCodeErrorMockArgs) => void;
   clearHttpRpcMockGroup: (group: string) => void;
+  clearHttpRpcMockGroupPrefix: (prefix: string) => void;
 };
 
 let handlers: HttpTestRpcHandlers | undefined;
@@ -80,6 +81,10 @@ export function setTestGetCodeErrorMock(
 
 export function clearTestRpcMockGroup(group: string): void {
   handlers?.clearHttpRpcMockGroup(group);
+}
+
+export function clearTestRpcMockGroupPrefix(prefix: string): void {
+  handlers?.clearHttpRpcMockGroupPrefix(prefix);
 }
 
 type MockRebalancingState = {

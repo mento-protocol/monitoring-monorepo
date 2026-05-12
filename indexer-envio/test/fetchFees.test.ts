@@ -70,6 +70,18 @@ describe("fetchFees (direct RPC-layer contract)", () => {
     assert.equal(fees, null);
   });
 
+  it("clears per-pool HTTP fee mocks when clearing all fee mocks", async () => {
+    _setMockFees(CHAIN, POOL, {
+      lpFee: { fulfilled: 15n },
+      protocolFee: { fulfilled: 5n },
+      rebalanceReward: { fulfilled: 25n },
+    });
+    _clearMockFees();
+
+    const fees = await fetchFees(CHAIN, POOL);
+    assert.equal(fees, null);
+  });
+
   it("returns null for an unknown chainId (real getRpcClient throw path)", async () => {
     // No mock needed — getRpcClient throws for chainIds not in
     // RPC_CONFIG_BY_CHAIN; the outer try/catch must catch that.
