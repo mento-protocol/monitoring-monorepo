@@ -69,19 +69,22 @@ a critical module with acceptable manual/nightly runtime.
 
 ## File Size And Lint Hygiene
 
-Current line counts were refreshed on 2026-05-11. `raw` is physical lines;
-`rough` approximates the ESLint `max-lines` count after skipping blanks and
-comments. Refresh before starting a split.
+Current line counts for remaining watch files were refreshed on 2026-05-11.
+`raw` is physical lines; `rough` approximates the ESLint `max-lines` count
+after skipping blanks and comments. Refresh before starting a split.
 
-|  Raw | Rough | File                                                 | Action                                                                                                                     |
-| ---: | ----: | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1566 |   907 | `indexer-envio/src/pool.ts`                          | Highest-priority split before adding more pool behavior; under the effective hard cap but far past the readability budget. |
-|  932 |   708 | `indexer-envio/src/rpc/pool-state.ts`                | Split RPC mocks/caches/fetchers when touching pool-state RPC.                                                              |
-|  749 |   542 | `indexer-envio/src/rpc/effects.ts`                   | Watch; split if adding another effect family.                                                                              |
-|  731 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts`      | Watch; split fetch orchestration if another network-wide data source lands.                                                |
-|  689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`        | Watch; split only with related oracle-handler work.                                                                        |
-|  673 |   605 | `ui-dashboard/src/components/global-pools-table.tsx` | Split if touching the table; it is just over the effective soft budget.                                                    |
-|  627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`           | Watch; split if hero KPI fallback or overlap logic grows again.                                                            |
-|  608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`        | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands.                                   |
+Completed on 2026-05-12 in PR #397:
+
+- [x] `indexer-envio/src/pool.ts` split into health, self-heal, snapshot, source-priority, and context-type modules.
+- [x] `indexer-envio/src/rpc/pool-state.ts` split into pool-state, oracle-state, and pool-fee modules.
+- [x] `ui-dashboard/src/components/global-pools-table.tsx` split into sort, formatting, limit heatmap, and strategy badge modules.
+
+| Raw | Rough | File                                            | Action                                                                                   |
+| --: | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 749 |   542 | `indexer-envio/src/rpc/effects.ts`              | Watch; split if adding another effect family.                                            |
+| 731 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts` | Watch; split fetch orchestration if another network-wide data source lands.              |
+| 689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
+| 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
+| 608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
 - [ ] **Enable `tseslint.configs.recommended` on `indexer-envio`.** The current config deliberately omits the preset so the gating PR did not surface unrelated pre-existing nits. Flipping it on requires fixing `no-explicit-any`, `no-unused-vars`, and `no-require-imports` issues, adding `globals: globals.node`, and restoring the needed `@eslint/js` + `globals` devDeps.
