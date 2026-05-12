@@ -36,12 +36,12 @@ The pilot therefore uses a minimal app-level Playwright harness:
   and browser-side SWR calls both need the same deterministic data source.
 - CSP needed a test-only connect-src extension for the fixture origin, gated by
   `NEXT_PUBLIC_BROWSER_TEST_FIXTURES=true`.
-- Local runs use the installed Chrome channel to avoid downloading a Playwright
-  browser. CI installs Playwright's Chromium before running the tests.
+- Local quality-gate runs and CI install Playwright's bundled Chromium before
+  running the tests.
 
 ## Runtime
 
-- Local headless Chrome channel, Next dev plus fixture
+- Local bundled Chromium, Next dev plus fixture
   server startup: `pnpm --filter @mento-protocol/ui-dashboard test:browser`
   completed 3 tests in 9.6s on 2026-05-12.
 - Acceptance target: stable headless run that would add less than two minutes

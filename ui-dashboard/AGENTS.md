@@ -42,7 +42,9 @@ under `tests/browser/`. The fixture server is the only GraphQL source for these
 tests; never point browser tests at hosted Hasura/Envio. The current pilot
 intentionally uses an app-level harness instead of Playwright Component Testing
 because the covered risks are App Router navigation, URL state, hydration, CSP,
-SWR request behavior, and real browser focus.
+SWR request behavior, and real browser focus. The agent quality gate installs
+Playwright Chromium before running this command; for direct fresh-checkout runs,
+run `pnpm exec playwright install chromium` once first.
 
 ## React Doctor
 

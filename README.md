@@ -89,7 +89,9 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser
 
 The browser suite starts the Next.js app with a local GraphQL fixture server so
 it can exercise routing, focus, hydration, and degraded query states without
-hitting hosted Hasura/Envio.
+hitting hosted Hasura/Envio. The agent quality gate installs Playwright
+Chromium before running it; for direct fresh-checkout runs, install it once with
+`pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`.
 
 ## Environment Variables
 

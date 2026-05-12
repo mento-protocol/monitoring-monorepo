@@ -4,9 +4,6 @@ const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
-const localBrowserChannel = process.env.CI
-  ? {}
-  : ({ channel: "chrome" } as const);
 
 export default defineConfig({
   testDir: "./tests/browser",
@@ -20,7 +17,6 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     ...devices["Desktop Chrome"],
-    ...localBrowserChannel,
     baseURL: nextUrl,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
@@ -29,7 +25,7 @@ export default defineConfig({
     {
       command: `node tests/browser/fixtures/hasura-fixture-server.mjs --port ${fixturePort}`,
       url: `${fixtureUrl}/health`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 15_000,
     },
     {
@@ -40,7 +36,7 @@ export default defineConfig({
         `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`,
       ].join(" "),
       url: nextUrl,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

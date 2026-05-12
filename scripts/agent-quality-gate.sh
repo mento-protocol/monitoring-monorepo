@@ -381,6 +381,7 @@ add_package_quality_commands() {
 add_dashboard_quality_commands() {
   local reason="$1"
   add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
+  add_command "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium" "$reason"
   add_command "pnpm --filter @mento-protocol/ui-dashboard test:browser" "$reason"
 }
 
