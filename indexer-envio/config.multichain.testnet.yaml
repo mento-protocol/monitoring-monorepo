@@ -82,8 +82,8 @@ contracts:
 
   # BiPoolManager — see config.multichain.mainnet.yaml for the full
   # rationale. Mirrored here so testnet codegen + handler bindings stay
-  # aligned with mainnet. Per-network address registered under each
-  # `networks:` entry below.
+  # aligned with mainnet. Per-chain address registered under each `chains:`
+  # entry below.
   - name: BiPoolManager
     abi_file_path: abis/BiPoolManager.json
     handler: src/EventHandlers.ts

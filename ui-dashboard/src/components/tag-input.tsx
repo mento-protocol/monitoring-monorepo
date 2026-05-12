@@ -95,17 +95,7 @@ export function TagInput({
 
   return (
     <div ref={containerRef} className="relative">
-      <div
-        role="combobox"
-        aria-expanded={showDropdown && filtered.length > 0}
-        aria-controls={
-          showDropdown && filtered.length > 0 ? listboxId : undefined
-        }
-        aria-haspopup="listbox"
-        aria-label={ariaLabelledBy ? undefined : "Add tag"}
-        aria-labelledby={ariaLabelledBy}
-        className="flex flex-wrap gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500"
-      >
+      <div className="flex flex-wrap gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500">
         {tags.map((tag) => (
           <span
             key={tag}
@@ -138,6 +128,13 @@ export function TagInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder={tags.length === 0 ? "Add tags…" : ""}
+          // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Keep combobox ownership on the focused input for aria-activedescendant.
+          role="combobox"
+          aria-expanded={showDropdown && filtered.length > 0}
+          aria-controls={
+            showDropdown && filtered.length > 0 ? listboxId : undefined
+          }
+          aria-haspopup="listbox"
           aria-label={ariaLabelledBy ? undefined : "Add tag"}
           aria-labelledby={ariaLabelledBy}
           aria-activedescendant={activeOptionId}

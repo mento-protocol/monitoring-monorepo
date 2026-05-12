@@ -94,12 +94,10 @@ export async function applyLiquidityPositionDelta({
 // visible in operations. See: Codex finding
 // https://chatgpt.com/codex/cloud/security/findings/bcfbd2e38c388191a52fb85205eb326d
 //
-// Note: contractRegister callbacks are a framework-level hook that Envio
-// invokes before the handler. The Envio test harness (processEvent) only
-// exercises the .handler() path, so this callback has no direct test
-// coverage — this is a framework limitation, not an oversight. We mitigate
-// by unit-testing `isKnownFeeToken` directly and asserting the callback is
-// registered via the handler-registry introspection tests.
+// Note: contractRegister callbacks are framework-level hooks that Envio invokes
+// before the event handler. The quarantined legacy integration tests did not
+// exercise this hook, so we mitigate by unit-testing `isKnownFeeToken` directly
+// and by asserting registration through handler-registry introspection tests.
 indexer.contractRegister(
   { contract: "FPMMFactory", event: "FPMMDeployed" },
   async ({ event, context }) => {

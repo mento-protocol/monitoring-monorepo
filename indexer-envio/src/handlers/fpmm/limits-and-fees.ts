@@ -208,8 +208,8 @@ indexer.onEvent(
   { contract: "FPMM", event: "RebalanceThresholdUpdated" },
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // Same preload-bail rationale as state-sync handlers: with
-    // `preload_handlers: true` we'd otherwise run `recordBreachTransition`
+    // Same preload-bail rationale as state-sync handlers: with v3 preload
+    // optimization we'd otherwise run `recordBreachTransition`
     // (inside `upsertPool`) twice per event.
     if (await maybePreloadPool(context, poolId)) return;
     const initial = await context.Pool.get(poolId);

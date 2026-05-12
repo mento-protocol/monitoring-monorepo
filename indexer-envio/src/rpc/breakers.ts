@@ -9,7 +9,7 @@
 // only need them during reprocessing / catch-up.
 //
 // Cache keys always include chainId so state from one chain can never bleed
-// into another in Envio's unordered_multichain_mode.
+// into another under v3's default unordered multichain indexing.
 // ---------------------------------------------------------------------------
 
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";

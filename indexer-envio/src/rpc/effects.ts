@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Envio Effect API wrappers for the 16 RPC fetchers used by handlers.
 //
-// Why effects: with `preload_handlers: true` (config.multichain.mainnet.yaml),
-// Envio runs each handler twice per event (preload + processing). Without the
+// Why effects: with v3 preload optimization enabled by default, Envio runs
+// each handler twice per event (preload + processing). Without the
 // Effect API, every `client.readContract` call inside the fetchers fires twice
 // and is never deduped or batched across concurrent handlers. Wrapping these
 // fetchers in `createEffect` gives us:
@@ -194,7 +194,7 @@ export const referenceRateFeedIDEffect = createEffect(
   },
 );
 
-// Output is nullable: with `preload_handlers: true` an effect that fabricated
+// Output is nullable: with v3 preload optimization, an effect that fabricated
 // `false` on a transient RPC blip during preload would memoize and persist
 // the wrong orientation — call sites must skip the assignment on null
 // and let the schema default ride until the next event re-fetches.

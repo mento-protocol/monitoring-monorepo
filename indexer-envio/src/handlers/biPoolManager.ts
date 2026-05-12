@@ -302,7 +302,7 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
-    // Preload phase: warm entity reads only. With `preload_handlers: true`
+    // Preload phase: warm entity reads only. With v3 preload optimization,
     // the same event runs twice (preload + processing); without this guard
     // the non-cached `poolExchangeEffect` would fire on both passes,
     // doubling RPC pressure exactly during the transient-RPC window the
