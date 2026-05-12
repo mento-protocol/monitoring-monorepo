@@ -29,12 +29,12 @@ export default defineConfig({
       timeout: 15_000,
     },
     {
-      command: [
-        `NEXT_PUBLIC_HASURA_URL=${fixtureUrl}/graphql`,
-        "NEXT_PUBLIC_BROWSER_TEST_FIXTURES=true",
-        "NEXT_TELEMETRY_DISABLED=1",
-        `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`,
-      ].join(" "),
+      command: `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`,
+      env: {
+        NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
+        NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
+        NEXT_TELEMETRY_DISABLED: "1",
+      },
       url: nextUrl,
       reuseExistingServer: false,
       timeout: 120_000,
