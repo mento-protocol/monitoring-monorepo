@@ -3,14 +3,8 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { formatUSD } from "@/lib/format";
-import {
-  poolName,
-  poolTvlUSD,
-  tokenSymbol,
-  type OracleRateMap,
-} from "@/lib/tokens";
-import type { Network } from "@/lib/networks";
-import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
+import { poolName, poolTvlUSD } from "@/lib/tokens";
+import { isVirtualPool, type TradingLimit } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -19,7 +13,6 @@ import {
   computeEffectiveStatus,
   computeHealthStatus,
   computePoolUptimePct,
-  pressureColorClass,
   resolveLimitStatus,
   uptimeColorClass,
 } from "@/lib/health";
@@ -27,297 +20,27 @@ import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { buildPoolDetailHref } from "@/lib/routing";
-import type { SortDir } from "@/lib/table-sort";
 import { useTableSort } from "@/lib/use-table-sort";
+import { formatFee, poolStrategies } from "./global-pools-table/formatting";
+import { LimitHeatmap } from "./global-pools-table/limit-heatmap";
+import {
+  GLOBAL_SORT_KEYS,
+  globalPoolKey,
+  sortGlobalPools,
+  type GlobalPoolEntry,
+  type GlobalSortKey,
+} from "./global-pools-table/sort";
+import { StrategyBadge } from "./global-pools-table/strategy-badge";
 
-/** A pool entry enriched with its originating network and oracle rates. */
-export type GlobalPoolEntry = {
-  pool: Pool;
-  network: Network;
-  rates: OracleRateMap;
-};
-
-type GlobalSortKey =
-  | "pool"
-  | "health"
-  | "uptime"
-  | "fee"
-  | "tvl"
-  | "tvlChangeWoW"
-  | "volume24h"
-  | "volume7d"
-  | "totalVolume";
-
-const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
-  "pool",
-  "health",
-  "uptime",
-  "fee",
-  "tvl",
-  "tvlChangeWoW",
-  "volume24h",
-  "volume7d",
-  "totalVolume",
-]);
-
-// Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
-const HEALTH_ORDER: Record<string, number> = {
-  "N/A": 0,
-  OK: 1,
-  WARN: 2,
-  WEEKEND: 3,
-  CRITICAL: 4,
-};
-
-/** Build a unique key for a pool entry so pools from different chains with the same ID don't collide. */
-export function globalPoolKey(entry: GlobalPoolEntry): string {
-  return `${entry.network.id}:${entry.pool.id}`;
-}
-
-export interface GlobalSortContext {
-  tvlByKey: Map<string, number | null>;
-  totalVolumeByKey: Map<string, number | null>;
-  volume24hByKey?: Map<string, number | null | undefined>;
-  volume7dByKey?: Map<string, number | null | undefined>;
-  tvlChangeWoWByKey?: Map<string, number | null>;
-}
-
-export function sortGlobalPools(
-  entries: GlobalPoolEntry[],
-  sortKey: GlobalSortKey,
-  sortDir: SortDir,
-  {
-    tvlByKey,
-    totalVolumeByKey,
-    volume24hByKey,
-    volume7dByKey,
-    tvlChangeWoWByKey,
-  }: GlobalSortContext,
-): GlobalPoolEntry[] {
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  return [...entries].sort((a, b) => {
-    const aKey = globalPoolKey(a);
-    const bKey = globalPoolKey(b);
-    let cmp = 0;
-    switch (sortKey) {
-      case "pool":
-        cmp = poolName(a.network, a.pool.token0, a.pool.token1).localeCompare(
-          poolName(b.network, b.pool.token0, b.pool.token1),
-        );
-        break;
-      case "health": {
-        const aH = computeEffectiveStatus(a.pool, a.network.chainId);
-        const bH = computeEffectiveStatus(b.pool, b.network.chainId);
-        cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
-        break;
-      }
-      case "uptime": {
-        // Unknown uptime (virtual pool, rollup unpopulated) sinks to the
-        // bottom regardless of direction — same pattern as volume columns.
-        const aUptime = computePoolUptimePct(a.pool);
-        const bUptime = computePoolUptimePct(b.pool);
-        if (aUptime == null && bUptime == null) return 0;
-        if (aUptime == null) return 1;
-        if (bUptime == null) return -1;
-        return sortDir === "asc" ? aUptime - bUptime : bUptime - aUptime;
-      }
-      case "fee": {
-        const aHas = hasFeeData(a.pool);
-        const bHas = hasFeeData(b.pool);
-        if (!aHas && !bHas) return 0;
-        if (!aHas) return 1;
-        if (!bHas) return -1;
-        const aFee = (a.pool.lpFee ?? 0) + (a.pool.protocolFee ?? 0);
-        const bFee = (b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0);
-        return sortDir === "asc" ? aFee - bFee : bFee - aFee;
-      }
-      case "tvl": {
-        // Untrusted pools (null) sink to the bottom regardless of direction —
-        // matches the volume / total-volume / WoW columns. Sentinel-mapping
-        // null to ±Infinity would put unknowns at the top of ascending order
-        // ahead of legitimate $0 pools (fail-open suggests "lowest"); the
-        // explicit-skip pattern keeps unknown rows last either way.
-        const aTvl = tvlByKey.get(aKey);
-        const bTvl = tvlByKey.get(bKey);
-        if (aTvl == null && bTvl == null) return 0;
-        if (aTvl == null) return 1;
-        if (bTvl == null) return -1;
-        return sortDir === "asc" ? aTvl - bTvl : bTvl - aTvl;
-      }
-      case "tvlChangeWoW": {
-        // Both error (null) and missing-data (undefined) sink regardless of direction.
-        const aW = tvlChangeWoWByKey?.get(aKey);
-        const bW = tvlChangeWoWByKey?.get(bKey);
-        const aMissing = aW == null;
-        const bMissing = bW == null;
-        if (aMissing && bMissing) return 0;
-        if (aMissing) return 1;
-        if (bMissing) return -1;
-        return sortDir === "asc" ? aW - bW : bW - aW;
-      }
-      case "volume24h": {
-        const aV = volume24hByKey?.get(aKey);
-        const bV = volume24hByKey?.get(bKey);
-        if (aV == null && bV == null) return 0;
-        if (aV == null) return 1;
-        if (bV == null) return -1;
-        return sortDir === "asc" ? aV - bV : bV - aV;
-      }
-      case "volume7d": {
-        const aV7 = volume7dByKey?.get(aKey);
-        const bV7 = volume7dByKey?.get(bKey);
-        if (aV7 == null && bV7 == null) return 0;
-        if (aV7 == null) return 1;
-        if (bV7 == null) return -1;
-        return sortDir === "asc" ? aV7 - bV7 : bV7 - aV7;
-      }
-      case "totalVolume": {
-        const aTV = totalVolumeByKey.get(aKey);
-        const bTV = totalVolumeByKey.get(bKey);
-        if (aTV == null && bTV == null) return 0;
-        if (aTV == null) return 1;
-        if (bTV == null) return -1;
-        return sortDir === "asc" ? aTV - bTV : bTV - aTV;
-      }
-    }
-    return sortDir === "asc" ? cmp : -cmp;
-  });
-}
+export type {
+  GlobalPoolEntry,
+  GlobalSortContext,
+} from "./global-pools-table/sort";
+export { globalPoolKey, sortGlobalPools } from "./global-pools-table/sort";
 
 /** Whether any network in the entry list has virtual pools (controls Type column visibility). */
 function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
-}
-
-// Compact 2×2 limit heatmap
-
-function LimitHeatmap({
-  limits,
-  network,
-  pool,
-}: {
-  limits: TradingLimit[];
-  network: Network;
-  pool: Pool;
-}) {
-  if (limits.length === 0)
-    return <span className="text-slate-600 text-xs">—</span>;
-
-  // Order by the pool's token0/token1 so heatmap rows match the displayed pair
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  const sorted = [...limits].sort((a, b) => {
-    const aIdx = a.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
-    const bIdx = b.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
-    return aIdx - bIdx;
-  });
-  const rows = sorted.map((tl) => {
-    const p0 = Number(tl.limitPressure0); // L0 = 5min
-    const p1 = Number(tl.limitPressure1); // L1 = 24h
-    const sym = tokenSymbol(network, tl.token);
-    return { sym, p0, p1 };
-  });
-
-  const tooltip = rows
-    .map(
-      (r) =>
-        `${r.sym}: 5m ${(r.p0 * 100).toFixed(1)}% · 24h ${(r.p1 * 100).toFixed(1)}%`,
-    )
-    .join("\n");
-
-  return (
-    /* eslint-disable jsx-a11y/no-noninteractive-tabindex */
-    // Focusable for keyboard tooltip access, not an interactive control
-    <span
-      className="inline-grid grid-cols-2 gap-px rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-      tabIndex={0}
-      role="group"
-      aria-label={tooltip.replace(/\n/g, "; ")}
-      title={tooltip}
-    >
-      {/* eslint-enable jsx-a11y/no-noninteractive-tabindex */}
-      {rows.map((r) => (
-        <span key={r.sym} className="contents">
-          <span
-            className={`block w-2 h-2 rounded-sm ${pressureColorClass(r.p0)}`}
-            aria-hidden="true"
-          />
-          <span
-            className={`block w-2 h-2 rounded-sm ${pressureColorClass(r.p1)}`}
-            aria-hidden="true"
-          />
-        </span>
-      ))}
-    </span>
-  );
-}
-
-// Strategy badges
-
-const STRATEGY_STYLES: Record<
-  string,
-  { bg: string; text: string; ring: string }
-> = {
-  Open: {
-    bg: "bg-purple-900/60",
-    text: "text-purple-300",
-    ring: "ring-purple-700/50",
-  },
-  Reserve: {
-    bg: "bg-blue-900/60",
-    text: "text-blue-300",
-    ring: "ring-blue-700/50",
-  },
-  CDP: {
-    bg: "bg-teal-900/60",
-    text: "text-teal-300",
-    ring: "ring-teal-700/50",
-  },
-};
-
-function StrategyBadge({ label }: { label: string }) {
-  const style = STRATEGY_STYLES[label] ?? STRATEGY_STYLES.Reserve;
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${style.bg} ${style.text} ${style.ring}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function poolStrategies(
-  isOls: boolean,
-  isCdp: boolean,
-  isReserve: boolean,
-): string[] {
-  // Precedence: OLS (indexer-tracked) > CDP > Reserve. All three require a
-  // positive signal — pools with a rebalancer whose RPC probe failed
-  // deliberately render no badge rather than misclassifying as Reserve.
-  // See `lib/strategy-detection.ts` for probe semantics.
-  if (isOls) return ["Open"];
-  if (isCdp) return ["CDP"];
-  if (isReserve) return ["Reserve"];
-  return [];
-}
-
-// Fee display
-
-function hasFeeData(pool: Pool): boolean {
-  if (pool.source?.includes("virtual")) return false;
-  if (pool.lpFee == null && pool.protocolFee == null) return false;
-  // Sentinel -1 means fees were never successfully fetched
-  if ((pool.lpFee ?? -1) < 0 || (pool.protocolFee ?? -1) < 0) return false;
-  return true;
-}
-
-function formatFee(pool: Pool): string {
-  if (!hasFeeData(pool)) return "—";
-  const total = (pool.lpFee ?? 0) + (pool.protocolFee ?? 0);
-  return `${(total / 100).toFixed(2)}%`;
 }
 
 // Table component
