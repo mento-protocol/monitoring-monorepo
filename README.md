@@ -93,6 +93,16 @@ hitting hosted Hasura/Envio. The agent quality gate installs Playwright
 Chromium before running it; for direct fresh-checkout runs, install it once with
 `pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`.
 
+### Targeted Mutation Baseline
+
+```bash
+pnpm dashboard:mutation
+```
+
+This runs the non-required StrykerJS baseline for the dashboard FX weekend logic.
+See [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope,
+runtime, score, and survivor classification.
+
 ## Environment Variables
 
 ### Indexer

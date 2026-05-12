@@ -30,6 +30,7 @@ pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
 pnpm test:browser  # Fixture-driven Playwright browser interaction tests
+pnpm test:mutation  # Targeted StrykerJS baseline for src/lib/weekend.ts
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
@@ -83,6 +84,10 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   (client code intentionally keeps spread+sort for older browser support) and
   `effect/no-event-handler` from the companion effect plugin (false-positives
   on debounced search and URL-state sync helpers).
+- **Silenced for local test harness entrypoints:** `knip/files` on
+  `tests/browser/fixtures/**`, which Playwright loads at runtime, and
+  `vitest.mutation.config.ts`, which Stryker loads by filename from
+  `stryker.config.mjs`.
 - **Silenced in `src/lib/graphql.ts` only:** `knip/exports` for the
   `HASURA_TIMEOUT_MS` backward-compat re-export. New imports still target
   `@/lib/hasura-timeout` directly so server code does not pull in SWR.

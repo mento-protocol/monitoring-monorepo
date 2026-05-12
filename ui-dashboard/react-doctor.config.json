@@ -24,7 +24,7 @@
         "rules": ["knip/files"]
       },
       {
-        "files": ["tests/browser/fixtures/**"],
+        "files": ["tests/browser/fixtures/**", "vitest.mutation.config.ts"],
         "rules": ["knip/files"]
       },
       {

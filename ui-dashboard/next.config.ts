@@ -10,6 +10,8 @@ import type { NextConfig } from "next";
 // - `vercel.live` is whitelisted so Vercel Live (preview comments toolbar)
 //   works on preview deployments; prod is unaffected since the toolbar only
 //   loads on Vercel previews.
+// - `va.vercel-scripts.com` is the Vercel Analytics script host used by
+//   `@vercel/analytics/next`.
 // - connect-src hosts: Hasura (indexer.hyperindex.xyz) for GraphQL queries,
 //   plus the RPC endpoints the bridge-redeem flow polls for tx receipts.
 //   Keep this list tight — any new external fetch needs a CSP update, and
@@ -51,6 +53,7 @@ const CSP_DIRECTIVES = [
     "'unsafe-inline'",
     ...browserTestScriptSrc,
     "https://vercel.live",
+    "https://va.vercel-scripts.com",
   ].join(" "),
   // Sentry's session-replay SDK spins up a Web Worker compiled from a
   // blob: URL. Browsers fall back from missing worker-src to script-src,
