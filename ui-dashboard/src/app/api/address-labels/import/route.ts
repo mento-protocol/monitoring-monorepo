@@ -14,9 +14,9 @@ import {
 // snapshot that now embeds forensic-report bodies (50KB cap × N reports +
 // labels overhead). 4MB ≈ 80 max-size reports + labels — comfortable
 // headroom against current usage (handful of investigations) and stays
-// inside Vercel's 4.5MB serverless body limit. If usage ever pushes past
-// this, the right fix is a server-side restore-from-Blob endpoint (no
-// body upload — pulls the snapshot by pathname). Tracked in BACKLOG.md.
+// inside Vercel's 4.5MB serverless body limit. Larger backup restores should
+// use `/api/address-labels/restore?pathname=...`, which pulls the private Blob
+// snapshot server-side instead of uploading the JSON body through this route.
 const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;
 
 /**

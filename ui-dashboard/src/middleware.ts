@@ -21,15 +21,15 @@ export default auth((req) => {
     return Response.redirect(signInUrl);
   }
 
-  // /backup and /migrate-flat authenticate via CRON_SECRET (or session) in
+  // /backup and /restore authenticate via CRON_SECRET (or session) in
   // the route handler itself, so middleware exempts them — otherwise the
-  // bearer-token path would 401 here before reaching `requireMigrationAuth`.
+  // bearer-token path would 401 here before reaching the route auth guard.
   // GET /api/address-labels is no longer a public endpoint (see the CSP
   // PR) — middleware enforces auth on every method now.
   const isProtectedApi =
     path.startsWith("/api/address-labels/") &&
     !path.startsWith("/api/address-labels/backup") &&
-    !path.startsWith("/api/address-labels/migrate-flat");
+    !path.startsWith("/api/address-labels/restore");
   const isLabelsRoot = path === "/api/address-labels";
   if (!isAuthorized && (isProtectedApi || isLabelsRoot)) {
     return new Response(JSON.stringify({ error: "Authentication required" }), {

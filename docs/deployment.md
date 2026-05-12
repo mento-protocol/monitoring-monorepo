@@ -95,7 +95,7 @@ All env vars are managed by Terraform (set for `production` and `preview` target
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.
 
-A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape on the restore path. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
+A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape for user-uploaded restores. For snapshots too large to upload through Vercel's request body limit, call `POST /api/address-labels/restore?pathname=<blob-pathname>` with either a workspace session or `Authorization: Bearer $CRON_SECRET`; this server-side Blob restore preserves report `authorEmail`, `createdAt`, `updatedAt`, `source`, and `version` metadata from trusted first-party backups. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
 
 ### Security Posture — Preview Deployments
 
