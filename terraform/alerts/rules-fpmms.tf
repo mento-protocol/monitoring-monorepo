@@ -329,7 +329,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — pool above 1% tolerance."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Deviation breach resolved — pool is back within tolerance."
+      resolved_summary = "Pool is back within tolerance."
     }
 
     labels = {
@@ -397,7 +397,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Deviation breach resolved — breach anchor cleared or ratio gauge recovered."
+      resolved_summary = "Breach anchor cleared or ratio gauge recovered."
     }
 
     labels = {
@@ -466,7 +466,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Deviation breach resolved — pool is back within the critical threshold."
+      resolved_summary = "Pool is back within the critical threshold."
       # Pre-rendered "8% above threshold". `Dev` query pre-computes
       # `(mento_pool_deviation_ratio - 1) * 100` in PromQL so the annotation
       # can use `printf "%.0f%%"` directly. We avoid `humanizePercentage`
@@ -629,7 +629,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Deviation breach resolved — breach anchor cleared or ratio gauge recovered below critical."
+      resolved_summary = "Breach anchor cleared or ratio gauge recovered below critical."
       # By construction the anchored rule fires when the deviation ratio
       # gauge is absent — so `$values.Dev` will almost always be empty and
       # this annotation will drop. Kept for symmetry with the magnitude-
@@ -869,7 +869,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     annotations = {
       summary          = "Rebalancer hasn't acted{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }} in {{ humanizeDuration $values.A.Value }}{{ end }} despite ongoing breach."
       resolved_title   = "Rebalancer healthy again"
-      resolved_summary = "Rebalancer stale condition resolved — the pool was rebalanced or the breach cleared."
+      resolved_summary = "The pool was rebalanced or the breach cleared."
       last_rebalance   = "{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}{{ humanizeDuration $values.A.Value }} ago{{ else if and $values.LastRebalancedAt (eq $values.LastRebalancedAt.Value 0.0) }}Never{{ end }}"
       root_cause       = local.deviation_critical_rebalance_reason_annotation
     }
