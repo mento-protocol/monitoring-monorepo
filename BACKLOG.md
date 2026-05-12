@@ -7,7 +7,9 @@ or tests.
 ## Thoughtworks Technology Radar Follow-Ups
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
-DORA metrics, CodeScene, and Dev Containers remain intentionally excluded.
+DORA metrics and Dev Containers remain intentionally excluded. CodeScene is covered
+through the OSS quality-check backlog item below rather than by adopting the
+commercial product.
 
 ### Browser-Based Component/Interaction Testing Pilot
 
@@ -56,6 +58,37 @@ weak assertions.
 
 Acceptance: finds at least one real assertion gap or gives high confidence on
 a critical module with acceptable manual/nightly runtime.
+
+### CodeScene-Equivalent OSS Quality Checks
+
+Why: CodeScene's useful signal is not the proprietary score itself; it is the
+combination of code-health smells, git-history hotspots, change coupling,
+ownership risk, duplication, and weak-test detection. We already have strong
+Trunk/CI coverage for syntax, formatting, security, supply chain, typechecking,
+and tests. This item adds the missing CodeScene-like signals with open-source
+tooling, staged so noisy metrics stay advisory until proven useful.
+
+Current baseline:
+
+- Trunk already gates `checkov`, `eslint`, `prettier`, `markdownlint`, `git-diff-check`, `trufflehog`, `osv-scanner`, `codespell`, `actionlint`, and `yamllint`.
+- Pre-push hooks run `trunk fmt --all`, `trunk check --all`, package typechecks, and dashboard/bridge tests.
+- CI runs package-scoped typecheck + coverage, Codecov upload, `pnpm audit --audit-level=high`, Terraform validation/fmt, and pinned GitHub Actions.
+- ESLint already enforces unused imports and a 1,000-line hard file cap; UI also has React/Next/a11y rules.
+
+Lightweight plan:
+
+- [ ] Finish the known `indexer-envio` ESLint cleanup and enable the normal `@eslint/js` + `typescript-eslint` recommended baseline there.
+- [ ] Add code-health-style ESLint budgets across packages: cyclomatic complexity, max nesting depth, max params, max lines per function, and optionally `eslint-plugin-sonarjs` for cognitive complexity / suspicious patterns.
+- [ ] Add `jscpd` for duplication detection, initially advisory or with conservative thresholds to avoid blocking on historical copy-paste.
+- [ ] Add `knip` for unused files, exports, and dependency hygiene; scope ignores explicitly for generated/Envio/test fixtures.
+- [ ] Add `dependency-cruiser` to enforce package/layer boundaries and catch cycles or runtime-invalid imports between `shared-config`, `ui-dashboard`, `metrics-bridge`, and `indexer-envio`.
+- [ ] Add a non-blocking CodeScene-lite history report script over `git log --numstat`: top churn × LOC hotspots, top change-coupled file pairs, files touched by many contributors, and weekly risk deltas. Keep this as an artifact/comment/report, not a merge gate.
+- [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
+- [ ] Document which signals are blocking vs advisory in `AGENTS.md` and the PR handoff checklist once the tool mix is validated.
+
+Acceptance: the first implementation PR adds at least one blocking low-noise
+quality gate and one advisory CodeScene-like report, records baseline findings,
+and avoids adding another dashboard nobody reads.
 
 ## Virtual Pool Metrics
 
