@@ -484,6 +484,10 @@ run_gate "ui-dashboard/stryker.config.mjs"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
+run_gate "ui-dashboard/vitest.mutation.config.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
+assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
+
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 
