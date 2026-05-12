@@ -274,6 +274,15 @@ locals {
     },
   ]
 
+  # Rebalancer liveness/effectiveness alerts only render `rebalance_reason`.
+  # Keep their annotation-only data to the blocked-reason + reserve-balance
+  # subset so unused deviation/reserve-share queries cannot add eval cost or
+  # widen the NoData surface.
+  deviation_rebalancer_annotation_queries = [
+    for query in local.deviation_critical_annotation_queries : query
+    if contains(["B", "ResUSDC", "ResUSDT", "ResAxlUSDC"], query.ref_id)
+  ]
+
   # ── Oracle Jump Critical annotation-only data sources ─────────────────────
   # Annotation queries for the `Oracle Jump Far Above Swap Fee` rule, fed
   # into the rule's `dynamic "data"` block. Same pattern as

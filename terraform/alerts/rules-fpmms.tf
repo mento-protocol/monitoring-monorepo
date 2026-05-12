@@ -932,7 +932,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     dynamic "data" {
-      for_each = local.deviation_critical_annotation_queries
+      for_each = local.deviation_rebalancer_annotation_queries
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
@@ -1086,7 +1086,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     dynamic "data" {
-      for_each = local.deviation_critical_annotation_queries
+      for_each = local.deviation_rebalancer_annotation_queries
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
