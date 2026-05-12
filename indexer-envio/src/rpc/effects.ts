@@ -194,15 +194,29 @@ export const referenceRateFeedIDEffect = createEffect(
   },
 );
 
-// Output is nullable: with v3 preload optimization, an effect that fabricated
-// `false` on a transient RPC blip during preload would memoize and persist
-// the wrong orientation — call sites must skip the assignment on null
-// and let the schema default ride until the next event re-fetches.
+const INVERT_RATE_FEED_UNKNOWN = -1;
+const INVERT_RATE_FEED_FALSE = 0;
+const INVERT_RATE_FEED_TRUE = 1;
+
+export function decodeInvertRateFeedEffectResult(
+  value: number,
+): boolean | null {
+  if (value === INVERT_RATE_FEED_UNKNOWN) return null;
+  if (value === INVERT_RATE_FEED_FALSE) return false;
+  if (value === INVERT_RATE_FEED_TRUE) return true;
+  throw new Error(`[invertRateFeedEffect] Unexpected encoded value ${value}`);
+}
+
+// Keep the cached output integer-encoded. Hosted Envio v3 rejects cached
+// nullable boolean writes for this effect (`boolean` -> `jsonb[]` cast), while
+// nullable integer effects are used elsewhere successfully. The sentinel keeps
+// the same call-site semantics: null means transient RPC miss, so skip writes
+// and retry later.
 export const invertRateFeedEffect = createEffect(
   {
     name: "invertRateFeed",
     input: { chainId: S.int32, poolAddress: S.string },
-    output: S.nullable(S.boolean),
+    output: S.int32,
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
@@ -214,9 +228,9 @@ export const invertRateFeedEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return null;
+      return INVERT_RATE_FEED_UNKNOWN;
     }
-    return result;
+    return result ? INVERT_RATE_FEED_TRUE : INVERT_RATE_FEED_FALSE;
   },
 );
 

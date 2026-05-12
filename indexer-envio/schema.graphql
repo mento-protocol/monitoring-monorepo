@@ -159,13 +159,13 @@ type Pool {
   rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
   # Linkage to the underlying v2 BiPoolManager exchange for VirtualPools.
   # Bytes32 hex (no `0x{chainId}-` prefix — `BiPoolExchange.id` is namespaced).
-  # Null for FPMM pools and for VPs we couldn't resolve at deploy time.
+  # Empty string for FPMM pools and for VPs we couldn't resolve at deploy time.
   # Set once at VirtualPoolDeployed via bytecode pattern extraction (the
   # exchangeId is an immutable PUSH32 in the swap() preamble).
   # Indexed because `BiPoolManager.ExchangeCreated` does a reverse `getWhere`
   # to pair pre-existing VP wrappers with their underlying exchange, and the
   # dashboard's pool-detail GraphQL query joins Pool → BiPoolExchange on it.
-  wrappedExchangeId: String @index
+  wrappedExchangeId: String! @index
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!

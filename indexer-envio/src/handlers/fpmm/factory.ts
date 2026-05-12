@@ -13,6 +13,7 @@ import {
 import { parseDecimalsPair } from "../../priceDifference.js";
 import {
   compactFees,
+  decodeInvertRateFeedEffectResult,
   feesEffect,
   invertRateFeedEffect,
   numReportersEffect,
@@ -152,7 +153,7 @@ indexer.onEvent(
       rebalanceThresholds,
       dec0Raw,
       dec1Raw,
-      invertRateFeed,
+      invertRateFeedRaw,
       fees,
     ] = await Promise.all([
       context.effect(referenceRateFeedIDEffect, {
@@ -191,6 +192,7 @@ indexer.onEvent(
       }),
     ]);
     const tokenDecimals = parseDecimalsPair(dec0Raw, dec1Raw);
+    const invertRateFeed = decodeInvertRateFeedEffectResult(invertRateFeedRaw);
 
     if (rateFeedID) {
       // Seed oracleExpiry and oracleNumReporters at pool creation so oracle

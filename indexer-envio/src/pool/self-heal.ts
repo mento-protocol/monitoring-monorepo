@@ -7,6 +7,7 @@ import {
   scalingFactorToDecimals,
 } from "../priceDifference.js";
 import {
+  decodeInvertRateFeedEffectResult,
   invertRateFeedEffect,
   poolExchangeEffect,
   rebalanceThresholdsEffect,
@@ -43,10 +44,11 @@ export async function selfHealInvertRateFeed(
     chainId: pool.chainId,
     poolAddress: poolAddr,
   });
-  if (invert === null) return pool;
+  const decoded = decodeInvertRateFeedEffectResult(invert);
+  if (decoded === null) return pool;
   return {
     ...pool,
-    invertRateFeed: invert,
+    invertRateFeed: decoded,
     invertRateFeedKnown: true,
   };
 }
