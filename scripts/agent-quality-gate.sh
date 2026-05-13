@@ -216,6 +216,14 @@ add_command() {
   fi
 }
 
+prepend_command() {
+  local command="$1"
+  local reason="$2"
+  if ! has_quality_command "$command"; then
+    quality_commands=("${command}|${reason}" "${quality_commands[@]+"${quality_commands[@]}"}")
+  fi
+}
+
 has_checklist() {
   local checklist="$1"
   local entry
@@ -464,6 +472,23 @@ add_terraform_validate_commands() {
   add_command "terraform -chdir=${module} validate -no-color" "$reason"
 }
 
+changed_path_args() {
+  local path
+  local args=()
+  while IFS= read -r path; do
+    args+=("$(quote_path "$path")")
+  done < "$changed_paths_file"
+  printf '%s' "${args[*]}"
+}
+
+add_trunk_check_command() {
+  if [[ ${#surfaces[@]} -eq 1 && "${surfaces[0]}" == "docs" ]]; then
+    prepend_command "./tools/trunk check $(changed_path_args)" "docs-only changes should pass targeted Trunk checks"
+  else
+    prepend_command "./tools/trunk check --all" "changed files should pass the same full-repo Trunk scope as CI"
+  fi
+}
+
 sort_codegen_commands() {
   local sorted=()
   local known_command
@@ -505,8 +530,6 @@ sort_codegen_commands() {
     codegen_commands+=("$entry")
   done
 }
-
-add_command "./tools/trunk check --all" "changed files should pass the same full-repo Trunk scope as CI"
 
 while IFS= read -r path; do
   case "$path" in
@@ -553,6 +576,14 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
+    ui-dashboard/scripts/*.sh)
+      add_surface "ui-dashboard"
+      case "$path" in
+        ui-dashboard/scripts/vercel-ignore-build.sh|ui-dashboard/scripts/vercel-ignore-build.test.sh)
+          add_command "bash ui-dashboard/scripts/vercel-ignore-build.test.sh" "Vercel ignore build script changed"
+          ;;
+      esac
+      ;;
     ui-dashboard/*)
       add_surface "ui-dashboard"
       add_dashboard_quality_commands "ui-dashboard changed"
@@ -753,6 +784,7 @@ while IFS= read -r path; do
   esac
 done < "$changed_paths_file"
 
+add_trunk_check_command
 sort_codegen_commands
 
 echo "Agent quality gate"
