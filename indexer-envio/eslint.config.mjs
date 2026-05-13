@@ -37,6 +37,9 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-return": "off",
+      // Generic Trunk CI runs before Envio codegen. Without .envio/types.d.ts,
+      // imported entity types degrade to parser error-any and trip this rule.
+      "@typescript-eslint/no-redundant-type-constituents": "off",
     },
   },
   {
