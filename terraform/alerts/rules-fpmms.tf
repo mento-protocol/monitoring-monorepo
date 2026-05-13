@@ -329,7 +329,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This warning stopped firing. The deviation state-change notification carries the exact reason."
+      resolved_summary = "Warning stopped firing. The pool recovered, escalated to critical, moved to data-gap coverage, or entered FX-weekend suppression."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -436,7 +436,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This data-gap warning stopped firing. The deviation state-change notification carries the exact reason."
+      resolved_summary = "Data-gap warning stopped firing. Ratio data returned, the pool recovered, it escalated to critical, or FX-weekend suppression started."
     }
 
     labels = {
@@ -505,7 +505,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This critical alert stopped firing. The deviation state-change notification carries the exact reason."
+      resolved_summary = "Critical alert stopped firing. The pool recovered, de-escalated to warning, moved to data-gap coverage, or entered FX-weekend suppression."
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -659,7 +659,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This data-gap critical alert stopped firing. The deviation state-change notification carries the exact reason."
+      resolved_summary = "Data-gap critical alert stopped firing. Ratio data returned, the pool recovered, de-escalated to warning, or FX-weekend suppression started."
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line

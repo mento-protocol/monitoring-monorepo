@@ -5,7 +5,8 @@ import {
 import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
 import type { PoolRow } from "./types.js";
 
-export const DEVIATION_CRITICAL_SUPPRESSION_SECONDS = 3_780;
+export const DEVIATION_WARNING_PENDING_SECONDS = 900;
+export const DEVIATION_CRITICAL_FIRING_SECONDS = 3_660;
 export const DEVIATION_TRANSITION_ACTIVE_SECONDS = 180;
 
 export type DeviationAlertState =
@@ -149,7 +150,7 @@ export function classifyDeviationAlertState(
     const ageSeconds = nowSeconds - breachStartedAt;
     return {
       state:
-        ageSeconds > DEVIATION_CRITICAL_SUPPRESSION_SECONDS
+        ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS
           ? "ratio_missing_critical"
           : "ratio_missing_warning",
       breachStartedAt,
@@ -165,7 +166,7 @@ export function classifyDeviationAlertState(
     openBreachPeakRatio(pool) > DEVIATION_CRITICAL_RATIO;
   const criticalAge =
     breachActive &&
-    nowSeconds - breachStartedAt > DEVIATION_CRITICAL_SUPPRESSION_SECONDS;
+    nowSeconds - breachStartedAt > DEVIATION_CRITICAL_FIRING_SECONDS;
 
   return {
     state: criticalMagnitude && criticalAge ? "critical" : "warning",
@@ -200,6 +201,46 @@ function transitionReason(
   }
   if (from === "ok") return "breach_started";
   return "state_changed";
+}
+
+function alertCouldHaveFired(
+  snapshot: StateSnapshot,
+  nowSeconds: number,
+): boolean {
+  const anchor = snapshot.breachStartedAt ?? snapshot.enteredAt;
+  const ageSeconds = nowSeconds - anchor;
+  if (
+    snapshot.state === "warning" ||
+    snapshot.state === "ratio_missing_warning"
+  ) {
+    return ageSeconds >= DEVIATION_WARNING_PENDING_SECONDS;
+  }
+  if (
+    snapshot.state === "critical" ||
+    snapshot.state === "ratio_missing_critical"
+  ) {
+    return ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS;
+  }
+  return false;
+}
+
+function shouldRecordTransition(
+  previous: StateSnapshot,
+  current: StateSnapshot,
+  nowSeconds: number,
+): boolean {
+  const reason = transitionReason(previous.state, current.state);
+  if (
+    reason === "breach_started" ||
+    reason === "fx_weekend_reopened" ||
+    reason === "state_changed"
+  ) {
+    return false;
+  }
+  return (
+    alertCouldHaveFired(previous, nowSeconds) ||
+    alertCouldHaveFired(current, nowSeconds)
+  );
 }
 
 function transitionKey(poolId: string, transition: DeviationAlertTransition) {
@@ -264,7 +305,11 @@ export function observeDeviationAlertState(
   };
 
   const newTransitions: DeviationAlertTransition[] = [];
-  if (previous && previous.state !== current.state) {
+  if (
+    previous &&
+    previous.state !== current.state &&
+    shouldRecordTransition(previous, current, nowSeconds)
+  ) {
     const transition = buildTransition(previous, current, nowSeconds);
     recentTransitions.set(transitionKey(pool.id, transition), transition);
     newTransitions.push(transition);

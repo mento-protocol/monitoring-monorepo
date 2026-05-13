@@ -256,7 +256,45 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
-  it("records warning to critical escalation when the suppression boundary is crossed", async () => {
+  it("does not emit a recovery transition for a warning breach that never fired", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713200600);
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transition_active",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("records warning to critical escalation when the critical alert can fire", async () => {
     updateMetrics(
       [
         makePool({
@@ -277,7 +315,7 @@ describe("updateMetrics", () => {
           currentOpenBreachEntryThreshold: 10000,
         }),
       ],
-      1713203900,
+      1713203661,
     );
 
     expect(
@@ -390,7 +428,7 @@ describe("updateMetrics", () => {
           deviationBreachStartedAt: "1713200000",
         }),
       ],
-      1713200300,
+      1713200000,
     );
     updateMetrics(
       [
@@ -399,7 +437,7 @@ describe("updateMetrics", () => {
           deviationBreachStartedAt: "1713200000",
         }),
       ],
-      1713200600,
+      1713200960,
     );
     updateMetrics(
       [
@@ -408,7 +446,7 @@ describe("updateMetrics", () => {
           deviationBreachStartedAt: "1713200000",
         }),
       ],
-      1713200900,
+      1713201020,
     );
 
     expect(
