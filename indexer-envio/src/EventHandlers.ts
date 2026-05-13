@@ -51,6 +51,8 @@ export {
   _clearMockERC20Decimals,
   _setMockTokenDecimalsScaling,
   _clearMockTokenDecimalsScaling,
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
   _setMockReportExpiry,

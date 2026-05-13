@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import generated from "envio";
+import {
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
   _setMockBreakerKind,
   _setMockBreakerDefaults,
@@ -8,91 +13,13 @@ import {
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 
-type MockDb = {
-  entities: {
-    Breaker: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    BreakerConfig: {
-      get: (id: string) => unknown;
-      set: (e: unknown) => MockDb;
-    };
-    BreakerTripEvent: { get: (id: string) => unknown };
-    [key: string]: unknown;
-  };
-};
+type MockDb = MockDbWith<{
+  Breaker: WritableEntity;
+  BreakerConfig: WritableEntity;
+  BreakerTripEvent: EntityReader;
+}>;
 
-type EventProcessor<E> = {
-  createMockEvent: (args: E) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type MockEventData = {
-  chainId: number;
-  logIndex: number;
-  srcAddress: string;
-  block: { number: number; timestamp: number };
-};
-
-type StatusArgs = {
-  breaker: string;
-  rateFeedID: string;
-  status: boolean;
-  mockEventData: MockEventData;
-};
-
-type TrippedArgs = {
-  breaker: string;
-  rateFeedID: string;
-  mockEventData: MockEventData;
-};
-
-type ResetArgs = {
-  rateFeedID: string;
-  breaker: string;
-  mockEventData: MockEventData;
-};
-
-type EMAResetArgs = {
-  rateFeedID: string;
-  mockEventData: MockEventData;
-};
-
-type RemovedArgs = {
-  breaker: string;
-  mockEventData: MockEventData;
-};
-
-type TradingModeArgs = {
-  rateFeedID: string;
-  tradingMode: bigint;
-  mockEventData: MockEventData;
-};
-
-type MedianUpdatedArgs = {
-  token: string;
-  value: bigint;
-  mockEventData: MockEventData;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    BreakerBox: {
-      BreakerStatusUpdated: EventProcessor<StatusArgs>;
-      BreakerTripped: EventProcessor<TrippedArgs>;
-      ResetSuccessful: EventProcessor<ResetArgs>;
-      BreakerRemoved: EventProcessor<RemovedArgs>;
-      TradingModeUpdated: EventProcessor<TradingModeArgs>;
-    };
-    MedianDeltaBreaker: {
-      MedianRateEMAReset: EventProcessor<EMAResetArgs>;
-    };
-    SortedOracles: {
-      MedianUpdated: EventProcessor<MedianUpdatedArgs>;
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, BreakerBox, MedianDeltaBreaker, SortedOracles } = TestHelpers;
 
 const CHAIN_ID = 42220;

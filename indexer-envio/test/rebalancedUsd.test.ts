@@ -1,6 +1,15 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import {
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type MockEventData,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
+import {
+  createMockEventData,
+  seedFpmmPoolFixture,
+} from "./helpers/eventFixtures.js";
 import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
@@ -12,54 +21,12 @@ import {
   _clearMockRebalanceThresholds,
 } from "../src/rpc.ts";
 
-type MockDb = {
-  entities: {
-    Pool: {
-      get: (id: string) => unknown;
-      set: (e: unknown) => MockDb;
-    };
-    RebalanceEvent: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
+  RebalanceEvent: EntityReader;
+}>;
 
-type EventProcessor<E> = {
-  createMockEvent: (args: E) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type MockEventData = {
-  chainId: number;
-  logIndex: number;
-  srcAddress: string;
-  block: { number: number; timestamp: number };
-  transaction?: { hash?: string; from?: string };
-};
-
-type RebalancedArgs = {
-  sender: string;
-  priceDifferenceBefore: bigint;
-  priceDifferenceAfter: bigint;
-  mockEventData: MockEventData;
-};
-
-type DeployedArgs = {
-  token0: string;
-  token1: string;
-  fpmmProxy: string;
-  fpmmImplementation: string;
-  mockEventData: MockEventData;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: { FPMMDeployed: EventProcessor<DeployedArgs> };
-    FPMM: { Rebalanced: EventProcessor<RebalancedArgs> };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 // Real Celo mainnet addresses — resolvable via KNOWN_TOKEN_META so
@@ -73,13 +40,14 @@ const STRATEGY = "0x0000000000000000000000000000000000000099";
 const TX_FROM = "0x000000000000000000000000000000000000ca11";
 
 function rebalancedEventData(blockNumber: number, logIndex = 5): MockEventData {
-  return {
+  return createMockEventData({
     chainId: CHAIN_CELO,
     logIndex,
     srcAddress: POOL,
-    block: { number: blockNumber, timestamp: 1_700_010_000 },
+    blockNumber,
+    blockTimestamp: 1_700_010_000,
     transaction: { hash: `0x${"ab".repeat(32)}`, from: TX_FROM },
-  };
+  });
 }
 
 async function seedRebalanceablePool(
@@ -94,21 +62,13 @@ async function seedRebalanceablePool(
     token1Decimals?: number;
   },
 ): Promise<MockDb> {
-  const deploy = FPMMFactory.FPMMDeployed.createMockEvent({
+  mockDb = await seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     token0: options.token0 ?? USDM,
     token1: options.token1 ?? CELO,
-    fpmmProxy: POOL,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: CHAIN_CELO,
-      logIndex: 0,
-      srcAddress: FACTORY,
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
-  });
-  mockDb = await FPMMFactory.FPMMDeployed.processEvent({
-    event: deploy,
-    mockDb,
+    poolAddress: POOL,
+    factoryAddress: FACTORY,
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
 
   const seeded = mockDb.entities.Pool.get(makePoolId(CHAIN_CELO, POOL)) as
@@ -121,6 +81,7 @@ async function seedRebalanceablePool(
     token1: options.token1 ?? CELO,
     token0Decimals: options.token0Decimals ?? 18,
     token1Decimals: options.token1Decimals ?? 18,
+    tokenDecimalsKnown: true,
     reserves0: options.reserves0,
     reserves1: options.reserves1,
     rebalanceReward: options.rebalanceReward,
@@ -142,7 +103,7 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     _setMockRebalanceThresholds(CHAIN_CELO, POOL, { above: 100, below: 100 });
   });
 
-  after(() => {
+  afterAll(() => {
     _clearMockReserves();
     _clearMockRebalancingStates();
     _clearMockRebalanceIncentivesAtBlock();
@@ -150,7 +111,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("stamps amount deltas + USD fields from block-scoped incentive read", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     // Pool reserves AFTER the rebalance: pool received 1000 USDM, gave away 500 CELO.
     mockDb = await seedRebalanceablePool(mockDb, {
@@ -198,7 +158,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("short-circuits the incentive RPC when Pool.rebalanceReward = -2 sentinel", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: -2, // getter missing on this contract
@@ -234,7 +193,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("stamps rewardUsd = '' when block-scoped incentive RPC fails (preserves notional, no fallback)", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 50, // NOT -2 — handler will attempt the RPC
@@ -281,7 +239,6 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
   });
 
   it("zero deltas (RPC fallback for pre-reserves) → '' sentinel for both USD fields", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
       rebalanceReward: 25,

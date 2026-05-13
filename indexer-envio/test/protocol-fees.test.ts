@@ -1,6 +1,14 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "generated";
+import {
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
+import {
+  createMockEventData,
+  seedFpmmPoolFixture,
+} from "./helpers/eventFixtures.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -24,58 +32,10 @@ const pid = (addr: string): string => makePoolId(42220, addr);
 // Types & helpers
 // ---------------------------------------------------------------------------
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    ProtocolFeeTransfer: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    ERC20FeeToken: {
-      Transfer: {
-        createMockEvent: (args: {
-          from?: string;
-          to?: string;
-          value?: bigint;
-          mockEventData?: {
-            chainId?: number;
-            srcAddress?: string;
-            logIndex?: number;
-            block?: { number?: number; timestamp?: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-    FPMMFactory: {
-      FPMMDeployed: {
-        createMockEvent: (args: {
-          token0: string;
-          token1: string;
-          fpmmProxy: string;
-          fpmmImplementation: string;
-          mockEventData: {
-            chainId: number;
-            logIndex: number;
-            srcAddress: string;
-            block: { number: number; timestamp: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-  };
-};
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
+  ProtocolFeeTransfer: EntityReader;
+}>;
 
 type FeeTokenMetaEffectRuntime = {
   handler: (args: {
@@ -92,7 +52,7 @@ type FeeTokenMetaEffectRuntime = {
   }) => Promise<{ symbol: string; decimals: number }>;
 };
 
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
 const feeTokenMetaEffectRuntime =
   feeTokenMetaEffect as unknown as FeeTokenMetaEffectRuntime;
@@ -126,19 +86,15 @@ const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000042";
  */
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   _setMockRebalanceThresholds(42220, POOL_ADDRESS, { above: 100, below: 100 });
-  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+  return seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     token0: TOKEN_ADDRESS,
     token1: "0x0000000000000000000000000000000000000043",
-    fpmmProxy: POOL_ADDRESS,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: 42220,
-      logIndex: 1,
-      srcAddress: "0x00000000000000000000000000000000000000cc",
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
+    poolAddress: POOL_ADDRESS,
+    logIndex: 1,
+    factoryAddress: "0x00000000000000000000000000000000000000cc",
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
-  return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 }
 
 function createTransferEvent(overrides: {
@@ -154,15 +110,13 @@ function createTransferEvent(overrides: {
     from: overrides.from ?? POOL_ADDRESS,
     to: overrides.to ?? YIELD_SPLIT,
     value: overrides.value ?? BigInt("1000000000000000000"), // 1e18
-    mockEventData: {
+    mockEventData: createMockEventData({
       chainId: 42220,
       srcAddress: overrides.srcAddress ?? TOKEN_ADDRESS,
       logIndex: overrides.logIndex ?? 10,
-      block: {
-        number: overrides.blockNumber ?? 500,
-        timestamp: overrides.blockTimestamp ?? 1_700_100_000,
-      },
-    },
+      blockNumber: overrides.blockNumber ?? 500,
+      blockTimestamp: overrides.blockTimestamp ?? 1_700_100_000,
+    }),
   });
 }
 
@@ -176,7 +130,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("persists a ProtocolFeeTransfer when sender is a known FPMM pool", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
 
@@ -196,7 +149,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("skips transfers from non-pool senders", async function () {
-    this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     // Seed the FPMM pool so the handler has a real DB, but send from a
     // different address that is NOT a pool.
@@ -218,7 +170,6 @@ describe("ERC20FeeToken.Transfer handler", () => {
   });
 
   it("skips transfers when no pool exists at all", async function () {
-    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     // No pools seeded — completely empty DB.
 
@@ -249,7 +200,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("stores UNKNOWN when RPC fails on first transfer", async function () {
-    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -271,7 +221,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("stores resolved symbol when RPC succeeds", async function () {
-    this.timeout(15_000);
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -293,7 +242,6 @@ describe("UNKNOWN backfill behavior", () => {
   });
 
   it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async function () {
-    this.timeout(15_000);
     // First transfer: fails
     _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
     let mockDb = MockDb.createMockDb();

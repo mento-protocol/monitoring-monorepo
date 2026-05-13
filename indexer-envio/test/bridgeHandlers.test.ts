@@ -10,98 +10,68 @@
  * MockDb, then assert on the resulting entity rows.
  */
 import { strict as assert } from "assert";
-import generated from "envio";
+import {
+  indexerTestHelpers,
+  type EntityCollection,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
 import { findByNttManager } from "../src/wormhole/nttAddresses.js";
 
 // Side-effect: register handlers with Envio.
 import "../src/EventHandlers.ts";
 
-type EntityGet<T> = { get: (id: string) => T | undefined };
-type MockDb = {
-  entities: {
-    BridgeTransfer: EntityGet<{
-      id: string;
-      status: string;
-      attestationCount: number;
-      amount?: bigint;
-      sentBlock?: bigint;
-      deliveredBlock?: bigint;
-      sourceChainId?: number;
-      destChainId?: number;
-      sender?: string;
-      tokenSymbol: string;
-      tokenAddress: string;
-    }>;
-    WormholeTransferDetail: EntityGet<{
-      id: string;
-      digest: string;
-      transceiverDigest?: string;
-      msgSequence?: bigint;
-      sourceWormholeChainId?: number;
-      inboundQueuedTimestamp?: bigint;
-    }>;
-    WormholeNttManager: EntityGet<{ id: string; tokenSymbol: string }>;
-    WormholeTransferPending: EntityGet<{ id: string; amount: bigint }>;
-    WormholeDestPending: EntityGet<{
-      id: string;
-      chainId: number;
-      txHash: string;
-      transceiverDigest: string;
-      sourceChainId: number;
-      sourceTransceiver: string;
-      sourceWormholeChainId: number;
-      msgSequence: bigint;
-      destTransceiver: string;
-    }>;
-    BridgeDailySnapshot: {
-      get: (id: string) =>
-        | {
-            id: string;
-            sentCount: number;
-            deliveredCount: number;
-            sentVolume: bigint;
-            deliveredVolume: bigint;
-          }
-        | undefined;
-      getAll: () => Array<{
-        id: string;
-        sentCount: number;
-        deliveredCount: number;
-        sentVolume: bigint;
-        deliveredVolume: bigint;
-      }>;
-    };
-    BridgeBridger: EntityGet<{
-      id: string;
-      sender: string;
-      totalSentCount: number;
-    }>;
-    BridgeAttestation: EntityGet<{ id: string; transferId: string }>;
-  };
-};
+type MockDb = MockDbWith<{
+  BridgeTransfer: EntityReader<{
+    id: string;
+    status: string;
+    attestationCount: number;
+    amount?: bigint;
+    sentBlock?: bigint;
+    deliveredBlock?: bigint;
+    sourceChainId?: number;
+    destChainId?: number;
+    sender?: string;
+    tokenSymbol: string;
+    tokenAddress: string;
+  }>;
+  WormholeTransferDetail: EntityReader<{
+    id: string;
+    digest: string;
+    transceiverDigest?: string;
+    msgSequence?: bigint;
+    sourceWormholeChainId?: number;
+    inboundQueuedTimestamp?: bigint;
+  }>;
+  WormholeNttManager: EntityReader<{ id: string; tokenSymbol: string }>;
+  WormholeTransferPending: EntityReader<{ id: string; amount: bigint }>;
+  WormholeDestPending: EntityReader<{
+    id: string;
+    chainId: number;
+    txHash: string;
+    transceiverDigest: string;
+    sourceChainId: number;
+    sourceTransceiver: string;
+    sourceWormholeChainId: number;
+    msgSequence: bigint;
+    destTransceiver: string;
+  }>;
+  BridgeDailySnapshot: EntityCollection<{
+    id: string;
+    sentCount: number;
+    deliveredCount: number;
+    sentVolume: bigint;
+    deliveredVolume: bigint;
+  }>;
+  BridgeBridger: EntityReader<{
+    id: string;
+    sender: string;
+    totalSentCount: number;
+  }>;
+  BridgeAttestation: EntityReader<{ id: string; transferId: string }>;
+}>;
 
-type EventProcessor = {
-  createMockEvent: (args: unknown) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    WormholeNttManager: {
-      TransferSentDetailed: EventProcessor;
-      TransferSentDigest: EventProcessor;
-      TransferRedeemed: EventProcessor;
-      MessageAttestedTo: EventProcessor;
-      InboundTransferQueued: EventProcessor;
-    };
-    WormholeTransceiver: {
-      ReceivedMessage: EventProcessor;
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const {
   MockDb,
   WormholeNttManager: TestWormholeNttManager,

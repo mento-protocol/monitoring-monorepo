@@ -1,6 +1,9 @@
-/// <reference types="mocha" />
-import { assert } from "chai";
-import generated from "generated";
+import { assert } from "vitest";
+import {
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -8,48 +11,17 @@ import {
 import { dayBucket, makePoolId } from "../src/helpers.ts";
 import { getContractAddress } from "../src/contractAddresses.ts";
 
-// MockDb shape is hand-typed per the existing pattern in dailySnapshot.test.ts —
-// generated types aren't exported in a stable form for direct import.
-type MockDb = {
-  entities: {
-    BrokerSwapEvent: {
-      get: (id: string) => unknown;
-    };
-    BrokerDailySnapshot: {
-      get: (id: string) => unknown;
-    };
-    BrokerExchangeDailySnapshot: {
-      get: (id: string) => unknown;
-    };
-    BrokerTraderDailySnapshot: {
-      get: (id: string) => unknown;
-    };
-    BrokerAggregatorDailySnapshot: {
-      get: (id: string) => unknown;
-    };
-    BrokerAggregatorTraderDayMarker: {
-      get: (id: string) => unknown;
-    };
-    Pool: {
-      get: (id: string) => unknown;
-    };
-  };
-};
+type MockDb = MockDbWith<{
+  BrokerSwapEvent: EntityReader;
+  BrokerDailySnapshot: EntityReader;
+  BrokerExchangeDailySnapshot: EntityReader;
+  BrokerTraderDailySnapshot: EntityReader;
+  BrokerAggregatorDailySnapshot: EntityReader;
+  BrokerAggregatorTraderDayMarker: EntityReader;
+  Pool: EntityReader;
+}>;
 
-type EventProcessor = {
-  createMockEvent: (args: unknown) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    Broker: { Swap: EventProcessor };
-    VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, Broker, VirtualPoolFactory } = TestHelpers;
 
 const CHAIN_CELO = 42220;
