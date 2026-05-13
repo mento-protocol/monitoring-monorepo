@@ -22,13 +22,13 @@ Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
 
 **Thresholds (Roman's spec):**
 
-- WARN: `limitPressure > 0.8`
+- WARN: `limitPressure >= 0.8`
 - CRITICAL: `limitPressure ≥ 1.0`
 
 The `TradingLimitConfigured` event fires when limits are changed (`configureTradingLimit` call).
-There is **no on-chain event for netflow state changes** — it's derived from Swap amounts.
+There is **no on-chain event for netflow state changes** — swaps mutate netflow inside the contract, so the indexer samples `getTradingLimits` at Swap blocks.
 
-**Strategy:** Index `TradingLimitConfigured` for limit config, then compute current `netflow` state via RPC call (`getTradingLimits`) on each `Swap` event, same pattern as oracle health.
+**Strategy:** Index `TradingLimitConfigured` for limit config and reset semantics, then read `getTradingLimits(token)` at each Swap block for authoritative netflow state. Local derivation from Swap logs is useful for parity tests but is not safe as the production path unless the indexer can prove no prior swap was skipped and that stored fee fields are historical for the swap block.
 
 ---
 
@@ -64,7 +64,7 @@ In `EventHandlers.ts`:
 
 - On `TradingLimitConfigured(token, config)`:
   - Upsert `TradingLimit` entity with new `limit0`, `limit1`, `decimals`
-  - RPC call `getTradingLimits(token)` to get current `state` (same viem pattern as oracle health)
+  - Reset `lastUpdated0/1` to zero, preserving netflow only for windows that remain enabled (matching `TradingLimitsV2.reset`)
   - Compute `limitPressure0 = |netflow0| / limit0`, `limitPressure1 = |netflow1| / limit1`
   - Set `limitStatus = computeLimitStatus(pressure0, pressure1)`
 
@@ -72,9 +72,9 @@ In `EventHandlers.ts`:
 
 On every `Swap`, update the `TradingLimit` entity:
 
-- RPC call `getTradingLimits(token0)` and `getTradingLimits(token1)`
+- Read `getTradingLimits(token)` at the Swap block for both tokens
+- Skip the entity write when the at-block RPC read fails or falls back to latest, then retry on the next Swap
 - Recompute `netflow0`, `netflow1`, `limitPressure0`, `limitPressure1`, `limitStatus`
-- This is the same pattern used for oracle health on `Swap` events
 
 #### 4. Add `limitStatus` to `Pool` entity (denormalised for fast badge queries)
 
@@ -93,7 +93,7 @@ Update on every Swap handler after computing TradingLimit.
 function computeLimitStatus(p0: number, p1: number): string {
   const worst = Math.max(p0, p1);
   if (worst >= 1.0) return "CRITICAL";
-  if (worst > 0.8) return "WARN";
+  if (worst >= 0.8) return "WARN";
   return "OK";
 }
 ```
@@ -144,7 +144,7 @@ computeLimitStatus(0, 0)      → "OK"
 
 - [ ] `TradingLimit` entity in schema with all fields
 - [ ] `TradingLimitConfigured` event handler creates/updates entity
-- [ ] `Swap` handler updates `TradingLimit` state via RPC
+- [ ] `Swap` handler updates `TradingLimit` state from logs, with RPC seed/recovery fallback
 - [ ] `Pool.limitStatus`, `limitPressure0`, `limitPressure1` denormalised fields updated on Swap
 - [ ] `LimitBadge` component with OK/WARN/CRITICAL/N/A states
 - [ ] `LimitBadge` column in `PoolsTable`
@@ -159,7 +159,7 @@ computeLimitStatus(0, 0)      → "OK"
 
 1. **Pool list** shows `Limit` column alongside `Health` — all 4 FPMM pools show a badge, all 12 VirtualPools show ⚪
 2. **FPMM pool detail** → Overview tab → `LimitPanel` shows two progress bars (token0 / token1)
-3. **Simulate near-limit:** Wait for a high-volume period or test manually with a simulated high-netflow state — badge should flip to WARN at >80%
+3. **Simulate near-limit:** Wait for a high-volume period or test manually with a simulated high-netflow state — badge should flip to WARN at >=80%
 4. **`TradingLimitConfigured` event:** If a limit is reconfigured on-chain, the badge updates on next indexer sync
 5. **No crashes on VirtualPools** — `getTradingLimits` will revert; handler must guard FPMM-only
 6. **`limitPressure` in Hasura:** Query `TradingLimit` table directly, verify `limitPressure0 + limitPressure1` match manual calculation from `getTradingLimits` RPC call
@@ -172,6 +172,6 @@ computeLimitStatus(0, 0)      → "OK"
 
 ## Notes
 
-- RPC calls on every `Swap` event adds latency to indexer processing. Monitor Envio sync speed — if it becomes a bottleneck, consider sampling (every Nth swap instead of every swap)
-- Windows reset when `block.timestamp - lastUpdated > windowDuration`. Pressure drops to 0 naturally — no special handling needed
+- RPC calls on every `Swap` event are deliberate until a correctness-safe contiguity marker exists. A future log-derived steady-state path must prove the stored row includes every prior Swap and must avoid applying future fee state to historical swaps.
+- The local swap-derivation helper was removed when Swap handling moved back to authoritative at-block RPC state. Future reintroduction must first prove stream contiguity and mirror `TradingLimitsV2.update` exactly.
 - VirtualPools: `getTradingLimits` will likely revert. Guard: `if (!isFpmm) return` before RPC call

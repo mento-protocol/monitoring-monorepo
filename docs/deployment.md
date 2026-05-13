@@ -53,6 +53,19 @@ git push origin main:envio
 2. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
 3. ✅ Verify monitoring.mento.org loads data
 
+To check whether Envio's persistent effect cache is active for a deployment:
+
+```bash
+npx -q envio-cloud deployment info mento <commit> mento-protocol -o json
+```
+
+`cacheEnabled: true` here means that specific deployment restored from an Envio
+cache. A project can still have indexer-level cache enabled while an older
+deployment reports `cacheEnabled: false` because it was created before a cache
+artifact was active. The current CLI settings command does not expose the
+indexer-level cache toggle or cache-artifact selection; use the Envio dashboard
+cache settings, or Envio support if the dashboard is unavailable.
+
 ---
 
 ## Dashboard Deployment (Vercel)

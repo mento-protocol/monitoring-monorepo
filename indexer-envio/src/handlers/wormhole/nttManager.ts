@@ -7,13 +7,13 @@
  * then recomputes BridgeTransfer.status via computeWormholeStatus.
  * SENT/DELIVERED transitions also roll up into BridgeDailySnapshot + BridgeBridger.
  */
-import { indexer } from "envio";
 import type {
   BridgeAttestation,
   BridgeTransfer,
   WormholeTransferDetail,
   WormholeNttManager as WormholeNttManagerEntity,
 } from "envio";
+import { indexer } from "../../indexer.js";
 import {
   buildTransferId,
   defaultBridgeTransfer,

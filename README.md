@@ -111,13 +111,15 @@ score, and survivor classification.
 
 Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
-| Variable                           | Description                                                                                               |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `ENVIO_RPC_URL_42220`              | Celo Mainnet primary RPC endpoint                                                                         |
-| `ENVIO_RPC_URL_143`                | Monad Mainnet primary RPC endpoint                                                                        |
-| `ENVIO_RPC_FALLBACK_URL_<chainId>` | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`) |
-| `ENVIO_START_BLOCK_CELO`           | Celo start block (default: 60664500)                                                                      |
-| `ENVIO_START_BLOCK_MONAD`          | Monad start block (default: 60730000)                                                                     |
+| Variable                           | Description                                                                                                    |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `ENVIO_RPC_URL_42220`              | Celo Mainnet primary RPC endpoint                                                                              |
+| `ENVIO_RPC_URL_143`                | Monad Mainnet primary RPC endpoint                                                                             |
+| `ENVIO_RPC_FALLBACK_URL_<chainId>` | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`)      |
+| `ENVIO_START_BLOCK_CELO`           | Celo start block (default: 60664500)                                                                           |
+| `ENVIO_START_BLOCK_MONAD`          | Monad start block (default: 60710000)                                                                          |
+| `INDEXER_PERF`                     | Optional indexer sync profiler; set to `1` to log handler/effect/entity counters during local or debug replays |
+| `INDEXER_PERF_LOG_INTERVAL_EVENTS` | Optional profiler log interval in processed handler calls (default: 10000)                                     |
 
 ### Dashboard
 

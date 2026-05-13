@@ -20,7 +20,7 @@
 // (groups A, B, F) are safe to flip later.
 // ---------------------------------------------------------------------------
 
-import { createEffect, S } from "envio";
+import { createEffect as createEnvioEffect, S } from "envio";
 import {
   fetchErc20Decimals,
   fetchInvertRateFeed,
@@ -49,6 +49,30 @@ import {
   type BreakerKindRpc,
 } from "./breakers.js";
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
+import { trackEffectExecution } from "../performance.js";
+
+type UntypedCreateEffect = (
+  options: unknown,
+  handler: (args: unknown) => Promise<unknown>,
+) => unknown;
+
+const createEffect = ((options: unknown, handler: unknown) => {
+  const effectName =
+    typeof options === "object" &&
+    options !== null &&
+    "name" in options &&
+    typeof (options as { name?: unknown }).name === "string"
+      ? (options as { name: string }).name
+      : "unknown";
+
+  return (createEnvioEffect as unknown as UntypedCreateEffect)(
+    options,
+    (args) =>
+      trackEffectExecution(effectName, () =>
+        (handler as (value: unknown) => Promise<unknown>)(args),
+      ),
+  );
+}) as typeof createEnvioEffect;
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
@@ -85,8 +109,8 @@ const tradingLimitsShape = S.schema({
     decimals: S.int32,
   }),
   state: S.schema({
-    lastUpdated0: S.int32,
-    lastUpdated1: S.int32,
+    lastUpdated0: S.bigint,
+    lastUpdated1: S.bigint,
     netflow0: S.bigint,
     netflow1: S.bigint,
   }),
@@ -194,15 +218,33 @@ export const referenceRateFeedIDEffect = createEffect(
   },
 );
 
-// Output is nullable: with v3 preload optimization, an effect that fabricated
-// `false` on a transient RPC blip during preload would memoize and persist
-// the wrong orientation — call sites must skip the assignment on null
-// and let the schema default ride until the next event re-fetches.
+const INVERT_RATE_FEED_UNKNOWN = -1;
+const INVERT_RATE_FEED_FALSE = 0;
+const INVERT_RATE_FEED_TRUE = 1;
+export const INVERT_RATE_FEED_EFFECT_NAME = "invertRateFeedV2";
+
+export function decodeInvertRateFeedEffectResult(
+  value: number,
+): boolean | null {
+  if (value === INVERT_RATE_FEED_UNKNOWN) return null;
+  if (value === INVERT_RATE_FEED_FALSE) return false;
+  if (value === INVERT_RATE_FEED_TRUE) return true;
+  throw new Error(`[invertRateFeedEffect] Unexpected encoded value ${value}`);
+}
+
+// Keep the cached output integer-encoded. Hosted Envio v3 rejects cached
+// nullable boolean writes for this effect (`boolean` -> `jsonb[]` cast), while
+// nullable integer effects are used elsewhere successfully. The effect name is
+// intentionally versioned: older hosted caches for `invertRateFeed` may contain
+// boolean/null payloads from the pre-encoded output schema, and replaying those
+// through the integer schema would fail decode before self-heal can run. The
+// sentinel keeps the same call-site semantics: null means transient RPC miss,
+// so skip writes and retry later.
 export const invertRateFeedEffect = createEffect(
   {
-    name: "invertRateFeed",
+    name: INVERT_RATE_FEED_EFFECT_NAME,
     input: { chainId: S.int32, poolAddress: S.string },
-    output: S.nullable(S.boolean),
+    output: S.int32,
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
@@ -214,9 +256,9 @@ export const invertRateFeedEffect = createEffect(
     );
     if (result === null) {
       context.cache = false;
-      return null;
+      return INVERT_RATE_FEED_UNKNOWN;
     }
-    return result;
+    return result ? INVERT_RATE_FEED_TRUE : INVERT_RATE_FEED_FALSE;
   },
 );
 
@@ -533,11 +575,10 @@ export const reportExpiryEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group E — trading limits.
-// MUST stay `cache: false` permanently (block-scoped state).
-// Higher rate limit than other block-scoped effects: fires twice per FPMM
-// Swap (once per token), so peak Celo catch-up of ~120 events/sec → up to
-// ~240 fetcher invocations/sec. Effect-level batching collapses concurrent
-// calls into multicalls, but the cap still needs headroom.
+// MUST stay `cache: false` permanently (block-scoped state). Swap handlers use
+// this as the authoritative per-swap path because local event derivation cannot
+// prove row contiguity after a transient miss or fee-history correctness during
+// a full replay.
 // ---------------------------------------------------------------------------
 
 export const tradingLimitsEffect = createEffect(

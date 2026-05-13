@@ -15,7 +15,8 @@
 // `MedianUpdated` lives in sortedOracles.ts.
 // ---------------------------------------------------------------------------
 
-import { indexer, type BreakerConfig, type BreakerTripEvent } from "envio";
+import type { BreakerConfig, BreakerTripEvent } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import {
   computeCooldownEndsAt,

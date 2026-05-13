@@ -42,6 +42,7 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     // every parity/health test. Tests exercising the no-data gate must
     // override `hasHealthData: false` explicitly.
     hasHealthData: true,
+    wrappedExchangeId: "",
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,
     updatedAtBlock: 0n,

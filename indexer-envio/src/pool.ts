@@ -201,8 +201,8 @@ const defaultPool = (
   // power to overwrite these on every event.
   referenceRateFeedID: "",
   // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
-  // (factory-direct value or bytecode read). FPMMs never set it.
-  wrappedExchangeId: undefined,
+  // (factory-direct value or bytecode read). Empty for FPMMs.
+  wrappedExchangeId: "",
   createdAtBlock: 0n,
   createdAtTimestamp: 0n,
   updatedAtBlock: 0n,

@@ -95,6 +95,31 @@ pnpm start      # Start without codegen
 pnpm stop       # Stop Docker containers
 ```
 
+### Performance Diagnostics
+
+Enable opt-in sync profiling when comparing local replays or a hosted debug
+deployment:
+
+```bash
+INDEXER_PERF=1 INDEXER_PERF_LOG_INTERVAL_EVENTS=10000 pnpm indexer:dev
+```
+
+The profiler logs the slowest handlers, effect request/execution counts
+(`hit~` is request count minus effect handler executions, i.e. preload/cache
+dedup), and entity get/set counters. It is disabled by default and has no
+runtime effect unless `INDEXER_PERF` is truthy.
+
+Before removing `schema.graphql` indexes, run the static usage audit:
+
+```bash
+node indexer-envio/scripts/auditSchemaIndexes.mjs
+```
+
+The audit maps `@index` directives to handler `getWhere` calls and
+dashboard/bridge GraphQL `where`, `order_by`, and `distinct_on` usage, including
+known dynamic discovery queries. Treat the output as a review aid, not an
+automatic deletion list.
+
 ## Schema
 
 See [`schema.graphql`](./schema.graphql) for the full entity model.

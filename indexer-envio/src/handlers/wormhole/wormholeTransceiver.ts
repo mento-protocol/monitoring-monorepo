@@ -20,7 +20,7 @@
  * scratch, and stamp the source identity + transceiverDigest onto the
  * BridgeTransfer/detail keyed by the authoritative manager digest.
  */
-import { indexer } from "envio";
+import { indexer } from "../../indexer.js";
 import { bytes32ToAddress } from "../../wormhole/detail.js";
 import { wormholeToEvmChainId } from "../../wormhole/chainIds.js";
 import type { WormholeTransceiverContext } from "../../wormhole/handlerContext.js";

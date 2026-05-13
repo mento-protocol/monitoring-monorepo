@@ -2,23 +2,129 @@
 // Trading limit types and computation
 // ---------------------------------------------------------------------------
 
+import type { TradingLimit } from "envio";
+
 /** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
 export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
 
-export type TradingLimitData = {
-  config: { limit0: bigint; limit1: bigint; decimals: number };
-  state: {
-    lastUpdated0: number;
-    lastUpdated1: number;
-    netflow0: bigint;
-    netflow1: bigint;
-  };
+const PRESSURE_SCALE = 100_000_000n;
+
+export type TradingLimitConfig = {
+  limit0: bigint;
+  limit1: bigint;
+  /** Token decimals from the FPMM contract config, not the entity display decimals. */
+  decimals: number;
 };
+
+export type TradingLimitState = {
+  lastUpdated0: bigint;
+  lastUpdated1: bigint;
+  netflow0: bigint;
+  netflow1: bigint;
+};
+
+export type TradingLimitData = {
+  config: TradingLimitConfig;
+  state: TradingLimitState;
+};
+
+export function tradingLimitId(poolId: string, token: string): string {
+  return `${poolId}-${token}`;
+}
+
+export function tradingLimitStateFromEntity(
+  row: Pick<
+    TradingLimit,
+    "lastUpdated0" | "lastUpdated1" | "netflow0" | "netflow1"
+  >,
+): TradingLimitState {
+  return {
+    lastUpdated0: row.lastUpdated0,
+    lastUpdated1: row.lastUpdated1,
+    netflow0: row.netflow0,
+    netflow1: row.netflow1,
+  };
+}
+
+export function resetTradingLimitState(
+  state: TradingLimitState | undefined,
+  config: Pick<TradingLimitConfig, "limit0" | "limit1">,
+): TradingLimitState {
+  return {
+    lastUpdated0: 0n,
+    lastUpdated1: 0n,
+    netflow0: config.limit0 === 0n ? 0n : (state?.netflow0 ?? 0n),
+    netflow1: config.limit1 === 0n ? 0n : (state?.netflow1 ?? 0n),
+  };
+}
+
+export function buildTradingLimitEntity(args: {
+  id: string;
+  chainId: number;
+  poolId: string;
+  token: string;
+  config: Pick<TradingLimitConfig, "limit0" | "limit1">;
+  state: TradingLimitState;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): TradingLimit {
+  const { p0, p1 } = computeLimitPressures(
+    args.state.netflow0,
+    args.state.netflow1,
+    args.config.limit0,
+    args.config.limit1,
+  );
+  return {
+    id: args.id,
+    chainId: args.chainId,
+    poolId: args.poolId,
+    token: args.token,
+    limit0: args.config.limit0,
+    limit1: args.config.limit1,
+    // UI formats all TradingLimitsV2 values in the library's internal scale.
+    decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
+    netflow0: args.state.netflow0,
+    netflow1: args.state.netflow1,
+    lastUpdated0: args.state.lastUpdated0,
+    lastUpdated1: args.state.lastUpdated1,
+    limitPressure0: p0.toFixed(4),
+    limitPressure1: p1.toFixed(4),
+    limitStatus: computeLimitStatusFromFlows(
+      args.state.netflow0,
+      args.state.netflow1,
+      args.config.limit0,
+      args.config.limit1,
+    ),
+    updatedAtBlock: args.blockNumber,
+    updatedAtTimestamp: args.blockTimestamp,
+  };
+}
+
+export function buildTradingLimitEntityFromRpc(args: {
+  id: string;
+  chainId: number;
+  poolId: string;
+  token: string;
+  data: TradingLimitData;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): TradingLimit {
+  return buildTradingLimitEntity({
+    id: args.id,
+    chainId: args.chainId,
+    poolId: args.poolId,
+    token: args.token,
+    config: args.data.config,
+    state: args.data.state,
+    blockNumber: args.blockNumber,
+    blockTimestamp: args.blockTimestamp,
+  });
+}
 
 export function computeLimitStatus(p0: number, p1: number): string {
   const worst = Math.max(p0, p1);
   if (worst >= 1.0) return "CRITICAL";
-  if (worst > 0.8) return "WARN";
+  if (worst >= 0.8) return "WARN";
   return "OK";
 }
 
@@ -28,9 +134,44 @@ export function computeLimitPressures(
   limit0: bigint,
   limit1: bigint,
 ): { p0: number; p1: number } {
-  const abs0 = netflow0 < 0n ? -netflow0 : netflow0;
-  const abs1 = netflow1 < 0n ? -netflow1 : netflow1;
-  const p0 = limit0 !== 0n ? Number(abs0) / Number(limit0) : 0;
-  const p1 = limit1 !== 0n ? Number(abs1) / Number(limit1) : 0;
+  const p0 = computeLimitPressure(netflow0, limit0);
+  const p1 = computeLimitPressure(netflow1, limit1);
   return { p0, p1 };
+}
+
+function computeLimitPressure(netflow: bigint, limit: bigint): number {
+  if (limit === 0n) return 0;
+  const abs = netflow < 0n ? -netflow : netflow;
+  const scaled = (abs * PRESSURE_SCALE) / limit;
+  return Number(scaled) / Number(PRESSURE_SCALE);
+}
+
+function computeLimitStatusFromFlows(
+  netflow0: bigint,
+  netflow1: bigint,
+  limit0: bigint,
+  limit1: bigint,
+): string {
+  if (isAtOrOverLimit(netflow0, limit0) || isAtOrOverLimit(netflow1, limit1)) {
+    return "CRITICAL";
+  }
+  if (
+    isAboveWarnLimit(netflow0, limit0) ||
+    isAboveWarnLimit(netflow1, limit1)
+  ) {
+    return "WARN";
+  }
+  return "OK";
+}
+
+function isAtOrOverLimit(netflow: bigint, limit: bigint): boolean {
+  if (limit === 0n) return false;
+  const abs = netflow < 0n ? -netflow : netflow;
+  return abs >= limit;
+}
+
+function isAboveWarnLimit(netflow: bigint, limit: bigint): boolean {
+  if (limit === 0n) return false;
+  const abs = netflow < 0n ? -netflow : netflow;
+  return abs * 10n >= limit * 8n;
 }

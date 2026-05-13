@@ -6,6 +6,10 @@ import {
   nextMedianEMA,
 } from "../src/breakers.ts";
 import {
+  _clearBreakerKindIndex,
+  getContractAddress,
+} from "../src/contractAddresses.ts";
+import {
   _clearBreakerMocks,
   _clearRpcClients,
   _setRpcClientForTests,
@@ -101,8 +105,35 @@ describe("fetchBreakerKind RPC selector probes", () => {
 
   afterEach(() => {
     _setRpcClientForTests(CHAIN_ID, null);
+    _setRpcClientForTests(143, null);
     _clearRpcClients();
     _clearBreakerMocks();
+    _clearBreakerKindIndex();
+  });
+
+  it("uses package metadata for known breaker kinds before selector probes", async () => {
+    const calls: unknown[] = [];
+    _setRpcClientForTests(143, {
+      readContract: async (args) => {
+        calls.push(args);
+        throw new Error("selector probe should not run for known breakers");
+      },
+    });
+
+    const valueDelta = getContractAddress(143, "ValueDeltaBreaker");
+    const marketHours = getContractAddress(143, "MarketHoursBreakerv300");
+
+    assert.ok(valueDelta);
+    assert.ok(marketHours);
+    assert.equal(
+      await fetchBreakerKind(143, valueDelta, noopLogger),
+      "VALUE_DELTA",
+    );
+    assert.equal(
+      await fetchBreakerKind(143, marketHours, noopLogger),
+      "MARKET_HOURS",
+    );
+    assert.equal(calls.length, 0);
   });
 
   it("retries rate-limited selector probes through readContractWithBlockFallback", async () => {

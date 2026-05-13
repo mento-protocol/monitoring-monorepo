@@ -159,13 +159,13 @@ type Pool {
   rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
   # Linkage to the underlying v2 BiPoolManager exchange for VirtualPools.
   # Bytes32 hex (no `0x{chainId}-` prefix — `BiPoolExchange.id` is namespaced).
-  # Null for FPMM pools and for VPs we couldn't resolve at deploy time.
+  # Empty string for FPMM pools and for VPs we couldn't resolve at deploy time.
   # Set once at VirtualPoolDeployed via bytecode pattern extraction (the
   # exchangeId is an immutable PUSH32 in the swap() preamble).
   # Indexed because `BiPoolManager.ExchangeCreated` does a reverse `getWhere`
   # to pair pre-existing VP wrappers with their underlying exchange, and the
   # dashboard's pool-detail GraphQL query joins Pool → BiPoolExchange on it.
-  wrappedExchangeId: String @index
+  wrappedExchangeId: String! @index
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
@@ -227,7 +227,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
   id: ID!
-  chainId: Int! @index
+  chainId: Int!
   poolId: String! @index
   timestamp: BigInt! @index
 
@@ -296,27 +296,26 @@ type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
 # can exclude them from the v2 series and avoid double-counting against v3.
 #
 # Per-day rollup keyed by (chainId, exchangeProvider, routedViaV3Router, day)
-# so the dashboard's `routedViaV3Router=false` filter reads from a single
-# index without scanning the per-event table.
+# so the dashboard's `routedViaV3Router=false` filter reads bounded daily rows
+# instead of scanning the per-event table.
 # ============================================================================
 
-type BrokerSwapEvent
-  @index(fields: ["chainId", "exchangeProvider", "blockTimestamp"]) {
+type BrokerSwapEvent {
   id: ID! # eventId(chainId, blockNumber, logIndex)
-  chainId: Int! @index
+  chainId: Int!
   # Lowercased; classifies the swap path (BiPoolManager → v2 legacy).
-  exchangeProvider: String! @index
-  exchangeId: String! @index # bytes32 hex; identifies the exchange row inside the provider
+  exchangeProvider: String!
+  exchangeId: String! # bytes32 hex; identifies the exchange row inside the provider
   # `event.params.trader` from Broker.Swap = `msg.sender` to Broker. For
   # routed swaps this is a router/aggregator/wrapper contract (MentoRouter,
   # OpenOcean executor, cluster-9fd2 adapters, etc.); for direct trades from
   # a UI/SDK this equals `tx.from`. Use `caller` for signer-EOA-level
   # attribution (volume-leaderboard primary key).
-  brokerCaller: String! @index
+  brokerCaller: String!
   # tx.from — the EOA that signed the tx. Mirrors the v3 SwapEvent.caller
   # field semantically; this is the volume-leaderboard primary key.
-  caller: String! @index
-  tokenIn: String! @index
+  caller: String!
+  tokenIn: String!
   tokenOut: String!
   amountIn: BigInt!
   amountOut: BigInt!
@@ -327,28 +326,27 @@ type BrokerSwapEvent
   # Used by the dashboard to disambiguate router-driven swaps (where the
   # Broker is invoked transitively via the v3 Router → VirtualPool wrapper)
   # from broker-direct swaps (legacy v2 path). Mirrors v3 SwapEvent.txTo.
-  txTo: String! @index
+  txTo: String!
   # True iff `txTo == V3 Router (0x4861840C...)`. Denormalized so the chart
   # can sum daily volume without re-checking the router address per row.
   # When true, this Broker.Swap is a sibling of a VirtualPool.Swap fired in
   # the same tx (the v3 Router → VirtualPool wrapper → Broker path), so
   # the v2 volume series MUST exclude these rows to avoid double-counting
   # against v3.
-  routedViaV3Router: Boolean! @index
+  routedViaV3Router: Boolean!
   txHash: String!
   blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
+  blockTimestamp: BigInt!
 }
 
-type BrokerDailySnapshot
-  @index(fields: ["chainId", "exchangeProvider", "timestamp"]) {
+type BrokerDailySnapshot {
   # `{chainId}-{exchangeProvider}-{router|direct}-{day}` (handler stringifies
   # `routedViaV3Router` to "router" / "direct"). Bucketing by routing key
   # lets the chart's v2 filter `routedViaV3Router=false` read a single row
   # set without scanning the per-event table.
   id: ID!
   chainId: Int! @index
-  exchangeProvider: String! @index
+  exchangeProvider: String!
   routedViaV3Router: Boolean! @index
   timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
   swapCount: Int!
@@ -408,8 +406,7 @@ type BrokerTraderDailySnapshot
   lastSeenTimestamp: BigInt!
 }
 
-type BrokerAggregatorDailySnapshot
-  @index(fields: ["chainId", "aggregator", "timestamp"]) {
+type BrokerAggregatorDailySnapshot {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
   # Canonical name from classifyAggregator(). Same value space as
@@ -417,7 +414,7 @@ type BrokerAggregatorDailySnapshot
   # outreach: someone is routing real v2 volume through a router we haven't
   # classified yet — file a follow-up entry in
   # indexer-envio/config/aggregators.json so they get a readable label.
-  aggregator: String! @index
+  aggregator: String!
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
   swapCount: Int!
@@ -466,11 +463,10 @@ type BiPoolExchange {
   # FixidityLib value (1e24 unit). Divide by 1e24 for the swap fee fraction.
   # Updated on `SpreadUpdated` events.
   spread: BigInt!
-  # SortedOracles feed used to recompute buckets on each reset. Indexed
-  # because the SortedOracles handler joins on this to write OracleSnapshot
-  # rows for v2-backed feeds (mirroring how it currently joins on
-  # `Pool.referenceRateFeedID`).
-  referenceRateFeedID: String! @index
+  # SortedOracles feed used to recompute buckets on each reset. Mirrored onto
+  # the wrapping Pool so the SortedOracles handler can join through
+  # `Pool.referenceRateFeedID`.
+  referenceRateFeedID: String!
   referenceRateResetFrequency: BigInt! # seconds between bucket resets
   minimumReports: BigInt!
   stablePoolResetSize: BigInt!
@@ -502,20 +498,20 @@ type BiPoolExchange {
 # `BucketsUpdated` events (cadence is per-exchange `referenceRateResetFrequency`,
 # typically 360s on Celo). Phase 4's spot-price chart consumes this to render
 # the bucket curve over time.
-type BucketUpdate @index(fields: ["exchangeId", "blockTimestamp"]) {
+type BucketUpdate {
   id: ID! # eventId(chainId, blockNumber, logIndex)
-  chainId: Int! @index
-  exchangeId: String! @index
+  chainId: Int!
+  exchangeId: String!
   bucket0: BigInt!
   bucket1: BigInt!
   txHash: String!
   blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
+  blockTimestamp: BigInt!
 }
 
 type FactoryDeployment {
   id: ID!
-  chainId: Int! @index
+  chainId: Int!
   poolId: String!
   token0: String!
   token1: String!
@@ -562,16 +558,16 @@ type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
   blockTimestamp: BigInt! @index
 }
 
-type ReserveUpdate @index(fields: ["poolId", "blockTimestamp"]) {
+type ReserveUpdate {
   id: ID!
-  chainId: Int! @index
+  chainId: Int!
   poolId: String! @index
   reserve0: BigInt!
   reserve1: BigInt!
   blockTimestampInPool: BigInt!
   txHash: String!
   blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
+  blockTimestamp: BigInt!
 }
 
 type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
@@ -639,7 +635,7 @@ type TradingLimit @index(fields: ["poolId"]) {
 
 type VirtualPoolLifecycle {
   id: ID!
-  chainId: Int! @index
+  chainId: Int!
   poolId: String!
   action: String!
   token0: String
@@ -662,7 +658,7 @@ type LiquidityPosition @index(fields: ["poolId", "address"]) {
 
 type ProtocolFeeTransfer {
   id: ID!
-  chainId: Int! @index
+  chainId: Int!
   token: String! @index
   tokenSymbol: String!
   tokenDecimals: Int!
@@ -670,18 +666,18 @@ type ProtocolFeeTransfer {
   from: String!
   txHash: String!
   blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
+  blockTimestamp: BigInt!
 }
 
 # Daily rollup of ProtocolFeeTransfer rows, bucketed per UTC day per pool.
 # Lets the per-pool revenue leaderboard query a small fixed-cardinality
 # table (~1 row/pool/day) instead of one row per raw transfer, so all-time
 # totals fit within Hasura's 1000-row page limit when paginated.
-type PoolDailyFeeSnapshot @index(fields: ["chainId", "poolId", "timestamp"]) {
+type PoolDailyFeeSnapshot {
   id: ID! # "{chainId}-{poolAddress}-{dayTs}"
   chainId: Int! @index
-  poolId: String! @index # FK to Pool.id; namespaced "{chainId}-{poolAddress}"
-  poolAddress: String! @index # Lowercased raw address (matches ProtocolFeeTransfer.from)
+  poolId: String! # FK to Pool.id; namespaced "{chainId}-{poolAddress}"
+  poolAddress: String! # Lowercased raw address (matches ProtocolFeeTransfer.from)
   timestamp: BigInt! @index # UTC day bucket: (ts / 86400) * 86400
   # Per-day deltas. Parallel arrays aligned by index. A pool can carry
   # transfers in multiple tokens within a day (FPMM takes its swap fee in
@@ -799,7 +795,7 @@ type BrokerLeaderboardWindowSnapshot
 # today-partial gap via a direct TraderDailySnapshot query.
 type LeaderboardChainState {
   id: ID! # "{chainId}"
-  chainId: Int! @index
+  chainId: Int!
   lastFlushedDay: BigInt! # v3 — 0n at genesis, advances by 86400 each rollover
   lastFlushedDayBroker: BigInt! # v2
   updatedAtTimestamp: BigInt!
@@ -851,8 +847,8 @@ type OlsLiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
 # Lifecycle events: PoolAdded, PoolRemoved, RebalanceCooldownSet
 type OlsLifecycleEvent {
   id: ID!
-  chainId: Int! @index
-  poolId: String! @index
+  chainId: Int!
+  poolId: String!
   olsAddress: String!
   action: String! # "POOL_ADDED" | "POOL_REMOVED" | "COOLDOWN_SET"
   cooldown: BigInt! # 0 for non-cooldown events; value for COOLDOWN_SET
@@ -889,10 +885,10 @@ enum BreakerStatus {
   TRIPPED
 }
 
-type Breaker @index(fields: ["chainId", "address"]) {
+type Breaker {
   id: ID! # "{chainId}-{lowercaseAddress}"
-  chainId: Int! @index
-  address: String! @index # lowercased
+  chainId: Int!
+  address: String! # lowercased
   kind: BreakerKind!
   # Trading mode this breaker OR's into rateFeedTradingMode when tripped.
   # Production: 3 (halt) for all three breakers on Celo + Monad.
@@ -948,7 +944,7 @@ type BreakerTripEvent @index(fields: ["rateFeedID", "blockTimestamp"]) {
   id: ID! # eventId(chainId, blockNumber, logIndex)
   chainId: Int! @index
   breaker: Breaker!
-  breakerAddress: String! @index
+  breakerAddress: String!
   rateFeedID: String! @index
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
@@ -978,10 +974,10 @@ enum BridgeProvider {
 
 type BridgeTransfer {
   id: ID! # "{provider}-{providerMessageId}", lowercased
-  provider: BridgeProvider! @index
-  providerMessageId: String! @index # Wormhole digest; LayerZero GUID; etc.
+  provider: BridgeProvider!
+  providerMessageId: String! # Wormhole digest; LayerZero GUID; etc.
   status: String! @index # PENDING | SENT | ATTESTED | DELIVERED | QUEUED_INBOUND | CANCELLED | FAILED. Source-side queue (QUEUED_OUTBOUND) is intentionally omitted — see src/wormhole/status.ts.
-  tokenSymbol: String! @index
+  tokenSymbol: String!
   tokenAddress: String!
   tokenDecimals: Int!
 
@@ -995,7 +991,7 @@ type BridgeTransfer {
   amount: BigInt
 
   sentBlock: BigInt
-  sentTimestamp: BigInt @index
+  sentTimestamp: BigInt
   sentTxHash: String
 
   attestationCount: Int!
@@ -1022,13 +1018,13 @@ type BridgeTransfer {
 
 type BridgeAttestation {
   id: ID! # "{transferId}-{attester}-{attesterIndex}"
-  transferId: String! @index
+  transferId: String!
   provider: BridgeProvider!
   attester: String! # guardian address (Wormhole); DVN address (LayerZero)
   attesterIndex: Int
   chainId: Int!
   blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
+  blockTimestamp: BigInt!
   txHash: String!
 }
 
@@ -1036,9 +1032,9 @@ type BridgeDailySnapshot {
   id: ID! # "{dayTs}-{provider}-{tokenSymbol}-{sourceChainId}-{destChainId}"
   date: BigInt! @index
   provider: BridgeProvider!
-  tokenSymbol: String! @index
-  sourceChainId: Int! @index
-  destChainId: Int! @index
+  tokenSymbol: String!
+  sourceChainId: Int!
+  destChainId: Int!
   sentCount: Int!
   deliveredCount: Int!
   cancelledCount: Int!
@@ -1053,7 +1049,7 @@ type BridgeDailySnapshot {
 
 type BridgeBridger {
   id: ID! # lowercase sender address (cross-chain identity)
-  sender: String! @index
+  sender: String!
   totalSentCount: Int!
   # Nullable while USD pricing is deferred (plan §1.5). See sentUsdValue
   # comment on BridgeDailySnapshot.
@@ -1075,12 +1071,12 @@ type BridgeBridger {
 
 type WormholeNttManager {
   id: ID! # "{chainId}-{nttManagerAddr}", lowercased
-  chainId: Int! @index
-  nttManager: String! @index
-  transceiver: String! @index
+  chainId: Int!
+  nttManager: String!
+  transceiver: String!
   helper: String!
-  tokenAddress: String! @index
-  tokenSymbol: String! @index
+  tokenAddress: String!
+  tokenSymbol: String!
   tokenDecimals: Int!
   wormholeChainId: Int!
   rateFeedId: String
@@ -1089,9 +1085,9 @@ type WormholeNttManager {
 
 type WormholeTransferDetail {
   id: ID! # == BridgeTransfer.id
-  digest: String! @index # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). Used by TransferSent/TransferRedeemed/MessageAttestedTo. This is the BridgeTransfer primary-key suffix.
-  transceiverDigest: String @index # Wormhole transceiver-layer digest (TransceiverStructs.transceiverMessageDigest), different bytestring from `digest`. Populated on the destination side when ReceivedMessage pairs with MessageAttestedTo/TransferRedeemed in the same tx.
-  msgSequence: BigInt @index # Wormhole VAA sequence number, unique per (emitterChain, emitterAddress).
+  digest: String! # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). Used by TransferSent/TransferRedeemed/MessageAttestedTo. This is the BridgeTransfer primary-key suffix.
+  transceiverDigest: String # Wormhole transceiver-layer digest (TransceiverStructs.transceiverMessageDigest), different bytestring from `digest`. Populated on the destination side when ReceivedMessage pairs with MessageAttestedTo/TransferRedeemed in the same tx.
+  msgSequence: BigInt # Wormhole VAA sequence number, unique per (emitterChain, emitterAddress).
   sourceWormholeChainId: Int
   destWormholeChainId: Int
   refundAddress: String
@@ -1184,12 +1180,11 @@ type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   lastSeenTimestamp: BigInt!
 }
 
-type TraderPoolDailySnapshot
-  @index(fields: ["chainId", "trader", "poolId", "timestamp"]) {
+type TraderPoolDailySnapshot {
   id: ID! # "{chainId}-{trader}-{poolId}-{day}"
   chainId: Int!
   trader: String! @index
-  poolId: String! @index
+  poolId: String!
   timestamp: BigInt! @index
   swapCount: Int!
   # Total USD volume the trader did in this pool today, summed from
@@ -1207,8 +1202,7 @@ type TraderPoolDailySnapshot
   feesPaidUsdWei: BigInt!
 }
 
-type PoolDailyVolumeSnapshot
-  @index(fields: ["chainId", "poolId", "timestamp"]) {
+type PoolDailyVolumeSnapshot {
   id: ID! # "{chainId}-{poolId}-{day}"
   chainId: Int!
   poolId: String! @index
@@ -1223,8 +1217,7 @@ type PoolDailyVolumeSnapshot
   updatedAtTimestamp: BigInt!
 }
 
-type AggregatorDailySnapshot
-  @index(fields: ["chainId", "aggregator", "timestamp"]) {
+type AggregatorDailySnapshot {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
   # Canonical name from classifyAggregator(). Values currently produced:
@@ -1240,7 +1233,7 @@ type AggregatorDailySnapshot
   # curation. Add new aggregators (1inch / paraswap / jumper / cowswap /
   # ...) or new clusters to indexer-envio/config/aggregators.json once
   # they're identified and they'll start appearing here on next re-sync.
-  aggregator: String! @index
+  aggregator: String!
   # Most recently observed router address mapped to this aggregator. May vary
   # across days if multiple routers map to the same canonical name.
   lastSeenAggregatorAddress: String!

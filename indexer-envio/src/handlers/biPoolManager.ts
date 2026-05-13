@@ -12,12 +12,8 @@
 // mutate fields incrementally as the contract emits update events.
 // ---------------------------------------------------------------------------
 
-import {
-  indexer,
-  type EvmOnEventContext,
-  type BiPoolExchange,
-  type BucketUpdate,
-} from "envio";
+import type { BiPoolExchange, BucketUpdate, EvmOnEventContext } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import { ZERO_ADDRESS } from "../constants.js";
 import { mirrorFeedIdToPool, mirrorTokensAndDecimalsToPool } from "../pool.js";

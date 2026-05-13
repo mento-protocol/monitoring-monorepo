@@ -2,14 +2,14 @@
 // VirtualPoolFactory and VirtualPool event handlers
 // ---------------------------------------------------------------------------
 
-import {
-  indexer,
-  type SwapEvent,
-  type LiquidityEvent,
-  type ReserveUpdate,
-  type RebalanceEvent,
-  type VirtualPoolLifecycle,
+import type {
+  LiquidityEvent,
+  RebalanceEvent,
+  ReserveUpdate,
+  SwapEvent,
+  VirtualPoolLifecycle,
 } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";

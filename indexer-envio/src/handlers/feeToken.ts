@@ -2,7 +2,8 @@
 // ERC20FeeToken Transfer handler — protocol fee tracking
 // ---------------------------------------------------------------------------
 
-import { indexer, type ProtocolFeeTransfer } from "envio";
+import type { ProtocolFeeTransfer } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, makePoolId } from "../helpers.js";
 import {
   YIELD_SPLIT_ADDRESS,

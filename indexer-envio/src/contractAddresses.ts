@@ -141,3 +141,62 @@ export function lookupPricingModuleName(
 export function _clearPricingModuleIndex(): void {
   _pricingModuleIndex.clear();
 }
+
+// ---------------------------------------------------------------------------
+// Breaker-kind resolution
+//
+// Breaker kind is deployment metadata: each known breaker address is published
+// by @mento-protocol/contracts under a typed contract name. Prefer this over
+// runtime selector probes so historical bootstrap does not depend on probing
+// view functions with dummy feed IDs that can legitimately revert.
+// ---------------------------------------------------------------------------
+
+export type ContractBreakerKind =
+  | "MEDIAN_DELTA"
+  | "VALUE_DELTA"
+  | "MARKET_HOURS";
+
+const BREAKER_KIND_BY_CONTRACT_NAME: Record<string, ContractBreakerKind> = {
+  MedianDeltaBreaker: "MEDIAN_DELTA",
+  ValueDeltaBreaker: "VALUE_DELTA",
+  MarketHoursBreaker: "MARKET_HOURS",
+  MarketHoursBreakerv300: "MARKET_HOURS",
+  MarketHoursBreakerToggleablev300: "MARKET_HOURS",
+};
+
+const _breakerKindIndex = new Map<number, Map<string, ContractBreakerKind>>();
+
+export function lookupBreakerKind(
+  chainId: number,
+  address: string,
+): ContractBreakerKind | null {
+  let index = _breakerKindIndex.get(chainId);
+  if (!index) {
+    index = new Map<string, ContractBreakerKind>();
+    const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
+    const chainEntries = ns
+      ? (_contractsJson as ContractsJson)[String(chainId)]?.[ns]
+      : undefined;
+    if (chainEntries) {
+      for (const [rawName, entry] of Object.entries(chainEntries)) {
+        const kind = BREAKER_KIND_BY_CONTRACT_NAME[rawName];
+        if (!kind || !entry.address) continue;
+        const key = entry.address.toLowerCase();
+        const existing = index.get(key);
+        if (existing && existing !== kind) {
+          throw new Error(
+            `[contractAddresses] Conflicting breaker kinds for ${entry.address} on chain ${chainId}: ${existing} vs ${kind}`,
+          );
+        }
+        index.set(key, kind);
+      }
+    }
+    _breakerKindIndex.set(chainId, index);
+  }
+  return index.get(address.toLowerCase()) ?? null;
+}
+
+/** @internal Test-only: clear the breaker-kind index between tests. */
+export function _clearBreakerKindIndex(): void {
+  _breakerKindIndex.clear();
+}

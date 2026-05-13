@@ -5,7 +5,7 @@
 // Trip / reset transitions are handled by the BreakerBox handler.
 // ---------------------------------------------------------------------------
 
-import { indexer } from "envio";
+import { indexer } from "../indexer.js";
 import { asAddress, asBigInt } from "../helpers.js";
 import {
   ensureBreaker,
