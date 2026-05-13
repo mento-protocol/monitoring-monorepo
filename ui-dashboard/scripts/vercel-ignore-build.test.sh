@@ -36,6 +36,12 @@ expect_build() {
   expect_status 1 "$@"
 }
 
+assert_output_contains() {
+  local expected="$1"
+  grep -Fq "$expected" "$output_file" ||
+    fail "expected output to contain: ${expected}"
+}
+
 mkdir -p "$fixture_repo/ui-dashboard/scripts" "$fixture_repo/shared-config"
 cp "$repo_root/ui-dashboard/scripts/vercel-ignore-build.sh" "$fixture_repo/ui-dashboard/scripts/vercel-ignore-build.sh"
 
@@ -77,5 +83,10 @@ git commit -am "dashboard PR change" -q
 expect_build "PR dashboard changes build from origin/main" \
   VERCEL_GIT_PULL_REQUEST_ID=408 \
   VERCEL_GIT_PREVIOUS_SHA="$main_sha"
+
+git update-ref -d refs/remotes/origin/main
+expect_build "PR falls back to build when origin/main is unavailable" \
+  VERCEL_GIT_PULL_REQUEST_ID=409
+assert_output_contains "Could not resolve origin/main for PR #409; building dashboard."
 
 echo "vercel-ignore-build tests passed"
