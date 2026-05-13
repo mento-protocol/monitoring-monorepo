@@ -290,7 +290,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("#writeProxyContract");
   });
 
-  it("surfaces block reason + raw error + enrichment in the tooltip when blocked", () => {
+  it("surfaces block reason + enrichment in the tooltip when blocked", () => {
     mockUseRebalanceCheck.mockReturnValue(
       rebalanceState({
         data: {
@@ -318,8 +318,31 @@ describe("RebalanceStatusValue", () => {
     // block — now folded into a native title so the header tells the
     // full story on hover without a separate panel.
     expect(html).toContain(
-      'title="Stability pool has insufficient liquidity — [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW] — Stability pool: 34.5k BOLD"',
+      'title="Stability pool has insufficient liquidity — Stability pool: 34.5k BOLD"',
     );
+    expect(html).not.toContain("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
+  });
+
+  it("keeps the raw error in the tooltip when no prose message is available", () => {
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "",
+          rawError: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+          strategyType: "cdp",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain('title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"');
   });
 
   it("renders a focusable info icon beside 'Rebalance blocked' so the detail is keyboard-reachable", () => {

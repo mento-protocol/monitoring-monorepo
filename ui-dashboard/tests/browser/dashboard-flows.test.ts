@@ -19,6 +19,48 @@ function trackUnexpectedBrowserErrors(page: Page): string[] {
   return errors;
 }
 
+async function mockBlockedRebalanceProbe(page: Page) {
+  await page.route("**/graphql", async (route) => {
+    const body = route.request().postData() ?? "";
+    if (!body.includes("query PoolDetailWithHealth")) {
+      await route.continue();
+      return;
+    }
+
+    const response = await route.fetch();
+    const json = await response.json();
+    const staleOracleTimestamp = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+    json.data.Pool = json.data.Pool.map((pool: Record<string, unknown>) => ({
+      ...pool,
+      oracleTimestamp: String(staleOracleTimestamp),
+      priceDifference: "200",
+      rebalanceThreshold: 100,
+      lastRebalancedAt: "0",
+      rebalancerAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }));
+    await route.fulfill({ response, json });
+  });
+
+  await page.route("**/api/rebalance-check?**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        canRebalance: false,
+        message: "Stability pool has insufficient liquidity",
+        rawError: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+        strategyType: "cdp",
+        enrichment: {
+          type: "cdp",
+          stabilityPoolBalance: 5000,
+          stabilityPoolTokenSymbol: "GBPm",
+          stabilityPoolTokenDecimals: 18,
+        },
+      }),
+    });
+  });
+}
+
 test.describe("dashboard browser flows", () => {
   let browserErrors: string[];
 
@@ -109,5 +151,37 @@ test.describe("dashboard browser flows", () => {
     await expect(
       page.getByText(/Failed to load swaps:.*Fixture recent swaps failed/),
     ).toBeVisible();
+  });
+
+  test("shows rebalance-blocked prose without the raw Solidity error code", async ({
+    page,
+  }) => {
+    await mockBlockedRebalanceProbe(page);
+
+    await page.goto(`/pool/${CELO_POOL_ID}`);
+
+    await expect(page.getByText("Rebalance blocked")).toBeVisible();
+
+    const diagnostics = page.getByRole("button", {
+      name: /Rebalance diagnostics: Stability pool has insufficient liquidity/,
+    });
+    await expect(diagnostics).toHaveAttribute(
+      "title",
+      "Stability pool has insufficient liquidity — Stability pool: 5.0k GBPm",
+    );
+    await expect(diagnostics).not.toHaveAttribute(
+      "title",
+      /CDPLS_STABILITY_POOL_BALANCE_TOO_LOW/,
+    );
+
+    await diagnostics.click();
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toContainText(
+      "Stability pool has insufficient liquidity",
+    );
+    await expect(tooltip).toContainText("Stability pool: 5.0k GBPm");
+    await expect(tooltip).not.toContainText(
+      "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+    );
   });
 });
