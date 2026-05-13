@@ -84,7 +84,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Pair `AbortSignal.timeout(8_000)` with the 10s refresh interval so a wedged TCP connection can't backpressure the polling loop
 - Distinguish `isLoading` from "data resolved to zero" — never render "100% / no breaches" while `data === undefined`
 - Hasura silently caps queries at 1000 rows; any custom `limit:` in a UI query that feeds a lifetime-aggregate metric is a bug — use a pre-rolled snapshot/rollup entity, or model your fetch after the offset-pagination pattern in `ui-dashboard/src/hooks/use-all-networks-data.ts` (`fetchPaginatedSnapshotPages`)
-- New indexer schema fields ship in an **isolated query** (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into the page's primary pool query. Hosted Hasura rejects the unknown column with "field not found" during the deploy+resync window and would take the whole page down; isolation lets the affected tile degrade to `—` while the rest renders
+- New indexer schema fields ship in an **isolated query** (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into the page's primary pool query. Hosted Hasura rejects the unknown column with "field not found" during the deploy+resync window and would take the whole page down; isolation lets the affected tile degrade to `—` while the rest renders. Apply this at field-version granularity too: if older persisted counters should remain available during schema lag, do not mix newer cursor/config fields into that counter query.
 
 ### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
 
