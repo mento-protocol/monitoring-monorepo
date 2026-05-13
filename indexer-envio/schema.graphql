@@ -906,7 +906,7 @@ type BreakerConfig @index(fields: ["chainId", "rateFeedID"]) {
   chainId: Int! @index
   breaker: Breaker!
   # Denormalized for query convenience (avoid joining for filter-by-address).
-  breakerAddress: String!
+  breakerAddress: String! @index
   rateFeedID: String! @index # lowercased
   enabled: Boolean!
   # Per-feed config (sentinel 0 = inherit Breaker default).

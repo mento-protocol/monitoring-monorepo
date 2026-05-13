@@ -213,6 +213,35 @@ describe("TradingLimitsV2 state derivation", () => {
     });
   });
 
+  it("resets elapsed windows even when swap deltaFlow is zero", () => {
+    const next = applyTradingLimitSwap(
+      {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 100_000n,
+        netflow0: 50n * INTERNAL_UNIT,
+        netflow1: 50n * INTERNAL_UNIT,
+      },
+      {
+        limit0: 1_000n * INTERNAL_UNIT,
+        limit1: 10_000n * INTERNAL_UNIT,
+        decimals: 18,
+      },
+      {
+        amountIn: 10n * TOKEN_18_UNIT,
+        amountOut: 10n * TOKEN_18_UNIT,
+        totalFeeBps: 0,
+        blockTimestamp: 186_401n,
+      },
+    );
+
+    assert.deepEqual(next, {
+      lastUpdated0: 186_401n,
+      lastUpdated1: 186_401n,
+      netflow0: 0n,
+      netflow1: 0n,
+    });
+  });
+
   it("applies negative deltaFlow when amountOut exceeds amountIn after fees", () => {
     const next = applyTradingLimitSwap(
       {

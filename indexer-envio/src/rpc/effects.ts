@@ -575,10 +575,10 @@ export const reportExpiryEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group E — trading limits.
-// MUST stay `cache: false` permanently (block-scoped state). Swap handlers
-// derive steady-state updates from events once rows are seeded; this effect is
-// kept as the canonical seed/recovery path for missing rows or unknown
-// fee/decimal metadata.
+// MUST stay `cache: false` permanently (block-scoped state). Swap handlers use
+// this as the authoritative per-swap path because local event derivation cannot
+// prove row contiguity after a transient miss or fee-history correctness during
+// a full replay.
 // ---------------------------------------------------------------------------
 
 export const tradingLimitsEffect = createEffect(

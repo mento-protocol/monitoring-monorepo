@@ -49,17 +49,6 @@ export function tradingLimitStateFromEntity(
   };
 }
 
-export function tradingLimitConfigFromEntity(
-  row: Pick<TradingLimit, "limit0" | "limit1">,
-  tokenDecimals: number,
-): TradingLimitConfig {
-  return {
-    limit0: row.limit0,
-    limit1: row.limit1,
-    decimals: tokenDecimals,
-  };
-}
-
 export function resetTradingLimitState(
   state: TradingLimitState | undefined,
   config: Pick<TradingLimitConfig, "limit0" | "limit1">,
@@ -104,7 +93,6 @@ export function applyTradingLimitSwap(
     scaledAmountIn -
     (scaledAmountIn * BigInt(args.totalFeeBps)) / BASIS_POINTS_DENOMINATOR;
   const deltaFlow = amountInAfterFees - scaledAmountOut;
-  if (deltaFlow === 0n) return state;
 
   const next = { ...state };
   if (config.limit0 > 0n) {
@@ -122,18 +110,6 @@ export function applyTradingLimitSwap(
     next.netflow1 += deltaFlow;
   }
   return next;
-}
-
-export function isKnownFeeState(
-  pool: Pick<
-    {
-      lpFee: number;
-      protocolFee: number;
-    },
-    "lpFee" | "protocolFee"
-  >,
-): boolean {
-  return pool.lpFee >= 0 && pool.protocolFee >= 0;
 }
 
 export function buildTradingLimitEntity(args: {

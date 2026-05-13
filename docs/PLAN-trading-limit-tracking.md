@@ -26,9 +26,9 @@ Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
 - CRITICAL: `limitPressure ≥ 1.0`
 
 The `TradingLimitConfigured` event fires when limits are changed (`configureTradingLimit` call).
-There is **no on-chain event for netflow state changes** — it's derived from Swap amounts.
+There is **no on-chain event for netflow state changes** — swaps mutate netflow inside the contract, so the indexer samples `getTradingLimits` at Swap blocks.
 
-**Strategy:** Index `TradingLimitConfigured` for limit config and reset semantics, then derive `netflow` state from `Swap` amounts using the same `TradingLimitsV2` math the contract uses. Keep `getTradingLimits` as a seed/recovery fallback only when a row is missing or when fee/decimal metadata is not yet trusted.
+**Strategy:** Index `TradingLimitConfigured` for limit config and reset semantics, then read `getTradingLimits(token)` at each Swap block for authoritative netflow state. Local derivation from Swap logs is useful for parity tests but is not safe as the production path unless the indexer can prove no prior swap was skipped and that stored fee fields are historical for the swap block.
 
 ---
 
@@ -72,8 +72,8 @@ In `EventHandlers.ts`:
 
 On every `Swap`, update the `TradingLimit` entity:
 
-- Prefer deriving token0/token1 state from the event amounts, stored limit row, token decimals, and stored LP/protocol fee state
-- Call `getTradingLimits(token)` only as fallback when the row is missing or metadata is not trusted
+- Read `getTradingLimits(token)` at the Swap block for both tokens
+- Skip the entity write when the at-block RPC read fails or falls back to latest, then retry on the next Swap
 - Recompute `netflow0`, `netflow1`, `limitPressure0`, `limitPressure1`, `limitStatus`
 
 #### 4. Add `limitStatus` to `Pool` entity (denormalised for fast badge queries)
@@ -172,6 +172,6 @@ computeLimitStatus(0, 0)      → "OK"
 
 ## Notes
 
-- RPC calls on every `Swap` event are avoidable. The steady-state path should derive from logs and only fall back to `getTradingLimits` when correctness requires seeding/recovery.
-- Windows reset when `block.timestamp - lastUpdated > windowDuration`. Pressure drops to 0 naturally — no special handling needed
+- RPC calls on every `Swap` event are deliberate until a correctness-safe contiguity marker exists. A future log-derived steady-state path must prove the stored row includes every prior Swap and must avoid applying future fee state to historical swaps.
+- Windows reset when `block.timestamp - lastUpdated > windowDuration`; the parity helper must run reset checks before adding delta, even for zero-delta swaps
 - VirtualPools: `getTradingLimits` will likely revert. Guard: `if (!isFpmm) return` before RPC call

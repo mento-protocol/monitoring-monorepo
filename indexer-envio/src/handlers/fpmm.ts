@@ -6,15 +6,10 @@ import type { SwapEvent, TradingLimit } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 import {
-  applyTradingLimitSwap,
-  buildTradingLimitEntity,
   buildTradingLimitEntityFromRpc,
   computeLimitPressures,
   computeLimitStatus,
-  isKnownFeeState,
-  tradingLimitConfigFromEntity,
   tradingLimitId,
-  tradingLimitStateFromEntity,
 } from "../tradingLimits.js";
 import { tradingLimitsEffect } from "../rpc/effects.js";
 import { maybePreloadPool, upsertPool, upsertSnapshot } from "../pool.js";
@@ -67,9 +62,10 @@ indexer.onEvent(
       swapDelta: { volume0, volume1 },
     });
 
-    // Update trading limits for FPMM pools. Once a token's limit row has
-    // been seeded, derive the next state from the Swap event itself; RPC is
-    // only a recovery path for missing rows or unknown fee/decimal metadata.
+    // Update trading limits for FPMM pools. Use the authoritative at-block RPC
+    // state for every swap: local derivation cannot prove the stored row is
+    // contiguous after a prior transient miss, and Pool fee fields may reflect
+    // future governance state during historical replay.
     if (
       pool.source &&
       pool.source.includes("fpmm") &&
@@ -78,60 +74,8 @@ indexer.onEvent(
     ) {
       const updateTradingLimitFromSwap = async (
         token: string,
-        amountIn: bigint,
-        amountOut: bigint,
       ): Promise<TradingLimit | null> => {
         const tlId = tradingLimitId(poolId, token);
-        const existing = await context.TradingLimit.get(tlId);
-        const bothLimitsDisabled =
-          existing !== undefined &&
-          existing.limit0 === 0n &&
-          existing.limit1 === 0n;
-        const tokenDecimals =
-          token === pool.token0
-            ? pool.token0Decimals
-            : token === pool.token1
-              ? pool.token1Decimals
-              : undefined;
-        const canDerive =
-          existing !== undefined &&
-          (bothLimitsDisabled ||
-            (tokenDecimals !== undefined &&
-              pool.tokenDecimalsKnown &&
-              isKnownFeeState(pool)));
-
-        if (canDerive && existing) {
-          const previousState = tradingLimitStateFromEntity(existing);
-          const state =
-            bothLimitsDisabled || tokenDecimals === undefined
-              ? previousState
-              : applyTradingLimitSwap(
-                  previousState,
-                  tradingLimitConfigFromEntity(existing, tokenDecimals),
-                  {
-                    amountIn,
-                    amountOut,
-                    totalFeeBps: pool.lpFee + pool.protocolFee,
-                    blockTimestamp,
-                  },
-                );
-          const tl = buildTradingLimitEntity({
-            id: tlId,
-            chainId: event.chainId,
-            poolId,
-            token,
-            config: {
-              limit0: existing.limit0,
-              limit1: existing.limit1,
-            },
-            state,
-            blockNumber,
-            blockTimestamp,
-          });
-          context.TradingLimit.set(tl);
-          return tl;
-        }
-
         const limits = await context.effect(tradingLimitsEffect, {
           chainId: event.chainId,
           poolAddress: event.srcAddress,
@@ -154,16 +98,8 @@ indexer.onEvent(
       };
 
       const [limits0, limits1] = await Promise.all([
-        updateTradingLimitFromSwap(
-          pool.token0,
-          event.params.amount0In,
-          event.params.amount0Out,
-        ),
-        updateTradingLimitFromSwap(
-          pool.token1,
-          event.params.amount1In,
-          event.params.amount1Out,
-        ),
+        updateTradingLimitFromSwap(pool.token0),
+        updateTradingLimitFromSwap(pool.token1),
       ]);
 
       let worstP0 = 0;
