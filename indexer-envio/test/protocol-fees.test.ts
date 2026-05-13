@@ -23,10 +23,6 @@ import {
 } from "../src/rpc.ts";
 import { feeTokenMetaEffect } from "../src/rpc/effects.ts";
 import { UNKNOWN_FEE_TOKEN_META } from "../src/feeToken.ts";
-import { makePoolId } from "../src/helpers.ts";
-
-/** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
-const pid = (addr: string): string => makePoolId(42220, addr);
 
 // ---------------------------------------------------------------------------
 // Types & helpers
@@ -297,7 +293,6 @@ describe("UNKNOWN backfill behavior", () => {
 describe("selectStaleTransfers", () => {
   const CHAIN_A = 42220;
   const CHAIN_B = 143;
-  const TOKEN = "0x0000000000000000000000000000000000000042";
 
   it("returns only UNKNOWN records for the given chainId", () => {
     const records = [

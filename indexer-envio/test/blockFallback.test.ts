@@ -1,4 +1,5 @@
 import { strict as assert } from "assert";
+import type { createPublicClient } from "viem";
 import { readContractWithBlockFallback, _testHooks } from "../src/rpc.js";
 import {
   _resetFallbackArchiveDepth,
@@ -15,12 +16,18 @@ const TEST_CHAIN_ID = 999_001;
 // Mock client factory
 // ---------------------------------------------------------------------------
 
-type ReadContractFn = (args: Record<string, unknown>) => Promise<unknown>;
+type PublicClient = ReturnType<typeof createPublicClient>;
+type MockReadContractArgs = Record<string, unknown> & {
+  blockNumber?: bigint;
+  functionName?: string;
+  args?: unknown;
+};
+type ReadContractFn = (args: MockReadContractArgs) => Promise<unknown>;
 
 /** Build a minimal mock viem client whose readContract behaviour is controlled
  *  by the provided function. */
-function mockClient(readContract: ReadContractFn) {
-  return { readContract } as any;
+function mockClient(readContract: ReadContractFn): PublicClient {
+  return { readContract } as unknown as PublicClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +56,7 @@ describe("readContractWithBlockFallback", () => {
   // -------------------------------------------------------------------------
 
   it("calls with blockNumber when provided, usedFallback=false", async () => {
-    const calls: Record<string, unknown>[] = [];
+    const calls: MockReadContractArgs[] = [];
     const client = mockClient(async (args) => {
       calls.push(args);
       return "ok";
@@ -63,11 +70,11 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.result, "ok");
     assert.equal(res.usedFallback, false);
     assert.equal(calls.length, 1);
-    assert.equal((calls[0] as any).blockNumber, 100n);
+    assert.equal(calls[0].blockNumber, 100n);
   });
 
   it("calls without blockNumber when not provided, usedFallback=false", async () => {
-    const calls: Record<string, unknown>[] = [];
+    const calls: MockReadContractArgs[] = [];
     const client = mockClient(async (args) => {
       calls.push(args);
       return "ok";
@@ -81,7 +88,7 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.result, "ok");
     assert.equal(res.usedFallback, false);
     assert.equal(calls.length, 1);
-    assert.equal((calls[0] as any).blockNumber, undefined);
+    assert.equal(calls[0].blockNumber, undefined);
   });
 
   // -------------------------------------------------------------------------
@@ -92,7 +99,7 @@ describe("readContractWithBlockFallback", () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
-      if ((args as any).blockNumber !== undefined) {
+      if (args.blockNumber !== undefined) {
         throw new Error("block is out of range");
       }
       return "fallback-ok";
@@ -110,11 +117,11 @@ describe("readContractWithBlockFallback", () => {
   });
 
   it("tries secondary at the same block before latest after block-lag retries", async () => {
-    const primaryCalls: Record<string, unknown>[] = [];
-    const fallbackCalls: Record<string, unknown>[] = [];
+    const primaryCalls: MockReadContractArgs[] = [];
+    const fallbackCalls: MockReadContractArgs[] = [];
     const primary = mockClient(async (args) => {
       primaryCalls.push({ ...args });
-      if ((args as any).blockNumber !== undefined) {
+      if (args.blockNumber !== undefined) {
         throw new Error("header not found");
       }
       return "latest-result";
@@ -138,14 +145,14 @@ describe("readContractWithBlockFallback", () => {
     // 1 initial + 3 retries; no latest read because secondary succeeded.
     assert.equal(primaryCalls.length, 4);
     assert.equal(fallbackCalls.length, 1);
-    assert.equal((fallbackCalls[0] as any).blockNumber, 100n);
+    assert.equal(fallbackCalls[0].blockNumber, 100n);
   });
 
   it("succeeds on second retry without falling back", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
-      if ((args as any).blockNumber !== undefined && callCount < 3) {
+      if (args.blockNumber !== undefined && callCount < 3) {
         throw new Error("block is out of range");
       }
       return "retry-ok";
@@ -166,7 +173,7 @@ describe("readContractWithBlockFallback", () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
-      if ((args as any).blockNumber !== undefined && callCount < 2) {
+      if (args.blockNumber !== undefined && callCount < 2) {
         throw new Error("block is out of range");
       }
       return "retry-ok";
@@ -190,7 +197,7 @@ describe("readContractWithBlockFallback", () => {
     };
     try {
       const client = mockClient(async (args) => {
-        if ((args as any).blockNumber !== undefined) {
+        if (args.blockNumber !== undefined) {
           throw new Error("block is out of range");
         }
         return "ok";
@@ -222,7 +229,7 @@ describe("readContractWithBlockFallback", () => {
       let callCount = 0;
       const client = mockClient(async (args) => {
         callCount++;
-        if ((args as any).blockNumber !== undefined) {
+        if (args.blockNumber !== undefined) {
           throw new Error(errorMsg);
         }
         return "ok";
@@ -297,7 +304,7 @@ describe("readContractWithBlockFallback", () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
-      if ((args as any).blockNumber !== undefined) {
+      if (args.blockNumber !== undefined) {
         throw new Error("block is out of range");
       }
       throw new Error("node is down");
@@ -313,7 +320,7 @@ describe("readContractWithBlockFallback", () => {
 
   it("propagates non-block error that occurs during a retry", async () => {
     let callCount = 0;
-    const client = mockClient(async (args) => {
+    const client = mockClient(async () => {
       callCount++;
       if (callCount === 1) {
         throw new Error("block is out of range");
@@ -335,7 +342,7 @@ describe("readContractWithBlockFallback", () => {
   // -------------------------------------------------------------------------
 
   it("preserves all args except blockNumber on fallback", async () => {
-    const calls: Record<string, unknown>[] = [];
+    const calls: MockReadContractArgs[] = [];
     const argsWithExtra = {
       address: "0xabc",
       abi: [{ name: "test" }],
@@ -344,7 +351,7 @@ describe("readContractWithBlockFallback", () => {
     };
     const client = mockClient(async (args) => {
       calls.push({ ...args });
-      if ((args as any).blockNumber !== undefined) {
+      if (args.blockNumber !== undefined) {
         throw new Error("block is out of range");
       }
       return "ok";
@@ -359,14 +366,14 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(calls.length, 5);
     // First 4 calls: has blockNumber
     for (let i = 0; i < 4; i++) {
-      assert.equal((calls[i] as any).blockNumber, 42n);
-      assert.equal((calls[i] as any).functionName, "bar");
-      assert.deepStrictEqual((calls[i] as any).args, ["0xfeed"]);
+      assert.equal(calls[i].blockNumber, 42n);
+      assert.equal(calls[i].functionName, "bar");
+      assert.deepStrictEqual(calls[i].args, ["0xfeed"]);
     }
     // Fallback: no blockNumber, same args
-    assert.equal((calls[4] as any).blockNumber, undefined);
-    assert.equal((calls[4] as any).functionName, "bar");
-    assert.deepStrictEqual((calls[4] as any).args, ["0xfeed"]);
+    assert.equal(calls[4].blockNumber, undefined);
+    assert.equal(calls[4].functionName, "bar");
+    assert.deepStrictEqual(calls[4].args, ["0xfeed"]);
   });
 
   // -------------------------------------------------------------------------
@@ -378,8 +385,8 @@ describe("readContractWithBlockFallback", () => {
   // -------------------------------------------------------------------------
 
   it("archive-depth: secondary at SAME block returns block-scoped result", async () => {
-    const primaryCalls: Record<string, unknown>[] = [];
-    const fallbackCalls: Record<string, unknown>[] = [];
+    const primaryCalls: MockReadContractArgs[] = [];
+    const fallbackCalls: MockReadContractArgs[] = [];
     const primary = mockClient(async (args) => {
       primaryCalls.push({ ...args });
       throw new Error(
@@ -410,7 +417,7 @@ describe("readContractWithBlockFallback", () => {
       "no retries on primary for archive-depth",
     );
     assert.equal(fallbackCalls.length, 1);
-    assert.equal((fallbackCalls[0] as any).blockNumber, 68202836n);
+    assert.equal(fallbackCalls[0].blockNumber, 68202836n);
   });
 
   it("archive-depth: matches 'querying historical state' phrasing too", async () => {
@@ -599,7 +606,7 @@ describe("readContractWithBlockFallback", () => {
     let primaryCallNo = 0;
     const primary = mockClient(async (args) => {
       primaryCallNo++;
-      if ((args as any).blockNumber !== undefined) {
+      if (args.blockNumber !== undefined) {
         throw new Error("Block requested not found");
       }
       return "latest-result";

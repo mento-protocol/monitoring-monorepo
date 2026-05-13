@@ -29,7 +29,6 @@ const BREAKER_BOX_ADDR = "0x303ed1df62fa067659b586ebee8de0ece824ab39";
 const MD_BREAKER = "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9";
 const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 
-const FIXED_1 = 10n ** 24n;
 const COOLDOWN = 900n; // 15 min — production value
 const THRESHOLD = 4n * 10n ** 22n; // 4% Fixidity
 

@@ -147,7 +147,7 @@ indexer.onEvent(
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     // Fetch oracle state from chain at pool creation
-    let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
+    const oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
     const [
       rateFeedID,

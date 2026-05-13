@@ -379,7 +379,7 @@ export const upsertPool = async ({
     }
   }
 
-  let next: Pool = {
+  const next: Pool = {
     ...existing,
     chainId,
     token0: token0 ?? existing.token0,

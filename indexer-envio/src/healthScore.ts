@@ -16,7 +16,7 @@
 //   - freshnessLimit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
 // ---------------------------------------------------------------------------
 
-import type { Pool, OracleSnapshot } from "envio";
+import type { Pool } from "envio";
 import FX_CALENDAR from "../config/fx-calendar.json" with { type: "json" };
 
 /** Safety cap for carry-forward duration (1 hour) */
@@ -259,7 +259,7 @@ export function updateHealthAccumulators(
     };
   }
 
-  let newTotalSeconds = pool.healthTotalSeconds + duration;
+  const newTotalSeconds = pool.healthTotalSeconds + duration;
   let newBinarySeconds = pool.healthBinarySeconds;
 
   if (prevHealthy) {
