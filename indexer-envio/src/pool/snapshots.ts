@@ -25,10 +25,10 @@ export const upsertSnapshot = async ({
   pool: Pool;
   blockTimestamp: bigint;
   blockNumber: bigint;
-  swapDelta?: { volume0: bigint; volume1: bigint };
-  rebalanceDelta?: boolean;
-  mintDelta?: boolean;
-  burnDelta?: boolean;
+  swapDelta?: { volume0: bigint; volume1: bigint } | undefined;
+  rebalanceDelta?: boolean | undefined;
+  mintDelta?: boolean | undefined;
+  burnDelta?: boolean | undefined;
 }): Promise<void> => {
   const hourTs = hourBucket(blockTimestamp);
   const id = snapshotId(pool.id, hourTs);
@@ -106,10 +106,10 @@ export const upsertDailySnapshot = async ({
   pool: Pool;
   blockTimestamp: bigint;
   blockNumber: bigint;
-  swapDelta?: { volume0: bigint; volume1: bigint };
-  rebalanceDelta?: boolean;
-  mintDelta?: boolean;
-  burnDelta?: boolean;
+  swapDelta?: { volume0: bigint; volume1: bigint } | undefined;
+  rebalanceDelta?: boolean | undefined;
+  mintDelta?: boolean | undefined;
+  burnDelta?: boolean | undefined;
 }): Promise<void> => {
   const dayTs = dayBucket(blockTimestamp);
   const id = dailySnapshotId(pool.id, dayTs);

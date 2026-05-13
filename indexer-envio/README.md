@@ -93,6 +93,9 @@ pnpm codegen    # Generate types
 pnpm dev        # Start indexer stack
 pnpm start      # Start without codegen
 pnpm stop       # Stop Docker containers
+pnpm typecheck:strict  # Dry-run stricter TS flags
+pnpm test:mutation     # Targeted StrykerJS pure-logic baseline
+pnpm knip:report       # Report-only unused-file/export/dependency scan
 ```
 
 ### Performance Diagnostics

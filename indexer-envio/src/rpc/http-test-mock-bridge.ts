@@ -342,8 +342,9 @@ export function registerMockBreakerDefaultsHttp(
         chainId,
         address,
         functionName,
-        callArgs:
-          functionName === "breakerTradingMode" ? [breakerAddress] : undefined,
+        ...(functionName === "breakerTradingMode"
+          ? { callArgs: [breakerAddress] }
+          : {}),
       });
     }
     return;

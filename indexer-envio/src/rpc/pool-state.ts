@@ -496,7 +496,7 @@ export async function fetchTradingLimits(
     // event during catch-up. Reject and let the caller skip the limit
     // update for this event.
     if (usedLatestFallback) return null;
-    const result = raw as unknown as [
+    const result = raw as [
       { limit0: bigint; limit1: bigint; decimals: number },
       {
         lastUpdated0: number;

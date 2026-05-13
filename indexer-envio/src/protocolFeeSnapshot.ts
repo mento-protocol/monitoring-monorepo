@@ -171,10 +171,11 @@ export function mergeFeeSnapshot(
     );
     // Reprice the prior accumulated amount that was previously priced as 0n
     // (the slot was UNKNOWN). Use the just-resolved metadata.
+    const priorAmount = existing.amounts[tokenIdx] ?? 0n;
     const repairedPriorUsd = computeFeeUsdWei({
       tokenSymbol: input.tokenSymbol,
       tokenDecimals: input.tokenDecimals,
-      amount: existing.amounts[tokenIdx]!,
+      amount: priorAmount,
     });
     nextFeesUsdWei = existing.feesUsdWei + repairedPriorUsd;
     nextUnresolvedCount = Math.max(0, existing.unresolvedCount - 1);

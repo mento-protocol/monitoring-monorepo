@@ -261,7 +261,7 @@ indexer.onEvent(
       txHash: event.transaction.hash,
       oracleDelta,
       tokenDecimals,
-      referenceRateFeedID: rateFeedID ?? undefined,
+      ...(rateFeedID == null ? {} : { referenceRateFeedID: rateFeedID }),
     });
 
     // Persist fee config read at pool creation. `compactFees` strips

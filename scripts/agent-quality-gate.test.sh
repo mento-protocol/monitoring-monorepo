@@ -529,6 +529,23 @@ run_gate "metrics-bridge/test/rebalance-probe.test.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
+run_gate "indexer-envio/stryker.config.mjs"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
+run_gate "indexer-envio/vitest.mutation.config.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
+run_gate "indexer-envio/src/helpers.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio typecheck:strict (indexer-envio changed)"
+
+run_gate "indexer-envio/test/code-quality-invariants.test.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
 run_gate "ui-dashboard/src/components/breach-history-panel.tsx"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 

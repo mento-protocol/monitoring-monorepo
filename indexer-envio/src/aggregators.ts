@@ -61,7 +61,7 @@ const CLUSTERS_BY_NAME: Map<string, ClusterMetadata> = (() => {
   for (const [name, value] of Object.entries(block)) {
     if (name.startsWith("$")) continue; // skip nested $comment
     if (typeof value !== "object" || value === null) continue;
-    const meta = value as ClusterMetadata;
+    const meta = value;
     if (
       typeof meta.deployer !== "string" ||
       meta.deployer.length === 0 ||

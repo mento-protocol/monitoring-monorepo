@@ -319,13 +319,13 @@ indexer.onEvent(
         // transition (delivered block known, but amount/source weren't until
         // now). priorTransfer.amount == null is the tight invariant — on replay
         // it's already set, so this branch doesn't fire.
-        const needsDeliveredCatchUp =
+        if (
           priorTransfer?.deliveredBlock != null &&
           priorTransfer?.deliveredTimestamp != null &&
-          priorTransfer?.amount == null;
-        if (needsDeliveredCatchUp) {
+          priorTransfer?.amount == null
+        ) {
           await updateDailySnapshot(context as HandlerContext, {
-            blockTimestamp: priorTransfer!.deliveredTimestamp!,
+            blockTimestamp: priorTransfer.deliveredTimestamp,
             tokenSymbol: mgr.tokenSymbol,
             sourceChainId: chainId,
             destChainId,
@@ -471,7 +471,12 @@ type DestPendingRow = NonNullable<
 >;
 function applyDestPendingToDelta(
   destPending: DestPendingRow | undefined,
-  prior: { sourceChainId?: number; sourceContract?: string } | undefined,
+  prior:
+    | {
+        sourceChainId?: number | undefined;
+        sourceContract?: string | undefined;
+      }
+    | undefined,
   transferDelta: BridgeTransferDelta,
   detailDelta: WormholeDetailDelta,
 ): void {

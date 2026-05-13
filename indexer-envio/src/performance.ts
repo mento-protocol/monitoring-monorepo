@@ -1,4 +1,5 @@
-type AnyHandler = (args: { context?: unknown }) => unknown | Promise<unknown>;
+type MaybePromise<T> = T | Promise<T>;
+type AnyHandler = (args: { context?: unknown }) => MaybePromise<unknown>;
 type AnyContext = Record<PropertyKey, unknown>;
 type AnyFunction = (...args: unknown[]) => unknown;
 
@@ -279,7 +280,13 @@ export async function trackEffectExecution<T>(
 export function eventLabel(config: unknown): string {
   if (typeof config !== "object" || config === null) return "event:unknown";
   const record = config as Record<string, unknown>;
-  const contract = String(record.contract ?? "unknown");
-  const event = String(record.event ?? "unknown");
+  const contract =
+    typeof record.contract === "string" && record.contract.length > 0
+      ? record.contract
+      : "unknown";
+  const event =
+    typeof record.event === "string" && record.event.length > 0
+      ? record.event
+      : "unknown";
   return `${contract}.${event}`;
 }

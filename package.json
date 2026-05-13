@@ -18,6 +18,8 @@
     "deploy:indexer:logs": "./scripts/deploy-indexer-logs.sh",
     "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml",
     "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.mainnet.yaml",
+    "indexer:knip": "pnpm --filter @mento-protocol/indexer-envio knip:report",
+    "indexer:mutation": "pnpm --filter @mento-protocol/indexer-envio test:mutation",
     "indexer:testnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml",
     "indexer:testnet:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.testnet.yaml",
     "bridge:dev": "pnpm --filter @mento-protocol/metrics-bridge dev",

@@ -284,17 +284,17 @@ export async function fetchFees(
       rebalanceReward: number;
     }> = {};
     if (lpFeeR.status === "fulfilled") {
-      fees.lpFee = Number(lpFeeR.value as bigint);
+      fees.lpFee = Number(lpFeeR.value);
     } else if (isUnsupportedGetterError(lpFeeR.reason)) {
       fees.lpFee = -2;
     }
     if (protocolFeeR.status === "fulfilled") {
-      fees.protocolFee = Number(protocolFeeR.value as bigint);
+      fees.protocolFee = Number(protocolFeeR.value);
     } else if (isUnsupportedGetterError(protocolFeeR.reason)) {
       fees.protocolFee = -2;
     }
     if (rebalanceRewardR.status === "fulfilled") {
-      fees.rebalanceReward = Number(rebalanceRewardR.value as bigint);
+      fees.rebalanceReward = Number(rebalanceRewardR.value);
     } else if (isUnsupportedGetterError(rebalanceRewardR.reason)) {
       fees.rebalanceReward = -2;
     }

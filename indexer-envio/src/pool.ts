@@ -173,7 +173,7 @@ const getOrCreatePool = async (
   context: PoolContext,
   chainId: number,
   poolId: string,
-  defaults?: { token0?: string; token1?: string },
+  defaults?: { token0?: string | undefined; token1?: string | undefined },
 ): Promise<Pool> => {
   const existing = await context.Pool.get(poolId);
   return existing ?? defaultPool(chainId, poolId, defaults);
@@ -182,7 +182,7 @@ const getOrCreatePool = async (
 const defaultPool = (
   chainId: number,
   poolId: string,
-  defaults?: { token0?: string; token1?: string },
+  defaults?: { token0?: string | undefined; token1?: string | undefined },
 ): Pool => ({
   id: poolId,
   chainId,
@@ -231,8 +231,8 @@ export const upsertPool = async ({
   context: PoolContext;
   chainId: number;
   poolId: string;
-  token0?: string;
-  token1?: string;
+  token0?: string | undefined;
+  token1?: string | undefined;
   source: PoolUpdateSource;
   blockNumber: bigint;
   blockTimestamp: bigint;
@@ -243,7 +243,7 @@ export const upsertPool = async ({
   /** Rebalancer strategy contract that fired the event. Only read when
    * source === "fpmm_rebalanced" — populates `endedByStrategy` on a breach
    * the rebalance closes. */
-  strategy?: string;
+  strategy?: string | undefined;
   reservesDelta?: { reserve0: bigint; reserve1: bigint };
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
@@ -258,7 +258,7 @@ export const upsertPool = async ({
    * the doc on `DEFAULT_ORACLE_FIELDS`). Only the FPMM factory + the
    * BiPoolExchange→Pool mirror set it; all other callers pass undefined
    * and the persisted value flows through unchanged. */
-  referenceRateFeedID?: string;
+  referenceRateFeedID?: string | undefined;
   /** Caller-provided pool snapshot. Handlers that have already done
    * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
    * concurrently with RPC) should pass the result here — wrapped as
@@ -512,7 +512,9 @@ export const upsertPool = async ({
     context,
     existing.source === "" ? undefined : existing, // brand-new pool → no prev
     { ...withBreach, healthStatus },
-    { blockTimestamp, blockNumber, txHash, source, strategy },
+    strategy === undefined
+      ? { blockTimestamp, blockNumber, txHash, source }
+      : { blockTimestamp, blockNumber, txHash, source, strategy },
   );
 
   const final: Pool = {

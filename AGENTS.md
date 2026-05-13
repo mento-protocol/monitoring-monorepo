@@ -181,6 +181,8 @@ pnpm install
 # Indexer
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
 pnpm indexer:dev                   # Start indexer (multichain mainnet: Celo + Monad)
+pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
+pnpm indexer:knip                  # Report-only unused-file/export/dependency scan for indexer-envio
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 

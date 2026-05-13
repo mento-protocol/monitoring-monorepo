@@ -383,6 +383,9 @@ add_package_quality_commands() {
   local reason="$2"
   add_command "pnpm --filter ${package_name} lint" "$reason"
   add_command "pnpm --filter ${package_name} typecheck" "$reason"
+  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
+    add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
+  fi
   add_command "pnpm --filter ${package_name} test" "$reason"
 }
 
@@ -411,6 +414,11 @@ add_ui_mutation_baseline() {
 add_bridge_mutation_baseline() {
   local reason="$1"
   add_command "pnpm bridge:mutation" "$reason"
+}
+
+add_indexer_mutation_baseline() {
+  local reason="$1"
+  add_command "pnpm indexer:mutation" "$reason"
 }
 
 add_workspace_quality_commands() {
@@ -666,6 +674,12 @@ while IFS= read -r path; do
         indexer-envio/config.multichain.bridge-only.yaml)
           add_bridge_codegen_then_restore_mainnet "bridge-only indexer config changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+      esac
+      case "$path" in
+        indexer-envio/stryker.config.mjs|indexer-envio/vitest.mutation.config.ts|indexer-envio/src/helpers.ts|indexer-envio/src/tradingLimits.ts|indexer-envio/test/code-quality-invariants.test.ts|indexer-envio/test/pool-helpers.test.ts|indexer-envio/test/tradingLimits.test.ts)
+          add_checklist "docs/pr-checklists/mutation-testing.md" "indexer mutation baseline changed"
+          add_indexer_mutation_baseline "indexer mutation baseline changed"
           ;;
       esac
       add_package_quality_commands "@mento-protocol/indexer-envio" "indexer-envio changed"

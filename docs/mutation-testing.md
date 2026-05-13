@@ -2,6 +2,8 @@
 
 Mutation testing is intentionally scoped to proven pure-logic targets:
 
+- `indexer-envio/src/helpers.ts`
+- `indexer-envio/src/tradingLimits.ts`
 - `ui-dashboard/src/lib/weekend.ts`
 - `ui-dashboard/src/lib/pool-id.ts`
 - `metrics-bridge/src/rebalance-probe.ts`
@@ -11,13 +13,29 @@ Mutation testing is intentionally scoped to proven pure-logic targets:
 Run from the repo root:
 
 ```bash
+pnpm indexer:mutation
 pnpm dashboard:mutation
 pnpm bridge:mutation
 ```
 
-Both commands run StrykerJS with the Vitest runner and dedicated mutation Vitest
-configs so each baseline executes only the direct unit tests for the mutated
-files.
+Each command runs StrykerJS with the Vitest runner and a dedicated mutation
+Vitest config so each baseline executes only the direct unit tests for the
+mutated files.
+
+Latest indexer result after adding the baseline:
+
+- Runtime: 5s on the final root-script run
+- Mutation score: 94.78% total / covered
+- Mutants: 127 killed, 0 timed out, 7 survived, 0 no coverage
+- Per-file: `helpers.ts` 91.11% total / covered; `tradingLimits.ts`
+  96.63% total / covered
+
+The initial indexer scope is limited to deterministic helpers with direct tests:
+chain/event/pool/snapshot ID helpers and trading-limit derivation. A trial that
+also mutated `healthScore.ts` and `priceDifference.ts` ran in 1m07s but scored
+65.19% total / 79.03% covered because broad branchy math helpers produced many
+survivors/no-coverage mutants. Revisit those one file at a time after adding
+smaller direct tests; adding them now would dilute the baseline.
 
 Latest dashboard result after adding focused assertions:
 
@@ -84,6 +102,16 @@ Remaining metrics-bridge survivors are accepted noise for this baseline:
   reaches the same last-run timestamp without probes.
 - The loop-bound / missing-result guards are defensive against impossible
   result-array holes under `runWithConcurrency()`.
+
+Remaining indexer survivors are accepted noise for this baseline:
+
+- `extractAddressFromPoolId()` regex anchor and error-string mutants do not
+  change the currently asserted valid extraction / bare-address /
+  double-namespacing behavior.
+- The `addr === undefined` guard mutant is unreachable after the preceding
+  capture-group match succeeds; it is defensive against future regex edits.
+- Trading-limit `<` to `<=` absolute-value mutants are equivalent for zero,
+  because negating `0n` still yields `0n`.
 
 ## Expansion Guidance
 

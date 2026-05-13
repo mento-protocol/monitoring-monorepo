@@ -1,15 +1,20 @@
 import { indexer as envioIndexer } from "envio";
 import { eventLabel, withInstrumentedHandler } from "./performance.js";
 
-type AnyHandler = (args: { context?: unknown }) => unknown | Promise<unknown>;
+type MaybePromise<T> = T | Promise<T>;
+type AnyHandler = (args: { context?: unknown }) => MaybePromise<unknown>;
 type RegisterHandler = (config: unknown, handler: AnyHandler) => unknown;
+
+function labelPart(value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : "unknown";
+}
 
 function contractRegisterLabel(config: unknown): string {
   if (typeof config !== "object" || config === null) {
     return "contractRegister:unknown";
   }
   const record = config as Record<string, unknown>;
-  const contract = String(record.contract ?? "unknown");
+  const contract = labelPart(record.contract);
   const event =
     typeof record.event === "string" && record.event.length > 0
       ? `.${record.event}`

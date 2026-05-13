@@ -22,16 +22,23 @@
     "generate:abis": "node ./scripts/generateAbis.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
     "typecheck": "tsc --noEmit",
+    "typecheck:strict": "tsc --noEmit -p tsconfig.strict-dry-run.json",
+    "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "lint": "eslint ."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@stryker-mutator/api": "9.6.1",
+    "@stryker-mutator/core": "9.6.1",
+    "@stryker-mutator/vitest-runner": "9.6.1",
     "@types/node": "^22.19.13",
     "@vitest/coverage-v8": "^4.0.16",
     "eslint": "^10.0.2",
     "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
+    "knip": "6.13.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.16"
