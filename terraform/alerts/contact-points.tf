@@ -15,10 +15,11 @@ resource "grafana_contact_point" "slack_critical" {
     recipient = var.slack_channel_critical
     # Minimal title: Grafana hardcodes attachment.title_link to the alert detail
     # URL on grafana.com, and the terraform provider does not expose title_link
-    # as a configurable field. Demoting the title to a compact status line
-    # keeps Slack's push/preview text small; deviation-recovery messages append
-    # pool identity here so their body can stay in the requested compact format.
-    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ with index .Alerts 0 }}{{ if eq .Annotations.resolved_format \"deviation_breach\" }}{{ if .Labels.pair }} {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}{{ if .Labels.pool_address_short }} · {{ .Labels.pool_address_short }}{{ end }}{{ end }}{{ end }}{{ end }}"
+    # as a configurable field. Demoting the title to a single status emoji
+    # keeps Slack's push/preview text small and unobtrusive; the prominent
+    # human-readable title is rendered as the first line of the body, where
+    # mrkdwn links are honoured (see local.slack_body_template).
+    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
     text  = local.slack_body_template
   }
 }
@@ -30,7 +31,7 @@ resource "grafana_contact_point" "slack_warnings" {
     token     = var.slack_bot_token
     recipient = var.slack_channel_warnings
     # See note on slack_critical above — same title-link constraint applies.
-    title = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ with index .Alerts 0 }}{{ if eq .Annotations.resolved_format \"deviation_breach\" }}{{ if .Labels.pair }} {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}{{ if .Labels.pool_address_short }} · {{ .Labels.pool_address_short }}{{ end }}{{ end }}{{ end }}{{ end }}"
+    title = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
     text  = local.slack_body_template
   }
 }
@@ -84,12 +85,11 @@ locals {
   #      breaches read e.g. "Apr 28 15:04 UTC" instead of just "15:04 UTC"
   #      — the latter is misleading once a breach lives longer than a day.
   #   6. *Alert ID* — Grafana's `.Fingerprint`, a deterministic hash of the
-  #      alert's label set. Rendered by the generic layout so an operator
-  #      scrolling Slack can match a ✅ "resolved" post back to the 🔴 "fired"
-  #      post that opened the alert.
-  #      Deviation-breach recovery messages that can only resolve on actual
-  #      recovery opt into a tighter recovery-only layout with
-  #      `resolved_format = "deviation_breach"` to match the requested copy.
+  #      alert's label set. The same value is rendered on the firing and the
+  #      resolved message, so an operator scrolling Slack can match a ✅
+  #      "resolved" post back to the 🔴 "fired" post that opened the breach.
+  #      Especially useful for deviation breaches where the same pool can
+  #      churn through multiple fire/resolve cycles in a day.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
@@ -98,23 +98,6 @@ locals {
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
     {{ $isResolved := eq .Status "resolved" -}}
-    {{ $isDeviationBreachResolved := and $isResolved (eq .Annotations.resolved_format "deviation_breach") -}}
-    {{ if $isDeviationBreachResolved -}}
-    {{ .Annotations.resolved_summary }}
-    {{ if .Annotations.current_reserves -}}
-    Reserves: {{ .Annotations.current_reserves }}
-    {{ end -}}
-    {{ $breachStartedAt := .StartsAt.Add -${local.deviation_critical_recovery_offset_nanos} -}}
-    {{ $duration := printf "%s" (.EndsAt.Sub $breachStartedAt) -}}
-    {{ $durationNoSeconds := reReplaceAll "[0-9]+(\\.[0-9]+)?s$" "" $duration -}}
-    Breach Duration: {{ reReplaceAll "([0-9]+h)([0-9]+m)" "$1 $2" $durationNoSeconds }}
-    {{ if .Annotations.breach_started_at -}}
-    Started: {{ .Annotations.breach_started_at }}
-    {{ else -}}
-    Started: {{ $breachStartedAt.Format "Mon Jan 02 15:04 UTC" }}
-    {{ end -}}
-    Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
-    {{ else -}}
     {{ $title := .Labels.alertname -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
     {{ if .Labels.pool_id -}}
@@ -151,7 +134,6 @@ locals {
     *Resolved:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
     {{ end -}}
     *Alert ID:* `{{ .Fingerprint }}`
-    {{ end -}}
     {{ end }}
   EOT
 
