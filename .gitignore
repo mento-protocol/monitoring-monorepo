@@ -18,6 +18,7 @@ dist/
 .claude/scheduled_tasks.lock
 .reviews/
 WORK.md
+CLAUDE.md
 .playwright-mcp/
 # Screenshots from chrome-devtools/playwright MCP dev sessions
 /*.png

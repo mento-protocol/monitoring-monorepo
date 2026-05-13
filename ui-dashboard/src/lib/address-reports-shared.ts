@@ -13,6 +13,8 @@
  * the model itself doesn't justify; rolled back to address-only on PR #330.
  */
 
+type AddressReportSource = "manual" | "claude" | "Codex" | "import";
+
 export type AddressReport = {
   /** Markdown body of the report. Capped at MAX_BODY_LENGTH characters. */
   body: string;
@@ -24,10 +26,10 @@ export type AddressReport = {
    */
   authorEmail?: string;
   /**
-   * Provenance: 'manual' = typed in editor, 'claude' = generated, 'import' =
-   * bulk import. Optional; absent for legacy entries.
+   * Provenance: 'manual' = typed in editor, 'claude' / 'Codex' = generated,
+   * 'import' = bulk import. Optional; absent for legacy entries.
    */
-  source?: "manual" | "claude" | "import";
+  source?: AddressReportSource;
   /** ISO timestamp of first write. Preserved across edits. */
   createdAt: string;
   /** ISO timestamp of most recent write. */
@@ -107,6 +109,7 @@ export function upgradeReport(raw: Record<string, unknown>): AddressReport {
   const source =
     raw.source === "manual" ||
     raw.source === "claude" ||
+    raw.source === "Codex" ||
     raw.source === "import"
       ? raw.source
       : undefined;

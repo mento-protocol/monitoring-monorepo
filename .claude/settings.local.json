@@ -23,7 +23,8 @@
       "Bash(gcloud services list:*)",
       "Bash(terraform -chdir=terraform output:*)",
       "Bash(terraform -chdir=terraform plan:*)",
-      "Bash(terraform -chdir=terraform validate:*)"
+      "Bash(terraform -chdir=terraform validate:*)",
+      "mcp__upstash__redis_database_run_redis_commands"
     ]
   }
 }
