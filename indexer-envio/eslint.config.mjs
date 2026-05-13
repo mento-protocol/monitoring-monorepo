@@ -10,10 +10,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked.map((config) => ({
+    ...config,
+    files: ["src/**/*.ts"],
+  })),
   {
     languageOptions: {
       globals: globals.node,
       parserOptions: { tsconfigRootDir: __dirname },
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
+    rules: {
+      // Envio handler/context types still expose dynamic entity and effect
+      // surfaces. Keep type-aware control-flow rules on while staging the
+      // noisy unsafe-* checks separately.
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
+    files: ["src/handlers/**/*.ts"],
+    rules: {
+      // Envio handler registrations require Promise-returning callbacks even
+      // for synchronous entity registration bodies.
+      "@typescript-eslint/require-await": "off",
     },
   },
   {

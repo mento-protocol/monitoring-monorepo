@@ -325,7 +325,7 @@ indexer.onEvent(
           priorTransfer?.amount == null;
         if (needsDeliveredCatchUp) {
           await updateDailySnapshot(context as HandlerContext, {
-            blockTimestamp: priorTransfer!.deliveredTimestamp!,
+            blockTimestamp: priorTransfer.deliveredTimestamp,
             tokenSymbol: mgr.tokenSymbol,
             sourceChainId: chainId,
             destChainId,
@@ -471,7 +471,12 @@ type DestPendingRow = NonNullable<
 >;
 function applyDestPendingToDelta(
   destPending: DestPendingRow | undefined,
-  prior: { sourceChainId?: number; sourceContract?: string } | undefined,
+  prior:
+    | {
+        sourceChainId?: number | undefined;
+        sourceContract?: string | undefined;
+      }
+    | undefined,
   transferDelta: BridgeTransferDelta,
   detailDelta: WormholeDetailDelta,
 ): void {

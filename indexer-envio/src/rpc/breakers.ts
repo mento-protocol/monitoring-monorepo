@@ -213,7 +213,7 @@ async function probeFunction(
     // throws — e.g. a require() failure on the probe address) would
     // misclassify legitimate RPC/contract errors as selector misses and
     // permanently persist the wrong BreakerKind.
-    const msg = err instanceof Error ? err.message : String(err ?? "");
+    const msg = err instanceof Error ? err.message : "";
     if (msg.includes("returned no data")) return "missing";
     logRpcFailure(
       chainId,

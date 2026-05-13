@@ -46,8 +46,8 @@ export const extractAddressFromPoolId = (poolId: string): string => {
         `Call site is passing a bare address — use event.srcAddress instead.`,
     );
   }
-  const addr = match[1]!;
-  if (!addr.startsWith("0x")) {
+  const addr = match.at(1);
+  if (addr === undefined || !addr.startsWith("0x")) {
     throw new Error(
       `[extractAddressFromPoolId] Unexpected format — extracted "${addr}" from poolId "${poolId}". ` +
         `Possible double-namespacing (e.g. "42220-42220-0x..."). Expected "{chainId}-0x{hex}".`,

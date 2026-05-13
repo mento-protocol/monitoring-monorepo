@@ -78,7 +78,7 @@ export type BreachTrigger = {
   source: string;
   /** Strategy contract that fired the rebalance, if this transition was
    * caused by a RebalanceEvent. Ignored otherwise. */
-  strategy?: string;
+  strategy?: string | undefined;
 };
 
 /** Deterministic id for the currently-open breach of a pool. Keyed on the

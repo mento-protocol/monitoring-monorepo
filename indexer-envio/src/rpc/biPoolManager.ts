@@ -258,11 +258,12 @@ export function extractVpExchangeIdFromBytecode(
 ): VirtualPoolExchangeId | null {
   const match = code.toLowerCase().match(VP_BYTECODE_PATTERN);
   if (!match) return null;
+  const [, mgrPadded, rawExchangeId] = match;
+  if (!mgrPadded || !rawExchangeId) return null;
   // First match is the address right-aligned in 32 bytes — bottom 20 bytes
   // is the actual address.
-  const mgrPadded = match[1]!;
   const exchangeProvider = ("0x" + mgrPadded.slice(24)).toLowerCase();
-  const exchangeId = ("0x" + match[2]!).toLowerCase();
+  const exchangeId = ("0x" + rawExchangeId).toLowerCase();
   return { exchangeProvider, exchangeId };
 }
 

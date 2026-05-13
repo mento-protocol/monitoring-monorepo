@@ -86,7 +86,9 @@ export function logRpcFailure(
   const message =
     err instanceof Error
       ? sanitizeErrorMessage(err.message)
-      : String(err ?? "unknown error");
+      : typeof err === "string"
+        ? sanitizeErrorMessage(err)
+        : "unknown error";
   const blockStr = block !== undefined ? ` block=${block}` : "";
 
   const revertSig = extractRevertSignature(message);

@@ -206,7 +206,7 @@ export async function resolveFeeTokenMeta(
         functionName: "symbol",
       }),
     ]);
-    const meta = { symbol: symbol as string, decimals: Number(decimals) };
+    const meta = { symbol: symbol, decimals: Number(decimals) };
     feeTokenMetaCache.set(cacheKey, meta);
     return meta;
   } catch {

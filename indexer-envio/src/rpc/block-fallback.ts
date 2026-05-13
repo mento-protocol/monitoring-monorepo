@@ -153,7 +153,7 @@ export async function readContractWithBlockFallback(
     if (isRateLimitError(currentError)) {
       let exitedWithRateLimit = true;
       for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
-        const delay = RATE_LIMIT_RETRY_DELAYS_MS[i];
+        const delay = RATE_LIMIT_RETRY_DELAYS_MS[i] ?? 0;
         log.debug(
           `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
         );
@@ -307,7 +307,7 @@ export async function readContractWithBlockFallback(
       // Retry the original blockNumber a few times with increasing delays —
       // the RPC node may just be slightly behind HyperSync.
       for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
-        const delay = BLOCK_RETRY_DELAYS_MS[i];
+        const delay = BLOCK_RETRY_DELAYS_MS[i] ?? 0;
         log.warn(
           `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
         );

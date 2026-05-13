@@ -96,14 +96,21 @@ Chromium before running it; for direct fresh-checkout runs, install it once with
 ### Targeted Mutation Baseline
 
 ```bash
+pnpm indexer:mutation
 pnpm dashboard:mutation
 pnpm bridge:mutation
 ```
 
-These run the non-required StrykerJS baselines for targeted dashboard and
-metrics-bridge pure logic. See
+These run the non-required StrykerJS baselines for targeted indexer, dashboard,
+and metrics-bridge pure logic. See
 [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope, runtime,
 score, and survivor classification.
+
+For indexer-only unused-code discovery, run the report-only scan:
+
+```bash
+pnpm indexer:knip
+```
 
 ## Environment Variables
 
