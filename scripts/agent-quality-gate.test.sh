@@ -553,6 +553,12 @@ assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query pa
 run_gate "ui-dashboard/src/lib/queries.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 
+run_gate "ui-dashboard/scripts/vercel-ignore-build.sh"
+assert_contains "- bash -n ui-dashboard/scripts/vercel-ignore-build.sh (shell script changed)"
+assert_contains "- bash ui-dashboard/scripts/vercel-ignore-build.test.sh (Vercel ignore build script changed)"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
+
 run_gate "terraform/main.tf"
 assert_contains "- terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
 assert_contains "- terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
@@ -701,7 +707,7 @@ STUB
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
 rm -rf "$quiet_success_repo"
-assert_contains "+ ./tools/trunk check --all"
+assert_contains "+ ./tools/trunk check README.md"
 assert_contains "Command elapsed-time summary:"
 assert_contains "- ok "
 assert_not_contains "expected fixture failure that should stay quiet"
@@ -857,13 +863,22 @@ assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
 
 scripts/agent-quality-gate.sh \
-  --changed-paths-file <(printf '%s\n' "docs/process.md") \
+  --changed-paths-file <(printf '%s\n' "docs/deployment.md") \
   --base origin/test \
   > "$output_file"
 assert_contains "- docs"
+assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
+assert_not_contains "- ./tools/trunk check --all"
 
-run_gate "docs/process.md"
+run_gate "docs/deployment.md"
 assert_contains "Detected surfaces:"
 assert_contains "- docs"
+assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
+assert_not_contains "- ./tools/trunk check --all"
+
+run_gate "docs/deleted.md"
+assert_contains "- docs"
+assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"
+assert_not_contains "- ./tools/trunk check docs/deleted.md"
 
 echo "agent quality gate tests passed"

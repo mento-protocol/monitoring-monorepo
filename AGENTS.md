@@ -54,7 +54,8 @@ execute until you review package scripts/lifecycle hooks and pass
 edit limited to `scripts.agent:quality-gate` or
 `scripts.agent:quality-gate:test`; the gate treats that as tooling-only and runs
 an entrypoint validator plus the gate regression tests instead of the
-package-script refusal path.
+package-script refusal path. Docs-only changes run targeted Trunk checks against
+the changed docs paths instead of full-repo Trunk.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast`, so the hook stops on the first failed mapped command instead of
