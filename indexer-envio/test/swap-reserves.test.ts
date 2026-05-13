@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
   _clearMockReserves,
   _setMockERC20Decimals,
@@ -15,13 +15,13 @@ import { makePoolId } from "../src/helpers.ts";
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
 const pid = (addr: string): string => makePoolId(42220, addr);
 
-type MockDb = LegacyMockDbWith<{
-  FactoryDeployment: LegacyEntityReader;
-  Pool: LegacyWritableEntity;
-  SwapEvent: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  FactoryDeployment: EntityReader;
+  Pool: WritableEntity;
+  SwapEvent: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
   TestHelpers;
 

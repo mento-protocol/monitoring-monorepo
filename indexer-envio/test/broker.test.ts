@@ -1,9 +1,9 @@
 import { assert } from "vitest";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -11,17 +11,17 @@ import {
 import { dayBucket, makePoolId } from "../src/helpers.ts";
 import { getContractAddress } from "../src/contractAddresses.ts";
 
-type MockDb = LegacyMockDbWith<{
-  BrokerSwapEvent: LegacyEntityReader;
-  BrokerDailySnapshot: LegacyEntityReader;
-  BrokerExchangeDailySnapshot: LegacyEntityReader;
-  BrokerTraderDailySnapshot: LegacyEntityReader;
-  BrokerAggregatorDailySnapshot: LegacyEntityReader;
-  BrokerAggregatorTraderDayMarker: LegacyEntityReader;
-  Pool: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  BrokerSwapEvent: EntityReader;
+  BrokerDailySnapshot: EntityReader;
+  BrokerExchangeDailySnapshot: EntityReader;
+  BrokerTraderDailySnapshot: EntityReader;
+  BrokerAggregatorDailySnapshot: EntityReader;
+  BrokerAggregatorTraderDayMarker: EntityReader;
+  Pool: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, Broker, VirtualPoolFactory } = TestHelpers;
 
 const CHAIN_CELO = 42220;

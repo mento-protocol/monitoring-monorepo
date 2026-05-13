@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
-  legacyMockEventData,
-  seedLegacyFpmmPool,
-} from "./helpers/legacyEvents.js";
+  createMockEventData,
+  seedFpmmPoolFixture,
+} from "./helpers/eventFixtures.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -25,13 +25,13 @@ import { USD_WEI_DECIMALS, computeFeeUsdWei } from "../src/usd.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyWritableEntity;
-  ProtocolFeeTransfer: LegacyEntityReader;
-  PoolDailyFeeSnapshot: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
+  ProtocolFeeTransfer: EntityReader;
+  PoolDailyFeeSnapshot: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ async function seedFpmmPool(
   token0 = USDC_ADDRESS,
   token1 = USDM_ADDRESS,
 ): Promise<MockDb> {
-  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
+  return seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     token0,
     token1,
     poolAddress: poolAddr,
@@ -130,7 +130,7 @@ function createTransferEvent(overrides: {
     from: overrides.from ?? POOL_ADDRESS,
     to: overrides.to ?? YIELD_SPLIT,
     value: overrides.value ?? AMOUNT_1E6,
-    mockEventData: legacyMockEventData({
+    mockEventData: createMockEventData({
       chainId: overrides.chainId ?? CELO_CHAIN,
       srcAddress: overrides.srcAddress ?? USDC_ADDRESS,
       logIndex: overrides.logIndex ?? 10,

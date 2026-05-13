@@ -1,25 +1,25 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyMockDbWith,
-  type LegacyMockEventData,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type MockDbWith,
+  type MockEventData,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
-  legacyMockEventData,
-  seedLegacyFpmmPool,
-} from "./helpers/legacyEvents.js";
+  createMockEventData,
+  seedFpmmPoolFixture,
+} from "./helpers/eventFixtures.js";
 import {
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyWritableEntity;
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 const POOL_ADDRESS = "0x00000000000000000000000000000000000000aa";
@@ -34,7 +34,7 @@ async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   // waiting on Forno when the test addresses don't exist on-chain.
   _setMockERC20Decimals(42220, TOKEN0, 18);
   _setMockERC20Decimals(42220, TOKEN1, 18);
-  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
+  return seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     token0: TOKEN0,
     token1: TOKEN1,
     poolAddress: POOL_ADDRESS,
@@ -44,8 +44,8 @@ async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   });
 }
 
-function mockEventData(logIndex = 1, blockNumber = 200): LegacyMockEventData {
-  return legacyMockEventData({
+function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
+  return createMockEventData({
     logIndex,
     srcAddress: POOL_ADDRESS,
     blockNumber,

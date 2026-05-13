@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-} from "./helpers/legacyMockDb.js";
-import { seedLegacyFpmmPool } from "./helpers/legacyEvents.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
+import { seedFpmmPoolFixture } from "./helpers/eventFixtures.js";
 import {
   _clearMockReserves,
   _clearMockERC20Decimals,
@@ -19,13 +19,13 @@ import {
 
 const pid = (addr: string): string => makePoolId(42220, addr);
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyEntityReader;
-  PoolSnapshot: LegacyEntityReader;
-  PoolDailySnapshot: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Pool: EntityReader;
+  PoolSnapshot: EntityReader;
+  PoolDailySnapshot: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
   TestHelpers;
 
@@ -50,7 +50,7 @@ const deployPool = async (
   blockNumber: number,
   blockTimestamp: number,
 ): Promise<MockDb> => {
-  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
+  return seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     poolAddress: poolAddr,
     blockNumber,
     blockTimestamp,

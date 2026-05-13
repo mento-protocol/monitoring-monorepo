@@ -19,10 +19,10 @@
 import { strict as assert } from "assert";
 import { createTestIndexer } from "envio";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
 import {
   setHttpRpcErrorMock,
   waitForHttpTestRpc,
@@ -40,12 +40,12 @@ import {
 } from "../src/EventHandlers.ts";
 import { VP_PROBE_RPC_ERROR } from "../src/rpc/biPoolManager.js";
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyEntityReader;
-  FactoryDeployment: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Pool: EntityReader;
+  FactoryDeployment: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const {
   MockDb,
   FPMMFactory: TestFPMMFactory,

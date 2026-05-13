@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-  type LegacyMockEventData,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type MockEventData,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
-  legacyMockEventData,
-  seedLegacyFpmmPool,
-} from "./helpers/legacyEvents.js";
+  createMockEventData,
+  seedFpmmPoolFixture,
+} from "./helpers/eventFixtures.js";
 import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
@@ -21,12 +21,12 @@ import {
   _clearMockRebalanceThresholds,
 } from "../src/rpc.ts";
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyWritableEntity;
-  RebalanceEvent: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
+  RebalanceEvent: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 // Real Celo mainnet addresses — resolvable via KNOWN_TOKEN_META so
@@ -39,11 +39,8 @@ const CELO = "0x471ece3750da237f93b8e339c536989b8978a438"; // 18dp, NOT pegged
 const STRATEGY = "0x0000000000000000000000000000000000000099";
 const TX_FROM = "0x000000000000000000000000000000000000ca11";
 
-function rebalancedEventData(
-  blockNumber: number,
-  logIndex = 5,
-): LegacyMockEventData {
-  return legacyMockEventData({
+function rebalancedEventData(blockNumber: number, logIndex = 5): MockEventData {
+  return createMockEventData({
     chainId: CHAIN_CELO,
     logIndex,
     srcAddress: POOL,
@@ -65,7 +62,7 @@ async function seedRebalanceablePool(
     token1Decimals?: number;
   },
 ): Promise<MockDb> {
-  mockDb = await seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
+  mockDb = await seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
     token0: options.token0 ?? USDM,
     token1: options.token1 ?? CELO,
     poolAddress: POOL,

@@ -120,7 +120,7 @@ PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how 
 ### Vitest timeout and RPC mocks
 
 - `vitest.config.ts` sets the indexer timeout to 60s. Do not add Mocha-style `this.timeout(...)` calls or `/// <reference types="mocha" />` pragmas; this package now runs on Vitest.
-- Multi-event integration tests should stay hermetic. If a handler path can hit RPC, seed the relevant test mock first or route through `test/helpers/legacyMockDb.ts`, which awaits the local HTTP test RPC bridge before `processEvent`.
+- Multi-event integration tests should stay hermetic. If a handler path can hit RPC, seed the relevant test mock first or route through `test/helpers/indexerTestHarness.ts`, which awaits the local HTTP test RPC bridge before `processEvent`.
 - For direct RPC-layer tests that clear in-memory mocks and intentionally fall through to the HTTP bridge, await `expectHttpRpcMockFallback()` from `test/helpers/httpRpc.ts` before the assertion so the test cannot race server startup or fall back to a live endpoint.
 
 ### Cross-checks before opening a PR

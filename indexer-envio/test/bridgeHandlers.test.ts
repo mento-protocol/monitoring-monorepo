@@ -11,18 +11,18 @@
  */
 import { strict as assert } from "assert";
 import {
-  legacyTestHelpers,
-  type LegacyEntityCollection,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityCollection,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
 import { findByNttManager } from "../src/wormhole/nttAddresses.js";
 
 // Side-effect: register handlers with Envio.
 import "../src/EventHandlers.ts";
 
-type MockDb = LegacyMockDbWith<{
-  BridgeTransfer: LegacyEntityReader<{
+type MockDb = MockDbWith<{
+  BridgeTransfer: EntityReader<{
     id: string;
     status: string;
     attestationCount: number;
@@ -35,7 +35,7 @@ type MockDb = LegacyMockDbWith<{
     tokenSymbol: string;
     tokenAddress: string;
   }>;
-  WormholeTransferDetail: LegacyEntityReader<{
+  WormholeTransferDetail: EntityReader<{
     id: string;
     digest: string;
     transceiverDigest?: string;
@@ -43,9 +43,9 @@ type MockDb = LegacyMockDbWith<{
     sourceWormholeChainId?: number;
     inboundQueuedTimestamp?: bigint;
   }>;
-  WormholeNttManager: LegacyEntityReader<{ id: string; tokenSymbol: string }>;
-  WormholeTransferPending: LegacyEntityReader<{ id: string; amount: bigint }>;
-  WormholeDestPending: LegacyEntityReader<{
+  WormholeNttManager: EntityReader<{ id: string; tokenSymbol: string }>;
+  WormholeTransferPending: EntityReader<{ id: string; amount: bigint }>;
+  WormholeDestPending: EntityReader<{
     id: string;
     chainId: number;
     txHash: string;
@@ -56,22 +56,22 @@ type MockDb = LegacyMockDbWith<{
     msgSequence: bigint;
     destTransceiver: string;
   }>;
-  BridgeDailySnapshot: LegacyEntityCollection<{
+  BridgeDailySnapshot: EntityCollection<{
     id: string;
     sentCount: number;
     deliveredCount: number;
     sentVolume: bigint;
     deliveredVolume: bigint;
   }>;
-  BridgeBridger: LegacyEntityReader<{
+  BridgeBridger: EntityReader<{
     id: string;
     sender: string;
     totalSentCount: number;
   }>;
-  BridgeAttestation: LegacyEntityReader<{ id: string; transferId: string }>;
+  BridgeAttestation: EntityReader<{ id: string; transferId: string }>;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const {
   MockDb,
   WormholeNttManager: TestWormholeNttManager,

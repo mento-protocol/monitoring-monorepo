@@ -1,8 +1,8 @@
 import type {
-  LegacyEventProcessor,
-  LegacyMockDb,
-  LegacyMockEventData,
-} from "./legacyMockDb.js";
+  EventProcessor,
+  MockDb,
+  MockEventData,
+} from "./indexerTestHarness.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEFAULT_FACTORY = "0x00000000000000000000000000000000000000cc";
@@ -10,15 +10,15 @@ const DEFAULT_IMPLEMENTATION = "0x00000000000000000000000000000000000000bc";
 const DEFAULT_TOKEN0 = "0x0000000000000000000000000000000000000003";
 const DEFAULT_TOKEN1 = "0x0000000000000000000000000000000000000004";
 
-export function legacyMockEventData(args: {
+export function createMockEventData(args: {
   chainId?: number;
   logIndex?: number;
   srcAddress?: string;
   blockNumber?: number;
   blockTimestamp?: number;
   transaction?: Record<string, unknown>;
-}): LegacyMockEventData {
-  const data: LegacyMockEventData = {
+}): MockEventData {
+  const data: MockEventData = {
     chainId: args.chainId ?? 42220,
     logIndex: args.logIndex ?? 0,
     srcAddress: args.srcAddress ?? ZERO_ADDRESS,
@@ -31,9 +31,9 @@ export function legacyMockEventData(args: {
   return data;
 }
 
-export async function seedLegacyFpmmPool<Db extends LegacyMockDb>(
+export async function seedFpmmPoolFixture<Db extends MockDb>(
   mockDb: Db,
-  FPMMDeployed: LegacyEventProcessor<unknown, Db>,
+  FPMMDeployed: EventProcessor<unknown, Db>,
   args: {
     chainId?: number;
     token0?: string;
@@ -51,7 +51,7 @@ export async function seedLegacyFpmmPool<Db extends LegacyMockDb>(
     token1: args.token1 ?? DEFAULT_TOKEN1,
     fpmmProxy: args.poolAddress,
     fpmmImplementation: args.implementation ?? DEFAULT_IMPLEMENTATION,
-    mockEventData: legacyMockEventData({
+    mockEventData: createMockEventData({
       chainId: args.chainId,
       logIndex: args.logIndex,
       srcAddress: args.factoryAddress ?? DEFAULT_FACTORY,

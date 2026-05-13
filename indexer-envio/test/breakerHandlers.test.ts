@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
 import {
   _setMockBreakerKind,
   _setMockBreakerDefaults,
@@ -13,13 +13,13 @@ import {
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 
-type MockDb = LegacyMockDbWith<{
-  Breaker: LegacyWritableEntity;
-  BreakerConfig: LegacyWritableEntity;
-  BreakerTripEvent: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Breaker: WritableEntity;
+  BreakerConfig: WritableEntity;
+  BreakerTripEvent: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, BreakerBox, MedianDeltaBreaker, SortedOracles } = TestHelpers;
 
 const CHAIN_ID = 42220;

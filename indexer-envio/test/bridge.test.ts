@@ -6,7 +6,7 @@
  *
  * Handler-level tests (event sequencing, replay idempotency, multi-send
  * pairing) live in test/bridgeHandlers.test.ts and run through the Envio v3
- * legacy MockDb facade.
+ * in-memory MockDb facade.
  */
 import { strict as assert } from "assert";
 import type { BridgeTransfer, WormholeTransferDetail } from "envio";

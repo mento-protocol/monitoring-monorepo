@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import {
-  legacyTestHelpers,
-  type LegacyEntityReader,
-  type LegacyMockDbWith,
-  type LegacyMockEventData,
-  type LegacyWritableEntity,
-} from "./helpers/legacyMockDb.js";
-import { legacyMockEventData } from "./helpers/legacyEvents.js";
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+  type MockEventData,
+  type WritableEntity,
+} from "./helpers/indexerTestHarness.js";
+import { createMockEventData } from "./helpers/eventFixtures.js";
 import {
   _setMockPoolExchange,
   _clearMockPoolExchanges,
@@ -28,13 +28,13 @@ import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
-type MockDb = LegacyMockDbWith<{
-  Pool: LegacyWritableEntity;
-  BiPoolExchange: LegacyWritableEntity;
-  BucketUpdate: LegacyEntityReader;
+type MockDb = MockDbWith<{
+  Pool: WritableEntity;
+  BiPoolExchange: WritableEntity;
+  BucketUpdate: EntityReader;
 }>;
 
-const TestHelpers = legacyTestHelpers<MockDb>();
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, BiPoolManager, VirtualPoolFactory, VirtualPool } = TestHelpers;
 
 const CHAIN_ID = 42220; // Celo mainnet — pricingModule index resolves here.
@@ -71,8 +71,8 @@ function mockEventData(
   blockNumber: number,
   blockTs: number,
   srcAddress: string = BIPOOL_MANAGER_ADDRESS,
-): LegacyMockEventData {
-  return legacyMockEventData({
+): MockEventData {
+  return createMockEventData({
     chainId: CHAIN_ID,
     logIndex,
     srcAddress,
