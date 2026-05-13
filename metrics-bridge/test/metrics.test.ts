@@ -395,6 +395,29 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("does not pause USD-pegged pools during the FX weekend window", async () => {
+    updateMetrics(
+      [
+        makePool({
+          token1: "0xeb466342c4d449bc9f53a865d5cb90586f405215",
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713556800",
+        }),
+      ],
+      1713564000,
+    );
+
+    const stateValues = await getMetricValues(
+      register,
+      "mento_pool_deviation_alert_state",
+    );
+    expect(stateValues).toHaveLength(1);
+    expect(stateValues[0]?.labels).toMatchObject({
+      pair: "axlUSDC/USDm",
+      state: "warning",
+    });
+  });
+
   it("publishes open-breach peak ratio when entry threshold is known", async () => {
     updateMetrics([
       makePool({
