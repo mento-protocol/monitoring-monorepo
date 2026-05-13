@@ -21,6 +21,7 @@ export type DeviationTransitionReason =
   | "breach_started"
   | "recovered"
   | "escalated_to_critical"
+  | "deescalated_to_warning"
   | "ratio_data_missing"
   | "ratio_data_restored"
   | "fx_weekend_suppressed"
@@ -179,17 +180,23 @@ function transitionReason(
   if (to === "ok") return "recovered";
   if (to === "fx_paused") return "fx_weekend_suppressed";
   if (from === "fx_paused") return "fx_weekend_reopened";
-  if (to.startsWith("ratio_missing") && !from.startsWith("ratio_missing")) {
-    return "ratio_data_missing";
-  }
-  if (from.startsWith("ratio_missing") && !to.startsWith("ratio_missing")) {
-    return "ratio_data_restored";
-  }
   if (
     (from === "warning" || from === "ratio_missing_warning") &&
     (to === "critical" || to === "ratio_missing_critical")
   ) {
     return "escalated_to_critical";
+  }
+  if (
+    (from === "critical" || from === "ratio_missing_critical") &&
+    (to === "warning" || to === "ratio_missing_warning")
+  ) {
+    return "deescalated_to_warning";
+  }
+  if (to.startsWith("ratio_missing") && !from.startsWith("ratio_missing")) {
+    return "ratio_data_missing";
+  }
+  if (from.startsWith("ratio_missing") && !to.startsWith("ratio_missing")) {
+    return "ratio_data_restored";
   }
   if (from === "ok") return "breach_started";
   return "state_changed";

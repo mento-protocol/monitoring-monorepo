@@ -231,6 +231,8 @@ locals {
         Pool is back within tolerance.
       {{- else if eq $reason "escalated_to_critical" -}}
         Warning escalated to critical.
+      {{- else if eq $reason "deescalated_to_warning" -}}
+        Critical alert de-escalated to warning.
       {{- else if eq $reason "ratio_data_missing" -}}
         Ratio data disappeared while the breach is still open.
       {{- else if eq $reason "ratio_data_restored" -}}

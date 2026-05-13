@@ -300,6 +300,88 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("prioritizes escalation when ratio data returns into a critical breach", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203900,
+    );
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "ratio_missing_warning",
+          to: "critical",
+          reason: "escalated_to_critical",
+        },
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "ratio_missing_warning",
+          to: "critical",
+          reason: "ratio_data_restored",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("records critical de-escalation to warning during peak-ratio rollout gaps", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203900,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203960,
+    );
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "warning",
+          reason: "deescalated_to_warning",
+        },
+      ),
+    ).toBe(1);
+  });
+
   it("records ratio data missing and restored transitions", async () => {
     updateMetrics(
       [
