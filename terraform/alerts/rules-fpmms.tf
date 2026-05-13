@@ -327,9 +327,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — pool above 1% tolerance."
+      summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
       resolved_summary = "Pool is back within tolerance."
+      current_reserves = local.deviation_current_reserves_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -349,6 +351,43 @@ resource "grafana_rule_group" "fpmms_deviation" {
         expr    = "mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})"
         instant = true
       })
+    }
+
+    # BreachAge = active threshold-breach duration for the warning summary.
+    # The threshold driver A stays as the ratio, so this annotation-only query
+    # carries the duration without changing alert semantics.
+    data {
+      ref_id         = "BreachAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "BreachAge"
+        expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)"
+        instant = true
+      })
+    }
+
+    dynamic "data" {
+      # Same annotation shape as critical by design. This adds a bounded set of
+      # instant diagnostic queries to the warning eval so Slack can show reserves
+      # and a likely rebalance-blocked reason when metrics-bridge has one.
+      for_each = local.deviation_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
+      }
     }
 
     data {
@@ -464,20 +503,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
+      summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
       resolved_summary = "Pool is back within the critical threshold."
-      # Pre-rendered "8% above threshold". `Dev` query pre-computes
-      # `(mento_pool_deviation_ratio - 1) * 100` in PromQL so the annotation
-      # can use `printf "%.0f%%"` directly. We avoid `humanizePercentage`
-      # because its `%.4g` format flips to scientific notation past 1e4
-      # (a 122x breach would render "1.219e+04% above threshold" — see
-      # local definition). Sprig `mul`/`sub` are NOT in scope for Grafana
-      # annotation templates so the multiplication has to live in PromQL.
-      # The `{{ if $values.Dev }}` guard handles the indexer's `-1`
-      # sentinel path, where the bridge gates the gauge and `Dev` returns
-      # no series.
-      current_deviation = local.deviation_critical_current_deviation_annotation
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -485,7 +513,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # When metrics-bridge can't resolve a contract address it falls
       # back to literal "token0" / "token1" (matches the existing `pair`
       # fallback semantics).
-      current_reserves = local.deviation_critical_current_reserves_annotation
+      current_reserves = local.deviation_current_reserves_annotation
       # Rebalance reason annotation, sourced from the metrics-bridge probe
       # (`mento_pool_rebalance_blocked`) for the bounded Solidity-error
       # reason and from Aegis (USDC/USDT/axlUSDC `_balanceOf`) for the
@@ -505,7 +533,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # queries return ALL series (Aegis label set differs from
       # `mento_pool_*`, so per-instance binding doesn't apply); the
       # template dispatches by `$labels.pair`.
-      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -539,7 +567,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     # reserves zero, non-stable pool with no Aegis coverage) leaves
     # `$values.X` empty and the `{{ if }}` guards in each annotation drop
     # the line cleanly. Authored once in
-    # `local.deviation_critical_annotation_queries` and consumed here +
+    # `local.deviation_annotation_queries` and consumed here +
     # by the anchored rule below — a query-shape change lands in one place.
     #
     # Implementation notes:
@@ -563,7 +591,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     #     main.tf for the rationale on why the dispatch happens in the
     #     `rebalance_reason` template instead of via per-instance label match.
     dynamic "data" {
-      for_each = local.deviation_critical_annotation_queries
+      for_each = local.deviation_annotation_queries
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
@@ -631,18 +659,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       resolved_title   = "Deviation Breach Resolved"
       resolved_summary = "Breach anchor cleared or ratio gauge recovered below critical."
-      # By construction the anchored rule fires when the deviation ratio
-      # gauge is absent — so `$values.Dev` will almost always be empty and
-      # this annotation will drop. Kept for symmetry with the magnitude-
-      # gated rule: if the bridge starts publishing again mid-breach, the
-      # next eval re-derives a value and the line appears automatically.
-      current_deviation = local.deviation_critical_current_deviation_annotation
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line
       # typically renders. See the magnitude-gated rule for the display
       # formatting rationale.
-      current_reserves = local.deviation_critical_current_reserves_annotation
+      current_reserves = local.deviation_current_reserves_annotation
       # Same rebalance-reason annotation as the magnitude-gated critical
       # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
       # (which is the `-1` sentinel during data gaps, so eligible pools
@@ -654,7 +676,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # series via `$labels.pair`. When neither the reason labels nor the
       # Aegis series are present, the `{{ if … }}` guards collapse the
       # annotation cleanly.
-      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -679,10 +701,10 @@ resource "grafana_rule_group" "fpmms_deviation" {
     # Annotation-only queries (Dev / R0 / R1 / B / ResUSDC / ResUSDT /
     # ResAxlUSDC) — see the magnitude-gated rule above for the rationale
     # on each query and why they sit outside the threshold condition.
-    # Authored once in `local.deviation_critical_annotation_queries` so
+    # Authored once in `local.deviation_annotation_queries` so
     # the magnitude-gated and anchored rules can never drift in shape.
     dynamic "data" {
-      for_each = local.deviation_critical_annotation_queries
+      for_each = local.deviation_annotation_queries
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
@@ -868,11 +890,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Rebalancer hasn't acted{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }} in {{ humanizeDuration $values.A.Value }}{{ end }} despite ongoing breach."
+      summary          = "Rebalancer hasn't acted{{ if $values.BreachAge }} despite {{ humanizeDuration $values.BreachAge.Value }} of ongoing threshold breach{{ else }} despite ongoing threshold breach{{ end }}."
       resolved_title   = "Rebalancer healthy again"
       resolved_summary = "The pool was rebalanced or the breach cleared."
       last_rebalance   = "{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}{{ humanizeDuration $values.A.Value }} ago{{ else if and $values.LastRebalancedAt (eq $values.LastRebalancedAt.Value 0.0) }}Never{{ end }}"
-      root_cause       = local.deviation_critical_rebalance_reason_annotation
+      root_cause       = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -909,6 +931,24 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
           ]),
           local.fx_weekend_suppressed_breach_start_promql,
         )
+        instant = true
+      })
+    }
+
+    # BreachAge = active threshold-breach duration. This is separate from A
+    # because A is seconds since last rebalance; the Slack summary should tell
+    # operators how long the pool has been in the threshold-breach state, while
+    # the Last Rebalance row keeps the idle age.
+    data {
+      ref_id         = "BreachAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "BreachAge"
+        expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)"
         instant = true
       })
     }
@@ -990,11 +1030,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Last rebalance effectiveness only {{ if $values.EffPct }}{{ printf \"%.1f%%\" $values.EffPct.Value }}{{ else }}{{ printf \"%.2f\" $values.A.Value }}{{ end }} — rebalancer is not closing the deviation breach."
+      summary          = "Last rebalance effectiveness only {{ if $values.EffPct }}{{ printf \"%.1f%%\" $values.EffPct.Value }}{{ else }}{{ printf \"%.2f\" $values.A.Value }}{{ end }} — not closing the deviation breach."
       description      = "Most recent in-breach rebalance closed less than 50% of the gap to the rebalance boundary AND no better rebalance has landed in the past 15 min. Effectiveness is measured against the boundary (`rebalanceThreshold`), not the oracle midpoint — 100% means the rebalance landed exactly on the boundary (ideal); values > 100% = overshoot; < 100% = under-correction."
       resolved_title   = "Rebalance effective again"
       resolved_summary = "Rebalance effectiveness recovered or the deviation breach cleared."
-      root_cause       = local.deviation_critical_rebalance_reason_annotation
+      root_cause       = local.deviation_rebalance_reason_annotation
     }
 
     labels = {

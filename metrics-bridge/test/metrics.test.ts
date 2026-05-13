@@ -292,7 +292,7 @@ describe("updateMetrics", () => {
   });
 
   // PR #234 review (Codex / Cursor): the reserve-share annotation queries
-  // (data blocks R0 and R1 on `Deviation Breach Critical`) are matched
+  // (data blocks R0 and R1 on deviation-breach rules) are matched
   // per-instance against the firing alert's label fingerprint. If the
   // gauge's pool-fingerprint label subset diverges from
   // `mento_pool_deviation_ratio`'s, Grafana silently returns nil for
@@ -738,11 +738,13 @@ describe("self-monitoring gauges", () => {
 // depend on so a future label rename / drop fails CI before reaching prod.
 //
 // Cross-references:
-//   - `terraform/alerts/main.tf` (`deviation_critical_*_annotation` locals)
-//     reads `$values.B.Labels.{reason_code,reason_message}`,
+//   - `terraform/alerts/main.tf` (`deviation_*_annotation` locals)
+//     reads `$values.B.Labels.reason_message`,
 //     `$values.R0.Labels.token_symbol`, `$values.R1.Labels.token_symbol`.
-//   - `terraform/alerts/rules-fpmms.tf` (Deviation Breach Critical,
-//     magnitude-gated and anchored) consumes the locals.
+//     `reason_code` stays on the gauge for diagnostics even though Slack no
+//     longer renders it.
+//   - `terraform/alerts/rules-fpmms.tf` (Deviation Breach warning/critical)
+//     consumes the locals.
 describe("label-shape contract: alert template ↔ metric labels", () => {
   // Use a typed cast: prom-client's Gauge typings hide `labelNames` as
   // private, but the runtime carries the array on every instance.
@@ -752,7 +754,7 @@ describe("label-shape contract: alert template ↔ metric labels", () => {
     return g.labelNames ?? [];
   }
 
-  it("rebalanceBlocked labels include reason_code + reason_message (referenced by $values.B.Labels.* in main.tf)", () => {
+  it("rebalanceBlocked labels include reason_code for diagnostics + reason_message for Slack", () => {
     const labels = labelNamesOf(gauges.rebalanceBlocked);
     expect(labels).toContain("reason_code");
     expect(labels).toContain("reason_message");
