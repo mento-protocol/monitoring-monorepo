@@ -4,6 +4,19 @@ import { eventLabel, withInstrumentedHandler } from "./performance.js";
 type AnyHandler = (args: { context?: unknown }) => unknown | Promise<unknown>;
 type RegisterHandler = (config: unknown, handler: AnyHandler) => unknown;
 
+function contractRegisterLabel(config: unknown): string {
+  if (typeof config !== "object" || config === null) {
+    return "contractRegister:unknown";
+  }
+  const record = config as Record<string, unknown>;
+  const contract = String(record.contract ?? "unknown");
+  const event =
+    typeof record.event === "string" && record.event.length > 0
+      ? `.${record.event}`
+      : "";
+  return `contractRegister:${contract}${event}`;
+}
+
 const onEvent = envioIndexer.onEvent as unknown as RegisterHandler;
 const contractRegister =
   envioIndexer.contractRegister as unknown as RegisterHandler;
@@ -22,11 +35,7 @@ const wrappedIndexer = {
 
   contractRegister: ((config: unknown, handler: AnyHandler) =>
     contractRegister(config, (args) =>
-      withInstrumentedHandler(
-        `contractRegister:${eventLabel(config)}`,
-        args,
-        handler,
-      ),
+      withInstrumentedHandler(contractRegisterLabel(config), args, handler),
     )) as typeof envioIndexer.contractRegister,
 
   onBlock: ((config: unknown, handler: AnyHandler) =>
