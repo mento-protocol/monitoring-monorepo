@@ -18,6 +18,7 @@
 
 import { poolIdAddress } from "@mento-protocol/monitoring-config/format";
 import {
+  LEGACY_OPEN_BREACH_ENTRY_THRESHOLD,
   REBALANCE_PROBE_CONCURRENCY,
   REBALANCE_PROBE_DEVIATION_THRESHOLD,
   REBALANCE_PROBE_TOLERANCE_THRESHOLD,
@@ -71,9 +72,12 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
     if (!Number.isFinite(ratio)) return false;
     if (ratio <= REBALANCE_PROBE_TOLERANCE_THRESHOLD) return false;
     const openBreachPeak = parseFloat(pool.currentOpenBreachPeak);
-    const entryThreshold = pool.currentOpenBreachEntryThreshold;
+    const entryThreshold =
+      pool.currentOpenBreachEntryThreshold > 0
+        ? pool.currentOpenBreachEntryThreshold
+        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
     const openBreachPeakRatio =
-      Number.isFinite(openBreachPeak) && entryThreshold > 0
+      Number.isFinite(openBreachPeak) && openBreachPeak > 0
         ? openBreachPeak / entryThreshold
         : 0;
     const crossedCritical =

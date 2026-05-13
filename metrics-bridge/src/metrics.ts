@@ -13,6 +13,7 @@ import {
   shortAddress,
 } from "@mento-protocol/monitoring-config/format";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
 import type { PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
@@ -299,8 +300,11 @@ export function updateMetrics(pools: PoolRow[]): void {
       Number(pool.deviationBreachStartedAt),
     );
     const openBreachPeak = fp(pool.currentOpenBreachPeak);
-    const openBreachEntryThreshold = pool.currentOpenBreachEntryThreshold;
-    if (openBreachPeak > 0 && openBreachEntryThreshold > 0) {
+    const openBreachEntryThreshold =
+      pool.currentOpenBreachEntryThreshold > 0
+        ? pool.currentOpenBreachEntryThreshold
+        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
+    if (openBreachPeak > 0) {
       gauges.deviationOpenBreachPeakRatio.set(
         labels,
         openBreachPeak / openBreachEntryThreshold,

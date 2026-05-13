@@ -40,6 +40,12 @@ export const REBALANCE_PROBE_EVERY_N_POLLS =
 export const REBALANCE_PROBE_DEVIATION_THRESHOLD = DEVIATION_CRITICAL_RATIO;
 export const REBALANCE_PROBE_TOLERANCE_THRESHOLD = DEVIATION_TOLERANCE_RATIO;
 
+// Legacy open-breach rows can have `currentOpenBreachEntryThreshold = 0`
+// because the column was added after the breach opened. The indexer closes
+// those rows against the same 10000 effective-threshold floor; metrics-bridge
+// uses it too so sticky critical alerting still works for old open breaches.
+export const LEGACY_OPEN_BREACH_ENTRY_THRESHOLD = 10_000;
+
 // Cap simultaneous probe RPC calls so a stuck endpoint can't backpressure
 // the next Hasura poll. At Mento's scale 0–3 pools are typically eligible
 // per cycle, so 5 leaves headroom without being permissive.

@@ -79,6 +79,16 @@ describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
     expect(eligibleForProbe([pool])).toEqual([pool]);
   });
 
+  it("uses the legacy entry-threshold floor for de-escalated old open breaches", () => {
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 0,
+    });
+    expect(eligibleForProbe([pool])).toEqual([pool]);
+  });
+
   it("excludes recovered pools even when the open-breach peak is still populated", () => {
     const pool = makePool({
       deviationBreachStartedAt: "1713200000",

@@ -44,15 +44,22 @@ if [[ -z "$COMMIT" ]]; then
     ")
 
   if [[ -z "$COMMIT" ]]; then
-    echo "❌ No deployments found for $ENVIO_ORG/$ENVIO_INDEXER"
+    echo "❌ No deployments found for $ENVIO_ORG/$ENVIO_INDEXER" >&2
     exit 1
   fi
 
-  echo "📊 Latest deployment: $COMMIT"
+  if [[ "$JSON" != "true" ]]; then
+    echo "📊 Latest deployment: $COMMIT"
+  fi
 else
-  echo "📊 Deployment: $COMMIT"
+  if [[ "$JSON" != "true" ]]; then
+    echo "📊 Deployment: $COMMIT"
+  fi
 fi
-echo ""
+
+if [[ "$JSON" != "true" ]]; then
+  echo ""
+fi
 
 EXTRA_FLAGS=()
 if [[ "$WATCH" == "true" ]]; then
