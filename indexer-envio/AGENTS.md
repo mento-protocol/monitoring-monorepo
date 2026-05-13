@@ -103,8 +103,8 @@ These rules come from PRs #184 and #194 — Codex flagged both as P1.
 ### File-size budget
 
 - Soft cap: 600 lines/file (advisory). Hard cap: 1,000 lines.
-- This package is exempt from ESLint (`.trunk/trunk.yaml` ignores `indexer-envio/**` for the `eslint` linter) — there's no mechanical enforcement here, so the rule is purely norms-based. Apply it anyway: `src/rpc.ts` (~1,900 lines) and `src/handlers/fpmm.ts` (~1,000 lines) are already over the cap and on the BACKLOG.md refactor list.
-- Suggested seams when splitting: per-method handlers in `rpc.ts` (one helper per RPC family); per-event handlers under `src/handlers/<entity>/` for big handler files.
+- `pnpm lint` enforces the 1,000-line hard cap for `src/**/*.ts`; tests are exempt. Apply the 600-line soft cap anyway because several files remain close to or slightly above it.
+- Suggested seams when splitting: one helper per RPC/effect family under `src/rpc/`; per-event handlers under `src/handlers/<entity>/` for big handler files.
 - Rationale + monthly drift detector: see `/AGENTS.md` §"File-size budget".
 
 ### Self-heal pipeline coordination
@@ -117,11 +117,11 @@ PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how 
 - **Gate-vs-retry: the gate must not short-circuit on partial state.** A gate like `if (wrappedExchangeId && token0 && token1) return pool;` fires after a transient `poolExchangeEffect` failure leaves the row mid-state (token addresses pinned but no `BiPoolExchange` row + no `referenceRateFeedID` mirrored). The fully-healed condition must include downstream side effects, not just the entity's own fields. PR #369 ended up checking `BiPoolExchange.get(exchangeRowId)` in the gate — extra DB read per event is the cost of correct retry semantics.
 - **Test setup must mock every RPC effect the merged-in heal pipeline can hit.** Upstream merges add new heal steps (e.g. `selfHealTokenDecimals` was added by PR #370 mid-PR-#369) — existing tests that drove `upsertPool` for an unmocked code path then time out in CI (locally fine because forno.celo.org is reachable from dev machines, not from blacksmith CI runners). When extending a heal-driven test, re-check what RPC paths the heal touches NOW, not when the test was written.
 
-### Mocha timeout under c8 coverage
+### Vitest timeout and RPC mocks
 
-- `.mocharc.cjs` sets a 30s default timeout, but the CI `Test with coverage` job wraps mocha in `c8` and the wrapped run sometimes ignores the rc default — observed brushing against the bare 15s mocha default on slower CI runners.
-- Multi-event integration tests (anything that fires multiple `processEvent` calls in sequence and waits for state) should add inline `this.timeout(60_000)` defensively at the top of the `it(...)` body. Locally these tests resolve in 0.5–2s, so the higher ceiling is purely defensive against CI variance under coverage.
-- Bit us on PR #366 round-9 (`feeUpdated`, `dailySnapshot`, `biPoolManager`) and PR #372 (`OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators`).
+- `vitest.config.ts` sets the indexer timeout to 60s. Do not add Mocha-style `this.timeout(...)` calls or `/// <reference types="mocha" />` pragmas; this package now runs on Vitest.
+- Multi-event integration tests should stay hermetic. If a handler path can hit RPC, seed the relevant test mock first or route through `test/helpers/indexerTestHarness.ts`, which awaits the local HTTP test RPC bridge before `processEvent`.
+- For direct RPC-layer tests that clear in-memory mocks and intentionally fall through to the HTTP bridge, await `expectHttpRpcMockFallback()` from `test/helpers/httpRpc.ts` before the assertion so the test cannot race server startup or fall back to a live endpoint.
 
 ### Cross-checks before opening a PR
 

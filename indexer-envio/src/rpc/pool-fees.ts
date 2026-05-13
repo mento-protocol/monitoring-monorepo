@@ -2,6 +2,13 @@ import { FPMM_FEE_ABI } from "../abis.js";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
+import {
+  clearTestRpcMockGroup,
+  clearTestRpcMockGroupPrefix,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+  setTestRpcRawMock,
+} from "./http-test-mock-bridge.js";
 
 /** Per-getter mock behavior for fetchFees. */
 export type FeeGetterMock =
@@ -33,14 +40,49 @@ export function _setMockFees(
   const key = `${chainId}:${poolAddress.toLowerCase()}`;
   if (mock === null) {
     _testFees.delete(key);
+    clearTestRpcMockGroup(`fees:${chainId}:${poolAddress.toLowerCase()}`);
   } else {
     _testFees.set(key, mock);
+    const group = `fees:${chainId}:${poolAddress.toLowerCase()}`;
+    for (const [field, functionName] of [
+      ["lpFee", "lpFee"],
+      ["protocolFee", "protocolFee"],
+      ["rebalanceReward", "rebalanceIncentive"],
+    ] as const) {
+      const getterMock = mock[field];
+      if (!getterMock) continue;
+      if ("fulfilled" in getterMock) {
+        setTestRpcMock({
+          group,
+          chainId,
+          address: poolAddress,
+          functionName,
+          result: getterMock.fulfilled,
+        });
+      } else if (getterMock.rejected === "unsupported") {
+        setTestRpcRawMock({
+          group,
+          chainId,
+          address: poolAddress,
+          functionName,
+          result: "0x",
+        });
+      } else {
+        setTestRpcErrorMock({
+          group,
+          chainId,
+          address: poolAddress,
+          functionName,
+        });
+      }
+    }
   }
 }
 
 /** @internal Test-only: clear all fetchFees mocks. */
 export function _clearMockFees(): void {
   _testFees.clear();
+  clearTestRpcMockGroupPrefix("fees:");
 }
 
 /** viem's `ContractFunctionZeroDataError` (message includes "returned no
@@ -99,11 +141,28 @@ export function _setMockRebalanceIncentiveAtBlock(
   bps: number | null,
 ): void {
   _testIncentiveAtBlock.set(`${chainId}:${poolAddress.toLowerCase()}`, bps);
+  if (bps === null) {
+    setTestRpcErrorMock({
+      group: "rebalanceIncentiveAtBlock",
+      chainId,
+      address: poolAddress,
+      functionName: "rebalanceIncentive",
+    });
+  } else {
+    setTestRpcMock({
+      group: "rebalanceIncentiveAtBlock",
+      chainId,
+      address: poolAddress,
+      functionName: "rebalanceIncentive",
+      result: BigInt(bps),
+    });
+  }
 }
 
 /** @internal Test-only: clear all `fetchRebalanceIncentiveAtBlock` mocks. */
 export function _clearMockRebalanceIncentivesAtBlock(): void {
   _testIncentiveAtBlock.clear();
+  clearTestRpcMockGroup("rebalanceIncentiveAtBlock");
 }
 
 /** Read `rebalanceIncentive()` (bps) at a specific block. Used by the

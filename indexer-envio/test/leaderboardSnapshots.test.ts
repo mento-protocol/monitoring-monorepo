@@ -66,14 +66,10 @@ function makeContext(): {
     context: {
       TraderDailySnapshot: {
         ...wrap(store.TraderDailySnapshot),
-        getWhere: {
-          chainId: {
-            eq: async (chainId: number) =>
-              Array.from(store.TraderDailySnapshot.values()).filter(
-                (r) => r.chainId === chainId,
-              ),
-          },
-        },
+        getWhere: async (query: { chainId?: { _eq?: number } }) =>
+          Array.from(store.TraderDailySnapshot.values()).filter(
+            (r) => r.chainId === query.chainId?._eq,
+          ),
       },
       TraderPoolDailySnapshot: wrap(store.TraderPoolDailySnapshot),
       PoolDailyVolumeSnapshot: wrap(store.PoolDailyVolumeSnapshot),

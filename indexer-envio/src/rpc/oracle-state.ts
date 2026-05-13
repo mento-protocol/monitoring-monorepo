@@ -5,6 +5,11 @@ import { FPMM_MINIMAL_ABI, SortedOraclesContract } from "../abis.js";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
+import {
+  clearTestRpcMockGroup,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+} from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)
@@ -19,10 +24,27 @@ export function _setMockRateFeedID(
   rateFeedID: string | null,
 ): void {
   _testRateFeedIDs.set(`${chainId}:${poolAddress.toLowerCase()}`, rateFeedID);
+  if (rateFeedID === null) {
+    setTestRpcErrorMock({
+      group: "rateFeedID",
+      chainId,
+      address: poolAddress,
+      functionName: "referenceRateFeedID",
+    });
+  } else {
+    setTestRpcMock({
+      group: "rateFeedID",
+      chainId,
+      address: poolAddress,
+      functionName: "referenceRateFeedID",
+      result: rateFeedID,
+    });
+  }
 }
 
 export function _clearMockRateFeedIDs(): void {
   _testRateFeedIDs.clear();
+  clearTestRpcMockGroup("rateFeedID");
 }
 
 const _testReportExpiry = new Map<string, bigint | null>();
@@ -34,10 +56,35 @@ export function _setMockReportExpiry(
   expiry: bigint | null,
 ): void {
   _testReportExpiry.set(`${chainId}:${rateFeedID.toLowerCase()}`, expiry);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (expiry === null) {
+    setTestRpcErrorMock({
+      group: "reportExpiry",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "tokenReportExpirySeconds",
+      callArgs: [rateFeedID],
+    });
+  } else {
+    setTestRpcMock({
+      group: "reportExpiry",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "tokenReportExpirySeconds",
+      callArgs: [rateFeedID],
+      result: expiry,
+    });
+  }
 }
 
 export function _clearMockReportExpiry(): void {
   _testReportExpiry.clear();
+  clearTestRpcMockGroup("reportExpiry");
 }
 
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */

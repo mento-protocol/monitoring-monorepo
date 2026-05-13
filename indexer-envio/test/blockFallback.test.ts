@@ -686,11 +686,11 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
   const HORIZON_CHAIN = 999_777;
 
   let originalDelayFn: typeof _testHooks.delayFn;
-  before(() => {
+  beforeAll(() => {
     originalDelayFn = _testHooks.delayFn;
     _testHooks.delayFn = async () => {};
   });
-  after(() => {
+  afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
   });
 

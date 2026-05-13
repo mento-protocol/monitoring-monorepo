@@ -626,12 +626,8 @@ function makeV3Context(traderRows: TraderDailySnapshot[] = []): {
   return {
     context: {
       TraderDailySnapshot: {
-        getWhere: {
-          chainId: {
-            eq: async (chainId: number) =>
-              traderRows.filter((r) => r.chainId === chainId),
-          },
-        },
+        getWhere: async (query: { chainId?: { _eq?: number } }) =>
+          traderRows.filter((r) => r.chainId === query.chainId?._eq),
       },
       LeaderboardChainState: wrap(store.LeaderboardChainState),
       LeaderboardWindowSnapshot: wrap(store.LeaderboardWindowSnapshot),
@@ -874,12 +870,8 @@ function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
   return {
     context: {
       BrokerTraderDailySnapshot: {
-        getWhere: {
-          chainId: {
-            eq: async (chainId: number) =>
-              traderRows.filter((r) => r.chainId === chainId),
-          },
-        },
+        getWhere: async (query: { chainId?: { _eq?: number } }) =>
+          traderRows.filter((r) => r.chainId === query.chainId?._eq),
       },
       LeaderboardChainState: wrap(store.LeaderboardChainState),
       BrokerLeaderboardWindowSnapshot: wrap(

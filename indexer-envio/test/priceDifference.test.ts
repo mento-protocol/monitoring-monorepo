@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
 import {

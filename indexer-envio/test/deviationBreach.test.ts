@@ -643,7 +643,7 @@ describe("recordBreachTransition — falling edge", () => {
       source: "oracle_reported",
     });
     const row = store.get(openBreachId(next.id, MON_NOON))!;
-    assert.isDefined(row);
+    assert.ok(row);
     assert.equal(row.startedAt, MON_NOON);
     assert.equal(row.startedByEvent, "oracle_update");
     assert.equal(row.entryPriceDifference, 8500n);
@@ -790,7 +790,7 @@ describe("recordBreachTransition — UpdateReserves followed by a semantic handl
       },
     );
     assert.deepStrictEqual(postUR, {}); // no close yet
-    assert.equal(store.get(open.id, undefined)!.endedAt);
+    assert.equal(store.get(open.id)!.endedAt, undefined);
 
     // Step 2: Rebalance fires next in the same tx. `prev` carries the
     // held anchor; `next.anchor = 0n` because Rebalance is NOT a

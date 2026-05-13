@@ -10,6 +10,14 @@ import type { TradingLimitData } from "../tradingLimits.js";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
+import {
+  clearPoolStateHttpMocks,
+  registerMockERC20DecimalsHttp,
+  registerMockRebalanceThresholdsHttp,
+  registerMockRebalancingStateHttp,
+  registerMockReservesHttp,
+  registerMockTokenDecimalsScalingHttp,
+} from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
@@ -30,11 +38,13 @@ export function _setMockRebalancingState(
   } else {
     _testRebalancingStates.set(key, state);
   }
+  registerMockRebalancingStateHttp(chainId, poolAddress, state);
 }
 
 /** @internal Test-only: clear all mock rebalancing states. */
 export function _clearMockRebalancingStates(): void {
   _testRebalancingStates.clear();
+  clearPoolStateHttpMocks("rebalancingState");
 }
 
 /** Sentinel value representing a mock null return (RPC failure simulation).
@@ -56,11 +66,13 @@ export function _setMockReserves(
 ): void {
   const key = `${chainId}:${poolAddress.toLowerCase()}`;
   _testReserves.set(key, reserves === null ? NULL_RESERVES : reserves);
+  registerMockReservesHttp(chainId, poolAddress, reserves);
 }
 
 /** @internal Test-only: clear all mock reserves. */
 export function _clearMockReserves(): void {
   _testReserves.clear();
+  clearPoolStateHttpMocks("reserves");
 }
 
 /** @internal Test-only: pre-set mock ERC20 decimals for a token address. */
@@ -72,10 +84,12 @@ export function _setMockERC20Decimals(
   decimals: number,
 ): void {
   _testERC20Decimals.set(`${chainId}:${tokenAddress.toLowerCase()}`, decimals);
+  registerMockERC20DecimalsHttp(chainId, tokenAddress, decimals);
 }
 
 export function _clearMockERC20Decimals(): void {
   _testERC20Decimals.clear();
+  clearPoolStateHttpMocks("erc20Decimals");
 }
 
 /** @internal Test-only: pre-set mock decimals0()/decimals1() scaling.
@@ -92,10 +106,12 @@ export function _setMockTokenDecimalsScaling(
     `${chainId}:${poolAddress.toLowerCase()}:${fn}`,
     value,
   );
+  registerMockTokenDecimalsScalingHttp(chainId, poolAddress, fn, value);
 }
 
 export function _clearMockTokenDecimalsScaling(): void {
   _testTokenDecimalsScaling.clear();
+  clearPoolStateHttpMocks("tokenDecimalsScaling");
 }
 
 /**
@@ -337,10 +353,12 @@ export function _setMockRebalanceThresholds(
     `${chainId}:${poolAddress.toLowerCase()}`,
     thresholds,
   );
+  registerMockRebalanceThresholdsHttp(chainId, poolAddress, thresholds);
 }
 
 export function _clearMockRebalanceThresholds(): void {
   _testRebalanceThresholds.clear();
+  clearPoolStateHttpMocks("rebalanceThresholds");
 }
 
 /** Fetch the pool's rebalance thresholds (above and below) at a specific

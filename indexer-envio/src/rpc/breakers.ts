@@ -1,16 +1,5 @@
-// ---------------------------------------------------------------------------
-// Breaker RPC self-heal + bootstrap.
-//
-// BreakerBox circuit breakers gate trading on each rateFeed. During indexing
-// the breakers.ts handler needs to know each breaker's kind (MEDIAN_DELTA /
-// VALUE_DELTA / MARKET_HOURS), its defaults (tradingMode, cooldown, threshold)
-// and its per-feed live state. All three are fetched via RPC and cached in the
-// indexer process — not stored in the DB — because they change rarely and we
-// only need them during reprocessing / catch-up.
-//
-// Cache keys always include chainId so state from one chain can never bleed
-// into another under v3's default unordered multichain indexing.
-// ---------------------------------------------------------------------------
+// BreakerBox gates trading per rateFeed. RPC cache keys include chainId so
+// state cannot bleed across v3 multichain indexing.
 
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import {
@@ -27,6 +16,13 @@ import {
   lookupBreakerKind,
   requireContractAddress,
 } from "../contractAddresses.js";
+import {
+  clearBreakerHttpMocks,
+  registerMockBreakerDefaultsHttp,
+  registerMockBreakerFeedStateHttp,
+  registerMockBreakerKindHttp,
+  registerMockBreakerListHttp,
+} from "./http-test-mock-bridge.js";
 
 export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 
@@ -38,6 +34,7 @@ export function _setMockBreakerList(
   breakers: string[] | null,
 ): void {
   _testBreakerList.set(chainId, breakers);
+  registerMockBreakerListHttp(chainId, breakers);
 }
 
 /** Returns all breaker addresses registered with BreakerBox at `blockNumber`,
@@ -142,6 +139,7 @@ export function _setMockBreakerKind(
   kind: BreakerKindRpc | null,
 ): void {
   _testBreakerKinds.set(breakerKindKey(chainId, breakerAddress), kind);
+  registerMockBreakerKindHttp(chainId, breakerAddress, kind);
 }
 
 /** @internal Test-only: pre-set Breaker defaults (activatesTradingMode / cooldown / threshold). */
@@ -151,6 +149,7 @@ export function _setMockBreakerDefaults(
   defaults: BreakerDefaults | null,
 ): void {
   _testBreakerDefaults.set(breakerKindKey(chainId, breakerAddress), defaults);
+  registerMockBreakerDefaultsHttp(chainId, breakerAddress, defaults);
 }
 
 /** @internal Test-only: pre-set BreakerConfig per-feed RPC state. */
@@ -164,6 +163,7 @@ export function _setMockBreakerFeedState(
     breakerFeedStateKey(chainId, breakerAddress, rateFeedID),
     state,
   );
+  registerMockBreakerFeedStateHttp(chainId, breakerAddress, rateFeedID, state);
 }
 
 /** @internal Test-only: clear all breaker mocks. */
@@ -172,6 +172,7 @@ export function _clearBreakerMocks(): void {
   _testBreakerDefaults.clear();
   _testBreakerFeedState.clear();
   _testBreakerList.clear();
+  clearBreakerHttpMocks();
 }
 
 // ---- Probes & fetchers ----

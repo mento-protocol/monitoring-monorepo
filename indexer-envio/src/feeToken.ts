@@ -1,6 +1,11 @@
 import { ERC20_DECIMALS_ABI } from "./abis.js";
 import { getRpcClient } from "./rpc.js";
 import { consoleLogger, type RpcLogger } from "./rpc/log.js";
+import {
+  clearTestRpcMockGroup,
+  setTestRpcErrorMock,
+  setTestRpcMock,
+} from "./rpc/http-test-mock-bridge.js";
 import _contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
 import _namespaces from "../config/deployment-namespaces.json" with { type: "json" };
 
@@ -29,10 +34,36 @@ export function _setMockFeeTokenMeta(
   meta: { symbol: string; decimals: number } | "FAIL",
 ): void {
   _testFeeTokenMeta.set(`${chainId}:${tokenAddress.toLowerCase()}`, meta);
+  if (meta === "FAIL") {
+    for (const functionName of ["decimals", "symbol"] as const) {
+      setTestRpcErrorMock({
+        group: "feeTokenMeta",
+        chainId,
+        address: tokenAddress,
+        functionName,
+      });
+    }
+  } else {
+    setTestRpcMock({
+      group: "feeTokenMeta",
+      chainId,
+      address: tokenAddress,
+      functionName: "decimals",
+      result: meta.decimals,
+    });
+    setTestRpcMock({
+      group: "feeTokenMeta",
+      chainId,
+      address: tokenAddress,
+      functionName: "symbol",
+      result: meta.symbol,
+    });
+  }
 }
 
 export function _clearMockFeeTokenMeta(): void {
   _testFeeTokenMeta.clear();
+  clearTestRpcMockGroup("feeTokenMeta");
 }
 
 /** Cache for token metadata fetched via RPC (one call per unique token, then cached). */

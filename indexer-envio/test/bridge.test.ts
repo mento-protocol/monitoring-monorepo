@@ -5,8 +5,8 @@
  * src/wormhole/status.ts, src/wormhole/chainIds.ts, src/wormhole/nttAddresses.ts.
  *
  * Handler-level tests (event sequencing, replay idempotency, multi-send
- * pairing) live in the quarantined test/bridgeHandlers.test.ts suite pending
- * the createTestIndexer + network-level RPC mock rewrite.
+ * pairing) live in test/bridgeHandlers.test.ts and run through the Envio v3
+ * in-memory MockDb facade.
  */
 import { strict as assert } from "assert";
 import type { BridgeTransfer, WormholeTransferDetail } from "envio";

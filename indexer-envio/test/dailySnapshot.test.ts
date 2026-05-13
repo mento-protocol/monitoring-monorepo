@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import generated from "envio";
+import {
+  indexerTestHelpers,
+  type EntityReader,
+  type MockDbWith,
+} from "./helpers/indexerTestHarness.js";
+import { seedFpmmPoolFixture } from "./helpers/eventFixtures.js";
 import {
   _clearMockReserves,
   _clearMockERC20Decimals,
@@ -14,35 +19,13 @@ import {
 
 const pid = (addr: string): string => makePoolId(42220, addr);
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown };
-    PoolSnapshot: { get: (id: string) => unknown };
-    PoolDailySnapshot: { get: (id: string) => unknown };
-  };
-};
+type MockDb = MockDbWith<{
+  Pool: EntityReader;
+  PoolSnapshot: EntityReader;
+  PoolDailySnapshot: EntityReader;
+}>;
 
-type EventProcessor = {
-  createMockEvent: (args: unknown) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: { FPMMDeployed: EventProcessor };
-    FPMM: {
-      Swap: EventProcessor;
-      UpdateReserves: EventProcessor;
-      Mint: EventProcessor;
-      Burn: EventProcessor;
-    };
-    VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
-    VirtualPool: { Swap: EventProcessor; UpdateReserves: EventProcessor };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
   TestHelpers;
 
@@ -67,19 +50,11 @@ const deployPool = async (
   blockNumber: number,
   blockTimestamp: number,
 ): Promise<MockDb> => {
-  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
-    token0: "0x0000000000000000000000000000000000000003",
-    token1: "0x0000000000000000000000000000000000000004",
-    fpmmProxy: poolAddr,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: 42220,
-      logIndex: 0,
-      srcAddress: "0x00000000000000000000000000000000000000cc",
-      block: { number: blockNumber, timestamp: blockTimestamp },
-    },
+  return seedFpmmPoolFixture(mockDb, FPMMFactory.FPMMDeployed, {
+    poolAddress: poolAddr,
+    blockNumber,
+    blockTimestamp,
   });
-  return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 };
 
 const fireMint = async (
