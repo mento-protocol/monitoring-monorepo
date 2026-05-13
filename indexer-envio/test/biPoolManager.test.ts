@@ -1,6 +1,12 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+  type LegacyMockEventData,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
+import { legacyMockEventData } from "./helpers/legacyEvents.js";
 import {
   _setMockPoolExchange,
   _clearMockPoolExchanges,
@@ -22,95 +28,13 @@ import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    BiPoolExchange: {
-      get: (id: string) => unknown;
-      set: (e: unknown) => MockDb;
-    };
-    BucketUpdate: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyWritableEntity;
+  BiPoolExchange: LegacyWritableEntity;
+  BucketUpdate: LegacyEntityReader;
+}>;
 
-type EventProcessor<E> = {
-  createMockEvent: (args: E) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type MockEventData = {
-  chainId: number;
-  logIndex: number;
-  srcAddress: string;
-  block: { number: number; timestamp: number };
-};
-
-type ExchangeCreatedArgs = {
-  exchangeId: string;
-  asset0: string;
-  asset1: string;
-  pricingModule: string;
-  mockEventData: MockEventData;
-};
-
-type ExchangeDestroyedArgs = {
-  exchangeId: string;
-  asset0: string;
-  asset1: string;
-  pricingModule: string;
-  mockEventData: MockEventData;
-};
-
-type BucketsUpdatedArgs = {
-  exchangeId: string;
-  bucket0: bigint;
-  bucket1: bigint;
-  mockEventData: MockEventData;
-};
-
-type SpreadUpdatedArgs = {
-  exchangeId: string;
-  spread: bigint;
-  mockEventData: MockEventData;
-};
-
-type VPDeployedArgs = {
-  pool: string;
-  token0: string;
-  token1: string;
-  mockEventData: MockEventData;
-};
-
-type VPSwapArgs = {
-  sender: string;
-  amount0In: bigint;
-  amount1In: bigint;
-  amount0Out: bigint;
-  amount1Out: bigint;
-  to: string;
-  mockEventData: MockEventData;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    BiPoolManager: {
-      ExchangeCreated: EventProcessor<ExchangeCreatedArgs>;
-      ExchangeDestroyed: EventProcessor<ExchangeDestroyedArgs>;
-      BucketsUpdated: EventProcessor<BucketsUpdatedArgs>;
-      SpreadUpdated: EventProcessor<SpreadUpdatedArgs>;
-    };
-    VirtualPoolFactory: {
-      VirtualPoolDeployed: EventProcessor<VPDeployedArgs>;
-    };
-    VirtualPool: {
-      Swap: EventProcessor<VPSwapArgs>;
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, BiPoolManager, VirtualPoolFactory, VirtualPool } = TestHelpers;
 
 const CHAIN_ID = 42220; // Celo mainnet — pricingModule index resolves here.
@@ -147,13 +71,14 @@ function mockEventData(
   blockNumber: number,
   blockTs: number,
   srcAddress: string = BIPOOL_MANAGER_ADDRESS,
-): MockEventData {
-  return {
+): LegacyMockEventData {
+  return legacyMockEventData({
     chainId: CHAIN_ID,
     logIndex,
     srcAddress,
-    block: { number: blockNumber, timestamp: blockTs },
-  };
+    blockNumber,
+    blockTimestamp: blockTs,
+  });
 }
 
 function fullStruct(): PoolExchangeStruct {

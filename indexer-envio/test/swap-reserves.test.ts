@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
 import {
   _clearMockReserves,
   _setMockERC20Decimals,
@@ -10,43 +15,13 @@ import { makePoolId } from "../src/helpers.ts";
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
 const pid = (addr: string): string => makePoolId(42220, addr);
 
-type MockDb = {
-  entities: {
-    FactoryDeployment: { get: (id: string) => unknown };
-    Pool: {
-      get: (id: string) => unknown;
-      set: (entity: unknown) => MockDb;
-    };
-    SwapEvent: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  FactoryDeployment: LegacyEntityReader;
+  Pool: LegacyWritableEntity;
+  SwapEvent: LegacyEntityReader;
+}>;
 
-type EventProcessor = {
-  createMockEvent: (args: unknown) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: {
-      FPMMDeployed: EventProcessor;
-    };
-    FPMM: {
-      Swap: EventProcessor;
-      UpdateReserves: EventProcessor;
-    };
-    VirtualPoolFactory: {
-      VirtualPoolDeployed: EventProcessor;
-    };
-    VirtualPool: {
-      Swap: EventProcessor;
-      UpdateReserves: EventProcessor;
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
   TestHelpers;
 

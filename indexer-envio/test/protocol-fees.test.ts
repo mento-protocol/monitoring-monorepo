@@ -1,6 +1,14 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
+import {
+  legacyMockEventData,
+  seedLegacyFpmmPool,
+} from "./helpers/legacyEvents.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -24,58 +32,10 @@ const pid = (addr: string): string => makePoolId(42220, addr);
 // Types & helpers
 // ---------------------------------------------------------------------------
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    ProtocolFeeTransfer: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    ERC20FeeToken: {
-      Transfer: {
-        createMockEvent: (args: {
-          from?: string;
-          to?: string;
-          value?: bigint;
-          mockEventData?: {
-            chainId?: number;
-            srcAddress?: string;
-            logIndex?: number;
-            block?: { number?: number; timestamp?: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-    FPMMFactory: {
-      FPMMDeployed: {
-        createMockEvent: (args: {
-          token0: string;
-          token1: string;
-          fpmmProxy: string;
-          fpmmImplementation: string;
-          mockEventData: {
-            chainId: number;
-            logIndex: number;
-            srcAddress: string;
-            block: { number: number; timestamp: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyWritableEntity;
+  ProtocolFeeTransfer: LegacyEntityReader;
+}>;
 
 type FeeTokenMetaEffectRuntime = {
   handler: (args: {
@@ -92,7 +52,7 @@ type FeeTokenMetaEffectRuntime = {
   }) => Promise<{ symbol: string; decimals: number }>;
 };
 
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
 const feeTokenMetaEffectRuntime =
   feeTokenMetaEffect as unknown as FeeTokenMetaEffectRuntime;
@@ -126,19 +86,15 @@ const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000042";
  */
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   _setMockRebalanceThresholds(42220, POOL_ADDRESS, { above: 100, below: 100 });
-  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
     token0: TOKEN_ADDRESS,
     token1: "0x0000000000000000000000000000000000000043",
-    fpmmProxy: POOL_ADDRESS,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: 42220,
-      logIndex: 1,
-      srcAddress: "0x00000000000000000000000000000000000000cc",
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
+    poolAddress: POOL_ADDRESS,
+    logIndex: 1,
+    factoryAddress: "0x00000000000000000000000000000000000000cc",
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
-  return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 }
 
 function createTransferEvent(overrides: {
@@ -154,15 +110,13 @@ function createTransferEvent(overrides: {
     from: overrides.from ?? POOL_ADDRESS,
     to: overrides.to ?? YIELD_SPLIT,
     value: overrides.value ?? BigInt("1000000000000000000"), // 1e18
-    mockEventData: {
+    mockEventData: legacyMockEventData({
       chainId: 42220,
       srcAddress: overrides.srcAddress ?? TOKEN_ADDRESS,
       logIndex: overrides.logIndex ?? 10,
-      block: {
-        number: overrides.blockNumber ?? 500,
-        timestamp: overrides.blockTimestamp ?? 1_700_100_000,
-      },
-    },
+      blockNumber: overrides.blockNumber ?? 500,
+      blockTimestamp: overrides.blockTimestamp ?? 1_700_100_000,
+    }),
   });
 }
 

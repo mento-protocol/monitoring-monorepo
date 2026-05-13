@@ -18,7 +18,11 @@
  */
 import { strict as assert } from "assert";
 import { createTestIndexer } from "envio";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+} from "./helpers/legacyMockDb.js";
 import {
   setHttpRpcErrorMock,
   waitForHttpTestRpc,
@@ -36,34 +40,12 @@ import {
 } from "../src/EventHandlers.ts";
 import { VP_PROBE_RPC_ERROR } from "../src/rpc/biPoolManager.js";
 
-// The `generated` module ships as CommonJS with its own hand-rolled type
-// definitions in generated/index.d.ts. It does not export clean standalone
-// interface types for MockDb or EventProcessor — only the full namespace shape.
-// Importing and narrowing inline avoids duplicating the entire generated
-// module's type surface while still giving TS enough to catch call-site errors.
-// If generated/index.d.ts gains proper exports in a future Envio version,
-// replace these local types with direct imports.
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown };
-    FactoryDeployment: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyEntityReader;
+  FactoryDeployment: LegacyEntityReader;
+}>;
 
-type EventProcessor = {
-  createMockEvent: (args: unknown) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: { FPMMDeployed: EventProcessor };
-    VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const {
   MockDb,
   FPMMFactory: TestFPMMFactory,

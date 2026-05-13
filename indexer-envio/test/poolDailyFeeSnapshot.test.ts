@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
+import {
+  legacyMockEventData,
+  seedLegacyFpmmPool,
+} from "./helpers/legacyEvents.js";
 import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
@@ -16,61 +25,13 @@ import { USD_WEI_DECIMALS, computeFeeUsdWei } from "../src/usd.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    ProtocolFeeTransfer: { get: (id: string) => unknown };
-    PoolDailyFeeSnapshot: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyWritableEntity;
+  ProtocolFeeTransfer: LegacyEntityReader;
+  PoolDailyFeeSnapshot: LegacyEntityReader;
+}>;
 
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    ERC20FeeToken: {
-      Transfer: {
-        createMockEvent: (args: {
-          from?: string;
-          to?: string;
-          value?: bigint;
-          mockEventData?: {
-            chainId?: number;
-            srcAddress?: string;
-            logIndex?: number;
-            block?: { number?: number; timestamp?: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-    FPMMFactory: {
-      FPMMDeployed: {
-        createMockEvent: (args: {
-          token0: string;
-          token1: string;
-          fpmmProxy: string;
-          fpmmImplementation: string;
-          mockEventData: {
-            chainId: number;
-            logIndex: number;
-            srcAddress: string;
-            block: { number: number; timestamp: number };
-          };
-        }) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
 
 // ---------------------------------------------------------------------------
@@ -125,19 +86,16 @@ async function seedFpmmPool(
   token0 = USDC_ADDRESS,
   token1 = USDM_ADDRESS,
 ): Promise<MockDb> {
-  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
     token0,
     token1,
-    fpmmProxy: poolAddr,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId,
-      logIndex: 1,
-      srcAddress: "0x00000000000000000000000000000000000000cc",
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
+    poolAddress: poolAddr,
+    chainId,
+    logIndex: 1,
+    factoryAddress: "0x00000000000000000000000000000000000000cc",
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
-  return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 }
 
 function cloneSeededPoolToChain(
@@ -172,15 +130,13 @@ function createTransferEvent(overrides: {
     from: overrides.from ?? POOL_ADDRESS,
     to: overrides.to ?? YIELD_SPLIT,
     value: overrides.value ?? AMOUNT_1E6,
-    mockEventData: {
+    mockEventData: legacyMockEventData({
       chainId: overrides.chainId ?? CELO_CHAIN,
       srcAddress: overrides.srcAddress ?? USDC_ADDRESS,
       logIndex: overrides.logIndex ?? 10,
-      block: {
-        number: overrides.blockNumber ?? 500,
-        timestamp: overrides.blockTimestamp ?? TS_DAY1_MORNING,
-      },
-    },
+      blockNumber: overrides.blockNumber ?? 500,
+      blockTimestamp: overrides.blockTimestamp ?? TS_DAY1_MORNING,
+    }),
   });
 }
 

@@ -1,64 +1,25 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyMockDbWith,
+  type LegacyMockEventData,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
+import {
+  legacyMockEventData,
+  seedLegacyFpmmPool,
+} from "./helpers/legacyEvents.js";
 import {
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
-type MockDb = {
-  entities: {
-    Pool: { get: (id: string) => unknown; set: (e: unknown) => MockDb };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyWritableEntity;
+}>;
 
-type EventProcessor<E> = {
-  createMockEvent: (args: E) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type MockEventData = {
-  chainId: number;
-  logIndex: number;
-  srcAddress: string;
-  block: { number: number; timestamp: number };
-};
-
-type FeeUpdatedArgs = {
-  oldFee: bigint;
-  newFee: bigint;
-  mockEventData: MockEventData;
-};
-
-type IncentiveUpdatedArgs = {
-  oldIncentive: bigint;
-  newIncentive: bigint;
-  mockEventData: MockEventData;
-};
-
-type DeployedArgs = {
-  token0: string;
-  token1: string;
-  fpmmProxy: string;
-  fpmmImplementation: string;
-  mockEventData: MockEventData;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: { FPMMDeployed: EventProcessor<DeployedArgs> };
-    FPMM: {
-      LPFeeUpdated: EventProcessor<FeeUpdatedArgs>;
-      ProtocolFeeUpdated: EventProcessor<FeeUpdatedArgs>;
-      RebalanceIncentiveUpdated: EventProcessor<IncentiveUpdatedArgs>;
-    };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 const POOL_ADDRESS = "0x00000000000000000000000000000000000000aa";
@@ -73,28 +34,23 @@ async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   // waiting on Forno when the test addresses don't exist on-chain.
   _setMockERC20Decimals(42220, TOKEN0, 18);
   _setMockERC20Decimals(42220, TOKEN1, 18);
-  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+  return seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
     token0: TOKEN0,
     token1: TOKEN1,
-    fpmmProxy: POOL_ADDRESS,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: 42220,
-      logIndex: 0,
-      srcAddress: FACTORY,
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
+    poolAddress: POOL_ADDRESS,
+    factoryAddress: FACTORY,
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
-  return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
 }
 
-function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
-  return {
-    chainId: 42220,
+function mockEventData(logIndex = 1, blockNumber = 200): LegacyMockEventData {
+  return legacyMockEventData({
     logIndex,
     srcAddress: POOL_ADDRESS,
-    block: { number: blockNumber, timestamp: 1_700_000_500 },
-  };
+    blockNumber,
+    blockTimestamp: 1_700_000_500,
+  });
 }
 
 describe("FPMM fee-config event handlers", () => {

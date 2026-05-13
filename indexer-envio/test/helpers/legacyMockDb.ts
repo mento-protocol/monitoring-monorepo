@@ -3,20 +3,43 @@ import type { TestIndexer } from "envio";
 
 import { waitForHttpTestRpc } from "../../src/rpc/http-test-mocks.js";
 
-type Entity = { id: string };
+export type LegacyEntity = { id: string };
 
-type EntityStore = {
-  get: (id: string) => unknown;
-  getAll: () => unknown[];
-  set: (entity: Entity) => LegacyMockDb;
+export type LegacyEntityStore<
+  T extends LegacyEntity = LegacyEntity,
+  Db = LegacyMockDb,
+> = {
+  get: (id: string) => T | undefined;
+  getAll: () => T[];
+  set: (entity: T) => Db;
 };
 
 export type LegacyMockDb = {
-  entities: Record<string, EntityStore>;
-  _stores: Map<string, Map<string, Entity>>;
+  entities: Record<string, LegacyEntityStore<LegacyEntity, LegacyMockDb>>;
+  _stores: Map<string, Map<string, LegacyEntity>>;
 };
 
-type MockEventData = {
+export type LegacyEntityReader<T = unknown> = {
+  get: (id: string) => T | undefined;
+};
+
+export type LegacyEntityCollection<T = unknown> = LegacyEntityReader<T> & {
+  getAll: () => T[];
+};
+
+export type LegacyWritableEntity<
+  T = unknown,
+  Db = LegacyMockDb,
+> = LegacyEntityReader<T> & {
+  set: (entity: T) => Db;
+};
+
+export type LegacyMockDbWith<Entities extends Record<string, object>> =
+  LegacyMockDb & {
+    entities: LegacyMockDb["entities"] & Entities;
+  };
+
+export type LegacyMockEventData = {
   chainId?: number;
   srcAddress?: string;
   logIndex?: number;
@@ -35,16 +58,76 @@ type LegacyEvent = {
   transaction: Record<string, unknown>;
 };
 
-function entityStore(db: LegacyMockDb, entityName: string): EntityStore {
+export type LegacyEventProcessor<
+  Args = unknown,
+  Db extends LegacyMockDb = LegacyMockDb,
+> = {
+  createMockEvent: (args: Args) => unknown;
+  processEvent: (args: { event: unknown; mockDb: Db }) => Promise<Db>;
+};
+
+export type LegacyTestHelpers<Db extends LegacyMockDb = LegacyMockDb> = {
+  MockDb: { createMockDb: () => Db };
+  Broker: { Swap: LegacyEventProcessor<unknown, Db> };
+  FPMMFactory: { FPMMDeployed: LegacyEventProcessor<unknown, Db> };
+  FPMM: {
+    UpdateReserves: LegacyEventProcessor<unknown, Db>;
+    Swap: LegacyEventProcessor<unknown, Db>;
+    Mint: LegacyEventProcessor<unknown, Db>;
+    Burn: LegacyEventProcessor<unknown, Db>;
+    Rebalanced: LegacyEventProcessor<unknown, Db>;
+    LPFeeUpdated: LegacyEventProcessor<unknown, Db>;
+    ProtocolFeeUpdated: LegacyEventProcessor<unknown, Db>;
+    RebalanceIncentiveUpdated: LegacyEventProcessor<unknown, Db>;
+  };
+  VirtualPoolFactory: {
+    VirtualPoolDeployed: LegacyEventProcessor<unknown, Db>;
+  };
+  VirtualPool: {
+    UpdateReserves: LegacyEventProcessor<unknown, Db>;
+    Swap: LegacyEventProcessor<unknown, Db>;
+  };
+  BiPoolManager: {
+    ExchangeCreated: LegacyEventProcessor<unknown, Db>;
+    ExchangeDestroyed: LegacyEventProcessor<unknown, Db>;
+    BucketsUpdated: LegacyEventProcessor<unknown, Db>;
+    SpreadUpdated: LegacyEventProcessor<unknown, Db>;
+  };
+  ERC20FeeToken: { Transfer: LegacyEventProcessor<unknown, Db> };
+  BreakerBox: {
+    BreakerStatusUpdated: LegacyEventProcessor<unknown, Db>;
+    BreakerTripped: LegacyEventProcessor<unknown, Db>;
+    ResetSuccessful: LegacyEventProcessor<unknown, Db>;
+    BreakerRemoved: LegacyEventProcessor<unknown, Db>;
+    TradingModeUpdated: LegacyEventProcessor<unknown, Db>;
+  };
+  MedianDeltaBreaker: { MedianRateEMAReset: LegacyEventProcessor<unknown, Db> };
+  SortedOracles: { MedianUpdated: LegacyEventProcessor<unknown, Db> };
+  WormholeNttManager: {
+    TransferSentDetailed: LegacyEventProcessor<unknown, Db>;
+    TransferSentDigest: LegacyEventProcessor<unknown, Db>;
+    TransferRedeemed: LegacyEventProcessor<unknown, Db>;
+    MessageAttestedTo: LegacyEventProcessor<unknown, Db>;
+    InboundTransferQueued: LegacyEventProcessor<unknown, Db>;
+  };
+  WormholeTransceiver: { ReceivedMessage: LegacyEventProcessor<unknown, Db> };
+  TestWormholeNttManager: LegacyTestHelpers<Db>["WormholeNttManager"];
+  TestWormholeTransceiver: LegacyTestHelpers<Db>["WormholeTransceiver"];
+};
+
+function entityStore(
+  db: LegacyMockDb,
+  entityName: string,
+): LegacyEntityStore<LegacyEntity, LegacyMockDb> {
   let store = db._stores.get(entityName);
   if (!store) {
-    store = new Map<string, Entity>();
+    store = new Map<string, LegacyEntity>();
     db._stores.set(entityName, store);
   }
   return {
     get: (id: string) => store.get(id),
     getAll: () => Array.from(store.values()),
-    set: (entity: Entity) => {
+    set: (entity: LegacyEntity) => {
       store.set(entity.id, entity);
       return db;
     },
@@ -53,15 +136,18 @@ function entityStore(db: LegacyMockDb, entityName: string): EntityStore {
 
 function createMockDb(): LegacyMockDb {
   const db = {
-    _stores: new Map<string, Map<string, Entity>>(),
+    _stores: new Map<string, Map<string, LegacyEntity>>(),
   } as LegacyMockDb;
-  db.entities = new Proxy({} as Record<string, EntityStore>, {
-    get(target, prop) {
-      if (typeof prop !== "string") return undefined;
-      target[prop] ??= entityStore(db, prop);
-      return target[prop];
+  db.entities = new Proxy(
+    {} as Record<string, LegacyEntityStore<LegacyEntity, LegacyMockDb>>,
+    {
+      get(target, prop) {
+        if (typeof prop !== "string") return undefined;
+        target[prop] ??= entityStore(db, prop);
+        return target[prop];
+      },
     },
-  });
+  );
   return db;
 }
 
@@ -71,7 +157,7 @@ function normalizeEvent(
   args: Record<string, unknown>,
 ): LegacyEvent {
   const { mockEventData, ...params } = args as Record<string, unknown> & {
-    mockEventData?: MockEventData;
+    mockEventData?: LegacyMockEventData;
   };
   const data = mockEventData ?? {};
   const blockNumber = Number(data.block?.number ?? 1);
@@ -96,7 +182,7 @@ function normalizeEvent(
 function seedIndexer(indexer: TestIndexer, db: LegacyMockDb): void {
   const target = indexer as unknown as Record<
     string,
-    { set?: (entity: Entity) => void }
+    { set?: (entity: LegacyEntity) => void }
   >;
   for (const [entityName, rows] of db._stores) {
     const ops = target[entityName];
@@ -119,7 +205,7 @@ function applyChanges(db: LegacyMockDb, changes: readonly object[]): void {
         continue;
       }
       const entityChange = value as
-        | { sets?: Entity[]; deleted?: string[] }
+        | { sets?: LegacyEntity[]; deleted?: string[] }
         | undefined;
       if (!entityChange) continue;
       const store = db.entities[entityName];
@@ -229,5 +315,11 @@ export const TestHelpers = {
 
 TestHelpers.TestWormholeNttManager = TestHelpers.WormholeNttManager;
 TestHelpers.TestWormholeTransceiver = TestHelpers.WormholeTransceiver;
+
+export function legacyTestHelpers<
+  Db extends LegacyMockDb = LegacyMockDb,
+>(): LegacyTestHelpers<Db> {
+  return TestHelpers as unknown as LegacyTestHelpers<Db>;
+}
 
 export default { TestHelpers };

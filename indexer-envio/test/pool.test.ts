@@ -1,4 +1,3 @@
-/// <reference types="mocha" />
 import { assert } from "vitest";
 import type { Pool } from "envio";
 import {

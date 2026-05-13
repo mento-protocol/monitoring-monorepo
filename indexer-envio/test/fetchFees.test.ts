@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fetchFees } from "../src/rpc.ts";
 import { _setMockFees, _clearMockFees } from "../src/EventHandlers.ts";
-import { waitForHttpTestRpc } from "../src/rpc/http-test-mocks.js";
+import { expectHttpRpcMockFallback } from "./helpers/httpRpc.js";
 
 const CHAIN = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";
@@ -72,7 +72,7 @@ describe("fetchFees (direct RPC-layer contract)", () => {
   });
 
   it("clears per-pool HTTP fee mocks when clearing all fee mocks", async () => {
-    await waitForHttpTestRpc();
+    await expectHttpRpcMockFallback();
     _setMockFees(CHAIN, POOL, {
       lpFee: { fulfilled: 15n },
       protocolFee: { fulfilled: 5n },

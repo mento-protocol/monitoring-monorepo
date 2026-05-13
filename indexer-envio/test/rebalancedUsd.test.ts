@@ -1,6 +1,15 @@
-/// <reference types="mocha" />
 import assert from "node:assert/strict";
-import generated from "./helpers/legacyMockDb.js";
+import {
+  legacyTestHelpers,
+  type LegacyEntityReader,
+  type LegacyMockDbWith,
+  type LegacyMockEventData,
+  type LegacyWritableEntity,
+} from "./helpers/legacyMockDb.js";
+import {
+  legacyMockEventData,
+  seedLegacyFpmmPool,
+} from "./helpers/legacyEvents.js";
 import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
@@ -12,54 +21,12 @@ import {
   _clearMockRebalanceThresholds,
 } from "../src/rpc.ts";
 
-type MockDb = {
-  entities: {
-    Pool: {
-      get: (id: string) => unknown;
-      set: (e: unknown) => MockDb;
-    };
-    RebalanceEvent: { get: (id: string) => unknown };
-    [key: string]: { get: (id: string) => unknown };
-  };
-};
+type MockDb = LegacyMockDbWith<{
+  Pool: LegacyWritableEntity;
+  RebalanceEvent: LegacyEntityReader;
+}>;
 
-type EventProcessor<E> = {
-  createMockEvent: (args: E) => unknown;
-  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
-};
-
-type MockEventData = {
-  chainId: number;
-  logIndex: number;
-  srcAddress: string;
-  block: { number: number; timestamp: number };
-  transaction?: { hash?: string; from?: string };
-};
-
-type RebalancedArgs = {
-  sender: string;
-  priceDifferenceBefore: bigint;
-  priceDifferenceAfter: bigint;
-  mockEventData: MockEventData;
-};
-
-type DeployedArgs = {
-  token0: string;
-  token1: string;
-  fpmmProxy: string;
-  fpmmImplementation: string;
-  mockEventData: MockEventData;
-};
-
-type GeneratedModule = {
-  TestHelpers: {
-    MockDb: { createMockDb: () => MockDb };
-    FPMMFactory: { FPMMDeployed: EventProcessor<DeployedArgs> };
-    FPMM: { Rebalanced: EventProcessor<RebalancedArgs> };
-  };
-};
-
-const { TestHelpers } = generated as unknown as GeneratedModule;
+const TestHelpers = legacyTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM } = TestHelpers;
 
 // Real Celo mainnet addresses — resolvable via KNOWN_TOKEN_META so
@@ -72,14 +39,18 @@ const CELO = "0x471ece3750da237f93b8e339c536989b8978a438"; // 18dp, NOT pegged
 const STRATEGY = "0x0000000000000000000000000000000000000099";
 const TX_FROM = "0x000000000000000000000000000000000000ca11";
 
-function rebalancedEventData(blockNumber: number, logIndex = 5): MockEventData {
-  return {
+function rebalancedEventData(
+  blockNumber: number,
+  logIndex = 5,
+): LegacyMockEventData {
+  return legacyMockEventData({
     chainId: CHAIN_CELO,
     logIndex,
     srcAddress: POOL,
-    block: { number: blockNumber, timestamp: 1_700_010_000 },
+    blockNumber,
+    blockTimestamp: 1_700_010_000,
     transaction: { hash: `0x${"ab".repeat(32)}`, from: TX_FROM },
-  };
+  });
 }
 
 async function seedRebalanceablePool(
@@ -94,21 +65,13 @@ async function seedRebalanceablePool(
     token1Decimals?: number;
   },
 ): Promise<MockDb> {
-  const deploy = FPMMFactory.FPMMDeployed.createMockEvent({
+  mockDb = await seedLegacyFpmmPool(mockDb, FPMMFactory.FPMMDeployed, {
     token0: options.token0 ?? USDM,
     token1: options.token1 ?? CELO,
-    fpmmProxy: POOL,
-    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
-    mockEventData: {
-      chainId: CHAIN_CELO,
-      logIndex: 0,
-      srcAddress: FACTORY,
-      block: { number: 100, timestamp: 1_700_000_000 },
-    },
-  });
-  mockDb = await FPMMFactory.FPMMDeployed.processEvent({
-    event: deploy,
-    mockDb,
+    poolAddress: POOL,
+    factoryAddress: FACTORY,
+    blockNumber: 100,
+    blockTimestamp: 1_700_000_000,
   });
 
   const seeded = mockDb.entities.Pool.get(makePoolId(CHAIN_CELO, POOL)) as
