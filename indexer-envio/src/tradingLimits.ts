@@ -93,6 +93,8 @@ export function applyTradingLimitSwap(
     scaledAmountIn -
     (scaledAmountIn * BigInt(args.totalFeeBps)) / BASIS_POINTS_DENOMINATOR;
   const deltaFlow = amountInAfterFees - scaledAmountOut;
+  // Mirrors TradingLimitsV2.update: zero-delta swaps do not reset windows.
+  if (deltaFlow === 0n) return state;
 
   const next = { ...state };
   if (config.limit0 > 0n) {

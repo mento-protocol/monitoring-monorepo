@@ -213,7 +213,7 @@ describe("TradingLimitsV2 state derivation", () => {
     });
   });
 
-  it("resets elapsed windows even when swap deltaFlow is zero", () => {
+  it("leaves state unchanged when swap deltaFlow is zero", () => {
     const next = applyTradingLimitSwap(
       {
         lastUpdated0: 100_000n,
@@ -235,10 +235,10 @@ describe("TradingLimitsV2 state derivation", () => {
     );
 
     assert.deepEqual(next, {
-      lastUpdated0: 186_401n,
-      lastUpdated1: 186_401n,
-      netflow0: 0n,
-      netflow1: 0n,
+      lastUpdated0: 100_000n,
+      lastUpdated1: 100_000n,
+      netflow0: 50n * INTERNAL_UNIT,
+      netflow1: 50n * INTERNAL_UNIT,
     });
   });
 

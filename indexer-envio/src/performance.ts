@@ -28,6 +28,8 @@ type EntityStats = {
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const DEFAULT_LOG_INTERVAL = 10_000;
+const MAX_TRACKED_STAT_KEYS = 256;
+const OVERFLOW_STAT_KEY = "__overflow__";
 
 const enabled = TRUE_VALUES.has((process.env.INDEXER_PERF ?? "").toLowerCase());
 const logInterval = Math.max(
@@ -45,8 +47,14 @@ function nowMs(): number {
   return performance.now();
 }
 
+function trackedStatKey<T>(stats: Map<string, T>, name: string): string {
+  if (stats.has(name) || stats.size < MAX_TRACKED_STAT_KEYS) return name;
+  return OVERFLOW_STAT_KEY;
+}
+
 function getHandlerStats(name: string): HandlerStats {
-  const existing = handlerStats.get(name);
+  const key = trackedStatKey(handlerStats, name);
+  const existing = handlerStats.get(key);
   if (existing) return existing;
   const created = {
     calls: 0,
@@ -55,20 +63,22 @@ function getHandlerStats(name: string): HandlerStats {
     totalMs: 0,
     maxMs: 0,
   };
-  handlerStats.set(name, created);
+  handlerStats.set(key, created);
   return created;
 }
 
 function getEffectStats(name: string): EffectStats {
-  const existing = effectStats.get(name);
+  const key = trackedStatKey(effectStats, name);
+  const existing = effectStats.get(key);
   if (existing) return existing;
   const created = { requests: 0, executions: 0, totalMs: 0, maxMs: 0 };
-  effectStats.set(name, created);
+  effectStats.set(key, created);
   return created;
 }
 
 function getEntityStats(name: string): EntityStats {
-  const existing = entityStats.get(name);
+  const key = trackedStatKey(entityStats, name);
+  const existing = entityStats.get(key);
   if (existing) return existing;
   const created = {
     get: 0,
@@ -78,7 +88,7 @@ function getEntityStats(name: string): EntityStats {
     set: 0,
     deleteUnsafe: 0,
   };
-  entityStats.set(name, created);
+  entityStats.set(key, created);
   return created;
 }
 

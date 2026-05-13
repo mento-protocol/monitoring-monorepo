@@ -43,7 +43,7 @@ indexer.onEvent(
     // reserves always precedes this Swap event in the same tx. By the time this
     // handler runs, the UpdateReserves handler has already written reserves to
     // the Pool entity.
-    const pool = await upsertPool({
+    let pool = await upsertPool({
       context,
       chainId: event.chainId,
       poolId,
@@ -137,12 +137,13 @@ indexer.onEvent(
         }
         const overallWorst = Math.max(worstP0, worstP1);
         const limitStatus = computeLimitStatus(overallWorst, 0);
-        context.Pool.set({
+        pool = {
           ...pool,
           limitStatus,
           limitPressure0: worstP0.toFixed(4),
           limitPressure1: worstP1.toFixed(4),
-        });
+        };
+        context.Pool.set(pool);
       }
     }
 
