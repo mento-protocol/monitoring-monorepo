@@ -65,7 +65,8 @@ export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
  * Preload-phase helper used by handlers that warm Pool reads before returning
  * from Envio's preload pass. `maybePreloadPool` returns `true` when the caller
  * should return early; `preloadPoolCache` exposes the warmed Pool row to
- * callers that need to issue dependent `context.effect(...)` reads first.
+ * callers that need to issue dependent `context.effect(...)` reads first. Its
+ * own `isPreload` guard makes it safe to call from either pass.
  *
  * Seeds BOTH the Pool entity cache AND the currently-open breach row
  * (when one exists) during preload. Skipping the breach-row warm-up

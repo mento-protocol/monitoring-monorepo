@@ -36,7 +36,8 @@ indexer.onEvent(
         pool.token1
       ) {
         // Keep processing writes out of preload, but let Envio batch and
-        // parallelize the per-swap trading-limit RPC reads.
+        // parallelize the per-swap trading-limit RPC reads. The processing
+        // pass presents the same effect keys and reuses these preload results.
         await Promise.all([
           context.effect(tradingLimitsEffect, {
             chainId: event.chainId,
