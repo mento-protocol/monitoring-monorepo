@@ -2,10 +2,13 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   aggregateBrokerAggregatorsByWindow,
   aggregateBrokerTradersByWindow,
+  aggregateBrokerViaByTrader,
   aggregateDailyVolume,
   aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
+  brokerViaDisplayName,
+  buildBrokerViaMarkerIds,
   buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
@@ -1056,6 +1059,142 @@ describe("aggregateBrokerAggregatorsByWindow", () => {
     const reversed = [...rows].reverse();
     const [row2] = aggregateBrokerAggregatorsByWindow(reversed);
     expect(row2!.lastSeenAggregatorAddress).toBe("0xrouter2");
+  });
+});
+
+describe("v2 trader Via marker helpers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("builds exact marker ids for visible traders, route buckets, and UTC days", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
+    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
+    const result = buildBrokerViaMarkerIds(
+      [
+        {
+          chainId: 42220,
+          trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          swapCount: 1,
+          volumeUsdWei: BigInt(1),
+          isSystemAddress: false,
+          lastSeenTimestamp: cutoff,
+        },
+        {
+          chainId: 42220,
+          trader: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          swapCount: 1,
+          volumeUsdWei: BigInt(1),
+          isSystemAddress: false,
+          lastSeenTimestamp: cutoff,
+        },
+      ],
+      ["squid", "direct"],
+      cutoff,
+    );
+
+    expect(result).toEqual({
+      ids: [
+        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+      ],
+      truncated: false,
+    });
+  });
+
+  it("does not build all-time marker ids because the query can exceed the row cap", () => {
+    expect(
+      buildBrokerViaMarkerIds(
+        [
+          {
+            chainId: 42220,
+            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            swapCount: 1,
+            volumeUsdWei: BigInt(1),
+            isSystemAddress: false,
+            lastSeenTimestamp: 1778457600,
+          },
+        ],
+        ["direct"],
+        0,
+      ),
+    ).toBeNull();
+  });
+
+  it("fails closed before allocating marker ids when the expansion exceeds the safety cap", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
+    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
+
+    expect(
+      buildBrokerViaMarkerIds(
+        [
+          {
+            chainId: 42220,
+            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            swapCount: 1,
+            volumeUsdWei: BigInt(1),
+            isSystemAddress: false,
+            lastSeenTimestamp: cutoff,
+          },
+        ],
+        ["direct", "squid"],
+        cutoff,
+        { maxIds: 3 },
+      ),
+    ).toEqual({ ids: [], truncated: true });
+  });
+
+  it("aggregates parsed marker ids by trader and orders route labels deterministically", () => {
+    const routes = aggregateBrokerViaByTrader([
+      {
+        id: "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+      },
+      {
+        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778371200",
+      },
+      {
+        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+      },
+      {
+        id: "42220-openocean-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778457600",
+      },
+      { id: "malformed" },
+    ]);
+
+    expect(
+      routes
+        .get("42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ?.map((route) => route.aggregator),
+    ).toEqual(["direct", "squid"]);
+    expect(
+      routes.get("42220-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+    ).toEqual([
+      {
+        aggregator: "openocean",
+        days: 1,
+        latestTimestamp: 1778457600,
+      },
+    ]);
+  });
+
+  it("formats v2 route buckets as trader-facing Via labels", () => {
+    expect(brokerViaDisplayName("broker")).toBe("Broker");
+    expect(brokerViaDisplayName("direct")).toBe("Broker");
+    expect(brokerViaDisplayName("mento-router-v2")).toBe("Mento Router v2");
+    expect(brokerViaDisplayName("squid")).toBe("Squid Router");
+    expect(brokerViaDisplayName("openocean")).toBe("OpenOcean Router");
+    expect(brokerViaDisplayName("unknown")).toBe("Unknown router");
+    expect(brokerViaDisplayName("cluster-7dc08ec28f299c06")).toBe(
+      "Router cluster 7dc08ec28f299c06",
+    );
   });
 });
 

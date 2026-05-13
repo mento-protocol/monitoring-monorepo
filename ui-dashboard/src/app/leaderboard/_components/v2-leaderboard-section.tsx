@@ -6,6 +6,7 @@ import type {
 } from "@/lib/leaderboard";
 import { V2LeaderboardTraderTable } from "./v2-leaderboard-tables";
 import { AggregatorBreakdownSection } from "./aggregator-breakdown-section";
+import { TableSectionTitle } from "./table-section-title";
 
 /**
  * V2 venue panel for `/leaderboard` — the legacy-broker trader table plus
@@ -28,6 +29,7 @@ import { AggregatorBreakdownSection } from "./aggregator-breakdown-section";
  */
 export function V2LeaderboardSection({
   rangeLabel,
+  cutoff,
   v2Aggregated,
   v2AggregatorAggregated,
   tableIsLoading,
@@ -40,6 +42,8 @@ export function V2LeaderboardSection({
    *  "all-time" — already mapped from `LeaderboardRangeKey` by the
    *  parent. Used only in section titles. */
   rangeLabel: string;
+  /** Same UTC-day cutoff used by the trader query; bounds the Via marker query. */
+  cutoff: number;
   v2Aggregated: readonly BrokerTraderWindowRow[];
   v2AggregatorAggregated: readonly BrokerAggregatorWindowRow[];
   /** Trader-table loading/error: `BrokerTraderDailySnapshot` query. */
@@ -58,11 +62,19 @@ export function V2LeaderboardSection({
   return (
     <>
       <section>
-        <h2 className="mb-3 text-sm font-medium text-slate-300">
+        <TableSectionTitle
+          label="About top v2 traders table"
+          info="Ranks signer wallets still using legacy Broker v2 by USD volume in this window. Via lists the entry-point routes observed for each wallet."
+        >
           Top v2 traders ({rangeLabel})
-        </h2>
+        </TableSectionTitle>
         <V2LeaderboardTraderTable
+          cutoff={cutoff}
           traders={v2Aggregated}
+          viaAggregators={v2AggregatorAggregated}
+          viaAggregatorsLoading={v2AggIsLoading}
+          viaAggregatorsError={v2AggHasError}
+          viaAggregatorsTruncated={isV2AggregatorCapHit}
           isLoading={tableIsLoading}
           hasError={tableHasError}
         />

@@ -15,9 +15,10 @@ import {
 } from "@/components/time-series-chart-card";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
-import { cmpBigInt, weiToUsd } from "@/lib/leaderboard";
+import { brokerViaDisplayName, cmpBigInt, weiToUsd } from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
+import { TableSectionTitle } from "./table-section-title";
 
 const PAGE_LIMIT = 50;
 
@@ -54,9 +55,13 @@ export function AggregatorBreakdownSection({
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-sm font-medium text-slate-300">
+        <TableSectionTitle
+          className="mb-0"
+          label={`About ${venueLabel} aggregator table`}
+          info={`${venueLabel} route view: groups volume by the transaction entry point, such as direct Mento routes, known aggregators, clusters, system contracts, or unknown routers.`}
+        >
           {venueLabel} volume by aggregator / entry-point ({rangeLabel})
-        </h2>
+        </TableSectionTitle>
         <p className="mt-1 text-xs text-slate-500">
           Canonical name from <code>aggregators.json</code>. Large{" "}
           <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
@@ -212,7 +217,14 @@ function AggregatorTable({
               <Td>
                 <span className="inline-flex items-center gap-1.5">
                   {network && <ChainIcon network={network} />}
-                  <AggregatorLabel name={row.aggregator} />
+                  <AggregatorLabel
+                    name={row.aggregator}
+                    label={
+                      venueLabel === "v2"
+                        ? brokerViaDisplayName(row.aggregator)
+                        : undefined
+                    }
+                  />
                 </span>
               </Td>
               <Td>
@@ -249,11 +261,17 @@ function AggregatorTable({
   );
 }
 
-function AggregatorLabel({ name }: { name: string }) {
+export function AggregatorLabel({
+  name,
+  label = name,
+}: {
+  name: string;
+  label?: string;
+}) {
   const meta = getClusterMetadata(name);
   return (
     <span className="inline-flex items-center gap-1">
-      <span className={aggregatorLabelClass(name)}>{name}</span>
+      <span className={aggregatorLabelClass(name)}>{label}</span>
       {meta && (
         <a
           href={meta.explorerUrl}
@@ -277,7 +295,12 @@ function aggregatorLabelClass(name: string): string {
   if (name.startsWith("cluster-")) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 font-mono text-[11px] text-slate-300";
   }
-  if (name === "system" || name === "direct") {
+  if (
+    name === "system" ||
+    name === "direct" ||
+    name === "broker" ||
+    name === "mento-router-v2"
+  ) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300";
   }
   return "rounded bg-indigo-900/30 px-1.5 py-0.5 text-[11px] font-medium text-indigo-200";

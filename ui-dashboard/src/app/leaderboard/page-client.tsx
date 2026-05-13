@@ -551,6 +551,7 @@ export function LeaderboardClient() {
       ) : (
         <V2LeaderboardSection
           rangeLabel={rangeLabel(range)}
+          cutoff={cutoff}
           v2Aggregated={v2Aggregated}
           v2AggregatorAggregated={v2AggregatorAggregated}
           tableIsLoading={tableIsLoading}

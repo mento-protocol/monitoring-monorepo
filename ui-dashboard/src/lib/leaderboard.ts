@@ -167,6 +167,26 @@ export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
   id: string;
 };
 export type BrokerAggregatorWindowRow = AggregatorWindowRow;
+export type BrokerAggregatorTraderDayMarkerRow = {
+  id: string;
+};
+export type BrokerTraderViaRoute = {
+  aggregator: string;
+  days: number;
+  latestTimestamp: number;
+};
+
+const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
+  "0x": "0x Router",
+  broker: "Broker",
+  direct: "Broker",
+  lifi: "LI.FI Router",
+  "mento-router-v2": "Mento Router v2",
+  openocean: "OpenOcean Router",
+  squid: "Squid Router",
+  system: "Mento system",
+  unknown: "Unknown router",
+};
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
@@ -306,6 +326,168 @@ export function aggregateBrokerTradersByWindow(
 }
 
 export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
+
+// The aggregator segment is intentionally greedy: route labels can contain
+// hyphens (`cluster-*`, future versioned names), so splitting on `-` is unsafe.
+// The trailing lowercase caller address + day anchor the parse; malformed ids
+// are ignored by `aggregateBrokerViaByTrader`.
+const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
+export const BROKER_VIA_MARKER_ID_LIMIT = 50_000;
+
+export type BrokerViaMarkerIdBuildResult = {
+  ids: string[];
+  truncated: boolean;
+};
+
+/**
+ * Build exact BrokerAggregatorTraderDayMarker ids for the visible trader rows.
+ * The marker table only exposes the composite id, so exact `_in` lookups are
+ * much cheaper than a wide regex over `{chainId}-{aggregator}-{caller}-{day}`.
+ */
+export function buildBrokerViaMarkerIds(
+  rows: readonly BrokerTraderWindowRow[],
+  aggregators: readonly string[],
+  cutoff: number,
+  options: { maxIds?: number } = {},
+): BrokerViaMarkerIdBuildResult | null {
+  // All-time can span enough day markers to saturate ENVIO_MAX_ROWS and make
+  // attribution silently partial. Show Via only for bounded windows until the
+  // indexer exposes a per-window route entity or a structured marker query.
+  if (cutoff <= 0) return null;
+  if (rows.length === 0) return null;
+
+  const routes = [
+    ...new Set(
+      aggregators.flatMap((aggregator) => {
+        const route = aggregator.trim().toLowerCase();
+        return route ? [route] : [];
+      }),
+    ),
+  ].sort();
+  if (routes.length === 0) return null;
+
+  const traderKeys = new Map<string, { chainId: number; trader: string }>();
+  for (const row of rows) {
+    const trader = row.trader.toLowerCase();
+    traderKeys.set(`${row.chainId}-${trader}`, {
+      chainId: row.chainId,
+      trader,
+    });
+  }
+  const traders = [...traderKeys.values()].sort((a, b) => {
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.trader.localeCompare(b.trader);
+  });
+  if (traders.length === 0) return null;
+
+  const todayMidnightUtc =
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const days = dayBuckets(cutoff, todayMidnightUtc);
+  if (!days) return null;
+
+  const maxIds = options.maxIds ?? BROKER_VIA_MARKER_ID_LIMIT;
+  const requestedIds = traders.length * routes.length * days.length;
+  if (requestedIds > maxIds) return { ids: [], truncated: true };
+
+  const ids: string[] = [];
+  for (const { chainId, trader } of traders) {
+    for (const route of routes) {
+      for (const day of days) {
+        ids.push(`${chainId}-${route}-${trader}-${day}`);
+      }
+    }
+  }
+  return { ids, truncated: false };
+}
+
+/**
+ * Parse v2 route marker ids into per-trader route labels. The route order is
+ * by active-day count, then recency, then label for deterministic rendering.
+ */
+export function aggregateBrokerViaByTrader(
+  rows: readonly BrokerAggregatorTraderDayMarkerRow[],
+): Map<string, BrokerTraderViaRoute[]> {
+  const byTrader = new Map<string, Map<string, BrokerTraderViaRoute>>();
+  for (const row of rows) {
+    const parsed = parseBrokerViaMarkerId(row.id);
+    if (!parsed) continue;
+    const key = `${parsed.chainId}-${parsed.trader}`;
+    let routes = byTrader.get(key);
+    if (!routes) {
+      routes = new Map<string, BrokerTraderViaRoute>();
+      byTrader.set(key, routes);
+    }
+    const existing = routes.get(parsed.aggregator);
+    if (existing) {
+      existing.days += 1;
+      existing.latestTimestamp = Math.max(
+        existing.latestTimestamp,
+        parsed.timestamp,
+      );
+    } else {
+      routes.set(parsed.aggregator, {
+        aggregator: parsed.aggregator,
+        days: 1,
+        latestTimestamp: parsed.timestamp,
+      });
+    }
+  }
+
+  return new Map(
+    [...byTrader.entries()].map(([key, routes]) => [
+      key,
+      [...routes.values()].sort((a, b) => {
+        if (b.days !== a.days) return b.days - a.days;
+        if (b.latestTimestamp !== a.latestTimestamp) {
+          return b.latestTimestamp - a.latestTimestamp;
+        }
+        return a.aggregator.localeCompare(b.aggregator);
+      }),
+    ]),
+  );
+}
+
+export function brokerViaDisplayName(aggregator: string): string {
+  if (aggregator.startsWith("cluster-")) {
+    return `Router cluster ${aggregator.slice("cluster-".length)}`;
+  }
+  const known = BROKER_VIA_DISPLAY_NAMES[aggregator];
+  if (known) return known;
+  return humanizeRouteBucket(aggregator);
+}
+
+function parseBrokerViaMarkerId(id: string): {
+  chainId: number;
+  aggregator: string;
+  trader: string;
+  timestamp: number;
+} | null {
+  const match = BROKER_VIA_MARKER_ID_RE.exec(id);
+  if (!match) return null;
+  return {
+    chainId: Number(match[1]),
+    aggregator: match[2]!,
+    trader: match[3]!,
+    timestamp: Number(match[4]),
+  };
+}
+
+function dayBuckets(from: number, to: number): string[] | null {
+  if (from > to) return null;
+  const days: string[] = [];
+  for (let day = from; day <= to; day += SECONDS_PER_DAY) {
+    days.push(String(day));
+  }
+  return days;
+}
+
+function humanizeRouteBucket(value: string): string {
+  const words: string[] = [];
+  for (const part of value.split(/[-_]+/)) {
+    if (part) words.push(part.charAt(0).toUpperCase() + part.slice(1));
+  }
+  return words.join(" ");
+}
 
 /**
  * Day-keyed totals across all traders in the window. Drives the volume
