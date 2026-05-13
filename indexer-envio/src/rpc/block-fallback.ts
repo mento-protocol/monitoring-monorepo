@@ -4,7 +4,7 @@
 // retries (with secondary-RPC fallback) and "block not yet on this node"
 // retries (with a same-block secondary attempt before `latest` fallback).
 
-import type { createPublicClient } from "viem";
+import type { createPublicClient, ReadContractParameters } from "viem";
 import {
   RATE_LIMIT_RETRY_DELAYS_MS,
   _resetRpcFailureCounts,
@@ -84,6 +84,8 @@ export type BlockFallbackResult = {
  * to reading "latest". Each retry uses an increasing delay. */
 const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
 
+type PublicClient = ReturnType<typeof createPublicClient>;
+
 /** @internal Test-only hooks for overriding the delay function and exposing
  *  internal helpers (rate-limit classifier, structured failure logger, and
  *  the burst-counter reset) so unit tests can pin their behaviour without
@@ -119,17 +121,17 @@ export const _testHooks = {
  */
 export async function readContractWithBlockFallback(
   chainId: number,
-  client: ReturnType<typeof createPublicClient>,
+  client: PublicClient,
   args: Record<string, unknown>,
   blockNumber?: bigint,
-  fallbackClient?: ReturnType<typeof createPublicClient> | null,
+  fallbackClient?: PublicClient | null,
   log: RpcLogger = consoleLogger,
 ): Promise<BlockFallbackResult> {
-  const makeCall = (c: ReturnType<typeof createPublicClient>, block?: bigint) =>
+  const makeCall = (c: PublicClient, block?: bigint) =>
     c.readContract({
       ...args,
       ...(block !== undefined && { blockNumber: block }),
-    } as any);
+    } as ReadContractParameters);
 
   const callWithBlock = () => makeCall(client, blockNumber);
   const fn = (args.functionName as string) ?? "unknown";

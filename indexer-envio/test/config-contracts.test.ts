@@ -15,7 +15,7 @@ function chainConfigBlock(chainId: number): string {
   assert.notEqual(start, -1, `missing chain ${chainId} in mainnet config`);
 
   const next = lines.findIndex(
-    (line, index) => index > start && /^  - id: \d+\b/.test(line),
+    (line, index) => index > start && /^ {2}- id: \d+\b/.test(line),
   );
   return lines.slice(start, next === -1 ? undefined : next).join("\n");
 }

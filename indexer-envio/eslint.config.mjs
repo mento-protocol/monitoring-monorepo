@@ -1,9 +1,6 @@
-// Scoped to the two BACKLOG items: file-size cap + unused-imports.
-// `tseslint.configs.recommended` would surface ~39 pre-existing nits
-// (no-explicit-any, no-unused-vars, no-require-imports) that should be
-// cleaned up in a separate PR before tightening this config.
-
+import js from "@eslint/js";
 import unusedImports from "eslint-plugin-unused-imports";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -11,9 +8,11 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
   {
     languageOptions: {
-      parser: tseslint.parser,
+      globals: globals.node,
       parserOptions: { tsconfigRootDir: __dirname },
     },
   },
