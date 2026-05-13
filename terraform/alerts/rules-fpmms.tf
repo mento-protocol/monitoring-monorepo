@@ -328,10 +328,10 @@ resource "grafana_rule_group" "fpmms_deviation" {
 
     annotations = {
       summary        = local.deviation_warning_summary_annotation
-      resolved_title = "Deviation Breach Resolved"
-      # Warning can resolve because coverage moved to a sibling rule or
-      # suppression path, not only because the pool recovered.
-      resolved_summary = "Pool recovered, escalated to critical, moved to anchored data-gap coverage, or FX weekend suppression is active."
+      resolved_title = "Deviation Breach Alert Stopped"
+      # Warning can resolve because the pool recovered, became critical,
+      # lost ratio data, or entered the FX weekend pause.
+      resolved_summary = "This warning stopped firing. The pool may have recovered, become critical, lost ratio data, or entered the FX weekend pause."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -437,8 +437,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
 
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
-      resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Breach anchor cleared, ratio gauge recovered, escalated to critical, or FX weekend suppression is active."
+      resolved_title   = "Deviation Breach Alert Stopped"
+      resolved_summary = "This data-gap warning stopped firing. The breach may have cleared, ratio data returned, become critical, or entered the FX weekend pause."
     }
 
     labels = {
@@ -506,8 +506,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
 
     annotations = {
       summary          = local.deviation_critical_summary_annotation
-      resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool recovered, moved to anchored data-gap critical coverage, or FX weekend suppression is active."
+      resolved_title   = "Deviation Breach Alert Stopped"
+      resolved_summary = "This critical alert stopped firing. The pool may have recovered, lost ratio data, or entered the FX weekend pause."
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -660,8 +660,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
 
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
-      resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Breach anchor cleared, ratio gauge recovered, or FX weekend suppression is active."
+      resolved_title   = "Deviation Breach Alert Stopped"
+      resolved_summary = "This data-gap critical alert stopped firing. The breach may have cleared, ratio data returned, or entered the FX weekend pause."
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line
