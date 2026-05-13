@@ -82,6 +82,8 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   const livePool = { ...pool, ...rollup };
   const anchor = anchorData?.PoolDailySnapshot?.[0] ?? null;
   const anchorTs = Number(anchor?.timestamp ?? "0");
+  // All-time uptime uses the unclipped projection inside computePoolUptimePct;
+  // the 7d subtitle clips the same open interval to the snapshot anchor first.
   const liveRollup = liveHealthCounters(
     livePool,
     nowSeconds,

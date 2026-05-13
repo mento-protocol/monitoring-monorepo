@@ -530,16 +530,18 @@ describe("computePoolUptimePct", () => {
   });
 
   it("does not retroactively count no-data intervals", () => {
-    expect(
-      computePoolUptimePct({
-        source: "fpmm_factory",
-        healthBinarySeconds: "1000",
-        healthTotalSeconds: "1000",
-        lastOracleSnapshotTimestamp: String(frozenNowSec - 6 * 3600),
-        lastDeviationRatio: "-1",
-        oracleExpiry: "360",
-      }),
-    ).toBe(100);
+    for (const lastDeviationRatio of ["-1", "-1.000000"]) {
+      expect(
+        computePoolUptimePct({
+          source: "fpmm_factory",
+          healthBinarySeconds: "1000",
+          healthTotalSeconds: "1000",
+          lastOracleSnapshotTimestamp: String(frozenNowSec - 6 * 3600),
+          lastDeviationRatio,
+          oracleExpiry: "360",
+        }),
+      ).toBe(100);
+    }
   });
 
   it("clips a live interval to the window anchor before subtracting cumulative counters", () => {

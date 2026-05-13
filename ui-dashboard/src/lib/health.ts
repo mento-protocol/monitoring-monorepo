@@ -371,7 +371,12 @@ export function liveHealthCounters(
   }
 
   const prevRatio = pool.lastDeviationRatio ?? "";
-  if (prevRatio === "" || prevRatio === "-1") {
+  const parsedRatio = parseFloat(prevRatio);
+  const prevIsNoData =
+    prevRatio === "" ||
+    prevRatio === "-1" ||
+    (Number.isFinite(parsedRatio) && parsedRatio < 0);
+  if (prevIsNoData) {
     return {
       healthBinarySeconds: String(baseBinary),
       healthTotalSeconds: String(baseTotal),
@@ -396,8 +401,8 @@ export function liveHealthCounters(
     carryEnd > intervalStart
       ? tradingSecondsInRange(intervalStart, carryEnd)
       : 0;
-  const parsedRatio = parseFloat(prevRatio);
-  const prevHealthy = Number.isFinite(parsedRatio) && parsedRatio <= 1.01;
+  const prevHealthy =
+    Number.isFinite(parsedRatio) && parsedRatio <= DEVIATION_TOLERANCE_RATIO;
 
   return {
     healthBinarySeconds: String(baseBinary + (prevHealthy ? carrySeconds : 0)),
