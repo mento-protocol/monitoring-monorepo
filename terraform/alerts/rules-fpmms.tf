@@ -329,7 +329,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within tolerance or escalated to critical."
+      resolved_summary = "Pool is back within tolerance."
+      resolved_format  = "deviation_breach"
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -506,6 +507,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
       resolved_summary = "Pool is back within tolerance."
+      resolved_format  = "deviation_breach"
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via

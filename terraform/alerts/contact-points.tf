@@ -90,6 +90,9 @@ locals {
   #      "resolved" post back to the 🔴 "fired" post that opened the breach.
   #      Especially useful for deviation breaches where the same pool can
   #      churn through multiple fire/resolve cycles in a day.
+  #      Deviation-breach recovery messages opt into a tighter recovery-only
+  #      layout with `resolved_format = "deviation_breach"` because those need
+  #      to compare cleanly across warning and critical channels.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
@@ -98,6 +101,21 @@ locals {
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
     {{ $isResolved := eq .Status "resolved" -}}
+    {{ $isDeviationBreachResolved := and $isResolved (eq .Annotations.resolved_format "deviation_breach") -}}
+    {{ if $isDeviationBreachResolved -}}
+    {{ .Annotations.resolved_summary }}
+    {{ if .Annotations.current_reserves -}}
+    Reserves: {{ .Annotations.current_reserves }}
+    {{ end -}}
+    {{ $startMinute := div .StartsAt.Unix 60 -}}
+    {{ $endMinute := div .EndsAt.Unix 60 -}}
+    {{ $durationMinutes := sub $endMinute $startMinute -}}
+    {{ $durationHours := div $durationMinutes 60 -}}
+    {{ $remainingMinutes := mod $durationMinutes 60 -}}
+    Breach Duration: {{ if gt $durationHours 0 }}{{ $durationHours }}h{{ if gt $remainingMinutes 0 }} {{ $remainingMinutes }}m{{ end }}{{ else }}{{ $remainingMinutes }}m{{ end }}
+    Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+    Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ else -}}
     {{ $title := .Labels.alertname -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
     {{ if .Labels.pool_id -}}
@@ -134,6 +152,7 @@ locals {
     *Resolved:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
     {{ end -}}
     *Alert ID:* `{{ .Fingerprint }}`
+    {{ end -}}
     {{ end }}
   EOT
 
