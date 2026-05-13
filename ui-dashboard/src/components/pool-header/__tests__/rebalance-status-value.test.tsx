@@ -345,6 +345,53 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain('title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"');
   });
 
+  it("trims blank prose before falling back to the raw error", () => {
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "  ",
+          rawError: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+          strategyType: "cdp",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain('title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"');
+    expect(html).not.toContain('title="  —');
+  });
+
+  it("keeps non-identifier raw errors alongside the prose message", () => {
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "Rebalance reverted with an unrecognized error",
+          rawError: "0x12345678",
+          strategyType: "reserve",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain(
+      'title="Rebalance reverted with an unrecognized error — [0x12345678]"',
+    );
+  });
+
   it("renders a focusable info icon beside 'Rebalance blocked' so the detail is keyboard-reachable", () => {
     // Native `title` on a <span> is mouse-only. The ⓘ sits in a <button>
     // so keyboard, touch, and screen-reader users can reach the

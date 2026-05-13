@@ -169,7 +169,8 @@ export function RebalanceStatusValue({
 
 function buildBlockedTitle(result: RebalanceCheckResult): string {
   const parts: string[] = [];
-  if (result.message) parts.push(result.message);
+  const message = result.message.trim();
+  if (message) parts.push(message);
   if (shouldShowRawError(result)) parts.push(`[${result.rawError}]`);
   if (result.enrichment?.type === "cdp") {
     const balance = result.enrichment.stabilityPoolBalance;
