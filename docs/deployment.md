@@ -21,7 +21,7 @@ The prod multichain indexer is driven by a single deploy branch that Envio watch
 
 ### Endpoint URL
 
-The indexer runs on the Envio **production** tier with a static endpoint — the hash does not change on redeployment:
+The indexer runs on the Envio **production medium** tier with a static endpoint - the hash does not change on redeployment:
 
 ```text
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
@@ -33,8 +33,16 @@ https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
 
 ```bash
 # Push main to the envio branch (triggers Envio redeploy)
+COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 # equivalent: git push origin main:envio
+```
+
+Then wait for the deployment to catch up and promote it:
+
+```bash
+pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:promote "$COMMIT"
 ```
 
 ### Force Retrigger Without Code Changes
@@ -49,9 +57,10 @@ git push origin main:envio
 
 ### After Redeployment Checklist
 
-1. ✅ Wait for Envio to reach 100% sync (check [envio.dev/app](https://envio.dev/app))
-2. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
-3. ✅ Verify monitoring.mento.org loads data
+1. Wait for the deployed commit to catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
+2. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
+3. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
+4. Verify monitoring.mento.org loads data.
 
 To check whether Envio's persistent effect cache is active for a deployment:
 

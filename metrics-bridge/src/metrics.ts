@@ -13,6 +13,7 @@ import {
   shortAddress,
 } from "@mento-protocol/monitoring-config/format";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
 import type { PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
@@ -130,6 +131,12 @@ export const gauges = {
   deviationBreachStart: new Gauge({
     name: "mento_pool_deviation_breach_start",
     help: "Unix timestamp when deviation breach started (0 = no breach)",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  deviationOpenBreachPeakRatio: new Gauge({
+    name: "mento_pool_deviation_open_breach_peak_ratio",
+    help: "Peak deviation ratio observed during the currently open breach (currentOpenBreachPeak / currentOpenBreachEntryThreshold). Absent when there is no open breach or the entry threshold is unavailable.",
     labelNames: poolLabels,
     registers: [register],
   }),
@@ -292,6 +299,17 @@ export function updateMetrics(pools: PoolRow[]): void {
       labels,
       Number(pool.deviationBreachStartedAt),
     );
+    const openBreachPeak = fp(pool.currentOpenBreachPeak);
+    const openBreachEntryThreshold =
+      pool.currentOpenBreachEntryThreshold > 0
+        ? pool.currentOpenBreachEntryThreshold
+        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
+    if (openBreachPeak > 0) {
+      gauges.deviationOpenBreachPeakRatio.set(
+        labels,
+        openBreachPeak / openBreachEntryThreshold,
+      );
+    }
     gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
     // Skip only the explicit "-1" no-data sentinel the indexer writes before
     // a pool has ever rebalanced (or for degenerate rebalances with zero

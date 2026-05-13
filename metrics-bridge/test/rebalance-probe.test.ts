@@ -44,7 +44,7 @@ import { getRpcClient } from "../src/rpc.js";
 const mockProbe = vi.mocked(probeRebalance);
 const mockGetRpcClient = vi.mocked(getRpcClient);
 
-describe("eligibleForProbe — gating mirrors the alert rule", () => {
+describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
   it("excludes pools without an active breach anchor", () => {
     const pool = makePool({
       deviationBreachStartedAt: "0",
@@ -67,6 +67,36 @@ describe("eligibleForProbe — gating mirrors the alert rule", () => {
       lastDeviationRatio: "1.10",
     });
     expect(eligibleForProbe([pool])).toEqual([pool]);
+  });
+
+  it("includes de-escalated pools whose open breach previously crossed critical", () => {
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 10000,
+    });
+    expect(eligibleForProbe([pool])).toEqual([pool]);
+  });
+
+  it("uses the legacy entry-threshold floor for de-escalated old open breaches", () => {
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 0,
+    });
+    expect(eligibleForProbe([pool])).toEqual([pool]);
+  });
+
+  it("excludes recovered pools even when the open-breach peak is still populated", () => {
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.01",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 10000,
+    });
+    expect(eligibleForProbe([pool])).toEqual([]);
   });
 
   it("excludes pools with the -1 deviation sentinel", () => {

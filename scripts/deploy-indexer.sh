@@ -9,8 +9,8 @@
 #   pnpm deploy:indexer --yes        → skip confirmation prompt (CI / agent friendly)
 #
 # After pushing, use companion scripts:
-#   pnpm deploy:indexer:status       → watch sync progress
-#   pnpm deploy:indexer:promote      → promote latest deployment to prod
+#   pnpm deploy:indexer:status <commit> --watch → watch sync progress
+#   pnpm deploy:indexer:promote <commit>        → promote deployment to prod
 #   pnpm deploy:indexer:logs         → tail runtime logs
 #
 # Envio project: https://envio.dev/app/mento-protocol/mento
@@ -109,11 +109,11 @@ echo ""
 echo "📋 POST-DEPLOY CHECKLIST:"
 echo ""
 echo "   1. Watch sync progress:"
-echo "      pnpm deploy:indexer:status"
+echo "      pnpm deploy:indexer:status $COMMIT_SHA --watch"
 echo "      $SYNC_URL"
 echo ""
 echo "   2. Once synced, promote to prod:"
-echo "      pnpm deploy:indexer:promote"
+echo "      pnpm deploy:indexer:promote $COMMIT_SHA"
 echo ""
 echo "   3. Verify the dashboard:"
 echo "      https://monitoring.mento.org"

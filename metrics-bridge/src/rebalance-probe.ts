@@ -1,11 +1,11 @@
 /**
  * Rebalance-reason probe runner.
  *
- * For every pool currently in critical breach (deviation > 1.05x AND
- * `deviationBreachStartedAt > 0`), simulate `rebalance(pool)` against the
- * pool's liquidity strategy and emit a `mento_pool_rebalance_blocked`
- * gauge with the decoded reason on each `(reason_code, reason_message)`
- * pair. The Slack alert template cross-references this gauge's labels via
+ * For every pool whose open breach has crossed critical magnitude and remains
+ * outside tolerance, simulate `rebalance(pool)` against the pool's liquidity
+ * strategy and emit a `mento_pool_rebalance_blocked` gauge with the decoded
+ * reason on each `(reason_code, reason_message)` pair. The Slack alert
+ * template cross-references this gauge's labels via
  * `$values.B.Labels.reason_message` (Grafana's `$labels` exposes only the
  * firing query's labels, so the annotation reads query B's labels through
  * the `$values` map) to annotate the existing `Deviation Breach Critical`
@@ -18,8 +18,10 @@
 
 import { poolIdAddress } from "@mento-protocol/monitoring-config/format";
 import {
+  LEGACY_OPEN_BREACH_ENTRY_THRESHOLD,
   REBALANCE_PROBE_CONCURRENCY,
   REBALANCE_PROBE_DEVIATION_THRESHOLD,
+  REBALANCE_PROBE_TOLERANCE_THRESHOLD,
   REBALANCE_PROBE_TIMEOUT_MS,
 } from "./config.js";
 import { gauges, poolDisplayLabels } from "./metrics.js";
@@ -55,11 +57,12 @@ export function _resetProbeInProgressForTests(): void {
 
 /**
  * Returns pools eligible for the rebalance-reason probe — same gating as the
- * `Deviation Breach Critical` rule (`terraform/alerts/rules-fpmms.tf:470`)
- * so we only annotate alerts that can actually fire.
+ * `Deviation Breach Critical` rule so we only annotate alerts that can
+ * actually fire.
  *
  *   - `deviationBreachStartedAt > 0` (active breach anchor)
- *   - `lastDeviationRatio > 1.05` (5% over threshold)
+ *   - current `lastDeviationRatio > 1.01` (still outside tolerance)
+ *   - current ratio OR open-breach peak crossed 1.05 (critical magnitude)
  *   - `rebalancerAddress` non-empty (no point probing virtual pools)
  */
 export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
@@ -67,7 +70,20 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
     if (Number(pool.deviationBreachStartedAt) <= 0) return false;
     const ratio = parseFloat(pool.lastDeviationRatio);
     if (!Number.isFinite(ratio)) return false;
-    if (ratio <= REBALANCE_PROBE_DEVIATION_THRESHOLD) return false;
+    if (ratio <= REBALANCE_PROBE_TOLERANCE_THRESHOLD) return false;
+    const openBreachPeak = parseFloat(pool.currentOpenBreachPeak);
+    const entryThreshold =
+      pool.currentOpenBreachEntryThreshold > 0
+        ? pool.currentOpenBreachEntryThreshold
+        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
+    const openBreachPeakRatio =
+      Number.isFinite(openBreachPeak) && openBreachPeak > 0
+        ? openBreachPeak / entryThreshold
+        : 0;
+    const crossedCritical =
+      ratio > REBALANCE_PROBE_DEVIATION_THRESHOLD ||
+      openBreachPeakRatio > REBALANCE_PROBE_DEVIATION_THRESHOLD;
+    if (!crossedCritical) return false;
     if (!pool.rebalancerAddress) return false;
     return true;
   });

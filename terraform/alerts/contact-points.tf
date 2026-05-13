@@ -74,12 +74,12 @@ locals {
   #      message, reserves, rebalance-blocked reason, then start time.
   #      Rebalancer alerts may add Last Rebalance / Root Cause rows when the
   #      rule exposes those annotations.
-  #   5. Metadata row: start time only. The per-row `View alert` link was
-  #      removed — Grafana's attachment title still links to grafana.com via
-  #      the (unconfigurable) `title_link`, so operators retain that path
-  #      without per-row chrome. `notify_*_pool` collapses multiple
-  #      alertnames per (chain_id, pool_id), but the linked title (point 1)
-  #      already names the firing alert.
+  #   5. Metadata row: start time plus resolved time when applicable. The
+  #      per-row `View alert` link was removed — Grafana's attachment title
+  #      still links to grafana.com via the (unconfigurable) `title_link`, so
+  #      operators retain that path without per-row chrome. `notify_*_pool`
+  #      collapses multiple alertnames per (chain_id, pool_id), but the linked
+  #      title (point 1) already names the firing alert.
   #
   #      The timestamp uses Go format `"Jan 02 15:04 UTC"` so multi-day-old
   #      breaches read e.g. "Apr 28 15:04 UTC" instead of just "15:04 UTC"
@@ -130,6 +130,9 @@ locals {
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
     *Started:* {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ if $isResolved -}}
+    *Resolved:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ end -}}
     *Alert ID:* `{{ .Fingerprint }}`
     {{ end }}
   EOT

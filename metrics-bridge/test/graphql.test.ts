@@ -35,6 +35,8 @@ const BASE_POOL = {
   oracleExpiry: "300",
   lastDeviationRatio: "0.42",
   deviationBreachStartedAt: "0",
+  currentOpenBreachPeak: "0",
+  currentOpenBreachEntryThreshold: 0,
   limitStatus: "OK",
   limitPressure0: "0.1",
   limitPressure1: "0.0",
@@ -93,6 +95,17 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              currentOpenBreachPeak: "15000",
+              currentOpenBreachEntryThreshold: 5000,
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -103,6 +116,8 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 5000,
     });
   });
 
@@ -115,6 +130,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
         return Promise.reject(unknownFieldError("prevMedianPrice"));
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -129,6 +147,38 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
+      currentOpenBreachPeak: "0",
+      currentOpenBreachEntryThreshold: 0,
+    });
+  });
+
+  it("falls back to zero open-breach state when Hasura reports an unknown field", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              prevMedianPrice: "1120000000000000000000000",
+              prevMedianAt: "1713199580",
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.reject(unknownFieldError("currentOpenBreachPeak"));
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      prevMedianPrice: "1120000000000000000000000",
+      prevMedianAt: "1713199580",
+      currentOpenBreachPeak: "0",
+      currentOpenBreachEntryThreshold: 0,
     });
   });
 
@@ -137,6 +187,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
         return Promise.reject(new Error("network down"));
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -158,6 +211,17 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: "different-pool-id",
+              currentOpenBreachPeak: "1",
+              currentOpenBreachEntryThreshold: 1,
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -167,6 +231,8 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "0",
       prevMedianAt: "0",
+      currentOpenBreachPeak: "0",
+      currentOpenBreachEntryThreshold: 0,
     });
   });
 });

@@ -9,36 +9,39 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 
 ### Events Indexed
 
-| Contract              | Events                                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Broker                | `Swap` (legacy v2 settlement layer; Celo only — no Broker on Monad)                                          |
-| FPMMFactory           | `FPMMDeployed`                                                                                               |
-| FPMM (pool)           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated` |
-| VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                       |
-| VirtualPoolFactory    | `VirtualPoolDeployed`, `PoolDeprecated`                                                                      |
-| SortedOracles         | `OracleReported`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                 |
-| OpenLiquidityStrategy | `PoolAdded`, `PoolRemoved`, `LiquidityMoved`, `RebalanceCooldownSet`                                         |
-| ERC20FeeToken         | `Transfer` (dynamically registered from FPMMDeployed events)                                                 |
+| Contract              | Events                                                                                                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Broker                | `Swap` (legacy v2 settlement layer; Celo only - no Broker on Monad)                                                                                                                                                      |
+| FPMMFactory           | `FPMMDeployed`                                                                                                                                                                                                           |
+| FPMM (pool)           | `Swap`, `Mint`, `Burn`, `Transfer`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated`, `LPFeeUpdated`, `ProtocolFeeUpdated`, `RebalanceIncentiveUpdated`, `RebalanceThresholdUpdated` |
+| VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                                                                                                                                   |
+| VirtualPoolFactory    | `VirtualPoolDeployed`, `PoolDeprecated`                                                                                                                                                                                  |
+| SortedOracles         | `OracleReported`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                                                                                                                             |
+| BiPoolManager         | `ExchangeCreated`, `ExchangeDestroyed`, `BucketsUpdated`, `SpreadUpdated`                                                                                                                                                |
+| OpenLiquidityStrategy | `PoolAdded`, `PoolRemoved`, `LiquidityMoved`, `RebalanceCooldownSet`                                                                                                                                                     |
+| ERC20FeeToken         | `Transfer` (dynamically registered from FPMMDeployed events)                                                                                                                                                             |
+| BreakerBox            | `BreakerAdded`, `BreakerRemoved`, `BreakerStatusUpdated`, `RateFeedAdded`, `RateFeedRemoved`, `BreakerTripped`, `ResetSuccessful`, `TradingModeUpdated`                                                                  |
+| MedianDeltaBreaker    | `DefaultCooldownTimeUpdated`, `RateFeedCooldownTimeUpdated`, `DefaultRateChangeThresholdUpdated`, `RateChangeThresholdUpdated`, `SmoothingFactorSet`, `MedianRateEMAReset`                                               |
+| ValueDeltaBreaker     | `DefaultCooldownTimeUpdated`, `RateFeedCooldownTimeUpdated`, `DefaultRateChangeThresholdUpdated`, `RateChangeThresholdUpdated`, `ReferenceValueUpdated`                                                                  |
+| WormholeNttManager    | `TransferSent`, `TransferRedeemed`, `MessageAttestedTo`, `InboundTransferQueued`                                                                                                                                         |
+| WormholeTransceiver   | `ReceivedMessage`                                                                                                                                                                                                        |
 
 ### Entities Written
 
-| Entity                 | Description                                                                                            |
-| ---------------------- | ------------------------------------------------------------------------------------------------------ |
-| `Pool`                 | Per-pool state: reserves, health, oracle, trading limits, rebalancer liveness                          |
-| `PoolSnapshot`         | Hourly aggregates: volume, TVL, swap count                                                             |
-| `OracleSnapshot`       | Per-oracle-event: price, deviation, health status                                                      |
-| `TradingLimit`         | Per-pool per-token: limit state, netflow, pressure ratio                                               |
-| `SwapEvent`            | Individual v3 swap: amounts in/out, txHash, timestamp                                                  |
-| `LiquidityEvent`       | Mint/burn events                                                                                       |
-| `ReserveUpdate`        | Reserve snapshots on every `UpdateReserves`                                                            |
-| `RebalanceEvent`       | Per-rebalance: improvement, effectiveness ratio                                                        |
-| `FactoryDeployment`    | Pool creation events from factory                                                                      |
-| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                                                                    |
-| `OlsPool`              | Open Liquidity Strategy pool registrations                                                             |
-| `OlsLiquidityEvent`    | OLS liquidity movements                                                                                |
-| `ProtocolFeeTransfer`  | ERC20 fee token transfers                                                                              |
-| `BrokerSwapEvent`      | Individual legacy v2 swap (Broker → BiPoolManager); flags `routedViaV3Router` to dedupe vs VirtualPool |
-| `BrokerDailySnapshot`  | Daily v2 volume rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`                  |
+| Entity group                  | Description                                                                                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state                    | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
+| Pool activity                 | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
+| Pool rollups                  | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
+| Protocol fees                 | `ProtocolFeeTransfer`                                                                                                                                                           |
+| Legacy v2 / Broker            | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
+| Broker aggregators            | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerLeaderboardWindowSnapshot`                                                                           |
+| BiPoolManager                 | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
+| VirtualPools                  | `VirtualPoolLifecycle`                                                                                                                                                          |
+| Open Liquidity Strategy       | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
+| Circuit breakers              | `Breaker`, `BreakerConfig`, `BreakerTripEvent`                                                                                                                                  |
+| Bridge flows                  | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
+| Leaderboards and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `LeaderboardWindowSnapshot`                                                                        |
 
 ### Pool ID Format
 
@@ -47,10 +50,11 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                             | Networks                                          |
-| -------------------------------- | ------------------------------------------------- |
-| `config.multichain.mainnet.yaml` | Celo Mainnet + Monad Mainnet (default/production) |
-| `config.multichain.testnet.yaml` | Celo Sepolia + Monad Testnet                      |
+| File                                 | Networks                                          |
+| ------------------------------------ | ------------------------------------------------- |
+| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet (default/production) |
+| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
+| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
 
 Deploy branch: `envio` → triggers hosted reindex on push.
 
@@ -84,6 +88,9 @@ pnpm indexer:dev                    # Start local multichain mainnet indexer
 pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
+pnpm deploy:indexer:status          # Show latest or specified hosted deployment sync state
+pnpm deploy:indexer:promote         # Promote a specified deployment to prod after sync
+pnpm deploy:indexer:logs            # Show latest hosted deployment logs
 ```
 
 ### From `indexer-envio/` directory
@@ -179,10 +186,13 @@ query PoolHealth {
 Push to the `envio` branch to trigger a hosted reindex:
 
 ```bash
+COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
+pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:promote "$COMMIT"
 ```
 
-The `mento` project on Envio Cloud watches this branch. The static production endpoint never changes on redeploy:
+The `mento` project on Envio Cloud watches this branch. Promote the caught-up deployment before treating it as live. The static production endpoint never changes on redeploy:
 
 ```
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
@@ -192,12 +202,12 @@ See [`STATUS.md`](./STATUS.md) for current sync state and endpoint details.
 
 ## Key Files
 
-| File                                | Purpose                                   |
-| ----------------------------------- | ----------------------------------------- |
-| `schema.graphql`                    | Entity model                              |
-| `src/EventHandlers.ts`              | Event → entity mapping                    |
-| `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities |
-| `src/rpc.ts`                        | RPC read helpers (per-chain clients)      |
-| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad)          |
-| `config/deployment-namespaces.json` | Vendored namespace map for hosted builds  |
-| `abis/`                             | Contract ABIs                             |
+| File                                | Purpose                                                 |
+| ----------------------------------- | ------------------------------------------------------- |
+| `schema.graphql`                    | Entity model                                            |
+| `src/EventHandlers.ts`              | Event → entity mapping                                  |
+| `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
+| `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
+| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad)                        |
+| `config/deployment-namespaces.json` | Vendored namespace map for hosted builds                |
+| `abis/`                             | Vendored contract ABI subsets                           |

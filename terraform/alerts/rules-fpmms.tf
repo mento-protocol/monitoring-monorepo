@@ -329,7 +329,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within tolerance."
+      resolved_summary = "Pool is back within tolerance or escalated to critical."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -348,7 +348,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})"
+        expr    = "(mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_active_promql})"
         instant = true
       })
     }
@@ -436,7 +436,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Breach anchor cleared or ratio gauge recovered."
+      resolved_summary = "Breach anchor cleared, ratio gauge recovered, or breach escalated to critical."
     }
 
     labels = {
@@ -453,7 +453,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+        expr    = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((time() - mento_pool_deviation_breach_start) <= ${local.deviation_critical_suppression_seconds})) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
         instant = true
       })
     }
@@ -505,7 +505,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within the critical threshold."
+      resolved_summary = "Pool is back within tolerance."
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -541,11 +541,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
       severity = "critical"
     }
 
-    # The Prometheus expression: seconds since breach started, gated on BOTH
-    # an active breach (breach_start > 0) AND current magnitude above 1.05
-    # (5% over threshold). Only sustained large breaches escalate to critical;
-    # smaller-but-prolonged breaches stay at warning. When either gate is
-    # false, the series is dropped — threshold below never sees it.
+    # The Prometheus expression: seconds since breach started, gated on an
+    # active breach (breach_start > 0), current magnitude still above the
+    # 1.01 warning tolerance, and either current OR open-breach peak
+    # magnitude above 1.05 (5% over threshold). Once an open breach crosses
+    # critical it stays with the critical rule until recovered, so warning
+    # notification suppression cannot create a silent de-escalation gap.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -555,7 +556,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+        expr    = local.deviation_critical_gate_promql
         instant = true
       })
     }
