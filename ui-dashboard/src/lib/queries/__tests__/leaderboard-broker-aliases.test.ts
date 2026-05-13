@@ -97,7 +97,7 @@ describe("v2 Via marker query", () => {
       "BrokerAggregatorTraderDayMarker",
     );
     expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).toContain(
-      "id: { _regex: $idRegex }",
+      "id: { _regex: $idRegex, _gt: $afterId }",
     );
     expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).toContain("\n      id\n");
     expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).not.toContain("caller");

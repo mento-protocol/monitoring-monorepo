@@ -1,8 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { useGQL } from "@/lib/graphql";
-import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { Table, Row, Td, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
@@ -15,13 +13,12 @@ import {
   buildBrokerViaMarkerIdRegex,
   cmpBigInt,
   weiToUsd,
-  type BrokerAggregatorTraderDayMarkerRow,
   type BrokerTraderViaRoute,
   type BrokerTraderWindowRow,
 } from "@/lib/leaderboard";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
-import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS } from "@/lib/queries/leaderboard-via";
+import { useBrokerViaMarkers } from "../_lib/use-broker-via-markers";
 import { AggregatorLabel } from "./aggregator-breakdown-section";
 import { SystemAddressChip } from "./system-address-chip";
 
@@ -89,26 +86,16 @@ export function V2LeaderboardTraderTable({
         : buildBrokerViaMarkerIdRegex(visibleRows, cutoff),
     [cutoff, hasError, isLoading, viaUnavailableReason, visibleRows],
   );
-  const viaVariables = useMemo(
-    () =>
-      viaMarkerRegex ? { idRegex: viaMarkerRegex, limit: ENVIO_MAX_ROWS } : {},
-    [viaMarkerRegex],
-  );
-  const viaResult = useGQL<{
-    BrokerAggregatorTraderDayMarker: BrokerAggregatorTraderDayMarkerRow[];
-  }>(
-    viaMarkerRegex ? BROKER_AGGREGATOR_TRADER_DAY_MARKERS : null,
-    viaVariables,
-    undefined,
-    { timeoutMs: 8_000 },
-  );
+  const viaResult = useBrokerViaMarkers(viaMarkerRegex);
+  const viaTruncated = Boolean(viaResult.data?.truncated);
+  const viaRows = viaTruncated ? [] : (viaResult.data?.rows ?? []);
   const viaByTrader = useMemo(
-    () =>
-      aggregateBrokerViaByTrader(
-        viaResult.data?.BrokerAggregatorTraderDayMarker ?? [],
-      ),
-    [viaResult.data],
+    () => aggregateBrokerViaByTrader(viaRows),
+    [viaRows],
   );
+  const viaErrorReason = viaTruncated
+    ? "Couldn't load complete v2 route attribution before the query page limit."
+    : undefined;
 
   if (hasError) {
     return (
@@ -179,7 +166,8 @@ export function V2LeaderboardTraderTable({
                     `${row.chainId}-${row.trader.toLowerCase()}`,
                   )}
                   isLoading={Boolean(viaMarkerRegex) && viaResult.isLoading}
-                  hasError={Boolean(viaResult.error)}
+                  hasError={Boolean(viaResult.error) || viaTruncated}
+                  errorReason={viaErrorReason}
                   unavailableReason={viaUnavailableReason}
                 />
               </Td>
@@ -204,11 +192,13 @@ function ViaCell({
   routes,
   isLoading,
   hasError,
+  errorReason,
   unavailableReason,
 }: {
   routes: readonly BrokerTraderViaRoute[] | undefined;
   isLoading: boolean;
   hasError: boolean;
+  errorReason?: string;
   unavailableReason?: string;
 }) {
   if (isLoading) {
@@ -225,7 +215,7 @@ function ViaCell({
     return (
       <span
         className="text-slate-500"
-        title="Couldn't load v2 route attribution."
+        title={errorReason ?? "Couldn't load v2 route attribution."}
       >
         -
       </span>

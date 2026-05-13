@@ -6,9 +6,13 @@
  * visible top-trader rows, then parse the id client-side.
  */
 export const BROKER_AGGREGATOR_TRADER_DAY_MARKERS = /* GraphQL */ `
-  query BrokerAggregatorTraderDayMarkers($idRegex: String!, $limit: Int!) {
+  query BrokerAggregatorTraderDayMarkers(
+    $idRegex: String!
+    $afterId: String!
+    $limit: Int!
+  ) {
     BrokerAggregatorTraderDayMarker(
-      where: { id: { _regex: $idRegex } }
+      where: { id: { _regex: $idRegex, _gt: $afterId } }
       order_by: { id: asc }
       limit: $limit
     ) {
