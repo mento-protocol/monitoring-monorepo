@@ -863,17 +863,22 @@ assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
 
 scripts/agent-quality-gate.sh \
-  --changed-paths-file <(printf '%s\n' "docs/process.md") \
+  --changed-paths-file <(printf '%s\n' "docs/deployment.md") \
   --base origin/test \
   > "$output_file"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check docs/process.md (docs-only changes should pass targeted Trunk checks)"
+assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 
-run_gate "docs/process.md"
+run_gate "docs/deployment.md"
 assert_contains "Detected surfaces:"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check docs/process.md (docs-only changes should pass targeted Trunk checks)"
+assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
+
+run_gate "docs/deleted.md"
+assert_contains "- docs"
+assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"
+assert_not_contains "- ./tools/trunk check docs/deleted.md"
 
 echo "agent quality gate tests passed"

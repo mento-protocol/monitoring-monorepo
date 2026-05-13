@@ -472,18 +472,26 @@ add_terraform_validate_commands() {
   add_command "terraform -chdir=${module} validate -no-color" "$reason"
 }
 
-changed_path_args() {
+docs_targeted_trunk_command() {
   local path
   local args=()
   while IFS= read -r path; do
+    [[ -e "$path" ]] || return 1
     args+=("$(quote_path "$path")")
   done < "$changed_paths_file"
-  printf '%s' "${args[*]}"
+
+  [[ ${#args[@]} -gt 0 ]] || return 1
+  printf './tools/trunk check %s' "${args[*]}"
 }
 
 add_trunk_check_command() {
   if [[ ${#surfaces[@]} -eq 1 && "${surfaces[0]}" == "docs" ]]; then
-    prepend_command "./tools/trunk check $(changed_path_args)" "docs-only changes should pass targeted Trunk checks"
+    local trunk_command
+    if trunk_command="$(docs_targeted_trunk_command)"; then
+      prepend_command "$trunk_command" "docs-only changes should pass targeted Trunk checks"
+    else
+      prepend_command "./tools/trunk check --all" "docs-only changes include deleted paths; full Trunk avoids missing-path failures"
+    fi
   else
     prepend_command "./tools/trunk check --all" "changed files should pass the same full-repo Trunk scope as CI"
   fi
