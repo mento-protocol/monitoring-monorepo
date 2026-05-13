@@ -6,6 +6,7 @@ import {
   maybePreloadPool,
   nextDeviationBreachStartedAt,
   nextOpenBreachEntryThreshold,
+  preloadPoolCache,
 } from "../src/pool";
 import { makePool } from "./helpers/makePool";
 
@@ -368,6 +369,26 @@ describe("maybePreloadPool", () => {
     const { context, calls } = makeCtx(true, {});
     const result = await maybePreloadPool(context, []);
     assert.isTrue(result);
+    assert.deepEqual(calls.poolGets, []);
+    assert.deepEqual(calls.breachGets, []);
+  });
+
+  it("preloadPoolCache returns the warmed pool so callers can preload dependent effects", async () => {
+    const anchor = 1_700_000_000n;
+    const pool = makePool({ deviationBreachStartedAt: anchor });
+    const id = pool.id;
+    const { context, calls } = makeCtx(true, { [id]: pool });
+    const result = await preloadPoolCache(context, id);
+    assert.equal(result, pool);
+    assert.deepEqual(calls.poolGets, [id]);
+    assert.deepEqual(calls.breachGets, [`${id}-${anchor}`]);
+  });
+
+  it("preloadPoolCache is a no-op outside preload", async () => {
+    const pool = makePool();
+    const { context, calls } = makeCtx(false, { [pool.id]: pool });
+    const result = await preloadPoolCache(context, pool.id);
+    assert.isUndefined(result);
     assert.deepEqual(calls.poolGets, []);
     assert.deepEqual(calls.breachGets, []);
   });

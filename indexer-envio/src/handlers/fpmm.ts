@@ -12,7 +12,7 @@ import {
   tradingLimitId,
 } from "../tradingLimits.js";
 import { tradingLimitsEffect } from "../rpc/effects.js";
-import { maybePreloadPool, upsertPool, upsertSnapshot } from "../pool.js";
+import { preloadPoolCache, upsertPool, upsertSnapshot } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
 
@@ -25,9 +25,36 @@ indexer.onEvent(
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    if (await maybePreloadPool(context, poolId)) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    if (context.isPreload) {
+      const pool = await preloadPoolCache(context, poolId);
+      if (
+        pool?.source &&
+        pool.source.includes("fpmm") &&
+        pool.token0 &&
+        pool.token1
+      ) {
+        // Keep processing writes out of preload, but let Envio batch and
+        // parallelize the per-swap trading-limit RPC reads. The processing
+        // pass presents the same effect keys and reuses these preload results.
+        await Promise.all([
+          context.effect(tradingLimitsEffect, {
+            chainId: event.chainId,
+            poolAddress: event.srcAddress,
+            token: pool.token0,
+            blockNumber,
+          }),
+          context.effect(tradingLimitsEffect, {
+            chainId: event.chainId,
+            poolAddress: event.srcAddress,
+            token: pool.token1,
+            blockNumber,
+          }),
+        ]);
+      }
+      return;
+    }
 
     const volume0 =
       event.params.amount0In > event.params.amount0Out
