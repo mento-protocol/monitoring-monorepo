@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("AuthStatus sign-in href", () => {
-  it("updates the anchor href after history.replaceState changes search params", () => {
+  it("updates the anchor href after history.replaceState changes search params", async () => {
     setup("/pools");
 
     act(() => {
@@ -117,12 +117,13 @@ describe("AuthStatus sign-in href", () => {
       "/sign-in?callbackUrl=%2Fpools",
     );
 
-    act(() => {
+    await act(async () => {
       window.history.replaceState(
         window.history.state,
         "",
         "/pools?poolsSort=tvl&poolsDir=desc",
       );
+      await Promise.resolve();
     });
 
     expect(signInLink().getAttribute("href")).toBe(
@@ -130,19 +131,20 @@ describe("AuthStatus sign-in href", () => {
     );
   });
 
-  it("updates the anchor href after history.pushState changes the path", () => {
+  it("updates the anchor href after history.pushState changes the path", async () => {
     setup("/pools");
 
     act(() => {
       root?.render(<AuthStatus />);
     });
 
-    act(() => {
+    await act(async () => {
       window.history.pushState(
         window.history.state,
         "",
         "/leaderboard?leaderboardWindow=7d",
       );
+      await Promise.resolve();
     });
 
     expect(signInLink().getAttribute("href")).toBe(
@@ -157,12 +159,13 @@ describe("AuthStatus sign-in href", () => {
       root?.render(<AuthStatus />);
     });
 
-    act(() => {
+    await act(async () => {
       window.history.pushState(
         window.history.state,
         "",
         "/leaderboard?leaderboardWindow=7d",
       );
+      await Promise.resolve();
     });
     expect(signInLink().getAttribute("href")).toBe(
       "/sign-in?callbackUrl=%2Fleaderboard%3FleaderboardWindow%3D7d",

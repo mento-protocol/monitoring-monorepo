@@ -11,22 +11,6 @@ DORA metrics and Dev Containers remain intentionally excluded. CodeScene is cove
 through the OSS quality-check backlog item below rather than by adopting the
 commercial product.
 
-### Browser-Based Component/Interaction Testing Pilot
-
-Why: jsdom cannot prove real-browser behavior for Plotly, focus, hydration,
-layout, and stateful UI interactions. This repo already requires interaction
-tests for stateful data/UI changes; we need a small real-browser safety net
-for the flows that matter.
-
-- [ ] Spike Playwright Component Testing first; fall back to a minimal Playwright app-level harness if Next.js 16 / React 19 setup is too awkward.
-- [ ] Use deterministic GraphQL fixtures/stubs; never hit live Hasura/Envio in tests.
-- [ ] Cover 2-3 flows only: network switching, pool detail tab navigation, and degraded Hasura/query states.
-- [ ] Add a `test:browser` script but do not make it required until runtime/flakiness is known.
-- [ ] Record setup friction, runtime, and whether the tests catch behavior Vitest cannot.
-
-Acceptance: headless run is stable, fixture-driven, and adds <2m if promoted
-to a PR-required check.
-
 ### `mise` Toolchain Management Trial
 
 Why: tool versions are currently spread across `.node-version`,
