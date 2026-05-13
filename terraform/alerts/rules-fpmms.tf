@@ -329,7 +329,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within tolerance."
+      resolved_summary = "Pool is back within tolerance or escalated to critical."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -436,7 +436,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Breach anchor cleared or ratio gauge recovered."
+      resolved_summary = "Breach anchor cleared, ratio gauge recovered, or breach escalated to critical."
     }
 
     labels = {

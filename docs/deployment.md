@@ -33,6 +33,7 @@ https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
 
 ```bash
 # Push main to the envio branch (triggers Envio redeploy)
+COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 # equivalent: git push origin main:envio
 ```
@@ -40,8 +41,8 @@ pnpm deploy:indexer
 Then wait for the deployment to catch up and promote it:
 
 ```bash
-pnpm deploy:indexer:status --watch
-pnpm deploy:indexer:promote
+pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:promote "$COMMIT"
 ```
 
 ### Force Retrigger Without Code Changes
@@ -56,8 +57,8 @@ git push origin main:envio
 
 ### After Redeployment Checklist
 
-1. Wait for Envio to catch up to the chain head (`pnpm deploy:indexer:status --watch` or [envio.dev/app](https://envio.dev/app)).
-2. Promote the caught-up deployment (`pnpm deploy:indexer:promote`) so the static production endpoint serves it.
+1. Wait for the deployed commit to catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
+2. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
 3. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
 4. Verify monitoring.mento.org loads data.
 

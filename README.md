@@ -145,9 +145,10 @@ Production env vars are managed by Terraform. See [`terraform/`](./terraform/).
 Push to the `envio` branch to trigger a hosted reindex:
 
 ```bash
+COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
-pnpm deploy:indexer:status --watch
-pnpm deploy:indexer:promote
+pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:promote "$COMMIT"
 ```
 
 The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento) watches this branch.
