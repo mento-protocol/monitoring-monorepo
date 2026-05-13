@@ -111,7 +111,7 @@ locals {
     {{ if .Annotations.breach_started_at -}}
     Started: {{ .Annotations.breach_started_at }}
     {{ else -}}
-    Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+    Started: {{ $breachStartedAt.Format "Mon Jan 02 15:04 UTC" }}
     {{ end -}}
     Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
     {{ else -}}
