@@ -2,7 +2,8 @@
 // FPMMFactory event handlers + FPMM.Transfer + applyLiquidityPositionDelta
 // ---------------------------------------------------------------------------
 
-import { indexer, type FactoryDeployment, type LiquidityPosition } from "envio";
+import type { FactoryDeployment, LiquidityPosition } from "envio";
+import { indexer } from "../../indexer.js";
 import {
   eventId,
   asAddress,

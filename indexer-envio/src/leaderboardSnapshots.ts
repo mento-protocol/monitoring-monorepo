@@ -151,11 +151,28 @@ export async function applyLeaderboardSnapshots(
   const inflowToken1 = amounts.amount1Out > 0n ? volumeUsdWei : 0n;
   const outflowToken1 = amounts.amount1In > 0n ? volumeUsdWei : 0n;
 
+  // Load independent rows concurrently so Envio's v3 preload phase can batch
+  // all base leaderboard reads for this event into as few DB queries as
+  // possible.
+  const [
+    existingTraderPoolMarker,
+    existingAggTraderMarker,
+    existingTraderDay,
+    existingTraderPoolDay,
+    existingPoolDay,
+    existingAggDay,
+  ] = await Promise.all([
+    context.TraderPoolDayMarker.get(traderPoolDayId),
+    context.AggregatorTraderDayMarker.get(aggTraderDayMarkerId),
+    context.TraderDailySnapshot.get(traderDayId),
+    context.TraderPoolDailySnapshot.get(traderPoolDayId),
+    context.PoolDailyVolumeSnapshot.get(poolDayId),
+    context.AggregatorDailySnapshot.get(aggDayId),
+  ]);
+
   // 1. TraderPoolDayMarker → first-touch dedup for TraderDailySnapshot.uniquePools.
   //    Marker key matches the parent snapshot key — same string, different
   //    entity table.
-  const existingTraderPoolMarker =
-    await context.TraderPoolDayMarker.get(traderPoolDayId);
   const traderPoolFirstTouch = existingTraderPoolMarker === undefined;
   if (traderPoolFirstTouch) {
     context.TraderPoolDayMarker.set({ id: traderPoolDayId });
@@ -164,12 +181,9 @@ export async function applyLeaderboardSnapshots(
   // 2. AggregatorTraderDayMarker → first-touch dedup for
   //    AggregatorDailySnapshot.uniqueTraders plus per-trader counters used
   //    if the day-sticky system flag flips after earlier same-day swaps.
-  const existingAggTraderMarker =
-    await context.AggregatorTraderDayMarker.get(aggTraderDayMarkerId);
   const aggTraderFirstTouch = existingAggTraderMarker === undefined;
 
   // 3. TraderDailySnapshot upsert.
-  const existingTraderDay = await context.TraderDailySnapshot.get(traderDayId);
   const traderDayWasSystem = existingTraderDay?.isSystemAddress ?? false;
   const traderDayIsSystem = traderDayWasSystem || callerIsSystem;
   const traderDayBecameSystem =
@@ -199,8 +213,6 @@ export async function applyLeaderboardSnapshots(
   });
 
   // 4. TraderPoolDailySnapshot upsert.
-  const existingTraderPoolDay =
-    await context.TraderPoolDailySnapshot.get(traderPoolDayId);
   context.TraderPoolDailySnapshot.set({
     id: traderPoolDayId,
     chainId,
@@ -231,25 +243,38 @@ export async function applyLeaderboardSnapshots(
     { swapCount: number; volumeUsdWei: bigint }
   >();
   if (traderDayBecameSystem) {
-    for (const touchedPoolId of poolIds) {
-      const priorTraderPoolDay =
-        touchedPoolId === poolId
-          ? existingTraderPoolDay
-          : await context.TraderPoolDailySnapshot.get(
-              `${chainId}-${caller}-${touchedPoolId}-${dayKey}`,
-            );
+    const priorTraderPoolDays = await Promise.all(
+      poolIds.map(async (touchedPoolId) => {
+        const priorTraderPoolDay =
+          touchedPoolId === poolId
+            ? existingTraderPoolDay
+            : await context.TraderPoolDailySnapshot.get(
+                `${chainId}-${caller}-${touchedPoolId}-${dayKey}`,
+              );
+        return { touchedPoolId, priorTraderPoolDay };
+      }),
+    );
+    for (const { touchedPoolId, priorTraderPoolDay } of priorTraderPoolDays) {
       if (!priorTraderPoolDay) continue;
       primaryCorrectionsByPool.set(touchedPoolId, {
         swapCount: priorTraderPoolDay.swapCount,
         volumeUsdWei: priorTraderPoolDay.volumeUsdWei,
       });
     }
-    for (const [touchedPoolId, correction] of primaryCorrectionsByPool) {
+    const touchedPoolDays = await Promise.all(
+      Array.from(primaryCorrectionsByPool, async ([touchedPoolId]) => {
+        if (touchedPoolId === poolId) return { touchedPoolId };
+        const touchedPoolDayId = `${chainId}-${touchedPoolId}-${dayKey}`;
+        const touchedPoolDay =
+          await context.PoolDailyVolumeSnapshot.get(touchedPoolDayId);
+        return { touchedPoolId, touchedPoolDay };
+      }),
+    );
+    for (const { touchedPoolId, touchedPoolDay } of touchedPoolDays) {
       if (touchedPoolId === poolId) continue;
-      const touchedPoolDayId = `${chainId}-${touchedPoolId}-${dayKey}`;
-      const touchedPoolDay =
-        await context.PoolDailyVolumeSnapshot.get(touchedPoolDayId);
       if (!touchedPoolDay) continue;
+      const correction = primaryCorrectionsByPool.get(touchedPoolId);
+      if (!correction) continue;
       context.PoolDailyVolumeSnapshot.set({
         ...touchedPoolDay,
         swapCount: subtractCount(
@@ -265,7 +290,6 @@ export async function applyLeaderboardSnapshots(
       });
     }
   }
-  const existingPoolDay = await context.PoolDailyVolumeSnapshot.get(poolDayId);
   const currentPoolCorrection = primaryCorrectionsByPool.get(poolId);
   const poolPrimarySwapBase = subtractCount(
     existingPoolDay?.swapCount ?? 0,
@@ -305,13 +329,18 @@ export async function applyLeaderboardSnapshots(
     }
   >();
   if (traderDayBecameSystem) {
-    for (const touchedAggregator of aggregatorKeys) {
-      const marker =
-        touchedAggregator === aggregator
-          ? existingAggTraderMarker
-          : await context.AggregatorTraderDayMarker.get(
-              `${chainId}-${touchedAggregator}-${caller}-${dayKey}`,
-            );
+    const touchedAggMarkers = await Promise.all(
+      aggregatorKeys.map(async (touchedAggregator) => {
+        const marker =
+          touchedAggregator === aggregator
+            ? existingAggTraderMarker
+            : await context.AggregatorTraderDayMarker.get(
+                `${chainId}-${touchedAggregator}-${caller}-${dayKey}`,
+              );
+        return { touchedAggregator, marker };
+      }),
+    );
+    for (const { touchedAggregator, marker } of touchedAggMarkers) {
       if (!marker || marker.isSystemAddress) continue;
       primaryCorrectionsByAggregator.set(touchedAggregator, {
         swapCount: marker.swapCount,
@@ -321,15 +350,23 @@ export async function applyLeaderboardSnapshots(
       });
     }
 
-    for (const [
-      touchedAggregator,
-      correction,
-    ] of primaryCorrectionsByAggregator) {
+    const touchedAggDays = await Promise.all(
+      Array.from(
+        primaryCorrectionsByAggregator,
+        async ([touchedAggregator]) => {
+          if (touchedAggregator === aggregator) return { touchedAggregator };
+          const touchedAggDayId = `${chainId}-${touchedAggregator}-${dayKey}`;
+          const touchedAggDay =
+            await context.AggregatorDailySnapshot.get(touchedAggDayId);
+          return { touchedAggregator, touchedAggDay };
+        },
+      ),
+    );
+    for (const { touchedAggregator, touchedAggDay } of touchedAggDays) {
       if (touchedAggregator === aggregator) continue;
-      const touchedAggDayId = `${chainId}-${touchedAggregator}-${dayKey}`;
-      const touchedAggDay =
-        await context.AggregatorDailySnapshot.get(touchedAggDayId);
       if (!touchedAggDay) continue;
+      const correction = primaryCorrectionsByAggregator.get(touchedAggregator);
+      if (!correction) continue;
       context.AggregatorDailySnapshot.set({
         ...touchedAggDay,
         swapCount: subtractCount(touchedAggDay.swapCount, correction.swapCount),
@@ -353,7 +390,6 @@ export async function applyLeaderboardSnapshots(
   //    surface the actual router contract
   //    (useful when an aggregator has multiple deployed addresses on a chain
   //    and we want to know which one drove this row).
-  const existingAggDay = await context.AggregatorDailySnapshot.get(aggDayId);
   const currentAggCorrection = primaryCorrectionsByAggregator.get(aggregator);
   const primarySwapBase = subtractCount(
     existingAggDay?.swapCount ?? 0,

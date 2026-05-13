@@ -2,7 +2,8 @@
 // FPMM.Mint and FPMM.Burn handlers
 // ---------------------------------------------------------------------------
 
-import { indexer, type LiquidityEvent } from "envio";
+import type { LiquidityEvent } from "envio";
+import { indexer } from "../../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers.js";
 import { maybePreloadPool, upsertPool, upsertSnapshot } from "../../pool.js";
 

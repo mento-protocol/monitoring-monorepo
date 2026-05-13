@@ -2,12 +2,19 @@
 // FPMM event handlers
 // ---------------------------------------------------------------------------
 
-import { indexer, type SwapEvent, type TradingLimit } from "envio";
+import type { SwapEvent, TradingLimit } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 import {
-  TRADING_LIMITS_INTERNAL_DECIMALS,
+  applyTradingLimitSwap,
+  buildTradingLimitEntity,
+  buildTradingLimitEntityFromRpc,
   computeLimitPressures,
   computeLimitStatus,
+  isKnownFeeState,
+  tradingLimitConfigFromEntity,
+  tradingLimitId,
+  tradingLimitStateFromEntity,
 } from "../tradingLimits.js";
 import { tradingLimitsEffect } from "../rpc/effects.js";
 import { maybePreloadPool, upsertPool, upsertSnapshot } from "../pool.js";
@@ -60,26 +67,103 @@ indexer.onEvent(
       swapDelta: { volume0, volume1 },
     });
 
-    // Update trading limits for FPMM pools (guard: getTradingLimits reverts on VirtualPools)
+    // Update trading limits for FPMM pools. Once a token's limit row has
+    // been seeded, derive the next state from the Swap event itself; RPC is
+    // only a recovery path for missing rows or unknown fee/decimal metadata.
     if (
       pool.source &&
       pool.source.includes("fpmm") &&
       pool.token0 &&
       pool.token1
     ) {
+      const updateTradingLimitFromSwap = async (
+        token: string,
+        amountIn: bigint,
+        amountOut: bigint,
+      ): Promise<TradingLimit | null> => {
+        const tlId = tradingLimitId(poolId, token);
+        const existing = await context.TradingLimit.get(tlId);
+        const bothLimitsDisabled =
+          existing !== undefined &&
+          existing.limit0 === 0n &&
+          existing.limit1 === 0n;
+        const tokenDecimals =
+          token === pool.token0
+            ? pool.token0Decimals
+            : token === pool.token1
+              ? pool.token1Decimals
+              : undefined;
+        const canDerive =
+          existing !== undefined &&
+          (bothLimitsDisabled ||
+            (tokenDecimals !== undefined &&
+              pool.tokenDecimalsKnown &&
+              isKnownFeeState(pool)));
+
+        if (canDerive && existing) {
+          const previousState = tradingLimitStateFromEntity(existing);
+          const state =
+            bothLimitsDisabled || tokenDecimals === undefined
+              ? previousState
+              : applyTradingLimitSwap(
+                  previousState,
+                  tradingLimitConfigFromEntity(existing, tokenDecimals),
+                  {
+                    amountIn,
+                    amountOut,
+                    totalFeeBps: pool.lpFee + pool.protocolFee,
+                    blockTimestamp,
+                  },
+                );
+          const tl = buildTradingLimitEntity({
+            id: tlId,
+            chainId: event.chainId,
+            poolId,
+            token,
+            config: {
+              limit0: existing.limit0,
+              limit1: existing.limit1,
+            },
+            state,
+            blockNumber,
+            blockTimestamp,
+          });
+          context.TradingLimit.set(tl);
+          return tl;
+        }
+
+        const limits = await context.effect(tradingLimitsEffect, {
+          chainId: event.chainId,
+          poolAddress: event.srcAddress,
+          token,
+          blockNumber,
+        });
+        if (!limits) return null;
+
+        const tl = buildTradingLimitEntityFromRpc({
+          id: tlId,
+          chainId: event.chainId,
+          poolId,
+          token,
+          data: limits,
+          blockNumber,
+          blockTimestamp,
+        });
+        context.TradingLimit.set(tl);
+        return tl;
+      };
+
       const [limits0, limits1] = await Promise.all([
-        context.effect(tradingLimitsEffect, {
-          chainId: event.chainId,
-          poolAddress: event.srcAddress,
-          token: pool.token0,
-          blockNumber,
-        }),
-        context.effect(tradingLimitsEffect, {
-          chainId: event.chainId,
-          poolAddress: event.srcAddress,
-          token: pool.token1,
-          blockNumber,
-        }),
+        updateTradingLimitFromSwap(
+          pool.token0,
+          event.params.amount0In,
+          event.params.amount0Out,
+        ),
+        updateTradingLimitFromSwap(
+          pool.token1,
+          event.params.amount1In,
+          event.params.amount1Out,
+        ),
       ]);
 
       let worstP0 = 0;
@@ -87,68 +171,30 @@ indexer.onEvent(
 
       if (limits0) {
         const { p0, p1 } = computeLimitPressures(
-          limits0.state.netflow0,
-          limits0.state.netflow1,
-          limits0.config.limit0,
-          limits0.config.limit1,
+          limits0.netflow0,
+          limits0.netflow1,
+          limits0.limit0,
+          limits0.limit1,
         );
         worstP0 = Math.max(worstP0, p0, p1);
-        const tl: TradingLimit = {
-          id: `${poolId}-${pool.token0}`,
-          chainId: event.chainId,
-          poolId,
-          token: pool.token0,
-          limit0: limits0.config.limit0,
-          limit1: limits0.config.limit1,
-          decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
-          netflow0: limits0.state.netflow0,
-          netflow1: limits0.state.netflow1,
-          lastUpdated0: BigInt(limits0.state.lastUpdated0),
-          lastUpdated1: BigInt(limits0.state.lastUpdated1),
-          limitPressure0: p0.toFixed(4),
-          limitPressure1: p1.toFixed(4),
-          limitStatus: computeLimitStatus(p0, p1),
-          updatedAtBlock: blockNumber,
-          updatedAtTimestamp: blockTimestamp,
-        };
-        context.TradingLimit.set(tl);
       }
 
       if (limits1) {
         const { p0, p1 } = computeLimitPressures(
-          limits1.state.netflow0,
-          limits1.state.netflow1,
-          limits1.config.limit0,
-          limits1.config.limit1,
+          limits1.netflow0,
+          limits1.netflow1,
+          limits1.limit0,
+          limits1.limit1,
         );
         worstP1 = Math.max(worstP1, p0, p1);
-        const tl: TradingLimit = {
-          id: `${poolId}-${pool.token1}`,
-          chainId: event.chainId,
-          poolId,
-          token: pool.token1,
-          limit0: limits1.config.limit0,
-          limit1: limits1.config.limit1,
-          decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
-          netflow0: limits1.state.netflow0,
-          netflow1: limits1.state.netflow1,
-          lastUpdated0: BigInt(limits1.state.lastUpdated0),
-          lastUpdated1: BigInt(limits1.state.lastUpdated1),
-          limitPressure0: p0.toFixed(4),
-          limitPressure1: p1.toFixed(4),
-          limitStatus: computeLimitStatus(p0, p1),
-          updatedAtBlock: blockNumber,
-          updatedAtTimestamp: blockTimestamp,
-        };
-        context.TradingLimit.set(tl);
       }
 
       if (limits0 || limits1) {
-        // Log when only one token's limits were fetched — partial state is usable
-        // but indicates an RPC hiccup that will be retried on the next Swap.
+        // Partial state is usable. The missing row will retry RPC seed/recovery
+        // on the next Swap.
         if (!limits0 || !limits1) {
           context.log.warn(
-            `[FPMM.Swap] Partial trading limit fetch for pool ${poolId}: ` +
+            `[FPMM.Swap] Partial trading limit update for pool ${poolId}: ` +
               `limits0=${!!limits0} limits1=${!!limits1}. ` +
               `limitStatus will reflect the available data only.`,
           );

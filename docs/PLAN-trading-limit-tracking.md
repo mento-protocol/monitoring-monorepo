@@ -28,7 +28,7 @@ Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
 The `TradingLimitConfigured` event fires when limits are changed (`configureTradingLimit` call).
 There is **no on-chain event for netflow state changes** — it's derived from Swap amounts.
 
-**Strategy:** Index `TradingLimitConfigured` for limit config, then compute current `netflow` state via RPC call (`getTradingLimits`) on each `Swap` event, same pattern as oracle health.
+**Strategy:** Index `TradingLimitConfigured` for limit config and reset semantics, then derive `netflow` state from `Swap` amounts using the same `TradingLimitsV2` math the contract uses. Keep `getTradingLimits` as a seed/recovery fallback only when a row is missing or when fee/decimal metadata is not yet trusted.
 
 ---
 
@@ -64,7 +64,7 @@ In `EventHandlers.ts`:
 
 - On `TradingLimitConfigured(token, config)`:
   - Upsert `TradingLimit` entity with new `limit0`, `limit1`, `decimals`
-  - RPC call `getTradingLimits(token)` to get current `state` (same viem pattern as oracle health)
+  - Reset `lastUpdated0/1` to zero, preserving netflow only for windows that remain enabled (matching `TradingLimitsV2.reset`)
   - Compute `limitPressure0 = |netflow0| / limit0`, `limitPressure1 = |netflow1| / limit1`
   - Set `limitStatus = computeLimitStatus(pressure0, pressure1)`
 
@@ -72,9 +72,9 @@ In `EventHandlers.ts`:
 
 On every `Swap`, update the `TradingLimit` entity:
 
-- RPC call `getTradingLimits(token0)` and `getTradingLimits(token1)`
+- Prefer deriving token0/token1 state from the event amounts, stored limit row, token decimals, and stored LP/protocol fee state
+- Call `getTradingLimits(token)` only as fallback when the row is missing or metadata is not trusted
 - Recompute `netflow0`, `netflow1`, `limitPressure0`, `limitPressure1`, `limitStatus`
-- This is the same pattern used for oracle health on `Swap` events
 
 #### 4. Add `limitStatus` to `Pool` entity (denormalised for fast badge queries)
 
@@ -144,7 +144,7 @@ computeLimitStatus(0, 0)      → "OK"
 
 - [ ] `TradingLimit` entity in schema with all fields
 - [ ] `TradingLimitConfigured` event handler creates/updates entity
-- [ ] `Swap` handler updates `TradingLimit` state via RPC
+- [ ] `Swap` handler updates `TradingLimit` state from logs, with RPC seed/recovery fallback
 - [ ] `Pool.limitStatus`, `limitPressure0`, `limitPressure1` denormalised fields updated on Swap
 - [ ] `LimitBadge` component with OK/WARN/CRITICAL/N/A states
 - [ ] `LimitBadge` column in `PoolsTable`
@@ -172,6 +172,6 @@ computeLimitStatus(0, 0)      → "OK"
 
 ## Notes
 
-- RPC calls on every `Swap` event adds latency to indexer processing. Monitor Envio sync speed — if it becomes a bottleneck, consider sampling (every Nth swap instead of every swap)
+- RPC calls on every `Swap` event are avoidable. The steady-state path should derive from logs and only fall back to `getTradingLimits` when correctness requires seeding/recovery.
 - Windows reset when `block.timestamp - lastUpdated > windowDuration`. Pressure drops to 0 naturally — no special handling needed
 - VirtualPools: `getTradingLimits` will likely revert. Guard: `if (!isFpmm) return` before RPC call

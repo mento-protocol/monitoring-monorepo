@@ -27,12 +27,8 @@
 // freely; OracleSnapshot → only writes data we believe in.
 // ---------------------------------------------------------------------------
 
-import {
-  indexer,
-  type OracleSnapshot,
-  type ReserveUpdate,
-  type RebalanceEvent,
-} from "envio";
+import type { OracleSnapshot, RebalanceEvent, ReserveUpdate } from "envio";
+import { indexer } from "../../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers.js";
 import {
   buildRebalanceOutcome,

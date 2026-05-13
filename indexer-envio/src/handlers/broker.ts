@@ -7,7 +7,8 @@
 // detected separately via a Pool lookup on `event.params.trader` (which is
 // `msg.sender` to Broker, == VirtualPool address in this case).
 
-import { indexer, type BrokerSwapEvent } from "envio";
+import type { BrokerSwapEvent } from "envio";
+import { indexer } from "../indexer.js";
 import {
   eventId,
   asAddress,
@@ -117,8 +118,13 @@ indexer.onEvent(
     const dayTs = dayBucket(blockTimestamp);
 
     const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
-    const existingExchangeSnapshot =
-      await context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId);
+    let brokerCallerPool: Awaited<ReturnType<typeof context.Pool.get>>;
+    const [existingExchangeSnapshot, initialBrokerCallerPool] =
+      await Promise.all([
+        context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId),
+        context.Pool.get(makePoolId(event.chainId, brokerCaller)),
+      ]);
+    brokerCallerPool = initialBrokerCallerPool;
     context.BrokerExchangeDailySnapshot.set({
       id: exchangeSnapshotId,
       chainId: event.chainId,
@@ -146,9 +152,6 @@ indexer.onEvent(
     // via `routedViaV3Router=false` filter) excludes these double-counted
     // swaps too — the original schema flag `routedViaV3Router` only catches
     // the `tx.to == Routerv300` path, not the aggregator → VirtualPool path.
-    let brokerCallerPool = await context.Pool.get(
-      makePoolId(event.chainId, brokerCaller),
-    );
     // Round 3 #6: pre-warm VP classification. Pre-start_block VPs whose
     // first event is `VirtualPool.UpdateReserves` (the inner step of a
     // VP-routed swap) get a Pool row with source `fpmm_update_reserves`
@@ -245,8 +248,21 @@ indexer.onEvent(
     // as a P1 false-positive on PR #363.
     const callerIsSystem = isSystemAddress(event.chainId, caller);
     const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
-    const existingCallerDay =
-      await context.BrokerTraderDailySnapshot.get(callerDayId);
+    // No pool address to pass — `classifyAggregator` falls back to the
+    // direct-entry / system-address / unknown ladder, which is the right
+    // taxonomy for v2 entry-point analysis.
+    const aggregator = classifyAggregator(event.chainId, txTo);
+    const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
+    // Marker is keyed on `caller` (signer EOA), not `brokerCaller`, so
+    // uniqueTraders counts distinct EOAs per day rather than distinct
+    // msg.sender contracts (a router shows up once but routes for many EOAs).
+    const aggCallerMarkerId = `${event.chainId}-${aggregator}-${caller}-${dayTs}`;
+    const [existingCallerDay, existingAggCallerMarker, existingAggDay] =
+      await Promise.all([
+        context.BrokerTraderDailySnapshot.get(callerDayId),
+        context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
+        context.BrokerAggregatorDailySnapshot.get(aggDayId),
+      ]);
     context.BrokerTraderDailySnapshot.set({
       id: callerDayId,
       chainId: event.chainId,
@@ -263,23 +279,10 @@ indexer.onEvent(
       lastSeenTimestamp: blockTimestamp,
     });
 
-    // No pool address to pass — `classifyAggregator` falls back to the
-    // direct-entry / system-address / unknown ladder, which is the right
-    // taxonomy for v2 entry-point analysis.
-    const aggregator = classifyAggregator(event.chainId, txTo);
-    const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
-    // Marker is keyed on `caller` (signer EOA), not `brokerCaller`, so
-    // uniqueTraders counts distinct EOAs per day rather than distinct
-    // msg.sender contracts (a router shows up once but routes for many EOAs).
-    const aggCallerMarkerId = `${event.chainId}-${aggregator}-${caller}-${dayTs}`;
-    const existingAggCallerMarker =
-      await context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId);
     const aggCallerFirstTouch = existingAggCallerMarker === undefined;
     if (aggCallerFirstTouch) {
       context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
     }
-    const existingAggDay =
-      await context.BrokerAggregatorDailySnapshot.get(aggDayId);
     context.BrokerAggregatorDailySnapshot.set({
       id: aggDayId,
       chainId: event.chainId,

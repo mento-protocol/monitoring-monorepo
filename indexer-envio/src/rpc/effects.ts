@@ -20,7 +20,7 @@
 // (groups A, B, F) are safe to flip later.
 // ---------------------------------------------------------------------------
 
-import { createEffect, S } from "envio";
+import { createEffect as createEnvioEffect, S } from "envio";
 import {
   fetchErc20Decimals,
   fetchInvertRateFeed,
@@ -49,6 +49,30 @@ import {
   type BreakerKindRpc,
 } from "./breakers.js";
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
+import { trackEffectExecution } from "../performance.js";
+
+type UntypedCreateEffect = (
+  options: unknown,
+  handler: (args: unknown) => Promise<unknown>,
+) => unknown;
+
+const createEffect = ((options: unknown, handler: unknown) => {
+  const effectName =
+    typeof options === "object" &&
+    options !== null &&
+    "name" in options &&
+    typeof (options as { name?: unknown }).name === "string"
+      ? (options as { name: string }).name
+      : "unknown";
+
+  return (createEnvioEffect as unknown as UntypedCreateEffect)(
+    options,
+    (args) =>
+      trackEffectExecution(effectName, () =>
+        (handler as (value: unknown) => Promise<unknown>)(args),
+      ),
+  );
+}) as typeof createEnvioEffect;
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
@@ -547,11 +571,10 @@ export const reportExpiryEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group E — trading limits.
-// MUST stay `cache: false` permanently (block-scoped state).
-// Higher rate limit than other block-scoped effects: fires twice per FPMM
-// Swap (once per token), so peak Celo catch-up of ~120 events/sec → up to
-// ~240 fetcher invocations/sec. Effect-level batching collapses concurrent
-// calls into multicalls, but the cap still needs headroom.
+// MUST stay `cache: false` permanently (block-scoped state). Swap handlers
+// derive steady-state updates from events once rows are seeded; this effect is
+// kept as the canonical seed/recovery path for missing rows or unknown
+// fee/decimal metadata.
 // ---------------------------------------------------------------------------
 
 export const tradingLimitsEffect = createEffect(

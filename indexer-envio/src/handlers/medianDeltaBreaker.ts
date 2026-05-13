@@ -10,7 +10,7 @@
 // invokes `_checkAndSetBreakers`, and we know the inputs from that event.
 // ---------------------------------------------------------------------------
 
-import { indexer } from "envio";
+import { indexer } from "../indexer.js";
 import { asAddress, asBigInt } from "../helpers.js";
 import {
   ensureBreaker,

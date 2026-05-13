@@ -2,7 +2,8 @@
 // SortedOracles event handlers (OracleReported, MedianUpdated, expiry)
 // ---------------------------------------------------------------------------
 
-import { indexer, type Pool, type OracleSnapshot } from "envio";
+import type { OracleSnapshot, Pool } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers.js";
 import {
   computePriceDifference,

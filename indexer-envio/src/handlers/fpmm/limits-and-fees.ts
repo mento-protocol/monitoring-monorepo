@@ -4,22 +4,16 @@
 // + RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-import {
-  indexer,
-  type OracleSnapshot,
-  type Pool,
-  type TradingLimit,
-} from "envio";
+import type { OracleSnapshot, Pool } from "envio";
+import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt, eventId, makePoolId } from "../../helpers.js";
 import {
-  TRADING_LIMITS_INTERNAL_DECIMALS,
-  computeLimitPressures,
-  computeLimitStatus,
+  buildTradingLimitEntity,
+  resetTradingLimitState,
+  tradingLimitId,
+  tradingLimitStateFromEntity,
 } from "../../tradingLimits.js";
-import {
-  rebalancingStateEffect,
-  tradingLimitsEffect,
-} from "../../rpc/effects.js";
+import { rebalancingStateEffect } from "../../rpc/effects.js";
 import {
   computeHealthStatus,
   effectiveThreshold,
@@ -45,66 +39,41 @@ indexer.onEvent(
   { contract: "FPMM", event: "TradingLimitConfigured" },
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // See state-sync.ts → UpdateReserves handler. `fetchTradingLimits` is a raw
-    // RPC call that must not run in preload for the same in-batch-state reasons.
+    // Avoid doing the reset write twice under Envio v3's preload pass.
     if (await maybePreloadPool(context, poolId)) return;
     const token = asAddress(event.params.token);
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
-    const eventLimit0 = event.params.config.limit0;
-    const eventLimit1 = event.params.config.limit1;
-
-    const limits = await context.effect(tradingLimitsEffect, {
-      chainId: event.chainId,
-      poolAddress: event.srcAddress,
-      token: event.params.token,
-      blockNumber,
-    });
-
-    const limit0 = limits ? limits.config.limit0 : eventLimit0;
-    const limit1 = limits ? limits.config.limit1 : eventLimit1;
-    const decimals = TRADING_LIMITS_INTERNAL_DECIMALS;
-    const netflow0 = limits ? limits.state.netflow0 : 0n;
-    const netflow1 = limits ? limits.state.netflow1 : 0n;
-    const lastUpdated0 = limits ? BigInt(limits.state.lastUpdated0) : 0n;
-    const lastUpdated1 = limits ? BigInt(limits.state.lastUpdated1) : 0n;
-
-    const { p0, p1 } = computeLimitPressures(
-      netflow0,
-      netflow1,
-      limit0,
-      limit1,
+    const id = tradingLimitId(poolId, token);
+    const existing = await context.TradingLimit.get(id);
+    const config = {
+      limit0: event.params.config.limit0,
+      limit1: event.params.config.limit1,
+    };
+    const state = resetTradingLimitState(
+      existing ? tradingLimitStateFromEntity(existing) : undefined,
+      config,
     );
-    const limitStatus = computeLimitStatus(p0, p1);
-
-    const tl: TradingLimit = {
-      id: `${poolId}-${token}`,
+    const tl = buildTradingLimitEntity({
+      id,
       chainId: event.chainId,
       poolId,
       token,
-      limit0,
-      limit1,
-      decimals,
-      netflow0,
-      netflow1,
-      lastUpdated0,
-      lastUpdated1,
-      limitPressure0: p0.toFixed(4),
-      limitPressure1: p1.toFixed(4),
-      limitStatus,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
-    };
+      config,
+      state,
+      blockNumber,
+      blockTimestamp,
+    });
     context.TradingLimit.set(tl);
 
     const pool = await context.Pool.get(poolId);
     if (pool) {
       context.Pool.set({
         ...pool,
-        limitStatus,
-        limitPressure0: p0.toFixed(4),
-        limitPressure1: p1.toFixed(4),
+        limitStatus: tl.limitStatus,
+        limitPressure0: tl.limitPressure0,
+        limitPressure1: tl.limitPressure1,
       });
     }
   },

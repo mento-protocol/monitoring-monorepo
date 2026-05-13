@@ -2,12 +2,8 @@
 // OpenLiquidityStrategy event handlers
 // ---------------------------------------------------------------------------
 
-import {
-  indexer,
-  type OlsPool,
-  type OlsLiquidityEvent,
-  type OlsLifecycleEvent,
-} from "envio";
+import type { OlsLifecycleEvent, OlsLiquidityEvent, OlsPool } from "envio";
+import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 
 /**
