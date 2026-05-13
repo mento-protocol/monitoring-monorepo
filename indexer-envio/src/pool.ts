@@ -62,10 +62,10 @@ export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Preload-phase helper used by every event handler that makes direct RPC
- * calls. Returns `true` when we're in the preload pass and the caller
- * should `return` early (after awaiting this). Returns `false` during
- * the processing pass so the caller continues with its full body.
+ * Preload-phase helper used by handlers that warm Pool reads before returning
+ * from Envio's preload pass. `maybePreloadPool` returns `true` when the caller
+ * should return early; `preloadPoolCache` exposes the warmed Pool row to
+ * callers that need to issue dependent `context.effect(...)` reads first.
  *
  * Seeds BOTH the Pool entity cache AND the currently-open breach row
  * (when one exists) during preload. Skipping the breach-row warm-up
@@ -73,28 +73,42 @@ export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
  * hits `DeviationThresholdBreach.get` in the processing phase — that
  * read goes cold otherwise.
  */
+type PreloadPoolContext = {
+  isPreload: boolean;
+  Pool: { get: (id: string) => Promise<Pool | undefined> };
+  DeviationThresholdBreach: {
+    get: (id: string) => Promise<unknown>;
+  };
+};
+
+async function preloadPoolAndOpenBreach(
+  context: PreloadPoolContext,
+  id: string,
+): Promise<Pool | undefined> {
+  const pool = await context.Pool.get(id);
+  if (pool && pool.deviationBreachStartedAt > 0n) {
+    await context.DeviationThresholdBreach.get(
+      `${id}-${pool.deviationBreachStartedAt}`,
+    );
+  }
+  return pool;
+}
+
+export async function preloadPoolCache(
+  context: PreloadPoolContext,
+  poolId: string,
+): Promise<Pool | undefined> {
+  if (!context.isPreload) return undefined;
+  return preloadPoolAndOpenBreach(context, poolId);
+}
+
 export async function maybePreloadPool(
-  context: {
-    isPreload: boolean;
-    Pool: { get: (id: string) => Promise<Pool | undefined> };
-    DeviationThresholdBreach: {
-      get: (id: string) => Promise<unknown>;
-    };
-  },
+  context: PreloadPoolContext,
   poolIds: string | readonly string[],
 ): Promise<boolean> {
   if (!context.isPreload) return false;
   const ids = typeof poolIds === "string" ? [poolIds] : poolIds;
-  await Promise.all(
-    ids.map(async (id) => {
-      const pool = await context.Pool.get(id);
-      if (pool && pool.deviationBreachStartedAt > 0n) {
-        await context.DeviationThresholdBreach.get(
-          `${id}-${pool.deviationBreachStartedAt}`,
-        );
-      }
-    }),
-  );
+  await Promise.all(ids.map((id) => preloadPoolAndOpenBreach(context, id)));
   return true;
 }
 
