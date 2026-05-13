@@ -15,12 +15,22 @@ permissions:
   contents: read
 
 jobs:
-  dashboard-weekend-baseline:
-    name: Dashboard weekend baseline
+  dashboard-logic-baseline:
+    name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
-      - name: Run mutation baseline
+      - name: Run dashboard mutation baseline
         run: pnpm dashboard:mutation
+
+  bridge-rebalance-probe-baseline:
+    name: Bridge rebalance probe baseline
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Run bridge mutation baseline
+        run: pnpm bridge:mutation

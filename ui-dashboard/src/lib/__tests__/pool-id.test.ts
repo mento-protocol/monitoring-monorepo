@@ -3,6 +3,7 @@ import {
   isNamespacedPoolId,
   extractChainIdFromPoolId,
   normalizePoolIdForChain,
+  stripChainIdFromPoolId,
 } from "../pool-id";
 
 // isNamespacedPoolId
@@ -41,6 +42,12 @@ describe("isNamespacedPoolId", () => {
     expect(
       isNamespacedPoolId("42220-0Xd8da6bf26964af9d7eed9e03e53415d37aa96045"),
     ).toBe(false);
+  });
+
+  it("rejects namespaced IDs with leading or trailing characters", () => {
+    const valid = "42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+    expect(isNamespacedPoolId(`x${valid}`)).toBe(false);
+    expect(isNamespacedPoolId(`${valid}x`)).toBe(false);
   });
 });
 
@@ -119,5 +126,28 @@ describe("normalizePoolIdForChain", () => {
         42220,
       ),
     ).toBe("42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
+  });
+});
+
+// stripChainIdFromPoolId
+describe("stripChainIdFromPoolId", () => {
+  it("strips the chainId prefix from a namespaced pool ID", () => {
+    expect(
+      stripChainIdFromPoolId(
+        "42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      ),
+    ).toBe("0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
+  });
+
+  it("preserves non-namespaced values unchanged", () => {
+    const raw = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+    expect(stripChainIdFromPoolId(raw)).toBe(raw);
+    expect(stripChainIdFromPoolId("garbage")).toBe("garbage");
+  });
+
+  it("preserves the address casing when stripping", () => {
+    expect(
+      stripChainIdFromPoolId("143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115"),
+    ).toBe("0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115");
   });
 });
