@@ -13,6 +13,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_BREACH_ROLLUP,
+  ALL_POOLS_HEALTH_CURSOR,
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
@@ -397,6 +398,7 @@ export async function fetchNetworkData(
     tradingLimitsResult,
     olsResult,
     breachRollupResult,
+    healthCursorResult,
     rebalanceThresholdsKnownResult,
     cdpPoolIdsResult,
   ] = await Promise.allSettled([
@@ -433,6 +435,15 @@ export async function fetchNetworkData(
         healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
+    // Live-tail cursor — split from ALL_POOLS_BREACH_ROLLUP so a schema-lag
+    // failure on these newer fields does not hide persisted uptime counters.
+    timed<{
+      Pool: {
+        id: string;
+        lastOracleSnapshotTimestamp?: string;
+        lastDeviationRatio?: string;
+      }[];
+    }>(ALL_POOLS_HEALTH_CURSOR, { chainId: network.chainId }),
     // Data-trust flags (`rebalanceThresholdsKnown` triple +
     // `tokenDecimalsKnown`) — isolated for the same schema-lag reason as
     // the breach rollup above. Consumers degrade safely when the fields
@@ -476,6 +487,24 @@ export async function fetchNetworkData(
             // ALL_POOLS_WITH_HEALTH's `healthTotalSeconds`, which would
             // pair counters captured at different polling cycles.
             healthTotalSeconds: r.healthTotalSeconds,
+          };
+    });
+  }
+
+  // Merge live-tail cursor fields separately. If this query fails during a
+  // schema-lag window, the UI still uses the persisted health counters.
+  if (healthCursorResult.status === "fulfilled") {
+    const cursorById = new Map(
+      (healthCursorResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const r = cursorById.get(p.id);
+      return r == null
+        ? p
+        : {
+            ...p,
+            lastOracleSnapshotTimestamp: r.lastOracleSnapshotTimestamp,
+            lastDeviationRatio: r.lastDeviationRatio,
           };
     });
   }

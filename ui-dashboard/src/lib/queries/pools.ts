@@ -100,6 +100,19 @@ export const ALL_POOLS_BREACH_ROLLUP = `
   }
 `;
 
+// Live-tail cursor fields for the uptime projection. Kept separate from
+// ALL_POOLS_BREACH_ROLLUP so schema lag on these newer fields still leaves
+// the persisted all-time uptime counters available.
+export const ALL_POOLS_HEALTH_CURSOR = `
+  query AllPoolsHealthCursor($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
+    }
+  }
+`;
+
 // Slim query for building an oracle USD-rate map. Used by pages that only
 // need to convert token amounts to USD (bridge-flows, pool-detail FX pairs)
 // without loading the full 44-field pool payload. `buildOracleRateMap` reads

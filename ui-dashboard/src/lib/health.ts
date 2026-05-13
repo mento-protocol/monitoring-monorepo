@@ -5,7 +5,7 @@
 
 export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
 
-import { isWeekend } from "./weekend";
+import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
 import {
   DEVIATION_TOLERANCE_RATIO,
@@ -311,6 +311,105 @@ function clampedPct(binary: number, total: number): number | null {
   return Math.max(0, Math.min(100, (binary / total) * 100));
 }
 
+const MAX_HEALTH_CARRY_SECONDS = DEVIATION_BREACH_GRACE_SECONDS;
+
+type HealthCounterState = {
+  source: string;
+  wrappedExchangeId?: string | null;
+  healthTotalSeconds?: string;
+  healthBinarySeconds?: string;
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
+  oracleExpiry?: string;
+};
+
+/** Return the counter pair with the current open interval included.
+ *
+ * The indexer persists health counters only when a later health sample closes
+ * the previous interval. During an active oracle outage there may be no later
+ * event yet, so the stored counters can still read 100%. This mirrors the
+ * indexer's interval split at render time: carry the previous healthy state
+ * through the freshness window, then count the stale tail as unhealthy.
+ * `fromSeconds` clips the open interval for windowed displays that subtract
+ * an older cumulative anchor.
+ */
+export function liveHealthCounters(
+  pool: HealthCounterState,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+  fromSeconds?: number,
+): { healthBinarySeconds?: string; healthTotalSeconds?: string } {
+  const baseBinary = Number(pool.healthBinarySeconds);
+  const baseTotal = Number(pool.healthTotalSeconds ?? "0");
+  if (!Number.isFinite(baseBinary) || !Number.isFinite(baseTotal)) {
+    return {
+      healthBinarySeconds: pool.healthBinarySeconds,
+      healthTotalSeconds: pool.healthTotalSeconds,
+    };
+  }
+
+  const lastTs = Number(pool.lastOracleSnapshotTimestamp ?? "0");
+  if (!Number.isFinite(lastTs) || lastTs <= 0 || nowSeconds <= lastTs) {
+    return {
+      healthBinarySeconds: String(baseBinary),
+      healthTotalSeconds: String(baseTotal),
+    };
+  }
+
+  const floorTs = fromSeconds == null ? lastTs : Number(fromSeconds);
+  if (!Number.isFinite(floorTs)) {
+    return {
+      healthBinarySeconds: String(baseBinary),
+      healthTotalSeconds: String(baseTotal),
+    };
+  }
+  const intervalStart = Math.max(lastTs, floorTs);
+  if (nowSeconds <= intervalStart) {
+    return {
+      healthBinarySeconds: String(baseBinary),
+      healthTotalSeconds: String(baseTotal),
+    };
+  }
+
+  const prevRatio = pool.lastDeviationRatio ?? "";
+  const parsedRatio = parseFloat(prevRatio);
+  const prevIsNoData =
+    prevRatio === "" ||
+    prevRatio === "-1" ||
+    (Number.isFinite(parsedRatio) && parsedRatio < 0);
+  if (prevIsNoData) {
+    return {
+      healthBinarySeconds: String(baseBinary),
+      healthTotalSeconds: String(baseTotal),
+    };
+  }
+
+  const duration = tradingSecondsInRange(intervalStart, nowSeconds);
+  if (duration <= 0) {
+    return {
+      healthBinarySeconds: String(baseBinary),
+      healthTotalSeconds: String(baseTotal),
+    };
+  }
+
+  const indexedExpiry = Number(pool.oracleExpiry ?? "0");
+  const freshnessLimit = Math.min(
+    indexedExpiry > 0 ? indexedExpiry : MAX_HEALTH_CARRY_SECONDS,
+    MAX_HEALTH_CARRY_SECONDS,
+  );
+  const carryEnd = Math.min(nowSeconds, lastTs + freshnessLimit);
+  const carrySeconds =
+    carryEnd > intervalStart
+      ? tradingSecondsInRange(intervalStart, carryEnd)
+      : 0;
+  const prevHealthy =
+    Number.isFinite(parsedRatio) && parsedRatio <= DEVIATION_TOLERANCE_RATIO;
+
+  return {
+    healthBinarySeconds: String(baseBinary + (prevHealthy ? carrySeconds : 0)),
+    healthTotalSeconds: String(baseTotal + duration),
+  };
+}
+
 /**
  * All-time uptime % for a pool. Reads the indexer's binary-health
  * accumulator (`healthBinarySeconds / healthTotalSeconds`), which counts
@@ -321,17 +420,16 @@ function clampedPct(binary: number, total: number): number | null {
  * Returns `null` for virtual pools, missing rollups (resync window), and
  * zero observation windows.
  */
-export function computePoolUptimePct(pool: {
-  source: string;
-  wrappedExchangeId?: string | null;
-  healthTotalSeconds?: string;
-  healthBinarySeconds?: string;
-}): number | null {
+export function computePoolUptimePct(
+  pool: HealthCounterState,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): number | null {
   if (isVirtualPool(pool)) return null;
   if (pool.healthBinarySeconds == null) return null;
+  const counters = liveHealthCounters(pool, nowSeconds);
   return clampedPct(
-    Number(pool.healthBinarySeconds),
-    Number(pool.healthTotalSeconds ?? "0"),
+    Number(counters.healthBinarySeconds),
+    Number(counters.healthTotalSeconds ?? "0"),
   );
 }
 

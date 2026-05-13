@@ -4,6 +4,9 @@ import {
   computeEffectiveStatus,
   formatDeviationPct,
   computeLimitStatus,
+  computePoolUptimePct,
+  computeWindowUptimePct,
+  liveHealthCounters,
   computeRebalancerLiveness,
   worstStatus,
 } from "../health";
@@ -13,6 +16,9 @@ import {
 vi.mock("../weekend", () => ({
   isWeekend: vi.fn(() => false),
   isWeekendOracleStale: vi.fn(() => false),
+  tradingSecondsInRange: vi.fn((startTs: number, endTs: number) =>
+    Math.max(0, endTs - startTs),
+  ),
   FX_CLOSE_DAY: 5,
   FX_CLOSE_HOUR_UTC: 21,
   FX_REOPEN_DAY: 0,
@@ -476,6 +482,94 @@ describe("computeHealthStatus", () => {
         hasHealthData: true,
       }),
     ).toBe("OK");
+  });
+});
+
+describe("computePoolUptimePct", () => {
+  const FROZEN_NOW_MS = Date.parse("2026-05-13T08:00:00Z");
+  const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
+
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW_MS);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("includes the live stale tail before the next oracle report closes the gap", () => {
+    const total = 30 * 86_400;
+    const sixHourGapStart = frozenNowSec - 6 * 3600;
+
+    expect(
+      computePoolUptimePct({
+        source: "fpmm_factory",
+        healthBinarySeconds: String(total),
+        healthTotalSeconds: String(total),
+        lastOracleSnapshotTimestamp: String(sixHourGapStart),
+        lastDeviationRatio: "0.010000",
+        oracleExpiry: "360",
+      })?.toFixed(2),
+    ).toBe("99.19");
+  });
+
+  it("keeps a healthy open interval at 100% while still inside freshness", () => {
+    const total = 30 * 86_400;
+
+    expect(
+      computePoolUptimePct({
+        source: "fpmm_factory",
+        healthBinarySeconds: String(total),
+        healthTotalSeconds: String(total),
+        lastOracleSnapshotTimestamp: String(frozenNowSec - 120),
+        lastDeviationRatio: "0.010000",
+        oracleExpiry: "360",
+      }),
+    ).toBe(100);
+  });
+
+  it("does not retroactively count no-data intervals", () => {
+    for (const lastDeviationRatio of ["-1", "-1.000000"]) {
+      expect(
+        computePoolUptimePct({
+          source: "fpmm_factory",
+          healthBinarySeconds: "1000",
+          healthTotalSeconds: "1000",
+          lastOracleSnapshotTimestamp: String(frozenNowSec - 6 * 3600),
+          lastDeviationRatio,
+          oracleExpiry: "360",
+        }),
+      ).toBe(100);
+    }
+  });
+
+  it("clips a live interval to the window anchor before subtracting cumulative counters", () => {
+    const anchorTs = frozenNowSec - 6 * 3600;
+    const liveRollup = liveHealthCounters(
+      {
+        source: "fpmm_factory",
+        healthBinarySeconds: "1000",
+        healthTotalSeconds: "1000",
+        lastOracleSnapshotTimestamp: String(anchorTs - 120),
+        lastDeviationRatio: "0.010000",
+        oracleExpiry: "360",
+      },
+      frozenNowSec,
+      anchorTs,
+    );
+
+    expect(
+      computeWindowUptimePct(
+        liveRollup,
+        {
+          timestamp: String(anchorTs),
+          cumulativeHealthBinarySeconds: "1000",
+          cumulativeHealthTotalSeconds: "1000",
+        },
+        frozenNowSec,
+      )?.toFixed(2),
+    ).toBe("1.11");
   });
 });
 

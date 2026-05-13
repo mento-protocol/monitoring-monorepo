@@ -129,6 +129,19 @@ export const POOL_BREACH_ROLLUP = `
   }
 `;
 
+// Cursor for projecting the currently open health interval. Isolated from
+// POOL_BREACH_ROLLUP so schema lag on these newer fields leaves the stored
+// all-time uptime counters available.
+export const POOL_HEALTH_CURSOR = `
+  query PoolHealthCursor($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
+    }
+  }
+`;
+
 // 7d-window anchor for the Uptime tile's "X.XX% last 7d" subtitle. Isolated
 // from POOL_BREACH_ROLLUP so a hosted-Hasura schema lag on the new
 // `cumulativeHealth*` fields degrades JUST the 7d subtitle to "—" — the

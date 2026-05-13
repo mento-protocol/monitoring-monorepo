@@ -3,10 +3,15 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREACH_ROLLUP, POOL_HEALTH_7D_ANCHOR } from "@/lib/queries";
+import {
+  POOL_BREACH_ROLLUP,
+  POOL_HEALTH_7D_ANCHOR,
+  POOL_HEALTH_CURSOR,
+} from "@/lib/queries";
 import {
   computePoolUptimePct,
   computeWindowUptimePct,
+  liveHealthCounters,
   uptimeColorClass,
 } from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
@@ -35,6 +40,10 @@ const ARROW = {
 type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+};
+type HealthCursorRow = {
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
 };
 type DailyAnchorRow = {
   // Read by computeWindowUptimePct's freshness gate (rejects anchors >8d
@@ -66,6 +75,17 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     id: pool.id,
     chainId: pool.chainId,
   });
+  const {
+    data: cursorData,
+    error: cursorError,
+    isLoading: cursorLoading,
+  } = useGQL<{ Pool: HealthCursorRow[] }>(
+    isVirtual ? null : POOL_HEALTH_CURSOR,
+    {
+      id: pool.id,
+      chainId: pool.chainId,
+    },
+  );
   const { data: anchorData } = useGQL<{ PoolDailySnapshot: DailyAnchorRow[] }>(
     isVirtual ? null : POOL_HEALTH_7D_ANCHOR,
     { id: pool.id, chainId: pool.chainId, sevenDaysAgo },
@@ -74,18 +94,24 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   if (isVirtual || rollupError) return NA;
   const rollup = rollupData?.Pool?.[0];
   if (!rollup) return NA;
+  if (!cursorError && cursorLoading && cursorData == null) return NA;
 
-  const pct = computePoolUptimePct({
-    source: pool.source,
-    healthBinarySeconds: rollup.healthBinarySeconds,
-    healthTotalSeconds: rollup.healthTotalSeconds,
-  });
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cursor = cursorData?.Pool?.[0];
+  const livePool = { ...pool, ...rollup, ...(cursor ?? {}) };
+  const anchor = anchorData?.PoolDailySnapshot?.[0] ?? null;
+  const anchorTs = Number(anchor?.timestamp ?? "0");
+  // All-time uptime uses the unclipped projection inside computePoolUptimePct;
+  // the 7d subtitle clips the same open interval to the snapshot anchor first.
+  const liveRollup = liveHealthCounters(
+    livePool,
+    nowSeconds,
+    anchorTs > 0 ? anchorTs : undefined,
+  );
+  const pct = computePoolUptimePct(livePool, nowSeconds);
   if (pct == null) return NA;
 
-  const pct7d = computeWindowUptimePct(
-    rollup,
-    anchorData?.PoolDailySnapshot?.[0] ?? null,
-  );
+  const pct7d = computeWindowUptimePct(liveRollup, anchor, nowSeconds);
 
   // Suppress the arrow when both values round to the same 2-decimal
   // string — anything finer would surface noise the user can't see.

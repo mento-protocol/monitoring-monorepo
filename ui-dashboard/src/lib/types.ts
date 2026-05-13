@@ -75,6 +75,8 @@ export type Pool = {
   reserves1?: string;
   healthTotalSeconds?: string;
   healthBinarySeconds?: string;
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
   hasHealthData?: boolean;
   breachCount?: number;
   // Set on VirtualPools at deploy time via bytecode extraction (PUSH32
