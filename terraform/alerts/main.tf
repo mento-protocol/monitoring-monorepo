@@ -91,9 +91,9 @@ locals {
     local.fx_weekend_gate_promql,
   )
 
-  # ── Deviation Breach Critical annotations ────────────────────────────────
-  # Both critical deviation-breach rules (magnitude-gated and anchored)
-  # render the same Slack diagnostic lines, so we author them once here.
+  # ── Deviation Breach annotations ─────────────────────────────────────────
+  # Deviation-breach rules render the same Slack diagnostic lines, so we
+  # author the shared copy and formatting once here.
   #
   # IMPORTANT — Grafana annotation templates expose Go text/template
   # builtins (`if`, `and`, `index`, `eq`, `len`, …) plus a small set of
@@ -105,10 +105,12 @@ locals {
   # this reason.
   #
   # Strategy:
-  #   - `current_deviation` reads `$values.Dev.Value` from a query that
+  #   - `deviation_*_summary` reads `$values.Dev.Value` from a query that
   #     pre-computes `(mento_pool_deviation_ratio - 1) * 100` in PromQL.
-  #     Rendering branches by magnitude so the line stays scannable across
-  #     four orders of magnitude (5% → 44M%):
+  #     The warning rule reads its duration from `$values.BreachAge`; the
+  #     critical rule already uses `$values.A` as breach age. Rendering branches
+  #     by magnitude so summaries stay scannable across four orders of
+  #     magnitude ("Pool 5% above…" → "Pool 44M% above…"):
   #       - < 1000:   integer percent ("44%")
   #       - 1000–9999: thousand-separated ("1,234%") — Go templates have
   #         no native %`,d formatter and Grafana's template engine doesn't
@@ -130,12 +132,11 @@ locals {
   #     Rounding to whole percentages is intentional here: the diagnostic
   #     alert signal is "100% USDT / 0% USDm", not tiny dust precision.
   #   - `rebalance_reason` reads `$values.B.Labels.reason_message` for the
-  #     bounded Solidity-error explanation and `$values.B.Labels.reason_code`
-  #     for the decoded custom-error code (for example
-  #     `CDPLS_STABILITY_POOL_BALANCE_TOO_LOW`). The message is terminated
-  #     with a period in the template since ERROR_MESSAGES entries are bare
-  #     phrases — keeps the shared dashboard tooltip's em-dash-joined render
-  #     path uncluttered.
+  #     bounded Solidity-error explanation. The decoded `reason_code` remains
+  #     on the gauge for diagnostics, but is intentionally not rendered in
+  #     Slack. The message is terminated with a period in the template since
+  #     ERROR_MESSAGES entries are bare phrases — keeps the shared dashboard
+  #     tooltip's em-dash-joined render path uncluttered.
   #   - For Celo reserve-strategy pools, `rebalance_reason` OPTIONALLY appends
   #     ` Reserve Balance: X.XX <token>` when the firing pool's `pair` matches
   #     a USD-pegged stable we have Aegis coverage for (USDC / USDT / axlUSDC).
@@ -148,19 +149,48 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  deviation_critical_current_deviation_annotation = <<-EOT
+  deviation_warning_summary_annotation           = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
-        {{ printf "%.0f%%" $dev }} above threshold
+        {{- if $values.BreachAge -}}
+          {{- printf "Pool %.0f%% above 1%% tolerance for %s." $dev (humanizeDuration $values.BreachAge.Value) -}}
+        {{- else -}}
+          {{- printf "Pool %.0f%% above 1%% tolerance." $dev -}}
+        {{- end -}}
       {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
-        {{ printf "%.0f,%03.0f%%" $values.DevQ.Value $values.DevR.Value }} above threshold
+        {{- if $values.BreachAge -}}
+          {{- printf "Pool %.0f,%03.0f%% above 1%% tolerance for %s." $values.DevQ.Value $values.DevR.Value (humanizeDuration $values.BreachAge.Value) -}}
+        {{- else -}}
+          {{- printf "Pool %.0f,%03.0f%% above 1%% tolerance." $values.DevQ.Value $values.DevR.Value -}}
+        {{- end -}}
       {{- else -}}
-        {{ humanize $dev }}% above threshold
+        {{- if $values.BreachAge -}}
+          {{- printf "Pool %s%% above 1%% tolerance for %s." (humanize $dev) (humanizeDuration $values.BreachAge.Value) -}}
+        {{- else -}}
+          {{- printf "Pool %s%% above 1%% tolerance." (humanize $dev) -}}
+        {{- end -}}
       {{- end -}}
+    {{- else -}}
+      Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_current_reserves_annotation  = <<-EOT
+  deviation_critical_summary_annotation          = <<-EOT
+    {{- if $values.Dev -}}
+      {{- $dev := $values.Dev.Value -}}
+      {{- $age := humanizeDuration $values.A.Value -}}
+      {{- if lt $dev 1000.0 -}}
+        {{- printf "Pool %.0f%% above 5%% threshold for %s — rebalancer not closing breach." $dev $age -}}
+      {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
+        {{- printf "Pool %.0f,%03.0f%% above 5%% threshold for %s — rebalancer not closing breach." $values.DevQ.Value $values.DevR.Value $age -}}
+      {{- else -}}
+        {{- printf "Pool %s%% above 5%% threshold for %s — rebalancer not closing breach." (humanize $dev) $age -}}
+      {{- end -}}
+    {{- else -}}
+      Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
+    {{- end -}}
+  EOT
+  deviation_critical_current_reserves_annotation = <<-EOT
     {{- if and $values.R0 $values.R1 -}}
       {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
     {{- end -}}
@@ -176,7 +206,8 @@ locals {
   #   - `{{ if $rm }}` — `reason_message` is 1:1 with `reason_code` by
   #     construction; the nil-and-emptystring guard is defensive against
   #     a misconfigured probe writing the gauge without the label.
-  #     Renders the bounded message, decoded custom-error code, then a period.
+  #     Renders the bounded message with a period; the decoded custom-error
+  #     code stays available on the Prometheus label for diagnostics.
   #   - inner Aegis dispatch — each ResX query is already pair-scoped via
   #     the cross-join (pair="USDC/USDm" etc.), so only the matching pool
   #     instance sees a non-nil $values.ResX. The chain/pair guards here
@@ -185,9 +216,8 @@ locals {
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
-      {{- $rc := index $values.B.Labels "reason_code" -}}
       {{- if $rm -}}
-        {{- $rm }}{{ if $rc }} (`{{ $rc }}`){{ end }}.
+        {{- $rm }}.
         {{- $pair := index $labels "pair" -}}
         {{- $chain := index $labels "chain_name" -}}
         {{- if and (eq $chain "celo") (eq $pair "USDC/USDm") $values.ResUSDC -}}
@@ -201,9 +231,9 @@ locals {
     {{- end -}}
   EOT
 
-  # ── Deviation Breach Critical annotation-only data sources ───────────────
-  # Both critical rules (magnitude-gated + anchored) wire the same instant
-  # queries into `$values.*` so the annotation locals above can render.
+  # ── Deviation Breach annotation-only data sources ────────────────────────
+  # Deviation breach rules wire the same instant queries into `$values.*` so
+  # the annotation locals above can render.
   # Authored once here and consumed by `dynamic` blocks in `rules-fpmms.tf`
   # so a query-shape change (new annotation, different time range) lands
   # in one place. The threshold node is rule-specific (warning has a
@@ -227,7 +257,7 @@ locals {
   #     label_replace renames "chain" → "chain_name" for the join key;
   #     the `* 0 + 1` scalar ensures the multiplier is 1 (not the deviation
   #     value); pair filter scopes each ResX var to its own alert instance.
-  deviation_critical_annotation_queries = [
+  deviation_annotation_queries = [
     {
       ref_id = "Dev"
       expr   = "(mento_pool_deviation_ratio - 1) * 100"
@@ -284,14 +314,14 @@ locals {
   # subset so unused deviation/reserve-share queries cannot add eval cost or
   # widen the NoData surface.
   deviation_rebalancer_annotation_queries = [
-    for query in local.deviation_critical_annotation_queries : query
+    for query in local.deviation_annotation_queries : query
     if contains(["B", "ResUSDC", "ResUSDT", "ResAxlUSDC"], query.ref_id)
   ]
 
   # ── Oracle Jump Critical annotation-only data sources ─────────────────────
   # Annotation queries for the `Oracle Jump Far Above Swap Fee` rule, fed
   # into the rule's `dynamic "data"` block. Same pattern as
-  # `deviation_critical_annotation_queries` above — kept out of the threshold
+  # `deviation_annotation_queries` above — kept out of the threshold
   # condition so a missing series leaves the matching annotation guard
   # empty instead of suppressing the alert.
   #

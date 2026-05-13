@@ -54,18 +54,16 @@ locals {
   #      intentionally suppressed in Slack to keep warning messages at a
   #      glance-able 4 lines.
   #   4. Optional KPI lines from rule-specific annotations (rebalance_reason,
-  #      current_deviation, current_reserves, current_oracle_price,
-  #      previous_oracle_price, …). Each guarded by `{{ if .Annotations.X }}`
+  #      current_reserves, current_oracle_price, previous_oracle_price, …).
+  #      Each guarded by `{{ if .Annotations.X }}`
   #      so rules that don't set the annotation render nothing — no empty
   #      "*Foo:*" placeholder. Add new lines here when introducing rule-
   #      specific context fields; rules that don't set them are unaffected.
   #
   #      The *Rebalance Blocked* row is sourced from the metrics-bridge
-  #      `mento_pool_rebalance_blocked` gauge (currently set on
-  #      `Deviation Breach Critical` and its anchored sibling) so the
-  #      operator sees the bounded Solidity-error explanation plus decoded
-  #      custom-error code (e.g. "Reserve has insufficient collateral
-  #      (`RLS_RESERVE_OUT_OF_COLLATERAL`)") inline with the breach.
+  #      `mento_pool_rebalance_blocked` gauge, so the operator sees the
+  #      bounded Solidity-error explanation inline with the breach while the
+  #      decoded custom-error code remains on the gauge for diagnostics.
   #      For Celo USDC/USDT/axlUSDC pools the row also appends the
   #      Reserve's live ERC20 balance from Aegis ("Reserve Balance:
   #      0.05 USDT") so operators can see at a glance how short the
@@ -73,9 +71,9 @@ locals {
   #      the RPC failed — the breach alert keeps its normal shape.
   #
   #      Deviation-breach alerts deliberately render in operator triage order:
-  #      message, deviation, reserves, rebalance-blocked reason, then start
-  #      time. Rebalancer alerts may add Last Rebalance / Root Cause rows
-  #      when the rule exposes those annotations.
+  #      message, reserves, rebalance-blocked reason, then start time.
+  #      Rebalancer alerts may add Last Rebalance / Root Cause rows when the
+  #      rule exposes those annotations.
   #   5. Metadata row: start time only. The per-row `View alert` link was
   #      removed — Grafana's attachment title still links to grafana.com via
   #      the (unconfigurable) `title_link`, so operators retain that path
@@ -112,9 +110,6 @@ locals {
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
-    {{ end -}}
-    {{ if .Annotations.current_deviation -}}
-    *Deviation:* {{ .Annotations.current_deviation }}
     {{ end -}}
     {{ if .Annotations.current_reserves -}}
     *Reserves:* {{ .Annotations.current_reserves }}
