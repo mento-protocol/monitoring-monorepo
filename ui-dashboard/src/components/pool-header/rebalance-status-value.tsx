@@ -169,8 +169,9 @@ export function RebalanceStatusValue({
 
 function buildBlockedTitle(result: RebalanceCheckResult): string {
   const parts: string[] = [];
-  if (result.message) parts.push(result.message);
-  if (result.rawError) parts.push(`[${result.rawError}]`);
+  const message = result.message.trim();
+  if (message) parts.push(message);
+  if (shouldShowRawError(result)) parts.push(`[${result.rawError}]`);
   if (result.enrichment?.type === "cdp") {
     const balance = result.enrichment.stabilityPoolBalance;
     const formatted =
@@ -187,6 +188,19 @@ function buildBlockedTitle(result: RebalanceCheckResult): string {
     );
   }
   return parts.join(" — ");
+}
+
+function shouldShowRawError(result: RebalanceCheckResult): boolean {
+  if (!result.rawError) return false;
+
+  const message = result.message.trim();
+  if (!message) return true;
+
+  return !isTechnicalErrorIdentifier(result.rawError);
+}
+
+function isTechnicalErrorIdentifier(value: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
 }
 
 function getPassiveStatus(
