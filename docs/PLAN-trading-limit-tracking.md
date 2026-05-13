@@ -173,5 +173,5 @@ computeLimitStatus(0, 0)      → "OK"
 ## Notes
 
 - RPC calls on every `Swap` event are deliberate until a correctness-safe contiguity marker exists. A future log-derived steady-state path must prove the stored row includes every prior Swap and must avoid applying future fee state to historical swaps.
-- Windows reset when `block.timestamp - lastUpdated > windowDuration`; matching `TradingLimitsV2.update`, zero-delta swaps return state unchanged before reset checks
+- The local swap-derivation helper was removed when Swap handling moved back to authoritative at-block RPC state. Future reintroduction must first prove stream contiguity and mirror `TradingLimitsV2.update` exactly.
 - VirtualPools: `getTradingLimits` will likely revert. Guard: `if (!isFpmm) return` before RPC call

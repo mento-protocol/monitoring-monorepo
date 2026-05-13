@@ -7,9 +7,6 @@ import type { TradingLimit } from "envio";
 /** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
 export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
 
-const L0_WINDOW_SECONDS = 5n * 60n;
-const L1_WINDOW_SECONDS = 24n * 60n * 60n;
-const BASIS_POINTS_DENOMINATOR = 10_000n;
 const PRESSURE_SCALE = 100_000_000n;
 
 export type TradingLimitConfig = {
@@ -59,59 +56,6 @@ export function resetTradingLimitState(
     netflow0: config.limit0 === 0n ? 0n : (state?.netflow0 ?? 0n),
     netflow1: config.limit1 === 0n ? 0n : (state?.netflow1 ?? 0n),
   };
-}
-
-export function scaleTradingLimitValue(
-  value: bigint,
-  tokenDecimals: number,
-): bigint {
-  if (value === 0n) return 0n;
-  return (
-    (value * 10n ** BigInt(TRADING_LIMITS_INTERNAL_DECIMALS)) /
-    10n ** BigInt(tokenDecimals)
-  );
-}
-
-export function applyTradingLimitSwap(
-  state: TradingLimitState,
-  config: TradingLimitConfig,
-  args: {
-    amountIn: bigint;
-    amountOut: bigint;
-    totalFeeBps: number;
-    blockTimestamp: bigint;
-  },
-): TradingLimitState {
-  if (config.limit0 === 0n && config.limit1 === 0n) return state;
-
-  const scaledAmountIn = scaleTradingLimitValue(args.amountIn, config.decimals);
-  const scaledAmountOut = scaleTradingLimitValue(
-    args.amountOut,
-    config.decimals,
-  );
-  const amountInAfterFees =
-    scaledAmountIn -
-    (scaledAmountIn * BigInt(args.totalFeeBps)) / BASIS_POINTS_DENOMINATOR;
-  const deltaFlow = amountInAfterFees - scaledAmountOut;
-  // Mirrors TradingLimitsV2.update: zero-delta swaps do not reset windows.
-  if (deltaFlow === 0n) return state;
-
-  const next = { ...state };
-  if (config.limit0 > 0n) {
-    if (args.blockTimestamp > next.lastUpdated0 + L0_WINDOW_SECONDS) {
-      next.netflow0 = 0n;
-      next.lastUpdated0 = args.blockTimestamp;
-    }
-    next.netflow0 += deltaFlow;
-  }
-  if (config.limit1 > 0n) {
-    if (args.blockTimestamp > next.lastUpdated1 + L1_WINDOW_SECONDS) {
-      next.netflow1 = 0n;
-      next.lastUpdated1 = args.blockTimestamp;
-    }
-    next.netflow1 += deltaFlow;
-  }
-  return next;
 }
 
 export function buildTradingLimitEntity(args: {
