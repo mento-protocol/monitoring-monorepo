@@ -133,6 +133,12 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
+  deviationOpenBreachPeakRatio: new Gauge({
+    name: "mento_pool_deviation_open_breach_peak_ratio",
+    help: "Peak deviation ratio observed during the currently open breach (currentOpenBreachPeak / currentOpenBreachEntryThreshold). Absent when there is no open breach or the entry threshold is unavailable.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
   limitPressure: new Gauge({
     name: "mento_pool_limit_pressure",
     help: "Trading limit pressure per token direction",
@@ -292,6 +298,14 @@ export function updateMetrics(pools: PoolRow[]): void {
       labels,
       Number(pool.deviationBreachStartedAt),
     );
+    const openBreachPeak = fp(pool.currentOpenBreachPeak);
+    const openBreachEntryThreshold = pool.currentOpenBreachEntryThreshold;
+    if (openBreachPeak > 0 && openBreachEntryThreshold > 0) {
+      gauges.deviationOpenBreachPeakRatio.set(
+        labels,
+        openBreachPeak / openBreachEntryThreshold,
+      );
+    }
     gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
     // Skip only the explicit "-1" no-data sentinel the indexer writes before
     // a pool has ever rebalanced (or for degenerate rebalances with zero

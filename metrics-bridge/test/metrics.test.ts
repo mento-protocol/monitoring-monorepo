@@ -150,6 +150,40 @@ describe("updateMetrics", () => {
     ).toBe(1713200500);
   });
 
+  it("publishes open-breach peak ratio when entry threshold is known", async () => {
+    updateMetrics([
+      makePool({
+        deviationBreachStartedAt: "1713200500",
+        currentOpenBreachPeak: "15000",
+        currentOpenBreachEntryThreshold: 5000,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_open_breach_peak_ratio",
+        poolLabels,
+      ),
+    ).toBe(3);
+  });
+
+  it("skips open-breach peak ratio when entry threshold is absent", async () => {
+    updateMetrics([
+      makePool({
+        deviationBreachStartedAt: "1713200500",
+        currentOpenBreachPeak: "15000",
+        currentOpenBreachEntryThreshold: 0,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_open_breach_peak_ratio",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("sets limit pressure per token index", async () => {
     updateMetrics([makePool()]);
     expect(

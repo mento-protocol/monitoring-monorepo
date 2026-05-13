@@ -10,6 +10,8 @@ export interface PoolRow {
   oracleExpiry: string;
   lastDeviationRatio: string;
   deviationBreachStartedAt: string;
+  currentOpenBreachPeak: string;
+  currentOpenBreachEntryThreshold: number;
   limitStatus: string;
   limitPressure0: string;
   limitPressure1: string;

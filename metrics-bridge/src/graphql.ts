@@ -6,14 +6,14 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 // `BRIDGE_POOLS_QUERY` is the load-bearing one — base pool state for every
 // FPMM gauge. Schema-stable: every field on it has been live in production
-// for >1 release. NEW indexer columns MUST land in
-// `BRIDGE_POOLS_ORACLE_LINEAGE_QUERY` (or a sibling) so a deploy-window
-// schema mismatch only loses the new annotation, not every pool gauge —
-// `fetchPools` falls back to base values when the lineage query fails with
-// an unknown-field error. `lastMedianPrice` is on the BASE query because
-// it predates this PR (used by the indexer's jump computation since the
-// initial Oracle Jump alert), so degraded mode keeps publishing the
-// current-price gauge — only the previous-price pair drops out.
+// for >1 release. NEW indexer columns MUST land in an isolated companion
+// query so a deploy-window schema mismatch only loses the new annotation or
+// alert refinement, not every pool gauge — `fetchPools` falls back to base
+// values when a companion query fails with an unknown-field error.
+// `lastMedianPrice` is on the BASE query because it predates this PR (used
+// by the indexer's jump computation since the initial Oracle Jump alert), so
+// degraded mode keeps publishing the current-price gauge — only the
+// previous-price pair drops out.
 const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
     Pool(where: { source: { _like: "%fpmm%" } }) {
@@ -63,20 +63,50 @@ const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
   }
 `;
 
+// Optional companion query for the open-breach denormalized state. Grafana
+// uses this to keep the critical deviation alert firing until a breach that
+// crossed the critical magnitude actually returns within tolerance.
+const BRIDGE_POOLS_OPEN_BREACH_QUERY = gql`
+  query BridgePoolsOpenBreach {
+    Pool(where: { source: { _like: "%fpmm%" } }) {
+      id
+      currentOpenBreachPeak
+      currentOpenBreachEntryThreshold
+    }
+  }
+`;
+
 type OracleLineageRow = Pick<
   PoolRow,
   "id" | "prevMedianPrice" | "prevMedianAt"
 >;
 
+type OpenBreachRow = Pick<
+  PoolRow,
+  "id" | "currentOpenBreachPeak" | "currentOpenBreachEntryThreshold"
+>;
+
 type BridgePoolsBaseResponse = {
-  Pool: Omit<PoolRow, "prevMedianPrice" | "prevMedianAt">[];
+  Pool: Omit<
+    PoolRow,
+    | "prevMedianPrice"
+    | "prevMedianAt"
+    | "currentOpenBreachPeak"
+    | "currentOpenBreachEntryThreshold"
+  >[];
 };
 
 type BridgePoolsOracleLineageResponse = { Pool: OracleLineageRow[] };
+type BridgePoolsOpenBreachResponse = { Pool: OpenBreachRow[] };
 
 const LINEAGE_DEFAULTS = {
   prevMedianPrice: "0",
   prevMedianAt: "0",
+} as const;
+
+const OPEN_BREACH_DEFAULTS = {
+  currentOpenBreachPeak: "0",
+  currentOpenBreachEntryThreshold: 0,
 } as const;
 
 const client = new GraphQLClient(HASURA_URL);
@@ -96,11 +126,12 @@ function isUnknownFieldError(err: unknown): boolean {
   );
 }
 
-let unknownFieldWarned = false;
+let oracleLineageUnknownFieldWarned = false;
+let openBreachUnknownFieldWarned = false;
 
 export async function fetchPools(): Promise<BridgePoolsResponse> {
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const [base, lineage] = await Promise.all([
+  const [base, lineage, openBreach] = await Promise.all([
     client.request<BridgePoolsBaseResponse>({
       document: BRIDGE_POOLS_QUERY,
       signal,
@@ -112,22 +143,40 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
       })
       .catch((err: unknown) => {
         if (!isUnknownFieldError(err)) throw err;
-        if (!unknownFieldWarned) {
-          unknownFieldWarned = true;
+        if (!oracleLineageUnknownFieldWarned) {
+          oracleLineageUnknownFieldWarned = true;
           console.warn(
             "[metrics-bridge] Hasura schema missing oracle-lineage fields; Oracle Jump previous-price annotation disabled until indexer catches up.",
           );
         }
         return { Pool: [] as OracleLineageRow[] };
       }),
+    client
+      .request<BridgePoolsOpenBreachResponse>({
+        document: BRIDGE_POOLS_OPEN_BREACH_QUERY,
+        signal,
+      })
+      .catch((err: unknown) => {
+        if (!isUnknownFieldError(err)) throw err;
+        if (!openBreachUnknownFieldWarned) {
+          openBreachUnknownFieldWarned = true;
+          console.warn(
+            "[metrics-bridge] Hasura schema missing open-breach fields; deviation critical de-escalation persistence disabled until indexer catches up.",
+          );
+        }
+        return { Pool: [] as OpenBreachRow[] };
+      }),
   ]);
 
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
+  const openBreachById = new Map(openBreach.Pool.map((p) => [p.id, p]));
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
       ...LINEAGE_DEFAULTS,
+      ...OPEN_BREACH_DEFAULTS,
       ...lineageById.get(p.id),
+      ...openBreachById.get(p.id),
     })),
   };
 }

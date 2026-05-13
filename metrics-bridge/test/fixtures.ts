@@ -17,6 +17,8 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleExpiry: "300",
     lastDeviationRatio: "0.420000",
     deviationBreachStartedAt: "0",
+    currentOpenBreachPeak: "0",
+    currentOpenBreachEntryThreshold: 0,
     limitStatus: "OK",
     limitPressure0: "0.1230",
     limitPressure1: "0.0050",

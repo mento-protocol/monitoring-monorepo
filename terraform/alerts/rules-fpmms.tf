@@ -505,7 +505,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within the critical threshold."
+      resolved_summary = "Pool is back within tolerance."
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -541,11 +541,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
       severity = "critical"
     }
 
-    # The Prometheus expression: seconds since breach started, gated on BOTH
-    # an active breach (breach_start > 0) AND current magnitude above 1.05
-    # (5% over threshold). Only sustained large breaches escalate to critical;
-    # smaller-but-prolonged breaches stay at warning. When either gate is
-    # false, the series is dropped — threshold below never sees it.
+    # The Prometheus expression: seconds since breach started, gated on an
+    # active breach (breach_start > 0), current magnitude still above the
+    # 1.01 warning tolerance, and either current OR open-breach peak
+    # magnitude above 1.05 (5% over threshold). Once an open breach crosses
+    # critical it stays with the critical rule until recovered, so warning
+    # notification suppression cannot create a silent de-escalation gap.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid

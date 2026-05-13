@@ -1,4 +1,7 @@
-import { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thresholds";
+import {
+  DEVIATION_CRITICAL_RATIO,
+  DEVIATION_TOLERANCE_RATIO,
+} from "@mento-protocol/monitoring-config/thresholds";
 
 const DEFAULT_HASURA_URL = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql";
 
@@ -27,14 +30,15 @@ export const REBALANCE_PROBE_EVERY_N_POLLS =
     ? Math.floor(rawRebalanceProbeEvery)
     : 5;
 
-// Pools with a deviation ratio strictly above this threshold are eligible
-// for the rebalance-reason probe. Mirrors the `> 1.05` gate on the
-// `Deviation Breach Critical` rule (terraform/alerts/rules-fpmms.tf:470)
-// so the annotation only attaches to alerts that can actually fire. Sourced
-// from `@mento-protocol/monitoring-config/thresholds` so a future bump of the
+// Pools above tolerance whose current ratio or open-breach peak crossed this
+// threshold are eligible for the rebalance-reason probe. Mirrors the
+// `Deviation Breach Critical` rule so the annotation only attaches to alerts
+// that can actually fire. Sourced from
+// `@mento-protocol/monitoring-config/thresholds` so a future bump of the
 // critical magnitude lands in one place across TS packages (the HCL literal in
 // rules-fpmms.tf still has to be edited manually — see that file's comments).
 export const REBALANCE_PROBE_DEVIATION_THRESHOLD = DEVIATION_CRITICAL_RATIO;
+export const REBALANCE_PROBE_TOLERANCE_THRESHOLD = DEVIATION_TOLERANCE_RATIO;
 
 // Cap simultaneous probe RPC calls so a stuck endpoint can't backpressure
 // the next Hasura poll. At Mento's scale 0–3 pools are typically eligible

@@ -91,15 +91,23 @@ locals {
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
   )
+  # Critical magnitude is sticky for the life of the open breach: once the
+  # indexer's open-breach peak has crossed 1.05x, the critical alert stays
+  # responsible until the current ratio is back within the warning tolerance.
+  # The `or` fallback keeps the old current-ratio-only semantics during the
+  # rollout window before metrics-bridge publishes the peak-ratio gauge.
+  deviation_critical_magnitude_promql = "(mento_pool_deviation_open_breach_peak_ratio > 1.05) or on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05)"
   deviation_critical_gate_promql = format(
-    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
+    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.01) and on(chain_id, pool_id, pair) (%s) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
+    local.deviation_critical_magnitude_promql,
     local.fx_weekend_suppressed_breach_start_promql,
   )
   # Critical deviation rules threshold on breach age > 1h and then use
   # `for = "1m"` to smooth single-eval ruler glitches. Warning suppression
-  # waits through that same grace so severe fresh breaches still send the
-  # warning page before the critical page takes over.
-  deviation_critical_suppression_seconds = 3660
+  # waits an extra eval after that same grace so severe fresh breaches still
+  # send the warning page before the critical page takes over, without
+  # resolving the warning before the critical rule can fire.
+  deviation_critical_suppression_seconds = 3720
   deviation_critical_active_promql = format(
     "(%s) > %d",
     local.deviation_critical_gate_promql,
@@ -198,7 +206,9 @@ locals {
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- $age := humanizeDuration $values.A.Value -}}
-      {{- if lt $dev 1000.0 -}}
+      {{- if lt $dev 5.0 -}}
+        {{- printf "Pool crossed 5%% threshold and remains %.0f%% above 1%% tolerance for %s — rebalancer not closing breach." $dev $age -}}
+      {{- else if lt $dev 1000.0 -}}
         {{- printf "Pool %.0f%% above 5%% threshold for %s — rebalancer not closing breach." $dev $age -}}
       {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
         {{- printf "Pool %.0f,%03.0f%% above 5%% threshold for %s — rebalancer not closing breach." $values.DevQ.Value $values.DevR.Value $age -}}
