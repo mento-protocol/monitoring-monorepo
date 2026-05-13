@@ -124,7 +124,7 @@ export function buildTradingLimitEntityFromRpc(args: {
 export function computeLimitStatus(p0: number, p1: number): string {
   const worst = Math.max(p0, p1);
   if (worst >= 1.0) return "CRITICAL";
-  if (worst > 0.8) return "WARN";
+  if (worst >= 0.8) return "WARN";
   return "OK";
 }
 
@@ -173,5 +173,5 @@ function isAtOrOverLimit(netflow: bigint, limit: bigint): boolean {
 function isAboveWarnLimit(netflow: bigint, limit: bigint): boolean {
   if (limit === 0n) return false;
   const abs = netflow < 0n ? -netflow : netflow;
-  return abs * 10n > limit * 8n;
+  return abs * 10n >= limit * 8n;
 }

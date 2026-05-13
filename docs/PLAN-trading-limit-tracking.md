@@ -22,7 +22,7 @@ Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
 
 **Thresholds (Roman's spec):**
 
-- WARN: `limitPressure > 0.8`
+- WARN: `limitPressure >= 0.8`
 - CRITICAL: `limitPressure ≥ 1.0`
 
 The `TradingLimitConfigured` event fires when limits are changed (`configureTradingLimit` call).
@@ -93,7 +93,7 @@ Update on every Swap handler after computing TradingLimit.
 function computeLimitStatus(p0: number, p1: number): string {
   const worst = Math.max(p0, p1);
   if (worst >= 1.0) return "CRITICAL";
-  if (worst > 0.8) return "WARN";
+  if (worst >= 0.8) return "WARN";
   return "OK";
 }
 ```
@@ -159,7 +159,7 @@ computeLimitStatus(0, 0)      → "OK"
 
 1. **Pool list** shows `Limit` column alongside `Health` — all 4 FPMM pools show a badge, all 12 VirtualPools show ⚪
 2. **FPMM pool detail** → Overview tab → `LimitPanel` shows two progress bars (token0 / token1)
-3. **Simulate near-limit:** Wait for a high-volume period or test manually with a simulated high-netflow state — badge should flip to WARN at >80%
+3. **Simulate near-limit:** Wait for a high-volume period or test manually with a simulated high-netflow state — badge should flip to WARN at >=80%
 4. **`TradingLimitConfigured` event:** If a limit is reconfigured on-chain, the badge updates on next indexer sync
 5. **No crashes on VirtualPools** — `getTradingLimits` will revert; handler must guard FPMM-only
 6. **`limitPressure` in Hasura:** Query `TradingLimit` table directly, verify `limitPressure0 + limitPressure1` match manual calculation from `getTradingLimits` RPC call

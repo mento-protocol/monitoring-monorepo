@@ -34,6 +34,30 @@ describe("TradingLimitsV2 state derivation", () => {
     assert.equal(row.limitStatus, "WARN");
   });
 
+  it("classifies exactly 80% pressure as WARN", () => {
+    const limit = 10n * INTERNAL_UNIT;
+    const netflow = 8n * INTERNAL_UNIT;
+
+    const row = buildTradingLimitEntity({
+      id: "pool-token",
+      chainId: 42220,
+      poolId: "42220-0x0000000000000000000000000000000000000001",
+      token: "0x0000000000000000000000000000000000000002",
+      config: { limit0: limit, limit1: 0n },
+      state: {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 0n,
+        netflow0: netflow,
+        netflow1: 0n,
+      },
+      blockNumber: 123n,
+      blockTimestamp: 100_000n,
+    });
+
+    assert.equal(row.limitPressure0, "0.8000");
+    assert.equal(row.limitStatus, "WARN");
+  });
+
   it("reset preserves enabled-window netflow and clears disabled-window netflow", () => {
     const next = resetTradingLimitState(
       {
