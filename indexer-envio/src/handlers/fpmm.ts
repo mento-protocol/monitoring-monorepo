@@ -11,7 +11,7 @@ import {
   computeLimitStatus,
   tradingLimitId,
 } from "../tradingLimits.js";
-import { tradingLimitsEffect } from "../rpc/effects.js";
+import { poolTradingLimitsEffect } from "../rpc/effects.js";
 import { preloadPoolCache, upsertPool, upsertSnapshot } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
@@ -37,21 +37,14 @@ indexer.onEvent(
       ) {
         // Keep processing writes out of preload, but let Envio batch and
         // parallelize the per-swap trading-limit RPC reads. The processing
-        // pass presents the same effect keys and reuses these preload results.
-        await Promise.all([
-          context.effect(tradingLimitsEffect, {
-            chainId: event.chainId,
-            poolAddress: event.srcAddress,
-            token: pool.token0,
-            blockNumber,
-          }),
-          context.effect(tradingLimitsEffect, {
-            chainId: event.chainId,
-            poolAddress: event.srcAddress,
-            token: pool.token1,
-            blockNumber,
-          }),
-        ]);
+        // pass presents the same effect key and reuses these preload results.
+        await context.effect(poolTradingLimitsEffect, {
+          chainId: event.chainId,
+          poolAddress: event.srcAddress,
+          token0: pool.token0,
+          token1: pool.token1,
+          blockNumber,
+        });
       }
       return;
     }
@@ -99,24 +92,27 @@ indexer.onEvent(
       pool.token0 &&
       pool.token1
     ) {
-      const updateTradingLimitFromSwap = async (
+      const limits = await context.effect(poolTradingLimitsEffect, {
+        chainId: event.chainId,
+        poolAddress: event.srcAddress,
+        token0: pool.token0,
+        token1: pool.token1,
+        blockNumber,
+      });
+
+      const updateTradingLimitFromSwap = (
         token: string,
-      ): Promise<TradingLimit | null> => {
+        data: NonNullable<typeof limits>["token0"],
+      ): TradingLimit | null => {
         const tlId = tradingLimitId(poolId, token);
-        const limits = await context.effect(tradingLimitsEffect, {
-          chainId: event.chainId,
-          poolAddress: event.srcAddress,
-          token,
-          blockNumber,
-        });
-        if (!limits) return null;
+        if (!data) return null;
 
         const tl = buildTradingLimitEntityFromRpc({
           id: tlId,
           chainId: event.chainId,
           poolId,
           token,
-          data: limits,
+          data,
           blockNumber,
           blockTimestamp,
         });
@@ -124,10 +120,10 @@ indexer.onEvent(
         return tl;
       };
 
-      const [limits0, limits1] = await Promise.all([
-        updateTradingLimitFromSwap(pool.token0),
-        updateTradingLimitFromSwap(pool.token1),
-      ]);
+      const [limits0, limits1] = [
+        updateTradingLimitFromSwap(pool.token0, limits?.token0 ?? null),
+        updateTradingLimitFromSwap(pool.token1, limits?.token1 ?? null),
+      ];
 
       let worstP0 = 0;
       let worstP1 = 0;

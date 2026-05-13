@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Envio Effect API wrappers for the 16 RPC fetchers used by handlers.
+// Envio Effect API wrappers for RPC fetchers used by handlers.
 //
 // Why effects: with v3 preload optimization enabled by default, Envio runs
 // each handler twice per event (preload + processing). Without the
@@ -576,9 +576,9 @@ export const reportExpiryEffect = createEffect(
 // ---------------------------------------------------------------------------
 // Group E — trading limits.
 // MUST stay `cache: false` permanently (block-scoped state). Swap handlers use
-// this as the authoritative per-swap path because local event derivation cannot
-// prove row contiguity after a transient miss or fee-history correctness during
-// a full replay.
+// the pool-level wrapper as the authoritative per-swap path because local event
+// derivation cannot prove row contiguity after a transient miss or fee-history
+// correctness during a full replay.
 // ---------------------------------------------------------------------------
 
 export const tradingLimitsEffect = createEffect(
@@ -588,9 +588,8 @@ export const tradingLimitsEffect = createEffect(
       chainId: S.int32,
       poolAddress: S.string,
       token: S.string,
-      // Most call sites pass blockNumber; `fetchTradingLimits` accepts it
-      // as optional (the Swap handler always supplies it; UpdateReserves
-      // limits-sync also supplies). Mirror the existing signature.
+      // `fetchTradingLimits` accepts blockNumber as optional; keep the legacy
+      // single-token effect shape available for non-hot-path callers.
       blockNumber: S.optional(S.bigint),
     },
     output: S.nullable(tradingLimitsShape),
@@ -605,6 +604,50 @@ export const tradingLimitsEffect = createEffect(
       input.blockNumber,
       context.log,
     )) ?? null,
+);
+
+const poolTradingLimitsShape = S.schema({
+  token0: S.nullable(tradingLimitsShape),
+  token1: S.nullable(tradingLimitsShape),
+});
+
+export const poolTradingLimitsEffect = createEffect(
+  {
+    name: "poolTradingLimits",
+    input: {
+      chainId: S.int32,
+      poolAddress: S.string,
+      token0: S.string,
+      token1: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(poolTradingLimitsShape),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) => {
+    // Keep the two token reads under one Envio effect envelope. Viem can still
+    // batch the underlying `eth_call`s, while Envio schedules/rate-limits one
+    // effect per swap instead of one per token.
+    const [token0, token1] = await Promise.all([
+      fetchTradingLimits(
+        input.chainId,
+        input.poolAddress,
+        input.token0,
+        input.blockNumber,
+        context.log,
+      ),
+      fetchTradingLimits(
+        input.chainId,
+        input.poolAddress,
+        input.token1,
+        input.blockNumber,
+        context.log,
+      ),
+    ]);
+    if (token0 === null && token1 === null) return null;
+    return { token0, token1 };
+  },
 );
 
 // ---------------------------------------------------------------------------
