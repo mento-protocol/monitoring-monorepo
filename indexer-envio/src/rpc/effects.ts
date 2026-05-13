@@ -221,6 +221,7 @@ export const referenceRateFeedIDEffect = createEffect(
 const INVERT_RATE_FEED_UNKNOWN = -1;
 const INVERT_RATE_FEED_FALSE = 0;
 const INVERT_RATE_FEED_TRUE = 1;
+export const INVERT_RATE_FEED_EFFECT_NAME = "invertRateFeedV2";
 
 export function decodeInvertRateFeedEffectResult(
   value: number,
@@ -233,12 +234,15 @@ export function decodeInvertRateFeedEffectResult(
 
 // Keep the cached output integer-encoded. Hosted Envio v3 rejects cached
 // nullable boolean writes for this effect (`boolean` -> `jsonb[]` cast), while
-// nullable integer effects are used elsewhere successfully. The sentinel keeps
-// the same call-site semantics: null means transient RPC miss, so skip writes
-// and retry later.
+// nullable integer effects are used elsewhere successfully. The effect name is
+// intentionally versioned: older hosted caches for `invertRateFeed` may contain
+// boolean/null payloads from the pre-encoded output schema, and replaying those
+// through the integer schema would fail decode before self-heal can run. The
+// sentinel keeps the same call-site semantics: null means transient RPC miss,
+// so skip writes and retry later.
 export const invertRateFeedEffect = createEffect(
   {
-    name: "invertRateFeed",
+    name: INVERT_RATE_FEED_EFFECT_NAME,
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.int32,
     rateLimit: { calls: 200, per: "second" },

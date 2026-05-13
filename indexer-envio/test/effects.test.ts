@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { decodeInvertRateFeedEffectResult } from "../src/rpc/effects.js";
+import {
+  decodeInvertRateFeedEffectResult,
+  INVERT_RATE_FEED_EFFECT_NAME,
+} from "../src/rpc/effects.js";
 
 describe("decodeInvertRateFeedEffectResult", () => {
   it("decodes the cached integer sentinel to nullable boolean semantics", () => {
@@ -13,5 +16,9 @@ describe("decodeInvertRateFeedEffectResult", () => {
       () => decodeInvertRateFeedEffectResult(2),
       /Unexpected encoded value 2/,
     );
+  });
+
+  it("versions the hosted cache key for the integer-encoded schema", () => {
+    assert.equal(INVERT_RATE_FEED_EFFECT_NAME, "invertRateFeedV2");
   });
 });
