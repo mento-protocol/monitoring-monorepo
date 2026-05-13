@@ -236,7 +236,7 @@ locals {
     {{- end -}}
   EOT
   deviation_breach_started_at_annotation = <<-EOT
-    {{- if $values.BreachStart -}}
+    {{- if and $values.BreachStart (gt $values.BreachStart.Value 0.0) -}}
       {{- $started := toTime $values.BreachStart.Value -}}
       {{- $started.Format "Mon Jan 02 15:04 UTC" -}}
     {{- end -}}
