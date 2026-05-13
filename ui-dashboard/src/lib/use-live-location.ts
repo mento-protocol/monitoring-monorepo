@@ -12,8 +12,15 @@ declare global {
   }
 }
 
+let locationChangeQueued = false;
+
 function dispatchLocationChange() {
-  window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+  if (locationChangeQueued) return;
+  locationChangeQueued = true;
+  queueMicrotask(() => {
+    locationChangeQueued = false;
+    window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+  });
 }
 
 function patchHistoryMethods() {

@@ -29,9 +29,23 @@ pnpm dev     # Start dev server
 pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
+pnpm test:browser  # Fixture-driven Playwright browser interaction tests
+pnpm test:mutation  # Targeted StrykerJS baseline for src/lib/weekend.ts
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
+
+## Browser Interaction Tests
+
+`pnpm test:browser` starts the real Next.js app plus
+`tests/browser/fixtures/hasura-fixture-server.mjs`, then runs Playwright tests
+under `tests/browser/`. The fixture server is the only GraphQL source for these
+tests; never point browser tests at hosted Hasura/Envio. The current pilot
+intentionally uses an app-level harness instead of Playwright Component Testing
+because the covered risks are App Router navigation, URL state, hydration, CSP,
+SWR request behavior, and real browser focus. The agent quality gate installs
+Playwright Chromium before running this command; for direct fresh-checkout runs,
+run `pnpm exec playwright install chromium` once first.
 
 ## React Doctor
 
@@ -70,6 +84,10 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   (client code intentionally keeps spread+sort for older browser support) and
   `effect/no-event-handler` from the companion effect plugin (false-positives
   on debounced search and URL-state sync helpers).
+- **Silenced for local test harness entrypoints:** `knip/files` on
+  `tests/browser/fixtures/**`, which Playwright loads at runtime, and
+  `vitest.mutation.config.ts`, which Stryker loads by filename from
+  `stryker.config.mjs`.
 - **Silenced in `src/lib/graphql.ts` only:** `knip/exports` for the
   `HASURA_TIMEOUT_MS` backward-compat re-export. New imports still target
   `@/lib/hasura-timeout` directly so server code does not pull in SWR.

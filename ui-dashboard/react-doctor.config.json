@@ -24,6 +24,10 @@
         "rules": ["knip/files"]
       },
       {
+        "files": ["tests/browser/fixtures/**", "vitest.mutation.config.ts"],
+        "rules": ["knip/files"]
+      },
+      {
         "files": ["src/lib/graphql.ts"],
         "rules": ["knip/exports"]
       }

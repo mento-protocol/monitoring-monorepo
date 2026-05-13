@@ -378,6 +378,13 @@ add_package_quality_commands() {
   add_command "pnpm --filter ${package_name} test" "$reason"
 }
 
+add_dashboard_quality_commands() {
+  local reason="$1"
+  add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
+  add_command "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium" "$reason"
+  add_command "pnpm --filter @mento-protocol/ui-dashboard test:browser" "$reason"
+}
+
 add_ui_react_doctor_full_score() {
   local reason="$1"
   add_command "bash scripts/check-react-doctor-score.sh" "$reason"
@@ -388,10 +395,15 @@ add_ui_react_doctor_diff() {
   add_command "bash scripts/check-react-doctor-diff.sh $(quote_path "$base_ref")" "$reason"
 }
 
+add_ui_mutation_baseline() {
+  local reason="$1"
+  add_command "pnpm dashboard:mutation" "$reason"
+}
+
 add_workspace_quality_commands() {
   local reason="$1"
   add_all_indexer_codegen "$reason"
-  add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
+  add_dashboard_quality_commands "$reason"
   add_ui_react_doctor_full_score "$reason"
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
@@ -538,7 +550,7 @@ while IFS= read -r path; do
   case "$path" in
     ui-dashboard/*)
       add_surface "ui-dashboard"
-      add_package_quality_commands "@mento-protocol/ui-dashboard" "ui-dashboard changed"
+      add_dashboard_quality_commands "ui-dashboard changed"
       add_ui_react_doctor_diff "ui-dashboard client code should keep React Doctor clean"
       add_ui_react_doctor_full_score "ui-dashboard React Doctor score should stay 100"
       case "$path" in
@@ -559,6 +571,12 @@ while IFS= read -r path; do
       case "$path" in
         ui-dashboard/src/components/*|ui-dashboard/src/app/*/_components/*|ui-dashboard/src/lib/use-roving-*)
           add_checklist "docs/pr-checklists/keyboard-a11y-controlled-widgets.md" "controlled dashboard component changed"
+          ;;
+      esac
+      case "$path" in
+        ui-dashboard/stryker.config.mjs|ui-dashboard/vitest.mutation.config.ts|ui-dashboard/src/lib/weekend.ts|ui-dashboard/src/lib/__tests__/weekend.test.ts)
+          add_checklist "docs/pr-checklists/mutation-testing.md" "dashboard mutation baseline changed"
+          add_ui_mutation_baseline "dashboard mutation baseline changed"
           ;;
       esac
       ;;

@@ -478,10 +478,10 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # sentinel path, where the bridge gates the gauge and `Dev` returns
       # no series.
       current_deviation = local.deviation_critical_current_deviation_annotation
-      # Pre-rendered "17% axlUSDC / 83% USDm". Reads `humanizePercentage`
-      # of each gauge value (already in [0, 1]) and the per-series
-      # `token_symbol` label written by metrics-bridge. No sprig — map
-      # access via `.Labels.token_symbol` is a Go-template builtin.
+      # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
+      # percentage values from R0/R1 and the per-series `token_symbol`
+      # label written by metrics-bridge. No sprig — map access via
+      # `.Labels.token_symbol` is a Go-template builtin.
       # When metrics-bridge can't resolve a contract address it falls
       # back to literal "token0" / "token1" (matches the existing `pair`
       # fallback semantics).
@@ -548,7 +548,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
     #     Integer percent + `printf "%.0f%%"` keeps a 122x breach out of
     #     scientific notation (humanizePercentage's `%.4g` would render
     #     "1.219e+04% above threshold").
-    #   - R0/R1 are FLAT gauges (no `token_index` label) so the per-instance
+    #   - R0/R1 scale the FLAT reserve-share gauges by 100 for display
+    #     (labels preserved, no `token_index` label) so the per-instance
     #     match against query A's `pool_id/chain_id/pair` fingerprint binds.
     #     A previous version with `token_index` silently dropped
     #     `$values.R0` / `$values.R1`. The `token_symbol` extension is 1:1
@@ -639,8 +640,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line
-      # typically renders. See the magnitude-gated rule for the no-sprig
-      # rationale.
+      # typically renders. See the magnitude-gated rule for the display
+      # formatting rationale.
       current_reserves = local.deviation_critical_current_reserves_annotation
       # Same rebalance-reason annotation as the magnitude-gated critical
       # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
@@ -648,8 +649,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # in this state typically slip past) — but if a probe DID run before
       # the ratio gauge dropped, the most-recent reason annotation would
       # still be present here. Reads `$values.B.Labels.*` for the bounded
-      # reason enum (NOT `$labels`, which exposes only the firing query's
-      # labels), and dispatches to the matching Aegis reserve-balance
+      # reason label pair (NOT `$labels`, which exposes only the firing
+      # query's labels), and dispatches to the matching Aegis reserve-balance
       # series via `$labels.pair`. When neither the reason labels nor the
       # Aegis series are present, the `{{ if … }}` guards collapse the
       # annotation cleanly.
