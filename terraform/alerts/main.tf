@@ -86,14 +86,24 @@ locals {
     local.fx_weekend_gate_promql,
   )
 
-  deviation_critical_gate_promql = format(
-    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
-    local.fx_weekend_suppressed_breach_start_promql,
-  )
   fx_weekend_suppressed_breach_start_promql = format(
     "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
+  )
+  deviation_critical_gate_promql = format(
+    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
+    local.fx_weekend_suppressed_breach_start_promql,
+  )
+  # Critical deviation rules threshold on breach age > 1h and then use
+  # `for = "1m"` to smooth single-eval ruler glitches. Warning suppression
+  # waits through that same grace so severe fresh breaches still send the
+  # warning page before the critical page takes over.
+  deviation_critical_suppression_seconds = 3660
+  deviation_critical_active_promql = format(
+    "(%s) > %d",
+    local.deviation_critical_gate_promql,
+    local.deviation_critical_suppression_seconds,
   )
 
   # ── Deviation Breach annotations ─────────────────────────────────────────

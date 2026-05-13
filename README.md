@@ -146,7 +146,7 @@ Push to the `envio` branch to trigger a hosted reindex:
 
 ```bash
 pnpm deploy:indexer
-pnpm deploy:indexer:status
+pnpm deploy:indexer:status --watch
 pnpm deploy:indexer:promote
 ```
 

@@ -40,7 +40,7 @@ pnpm deploy:indexer
 Then wait for the deployment to catch up and promote it:
 
 ```bash
-pnpm deploy:indexer:status
+pnpm deploy:indexer:status --watch
 pnpm deploy:indexer:promote
 ```
 
@@ -56,7 +56,7 @@ git push origin main:envio
 
 ### After Redeployment Checklist
 
-1. Wait for Envio to catch up to the chain head (`pnpm deploy:indexer:status` or [envio.dev/app](https://envio.dev/app)).
+1. Wait for Envio to catch up to the chain head (`pnpm deploy:indexer:status --watch` or [envio.dev/app](https://envio.dev/app)).
 2. Promote the caught-up deployment (`pnpm deploy:indexer:promote`) so the static production endpoint serves it.
 3. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
 4. Verify monitoring.mento.org loads data.
