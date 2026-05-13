@@ -19,6 +19,8 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+const analyticsEnabled =
+  process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES !== "true";
 
 // Static fallback for every route. The homepage overrides via its own
 // `generateMetadata` in `app/page.tsx` — keeping the dynamic fetch scoped
@@ -69,7 +71,7 @@ export default async function RootLayout({
             </Suspense>
           </SwrProvider>
         </SessionProvider>
-        <Analytics mode={analyticsMode} />
+        {analyticsEnabled && <Analytics mode={analyticsMode} />}
       </body>
     </html>
   );
