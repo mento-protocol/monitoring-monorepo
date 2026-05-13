@@ -167,6 +167,14 @@ export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
   id: string;
 };
 export type BrokerAggregatorWindowRow = AggregatorWindowRow;
+export type BrokerAggregatorTraderDayMarkerRow = {
+  id: string;
+};
+export type BrokerTraderViaRoute = {
+  aggregator: string;
+  days: number;
+  latestTimestamp: number;
+};
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
@@ -306,6 +314,114 @@ export function aggregateBrokerTradersByWindow(
 }
 
 export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
+
+const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
+
+/**
+ * Build a bounded Hasura `_regex` filter for BrokerAggregatorTraderDayMarker.
+ * The marker table only exposes the composite id, so the filter encodes the
+ * visible `(chainId, trader)` rows and active UTC-day buckets.
+ */
+export function buildBrokerViaMarkerIdRegex(
+  rows: readonly BrokerTraderWindowRow[],
+  cutoff: number,
+): string | null {
+  if (rows.length === 0) return null;
+
+  const chainIds = [...new Set(rows.map((row) => row.chainId))].sort(
+    (a, b) => a - b,
+  );
+  const traders = [
+    ...new Set(rows.map((row) => row.trader.toLowerCase())),
+  ].sort();
+  if (chainIds.length === 0 || traders.length === 0) return null;
+
+  const todayMidnightUtc =
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const dayPart =
+    cutoff > 0 ? dayAlternation(cutoff, todayMidnightUtc) : String.raw`\d+`;
+  if (!dayPart) return null;
+
+  const chainPart = chainIds.map(String).join("|");
+  const traderPart = traders.map(escapeRegex).join("|");
+  return `^(?:${chainPart})-.+-(?:${traderPart})-(?:${dayPart})$`;
+}
+
+/**
+ * Parse v2 route marker ids into per-trader route labels. The route order is
+ * by active-day count, then recency, then label for deterministic rendering.
+ */
+export function aggregateBrokerViaByTrader(
+  rows: readonly BrokerAggregatorTraderDayMarkerRow[],
+): Map<string, BrokerTraderViaRoute[]> {
+  const byTrader = new Map<string, Map<string, BrokerTraderViaRoute>>();
+  for (const row of rows) {
+    const parsed = parseBrokerViaMarkerId(row.id);
+    if (!parsed) continue;
+    const key = `${parsed.chainId}-${parsed.trader}`;
+    let routes = byTrader.get(key);
+    if (!routes) {
+      routes = new Map<string, BrokerTraderViaRoute>();
+      byTrader.set(key, routes);
+    }
+    const existing = routes.get(parsed.aggregator);
+    if (existing) {
+      existing.days += 1;
+      existing.latestTimestamp = Math.max(
+        existing.latestTimestamp,
+        parsed.timestamp,
+      );
+    } else {
+      routes.set(parsed.aggregator, {
+        aggregator: parsed.aggregator,
+        days: 1,
+        latestTimestamp: parsed.timestamp,
+      });
+    }
+  }
+
+  return new Map(
+    [...byTrader.entries()].map(([key, routes]) => [
+      key,
+      [...routes.values()].sort((a, b) => {
+        if (b.days !== a.days) return b.days - a.days;
+        if (b.latestTimestamp !== a.latestTimestamp) {
+          return b.latestTimestamp - a.latestTimestamp;
+        }
+        return a.aggregator.localeCompare(b.aggregator);
+      }),
+    ]),
+  );
+}
+
+function parseBrokerViaMarkerId(id: string): {
+  chainId: number;
+  aggregator: string;
+  trader: string;
+  timestamp: number;
+} | null {
+  const match = BROKER_VIA_MARKER_ID_RE.exec(id);
+  if (!match) return null;
+  return {
+    chainId: Number(match[1]),
+    aggregator: match[2]!,
+    trader: match[3]!,
+    timestamp: Number(match[4]),
+  };
+}
+
+function dayAlternation(from: number, to: number): string | null {
+  if (from > to) return null;
+  const days: string[] = [];
+  for (let day = from; day <= to; day += SECONDS_PER_DAY) {
+    days.push(String(day));
+  }
+  return days.join("|");
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /**
  * Day-keyed totals across all traders in the window. Drives the volume

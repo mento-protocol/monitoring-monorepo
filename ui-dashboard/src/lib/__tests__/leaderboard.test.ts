@@ -2,10 +2,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   aggregateBrokerAggregatorsByWindow,
   aggregateBrokerTradersByWindow,
+  aggregateBrokerViaByTrader,
   aggregateDailyVolume,
   aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
+  buildBrokerViaMarkerIdRegex,
   buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
@@ -1056,6 +1058,79 @@ describe("aggregateBrokerAggregatorsByWindow", () => {
     const reversed = [...rows].reverse();
     const [row2] = aggregateBrokerAggregatorsByWindow(reversed);
     expect(row2!.lastSeenAggregatorAddress).toBe("0xrouter2");
+  });
+});
+
+describe("v2 trader Via marker helpers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("builds a bounded marker-id regex for visible traders and UTC days", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
+    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
+    const regex = buildBrokerViaMarkerIdRegex(
+      [
+        {
+          chainId: 42220,
+          trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          swapCount: 1,
+          volumeUsdWei: BigInt(1),
+          isSystemAddress: false,
+          lastSeenTimestamp: cutoff,
+        },
+        {
+          chainId: 42220,
+          trader: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          swapCount: 1,
+          volumeUsdWei: BigInt(1),
+          isSystemAddress: false,
+          lastSeenTimestamp: cutoff,
+        },
+      ],
+      cutoff,
+    );
+
+    expect(regex).toBe(
+      "^" +
+        "(?:42220)-.+-" +
+        "(?:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)-" +
+        "(?:1778544000|1778630400)$",
+    );
+  });
+
+  it("aggregates parsed marker ids by trader and orders route labels deterministically", () => {
+    const routes = aggregateBrokerViaByTrader([
+      {
+        id: "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+      },
+      {
+        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778371200",
+      },
+      {
+        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+      },
+      {
+        id: "42220-openocean-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778457600",
+      },
+      { id: "malformed" },
+    ]);
+
+    expect(
+      routes
+        .get("42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ?.map((route) => route.aggregator),
+    ).toEqual(["direct", "squid"]);
+    expect(
+      routes.get("42220-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+    ).toEqual([
+      {
+        aggregator: "openocean",
+        days: 1,
+        latestTimestamp: 1778457600,
+      },
+    ]);
   });
 });
 

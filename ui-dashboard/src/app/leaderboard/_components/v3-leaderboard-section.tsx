@@ -13,6 +13,7 @@ import {
 } from "./aggregator-breakdown-section";
 import type { PoolMeta } from "../_lib/types";
 import { V3FlowInsights } from "./v3-flow-insights";
+import { TableSectionTitle } from "./table-section-title";
 
 export function V3LeaderboardSection({
   rangeLabel,
@@ -62,9 +63,12 @@ export function V3LeaderboardSection({
         tableHasError={tableHasError}
       />
       <section>
-        <h2 className="mb-3 text-sm font-medium text-slate-300">
+        <TableSectionTitle
+          label="About top traders table"
+          info="Ranks signer wallets by v3 Mento pool and VirtualPool USD volume in this window. System addresses are hidden unless enabled."
+        >
           Top traders ({rangeLabel})
-        </h2>
+        </TableSectionTitle>
         <LeaderboardTable
           cutoff={cutoff}
           traders={traders}

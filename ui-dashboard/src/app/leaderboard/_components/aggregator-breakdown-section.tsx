@@ -18,6 +18,7 @@ import { networkForChainId } from "@/lib/networks";
 import { cmpBigInt, weiToUsd } from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
+import { TableSectionTitle } from "./table-section-title";
 
 const PAGE_LIMIT = 50;
 
@@ -54,9 +55,13 @@ export function AggregatorBreakdownSection({
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-sm font-medium text-slate-300">
+        <TableSectionTitle
+          className="mb-0"
+          label={`About ${venueLabel} aggregator table`}
+          info={`${venueLabel} route view: groups volume by the transaction entry point, such as direct Mento routes, known aggregators, clusters, system contracts, or unknown routers.`}
+        >
           {venueLabel} volume by aggregator / entry-point ({rangeLabel})
-        </h2>
+        </TableSectionTitle>
         <p className="mt-1 text-xs text-slate-500">
           Canonical name from <code>aggregators.json</code>. Large{" "}
           <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
@@ -249,7 +254,7 @@ function AggregatorTable({
   );
 }
 
-function AggregatorLabel({ name }: { name: string }) {
+export function AggregatorLabel({ name }: { name: string }) {
   const meta = getClusterMetadata(name);
   return (
     <span className="inline-flex items-center gap-1">
