@@ -96,6 +96,17 @@ export const ALL_POOLS_BREACH_ROLLUP = `
       breachCount
       healthBinarySeconds
       healthTotalSeconds
+    }
+  }
+`;
+
+// Live-tail cursor fields for the uptime projection. Kept separate from
+// ALL_POOLS_BREACH_ROLLUP so schema lag on these newer fields still leaves
+// the persisted all-time uptime counters available.
+export const ALL_POOLS_HEALTH_CURSOR = `
+  query AllPoolsHealthCursor($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
       lastOracleSnapshotTimestamp
       lastDeviationRatio
     }

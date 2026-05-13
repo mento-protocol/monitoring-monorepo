@@ -6,6 +6,8 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+};
+type HealthCursorRow = {
   lastOracleSnapshotTimestamp?: string;
   lastDeviationRatio?: string;
 };
@@ -19,12 +21,18 @@ type RollupResult = {
   data?: { Pool: RollupRow[] };
   error?: Error;
 };
+type HealthCursorResult = {
+  data?: { Pool: HealthCursorRow[] };
+  error?: Error;
+  isLoading?: boolean;
+};
 type AnchorResult = {
   data?: { PoolDailySnapshot: DailyAnchorRow[] };
   error?: Error;
 };
 
 let nextRollup: RollupResult = { data: undefined };
+let nextCursor: HealthCursorResult = { data: { Pool: [] } };
 let nextAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
 let anchorVars:
   | { id?: string; chainId?: number; sevenDaysAgo?: number }
@@ -37,6 +45,7 @@ vi.mock("@/lib/graphql", () => ({
   ) => {
     if (query == null) return { data: undefined };
     if (query.includes("PoolBreachRollup")) return nextRollup;
+    if (query.includes("PoolHealthCursor")) return nextCursor;
     if (query.includes("PoolHealth7dAnchor")) {
       anchorVars = variables;
       return nextAnchor;
@@ -63,6 +72,7 @@ const noAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
 
 beforeEach(() => {
   nextRollup = { data: undefined };
+  nextCursor = { data: { Pool: [] } };
   nextAnchor = noAnchor;
   anchorVars = undefined;
 });
@@ -144,6 +154,14 @@ describe("UptimeValue", () => {
           {
             healthBinarySeconds: String(total),
             healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    nextCursor = {
+      data: {
+        Pool: [
+          {
             lastOracleSnapshotTimestamp: String(nowSec - 6 * 3600),
             lastDeviationRatio: "0.010000",
           },
@@ -156,6 +174,45 @@ describe("UptimeValue", () => {
     );
 
     expect(html).toContain("99.19%");
+    expect(html).not.toContain("100.00%");
+  });
+
+  it("falls back to stored counters when the live-tail cursor query is unavailable", () => {
+    const total = 30 * 86400;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    nextCursor = { error: new Error("field not found") };
+
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+
+    expect(html).toContain("100.00%");
+  });
+
+  it("renders N/A while the live-tail cursor query is still loading", () => {
+    const total = 30 * 86400;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    nextCursor = { isLoading: true };
+
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+
+    expect(html).toContain("N/A");
     expect(html).not.toContain("100.00%");
   });
 

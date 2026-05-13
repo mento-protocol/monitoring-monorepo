@@ -5,6 +5,7 @@ import * as queries from "@/lib/queries";
 const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_WITH_HEALTH",
   "ALL_POOLS_BREACH_ROLLUP",
+  "ALL_POOLS_HEALTH_CURSOR",
   "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ORACLE_RATES",
   "RECENT_SWAPS",
@@ -26,6 +27,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_CONFIG_EXT",
   "POOL_V2_EXCHANGE",
   "POOL_BREACH_ROLLUP",
+  "POOL_HEALTH_CURSOR",
   "POOL_HEALTH_7D_ANCHOR",
   "POOL_OPEN_BREACH_TX",
   "POOL_DEVIATION_BREACHES_PAGE",
@@ -184,6 +186,18 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             breachCount
             healthBinarySeconds
             healthTotalSeconds
+          }
+        }
+      `),
+    );
+  });
+
+  it("ALL_POOLS_HEALTH_CURSOR isolates live-tail fields from persisted counters", () => {
+    expect(normalize(queries.ALL_POOLS_HEALTH_CURSOR)).toBe(
+      normalize(`
+        query AllPoolsHealthCursor($chainId: Int!) {
+          Pool(where: { chainId: { _eq: $chainId } }) {
+            id
             lastOracleSnapshotTimestamp
             lastDeviationRatio
           }
@@ -213,12 +227,23 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_CONFIG_EXT).not.toContain("oraclePrice");
   });
 
-  it("POOL_BREACH_ROLLUP returns counters plus the live-tail cursor", () => {
+  it("POOL_BREACH_ROLLUP returns persisted uptime counters", () => {
     expect(queries.POOL_BREACH_ROLLUP).toContain("breachCount");
     expect(queries.POOL_BREACH_ROLLUP).toContain("healthBinarySeconds");
     expect(queries.POOL_BREACH_ROLLUP).toContain("healthTotalSeconds");
-    expect(queries.POOL_BREACH_ROLLUP).toContain("lastOracleSnapshotTimestamp");
-    expect(queries.POOL_BREACH_ROLLUP).toContain("lastDeviationRatio");
+    expect(queries.POOL_BREACH_ROLLUP).not.toContain(
+      "lastOracleSnapshotTimestamp",
+    );
+    expect(queries.POOL_BREACH_ROLLUP).not.toContain("lastDeviationRatio");
+  });
+
+  it("POOL_HEALTH_CURSOR isolates live-tail fields from persisted counters", () => {
+    expect(queries.POOL_HEALTH_CURSOR).toContain("$id: String!");
+    expect(queries.POOL_HEALTH_CURSOR).toContain("$chainId: Int!");
+    expect(queries.POOL_HEALTH_CURSOR).toContain("lastOracleSnapshotTimestamp");
+    expect(queries.POOL_HEALTH_CURSOR).toContain("lastDeviationRatio");
+    expect(queries.POOL_HEALTH_CURSOR).not.toContain("healthBinarySeconds");
+    expect(queries.POOL_HEALTH_CURSOR).not.toContain("healthTotalSeconds");
   });
 
   it("POOL_HEALTH_7D_ANCHOR is scoped by id + chainId at sevenDaysAgo timestamp", () => {

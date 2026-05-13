@@ -311,7 +311,7 @@ function clampedPct(binary: number, total: number): number | null {
   return Math.max(0, Math.min(100, (binary / total) * 100));
 }
 
-const MAX_HEALTH_CARRY_SECONDS = 3600;
+const MAX_HEALTH_CARRY_SECONDS = DEVIATION_BREACH_GRACE_SECONDS;
 
 type HealthCounterState = {
   source: string;
