@@ -174,7 +174,7 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  deviation_warning_summary_annotation  = <<-EOT
+  deviation_warning_summary_annotation            = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
@@ -202,7 +202,7 @@ locals {
       Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_summary_annotation = <<-EOT
+  deviation_critical_summary_annotation           = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- $age := humanizeDuration $values.A.Value -}}
@@ -219,10 +219,39 @@ locals {
       Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
     {{- end -}}
   EOT
-  deviation_current_reserves_annotation = <<-EOT
+  deviation_current_reserves_annotation           = <<-EOT
     {{- if and $values.R0 $values.R1 -}}
       {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
     {{- end -}}
+  EOT
+  deviation_transition_summary_annotation         = <<-EOT
+    {{- if $values.Info -}}
+      {{- $reason := index $values.Info.Labels "reason" -}}
+      {{- if eq $reason "recovered" -}}
+        Pool is back within tolerance.
+      {{- else if eq $reason "escalated_to_critical" -}}
+        Warning escalated to critical.
+      {{- else if eq $reason "ratio_data_missing" -}}
+        Ratio data disappeared while the breach is still open.
+      {{- else if eq $reason "ratio_data_restored" -}}
+        Ratio data is available again while the breach is still open.
+      {{- else if eq $reason "fx_weekend_suppressed" -}}
+        Alert paused because FX weekend suppression is active.
+      {{- else -}}
+        Deviation alert state changed.
+      {{- end -}}
+    {{- else -}}
+      Deviation alert state changed.
+    {{- end -}}
+  EOT
+  deviation_transition_breach_duration_annotation = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_duration" }}{{- end -}}
+  EOT
+  deviation_transition_breach_started_annotation  = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_started_at" }}{{- end -}}
+  EOT
+  deviation_transition_breach_ended_annotation    = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_ended_at" }}{{- end -}}
   EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
   # trim markers strip ALL surrounding whitespace (including newlines), so
@@ -336,6 +365,11 @@ locals {
       ref_id = "ResAxlUSDC"
       expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
+  ]
+
+  deviation_reserve_annotation_queries = [
+    for query in local.deviation_annotation_queries : query
+    if contains(["R0", "R1"], query.ref_id)
   ]
 
   # Rebalancer liveness/effectiveness alerts only render `rebalance_reason`.

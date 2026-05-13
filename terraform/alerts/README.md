@@ -4,7 +4,7 @@ Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
 
 ## Scope
 
-- **In this module:** `grafana_rule_group` resources (5 groups, 9 rules) for FPMM pool health + metrics-bridge liveness, organised into one Grafana folder per `service` label (`FPMMs`, `Metrics Bridge`), plus two `grafana_contact_point` resources (`slack-alerts-critical` → `#alerts-critical`, `slack-alerts-warnings` → `#alerts-warning`).
+- **In this module:** `grafana_rule_group` resources for FPMM pool health, indexer health, and metrics-bridge liveness, organised into one Grafana folder per `service` label (`FPMMs`, `Indexer`, `Metrics Bridge`). Slack uses the normal critical/warning contact points plus resolve-disabled transition contact points for one-shot state-change notices.
 - **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
 - **Folder convention:** one folder per `service` label (same pattern Aegis uses for `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
 
@@ -32,8 +32,8 @@ Both secrets live in `terraform/alerts/terraform.tfvars` (gitignored). Matches t
 
 ## Smoke test
 
-After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-warning` should receive a fire, then a resolve after reverting the change.
+After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-warning` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
 
 ## Service label routing
 
-Each rule attaches `service = "fpmms"` or `service = "metrics-bridge"`. Future oracles / cdps rule groups will attach their own service label and stay in this module — no notification-tree churn required.
+Each rule attaches `service = "fpmms"`, `service = "indexer"`, or `service = "metrics-bridge"`. Future oracles / cdps rule groups will attach their own service label and stay in this module — no notification-tree churn required.

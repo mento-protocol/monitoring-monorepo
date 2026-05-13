@@ -14,6 +14,10 @@ import {
 } from "@mento-protocol/monitoring-config/format";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
+import {
+  observeDeviationAlertState,
+  pruneDeviationAlertStates,
+} from "./deviation-alert-state.js";
 import type { PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
@@ -78,6 +82,19 @@ const poolLabels = [
   "pool_address_short",
   "block_explorer_url",
 ] as const;
+const deviationAlertStateLabels = [...poolLabels, "state"] as const;
+const deviationAlertTransitionCounterLabels = [
+  ...poolLabels,
+  "from",
+  "to",
+  "reason",
+] as const;
+const deviationAlertTransitionActiveLabels = [
+  ...deviationAlertTransitionCounterLabels,
+  "breach_started_at",
+  "breach_ended_at",
+  "breach_duration",
+] as const;
 const pressureLabels = [...poolLabels, "token_index"] as const;
 // Reserve-share gauges carry an additional `token_symbol` label so the Slack
 // alert annotation can render "17% USDT / 83% USDm" without parsing the `pair`
@@ -138,6 +155,18 @@ export const gauges = {
     name: "mento_pool_deviation_open_breach_peak_ratio",
     help: "Peak deviation ratio observed during the currently open breach (currentOpenBreachPeak / currentOpenBreachEntryThreshold). Absent when there is no open breach or the entry threshold is unavailable.",
     labelNames: poolLabels,
+    registers: [register],
+  }),
+  deviationAlertState: new Gauge({
+    name: "mento_pool_deviation_alert_state",
+    help: "Current metrics-bridge deviation alert state for a pool. Exactly one state label is set to 1 per pool on each successful poll.",
+    labelNames: deviationAlertStateLabels,
+    registers: [register],
+  }),
+  deviationAlertTransitionActive: new Gauge({
+    name: "mento_pool_deviation_alert_transition_active",
+    help: "Short-lived deviation alert state transition marker for Slack notifications. Labels carry the exact reason plus pre-rendered UTC start/end/duration strings.",
+    labelNames: deviationAlertTransitionActiveLabels,
     registers: [register],
   }),
   limitPressure: new Gauge({
@@ -247,6 +276,12 @@ export const counters = {
     help: "Total number of poll errors",
     registers: [register],
   }),
+  deviationAlertTransitions: new Counter({
+    name: "mento_pool_deviation_alert_transitions_total",
+    help: "Total deviation alert state transitions observed by metrics-bridge, keyed by bounded from/to/reason labels.",
+    labelNames: deviationAlertTransitionCounterLabels,
+    registers: [register],
+  }),
 };
 
 /**
@@ -265,13 +300,18 @@ const POLL_PRESERVED_GAUGES = new Set<Gauge>([
   gauges.rebalanceBlocked,
 ]);
 
-export function updateMetrics(pools: PoolRow[]): void {
+export function updateMetrics(
+  pools: PoolRow[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+): void {
   // Reset pool-level gauges to evict stale label sets from removed pools.
   for (const g of Object.values(gauges)) {
     if (!POLL_PRESERVED_GAUGES.has(g)) g.reset();
   }
 
+  const activePoolIds = new Set<string>();
   for (const pool of pools) {
+    activePoolIds.add(pool.id);
     const address = poolIdAddress(pool.id);
     const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
     warnIfUnknown(pool, derivedPair);
@@ -283,6 +323,38 @@ export function updateMetrics(pools: PoolRow[]): void {
       pool_address_short: shortAddress(address),
       block_explorer_url: explorerAddressUrl(pool.chainId, address) ?? "",
     };
+
+    const deviationAlert = observeDeviationAlertState(
+      pool,
+      labels.pair,
+      nowSeconds,
+    );
+    gauges.deviationAlertState.set(
+      { ...labels, state: deviationAlert.state },
+      1,
+    );
+    for (const transition of deviationAlert.newTransitions) {
+      counters.deviationAlertTransitions.inc({
+        ...labels,
+        from: transition.from,
+        to: transition.to,
+        reason: transition.reason,
+      });
+    }
+    for (const transition of deviationAlert.activeTransitions) {
+      gauges.deviationAlertTransitionActive.set(
+        {
+          ...labels,
+          from: transition.from,
+          to: transition.to,
+          reason: transition.reason,
+          breach_started_at: transition.breachStartedAtLabel,
+          breach_ended_at: transition.endedAtLabel,
+          breach_duration: transition.durationLabel,
+        },
+        1,
+      );
+    }
 
     gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
     gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
@@ -402,6 +474,7 @@ export function updateMetrics(pools: PoolRow[]): void {
       );
     }
   }
+  pruneDeviationAlertStates(activePoolIds);
 }
 
 /**

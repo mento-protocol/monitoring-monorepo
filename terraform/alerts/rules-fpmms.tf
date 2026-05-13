@@ -327,11 +327,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary        = local.deviation_warning_summary_annotation
-      resolved_title = "Deviation Breach Alert Stopped"
-      # Warning can resolve because the pool recovered, became critical,
-      # lost ratio data, or entered the FX weekend pause.
-      resolved_summary = "This warning stopped firing. The pool may have recovered, become critical, lost ratio data, or entered the FX weekend pause."
+      summary          = local.deviation_warning_summary_annotation
+      resolved_title   = "Deviation Breach Alert Stopped"
+      resolved_summary = "This warning stopped firing. The deviation state-change notification carries the exact reason."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -438,7 +436,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This data-gap warning stopped firing. The breach may have cleared, ratio data returned, become critical, or entered the FX weekend pause."
+      resolved_summary = "This data-gap warning stopped firing. The deviation state-change notification carries the exact reason."
     }
 
     labels = {
@@ -507,7 +505,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This critical alert stopped firing. The pool may have recovered, lost ratio data, or entered the FX weekend pause."
+      resolved_summary = "This critical alert stopped firing. The deviation state-change notification carries the exact reason."
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -661,7 +659,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "This data-gap critical alert stopped firing. The breach may have cleared, ratio data returned, or entered the FX weekend pause."
+      resolved_summary = "This data-gap critical alert stopped firing. The deviation state-change notification carries the exact reason."
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line
@@ -749,6 +747,201 @@ resource "grafana_rule_group" "fpmms_deviation" {
       group_wait      = local.notify_critical_pool.group_wait
       group_interval  = local.notify_critical_pool.group_interval
       repeat_interval = local.notify_critical_pool.repeat_interval
+    }
+  }
+}
+
+# ── Deviation breach state transitions ───────────────────────────────────────
+resource "grafana_rule_group" "fpmms_deviation_transitions" {
+  name             = "Deviation Breach Transitions"
+  folder_uid       = grafana_folder.fpmms.uid
+  interval_seconds = 60
+
+  rule {
+    name           = "Deviation Breach State Changed"
+    condition      = "threshold"
+    for            = "0s"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary          = local.deviation_transition_summary_annotation
+      current_reserves = local.deviation_current_reserves_annotation
+      breach_duration  = local.deviation_transition_breach_duration_annotation
+      breach_started   = local.deviation_transition_breach_started_annotation
+      breach_ended     = local.deviation_transition_breach_ended_annotation
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"warning|ratio_missing_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = "mento_pool_deviation_alert_transition_active{from=~\"warning|ratio_missing_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+        instant = true
+      })
+    }
+
+    dynamic "data" {
+      for_each = local.deviation_reserve_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
+      }
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_warning_transition.contact_point
+      group_by        = local.notify_warning_transition.group_by
+      group_wait      = local.notify_warning_transition.group_wait
+      group_interval  = local.notify_warning_transition.group_interval
+      repeat_interval = local.notify_warning_transition.repeat_interval
+    }
+  }
+
+  rule {
+    name           = "Deviation Breach Critical State Changed"
+    condition      = "threshold"
+    for            = "0s"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary          = local.deviation_transition_summary_annotation
+      current_reserves = local.deviation_current_reserves_annotation
+      breach_duration  = local.deviation_transition_breach_duration_annotation
+      breach_started   = local.deviation_transition_breach_started_annotation
+      breach_ended     = local.deviation_transition_breach_ended_annotation
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"critical|ratio_missing_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = "mento_pool_deviation_alert_transition_active{from=~\"critical|ratio_missing_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+        instant = true
+      })
+    }
+
+    dynamic "data" {
+      for_each = local.deviation_reserve_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
+      }
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical_transition.contact_point
+      group_by        = local.notify_critical_transition.group_by
+      group_wait      = local.notify_critical_transition.group_wait
+      group_interval  = local.notify_critical_transition.group_interval
+      repeat_interval = local.notify_critical_transition.repeat_interval
     }
   }
 }
