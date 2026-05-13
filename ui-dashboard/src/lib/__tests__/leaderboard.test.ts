@@ -1071,7 +1071,7 @@ describe("v2 trader Via marker helpers", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
     const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
-    const ids = buildBrokerViaMarkerIds(
+    const result = buildBrokerViaMarkerIds(
       [
         {
           chainId: 42220,
@@ -1094,16 +1094,19 @@ describe("v2 trader Via marker helpers", () => {
       cutoff,
     );
 
-    expect(ids).toEqual([
-      "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
-      "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
-      "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
-      "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
-      "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
-      "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
-      "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
-      "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
-    ]);
+    expect(result).toEqual({
+      ids: [
+        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+      ],
+      truncated: false,
+    });
   });
 
   it("does not build all-time marker ids because the query can exceed the row cap", () => {
@@ -1123,6 +1126,30 @@ describe("v2 trader Via marker helpers", () => {
         0,
       ),
     ).toBeNull();
+  });
+
+  it("fails closed before allocating marker ids when the expansion exceeds the safety cap", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
+    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
+
+    expect(
+      buildBrokerViaMarkerIds(
+        [
+          {
+            chainId: 42220,
+            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            swapCount: 1,
+            volumeUsdWei: BigInt(1),
+            isSystemAddress: false,
+            lastSeenTimestamp: cutoff,
+          },
+        ],
+        ["direct", "squid"],
+        cutoff,
+        { maxIds: 3 },
+      ),
+    ).toEqual({ ids: [], truncated: true });
   });
 
   it("aggregates parsed marker ids by trader and orders route labels deterministically", () => {

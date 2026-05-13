@@ -37,6 +37,7 @@ export function V2LeaderboardTraderTable({
   viaAggregators,
   viaAggregatorsLoading,
   viaAggregatorsError,
+  viaAggregatorsTruncated,
   isLoading,
   hasError,
 }: {
@@ -45,6 +46,7 @@ export function V2LeaderboardTraderTable({
   viaAggregators: readonly BrokerAggregatorWindowRow[];
   viaAggregatorsLoading: boolean;
   viaAggregatorsError: boolean;
+  viaAggregatorsTruncated: boolean;
   isLoading: boolean;
   hasError: boolean;
 }) {
@@ -91,9 +93,9 @@ export function V2LeaderboardTraderTable({
   // Keep the Via side query scoped to the rows actually rendered. Sort changes
   // can change the visible top-50 slice, so attribution follows `visibleRows`
   // instead of fetching markers for every aggregated trader in the response.
-  const viaMarkerIds = useMemo(
+  const viaMarkerBuild = useMemo(
     () =>
-      isLoading || hasError || viaUnavailableReason
+      isLoading || hasError || viaUnavailableReason || viaAggregatorsTruncated
         ? null
         : buildBrokerViaMarkerIds(visibleRows, viaAggregatorNames, cutoff),
     [
@@ -101,22 +103,31 @@ export function V2LeaderboardTraderTable({
       hasError,
       isLoading,
       viaAggregatorNames,
+      viaAggregatorsTruncated,
       viaUnavailableReason,
       visibleRows,
     ],
   );
+  const viaMarkerIds =
+    viaMarkerBuild && !viaMarkerBuild.truncated ? viaMarkerBuild.ids : null;
+  const viaIdExpansionTruncated = Boolean(viaMarkerBuild?.truncated);
   const viaResult = useBrokerViaMarkers(viaMarkerIds);
-  const viaTruncated = Boolean(viaResult.data?.truncated);
+  const viaTruncated =
+    viaIdExpansionTruncated || Boolean(viaResult.data?.truncated);
   const viaRows = viaTruncated ? [] : (viaResult.data?.rows ?? []);
   const viaByTrader = useMemo(
     () => aggregateBrokerViaByTrader(viaRows),
     [viaRows],
   );
-  const viaErrorReason = viaTruncated
-    ? "Couldn't load complete v2 route attribution before the query page limit."
-    : viaAggregatorsError
-      ? "Couldn't load v2 route buckets for Via attribution."
-      : undefined;
+  const viaErrorReason = viaAggregatorsTruncated
+    ? "Couldn't load complete v2 route attribution because the route-bucket query hit the row cap."
+    : viaIdExpansionTruncated
+      ? "Couldn't load complete v2 route attribution because this window includes too many route markers."
+      : viaTruncated
+        ? "Couldn't load complete v2 route attribution before the query page limit."
+        : viaAggregatorsError
+          ? "Couldn't load v2 route buckets for Via attribution."
+          : undefined;
   const viaPrerequisitesReady =
     !isLoading && !hasError && !viaUnavailableReason && visibleRows.length > 0;
   const viaIsLoading =
@@ -125,7 +136,10 @@ export function V2LeaderboardTraderTable({
       viaAggregatorsLoading) ||
     (Boolean(viaMarkerIds) && viaResult.isLoading);
   const viaHasError =
-    Boolean(viaResult.error) || viaTruncated || viaAggregatorsError;
+    Boolean(viaResult.error) ||
+    viaAggregatorsTruncated ||
+    viaTruncated ||
+    viaAggregatorsError;
 
   if (hasError) {
     return (
@@ -247,6 +261,7 @@ function ViaCell({
         className="inline-flex h-5 min-w-[4.75rem] items-center gap-1.5 rounded bg-slate-800/70 px-2 text-[11px] font-medium text-slate-400"
         title="Loading v2 route attribution"
         aria-label="Loading v2 route attribution"
+        role="status"
       >
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
         <span>Loading</span>

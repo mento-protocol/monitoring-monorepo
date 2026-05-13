@@ -74,6 +74,7 @@ export function V2LeaderboardSection({
           viaAggregators={v2AggregatorAggregated}
           viaAggregatorsLoading={v2AggIsLoading}
           viaAggregatorsError={v2AggHasError}
+          viaAggregatorsTruncated={isV2AggregatorCapHit}
           isLoading={tableIsLoading}
           hasError={tableHasError}
         />

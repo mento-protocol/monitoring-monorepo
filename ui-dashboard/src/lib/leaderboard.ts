@@ -332,6 +332,12 @@ export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 // The trailing lowercase caller address + day anchor the parse; malformed ids
 // are ignored by `aggregateBrokerViaByTrader`.
 const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
+export const BROKER_VIA_MARKER_ID_LIMIT = 50_000;
+
+export type BrokerViaMarkerIdBuildResult = {
+  ids: string[];
+  truncated: boolean;
+};
 
 /**
  * Build exact BrokerAggregatorTraderDayMarker ids for the visible trader rows.
@@ -342,7 +348,8 @@ export function buildBrokerViaMarkerIds(
   rows: readonly BrokerTraderWindowRow[],
   aggregators: readonly string[],
   cutoff: number,
-): string[] | null {
+  options: { maxIds?: number } = {},
+): BrokerViaMarkerIdBuildResult | null {
   // All-time can span enough day markers to saturate ENVIO_MAX_ROWS and make
   // attribution silently partial. Show Via only for bounded windows until the
   // indexer exposes a per-window route entity or a structured marker query.
@@ -378,6 +385,10 @@ export function buildBrokerViaMarkerIds(
   const days = dayBuckets(cutoff, todayMidnightUtc);
   if (!days) return null;
 
+  const maxIds = options.maxIds ?? BROKER_VIA_MARKER_ID_LIMIT;
+  const requestedIds = traders.length * routes.length * days.length;
+  if (requestedIds > maxIds) return { ids: [], truncated: true };
+
   const ids: string[] = [];
   for (const { chainId, trader } of traders) {
     for (const route of routes) {
@@ -386,7 +397,7 @@ export function buildBrokerViaMarkerIds(
       }
     }
   }
-  return ids;
+  return { ids, truncated: false };
 }
 
 /**

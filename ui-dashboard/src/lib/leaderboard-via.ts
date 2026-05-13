@@ -1,5 +1,8 @@
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
-import type { BrokerAggregatorTraderDayMarkerRow } from "@/lib/leaderboard";
+import {
+  BROKER_VIA_MARKER_ID_LIMIT,
+  type BrokerAggregatorTraderDayMarkerRow,
+} from "@/lib/leaderboard";
 import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID } from "@/lib/queries/leaderboard-via";
 
 type BrokerViaMarkerPage = {
@@ -21,7 +24,7 @@ export type BrokerViaMarkerPageResult = {
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_CHUNK_SIZE = ENVIO_MAX_ROWS;
-const DEFAULT_MAX_IDS = 50_000;
+const DEFAULT_MAX_IDS = BROKER_VIA_MARKER_ID_LIMIT;
 const DEFAULT_CONCURRENCY = 8;
 
 export async function fetchBrokerViaMarkerIds(
