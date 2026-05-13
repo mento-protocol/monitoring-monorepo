@@ -71,6 +71,9 @@ export function V2LeaderboardSection({
         <V2LeaderboardTraderTable
           cutoff={cutoff}
           traders={v2Aggregated}
+          viaAggregators={v2AggregatorAggregated}
+          viaAggregatorsLoading={v2AggIsLoading}
+          viaAggregatorsError={v2AggHasError}
           isLoading={tableIsLoading}
           hasError={tableHasError}
         />

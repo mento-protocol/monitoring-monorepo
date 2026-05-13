@@ -334,39 +334,59 @@ export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
 
 /**
- * Build a bounded Hasura `_regex` filter for BrokerAggregatorTraderDayMarker.
- * The marker table only exposes the composite id, so the filter encodes the
- * visible `(chainId, trader)` rows and active UTC-day buckets.
+ * Build exact BrokerAggregatorTraderDayMarker ids for the visible trader rows.
+ * The marker table only exposes the composite id, so exact `_in` lookups are
+ * much cheaper than a wide regex over `{chainId}-{aggregator}-{caller}-{day}`.
  */
-export function buildBrokerViaMarkerIdRegex(
+export function buildBrokerViaMarkerIds(
   rows: readonly BrokerTraderWindowRow[],
+  aggregators: readonly string[],
   cutoff: number,
-): string | null {
+): string[] | null {
   // All-time can span enough day markers to saturate ENVIO_MAX_ROWS and make
   // attribution silently partial. Show Via only for bounded windows until the
   // indexer exposes a per-window route entity or a structured marker query.
   if (cutoff <= 0) return null;
   if (rows.length === 0) return null;
 
-  const chainIds = [...new Set(rows.map((row) => row.chainId))].sort(
-    (a, b) => a - b,
-  );
-  const traders = [
-    ...new Set(rows.map((row) => row.trader.toLowerCase())),
+  const routes = [
+    ...new Set(
+      aggregators.flatMap((aggregator) => {
+        const route = aggregator.trim().toLowerCase();
+        return route ? [route] : [];
+      }),
+    ),
   ].sort();
-  if (chainIds.length === 0 || traders.length === 0) return null;
+  if (routes.length === 0) return null;
+
+  const traderKeys = new Map<string, { chainId: number; trader: string }>();
+  for (const row of rows) {
+    const trader = row.trader.toLowerCase();
+    traderKeys.set(`${row.chainId}-${trader}`, {
+      chainId: row.chainId,
+      trader,
+    });
+  }
+  const traders = [...traderKeys.values()].sort((a, b) => {
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.trader.localeCompare(b.trader);
+  });
+  if (traders.length === 0) return null;
 
   const todayMidnightUtc =
     Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  // Current bounded max is 90d, so the day alternation stays small enough for
-  // the visible top-50 side query. Longer ranges should move to a structured
-  // backend entity instead of growing this regex.
-  const dayPart = dayAlternation(cutoff, todayMidnightUtc);
-  if (!dayPart) return null;
+  const days = dayBuckets(cutoff, todayMidnightUtc);
+  if (!days) return null;
 
-  const chainPart = chainIds.map(String).join("|");
-  const traderPart = traders.map(escapeRegex).join("|");
-  return `^(?:${chainPart})-.+-(?:${traderPart})-(?:${dayPart})$`;
+  const ids: string[] = [];
+  for (const { chainId, trader } of traders) {
+    for (const route of routes) {
+      for (const day of days) {
+        ids.push(`${chainId}-${route}-${trader}-${day}`);
+      }
+    }
+  }
+  return ids;
 }
 
 /**
@@ -441,17 +461,13 @@ function parseBrokerViaMarkerId(id: string): {
   };
 }
 
-function dayAlternation(from: number, to: number): string | null {
+function dayBuckets(from: number, to: number): string[] | null {
   if (from > to) return null;
   const days: string[] = [];
   for (let day = from; day <= to; day += SECONDS_PER_DAY) {
     days.push(String(day));
   }
-  return days.join("|");
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return days;
 }
 
 function humanizeRouteBucket(value: string): string {

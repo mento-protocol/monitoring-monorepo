@@ -9,7 +9,7 @@ import {
   LEADERBOARD_PARTIAL_OVERLAP_TRADERS,
   LEADERBOARD_WINDOW_FIRSTDAY_LATEST,
 } from "../leaderboard";
-import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS } from "../leaderboard-via";
+import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID } from "../leaderboard-via";
 
 // Cursor flagged on PR #363 that the v2 dashboard's whole `BrokerTraderDaily*`
 // path now relies on the GraphQL aliasing `trader: caller` to keep the row
@@ -92,15 +92,19 @@ describe("leaderboard hero rollout-safe isolated queries", () => {
 });
 
 describe("v2 Via marker query", () => {
-  it("uses the composite marker id as the only selected field", () => {
-    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).toContain(
+  it("uses exact composite marker ids and selects only the id field", () => {
+    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID).toContain(
       "BrokerAggregatorTraderDayMarker",
     );
-    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).toContain(
-      "id: { _regex: $idRegex, _gt: $afterId }",
+    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID).toContain(
+      "id: { _in: $ids }",
     );
-    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).toContain("\n      id\n");
-    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).not.toContain("caller");
-    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS).not.toContain("aggregator");
+    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID).toContain(
+      "\n      id\n",
+    );
+    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID).not.toContain("caller");
+    expect(BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID).not.toContain(
+      "aggregator",
+    );
   });
 });

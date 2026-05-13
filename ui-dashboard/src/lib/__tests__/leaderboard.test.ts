@@ -8,7 +8,7 @@ import {
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   brokerViaDisplayName,
-  buildBrokerViaMarkerIdRegex,
+  buildBrokerViaMarkerIds,
   buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
@@ -1067,11 +1067,11 @@ describe("v2 trader Via marker helpers", () => {
     vi.useRealTimers();
   });
 
-  it("builds a bounded marker-id regex for visible traders and UTC days", () => {
+  it("builds exact marker ids for visible traders, route buckets, and UTC days", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
     const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
-    const regex = buildBrokerViaMarkerIdRegex(
+    const ids = buildBrokerViaMarkerIds(
       [
         {
           chainId: 42220,
@@ -1090,20 +1090,25 @@ describe("v2 trader Via marker helpers", () => {
           lastSeenTimestamp: cutoff,
         },
       ],
+      ["squid", "direct"],
       cutoff,
     );
 
-    expect(regex).toBe(
-      "^" +
-        "(?:42220)-.+-" +
-        "(?:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)-" +
-        "(?:1778544000|1778630400)$",
-    );
+    expect(ids).toEqual([
+      "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+      "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+      "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
+      "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
+      "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+      "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+      "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
+      "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
+    ]);
   });
 
-  it("does not build an all-time marker regex because the query can exceed the row cap", () => {
+  it("does not build all-time marker ids because the query can exceed the row cap", () => {
     expect(
-      buildBrokerViaMarkerIdRegex(
+      buildBrokerViaMarkerIds(
         [
           {
             chainId: 42220,
@@ -1114,6 +1119,7 @@ describe("v2 trader Via marker helpers", () => {
             lastSeenTimestamp: 1778457600,
           },
         ],
+        ["direct"],
         0,
       ),
     ).toBeNull();

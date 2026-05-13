@@ -10,9 +10,10 @@ import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateBrokerViaByTrader,
   brokerViaDisplayName,
-  buildBrokerViaMarkerIdRegex,
+  buildBrokerViaMarkerIds,
   cmpBigInt,
   weiToUsd,
+  type BrokerAggregatorWindowRow,
   type BrokerTraderViaRoute,
   type BrokerTraderWindowRow,
 } from "@/lib/leaderboard";
@@ -33,11 +34,17 @@ const TRADER_VALID_KEYS = new Set<TraderSortKey>(TRADER_SORT_KEYS);
 export function V2LeaderboardTraderTable({
   cutoff,
   traders,
+  viaAggregators,
+  viaAggregatorsLoading,
+  viaAggregatorsError,
   isLoading,
   hasError,
 }: {
   cutoff: number;
   traders: readonly BrokerTraderWindowRow[];
+  viaAggregators: readonly BrokerAggregatorWindowRow[];
+  viaAggregatorsLoading: boolean;
+  viaAggregatorsError: boolean;
   isLoading: boolean;
   hasError: boolean;
 }) {
@@ -76,17 +83,29 @@ export function V2LeaderboardTraderTable({
       ? "Via attribution is shown for bounded time windows only. All-time marker history can exceed the query cap."
       : undefined;
 
+  const viaAggregatorNames = useMemo(
+    () => [...new Set(viaAggregators.map((row) => row.aggregator))].sort(),
+    [viaAggregators],
+  );
+
   // Keep the Via side query scoped to the rows actually rendered. Sort changes
   // can change the visible top-50 slice, so attribution follows `visibleRows`
   // instead of fetching markers for every aggregated trader in the response.
-  const viaMarkerRegex = useMemo(
+  const viaMarkerIds = useMemo(
     () =>
       isLoading || hasError || viaUnavailableReason
         ? null
-        : buildBrokerViaMarkerIdRegex(visibleRows, cutoff),
-    [cutoff, hasError, isLoading, viaUnavailableReason, visibleRows],
+        : buildBrokerViaMarkerIds(visibleRows, viaAggregatorNames, cutoff),
+    [
+      cutoff,
+      hasError,
+      isLoading,
+      viaAggregatorNames,
+      viaUnavailableReason,
+      visibleRows,
+    ],
   );
-  const viaResult = useBrokerViaMarkers(viaMarkerRegex);
+  const viaResult = useBrokerViaMarkers(viaMarkerIds);
   const viaTruncated = Boolean(viaResult.data?.truncated);
   const viaRows = viaTruncated ? [] : (viaResult.data?.rows ?? []);
   const viaByTrader = useMemo(
@@ -95,7 +114,18 @@ export function V2LeaderboardTraderTable({
   );
   const viaErrorReason = viaTruncated
     ? "Couldn't load complete v2 route attribution before the query page limit."
-    : undefined;
+    : viaAggregatorsError
+      ? "Couldn't load v2 route buckets for Via attribution."
+      : undefined;
+  const viaPrerequisitesReady =
+    !isLoading && !hasError && !viaUnavailableReason && visibleRows.length > 0;
+  const viaIsLoading =
+    (viaPrerequisitesReady &&
+      viaAggregatorNames.length === 0 &&
+      viaAggregatorsLoading) ||
+    (Boolean(viaMarkerIds) && viaResult.isLoading);
+  const viaHasError =
+    Boolean(viaResult.error) || viaTruncated || viaAggregatorsError;
 
   if (hasError) {
     return (
@@ -115,7 +145,17 @@ export function V2LeaderboardTraderTable({
         <tr className="border-b border-slate-800">
           <Th align="right">#</Th>
           <Th>Trader</Th>
-          <Th>Via</Th>
+          <Th>
+            <span className="inline-flex items-center gap-1.5">
+              Via
+              {viaIsLoading && (
+                <span
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400"
+                  title="Loading v2 route attribution"
+                />
+              )}
+            </span>
+          </Th>
           <SortableTh
             sortKey="volume"
             activeSortKey={sortKey}
@@ -165,8 +205,8 @@ export function V2LeaderboardTraderTable({
                   routes={viaByTrader.get(
                     `${row.chainId}-${row.trader.toLowerCase()}`,
                   )}
-                  isLoading={Boolean(viaMarkerRegex) && viaResult.isLoading}
-                  hasError={Boolean(viaResult.error) || viaTruncated}
+                  isLoading={viaIsLoading}
+                  hasError={viaHasError}
                   errorReason={viaErrorReason}
                   unavailableReason={viaUnavailableReason}
                 />
@@ -202,7 +242,16 @@ function ViaCell({
   unavailableReason?: string;
 }) {
   if (isLoading) {
-    return <span className="text-slate-500">...</span>;
+    return (
+      <span
+        className="inline-flex h-5 min-w-[4.75rem] items-center gap-1.5 rounded bg-slate-800/70 px-2 text-[11px] font-medium text-slate-400"
+        title="Loading v2 route attribution"
+        aria-label="Loading v2 route attribution"
+      >
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
+        <span>Loading</span>
+      </span>
+    );
   }
   if (unavailableReason) {
     return (

@@ -1,6 +1,6 @@
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import type { BrokerAggregatorTraderDayMarkerRow } from "@/lib/leaderboard";
-import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS } from "@/lib/queries/leaderboard-via";
+import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID } from "@/lib/queries/leaderboard-via";
 
 type BrokerViaMarkerPage = {
   BrokerAggregatorTraderDayMarker: BrokerAggregatorTraderDayMarkerRow[];
@@ -20,47 +20,60 @@ export type BrokerViaMarkerPageResult = {
 };
 
 const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_MAX_PAGES = 20;
+const DEFAULT_CHUNK_SIZE = ENVIO_MAX_ROWS;
+const DEFAULT_MAX_IDS = 50_000;
+const DEFAULT_CONCURRENCY = 8;
 
-export async function fetchBrokerViaMarkerPages(
+export async function fetchBrokerViaMarkerIds(
   client: BrokerViaMarkerRequester,
-  idRegex: string,
+  markerIds: readonly string[],
   options: {
-    pageSize?: number;
-    maxPages?: number;
+    chunkSize?: number;
+    maxIds?: number;
+    concurrency?: number;
     timeoutMs?: number;
   } = {},
 ): Promise<BrokerViaMarkerPageResult> {
-  const pageSize = options.pageSize ?? ENVIO_MAX_ROWS;
-  const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
+  const chunkSize = Math.max(
+    1,
+    Math.min(options.chunkSize ?? DEFAULT_CHUNK_SIZE, ENVIO_MAX_ROWS),
+  );
+  const maxIds = options.maxIds ?? DEFAULT_MAX_IDS;
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const ids = [...new Set(markerIds)];
+  if (ids.length === 0) return { rows: [], truncated: false };
+  if (ids.length > maxIds) return { rows: [], truncated: true };
+
   const rows: BrokerAggregatorTraderDayMarkerRow[] = [];
   const seen = new Set<string>();
   const signal = AbortSignal.timeout(timeoutMs);
-  let afterId = "";
 
-  for (let page = 0; page < maxPages; page += 1) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop
-    const result = await client.request<BrokerViaMarkerPage>({
-      document: BROKER_AGGREGATOR_TRADER_DAY_MARKERS,
-      variables: { idRegex, afterId, limit: pageSize },
-      signal,
-    });
-    const batch = result.BrokerAggregatorTraderDayMarker;
-    for (const row of batch) {
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      rows.push(row);
-    }
-    if (batch.length < pageSize) {
-      return { rows, truncated: false };
-    }
-    const nextAfterId = batch.at(-1)?.id;
-    if (!nextAfterId || nextAfterId === afterId) {
-      return { rows, truncated: true };
-    }
-    afterId = nextAfterId;
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += chunkSize) {
+    chunks.push(ids.slice(index, index + chunkSize));
   }
 
-  return { rows, truncated: true };
+  for (let start = 0; start < chunks.length; start += concurrency) {
+    const batchChunks = chunks.slice(start, start + concurrency);
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
+    const results = await Promise.all(
+      batchChunks.map((idsChunk) =>
+        client.request<BrokerViaMarkerPage>({
+          document: BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID,
+          variables: { ids: idsChunk, limit: idsChunk.length },
+          signal,
+        }),
+      ),
+    );
+    for (const result of results) {
+      for (const row of result.BrokerAggregatorTraderDayMarker) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push(row);
+      }
+    }
+  }
+
+  return { rows, truncated: false };
 }
