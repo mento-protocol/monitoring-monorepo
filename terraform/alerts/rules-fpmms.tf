@@ -330,8 +330,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Resolved"
       resolved_summary = "Pool is back within tolerance."
-      current_reserves = local.deviation_critical_current_reserves_annotation
-      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
+      current_reserves = local.deviation_current_reserves_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -371,6 +371,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     dynamic "data" {
+      # Same annotation shape as critical by design. This adds a bounded set of
+      # instant diagnostic queries to the warning eval so Slack can show reserves
+      # and a likely rebalance-blocked reason when metrics-bridge has one.
       for_each = local.deviation_annotation_queries
       content {
         ref_id         = data.value.ref_id
@@ -510,7 +513,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # When metrics-bridge can't resolve a contract address it falls
       # back to literal "token0" / "token1" (matches the existing `pair`
       # fallback semantics).
-      current_reserves = local.deviation_critical_current_reserves_annotation
+      current_reserves = local.deviation_current_reserves_annotation
       # Rebalance reason annotation, sourced from the metrics-bridge probe
       # (`mento_pool_rebalance_blocked`) for the bounded Solidity-error
       # reason and from Aegis (USDC/USDT/axlUSDC `_balanceOf`) for the
@@ -530,7 +533,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # queries return ALL series (Aegis label set differs from
       # `mento_pool_*`, so per-instance binding doesn't apply); the
       # template dispatches by `$labels.pair`.
-      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -661,7 +664,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # writing reserves on every Swap / ReserveUpdate, so this line
       # typically renders. See the magnitude-gated rule for the display
       # formatting rationale.
-      current_reserves = local.deviation_critical_current_reserves_annotation
+      current_reserves = local.deviation_current_reserves_annotation
       # Same rebalance-reason annotation as the magnitude-gated critical
       # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
       # (which is the `-1` sentinel during data gaps, so eligible pools
@@ -673,7 +676,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # series via `$labels.pair`. When neither the reason labels nor the
       # Aegis series are present, the `{{ if … }}` guards collapse the
       # annotation cleanly.
-      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
+      rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -891,7 +894,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       resolved_title   = "Rebalancer healthy again"
       resolved_summary = "The pool was rebalanced or the breach cleared."
       last_rebalance   = "{{ if and $values.A $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}{{ humanizeDuration $values.A.Value }} ago{{ else if and $values.LastRebalancedAt (eq $values.LastRebalancedAt.Value 0.0) }}Never{{ end }}"
-      root_cause       = local.deviation_critical_rebalance_reason_annotation
+      root_cause       = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -1031,7 +1034,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       description      = "Most recent in-breach rebalance closed less than 50% of the gap to the rebalance boundary AND no better rebalance has landed in the past 15 min. Effectiveness is measured against the boundary (`rebalanceThreshold`), not the oracle midpoint — 100% means the rebalance landed exactly on the boundary (ideal); values > 100% = overshoot; < 100% = under-correction."
       resolved_title   = "Rebalance effective again"
       resolved_summary = "Rebalance effectiveness recovered or the deviation breach cleared."
-      root_cause       = local.deviation_critical_rebalance_reason_annotation
+      root_cause       = local.deviation_rebalance_reason_annotation
     }
 
     labels = {

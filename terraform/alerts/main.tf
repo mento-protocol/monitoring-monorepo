@@ -111,6 +111,8 @@ locals {
   #     critical rule already uses `$values.A` as breach age. Rendering branches
   #     by magnitude so summaries stay scannable across four orders of
   #     magnitude ("Pool 5% above…" → "Pool 44M% above…"):
+  #     If `Dev` is absent, the critical fallback can still render `$values.A`
+  #     because A is the firing breach-age condition for that rule.
   #       - < 1000:   integer percent ("44%")
   #       - 1000–9999: thousand-separated ("1,234%") — Go templates have
   #         no native %`,d formatter and Grafana's template engine doesn't
@@ -149,7 +151,7 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  deviation_warning_summary_annotation           = <<-EOT
+  deviation_warning_summary_annotation  = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
@@ -171,11 +173,13 @@ locals {
           {{- printf "Pool %s%% above 1%% tolerance." (humanize $dev) -}}
         {{- end -}}
       {{- end -}}
+    {{- else if $values.BreachAge -}}
+      Pool above 1% tolerance for {{ humanizeDuration $values.BreachAge.Value }}.
     {{- else -}}
       Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_summary_annotation          = <<-EOT
+  deviation_critical_summary_annotation = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- $age := humanizeDuration $values.A.Value -}}
@@ -190,7 +194,7 @@ locals {
       Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
     {{- end -}}
   EOT
-  deviation_critical_current_reserves_annotation = <<-EOT
+  deviation_current_reserves_annotation = <<-EOT
     {{- if and $values.R0 $values.R1 -}}
       {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
     {{- end -}}
@@ -213,7 +217,7 @@ locals {
   #     instance sees a non-nil $values.ResX. The chain/pair guards here
   #     are defensive but harmless. New stable pairs need both an Aegis
   #     Treb source and a new branch here + a new cross-join query.
-  deviation_critical_rebalance_reason_annotation = <<-EOT
+  deviation_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
       {{- if $rm -}}
