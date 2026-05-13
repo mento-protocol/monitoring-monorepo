@@ -108,6 +108,14 @@ locals {
   # send the warning page before the critical page takes over, without
   # resolving the warning before the critical rule can definitely fire.
   deviation_critical_suppression_seconds = 3780
+  # Critical resolved notifications compute breach duration at notification
+  # time from `.EndsAt` and the alert's `.StartsAt`, adjusted back by the
+  # critical rule's 1h threshold plus 1m pending period. Grafana notification
+  # templates expose `Time.Sub`, but not arbitrary Unix timestamp parsing, so
+  # the fixed rule offset is the safest way to avoid stale firing-time
+  # annotation durations while keeping unsupported arithmetic out of Slack
+  # contact-point templates.
+  deviation_critical_recovery_offset_nanos = (3600 + 60) * 1000000000
   deviation_critical_active_promql = format(
     "(%s) > %d",
     local.deviation_critical_gate_promql,
@@ -174,10 +182,9 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  #   - `breach_started_at` and `breach_duration` are rendered from PromQL
-  #     helpers based on `mento_pool_deviation_breach_start`, not Grafana's
-  #     `.StartsAt`, so recovery copy reports the pool-level breach duration
-  #     rather than the alert-rule pending/firing duration.
+  #   - `breach_started_at` is rendered from `mento_pool_deviation_breach_start`,
+  #     not Grafana's `.StartsAt`, so recovery copy reports the pool-level breach
+  #     anchor rather than the alert-rule pending/firing timestamp.
   deviation_warning_summary_annotation   = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
@@ -232,16 +239,6 @@ locals {
     {{- if $values.BreachStart -}}
       {{- $started := toTime $values.BreachStart.Value -}}
       {{- $started.Format "Mon Jan 02 15:04 UTC" -}}
-    {{- end -}}
-  EOT
-  deviation_breach_duration_annotation   = <<-EOT
-    {{- if and $values.BreachDurationHours $values.BreachDurationRemainderMinutes -}}
-      {{- if gt $values.BreachDurationHours.Value 0.0 -}}
-        {{- printf "%.0fh" $values.BreachDurationHours.Value -}}
-        {{- if gt $values.BreachDurationRemainderMinutes.Value 0.0 }} {{ printf "%.0fm" $values.BreachDurationRemainderMinutes.Value }}{{ end -}}
-      {{- else -}}
-        {{- printf "%.0fm" $values.BreachDurationRemainderMinutes.Value -}}
-      {{- end -}}
     {{- end -}}
   EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
@@ -343,14 +340,6 @@ locals {
     {
       ref_id = "BreachStart"
       expr   = "mento_pool_deviation_breach_start"
-    },
-    {
-      ref_id = "BreachDurationHours"
-      expr   = "floor((time() - mento_pool_deviation_breach_start) / 3600)"
-    },
-    {
-      ref_id = "BreachDurationRemainderMinutes"
-      expr   = "floor(((time() - mento_pool_deviation_breach_start) % 3600) / 60)"
     },
     {
       ref_id = "B"

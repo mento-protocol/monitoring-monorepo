@@ -104,9 +104,10 @@ locals {
     {{ if .Annotations.current_reserves -}}
     Reserves: {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ if .Annotations.breach_duration -}}
-    Breach Duration: {{ .Annotations.breach_duration }}
-    {{ end -}}
+    {{ $breachStartedAt := .StartsAt.Add -${local.deviation_critical_recovery_offset_nanos} -}}
+    {{ $duration := printf "%s" (.EndsAt.Sub $breachStartedAt) -}}
+    {{ $durationNoSeconds := reReplaceAll "[0-9]+(\\.[0-9]+)?s$" "" $duration -}}
+    Breach Duration: {{ reReplaceAll "([0-9]+h)([0-9]+m)" "$1 $2" $durationNoSeconds }}
     {{ if .Annotations.breach_started_at -}}
     Started: {{ .Annotations.breach_started_at }}
     {{ else -}}

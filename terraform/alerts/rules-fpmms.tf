@@ -511,7 +511,6 @@ resource "grafana_rule_group" "fpmms_deviation" {
       resolved_summary  = "Pool is back within tolerance."
       resolved_format   = "deviation_breach"
       breach_started_at = local.deviation_breach_started_at_annotation
-      breach_duration   = local.deviation_breach_duration_annotation
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
