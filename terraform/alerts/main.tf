@@ -121,7 +121,7 @@ locals {
   # IMPORTANT — Grafana annotation templates expose Go text/template
   # builtins (`if`, `and`, `index`, `eq`, `len`, …) plus a small set of
   # Prometheus helpers (`humanize`, `humanizePercentage`, `humanizeDuration`,
-  # `printf`). Sprig (`mul`, `sub`, `splitList`, etc.) is NOT in scope —
+  # `toTime`, `printf`). Sprig (`mul`, `sub`, `splitList`, etc.) is NOT in scope —
   # it's only available in `grafana_contact_point` notification templates.
   # See `pkg/services/ngalert/state/template/funcs.go` upstream. PR #211
   # commit `50acbd3` removed `mul` from a different annotation for exactly
@@ -174,7 +174,11 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  deviation_warning_summary_annotation  = <<-EOT
+  #   - `breach_started_at` and `breach_duration` are rendered from PromQL
+  #     helpers based on `mento_pool_deviation_breach_start`, not Grafana's
+  #     `.StartsAt`, so recovery copy reports the pool-level breach duration
+  #     rather than the alert-rule pending/firing duration.
+  deviation_warning_summary_annotation   = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
@@ -202,7 +206,7 @@ locals {
       Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_summary_annotation = <<-EOT
+  deviation_critical_summary_annotation  = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- $age := humanizeDuration $values.A.Value -}}
@@ -219,9 +223,25 @@ locals {
       Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
     {{- end -}}
   EOT
-  deviation_current_reserves_annotation = <<-EOT
+  deviation_current_reserves_annotation  = <<-EOT
     {{- if and $values.R0 $values.R1 -}}
       {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
+    {{- end -}}
+  EOT
+  deviation_breach_started_at_annotation = <<-EOT
+    {{- if $values.BreachStart -}}
+      {{- $started := toTime $values.BreachStart.Value -}}
+      {{- $started.Format "Mon Jan 02 15:04 UTC" -}}
+    {{- end -}}
+  EOT
+  deviation_breach_duration_annotation   = <<-EOT
+    {{- if and $values.BreachDurationHours $values.BreachDurationRemainderMinutes -}}
+      {{- if gt $values.BreachDurationHours.Value 0.0 -}}
+        {{- printf "%.0fh" $values.BreachDurationHours.Value -}}
+        {{- if gt $values.BreachDurationRemainderMinutes.Value 0.0 }} {{ printf "%.0fm" $values.BreachDurationRemainderMinutes.Value }}{{ end -}}
+      {{- else -}}
+        {{- printf "%.0fm" $values.BreachDurationRemainderMinutes.Value -}}
+      {{- end -}}
     {{- end -}}
   EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
@@ -319,6 +339,18 @@ locals {
     {
       ref_id = "R1"
       expr   = "mento_pool_reserve_share_token1 * 100"
+    },
+    {
+      ref_id = "BreachStart"
+      expr   = "mento_pool_deviation_breach_start"
+    },
+    {
+      ref_id = "BreachDurationHours"
+      expr   = "floor((time() - mento_pool_deviation_breach_start) / 3600)"
+    },
+    {
+      ref_id = "BreachDurationRemainderMinutes"
+      expr   = "floor(((time() - mento_pool_deviation_breach_start) % 3600) / 60)"
     },
     {
       ref_id = "B"

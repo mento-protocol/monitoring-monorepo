@@ -15,11 +15,10 @@ resource "grafana_contact_point" "slack_critical" {
     recipient = var.slack_channel_critical
     # Minimal title: Grafana hardcodes attachment.title_link to the alert detail
     # URL on grafana.com, and the terraform provider does not expose title_link
-    # as a configurable field. Demoting the title to a single status emoji
-    # keeps Slack's push/preview text small and unobtrusive; the prominent
-    # human-readable title is rendered as the first line of the body, where
-    # mrkdwn links are honoured (see local.slack_body_template).
-    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
+    # as a configurable field. Demoting the title to a compact status line
+    # keeps Slack's push/preview text small; deviation-recovery messages append
+    # pool identity here so their body can stay in the requested compact format.
+    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ with index .Alerts 0 }}{{ if eq .Annotations.resolved_format \"deviation_breach\" }}{{ if .Labels.pair }} {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}{{ if .Labels.pool_address_short }} · {{ .Labels.pool_address_short }}{{ end }}{{ end }}{{ end }}{{ end }}"
     text  = local.slack_body_template
   }
 }
@@ -31,7 +30,7 @@ resource "grafana_contact_point" "slack_warnings" {
     token     = var.slack_bot_token
     recipient = var.slack_channel_warnings
     # See note on slack_critical above — same title-link constraint applies.
-    title = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    title = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ with index .Alerts 0 }}{{ if eq .Annotations.resolved_format \"deviation_breach\" }}{{ if .Labels.pair }} {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}{{ if .Labels.pool_address_short }} · {{ .Labels.pool_address_short }}{{ end }}{{ end }}{{ end }}{{ end }}"
     text  = local.slack_body_template
   }
 }
@@ -88,10 +87,9 @@ locals {
   #      alert's label set. Rendered by the generic layout so an operator
   #      scrolling Slack can match a ✅ "resolved" post back to the 🔴 "fired"
   #      post that opened the alert.
-  #      Deviation-breach recovery messages opt into a tighter recovery-only
-  #      layout with `resolved_format = "deviation_breach"` because those need
-  #      to compare cleanly across warning and critical channels and match the
-  #      requested recovery copy exactly.
+  #      Deviation-breach recovery messages that can only resolve on actual
+  #      recovery opt into a tighter recovery-only layout with
+  #      `resolved_format = "deviation_breach"` to match the requested copy.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
@@ -106,13 +104,14 @@ locals {
     {{ if .Annotations.current_reserves -}}
     Reserves: {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ $startMinute := div .StartsAt.Unix 60 -}}
-    {{ $endMinute := div .EndsAt.Unix 60 -}}
-    {{ $durationMinutes := sub $endMinute $startMinute -}}
-    {{ $durationHours := div $durationMinutes 60 -}}
-    {{ $remainingMinutes := mod $durationMinutes 60 -}}
-    Breach Duration: {{ if gt $durationHours 0 }}{{ $durationHours }}h{{ if gt $remainingMinutes 0 }} {{ $remainingMinutes }}m{{ end }}{{ else }}{{ $remainingMinutes }}m{{ end }}
+    {{ if .Annotations.breach_duration -}}
+    Breach Duration: {{ .Annotations.breach_duration }}
+    {{ end -}}
+    {{ if .Annotations.breach_started_at -}}
+    Started: {{ .Annotations.breach_started_at }}
+    {{ else -}}
     Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ end -}}
     Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
     {{ else -}}
     {{ $title := .Labels.alertname -}}

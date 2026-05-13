@@ -327,10 +327,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = local.deviation_warning_summary_annotation
-      resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within tolerance."
-      resolved_format  = "deviation_breach"
+      summary        = local.deviation_warning_summary_annotation
+      resolved_title = "Deviation Breach Resolved"
+      # Warning can resolve because the critical rule took ownership, not
+      # because the pool recovered. Keep this escalation-aware and on the
+      # generic layout; only critical can render the recovery-only copy.
+      resolved_summary = "Pool is back within tolerance or escalated to critical."
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -504,10 +506,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = local.deviation_critical_summary_annotation
-      resolved_title   = "Deviation Breach Resolved"
-      resolved_summary = "Pool is back within tolerance."
-      resolved_format  = "deviation_breach"
+      summary           = local.deviation_critical_summary_annotation
+      resolved_title    = "Deviation Breach Resolved"
+      resolved_summary  = "Pool is back within tolerance."
+      resolved_format   = "deviation_breach"
+      breach_started_at = local.deviation_breach_started_at_annotation
+      breach_duration   = local.deviation_breach_duration_annotation
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
