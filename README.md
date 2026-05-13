@@ -33,12 +33,12 @@ Both Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio
 
 ## Networks
 
-| Network       | Chain ID | Status  |
-| ------------- | -------- | ------- |
-| Celo Mainnet  | 42220    | ✅ Live |
-| Monad Mainnet | 143      | ✅ Live |
-| Celo Sepolia  | 11142220 | ✅ Live |
-| Monad Testnet | 10143    | ✅ Live |
+| Network       | Chain ID | Status                                         |
+| ------------- | -------- | ---------------------------------------------- |
+| Celo Mainnet  | 42220    | Live in the production multichain indexer      |
+| Monad Mainnet | 143      | Live in the production multichain indexer      |
+| Celo Sepolia  | 11142220 | Local/testnet config available, not production |
+| Monad Testnet | 10143    | Local/testnet config available, not production |
 
 ## Getting Started
 
@@ -146,6 +146,8 @@ Push to the `envio` branch to trigger a hosted reindex:
 
 ```bash
 pnpm deploy:indexer
+pnpm deploy:indexer:status
+pnpm deploy:indexer:promote
 ```
 
 The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento) watches this branch.

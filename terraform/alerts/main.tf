@@ -85,6 +85,11 @@ locals {
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
   )
+
+  deviation_critical_gate_promql = format(
+    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
+    local.fx_weekend_suppressed_breach_start_promql,
+  )
   fx_weekend_suppressed_breach_start_promql = format(
     "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
     local.usd_pegged_pair_regex,

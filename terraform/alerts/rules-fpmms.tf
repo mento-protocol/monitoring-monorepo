@@ -348,7 +348,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})"
+        expr    = "(mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_gate_promql})"
         instant = true
       })
     }
@@ -453,7 +453,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+        expr    = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((time() - mento_pool_deviation_breach_start) <= 3600)) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
         instant = true
       })
     }
@@ -555,7 +555,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+        expr    = local.deviation_critical_gate_promql
         instant = true
       })
     }

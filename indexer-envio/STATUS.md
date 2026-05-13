@@ -1,15 +1,23 @@
 # Indexer Status
 
-Last updated: 2026-03-30
+Last updated: 2026-05-13
 
 ## Current State
 
-Single multichain indexer (Celo + Monad) live on Envio's hosted service.
+Single multichain mainnet indexer (Celo + Monad) live on Envio Cloud.
 
-| Network      | Envio Project | Plan             | Status  | Sync |
-| ------------ | ------------- | ---------------- | ------- | ---- |
-| Celo Mainnet | `mento`       | Production Small | ✅ Live | 100% |
-| Monad        | `mento`       | Production Small | ✅ Live | 100% |
+| Network      | Envio Project | Tier              | Status | Sync state                          |
+| ------------ | ------------- | ----------------- | ------ | ----------------------------------- |
+| Celo Mainnet | `mento`       | Production Medium | Live   | Caught up at `2026-05-13T11:54:24Z` |
+| Monad        | `mento`       | Production Medium | Live   | Caught up at `2026-05-13T11:54:24Z` |
+
+Current production deployment:
+
+| Field       | Value                                        |
+| ----------- | -------------------------------------------- |
+| Commit      | `cea00ee`                                    |
+| Commit name | `Optimize Envio v3 indexer sync path (#405)` |
+| Created     | `2026-05-13T10:42:34Z`                       |
 
 ## GraphQL Endpoint
 
@@ -35,20 +43,22 @@ All child entities (`poolId` FKs) follow the same format.
 
 Git release branch: `envio` — push to this branch to trigger a redeployment.
 
-## Legacy Endpoints (kept as fallback, to be retired)
+## Legacy Projects
 
-| Endpoint                                            | Project                  | Notes                                                 |
-| --------------------------------------------------- | ------------------------ | ----------------------------------------------------- |
-| `https://indexer.hyperindex.xyz/60ff18c/v1/graphql` | `mento-v3-celo-mainnet`  | Celo-only, old schema (no chainId, no namespaced IDs) |
-| `https://indexer.hyperindex.xyz/cfeda9e/v1/graphql` | `mento-v3-monad-mainnet` | Monad-only, to be deleted                             |
+The old single-network Envio projects still exist as project records but have no active deployments:
 
-These will be deleted once the multichain endpoint is confirmed stable in production.
+| Project                  | Current role                         |
+| ------------------------ | ------------------------------------ |
+| `mento-v3-celo-mainnet`  | Legacy project record, no deployment |
+| `mento-v3-monad-mainnet` | Legacy project record, no deployment |
+| `mento-v3-celo-sepolia`  | Legacy project record, no deployment |
+| `mento-v3-monad-testnet` | Legacy project record, no deployment |
 
 ## Schema
 
 Full schema: [`schema.graphql`](./schema.graphql)
 
-All entities have `chainId: Int! @index` and namespaced IDs since PR #95 (2026-03-27).
+All cross-chain entities have `chainId` fields and namespaced IDs since PR #95 (2026-03-27). Internal marker/helper entities may only carry the chain dimension needed by their lookup path.
 
 ## Local Dev
 
