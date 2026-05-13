@@ -58,27 +58,11 @@ Acceptance: the first implementation PR adds at least one blocking low-noise
 quality gate and one advisory CodeScene-like report, records baseline findings,
 and avoids adding another dashboard nobody reads.
 
-## Virtual Pool Metrics
-
-- [x] ~~**24h Volume tile for VPs.**~~ Done on `virtual-pools`: `BrokerExchangeDailySnapshot` now rolls up per-`chainId-exchangeId-day` Broker volume in the indexer, and the VirtualPool header reads that isolated daily rollup for the current UTC-day 24h volume tile with visible query-failure degradation. Requires a schema bump and full re-sync.
-
-## Dashboard Data Correctness
-
-- [x] ~~**Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.**~~ Done in PR #389: `AuthStatus` now builds the rendered anchor from `useLiveLocation()`, a `useSyncExternalStore` wrapper around `pushState` / `replaceState` / `popstate`, so modified clicks and "open in new tab" use the same current callback URL as ordinary navigation. Component tests cover `replaceState` search-param updates, `pushState` path changes, `popstate` back navigation, and hydration correction.
-- [x] ~~**Volume chart partial signal on the homepage.**~~ Done in PR #387: `buildDailyVolumeSeries` now returns `volumePartial`, `VolumeOverTimeChart` renders partial/unavailable v3 states explicitly, and tests cover skipped untrusted-decimal snapshots.
-- [x] ~~**Pool detail tab panels gate on decimal trust state.**~~ Token-amount tabs now fail closed behind `TokenAmountTrustGate` until `POOL_THRESHOLDS_KNOWN_EXT` verifies token decimals; page tests cover untrusted decimals and trust-query failure without firing the tab-local reserves query.
-
 ## File Size And Lint Hygiene
 
 Current line counts for remaining watch files were refreshed on 2026-05-11.
 `raw` is physical lines; `rough` approximates the ESLint `max-lines` count
 after skipping blanks and comments. Refresh before starting a split.
-
-Completed on 2026-05-12 in PR #397:
-
-- [x] `indexer-envio/src/pool.ts` split into health, self-heal, snapshot, source-priority, and context-type modules.
-- [x] `indexer-envio/src/rpc/pool-state.ts` split into pool-state, oracle-state, and pool-fee modules.
-- [x] `ui-dashboard/src/components/global-pools-table.tsx` split into sort, formatting, limit heatmap, and strategy badge modules.
 
 | Raw | Rough | File                                            | Action                                                                                   |
 | --: | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
