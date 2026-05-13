@@ -5,7 +5,7 @@ const config = {
   packageManager: "pnpm",
   plugins: ["@stryker-mutator/vitest-runner"],
   testRunner: "vitest",
-  mutate: ["src/lib/weekend.ts", "src/lib/pool-id.ts"],
+  mutate: ["src/rebalance-probe.ts"],
   reporters: ["clear-text", "progress", "html", "json"],
   cleanTempDir: "always",
   thresholds: {
@@ -13,14 +13,7 @@ const config = {
     low: 80,
     break: null,
   },
-  ignorePatterns: [
-    ".next/**",
-    "coverage/**",
-    "dist/**",
-    "reports/**",
-    "src/lib/__generated__/**",
-    "src/lib/queries/**",
-  ],
+  ignorePatterns: ["coverage/**", "dist/**", "reports/**"],
   vitest: {
     configFile: "vitest.mutation.config.ts",
     related: false,

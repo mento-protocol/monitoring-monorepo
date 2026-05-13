@@ -187,7 +187,8 @@ pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 pnpm dashboard:dev            # Dev server
 pnpm dashboard:build          # Production build
 pnpm --filter @mento-protocol/ui-dashboard test:browser  # Fixture-driven browser interaction tests
-pnpm dashboard:mutation       # Targeted StrykerJS baseline for FX weekend logic
+pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
+pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
 # Infrastructure (Terraform)
 pnpm infra:init               # Init providers (first time or after changes)

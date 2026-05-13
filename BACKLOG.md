@@ -27,16 +27,6 @@ agent sessions.
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
 
-### Mutation Testing Follow-up Targets
-
-The initial dashboard FX-weekend baseline shipped via `pnpm dashboard:mutation`;
-scope, runtime, score, and survivor classification live in
-`docs/mutation-testing.md`. Keep expansion targeted until the scheduled baseline
-stays stable.
-
-- [ ] Evaluate `ui-dashboard` pool ID/helpers with the same narrow StrykerJS scope.
-- [ ] Evaluate `metrics-bridge` rebalance probe/check logic if it can stay pure and under roughly one minute.
-
 ### CodeScene-Equivalent OSS Quality Checks
 
 Why: CodeScene's useful signal is not the proprietary score itself; it is the

@@ -11,6 +11,9 @@ import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
+// This is server-only; local `next start` needs analytics development mode.
+const analyticsMode = process.env.VERCEL ? "auto" : "development";
+
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -68,7 +71,7 @@ export default async function RootLayout({
             </Suspense>
           </SwrProvider>
         </SessionProvider>
-        {analyticsEnabled && <Analytics />}
+        {analyticsEnabled && <Analytics mode={analyticsMode} />}
       </body>
     </html>
   );

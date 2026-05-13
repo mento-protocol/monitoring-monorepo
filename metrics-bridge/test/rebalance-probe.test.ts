@@ -326,6 +326,27 @@ describe("runRebalanceProbes — timeout race", () => {
     warn.mockRestore();
   });
 
+  it("truncates unexpected probe errors before logging", async () => {
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+    const longMessage = `transport ${"x".repeat(260)}`;
+    mockProbe.mockRejectedValueOnce(new Error(longMessage));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runRebalanceProbes([pool]);
+
+    const logged = warn.mock.calls
+      .filter((args) => String(args[0]).includes("[REBALANCE_PROBE_FAILED]"))
+      .map((args) => String(args[0]))
+      .join("\n");
+    const loggedError = logged.split(" error=")[1] ?? "";
+    expect(loggedError).toHaveLength(200);
+    expect(loggedError).toBe(longMessage.slice(0, 200));
+    warn.mockRestore();
+  });
+
   it("does not throw an AbortError downstream when the probe completes successfully", async () => {
     // Regression guard: a probe that finishes BEFORE the timeout fires
     // must surface its result cleanly. Even if the abort eventually
@@ -635,9 +656,29 @@ describe("runRebalanceProbes — gauge writes", () => {
     expect(value).toBe(1);
   });
 
+  it("does not log a diagnostic line for blocked probes without diagnostic detail", async () => {
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient collateral",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runRebalanceProbes([pool]);
+
+    expect(warn.mock.calls).not.toEqual(
+      expect.arrayContaining([
+        [expect.stringContaining("[REBALANCE_PROBE_DIAGNOSTIC]")],
+      ]),
+    );
+    warn.mockRestore();
+  });
+
   it("emits no metric on an ok probe (the rebalancer can act)", async () => {
     const pool = makePool(breachOverrides);
     mockProbe.mockResolvedValueOnce({ kind: "ok" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await runRebalanceProbes([pool]);
 
@@ -649,6 +690,8 @@ describe("runRebalanceProbes — gauge writes", () => {
     if (blocked && "values" in blocked) {
       expect((blocked as { values: unknown[] }).values).toEqual([]);
     }
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("emits no metric and logs on a transport_error", async () => {
@@ -716,6 +759,9 @@ describe("runRebalanceProbes — gauge writes", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
     );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("no rpc client for chain"),
+    );
     warn.mockRestore();
   });
 
@@ -762,6 +808,25 @@ describe("runRebalanceProbes — gauge writes", () => {
     );
     expect(value).toBeGreaterThanOrEqual(before);
     expect(value).toBeLessThanOrEqual(after);
+  });
+
+  it("records rebalanceProbeLastRun in Unix seconds after an eligible probe cycle", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2024-04-15T12:00:00Z"));
+      const pool = makePool(breachOverrides);
+      mockProbe.mockResolvedValueOnce({ kind: "ok" });
+
+      await runRebalanceProbes([pool]);
+
+      const value = await getGaugeValue(
+        register,
+        "mento_pool_rebalance_probe_last_run",
+      );
+      expect(value).toBe(1713182400);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("logs the diagnostic detail on a blocked probe with operator-only context", async () => {
