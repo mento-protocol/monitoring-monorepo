@@ -96,6 +96,8 @@ export const ALL_POOLS_BREACH_ROLLUP = `
       breachCount
       healthBinarySeconds
       healthTotalSeconds
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
     }
   }
 `;

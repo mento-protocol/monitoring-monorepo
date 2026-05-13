@@ -125,6 +125,8 @@ export const POOL_BREACH_ROLLUP = `
       breachCount
       healthBinarySeconds
       healthTotalSeconds
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
     }
   }
 `;

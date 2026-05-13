@@ -7,6 +7,7 @@ import { POOL_BREACH_ROLLUP, POOL_HEALTH_7D_ANCHOR } from "@/lib/queries";
 import {
   computePoolUptimePct,
   computeWindowUptimePct,
+  liveHealthCounters,
   uptimeColorClass,
 } from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
@@ -35,6 +36,8 @@ const ARROW = {
 type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
 };
 type DailyAnchorRow = {
   // Read by computeWindowUptimePct's freshness gate (rejects anchors >8d
@@ -75,17 +78,19 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   const rollup = rollupData?.Pool?.[0];
   if (!rollup) return NA;
 
-  const pct = computePoolUptimePct({
-    source: pool.source,
-    healthBinarySeconds: rollup.healthBinarySeconds,
-    healthTotalSeconds: rollup.healthTotalSeconds,
-  });
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const livePool = { ...pool, ...rollup };
+  const anchor = anchorData?.PoolDailySnapshot?.[0] ?? null;
+  const anchorTs = Number(anchor?.timestamp ?? "0");
+  const liveRollup = liveHealthCounters(
+    livePool,
+    nowSeconds,
+    anchorTs > 0 ? anchorTs : undefined,
+  );
+  const pct = computePoolUptimePct(livePool, nowSeconds);
   if (pct == null) return NA;
 
-  const pct7d = computeWindowUptimePct(
-    rollup,
-    anchorData?.PoolDailySnapshot?.[0] ?? null,
-  );
+  const pct7d = computeWindowUptimePct(liveRollup, anchor, nowSeconds);
 
   // Suppress the arrow when both values round to the same 2-decimal
   // string — anything finer would surface noise the user can't see.

@@ -6,6 +6,8 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
 };
 type DailyAnchorRow = {
   timestamp?: string;
@@ -129,6 +131,32 @@ describe("UptimeValue", () => {
     };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("99.86%");
+  });
+
+  it("includes active oracle staleness before the next report closes the outage interval", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const total = 30 * 86400;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total),
+            healthTotalSeconds: String(total),
+            lastOracleSnapshotTimestamp: String(nowSec - 6 * 3600),
+            lastDeviationRatio: "0.010000",
+          },
+        ],
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <UptimeValue pool={{ ...BASE_POOL, oracleExpiry: "360" }} />,
+    );
+
+    expect(html).toContain("99.19%");
+    expect(html).not.toContain("100.00%");
   });
 
   it("clamps to [0, 100] when binary > total (defensive — shouldn't happen, but rounding could push it)", () => {

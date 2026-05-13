@@ -184,6 +184,8 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             breachCount
             healthBinarySeconds
             healthTotalSeconds
+            lastOracleSnapshotTimestamp
+            lastDeviationRatio
           }
         }
       `),
@@ -211,10 +213,12 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_CONFIG_EXT).not.toContain("oraclePrice");
   });
 
-  it("POOL_BREACH_ROLLUP returns just rollup counters", () => {
+  it("POOL_BREACH_ROLLUP returns counters plus the live-tail cursor", () => {
     expect(queries.POOL_BREACH_ROLLUP).toContain("breachCount");
     expect(queries.POOL_BREACH_ROLLUP).toContain("healthBinarySeconds");
     expect(queries.POOL_BREACH_ROLLUP).toContain("healthTotalSeconds");
+    expect(queries.POOL_BREACH_ROLLUP).toContain("lastOracleSnapshotTimestamp");
+    expect(queries.POOL_BREACH_ROLLUP).toContain("lastDeviationRatio");
   });
 
   it("POOL_HEALTH_7D_ANCHOR is scoped by id + chainId at sevenDaysAgo timestamp", () => {

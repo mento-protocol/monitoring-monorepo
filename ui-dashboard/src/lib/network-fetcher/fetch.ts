@@ -431,6 +431,8 @@ export async function fetchNetworkData(
         breachCount?: number;
         healthBinarySeconds?: string;
         healthTotalSeconds?: string;
+        lastOracleSnapshotTimestamp?: string;
+        lastDeviationRatio?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
     // Data-trust flags (`rebalanceThresholdsKnown` triple +
@@ -476,6 +478,8 @@ export async function fetchNetworkData(
             // ALL_POOLS_WITH_HEALTH's `healthTotalSeconds`, which would
             // pair counters captured at different polling cycles.
             healthTotalSeconds: r.healthTotalSeconds,
+            lastOracleSnapshotTimestamp: r.lastOracleSnapshotTimestamp,
+            lastDeviationRatio: r.lastDeviationRatio,
           };
     });
   }
