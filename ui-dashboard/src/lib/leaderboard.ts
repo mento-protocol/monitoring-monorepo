@@ -176,6 +176,16 @@ export type BrokerTraderViaRoute = {
   latestTimestamp: number;
 };
 
+const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
+  "0x": "0x Router",
+  direct: "Mento Broker/Router",
+  lifi: "LI.FI Router",
+  openocean: "OpenOcean Router",
+  squid: "Squid Router",
+  system: "Mento system",
+  unknown: "Unknown router",
+};
+
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
 /**
@@ -315,6 +325,10 @@ export function aggregateBrokerTradersByWindow(
 
 export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 
+// The aggregator segment is intentionally greedy: route labels can contain
+// hyphens (`cluster-*`, future versioned names), so splitting on `-` is unsafe.
+// The trailing lowercase caller address + day anchor the parse; malformed ids
+// are ignored by `aggregateBrokerViaByTrader`.
 const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
 
 /**
@@ -326,6 +340,10 @@ export function buildBrokerViaMarkerIdRegex(
   rows: readonly BrokerTraderWindowRow[],
   cutoff: number,
 ): string | null {
+  // All-time can span enough day markers to saturate ENVIO_MAX_ROWS and make
+  // attribution silently partial. Show Via only for bounded windows until the
+  // indexer exposes a per-window route entity or a structured marker query.
+  if (cutoff <= 0) return null;
   if (rows.length === 0) return null;
 
   const chainIds = [...new Set(rows.map((row) => row.chainId))].sort(
@@ -338,8 +356,10 @@ export function buildBrokerViaMarkerIdRegex(
 
   const todayMidnightUtc =
     Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  const dayPart =
-    cutoff > 0 ? dayAlternation(cutoff, todayMidnightUtc) : String.raw`\d+`;
+  // Current bounded max is 90d, so the day alternation stays small enough for
+  // the visible top-50 side query. Longer ranges should move to a structured
+  // backend entity instead of growing this regex.
+  const dayPart = dayAlternation(cutoff, todayMidnightUtc);
   if (!dayPart) return null;
 
   const chainPart = chainIds.map(String).join("|");
@@ -394,6 +414,15 @@ export function aggregateBrokerViaByTrader(
   );
 }
 
+export function brokerViaDisplayName(aggregator: string): string {
+  if (aggregator.startsWith("cluster-")) {
+    return `Router cluster ${aggregator.slice("cluster-".length)}`;
+  }
+  const known = BROKER_VIA_DISPLAY_NAMES[aggregator];
+  if (known) return known;
+  return `${humanizeRouteBucket(aggregator)} Router`;
+}
+
 function parseBrokerViaMarkerId(id: string): {
   chainId: number;
   aggregator: string;
@@ -421,6 +450,14 @@ function dayAlternation(from: number, to: number): string | null {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function humanizeRouteBucket(value: string): string {
+  const words: string[] = [];
+  for (const part of value.split(/[-_]+/)) {
+    if (part) words.push(part.charAt(0).toUpperCase() + part.slice(1));
+  }
+  return words.join(" ");
 }
 
 /**

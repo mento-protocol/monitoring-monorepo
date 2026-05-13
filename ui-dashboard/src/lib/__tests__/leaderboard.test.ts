@@ -7,6 +7,7 @@ import {
   aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
+  brokerViaDisplayName,
   buildBrokerViaMarkerIdRegex,
   buildHeroPartialOverlapQueryInput,
   computeFlow,
@@ -1100,6 +1101,24 @@ describe("v2 trader Via marker helpers", () => {
     );
   });
 
+  it("does not build an all-time marker regex because the query can exceed the row cap", () => {
+    expect(
+      buildBrokerViaMarkerIdRegex(
+        [
+          {
+            chainId: 42220,
+            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            swapCount: 1,
+            volumeUsdWei: BigInt(1),
+            isSystemAddress: false,
+            lastSeenTimestamp: 1778457600,
+          },
+        ],
+        0,
+      ),
+    ).toBeNull();
+  });
+
   it("aggregates parsed marker ids by trader and orders route labels deterministically", () => {
     const routes = aggregateBrokerViaByTrader([
       {
@@ -1131,6 +1150,16 @@ describe("v2 trader Via marker helpers", () => {
         latestTimestamp: 1778457600,
       },
     ]);
+  });
+
+  it("formats v2 route buckets as trader-facing Via labels", () => {
+    expect(brokerViaDisplayName("direct")).toBe("Mento Broker/Router");
+    expect(brokerViaDisplayName("squid")).toBe("Squid Router");
+    expect(brokerViaDisplayName("openocean")).toBe("OpenOcean Router");
+    expect(brokerViaDisplayName("unknown")).toBe("Unknown router");
+    expect(brokerViaDisplayName("cluster-7dc08ec28f299c06")).toBe(
+      "Router cluster 7dc08ec28f299c06",
+    );
   });
 });
 

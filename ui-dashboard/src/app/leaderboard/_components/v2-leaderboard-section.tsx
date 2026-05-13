@@ -64,7 +64,7 @@ export function V2LeaderboardSection({
       <section>
         <TableSectionTitle
           label="About top v2 traders table"
-          info="Ranks signer wallets still using legacy Broker v2 by USD volume in this window. Via shows the route buckets observed for each wallet."
+          info="Ranks signer wallets still using legacy Broker v2 by USD volume in this window. Via names the route family observed for each wallet."
         >
           Top v2 traders ({rangeLabel})
         </TableSectionTitle>

@@ -254,11 +254,17 @@ function AggregatorTable({
   );
 }
 
-export function AggregatorLabel({ name }: { name: string }) {
+export function AggregatorLabel({
+  name,
+  label = name,
+}: {
+  name: string;
+  label?: string;
+}) {
   const meta = getClusterMetadata(name);
   return (
     <span className="inline-flex items-center gap-1">
-      <span className={aggregatorLabelClass(name)}>{name}</span>
+      <span className={aggregatorLabelClass(name)}>{label}</span>
       {meta && (
         <a
           href={meta.explorerUrl}

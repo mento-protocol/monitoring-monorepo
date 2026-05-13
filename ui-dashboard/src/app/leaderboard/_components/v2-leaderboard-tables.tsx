@@ -11,6 +11,7 @@ import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateBrokerViaByTrader,
+  brokerViaDisplayName,
   buildBrokerViaMarkerIdRegex,
   cmpBigInt,
   weiToUsd,
@@ -50,7 +51,7 @@ export function V2LeaderboardTraderTable({
     paramPrefix: "v2trader",
   });
 
-  const sorted = useMemo(() => {
+  const visibleRows = useMemo(() => {
     const sign = sortDir === "asc" ? 1 : -1;
     const arr = [...traders];
     arr.sort((a, b) => {
@@ -73,18 +74,31 @@ export function V2LeaderboardTraderTable({
     return arr.slice(0, PAGE_LIMIT);
   }, [traders, sortKey, sortDir]);
 
+  const viaUnavailableReason =
+    cutoff <= 0
+      ? "Via attribution is shown for bounded time windows only. All-time marker history can exceed the query cap."
+      : undefined;
+
+  // Keep the Via side query scoped to the rows actually rendered. Sort changes
+  // can change the visible top-50 slice, so attribution follows `visibleRows`
+  // instead of fetching markers for every aggregated trader in the response.
   const viaMarkerRegex = useMemo(
     () =>
-      isLoading || hasError
+      isLoading || hasError || viaUnavailableReason
         ? null
-        : buildBrokerViaMarkerIdRegex(sorted, cutoff),
-    [cutoff, hasError, isLoading, sorted],
+        : buildBrokerViaMarkerIdRegex(visibleRows, cutoff),
+    [cutoff, hasError, isLoading, viaUnavailableReason, visibleRows],
+  );
+  const viaVariables = useMemo(
+    () =>
+      viaMarkerRegex ? { idRegex: viaMarkerRegex, limit: ENVIO_MAX_ROWS } : {},
+    [viaMarkerRegex],
   );
   const viaResult = useGQL<{
     BrokerAggregatorTraderDayMarker: BrokerAggregatorTraderDayMarkerRow[];
   }>(
     viaMarkerRegex ? BROKER_AGGREGATOR_TRADER_DAY_MARKERS : null,
-    viaMarkerRegex ? { idRegex: viaMarkerRegex, limit: ENVIO_MAX_ROWS } : {},
+    viaVariables,
     undefined,
     { timeoutMs: 8_000 },
   );
@@ -102,7 +116,7 @@ export function V2LeaderboardTraderTable({
     );
   }
   if (isLoading) return <Skeleton rows={10} />;
-  if (sorted.length === 0) {
+  if (visibleRows.length === 0) {
     return (
       <EmptyBox message="No legacy-v2 traders in this window. Either v2 volume has stopped — celebrate — or try widening the range / showing system addresses." />
     );
@@ -145,7 +159,7 @@ export function V2LeaderboardTraderTable({
         </tr>
       </thead>
       <tbody>
-        {sorted.map((row, idx) => {
+        {visibleRows.map((row, idx) => {
           const network = networkForChainId(row.chainId);
           return (
             <Row key={`${row.chainId}-${row.trader}`}>
@@ -166,6 +180,7 @@ export function V2LeaderboardTraderTable({
                   )}
                   isLoading={Boolean(viaMarkerRegex) && viaResult.isLoading}
                   hasError={Boolean(viaResult.error)}
+                  unavailableReason={viaUnavailableReason}
                 />
               </Td>
               <Td align="right" mono>
@@ -189,13 +204,22 @@ function ViaCell({
   routes,
   isLoading,
   hasError,
+  unavailableReason,
 }: {
   routes: readonly BrokerTraderViaRoute[] | undefined;
   isLoading: boolean;
   hasError: boolean;
+  unavailableReason?: string;
 }) {
   if (isLoading) {
     return <span className="text-slate-500">...</span>;
+  }
+  if (unavailableReason) {
+    return (
+      <span className="text-slate-500" title={unavailableReason}>
+        -
+      </span>
+    );
   }
   if (hasError) {
     return (
@@ -223,10 +247,16 @@ function ViaCell({
   return (
     <span
       className="inline-flex max-w-[16rem] flex-wrap items-center gap-1"
-      title={`Observed route buckets: ${routes.map((route) => route.aggregator).join(", ")}`}
+      title={`Observed route labels: ${routes
+        .map((route) => brokerViaDisplayName(route.aggregator))
+        .join(", ")}`}
     >
       {shown.map((route) => (
-        <AggregatorLabel key={route.aggregator} name={route.aggregator} />
+        <AggregatorLabel
+          key={route.aggregator}
+          name={route.aggregator}
+          label={brokerViaDisplayName(route.aggregator)}
+        />
       ))}
       {hidden.length > 0 && (
         <span className="rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300">
