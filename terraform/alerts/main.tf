@@ -104,10 +104,10 @@ locals {
   )
   # Critical deviation rules threshold on breach age > 1h and then use
   # `for = "1m"` to smooth single-eval ruler glitches. Warning suppression
-  # waits an extra eval after that same grace so severe fresh breaches still
+  # waits two extra evals after that same grace so severe fresh breaches still
   # send the warning page before the critical page takes over, without
-  # resolving the warning before the critical rule can fire.
-  deviation_critical_suppression_seconds = 3720
+  # resolving the warning before the critical rule can definitely fire.
+  deviation_critical_suppression_seconds = 3780
   deviation_critical_active_promql = format(
     "(%s) > %d",
     local.deviation_critical_gate_promql,
