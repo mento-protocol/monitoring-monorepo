@@ -201,15 +201,12 @@ indexer.onEvent(
         }
         const overallWorst = Math.max(worstP0, worstP1);
         const limitStatus = computeLimitStatus(overallWorst, 0);
-        const updatedPool = await context.Pool.get(poolId);
-        if (updatedPool) {
-          context.Pool.set({
-            ...updatedPool,
-            limitStatus,
-            limitPressure0: worstP0.toFixed(4),
-            limitPressure1: worstP1.toFixed(4),
-          });
-        }
+        context.Pool.set({
+          ...pool,
+          limitStatus,
+          limitPressure0: worstP0.toFixed(4),
+          limitPressure1: worstP1.toFixed(4),
+        });
       }
     }
 

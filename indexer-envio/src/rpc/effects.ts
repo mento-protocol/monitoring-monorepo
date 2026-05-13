@@ -109,8 +109,8 @@ const tradingLimitsShape = S.schema({
     decimals: S.int32,
   }),
   state: S.schema({
-    lastUpdated0: S.int32,
-    lastUpdated1: S.int32,
+    lastUpdated0: S.bigint,
+    lastUpdated1: S.bigint,
     netflow0: S.bigint,
     netflow1: S.bigint,
   }),

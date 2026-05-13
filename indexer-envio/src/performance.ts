@@ -42,7 +42,7 @@ const entityStats = new Map<string, EntityStats>();
 let processedHandlerCalls = 0;
 
 function nowMs(): number {
-  return Date.now();
+  return performance.now();
 }
 
 function getHandlerStats(name: string): HandlerStats {

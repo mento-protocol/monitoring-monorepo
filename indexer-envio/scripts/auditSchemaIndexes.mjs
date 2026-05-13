@@ -130,12 +130,21 @@ function extractGraphqlUsages(sources, schemaTypes) {
 
 function extractDiscoveryTargetUsages(sources) {
   const usages = new Map();
-  const regex =
-    /\{\s*table:\s*"([A-Z][A-Za-z0-9_]*)"\s*,\s*field:\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*chainIdColumn:\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\}/g;
+  const objectRegex = /\{[^{}]*\}/g;
+  const property = (body, name, pattern) =>
+    new RegExp(`\\b${name}\\s*:\\s*"(${pattern})"`).exec(body)?.[1] ?? null;
 
   for (const { text } of sources) {
-    for (const match of text.matchAll(regex)) {
-      const [, table, field, chainIdColumn] = match;
+    for (const match of text.matchAll(objectRegex)) {
+      const objectText = match[0];
+      const table = property(objectText, "table", "[A-Z][A-Za-z0-9_]*");
+      const field = property(objectText, "field", "[A-Za-z_][A-Za-z0-9_]*");
+      const chainIdColumn = property(
+        objectText,
+        "chainIdColumn",
+        "[A-Za-z_][A-Za-z0-9_]*",
+      );
+      if (!table || !field || !chainIdColumn) continue;
       addUsage(usages, table, chainIdColumn, "dynamic-discovery:where");
       addUsage(usages, table, field, "dynamic-discovery:distinct_order");
     }

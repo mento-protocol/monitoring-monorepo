@@ -1,6 +1,8 @@
 import { strict as assert } from "assert";
 import {
   applyTradingLimitSwap,
+  buildTradingLimitEntity,
+  computeLimitPressures,
   resetTradingLimitState,
   scaleTradingLimitValue,
 } from "../src/tradingLimits.js";
@@ -18,6 +20,32 @@ describe("TradingLimitsV2 state derivation", () => {
       scaleTradingLimitValue(100n * TOKEN_18_UNIT, 18),
       100n * INTERNAL_UNIT,
     );
+  });
+
+  it("computes pressure and status for large 15-decimal limits", () => {
+    const limit = 10_000_000n * INTERNAL_UNIT;
+    const netflow = 8_500_000n * INTERNAL_UNIT;
+
+    const { p0 } = computeLimitPressures(netflow, 0n, limit, 0n);
+    assert.equal(p0, 0.85);
+
+    const row = buildTradingLimitEntity({
+      id: "pool-token",
+      chainId: 42220,
+      poolId: "42220-0x0000000000000000000000000000000000000001",
+      token: "0x0000000000000000000000000000000000000002",
+      config: { limit0: limit, limit1: 0n },
+      state: {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 0n,
+        netflow0: netflow,
+        netflow1: 0n,
+      },
+      blockNumber: 123n,
+      blockTimestamp: 100_000n,
+    });
+    assert.equal(row.limitPressure0, "0.8500");
+    assert.equal(row.limitStatus, "WARN");
   });
 
   it("reset preserves enabled-window netflow and clears disabled-window netflow", () => {
@@ -98,6 +126,35 @@ describe("TradingLimitsV2 state derivation", () => {
     });
   });
 
+  it("does not reset the five-minute window at the exact boundary", () => {
+    const next = applyTradingLimitSwap(
+      {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 100_000n,
+        netflow0: 50n * INTERNAL_UNIT,
+        netflow1: 50n * INTERNAL_UNIT,
+      },
+      {
+        limit0: 1_000n * INTERNAL_UNIT,
+        limit1: 10_000n * INTERNAL_UNIT,
+        decimals: 18,
+      },
+      {
+        amountIn: 10n * TOKEN_18_UNIT,
+        amountOut: 0n,
+        totalFeeBps: 0,
+        blockTimestamp: 100_300n,
+      },
+    );
+
+    assert.deepEqual(next, {
+      lastUpdated0: 100_000n,
+      lastUpdated1: 100_000n,
+      netflow0: 60n * INTERNAL_UNIT,
+      netflow1: 60n * INTERNAL_UNIT,
+    });
+  });
+
   it("resets only the elapsed five-minute window", () => {
     const next = applyTradingLimitSwap(
       {
@@ -124,6 +181,64 @@ describe("TradingLimitsV2 state derivation", () => {
       lastUpdated1: 100_000n,
       netflow0: 10n * INTERNAL_UNIT,
       netflow1: 60n * INTERNAL_UNIT,
+    });
+  });
+
+  it("resets the elapsed 24-hour window", () => {
+    const next = applyTradingLimitSwap(
+      {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 100_000n,
+        netflow0: 50n * INTERNAL_UNIT,
+        netflow1: 50n * INTERNAL_UNIT,
+      },
+      {
+        limit0: 1_000n * INTERNAL_UNIT,
+        limit1: 10_000n * INTERNAL_UNIT,
+        decimals: 18,
+      },
+      {
+        amountIn: 10n * TOKEN_18_UNIT,
+        amountOut: 0n,
+        totalFeeBps: 0,
+        blockTimestamp: 186_401n,
+      },
+    );
+
+    assert.deepEqual(next, {
+      lastUpdated0: 186_401n,
+      lastUpdated1: 186_401n,
+      netflow0: 10n * INTERNAL_UNIT,
+      netflow1: 10n * INTERNAL_UNIT,
+    });
+  });
+
+  it("applies negative deltaFlow when amountOut exceeds amountIn after fees", () => {
+    const next = applyTradingLimitSwap(
+      {
+        lastUpdated0: 100_000n,
+        lastUpdated1: 100_000n,
+        netflow0: 50n * INTERNAL_UNIT,
+        netflow1: 50n * INTERNAL_UNIT,
+      },
+      {
+        limit0: 1_000n * INTERNAL_UNIT,
+        limit1: 10_000n * INTERNAL_UNIT,
+        decimals: 18,
+      },
+      {
+        amountIn: 0n,
+        amountOut: 10n * TOKEN_18_UNIT,
+        totalFeeBps: 0,
+        blockTimestamp: 100_100n,
+      },
+    );
+
+    assert.deepEqual(next, {
+      lastUpdated0: 100_000n,
+      lastUpdated1: 100_000n,
+      netflow0: 40n * INTERNAL_UNIT,
+      netflow1: 40n * INTERNAL_UNIT,
     });
   });
 

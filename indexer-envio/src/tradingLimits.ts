@@ -10,6 +10,7 @@ export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
 const L0_WINDOW_SECONDS = 5n * 60n;
 const L1_WINDOW_SECONDS = 24n * 60n * 60n;
 const BASIS_POINTS_DENOMINATOR = 10_000n;
+const PRESSURE_SCALE = 100_000_000n;
 
 export type TradingLimitConfig = {
   limit0: bigint;
@@ -27,12 +28,7 @@ export type TradingLimitState = {
 
 export type TradingLimitData = {
   config: TradingLimitConfig;
-  state: {
-    lastUpdated0: number;
-    lastUpdated1: number;
-    netflow0: bigint;
-    netflow1: bigint;
-  };
+  state: TradingLimitState;
 };
 
 export function tradingLimitId(poolId: string, token: string): string {
@@ -171,7 +167,12 @@ export function buildTradingLimitEntity(args: {
     lastUpdated1: args.state.lastUpdated1,
     limitPressure0: p0.toFixed(4),
     limitPressure1: p1.toFixed(4),
-    limitStatus: computeLimitStatus(p0, p1),
+    limitStatus: computeLimitStatusFromFlows(
+      args.state.netflow0,
+      args.state.netflow1,
+      args.config.limit0,
+      args.config.limit1,
+    ),
     updatedAtBlock: args.blockNumber,
     updatedAtTimestamp: args.blockTimestamp,
   };
@@ -192,12 +193,7 @@ export function buildTradingLimitEntityFromRpc(args: {
     poolId: args.poolId,
     token: args.token,
     config: args.data.config,
-    state: {
-      lastUpdated0: BigInt(args.data.state.lastUpdated0),
-      lastUpdated1: BigInt(args.data.state.lastUpdated1),
-      netflow0: args.data.state.netflow0,
-      netflow1: args.data.state.netflow1,
-    },
+    state: args.data.state,
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
   });
@@ -216,9 +212,44 @@ export function computeLimitPressures(
   limit0: bigint,
   limit1: bigint,
 ): { p0: number; p1: number } {
-  const abs0 = netflow0 < 0n ? -netflow0 : netflow0;
-  const abs1 = netflow1 < 0n ? -netflow1 : netflow1;
-  const p0 = limit0 !== 0n ? Number(abs0) / Number(limit0) : 0;
-  const p1 = limit1 !== 0n ? Number(abs1) / Number(limit1) : 0;
+  const p0 = computeLimitPressure(netflow0, limit0);
+  const p1 = computeLimitPressure(netflow1, limit1);
   return { p0, p1 };
+}
+
+function computeLimitPressure(netflow: bigint, limit: bigint): number {
+  if (limit === 0n) return 0;
+  const abs = netflow < 0n ? -netflow : netflow;
+  const scaled = (abs * PRESSURE_SCALE) / limit;
+  return Number(scaled) / Number(PRESSURE_SCALE);
+}
+
+function computeLimitStatusFromFlows(
+  netflow0: bigint,
+  netflow1: bigint,
+  limit0: bigint,
+  limit1: bigint,
+): string {
+  if (isAtOrOverLimit(netflow0, limit0) || isAtOrOverLimit(netflow1, limit1)) {
+    return "CRITICAL";
+  }
+  if (
+    isAboveWarnLimit(netflow0, limit0) ||
+    isAboveWarnLimit(netflow1, limit1)
+  ) {
+    return "WARN";
+  }
+  return "OK";
+}
+
+function isAtOrOverLimit(netflow: bigint, limit: bigint): boolean {
+  if (limit === 0n) return false;
+  const abs = netflow < 0n ? -netflow : netflow;
+  return abs >= limit;
+}
+
+function isAboveWarnLimit(netflow: bigint, limit: bigint): boolean {
+  if (limit === 0n) return false;
+  const abs = netflow < 0n ? -netflow : netflow;
+  return abs * 10n > limit * 8n;
 }

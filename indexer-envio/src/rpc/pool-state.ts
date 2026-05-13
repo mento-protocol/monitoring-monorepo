@@ -488,7 +488,15 @@ export async function fetchTradingLimits(
       },
     ];
     const [config, state] = result;
-    return { config, state };
+    return {
+      config,
+      state: {
+        lastUpdated0: BigInt(state.lastUpdated0),
+        lastUpdated1: BigInt(state.lastUpdated1),
+        netflow0: state.netflow0,
+        netflow1: state.netflow1,
+      },
+    };
   } catch (err) {
     logRpcFailure(
       chainId,
