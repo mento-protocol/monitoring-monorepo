@@ -178,8 +178,10 @@ export type BrokerTraderViaRoute = {
 
 const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
   "0x": "0x Router",
-  direct: "Mento Broker/Router",
+  broker: "Broker",
+  direct: "Broker",
   lifi: "LI.FI Router",
+  "mento-router-v2": "Mento Router v2",
   openocean: "OpenOcean Router",
   squid: "Squid Router",
   system: "Mento system",
@@ -420,7 +422,7 @@ export function brokerViaDisplayName(aggregator: string): string {
   }
   const known = BROKER_VIA_DISPLAY_NAMES[aggregator];
   if (known) return known;
-  return `${humanizeRouteBucket(aggregator)} Router`;
+  return humanizeRouteBucket(aggregator);
 }
 
 function parseBrokerViaMarkerId(id: string): {

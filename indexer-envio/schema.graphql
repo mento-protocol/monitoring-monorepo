@@ -327,12 +327,11 @@ type BrokerSwapEvent {
   # Broker is invoked transitively via the v3 Router → VirtualPool wrapper)
   # from broker-direct swaps (legacy v2 path). Mirrors v3 SwapEvent.txTo.
   txTo: String!
-  # True iff `txTo == V3 Router (0x4861840C...)`. Denormalized so the chart
-  # can sum daily volume without re-checking the router address per row.
-  # When true, this Broker.Swap is a sibling of a VirtualPool.Swap fired in
-  # the same tx (the v3 Router → VirtualPool wrapper → Broker path), so
-  # the v2 volume series MUST exclude these rows to avoid double-counting
-  # against v3.
+  # True iff this Broker.Swap is a sibling of a VirtualPool.Swap fired in the
+  # same tx (the v3 Router → VirtualPool wrapper → Broker path). This requires
+  # both tx.to == Routerv300 and brokerCaller == a registered VirtualPool; a
+  # legacy v2 Router call also has tx.to == Router on Celo, but calls Broker
+  # directly and must stay in the v2 series.
   routedViaV3Router: Boolean!
   txHash: String!
   blockNumber: BigInt!
@@ -409,10 +408,11 @@ type BrokerTraderDailySnapshot
 type BrokerAggregatorDailySnapshot {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
-  # Canonical name from classifyAggregator(). Same value space as
-  # AggregatorDailySnapshot.aggregator. "unknown" rows here directly drive
-  # outreach: someone is routing real v2 volume through a router we haven't
-  # classified yet — file a follow-up entry in
+  # Canonical route name for the v2 entry point. Mento direct paths split into
+  # "broker" (tx.to Broker) and "mento-router-v2" (legacy Router direct to
+  # Broker); third-party routes use classifyAggregator() names. "unknown" rows
+  # directly drive outreach: someone is routing real v2 volume through a router
+  # we haven't classified yet — file a follow-up entry in
   # indexer-envio/config/aggregators.json so they get a readable label.
   aggregator: String!
   lastSeenAggregatorAddress: String!

@@ -156,6 +156,21 @@ describe("AggregatorBreakdownSection", () => {
     );
   });
 
+  it("renders v2 first-party route buckets with trader-facing labels", () => {
+    handle = renderSection({
+      venueLabel: "v2",
+      aggregators: [
+        row({ aggregator: "broker" }),
+        row({ aggregator: "mento-router-v2" }),
+      ],
+    });
+
+    expect(aggregatorNames(handle.container)).toEqual([
+      "Broker",
+      "Mento Router v2",
+    ]);
+  });
+
   it("sorts rows through the v3 aggregator URL params", () => {
     handle = renderSection({
       aggregators: [

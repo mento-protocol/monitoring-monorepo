@@ -40,12 +40,14 @@ const USDC = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
 const SIGNER_EOA = "0xAbCdEf1234567890aBCdef1234567890ABCDef12";
 const EXCHANGE_ID =
   "0x1111111111111111111111111111111111111111111111111111111111111111";
-// Default tx.to for a "broker-direct" swap (legacy v2 path). Tests that
-// simulate router-driven swaps override this to V3_ROUTER below.
+// Default tx.to for a direct Broker swap (legacy v2 path).
 const BROKER_PROXY = "0x777A8255cA72412f0d706dc03C9D1987306B4CaD";
-// Real v3 Router (Router:v3.0.0) — must match the constant in handlers/broker.ts
-// so the routedViaV3Router classifier flips correctly.
+// Real Router address on Celo. The same address can be a legacy v2 Router
+// entry point or a v3 Router entry point; Broker.Swap distinguishes those by
+// brokerCaller (Router direct-to-Broker vs VirtualPool).
 const V3_ROUTER = "0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6";
+const VIRTUAL_POOL_ADDR =
+  "0x00000000000000000000000000000000000000aa".toLowerCase();
 
 const fireSwap = async (
   mockDb: MockDb,
@@ -90,6 +92,27 @@ const fireSwap = async (
     },
   });
   return Broker.Swap.processEvent({ event, mockDb });
+};
+
+const seedVirtualPool = async (
+  mockDb: MockDb,
+  pool = VIRTUAL_POOL_ADDR,
+): Promise<MockDb> => {
+  const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+    pool,
+    token0: CUSD,
+    token1: USDC,
+    mockEventData: {
+      chainId: CHAIN_CELO,
+      logIndex: 0,
+      srcAddress: "0x00000000000000000000000000000000000000cc",
+      block: { number: 99, timestamp: 1_699_999_999 },
+    },
+  });
+  return VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+    event: deployEvent,
+    mockDb,
+  });
 };
 
 describe("Broker.Swap handler", () => {
@@ -194,23 +217,55 @@ describe("Broker.Swap handler", () => {
     );
   });
 
-  it("flags routedViaV3Router=true when tx.to is the v3 Router (sibling-of-VirtualPool path)", async () => {
+  it("flags routedViaV3Router=true when Router enters Broker through a VirtualPool sibling", async () => {
     let mockDb = MockDb.createMockDb();
+    mockDb = await seedVirtualPool(mockDb);
     mockDb = await fireSwap(mockDb, {
       blockNumber: 200,
       blockTimestamp: 1_700_000_000,
       logIndex: 0,
       txTo: V3_ROUTER,
+      brokerCaller: VIRTUAL_POOL_ADDR,
     });
     const row = mockDb.entities.BrokerSwapEvent.get(`${CHAIN_CELO}_200_0`) as
       | { txTo: string; routedViaV3Router: boolean }
       | undefined;
     assert.isOk(row, "BrokerSwapEvent row missing");
     assert.equal(row!.txTo, V3_ROUTER.toLowerCase());
-    // Crucial: the v2 chart filter (`routedViaV3Router=false`) excludes this
-    // row, preventing double-count against the VirtualPool.Swap volume that
-    // fired in the same tx.
+    // Crucial: the v2 chart filter (`routedViaV3Router=false`) excludes only
+    // Router → VirtualPool → Broker rows, preventing double-count against the
+    // VirtualPool.Swap volume that fired in the same tx.
     assert.equal(row!.routedViaV3Router, true);
+  });
+
+  it("keeps legacy Router direct-to-Broker swaps in v2 and labels the entry point", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 200,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: V3_ROUTER,
+      brokerCaller: V3_ROUTER,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const eventRow = mockDb.entities.BrokerSwapEvent.get(
+      `${CHAIN_CELO}_200_0`,
+    ) as { routedViaV3Router: boolean } | undefined;
+    assert.isOk(eventRow, "BrokerSwapEvent row missing");
+    assert.equal(eventRow!.routedViaV3Router, false);
+    assert.isOk(
+      mockDb.entities.BrokerDailySnapshot.get(
+        `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
+      ),
+      "legacy Router direct-to-Broker swaps should remain in the v2 daily series",
+    );
+    const routeRow = mockDb.entities.BrokerAggregatorDailySnapshot.get(
+      `${CHAIN_CELO}-mento-router-v2-${dayTs}`,
+    ) as { aggregator: string; lastSeenAggregatorAddress: string } | undefined;
+    assert.isOk(routeRow, "Mento Router v2 route row missing");
+    assert.equal(routeRow!.aggregator, "mento-router-v2");
+    assert.equal(routeRow!.lastSeenAggregatorAddress, V3_ROUTER.toLowerCase());
   });
 
   it("rolls (chain, exchangeProvider, day) into a single BrokerDailySnapshot that accumulates", async () => {
@@ -319,11 +374,12 @@ describe("Broker.Swap handler", () => {
     assert.equal(second?.swapCount, 1);
   });
 
-  it("buckets router-driven and broker-direct swaps into separate daily snapshots", async () => {
+  it("excludes v3-router VirtualPool siblings from BrokerDailySnapshot", async () => {
     // Same day, same provider, but different `tx.to`: one direct broker call,
-    // one via the v3 Router. The v2 chart's filter
-    // (`routedViaV3Router=false`) reads only the direct row.
+    // one via the v3 Router → VirtualPool path. The v2 chart reads only the
+    // direct row; the v3 sibling is already counted by VirtualPool.Swap.
     let mockDb = MockDb.createMockDb();
+    mockDb = await seedVirtualPool(mockDb);
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
       blockTimestamp: 1_700_000_000,
@@ -335,17 +391,18 @@ describe("Broker.Swap handler", () => {
       blockTimestamp: 1_700_000_500,
       logIndex: 0,
       txTo: V3_ROUTER, // routedViaV3Router=true
+      brokerCaller: VIRTUAL_POOL_ADDR,
     });
 
     const dayTs = dayBucket(1_700_000_000n);
     const direct = mockDb.entities.BrokerDailySnapshot.get(
       `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
     ) as { swapCount: number } | undefined;
-    const router = mockDb.entities.BrokerDailySnapshot.get(
+    const v3Sibling = mockDb.entities.BrokerDailySnapshot.get(
       `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-router-${dayTs}`,
     ) as { swapCount: number } | undefined;
     assert.equal(direct?.swapCount, 1);
-    assert.equal(router?.swapCount, 1);
+    assert.isUndefined(v3Sibling);
   });
 
   it("rolls broker-direct swaps into BrokerTraderDailySnapshot per (chain, caller, day)", async () => {
@@ -432,6 +489,7 @@ describe("Broker.Swap handler", () => {
     // is already covered by the v3 leaderboard's TraderDailySnapshot via the
     // VirtualPool.Swap sibling that fired in the same tx.
     let mockDb = MockDb.createMockDb();
+    mockDb = await seedVirtualPool(mockDb);
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
       blockTimestamp: 1_700_000_000,
@@ -442,6 +500,7 @@ describe("Broker.Swap handler", () => {
       blockTimestamp: 1_700_000_500,
       logIndex: 0,
       txTo: V3_ROUTER, // routedViaV3Router=true → skip rollups
+      brokerCaller: VIRTUAL_POOL_ADDR,
     });
 
     const dayTs = dayBucket(1_700_000_000n);
@@ -466,8 +525,6 @@ describe("Broker.Swap handler", () => {
     // lookup on `brokerCaller` should detect the virtual_pool_factory
     // source and skip the v2 producer/aggregator rollups even though the
     // simple routedViaV3Router guard misses this path.
-    const VIRTUAL_POOL_ADDR =
-      "0x00000000000000000000000000000000000000aa".toLowerCase();
     // Some external aggregator router that ISN'T Routerv300 — proves the
     // routedViaV3Router guard alone wouldn't skip this swap.
     const EXTERNAL_AGGREGATOR =
@@ -475,24 +532,7 @@ describe("Broker.Swap handler", () => {
 
     let mockDb = MockDb.createMockDb();
 
-    // Register the VirtualPool with source="virtual_pool_factory" via the
-    // real factory deploy handler so the Pool entity matches what
-    // production would index.
-    const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
-      pool: VIRTUAL_POOL_ADDR,
-      token0: CUSD,
-      token1: USDC,
-      mockEventData: {
-        chainId: CHAIN_CELO,
-        logIndex: 0,
-        srcAddress: "0x00000000000000000000000000000000000000cc",
-        block: { number: 99, timestamp: 1_699_999_999 },
-      },
-    });
-    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
-      event: deployEvent,
-      mockDb,
-    });
+    mockDb = await seedVirtualPool(mockDb);
     const seededPool = mockDb.entities.Pool.get(
       makePoolId(CHAIN_CELO, VIRTUAL_POOL_ADDR),
     ) as { source: string } | undefined;
@@ -569,7 +609,7 @@ describe("Broker.Swap handler", () => {
     // un-registered router, so the negative assertion checks all aggregator
     // names that could plausibly land here.
     const allAggregatorRowsEmpty = (
-      ["unknown", "direct", "system"] as const
+      ["unknown", "broker", "mento-router-v2", "direct", "system"] as const
     ).every(
       (name) =>
         !mockDb.entities.BrokerAggregatorDailySnapshot.get(
@@ -582,10 +622,10 @@ describe("Broker.Swap handler", () => {
     );
   });
 
-  it("rolls broker-direct swaps into BrokerAggregatorDailySnapshot keyed by classifyAggregator(txTo)", async () => {
+  it("rolls broker-direct swaps into BrokerAggregatorDailySnapshot keyed by entry point", async () => {
     let mockDb = MockDb.createMockDb();
     // Two distinct callers both entering via the Broker proxy (a
-    // "direct"-classified entry-point per classifyAggregator). Assert the
+    // Broker entry point. Assert the
     // aggregator rollup tallies swaps + uniqueTraders correctly across them.
     const SIGNER_B = "0xBeefBeefBeefBeefBeefBeefBeefBeefBeefBeef";
     mockDb = await fireSwap(mockDb, {
@@ -609,7 +649,7 @@ describe("Broker.Swap handler", () => {
     });
 
     const dayTs = dayBucket(1_700_000_000n);
-    const id = `${CHAIN_CELO}-direct-${dayTs}`;
+    const id = `${CHAIN_CELO}-broker-${dayTs}`;
     const row = mockDb.entities.BrokerAggregatorDailySnapshot.get(id) as
       | {
           aggregator: string;
@@ -620,7 +660,7 @@ describe("Broker.Swap handler", () => {
         }
       | undefined;
     assert.isOk(row, "BrokerAggregatorDailySnapshot missing");
-    assert.equal(row!.aggregator, "direct");
+    assert.equal(row!.aggregator, "broker");
     assert.equal(row!.lastSeenAggregatorAddress, BROKER_PROXY.toLowerCase());
     assert.equal(row!.swapCount, 3);
     // First-touch dedup via BrokerAggregatorTraderDayMarker — SIGNER_EOA seen
@@ -632,12 +672,12 @@ describe("Broker.Swap handler", () => {
     // Marker entities exist per (aggregator, caller, day).
     assert.isOk(
       mockDb.entities.BrokerAggregatorTraderDayMarker.get(
-        `${CHAIN_CELO}-direct-${SIGNER_EOA.toLowerCase()}-${dayTs}`,
+        `${CHAIN_CELO}-broker-${SIGNER_EOA.toLowerCase()}-${dayTs}`,
       ),
     );
     assert.isOk(
       mockDb.entities.BrokerAggregatorTraderDayMarker.get(
-        `${CHAIN_CELO}-direct-${SIGNER_B.toLowerCase()}-${dayTs}`,
+        `${CHAIN_CELO}-broker-${SIGNER_B.toLowerCase()}-${dayTs}`,
       ),
     );
   });
@@ -723,12 +763,10 @@ describe("Broker.Swap handler", () => {
 
 describe("v3 router lookup smoke test", () => {
   it("@mento-protocol/contracts still registers the v3 Router on Celo at the expected address", () => {
-    // The handler at handlers/broker.ts derives `routedViaV3Router` from
-    // `getContractAddress(chainId, "Routerv300")`. If the package ever loses
-    // that entry (rename, repackaging) the comparison silently always returns
-    // false → every Broker.Swap gets misclassified as v2-direct, inflating
-    // legacy volume on the chart. This catches that regression at test time
-    // rather than at production sync.
+    // The handler at handlers/broker.ts uses this address together with the
+    // Broker caller VirtualPool check to separate v3 Router siblings from
+    // legacy Router direct-to-Broker calls. If the package ever loses that
+    // entry (rename, repackaging), Router sibling classification regresses.
     assert.equal(
       getContractAddress(CHAIN_CELO, "Routerv300")?.toLowerCase(),
       V3_ROUTER.toLowerCase(),

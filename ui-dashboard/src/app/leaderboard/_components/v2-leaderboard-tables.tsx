@@ -237,8 +237,13 @@ function ViaCell({
   return (
     <span
       className="inline-flex max-w-[16rem] flex-wrap items-center gap-1"
-      title={`Observed route labels: ${routes
-        .map((route) => brokerViaDisplayName(route.aggregator))
+      title={`Observed routes in this window, ordered by active days: ${routes
+        .map(
+          (route) =>
+            `${brokerViaDisplayName(route.aggregator)} (${route.days} active ${
+              route.days === 1 ? "day" : "days"
+            })`,
+        )
         .join(", ")}`}
     >
       {shown.map((route) => (

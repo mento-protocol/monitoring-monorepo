@@ -15,7 +15,7 @@ import {
 } from "@/components/time-series-chart-card";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
-import { cmpBigInt, weiToUsd } from "@/lib/leaderboard";
+import { brokerViaDisplayName, cmpBigInt, weiToUsd } from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
 import { TableSectionTitle } from "./table-section-title";
@@ -217,7 +217,14 @@ function AggregatorTable({
               <Td>
                 <span className="inline-flex items-center gap-1.5">
                   {network && <ChainIcon network={network} />}
-                  <AggregatorLabel name={row.aggregator} />
+                  <AggregatorLabel
+                    name={row.aggregator}
+                    label={
+                      venueLabel === "v2"
+                        ? brokerViaDisplayName(row.aggregator)
+                        : undefined
+                    }
+                  />
                 </span>
               </Td>
               <Td>
@@ -288,7 +295,12 @@ function aggregatorLabelClass(name: string): string {
   if (name.startsWith("cluster-")) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 font-mono text-[11px] text-slate-300";
   }
-  if (name === "system" || name === "direct") {
+  if (
+    name === "system" ||
+    name === "direct" ||
+    name === "broker" ||
+    name === "mento-router-v2"
+  ) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300";
   }
   return "rounded bg-indigo-900/30 px-1.5 py-0.5 text-[11px] font-medium text-indigo-200";

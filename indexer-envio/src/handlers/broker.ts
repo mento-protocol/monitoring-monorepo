@@ -1,7 +1,8 @@
 // Mento Broker Swap handler. v3 swaps that route through VirtualPool wrappers
 // also fire Broker.Swap (the wrapper transitively invokes the Broker), so we
-// flag `routedViaV3Router` from `tx.to` to let the dashboard exclude those
-// router-driven sibling rows from the v2 series and avoid double-count.
+// flag `routedViaV3Router` from `tx.to` + `brokerCaller` to let the dashboard
+// exclude those router-driven sibling rows from the v2 series and avoid
+// double-count.
 // VirtualPool-routed Broker.Swaps (where an external aggregator routes
 // through VirtualPool — `tx.to` is the aggregator, not Router300) are
 // detected separately via a Pool lookup on `event.params.trader` (which is
@@ -41,6 +42,22 @@ function v3RouterAddress(chainId: number): string | null {
   return value;
 }
 
+function contractAddress(chainId: number, name: string): string | null {
+  return getContractAddress(chainId, name)?.toLowerCase() ?? null;
+}
+
+function classifyBrokerEntryPoint(chainId: number, txTo: string): string {
+  const lower = txTo.toLowerCase();
+  if (lower === contractAddress(chainId, "Broker")) return "broker";
+  if (
+    lower === contractAddress(chainId, "Router") ||
+    lower === contractAddress(chainId, "Routerv300")
+  ) {
+    return "mento-router-v2";
+  }
+  return classifyAggregator(chainId, txTo);
+}
+
 indexer.onEvent(
   { contract: "Broker", event: "Swap" },
   async ({ event, context }) => {
@@ -59,7 +76,7 @@ indexer.onEvent(
     const tokenIn = asAddress(event.params.tokenIn);
     const tokenOut = asAddress(event.params.tokenOut);
     const router = v3RouterAddress(event.chainId);
-    const routedViaV3Router = router !== null && txTo === router;
+    const txToV3Router = router !== null && txTo === router;
 
     // Reuses the ERC20FeeToken handler's cache + KNOWN_TOKEN_META static
     // fallback, so per-token first-hit RPC for known Mento stablecoins is free
@@ -94,26 +111,6 @@ indexer.onEvent(
       amount1In: 0n,
       amount1Out: event.params.amountOut,
     });
-
-    const swap: BrokerSwapEvent = {
-      id,
-      chainId: event.chainId,
-      exchangeProvider,
-      exchangeId,
-      brokerCaller,
-      caller,
-      tokenIn,
-      tokenOut,
-      amountIn: event.params.amountIn,
-      amountOut: event.params.amountOut,
-      volumeUsdWei,
-      txTo,
-      routedViaV3Router,
-      txHash: event.transaction.hash,
-      blockNumber,
-      blockTimestamp,
-    };
-    context.BrokerSwapEvent.set(swap);
 
     const dayTs = dayBucket(blockTimestamp);
 
@@ -151,7 +148,7 @@ indexer.onEvent(
     // volume series (consumed by the dashboard's v2 volume-over-time chart
     // via `routedViaV3Router=false` filter) excludes these double-counted
     // swaps too — the original schema flag `routedViaV3Router` only catches
-    // the `tx.to == Routerv300` path, not the aggregator → VirtualPool path.
+    // the Router → VirtualPool path, not the aggregator → VirtualPool path.
     // Round 3 #6: pre-warm VP classification. Pre-start_block VPs whose
     // first event is `VirtualPool.UpdateReserves` (the inner step of a
     // VP-routed swap) get a Pool row with source `fpmm_update_reserves`
@@ -175,6 +172,27 @@ indexer.onEvent(
     const brokerCallerIsVirtualPool = brokerCallerPool
       ? isVirtualPool(brokerCallerPool)
       : false;
+    const routedViaV3Router = txToV3Router && brokerCallerIsVirtualPool;
+
+    const swap: BrokerSwapEvent = {
+      id,
+      chainId: event.chainId,
+      exchangeProvider,
+      exchangeId,
+      brokerCaller,
+      caller,
+      tokenIn,
+      tokenOut,
+      amountIn: event.params.amountIn,
+      amountOut: event.params.amountOut,
+      volumeUsdWei,
+      txTo,
+      routedViaV3Router,
+      txHash: event.transaction.hash,
+      blockNumber,
+      blockTimestamp,
+    };
+    context.BrokerSwapEvent.set(swap);
 
     // Heartbeat the v2 leaderboard window snapshot before any of the
     // legacy-v2 early-returns below. Every broker.swap is a heartbeat
@@ -214,7 +232,10 @@ indexer.onEvent(
     // Legacy-v2 producer rollups. Skip when:
     //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap
     //     already counted by the v3 leaderboard. Including it here would
-    //     double-count the same caller/aggregator across both venues.
+    //     double-count the same caller/aggregator across both venues. The
+    //     tx.to Router check alone is not enough: legacy v2 Router calls also
+    //     enter at that address but call Broker directly instead of through a
+    //     VirtualPool.
     //   - brokerCallerIsVirtualPool: aggregator → VirtualPool → Broker — same
     //     double-count concern; `tx.to` is the aggregator router (not
     //     `Routerv300`), so the `routedViaV3Router` guard misses this path.
@@ -248,10 +269,10 @@ indexer.onEvent(
     // as a P1 false-positive on PR #363.
     const callerIsSystem = isSystemAddress(event.chainId, caller);
     const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
-    // No pool address to pass — `classifyAggregator` falls back to the
-    // direct-entry / system-address / unknown ladder, which is the right
-    // taxonomy for v2 entry-point analysis.
-    const aggregator = classifyAggregator(event.chainId, txTo);
+    // v2 entry-point analysis splits Mento direct routes by exact contract:
+    // direct Broker calls vs legacy Router calls. Third-party routers still
+    // fall through to the shared aggregator classifier.
+    const aggregator = classifyBrokerEntryPoint(event.chainId, txTo);
     const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
     // Marker is keyed on `caller` (signer EOA), not `brokerCaller`, so
     // uniqueTraders counts distinct EOAs per day rather than distinct
