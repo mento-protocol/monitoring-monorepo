@@ -207,21 +207,19 @@ indexer.onEvent(
       blockNumber,
     });
 
-    // Daily rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`
-    // so the dashboard's `routedViaV3Router=false` filter reads from a single
-    // index without scanning the per-event table. Skip the write entirely for
+    // Daily rollup for legacy-v2 volume keyed by
+    // `(chainId, exchangeProvider, day)`. Skip the write entirely for
     // VirtualPool-routed swaps — the v3 VirtualPool.Swap sibling already
-    // accounts for them in its own snapshot table; including them here under
-    // `routedViaV3Router=false` would inflate the legacy-v2 volume series.
+    // accounts for them in its own snapshot table; including them here would
+    // inflate the legacy-v2 volume series.
     if (!brokerCallerIsVirtualPool) {
-      const routedKey = routedViaV3Router ? "router" : "direct";
-      const snapshotId = `${event.chainId}-${exchangeProvider}-${routedKey}-${dayTs}`;
+      const snapshotId = `${event.chainId}-${exchangeProvider}-direct-${dayTs}`;
       const existing = await context.BrokerDailySnapshot.get(snapshotId);
       context.BrokerDailySnapshot.set({
         id: snapshotId,
         chainId: event.chainId,
         exchangeProvider,
-        routedViaV3Router,
+        routedViaV3Router: false,
         timestamp: dayTs,
         swapCount: (existing?.swapCount ?? 0) + 1,
         volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + volumeUsdWei,

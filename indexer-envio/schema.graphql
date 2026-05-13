@@ -295,9 +295,10 @@ type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
 # `routedViaV3Router` flags those router-driven sibling rows so the dashboard
 # can exclude them from the v2 series and avoid double-counting against v3.
 #
-# Per-day rollup keyed by (chainId, exchangeProvider, routedViaV3Router, day)
-# so the dashboard's `routedViaV3Router=false` filter reads bounded daily rows
-# instead of scanning the per-event table.
+# Per-day legacy-v2 rollup keyed by (chainId, exchangeProvider, day), populated
+# only for Broker.Swap rows that are not VirtualPool-routed v3 siblings. The
+# dashboard reads these bounded daily rows instead of scanning the per-event
+# table.
 # ============================================================================
 
 type BrokerSwapEvent {
@@ -339,10 +340,9 @@ type BrokerSwapEvent {
 }
 
 type BrokerDailySnapshot {
-  # `{chainId}-{exchangeProvider}-{router|direct}-{day}` (handler stringifies
-  # `routedViaV3Router` to "router" / "direct"). Bucketing by routing key
-  # lets the chart's v2 filter `routedViaV3Router=false` read a single row
-  # set without scanning the per-event table.
+  # `{chainId}-{exchangeProvider}-direct-{day}`. VirtualPool-routed v3 sibling
+  # Broker.Swap rows are skipped rather than written under a parallel router
+  # bucket, so this daily table stays aligned with the legacy-v2 chart.
   id: ID!
   chainId: Int! @index
   exchangeProvider: String!

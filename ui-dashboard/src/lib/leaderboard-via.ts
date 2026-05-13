@@ -36,6 +36,7 @@ export async function fetchBrokerViaMarkerPages(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const rows: BrokerAggregatorTraderDayMarkerRow[] = [];
   const seen = new Set<string>();
+  const signal = AbortSignal.timeout(timeoutMs);
   let afterId = "";
 
   for (let page = 0; page < maxPages; page += 1) {
@@ -43,7 +44,7 @@ export async function fetchBrokerViaMarkerPages(
     const result = await client.request<BrokerViaMarkerPage>({
       document: BROKER_AGGREGATOR_TRADER_DAY_MARKERS,
       variables: { idRegex, afterId, limit: pageSize },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
     const batch = result.BrokerAggregatorTraderDayMarker;
     for (const row of batch) {
