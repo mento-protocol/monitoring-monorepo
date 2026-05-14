@@ -30,17 +30,25 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Envio handler/context types still expose dynamic entity and effect
-      // surfaces. Keep type-aware control-flow rules on while staging the
-      // noisy unsafe-* checks separately.
+      // Generic Trunk CI runs before Envio codegen. Without .envio/types.d.ts,
+      // imported entity types degrade to parser error-any and trip this rule.
+      "@typescript-eslint/no-redundant-type-constituents": "off",
+    },
+  },
+  {
+    // `src/performance.ts` is deliberately reflection-heavy: it Proxy-wraps
+    // Envio's entity/effect/context operations to record per-handler stats.
+    // `Reflect.get` returns `any` by design, and the wrapped function values
+    // can't be typed without losing the dynamic Proxy semantics. The unsafe-*
+    // disables stay scoped to this single file rather than the whole src/
+    // tree, so new code is fully covered by `recommendedTypeChecked`.
+    files: ["src/performance.ts"],
+    rules: {
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-return": "off",
-      // Generic Trunk CI runs before Envio codegen. Without .envio/types.d.ts,
-      // imported entity types degrade to parser error-any and trip this rule.
-      "@typescript-eslint/no-redundant-type-constituents": "off",
     },
   },
   {

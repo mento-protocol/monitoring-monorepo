@@ -159,10 +159,10 @@ export function getClusterMetadata(
 export function _aggregatorAddressesForChain(
   chainId: number,
 ): Map<string, string> {
-  return AGGREGATOR_BY_CHAIN.get(chainId) ?? new Map();
+  return AGGREGATOR_BY_CHAIN.get(chainId) ?? new Map<string, string>();
 }
 export function _directEntriesForChain(chainId: number): Set<string> {
-  return DIRECT_ENTRY_BY_CHAIN.get(chainId) ?? new Set();
+  return DIRECT_ENTRY_BY_CHAIN.get(chainId) ?? new Set<string>();
 }
 export function _allClusterNames(): string[] {
   return [...CLUSTERS_BY_NAME.keys()];
