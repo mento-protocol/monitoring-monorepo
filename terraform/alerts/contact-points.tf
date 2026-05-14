@@ -36,6 +36,30 @@ resource "grafana_contact_point" "slack_warnings" {
   }
 }
 
+resource "grafana_contact_point" "slack_critical_transition" {
+  name = "slack-alerts-critical-transition"
+
+  slack {
+    token                   = var.slack_bot_token
+    recipient               = var.slack_channel_critical
+    disable_resolve_message = true
+    title                   = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
+    text                    = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_warnings_transition" {
+  name = "slack-alerts-warnings-transition"
+
+  slack {
+    token                   = var.slack_bot_token
+    recipient               = var.slack_channel_warnings
+    disable_resolve_message = true
+    title                   = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text                    = local.slack_body_template
+  }
+}
+
 locals {
   # Shared message body — both contact points (critical + warnings) render the
   # same structure so operators can't mistake fields between channels. Split
@@ -114,6 +138,9 @@ locals {
     {{ if .Annotations.current_reserves -}}
     *Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
+    {{ if .Annotations.breach_duration -}}
+    *Breach Duration:* {{ .Annotations.breach_duration }}
+    {{ end -}}
     {{ if .Annotations.rebalance_reason -}}
     *Rebalance Blocked:* {{ .Annotations.rebalance_reason }}
     {{ end -}}
@@ -129,9 +156,17 @@ locals {
     {{ if .Annotations.previous_oracle_price -}}
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
+    {{ if .Annotations.breach_started -}}
+    *Started:* {{ .Annotations.breach_started }}
+    {{ else -}}
     *Started:* {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ end -}}
+    {{ if .Annotations.breach_ended -}}
+    *Ended:* {{ .Annotations.breach_ended }}
+    {{ else -}}
     {{ if $isResolved -}}
     *Resolved:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+    {{ end -}}
     {{ end -}}
     *Alert ID:* `{{ .Fingerprint }}`
     {{ end }}
@@ -177,6 +212,22 @@ locals {
     group_by        = ["grafana_folder", "chain_id", "pool_id"]
     group_wait      = "1m"
     group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_critical_transition = {
+    contact_point   = grafana_contact_point.slack_critical_transition.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "0s"
+    group_interval  = "5m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_transition = {
+    contact_point   = grafana_contact_point.slack_warnings_transition.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "0s"
+    group_interval  = "5m"
     repeat_interval = "4h"
   }
 }

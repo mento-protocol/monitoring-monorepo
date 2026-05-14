@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   register,
   gauges,
@@ -6,7 +6,8 @@ import {
   updateMetrics,
   healthStatusToNumber,
 } from "../src/metrics.js";
-import { makePool, getGaugeValue } from "./fixtures.js";
+import { resetDeviationAlertStateForTests } from "../src/deviation-alert-state.js";
+import { makePool, getGaugeValue, getMetricValues } from "./fixtures.js";
 
 describe("healthStatusToNumber", () => {
   it("maps OK to 0", () => expect(healthStatusToNumber("OK")).toBe(0));
@@ -31,6 +32,11 @@ describe("updateMetrics", () => {
 
   beforeEach(() => {
     register.resetMetrics();
+    resetDeviationAlertStateForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("sets oracle_ok to 1 when oracleOk is true", async () => {
@@ -148,6 +154,684 @@ describe("updateMetrics", () => {
         poolLabels,
       ),
     ).toBe(1713200500);
+  });
+
+  it("publishes exactly one deviation alert state per pool", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200900,
+    );
+
+    const stateValues = await getMetricValues(
+      register,
+      "mento_pool_deviation_alert_state",
+    );
+    expect(stateValues).toHaveLength(1);
+    expect(stateValues[0]?.labels).toMatchObject({
+      ...poolLabels,
+      state: "warning",
+    });
+    expect(stateValues[0]?.value).toBe(1);
+  });
+
+  it("increments a recovered transition once and exposes formatted transition labels", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200300,
+    );
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713203660);
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transition_active",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+          breach_started_at: "Mon Apr 15 16:53 UTC",
+          breach_ended_at: "Mon Apr 15 17:54 UTC",
+          breach_duration: "1h 1m",
+        },
+      ),
+    ).toBe(1);
+
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713203690);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("does not emit a recovery transition for a warning breach that never fired", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713200600);
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transition_active",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not inherit breach age after FX weekend suppression reopens", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713564000",
+        }),
+      ],
+      1713564000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713564000",
+        }),
+      ],
+      1713740400,
+    );
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713740700);
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not emit a restored transition when anchored warning never fired", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200300,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200960,
+    );
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deviation_ratio_unavailable",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "deviation_ratio_unavailable_warning",
+          to: "warning",
+          reason: "deviation_ratio_restored",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("records warning to critical escalation when the critical alert can fire", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203661,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "critical",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "critical",
+          reason: "escalated_to_critical",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("records data restoration without pretending critical already escalated", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203900,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "warning",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "deviation_ratio_unavailable_warning",
+          to: "warning",
+          reason: "deviation_ratio_restored",
+        },
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "deviation_ratio_unavailable_warning",
+          to: "critical",
+          reason: "escalated_to_critical",
+        },
+      ),
+    ).toBeUndefined();
+
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203961,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "critical",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "critical",
+          reason: "escalated_to_critical",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not emit critical-tier transitions for a brief critical spike", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203661,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "warning",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "critical",
+          reason: "escalated_to_critical",
+        },
+      ),
+    ).toBeUndefined();
+
+    updateMetrics([makePool({ lastDeviationRatio: "1.000000" })], 1713203690);
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ok",
+          reason: "recovered",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("records critical de-escalation to warning during peak-ratio rollout gaps", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203900,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713203960,
+    );
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "warning",
+          reason: "deescalated_to_warning",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("keeps critical readiness when deviation-ratio data disappears", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203661,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203720,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "deviation_ratio_unavailable_critical",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deescalated_to_warning",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "deviation_ratio_unavailable_critical",
+          reason: "deviation_ratio_unavailable",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("records deviation-ratio unavailable and restored transitions", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713200960,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713200000",
+        }),
+      ],
+      1713201861,
+    );
+
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deviation_ratio_unavailable",
+        },
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "deviation_ratio_unavailable_warning",
+          to: "warning",
+          reason: "deviation_ratio_restored",
+        },
+      ),
+    ).toBe(1);
+
+    const activeTransitions = await getMetricValues(
+      register,
+      "mento_pool_deviation_alert_transition_active",
+    );
+    expect(activeTransitions).toHaveLength(1);
+    expect(activeTransitions[0]?.labels).toMatchObject({
+      ...poolLabels,
+      from: "deviation_ratio_unavailable_warning",
+      to: "warning",
+      reason: "deviation_ratio_restored",
+    });
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transition_active",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deviation_ratio_unavailable",
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("records FX weekend suppression for FX pairs", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713556800",
+        }),
+      ],
+      1713556800,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713556800",
+        }),
+      ],
+      1713564000,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "fx_paused",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "fx_paused",
+          reason: "fx_weekend_suppressed",
+        },
+      ),
+    ).toBe(1);
+  });
+
+  it("does not pause USD-pegged pools during the FX weekend window", async () => {
+    updateMetrics(
+      [
+        makePool({
+          token1: "0xeb466342c4d449bc9f53a865d5cb90586f405215",
+          lastDeviationRatio: "1.020000",
+          deviationBreachStartedAt: "1713556800",
+        }),
+      ],
+      1713564000,
+    );
+
+    const stateValues = await getMetricValues(
+      register,
+      "mento_pool_deviation_alert_state",
+    );
+    expect(stateValues).toHaveLength(1);
+    expect(stateValues[0]?.labels).toMatchObject({
+      pair: "axlUSDC/USDm",
+      state: "warning",
+    });
   });
 
   it("publishes open-breach peak ratio when entry threshold is known", async () => {

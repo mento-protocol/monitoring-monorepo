@@ -71,4 +71,17 @@ export async function getGaugeValue(
   )?.value;
 }
 
+export async function getMetricValues(
+  reg: Registry,
+  name: string,
+): Promise<Array<{ labels: Record<string, string>; value: number }>> {
+  const metrics = await reg.getMetricsAsJSON();
+  const metric = metrics.find((m) => m.name === name);
+  if (!metric || !("values" in metric)) return [];
+  return metric.values as Array<{
+    labels: Record<string, string>;
+    value: number;
+  }>;
+}
+
 export const tick = () => new Promise((r) => setTimeout(r, 10));

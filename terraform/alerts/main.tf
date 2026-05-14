@@ -102,17 +102,39 @@ locals {
     local.deviation_critical_magnitude_promql,
     local.fx_weekend_suppressed_breach_start_promql,
   )
-  # Critical deviation rules threshold on breach age > 1h and then use
-  # `for = "1m"` to smooth single-eval ruler glitches. Warning suppression
-  # waits two extra evals after that same grace so severe fresh breaches still
-  # send the warning page before the critical page takes over, without
-  # resolving the warning before the critical rule can definitely fire.
-  deviation_critical_suppression_seconds = 3780
-  deviation_critical_active_promql = format(
-    "(%s) > %d",
-    local.deviation_critical_gate_promql,
-    local.deviation_critical_suppression_seconds,
-  )
+  # Metrics-bridge only publishes critical alert_state after the critical
+  # rule's own 1m dwell could have elapsed. Suppress warning coverage on that
+  # state, not on breach age alone, so late critical-magnitude or data-gap
+  # changes cannot resolve warning before critical can actually fire. During
+  # rollout, fall back to the previous age-based suppression per pool until any
+  # alert_state series exists for that pool.
+  deviation_critical_suppression_seconds       = 3780
+  deviation_alert_state_present_promql         = "max without(state) (mento_pool_deviation_alert_state)"
+  deviation_critical_state_ready_promql        = "max without(state) (mento_pool_deviation_alert_state{state=~\"critical|deviation_ratio_unavailable_critical\"} > 0)"
+  deviation_critical_legacy_active_promql      = "(${local.deviation_critical_gate_promql}) > ${local.deviation_critical_suppression_seconds}"
+  deviation_critical_ready_promql              = "(${local.deviation_critical_state_ready_promql}) or on(chain_id, pool_id, pair) ((${local.deviation_critical_legacy_active_promql}) unless on(chain_id, pool_id, pair) (${local.deviation_alert_state_present_promql}))"
+  deviation_warning_unavailable_base_promql    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+  deviation_warning_unavailable_rollout_promql = "(${local.deviation_alert_state_present_promql}) or (((time() - mento_pool_deviation_breach_start) <= ${local.deviation_critical_suppression_seconds}) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0))"
+  deviation_warning_active_promql              = "((mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_ready_promql}))"
+  deviation_warning_unavailable_active_promql  = "((${local.deviation_warning_unavailable_base_promql}) unless on(chain_id, pool_id, pair) (${local.deviation_critical_state_ready_promql})) and on(chain_id, pool_id, pair) (${local.deviation_warning_unavailable_rollout_promql})"
+  deviation_critical_unavailable_active_promql = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
+
+  # Transition markers let resolved notifications say why an alert stopped
+  # instead of listing every possible cause. Each base alert rule adds the
+  # matching query as annotation-only `Info`; it is not part of the threshold
+  # condition. Grafana can mark the whole rule NoData when an annotation query
+  # returns zero series, so each `Info` query falls back to a zero-valued series
+  # matching the base alert's own active label set. The transition marker wins
+  # when present and carries the reason labels; the fallback only keeps active
+  # alerts evaluable between transitions.
+  deviation_warning_resolved_transition_promql              = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_unavailable_resolved_transition_promql  = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_resolved_transition_promql             = "mento_pool_deviation_alert_transition_active{from=\"critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_unavailable_resolved_transition_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_resolved_info_promql                    = "(${local.deviation_warning_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_active_promql}))"
+  deviation_warning_unavailable_resolved_info_promql        = "(${local.deviation_warning_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_unavailable_active_promql}))"
+  deviation_critical_resolved_info_promql                   = "(${local.deviation_critical_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_gate_promql}))"
+  deviation_critical_unavailable_resolved_info_promql       = "(${local.deviation_critical_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_unavailable_active_promql}))"
 
   # ── Deviation Breach annotations ─────────────────────────────────────────
   # Deviation-breach rules render the same Slack diagnostic lines, so we
@@ -174,7 +196,7 @@ locals {
   #     NoData through this rule and stuck the critical alerts in Normal for
   #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
   #     Aegis Monad coverage entry in BACKLOG.md.
-  deviation_warning_summary_annotation  = <<-EOT
+  deviation_warning_summary_annotation            = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
@@ -202,7 +224,7 @@ locals {
       Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_summary_annotation = <<-EOT
+  deviation_critical_summary_annotation           = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- $age := humanizeDuration $values.A.Value -}}
@@ -219,10 +241,67 @@ locals {
       Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
     {{- end -}}
   EOT
-  deviation_current_reserves_annotation = <<-EOT
+  deviation_current_reserves_annotation           = <<-EOT
     {{- if and $values.R0 $values.R1 -}}
       {{- printf "%.0f%%" $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}
     {{- end -}}
+  EOT
+  deviation_transition_summary_annotation         = <<-EOT
+    {{- if $values.Info -}}
+      {{- $reason := index $values.Info.Labels "reason" -}}
+      {{- if eq $reason "recovered" -}}
+        Pool is back within tolerance.
+      {{- else if eq $reason "escalated_to_critical" -}}
+        Warning escalated to critical.
+      {{- else if eq $reason "deescalated_to_warning" -}}
+        Critical alert de-escalated to warning.
+      {{- else if eq $reason "deviation_ratio_unavailable" -}}
+        Deviation-ratio data is unavailable while the breach is still open.
+      {{- else if eq $reason "deviation_ratio_restored" -}}
+        Deviation-ratio data is available again while the breach is still open.
+      {{- else if eq $reason "fx_weekend_suppressed" -}}
+        Alert paused because FX weekend suppression is active.
+      {{- else -}}
+        Deviation alert state changed: {{ $reason }}.
+      {{- end -}}
+    {{- else -}}
+      Deviation alert state changed.
+    {{- end -}}
+  EOT
+  deviation_resolved_summary_annotation           = <<-EOT
+    {{- if $values.Info -}}
+      {{- $reason := index $values.Info.Labels "reason" -}}
+      {{- if $reason -}}
+        {{- if eq $reason "recovered" -}}
+          Pool is back within tolerance.
+        {{- else if eq $reason "escalated_to_critical" -}}
+          Warning escalated to critical.
+        {{- else if eq $reason "deescalated_to_warning" -}}
+          Critical alert de-escalated to warning.
+        {{- else if eq $reason "deviation_ratio_unavailable" -}}
+          Deviation-ratio data is unavailable while the breach is still open.
+        {{- else if eq $reason "deviation_ratio_restored" -}}
+          Deviation-ratio data is available again while the breach is still open.
+        {{- else if eq $reason "fx_weekend_suppressed" -}}
+          Alert paused because FX weekend suppression is active.
+        {{- else -}}
+          Alert stopped because of transition reason: {{ $reason }}.
+        {{- end -}}
+      {{- else -}}
+        Alert stopped, but the transition reason marker was unavailable.
+      {{- end -}}
+    {{- else -}}
+      Alert stopped, but the transition reason marker was unavailable.
+    {{- end -}}
+  EOT
+  deviation_transition_breach_duration_annotation = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_duration" }}{{- end -}}
+  EOT
+  deviation_transition_breach_started_annotation  = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_started_at" }}{{- end -}}
+  EOT
+  deviation_transition_breach_ended_annotation    = <<-EOT
+    {{- if $values.Info -}}{{ index $values.Info.Labels "breach_ended_at" }}{{- end -}}
   EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
   # trim markers strip ALL surrounding whitespace (including newlines), so
@@ -336,6 +415,11 @@ locals {
       ref_id = "ResAxlUSDC"
       expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
+  ]
+
+  deviation_reserve_annotation_queries = [
+    for query in local.deviation_annotation_queries : query
+    if contains(["R0", "R1"], query.ref_id)
   ]
 
   # Rebalancer liveness/effectiveness alerts only render `rebalance_reason`.
