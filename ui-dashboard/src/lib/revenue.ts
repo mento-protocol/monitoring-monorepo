@@ -87,8 +87,11 @@ export function buildDailyFeeSeries(
 
     for (const s of netData.feeSnapshots) {
       const ts = Number(s.timestamp);
-      if (dayAlignedWindow) {
-        if (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to) continue;
+      if (
+        dayAlignedWindow &&
+        (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to)
+      ) {
+        continue;
       }
       const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       let usd = Number(s.feesUsdWei) / 1e18;

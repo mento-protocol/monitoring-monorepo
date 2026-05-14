@@ -116,8 +116,8 @@ export function buildDailyVolumeSeries(
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
     for (const snapshot of netData.snapshotsAllDaily) {
       const timestamp = Number(snapshot.timestamp);
-      if (window) {
-        if (timestamp < window.from || timestamp >= window.to) continue;
+      if (window && (timestamp < window.from || timestamp >= window.to)) {
+        continue;
       }
       const pool = poolById.get(snapshot.poolId);
       if (pool && pool.tokenDecimalsKnown !== true) {

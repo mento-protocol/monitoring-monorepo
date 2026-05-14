@@ -226,18 +226,19 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
 
   // Already in v2 format — unless the name is blank and we can recover a
   // valid legacy label from mixed/partially-corrupted data.
-  if (typeof entry.name === "string") {
-    if (entry.name.trim() || typeof entry.label !== "string") {
-      return {
-        name: entry.name,
-        tags: normalizedTags,
-        notes: typeof entry.notes === "string" ? entry.notes : undefined,
-        isPublic: entry.isPublic === true ? true : undefined,
-        ...(source ? { source } : {}),
-        ...(createdAt ? { createdAt } : {}),
-        updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
-      };
-    }
+  if (
+    typeof entry.name === "string" &&
+    (entry.name.trim() || typeof entry.label !== "string")
+  ) {
+    return {
+      name: entry.name,
+      tags: normalizedTags,
+      notes: typeof entry.notes === "string" ? entry.notes : undefined,
+      isPublic: entry.isPublic === true ? true : undefined,
+      ...(source ? { source } : {}),
+      ...(createdAt ? { createdAt } : {}),
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
+    };
   }
 
   // Legacy v1 format: { label, category?, ... }

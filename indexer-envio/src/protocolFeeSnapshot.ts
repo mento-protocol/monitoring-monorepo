@@ -210,10 +210,8 @@ export function mergeFeeSnapshot(
   // allPegged: if the new transfer is non-pegged (or UNKNOWN), the row can no
   // longer be all-pegged. If shouldHeal already recomputed it, that's the
   // canonical value — only flip from true→false here, never the reverse.
-  if (!shouldHeal) {
-    if (isUnresolvedInput || !isInputPegged) {
-      nextAllPegged = false;
-    }
+  if (!shouldHeal && (isUnresolvedInput || !isInputPegged)) {
+    nextAllPegged = false;
   }
 
   return {
