@@ -473,6 +473,30 @@ describe("updateMetrics", () => {
         },
       ),
     ).toBe(1);
+
+    const activeTransitions = await getMetricValues(
+      register,
+      "mento_pool_deviation_alert_transition_active",
+    );
+    expect(activeTransitions).toHaveLength(1);
+    expect(activeTransitions[0]?.labels).toMatchObject({
+      ...poolLabels,
+      from: "ratio_missing_warning",
+      to: "warning",
+      reason: "ratio_data_restored",
+    });
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transition_active",
+        {
+          ...poolLabels,
+          from: "warning",
+          to: "ratio_missing_warning",
+          reason: "ratio_data_missing",
+        },
+      ),
+    ).toBeUndefined();
   });
 
   it("records FX weekend suppression for FX pairs", async () => {

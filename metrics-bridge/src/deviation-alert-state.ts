@@ -243,20 +243,10 @@ function shouldRecordTransition(
   );
 }
 
-function transitionKey(poolId: string, transition: DeviationAlertTransition) {
-  return [
-    poolId,
-    transition.from,
-    transition.to,
-    transition.reason,
-    transition.endedAt,
-  ].join(":");
-}
-
 function pruneRecentTransitions(nowSeconds: number): void {
-  for (const [key, transition] of recentTransitions) {
+  for (const [poolId, transition] of recentTransitions) {
     if (nowSeconds - transition.endedAt > DEVIATION_TRANSITION_ACTIVE_SECONDS) {
-      recentTransitions.delete(key);
+      recentTransitions.delete(poolId);
     }
   }
 }
@@ -311,20 +301,18 @@ export function observeDeviationAlertState(
     shouldRecordTransition(previous, current, nowSeconds)
   ) {
     const transition = buildTransition(previous, current, nowSeconds);
-    recentTransitions.set(transitionKey(pool.id, transition), transition);
+    recentTransitions.set(pool.id, transition);
     newTransitions.push(transition);
   }
 
   previousStates.set(pool.id, current);
 
-  const activeTransitions = Array.from(recentTransitions.entries())
-    .filter(([key, transition]) => {
-      return (
-        key.startsWith(`${pool.id}:`) &&
-        nowSeconds - transition.endedAt <= DEVIATION_TRANSITION_ACTIVE_SECONDS
-      );
-    })
-    .map(([, transition]) => transition);
+  const activeTransition = recentTransitions.get(pool.id);
+  const activeTransitions =
+    activeTransition &&
+    nowSeconds - activeTransition.endedAt <= DEVIATION_TRANSITION_ACTIVE_SECONDS
+      ? [activeTransition]
+      : [];
 
   return {
     state: current.state,
@@ -336,6 +324,9 @@ export function observeDeviationAlertState(
 export function pruneDeviationAlertStates(activePoolIds: Set<string>): void {
   for (const poolId of previousStates.keys()) {
     if (!activePoolIds.has(poolId)) previousStates.delete(poolId);
+  }
+  for (const poolId of recentTransitions.keys()) {
+    if (!activePoolIds.has(poolId)) recentTransitions.delete(poolId);
   }
 }
 
