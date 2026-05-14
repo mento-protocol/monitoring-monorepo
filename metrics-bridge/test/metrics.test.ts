@@ -338,7 +338,7 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
-  it("prioritizes escalation when ratio data returns into a critical breach", async () => {
+  it("prioritizes escalation when deviation-ratio data returns into a critical breach", async () => {
     updateMetrics(
       [
         makePool({
@@ -366,7 +366,7 @@ describe("updateMetrics", () => {
         "mento_pool_deviation_alert_transitions_total",
         {
           ...poolLabels,
-          from: "ratio_missing_warning",
+          from: "deviation_ratio_unavailable_warning",
           to: "critical",
           reason: "escalated_to_critical",
         },
@@ -378,9 +378,9 @@ describe("updateMetrics", () => {
         "mento_pool_deviation_alert_transitions_total",
         {
           ...poolLabels,
-          from: "ratio_missing_warning",
+          from: "deviation_ratio_unavailable_warning",
           to: "critical",
-          reason: "ratio_data_restored",
+          reason: "deviation_ratio_restored",
         },
       ),
     ).toBeUndefined();
@@ -420,7 +420,7 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
-  it("records ratio data missing and restored transitions", async () => {
+  it("records deviation-ratio unavailable and restored transitions", async () => {
     updateMetrics(
       [
         makePool({
@@ -456,8 +456,8 @@ describe("updateMetrics", () => {
         {
           ...poolLabels,
           from: "warning",
-          to: "ratio_missing_warning",
-          reason: "ratio_data_missing",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deviation_ratio_unavailable",
         },
       ),
     ).toBe(1);
@@ -467,9 +467,9 @@ describe("updateMetrics", () => {
         "mento_pool_deviation_alert_transitions_total",
         {
           ...poolLabels,
-          from: "ratio_missing_warning",
+          from: "deviation_ratio_unavailable_warning",
           to: "warning",
-          reason: "ratio_data_restored",
+          reason: "deviation_ratio_restored",
         },
       ),
     ).toBe(1);
@@ -481,9 +481,9 @@ describe("updateMetrics", () => {
     expect(activeTransitions).toHaveLength(1);
     expect(activeTransitions[0]?.labels).toMatchObject({
       ...poolLabels,
-      from: "ratio_missing_warning",
+      from: "deviation_ratio_unavailable_warning",
       to: "warning",
-      reason: "ratio_data_restored",
+      reason: "deviation_ratio_restored",
     });
     expect(
       await getGaugeValue(
@@ -492,8 +492,8 @@ describe("updateMetrics", () => {
         {
           ...poolLabels,
           from: "warning",
-          to: "ratio_missing_warning",
-          reason: "ratio_data_missing",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deviation_ratio_unavailable",
         },
       ),
     ).toBeUndefined();

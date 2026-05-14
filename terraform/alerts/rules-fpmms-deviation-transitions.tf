@@ -33,7 +33,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"warning|ratio_missing_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
+        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"warning|deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
         instant = true
       })
     }
@@ -47,7 +47,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
       }
       model = jsonencode({
         refId   = "Info"
-        expr    = "mento_pool_deviation_alert_transition_active{from=~\"warning|ratio_missing_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+        expr    = "mento_pool_deviation_alert_transition_active{from=~\"warning|deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
         instant = true
       })
     }
@@ -127,7 +127,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"critical|ratio_missing_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
+        expr    = "max without(from, to, reason, breach_started_at, breach_ended_at, breach_duration) (mento_pool_deviation_alert_transition_active{from=~\"critical|deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0)"
         instant = true
       })
     }
@@ -141,7 +141,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
       }
       model = jsonencode({
         refId   = "Info"
-        expr    = "mento_pool_deviation_alert_transition_active{from=~\"critical|ratio_missing_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+        expr    = "mento_pool_deviation_alert_transition_active{from=~\"critical|deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
         instant = true
       })
     }

@@ -117,9 +117,9 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                           |
 | `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                     |
 | `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)              |
-| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + ratio gauge missing for 15m                      |
+| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m         |
 | `fpmms`          | Deviation Breach Critical               | critical | breach >3600s AND `deviation_ratio > 1.05` (magnitude + duration)  |
-| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND ratio gauge missing                              |
+| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND deviation-ratio data unavailable                 |
 | `fpmms`          | Deviation Breach State Changed          | warning  | recent warning-tier deviation state transition                     |
 | `fpmms`          | Deviation Breach Critical State Changed | critical | recent critical-tier deviation state transition                    |
 | `fpmms`          | Trading Limit Pressure                  | warning  | `limit_pressure > 0.8` for 5m                                      |

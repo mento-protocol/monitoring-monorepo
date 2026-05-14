@@ -329,7 +329,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "Warning stopped firing. The pool recovered, escalated to critical, moved to data-gap coverage, or entered FX-weekend suppression."
+      resolved_summary = local.deviation_resolved_summary_annotation
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -391,6 +391,20 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = local.deviation_warning_resolved_info_promql
+        instant = true
+      })
+    }
+
+    data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
       relative_time_range {
@@ -425,7 +439,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # is the `-1` sentinel (see metrics-bridge/src/metrics.ts:110). The indexer
   # treats the anchor as the authoritative breach signal (see
   # indexer-envio/src/deviationBreach.ts comment at L98-107), so this rule
-  # exists to keep warning coverage continuous across ratio gaps.
+  # exists to keep warning coverage continuous while deviation-ratio data is
+  # unavailable.
   rule {
     name           = "Deviation Breach (anchored)"
     condition      = "threshold"
@@ -434,9 +449,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
+      summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — deviation-ratio data unavailable."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "Data-gap warning stopped firing. Ratio data returned, the pool recovered, it escalated to critical, or FX-weekend suppression started."
+      resolved_summary = local.deviation_resolved_summary_annotation
     }
 
     labels = {
@@ -478,6 +493,20 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = local.deviation_warning_unavailable_resolved_info_promql
+        instant = true
+      })
+    }
+
     notification_settings {
       contact_point   = local.notify_warning_pool.contact_point
       group_by        = local.notify_warning_pool.group_by
@@ -505,7 +534,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary          = local.deviation_critical_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "Critical alert stopped firing. The pool recovered, de-escalated to warning, moved to data-gap coverage, or entered FX-weekend suppression."
+      resolved_summary = local.deviation_resolved_summary_annotation
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
       # percentage values from R0/R1 and the per-series `token_symbol`
       # label written by metrics-bridge. No sprig — map access via
@@ -609,6 +638,20 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = local.deviation_critical_resolved_info_promql
+        instant = true
+      })
+    }
+
+    data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
       relative_time_range {
@@ -637,10 +680,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
   }
 
-  # Critical fallback for the data-gap window where the indexer has anchored
-  # a breach for >1h but the bridge isn't publishing `mento_pool_deviation_ratio`
-  # (the `-1` sentinel from metrics-bridge). Without this rule, the magnitude-
-  # gated critical above silently drops alerts during ratio-gauge outages —
+  # Critical fallback for the deviation-ratio-unavailable window where the indexer
+  # has anchored a breach for >1h but the bridge isn't publishing
+  # `mento_pool_deviation_ratio` (the `-1` sentinel from metrics-bridge).
+  # Without this rule, the magnitude-gated critical above silently drops
+  # alerts while deviation-ratio data is unavailable —
   # the anchored warning rule still fires, but at warning severity. Mirror of
   # the warning anchored rule, escalated to critical once the breach has
   # outlived the 1h grace.
@@ -657,9 +701,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
+      summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — deviation-ratio data unavailable; can't confirm magnitude."
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = "Data-gap critical alert stopped firing. Ratio data returned, the pool recovered, de-escalated to warning, or FX-weekend suppression started."
+      resolved_summary = local.deviation_resolved_summary_annotation
       # Reserve share is independent of the deviation ratio gauge — even
       # when the ratio is in its `-1` sentinel state, the indexer is still
       # writing reserves on every Swap / ReserveUpdate, so this line
@@ -668,10 +712,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
       current_reserves = local.deviation_current_reserves_annotation
       # Same rebalance-reason annotation as the magnitude-gated critical
       # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
-      # (which is the `-1` sentinel during data gaps, so eligible pools
-      # in this state typically slip past) — but if a probe DID run before
-      # the ratio gauge dropped, the most-recent reason annotation would
-      # still be present here. Reads `$values.B.Labels.*` for the bounded
+      # (which is the `-1` sentinel while deviation-ratio data is unavailable,
+      # so eligible pools in this state typically slip past) — but if a probe
+      # DID run before the deviation-ratio gauge dropped, the most-recent
+      # reason annotation would still be present here. Reads
+      # `$values.B.Labels.*` for the bounded
       # reason label pair (NOT `$labels`, which exposes only the firing
       # query's labels), and dispatches to the matching Aegis reserve-balance
       # series via `$labels.pair`. When neither the reason labels nor the
@@ -719,6 +764,20 @@ resource "grafana_rule_group" "fpmms_deviation" {
           instant = true
         })
       }
+    }
+
+    data {
+      ref_id         = "Info"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Info"
+        expr    = local.deviation_critical_unavailable_resolved_info_promql
+        instant = true
+      })
     }
 
     data {
@@ -1049,8 +1108,8 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     #      authoritative breach anchor, set when devRatio crosses strictly above
     #      the 1% tolerance line). Intentionally NOT `deviation_ratio >= 1` or
     #      `> 1.01`: the anchor encodes both the strict-`>` semantics and the
-    #      tolerance threshold in one signal, and stays consistent during ratio-
-    #      gauge data gaps.
+    #      tolerance threshold in one signal, and stays consistent while
+    #      deviation-ratio data is unavailable.
     #   2. rebalanced DURING the current breach — `last_rebalanced_at >=
     #      deviation_breach_start` ensures the ineffectiveness we're measuring
     #      actually belongs to this breach, not a prior one. `>=` (not `>`)

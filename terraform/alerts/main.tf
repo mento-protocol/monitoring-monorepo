@@ -114,6 +114,16 @@ locals {
     local.deviation_critical_suppression_seconds,
   )
 
+  # Transition markers let resolved notifications say why an alert stopped
+  # instead of listing every possible cause. Each base alert rule adds the
+  # matching query as annotation-only `Info`; it is not part of the threshold
+  # condition. The bridge keeps one latest transition marker per pool for 180s,
+  # long enough for the next 60s Grafana eval to render the resolved message.
+  deviation_warning_resolved_info_promql              = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_unavailable_resolved_info_promql  = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_resolved_info_promql             = "mento_pool_deviation_alert_transition_active{from=\"critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_unavailable_resolved_info_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+
   # ── Deviation Breach annotations ─────────────────────────────────────────
   # Deviation-breach rules render the same Slack diagnostic lines, so we
   # author the shared copy and formatting once here.
@@ -233,17 +243,39 @@ locals {
         Warning escalated to critical.
       {{- else if eq $reason "deescalated_to_warning" -}}
         Critical alert de-escalated to warning.
-      {{- else if eq $reason "ratio_data_missing" -}}
-        Ratio data disappeared while the breach is still open.
-      {{- else if eq $reason "ratio_data_restored" -}}
-        Ratio data is available again while the breach is still open.
+      {{- else if eq $reason "deviation_ratio_unavailable" -}}
+        Deviation-ratio data is unavailable while the breach is still open.
+      {{- else if eq $reason "deviation_ratio_restored" -}}
+        Deviation-ratio data is available again while the breach is still open.
       {{- else if eq $reason "fx_weekend_suppressed" -}}
         Alert paused because FX weekend suppression is active.
       {{- else -}}
-        Deviation alert state changed.
+        Deviation alert state changed: {{ $reason }}.
       {{- end -}}
     {{- else -}}
       Deviation alert state changed.
+    {{- end -}}
+  EOT
+  deviation_resolved_summary_annotation           = <<-EOT
+    {{- if $values.Info -}}
+      {{- $reason := index $values.Info.Labels "reason" -}}
+      {{- if eq $reason "recovered" -}}
+        Pool is back within tolerance.
+      {{- else if eq $reason "escalated_to_critical" -}}
+        Warning escalated to critical.
+      {{- else if eq $reason "deescalated_to_warning" -}}
+        Critical alert de-escalated to warning.
+      {{- else if eq $reason "deviation_ratio_unavailable" -}}
+        Deviation-ratio data is unavailable while the breach is still open.
+      {{- else if eq $reason "deviation_ratio_restored" -}}
+        Deviation-ratio data is available again while the breach is still open.
+      {{- else if eq $reason "fx_weekend_suppressed" -}}
+        Alert paused because FX weekend suppression is active.
+      {{- else -}}
+        Alert stopped because of transition reason: {{ $reason }}.
+      {{- end -}}
+    {{- else -}}
+      Alert stopped, but the transition reason marker was unavailable.
     {{- end -}}
   EOT
   deviation_transition_breach_duration_annotation = <<-EOT

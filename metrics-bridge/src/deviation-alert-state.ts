@@ -13,8 +13,8 @@ export type DeviationAlertState =
   | "ok"
   | "warning"
   | "critical"
-  | "ratio_missing_warning"
-  | "ratio_missing_critical"
+  | "deviation_ratio_unavailable_warning"
+  | "deviation_ratio_unavailable_critical"
   | "fx_paused"
   | "unknown";
 
@@ -23,8 +23,8 @@ export type DeviationTransitionReason =
   | "recovered"
   | "escalated_to_critical"
   | "deescalated_to_warning"
-  | "ratio_data_missing"
-  | "ratio_data_restored"
+  | "deviation_ratio_unavailable"
+  | "deviation_ratio_restored"
   | "fx_weekend_suppressed"
   | "fx_weekend_reopened"
   | "state_changed";
@@ -151,8 +151,8 @@ export function classifyDeviationAlertState(
     return {
       state:
         ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS
-          ? "ratio_missing_critical"
-          : "ratio_missing_warning",
+          ? "deviation_ratio_unavailable_critical"
+          : "deviation_ratio_unavailable_warning",
       breachStartedAt,
     };
   }
@@ -182,22 +182,28 @@ function transitionReason(
   if (to === "fx_paused") return "fx_weekend_suppressed";
   if (from === "fx_paused") return "fx_weekend_reopened";
   if (
-    (from === "warning" || from === "ratio_missing_warning") &&
-    (to === "critical" || to === "ratio_missing_critical")
+    (from === "warning" || from === "deviation_ratio_unavailable_warning") &&
+    (to === "critical" || to === "deviation_ratio_unavailable_critical")
   ) {
     return "escalated_to_critical";
   }
   if (
-    (from === "critical" || from === "ratio_missing_critical") &&
-    (to === "warning" || to === "ratio_missing_warning")
+    (from === "critical" || from === "deviation_ratio_unavailable_critical") &&
+    (to === "warning" || to === "deviation_ratio_unavailable_warning")
   ) {
     return "deescalated_to_warning";
   }
-  if (to.startsWith("ratio_missing") && !from.startsWith("ratio_missing")) {
-    return "ratio_data_missing";
+  if (
+    to.startsWith("deviation_ratio_unavailable") &&
+    !from.startsWith("deviation_ratio_unavailable")
+  ) {
+    return "deviation_ratio_unavailable";
   }
-  if (from.startsWith("ratio_missing") && !to.startsWith("ratio_missing")) {
-    return "ratio_data_restored";
+  if (
+    from.startsWith("deviation_ratio_unavailable") &&
+    !to.startsWith("deviation_ratio_unavailable")
+  ) {
+    return "deviation_ratio_restored";
   }
   if (from === "ok") return "breach_started";
   return "state_changed";
@@ -211,13 +217,13 @@ function alertCouldHaveFired(
   const ageSeconds = nowSeconds - anchor;
   if (
     snapshot.state === "warning" ||
-    snapshot.state === "ratio_missing_warning"
+    snapshot.state === "deviation_ratio_unavailable_warning"
   ) {
     return ageSeconds >= DEVIATION_WARNING_PENDING_SECONDS;
   }
   if (
     snapshot.state === "critical" ||
-    snapshot.state === "ratio_missing_critical"
+    snapshot.state === "deviation_ratio_unavailable_critical"
   ) {
     return ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS;
   }
