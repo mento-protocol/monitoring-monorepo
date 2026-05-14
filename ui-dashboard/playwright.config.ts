@@ -20,6 +20,14 @@ export default defineConfig({
     baseURL: nextUrl,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
+    // Inside Claude Code's macOS sandbox, Chromium can't register Mach ports
+    // for its multi-process IPC (Seatbelt blocks `bootstrap_check_in`).
+    // `--single-process` collapses renderer/network/GPU into one process and
+    // sidesteps the Mach IPC entirely. CI and regular Terminal runs get the
+    // normal multi-process model for full test fidelity.
+    launchOptions: {
+      args: process.env.CLAUDE_SANDBOX === "1" ? ["--single-process"] : [],
+    },
   },
   webServer: [
     {

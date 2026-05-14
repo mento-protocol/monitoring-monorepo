@@ -65,6 +65,18 @@ pnpm install
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 ```
 
+> **Supply-chain gate:** `pnpm-workspace.yaml` sets `minimumReleaseAge: 4320`
+> (3 days), so pnpm refuses to resolve registry versions younger than 3
+> days. Frozen-lockfile installs (CI, `./scripts/setup.sh`) are unaffected.
+> If you hit `ERR_PNPM_PACKAGE_TOO_YOUNG` — during `pnpm add`, a
+> lockfile-updating `pnpm install`, or `pnpm update` — pin to a slightly
+> older version or wait out the gate. For urgent CVE patches that need a
+> brand-new release immediately, override per-invocation by appending
+> `--config.minimumReleaseAge=0` to the failing command (e.g.
+> `pnpm add --config.minimumReleaseAge=0 <pkg>` or
+> `pnpm update --config.minimumReleaseAge=0 <pkg>`). `@mento-protocol/*`
+> is exempted so our own releases install same-day.
+
 ### Run the Indexer (local)
 
 ```bash

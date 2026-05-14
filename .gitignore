@@ -18,6 +18,7 @@ dist/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .reviews/
+.tmp/
 WORK.md
 CLAUDE.md
 .playwright-mcp/
