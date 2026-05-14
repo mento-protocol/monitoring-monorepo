@@ -19,6 +19,12 @@
     "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml",
     "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.mainnet.yaml",
     "indexer:knip": "pnpm --filter @mento-protocol/indexer-envio knip:report",
+    "code-health:knip": "pnpm -r --workspace-concurrency=1 knip",
+    "code-health:knip:report": "pnpm -r --workspace-concurrency=1 knip:report",
+    "code-health:deps": "depcruise --config .dependency-cruiser.cjs shared-config ui-dashboard indexer-envio metrics-bridge",
+    "code-health:deps:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot shared-config ui-dashboard indexer-envio metrics-bridge | dot -T svg > reports/dep-graph.svg",
+    "code-health:history": "node scripts/code-health-history.mjs",
+    "code-health": "pnpm code-health:knip && pnpm code-health:deps",
     "indexer:mutation": "pnpm --filter @mento-protocol/indexer-envio test:mutation",
     "indexer:testnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml",
     "indexer:testnet:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.testnet.yaml",
@@ -49,5 +55,8 @@
       "path-to-regexp@<0.1.13": "0.1.13",
       "fast-uri": ">=3.1.1"
     }
+  },
+  "devDependencies": {
+    "dependency-cruiser": "17.4.0"
   }
 }

@@ -172,6 +172,16 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 - When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
 
+### Code health budgets — `docs/pr-checklists/code-health.md`
+
+CodeScene-equivalent OSS quality checks. Tier-1 ships in this PR; later tiers
+ratchet in over PR 2-6 of the BACKLOG plan.
+
+- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard` and `metrics-bridge` may import only from `shared-config` + externals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
+- **No circular dependencies (warn-only baseline)**: `indexer-envio/src/{pool,deviationBreach}.ts` is the recorded baseline cycle. New cycles must NOT be introduced (warn keeps it advisory until the baseline cycle is broken in a follow-up PR). Promotion to error happens then.
+- **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
+- **Code-health history report (advisory, `pnpm code-health:history`)**: writes `reports/code-health-history.md` with hotspots, change-coupling, ownership concentration, weekly delta. Run before large refactors so the targets are picked from data, not vibes. Weekly cron + Slack delivery in a follow-up PR.
+
 ## Quick Commands
 
 ```bash
@@ -185,6 +195,14 @@ pnpm indexer:codegen              # Generate types from schema (multichain mainn
 pnpm indexer:dev                   # Start indexer (multichain mainnet: Celo + Monad)
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm indexer:knip                  # Report-only unused-file/export/dependency scan for indexer-envio
+
+# Code health (CodeScene-equivalent OSS checks)
+pnpm code-health:knip              # Strict knip across all packages (blocking)
+pnpm code-health:knip:report       # Advisory knip (warn-only) — does not exit non-zero
+pnpm code-health:deps              # dependency-cruiser: cross-package boundaries + cycles (blocking)
+pnpm code-health:deps:graph        # Render the dependency graph to reports/dep-graph.svg (needs graphviz `dot`)
+pnpm code-health:history           # CodeScene-style git history report → reports/code-health-history.md
+pnpm code-health                   # Run knip + deps together (everything except history)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 

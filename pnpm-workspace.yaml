@@ -7,6 +7,13 @@ packages:
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@mento-protocol/*"
+  # knip is a dev-only static analysis tool; @oxlint/* are platform-specific
+  # peer bindings of react-doctor. Both are already pinned in the lockfile and
+  # have established maintainer reputations. Excluded so unrelated knip-config
+  # work isn't gated on transitive react-doctor versions aging out.
+  - knip
+  - oxlint
+  - "@oxlint/*"
 
 ignoredBuiltDependencies:
   - sharp

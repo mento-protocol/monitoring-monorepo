@@ -48,11 +48,13 @@ Lightweight plan:
 - [ ] Finish the known `indexer-envio` ESLint cleanup and enable the normal `@eslint/js` + `typescript-eslint` recommended baseline there.
 - [ ] Add code-health-style ESLint budgets across packages: cyclomatic complexity, max nesting depth, max params, max lines per function, and optionally `eslint-plugin-sonarjs` for cognitive complexity / suspicious patterns.
 - [ ] Add `jscpd` for duplication detection, initially advisory or with conservative thresholds to avoid blocking on historical copy-paste.
-- [ ] Add `knip` for unused files, exports, and dependency hygiene; scope ignores explicitly for generated/Envio/test fixtures.
-- [ ] Add `dependency-cruiser` to enforce package/layer boundaries and catch cycles or runtime-invalid imports between `shared-config`, `ui-dashboard`, `metrics-bridge`, and `indexer-envio`.
-- [ ] Add a non-blocking CodeScene-lite history report script over `git log --numstat`: top churn × LOC hotspots, top change-coupled file pairs, files touched by many contributors, and weekly risk deltas. Keep this as an artifact/comment/report, not a merge gate.
+- [x] **PR 1 (this branch)**: Added `knip` to `shared-config`, `ui-dashboard`, `metrics-bridge` (was already in `indexer-envio`). Each package runs strict `knip` in CI; files/deps blocking, exports/types as warn-only.
+- [x] **PR 1**: Added `dependency-cruiser` with cross-package boundary rules (blocking) and a no-circular rule (warn-only baseline; promotes to error after the known indexer cycle is broken — see below).
+- [x] **PR 1**: Added `scripts/code-health-history.mjs` + `pnpm code-health:history`. First baseline committed to `reports/code-health-history.md`.
 - [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
-- [ ] Document which signals are blocking vs advisory in `AGENTS.md` and the PR handoff checklist once the tool mix is validated.
+- [ ] Document which signals are blocking vs advisory in `AGENTS.md` and the PR handoff checklist once the tool mix is validated. _Partially done in PR 1 (`AGENTS.md` "Code health budgets" + `docs/pr-checklists/code-health.md`); revisit when later tiers land._
+- [ ] **PR 1 follow-up**: Break the circular import between `indexer-envio/src/pool.ts` and `indexer-envio/src/deviationBreach.ts` (probably by extracting `recordBreachTransition`). Once clean, promote `no-circular` from `warn` → `error` in `.dependency-cruiser.cjs`.
+- [ ] **PR 1 follow-up**: Remove the temporary `knip`, `oxlint`, `@oxlint/*` entries from `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` block after they age past the 3-day gate (2026-05-15 / 2026-05-16). They were added so PR 1 wouldn't be gated on transitive react-doctor maturity.
 
 Acceptance: the first implementation PR adds at least one blocking low-noise
 quality gate and one advisory CodeScene-like report, records baseline findings,

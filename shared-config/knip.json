@@ -1,13 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "src/EventHandlers.ts",
-    "src/EventHandlersBridgeOnly.ts",
-    "src/indexer.ts",
-    "vitest.mutation.config.ts",
-    "scripts/*.mjs"
-  ],
-  "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs", "*.config.*"],
+  "entry": ["src/*.ts"],
+  "project": ["src/**/*.ts", "*.config.*"],
   "ignoreDependencies": ["@vitest/coverage-v8"],
   "rules": {
     "files": "error",

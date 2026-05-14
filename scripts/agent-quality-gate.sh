@@ -408,6 +408,8 @@ add_package_quality_commands() {
     add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
   fi
   add_command "pnpm --filter ${package_name} test" "$reason"
+  add_command "pnpm --filter ${package_name} knip" "$reason (knip: unused files/deps/exports)"
+  add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
 }
 
 add_dashboard_quality_commands() {
