@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform -chdir=terraform output:*)",
+      "Bash(terraform -chdir=terraform plan:*)",
+      "Bash(terraform -chdir=terraform validate:*)",
+      "WebFetch(domain:monitoring.mento.org)"
+    ]
+  }
+}
