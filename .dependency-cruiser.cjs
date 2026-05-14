@@ -50,11 +50,25 @@ module.exports = {
       to: { path: "^shared-config/" },
     },
     {
-      name: "dashboard-no-indexer",
+      name: "dashboard-runtime-no-indexer",
       severity: "error",
       comment:
-        "ui-dashboard reads indexed data via Hasura/GraphQL, never by importing indexer runtime. Config JSON (data) is allowed to support cross-validation tests.",
-      from: { path: "^ui-dashboard/src/" },
+        "ui-dashboard runtime must not import indexer-envio. Reads happen via Hasura/GraphQL.",
+      from: {
+        path: "^ui-dashboard/src/",
+        // Tests get their own (narrower) escape hatch — see next rule.
+        pathNot: "(/__tests__/|\\.test\\.)",
+      },
+      to: { path: "^indexer-envio/" },
+    },
+    {
+      name: "dashboard-tests-only-indexer-config-json",
+      severity: "error",
+      comment:
+        "ui-dashboard tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits.",
+      from: {
+        path: "^ui-dashboard/src/.*(/__tests__/|\\.test\\.)",
+      },
       to: {
         path: "^indexer-envio/",
         pathNot: "^indexer-envio/config/.*\\.json$",

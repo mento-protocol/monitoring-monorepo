@@ -599,6 +599,29 @@ while IFS= read -r path; do
     pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true
       ;;
+    .dependency-cruiser.cjs)
+      add_surface "tooling"
+      add_command "pnpm code-health:deps" "dep-cruiser config changed (cross-package boundaries + cycles)"
+      ;;
+    */knip.json)
+      # Match knip.json regardless of which package owns it. The pnpm
+      # filter scope below normalizes path to package.
+      add_surface "tooling"
+      case "$path" in
+        shared-config/knip.json)
+          add_command "pnpm --filter @mento-protocol/monitoring-config knip" "knip config changed"
+          ;;
+        ui-dashboard/knip.json)
+          add_command "pnpm --filter @mento-protocol/ui-dashboard knip" "knip config changed"
+          ;;
+        indexer-envio/knip.json)
+          add_command "pnpm --filter @mento-protocol/indexer-envio knip" "knip config changed"
+          ;;
+        metrics-bridge/knip.json)
+          add_command "pnpm --filter @mento-protocol/metrics-bridge knip" "knip config changed"
+          ;;
+      esac
+      ;;
     .npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs)
       package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "package manager config changed"
