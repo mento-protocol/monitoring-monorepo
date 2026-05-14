@@ -27,7 +27,9 @@ export type AddressReport = {
   authorEmail?: string;
   /**
    * Provenance: 'manual' = typed in editor, 'claude' / 'Codex' = generated,
-   * 'import' = bulk import. Optional; absent for legacy entries.
+   * 'import' = bulk import. Product-backed sources preserve their product
+   * casing; 'claude' stays lowercase for legacy stored entries.
+   * Optional; absent for legacy entries.
    */
   source?: AddressReportSource;
   /** ISO timestamp of first write. Preserved across edits. */

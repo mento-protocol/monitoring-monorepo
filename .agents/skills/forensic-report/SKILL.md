@@ -257,6 +257,9 @@ These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/addr
 
 ## Reference: production database
 
+The database id is non-secret. If the address-book database is replaced or
+split, update this value from Terraform or the Upstash console before writing.
+
 ```
 database_id: c687bf0d-f61f-498e-879a-016de335b4ce
 hash:        reports
