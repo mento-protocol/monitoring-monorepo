@@ -174,12 +174,13 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 ### Code health budgets — `docs/pr-checklists/code-health.md`
 
-CodeScene-equivalent OSS quality checks. Tier-1 ships in this PR; later tiers
+CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
 ratchet in over PR 2-6 of the BACKLOG plan.
 
 - **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard` and `metrics-bridge` may import only from `shared-config` + externals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
 - **No circular dependencies (warn-only baseline)**: `indexer-envio/src/{pool,deviationBreach}.ts` is the recorded baseline cycle. New cycles must NOT be introduced (warn keeps it advisory until the baseline cycle is broken in a follow-up PR). Promotion to error happens then.
 - **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
+- **Complexity / size / cognitive-complexity budgets (warn-only baseline, PR 2)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Baseline counts in `reports/eslint-health-baseline.json`; ratchet to `error` in PR 6 after baseline cleanup. Don't add NEW warnings — fix or `// eslint-disable-next-line <rule>` with a 1-line justification.
 - **Code-health history report (advisory, `pnpm code-health:history`)**: writes `reports/code-health-history.md` with hotspots, change-coupling, ownership concentration, weekly delta. Run before large refactors so the targets are picked from data, not vibes. Weekly cron + Slack delivery in a follow-up PR.
 
 ## Quick Commands

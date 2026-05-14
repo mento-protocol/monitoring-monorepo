@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import { fileURLToPath } from "node:url";
@@ -69,6 +70,54 @@ export default tseslint.config(
   {
     files: ["test/**/*.ts", "**/*.test.ts"],
     rules: { "max-lines": "off" },
+  },
+  // Code-health budgets (PR 2 baseline, warn-only).
+  // Default (non-handler) src/ — moderate budgets. Handlers have looser
+  // budgets because Envio event-handler bodies are intentionally repetitive
+  // and long (one branch per event variant + state-machine boilerplate).
+  {
+    files: ["src/**/*.ts"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["warn", 15],
+      "max-lines-per-function": [
+        "warn",
+        { max: 80, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["warn", 4],
+      "max-params": ["warn", 4],
+      "sonarjs/cognitive-complexity": ["warn", 18],
+      "sonarjs/no-identical-functions": "warn",
+      "sonarjs/no-collapsible-if": "warn",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "warn",
+    },
+  },
+  {
+    files: ["src/handlers/**/*.ts"],
+    rules: {
+      complexity: ["warn", 25],
+      "max-lines-per-function": [
+        "warn",
+        { max: 150, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["warn", 5],
+      "max-params": ["warn", 6],
+      "sonarjs/cognitive-complexity": ["warn", 25],
+      "sonarjs/no-small-switch": "off",
+    },
+  },
+  {
+    files: ["test/**/*.ts", "**/*.test.ts"],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
+    },
   },
   {
     ignores: [

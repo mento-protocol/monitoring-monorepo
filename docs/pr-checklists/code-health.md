@@ -28,16 +28,24 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | `dependency-cruiser` cycles          | warn (baseline) | new circular deps anywhere                                           | Extract the shared piece into a third module                                                    |
 | `knip` files / deps / unlisted       | **error**       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                           |
 | `knip` exports / types / enumMembers | warn            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                              |
+| ESLint complexity budgets            | warn (baseline) | over-complex / long / nested / many-arg functions                    | Refactor or `// eslint-disable-next-line <rule>` with 1-line justification                      |
+| `sonarjs/no-redundant-jump`          | **error**       | dead control-flow jumps                                              | Trivial fix; never opt out                                                                      |
+| `sonarjs/cognitive-complexity`       | warn (baseline) | hard-to-read nested logic                                            | Extract sub-functions; per-line disable with 1-line "why" otherwise                             |
+| `sonarjs/no-identical-functions`     | warn (mostly)   | duplicate function bodies                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                       |
 | Code-health history report           | advisory        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                            |
 
 ## Ratchet pipeline (where this is going)
 
-PR 1 (this PR): blocking knip + dep-cruiser cross-pkg + advisory history report.
+PR 1: blocking knip + dep-cruiser cross-pkg + advisory history report.
 
-PR 2: per-package ESLint complexity budgets (`complexity`, `max-lines-per-function`,
-`max-depth`, `max-params`, `sonarjs/cognitive-complexity`) ship as `warn` with a
-baseline recorded in `reports/eslint-health-baseline.json`. Intra-package layer
-rules in `dependency-cruiser` ship as `warn`.
+PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
+`max-lines-per-function`, `max-depth`, `max-params`,
+`sonarjs/cognitive-complexity` plus four other sonarjs rules) ship as `warn`,
+with the baseline recorded in `reports/eslint-health-baseline.json`. **Don't
+add NEW warnings — fix or per-line disable with a 1-line "why".** Baseline
+counts: shared-config 0w, metrics-bridge 11w, ui-dashboard 191w,
+indexer-envio 63w. Intra-package layer rules in `dependency-cruiser` are
+deferred to a separate follow-up.
 
 PR 3: `jscpd` duplication check ships as a non-blocking CI job.
 

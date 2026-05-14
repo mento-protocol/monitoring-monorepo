@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -35,6 +36,39 @@ export default tseslint.config(
   {
     files: ["test/**/*.ts", "**/*.test.ts"],
     rules: { "max-lines": "off" },
+  },
+  // Code-health budgets (PR 2 baseline, warn-only).
+  // Small Cloud Run service; budgets stricter than dashboard but a notch
+  // looser than shared-config to allow real-world I/O glue code.
+  {
+    files: ["src/**/*.ts"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["warn", 10],
+      "max-lines-per-function": [
+        "warn",
+        { max: 60, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["warn", 3],
+      "max-params": ["warn", 4],
+      "sonarjs/cognitive-complexity": ["warn", 15],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "warn",
+    },
+  },
+  {
+    files: ["test/**/*.ts", "**/*.test.ts"],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
+    },
   },
   { ignores: ["**/node_modules/**", "dist/**"] },
 );

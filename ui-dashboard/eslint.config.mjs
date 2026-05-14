@@ -6,6 +6,7 @@ import nextPlugin from "@next/eslint-plugin-next";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import reactNoUnneededEffect from "eslint-plugin-react-you-might-not-need-an-effect";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -110,6 +111,46 @@ export default tseslint.config(
     files: ["**/__tests__/**", "**/*.test.{ts,tsx}", "scripts/**"],
     rules: {
       "react-doctor/no-secrets-in-client-code": "off",
+    },
+  },
+  // Code-health budgets (PR 2 baseline, warn-only).
+  // React components are exempt from max-depth (JSX nesting isn't counted)
+  // and from max-lines-per-function (component bodies legitimately long
+  // when they assemble many sub-elements). Thresholds set to surface real
+  // outliers without flooding the IDE on first install.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["warn", 15],
+      "max-lines-per-function": [
+        "warn",
+        { max: 100, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["warn", 4],
+      "max-params": ["warn", 5],
+      "sonarjs/cognitive-complexity": ["warn", 18],
+      "sonarjs/no-identical-functions": "warn",
+      "sonarjs/no-collapsible-if": "warn",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "warn",
+    },
+  },
+  {
+    files: [
+      "**/__tests__/**",
+      "**/*.test.{ts,tsx}",
+      "src/lib/types.ts",
+      "scripts/**",
+    ],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
     },
   },
   {

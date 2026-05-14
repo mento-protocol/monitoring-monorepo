@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-05-14",
+  "packages": {
+    "shared-config": {
+      "errors": 0,
+      "warnings": 0,
+      "byRule": {},
+      "topFiles": {}
+    },
+    "metrics-bridge": {
+      "errors": 0,
+      "warnings": 11,
+      "byRule": {
+        "complexity": 6,
+        "sonarjs/cognitive-complexity": 2,
+        "max-depth": 2,
+        "max-lines-per-function": 1
+      },
+      "topFiles": {
+        "src/rebalance-check.ts": 4,
+        "src/deviation-alert-state.ts": 3,
+        "src/metrics.ts": 3,
+        "src/rebalance-probe.ts": 1
+      }
+    },
+    "ui-dashboard": {
+      "errors": 0,
+      "warnings": 191,
+      "byRule": {
+        "complexity": 77,
+        "max-lines-per-function": 67,
+        "sonarjs/cognitive-complexity": 38,
+        "max-params": 4,
+        "sonarjs/no-collapsible-if": 3,
+        "max-depth": 2
+      },
+      "topFiles": {
+        "src/components/time-series-chart-card.tsx": 5,
+        "src/components/volume-over-time-chart.tsx": 5,
+        "src/lib/address-labels/snapshot.ts": 5,
+        "src/lib/leaderboard-hero.ts": 5,
+        "src/app/leaderboard/_components/leaderboard-table.tsx": 4,
+        "src/app/page-client.tsx": 4,
+        "src/components/address-report-editor.tsx": 4,
+        "src/components/fee-over-time-chart.tsx": 4,
+        "src/components/global-pools-table.tsx": 4,
+        "src/lib/arkham.ts": 4,
+        "src/lib/network-fetcher/fetch.ts": 4,
+        "src/lib/pool-og.ts": 4,
+        "src/app/address-book/_components/address-table-row.tsx": 3,
+        "src/app/bridge-flows/_components/bridge-flows-page-client.tsx": 3,
+        "src/app/leaderboard/_components/v2-leaderboard-tables.tsx": 3
+      }
+    },
+    "indexer-envio": {
+      "errors": 0,
+      "warnings": 63,
+      "byRule": {
+        "max-params": 17,
+        "complexity": 15,
+        "max-lines-per-function": 13,
+        "sonarjs/cognitive-complexity": 9,
+        "max-depth": 8,
+        "sonarjs/no-collapsible-if": 1
+      },
+      "topFiles": {
+        "src/rpc/block-fallback.ts": 12,
+        "src/pool/self-heal.ts": 7,
+        "src/rpc/breakers.ts": 6,
+        "src/protocolFeeSnapshot.ts": 4,
+        "src/breakers.ts": 3,
+        "src/deviationBreach.ts": 3,
+        "src/handlers/biPoolManager.ts": 3,
+        "src/leaderboardSnapshots.ts": 3,
+        "src/pool.ts": 3,
+        "src/handlers/fpmm/state-sync.ts": 2,
+        "src/handlers/sortedOracles.ts": 2,
+        "src/pool/snapshots.ts": 2,
+        "src/rpc/pool-fees.ts": 2,
+        "src/contractAddresses.ts": 1,
+        "src/handlers/broker.ts": 1
+      }
+    }
+  }
+}

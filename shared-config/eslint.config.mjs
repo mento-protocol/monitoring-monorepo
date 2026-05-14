@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -35,6 +36,40 @@ export default tseslint.config(
   {
     files: ["__tests__/**", "**/*.test.ts"],
     rules: { "max-lines": "off" },
+  },
+  // Code-health budgets (PR 2 baseline, warn-only).
+  // Promotion to error in a follow-up PR after baseline cleanup —
+  // see docs/pr-checklists/code-health.md. Stricter here than other
+  // packages because shared-config is small, pure, and data-shaped.
+  {
+    files: ["src/**/*.ts"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["warn", 8],
+      "max-lines-per-function": [
+        "warn",
+        { max: 40, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["warn", 3],
+      "max-params": ["warn", 3],
+      "sonarjs/cognitive-complexity": ["warn", 12],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "warn",
+    },
+  },
+  {
+    files: ["__tests__/**", "**/*.test.ts"],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
+    },
   },
   { ignores: ["**/node_modules/**", "dist/**"] },
 );
