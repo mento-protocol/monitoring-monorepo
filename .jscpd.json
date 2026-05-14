@@ -26,6 +26,5 @@
   "output": "reports/jscpd",
   "absolute": false,
   "noSymlinks": true,
-  "skipLocal": true,
   "exitCode": 0
 }
