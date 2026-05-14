@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schemas/jscpd.json",
+  "threshold": 5,
+  "minTokens": 50,
+  "minLines": 5,
+  "mode": "strict",
+  "format": ["typescript", "tsx", "javascript", "jsx"],
+  "pattern": "{shared-config,ui-dashboard,indexer-envio,metrics-bridge}/src/**/*.{ts,tsx,js,jsx}",
+  "ignore": [
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/.envio/**",
+    "**/generated/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/__tests__/**",
+    "**/*.test.{ts,tsx}",
+    "**/test/**",
+    "indexer-envio/src/handlers/**",
+    "ui-dashboard/src/app/**/page.tsx",
+    "ui-dashboard/src/app/**/layout.tsx",
+    "ui-dashboard/src/lib/types.ts"
+  ],
+  "reporters": ["console", "json", "html"],
+  "output": "reports/jscpd",
+  "absolute": false,
+  "noSymlinks": true,
+  "skipLocal": true,
+  "exitCode": 0
+}

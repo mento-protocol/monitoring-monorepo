@@ -180,7 +180,8 @@ ratchet in over PR 2-6 of the BACKLOG plan.
 - **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard` and `metrics-bridge` may import only from `shared-config` + externals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
 - **No circular dependencies (warn-only baseline)**: `indexer-envio/src/{pool,deviationBreach}.ts` is the recorded baseline cycle. New cycles must NOT be introduced (warn keeps it advisory until the baseline cycle is broken in a follow-up PR). Promotion to error happens then.
 - **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
-- **Complexity / size / cognitive-complexity budgets (warn-only baseline, PR 2)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Baseline counts in `reports/eslint-health-baseline.json`; ratchet to `error` in PR 6 after baseline cleanup. Don't add NEW warnings — fix or `// eslint-disable-next-line <rule>` with a 1-line justification.
+- **Complexity / size / cognitive-complexity budgets (blocking, diff-aware baseline)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Pre-existing violations live in each package's `eslint-baseline.json`; new violations fail `pnpm --filter <pkg> lint` via `scripts/eslint-baseline-diff.mjs`. See `docs/pr-checklists/code-health.md`.
+- **Duplication detection (advisory, `pnpm code-health:duplication`)**: `jscpd` scans `src/` across all packages on every PR (excluding tests, `indexer-envio/src/handlers/**`, route entry pages, and pure type modules — they're intentionally repetitive). The CI job is non-blocking — surfaces a comment-summary + an artifact in `reports/jscpd/`. Use the artifact to plan extract-helper refactors.
 - **Code-health history report (advisory, `pnpm code-health:history`)**: writes `reports/code-health-history.md` with hotspots, change-coupling, ownership concentration, weekly delta. Run before large refactors so the targets are picked from data, not vibes. Weekly cron + Slack delivery in a follow-up PR.
 
 ## Quick Commands
@@ -202,7 +203,8 @@ pnpm code-health:knip:report       # Advisory knip (warn-only) — does not exit
 pnpm code-health:deps              # dependency-cruiser: cross-package boundaries + cycles (blocking)
 pnpm code-health:deps:graph        # Render the dependency graph to reports/dep-graph.svg (needs graphviz `dot`)
 pnpm code-health:history           # CodeScene-style git history report → reports/code-health-history.md
-pnpm code-health                   # Run knip + deps together (everything except history)
+pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
+pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 

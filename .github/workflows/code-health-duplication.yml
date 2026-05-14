@@ -1,0 +1,40 @@
+name: Code Health — Duplication
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# PR runs cancel on new pushes to the same PR ref; push to main uses a
+# SHA-unique group so consecutive main runs never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  duplication:
+    name: jscpd
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    # Strictly advisory — never fails the PR. Surfaces duplication signal
+    # via an uploaded artifact and (optionally) a PR summary comment.
+    # If `jscpd` exits non-zero (it shouldn't, given .jscpd.json's
+    # `exitCode: 0`), the next step still runs to upload the artifact.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/pnpm-install
+      - name: Run jscpd
+        run: pnpm code-health:duplication
+      - name: Upload jscpd report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jscpd-report
+          path: reports/jscpd/
+          retention-days: 14

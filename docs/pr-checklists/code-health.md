@@ -138,7 +138,12 @@ Eight prior baseline mechanisms were rejected:
    baseline. Lint can be green locally while CI rejects baseline
    growth that wasn't matched by removals.
 
-PR 3: `jscpd` duplication check ships as a non-blocking CI job.
+PR 3 (this PR): `jscpd` duplication check ships as a non-blocking CI job
+(`.github/workflows/code-health-duplication.yml`) with the HTML+JSON report
+uploaded as an artifact. Tests, handlers, and route entry files are excluded
+(they're intentionally repetitive). Initial baseline: 0 clones. Run locally
+via `pnpm code-health:duplication`. Future findings should drive
+extract-helper refactors, not knee-jerk suppression.
 
 PR 5: weekly cron renders `reports/code-health-history.md` and posts the
 hotspot/coupling delta to Slack.
