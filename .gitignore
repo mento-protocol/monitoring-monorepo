@@ -16,6 +16,7 @@ dist/
 .env*.local
 .claude/worktrees
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 .reviews/
 WORK.md
 CLAUDE.md
