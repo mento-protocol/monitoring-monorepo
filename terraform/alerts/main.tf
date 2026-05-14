@@ -113,16 +113,26 @@ locals {
     local.deviation_critical_gate_promql,
     local.deviation_critical_suppression_seconds,
   )
+  deviation_warning_active_promql              = "((mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_active_promql}))"
+  deviation_warning_unavailable_active_promql  = "((((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((time() - mento_pool_deviation_breach_start) <= ${local.deviation_critical_suppression_seconds})) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
+  deviation_critical_unavailable_active_promql = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
 
   # Transition markers let resolved notifications say why an alert stopped
   # instead of listing every possible cause. Each base alert rule adds the
   # matching query as annotation-only `Info`; it is not part of the threshold
-  # condition. The bridge keeps one latest transition marker per pool for 180s,
-  # long enough for the next 60s Grafana eval to render the resolved message.
-  deviation_warning_resolved_info_promql              = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_warning_unavailable_resolved_info_promql  = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_critical_resolved_info_promql             = "mento_pool_deviation_alert_transition_active{from=\"critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_critical_unavailable_resolved_info_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  # condition. Grafana can mark the whole rule NoData when an annotation query
+  # returns zero series, so each `Info` query falls back to a zero-valued series
+  # matching the base alert's own active label set. The transition marker wins
+  # when present and carries the reason labels; the fallback only keeps active
+  # alerts evaluable between transitions.
+  deviation_warning_resolved_transition_promql              = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_unavailable_resolved_transition_promql  = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_resolved_transition_promql             = "mento_pool_deviation_alert_transition_active{from=\"critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_critical_unavailable_resolved_transition_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_resolved_info_promql                    = "(${local.deviation_warning_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_active_promql}))"
+  deviation_warning_unavailable_resolved_info_promql        = "(${local.deviation_warning_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_unavailable_active_promql}))"
+  deviation_critical_resolved_info_promql                   = "(${local.deviation_critical_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_gate_promql}))"
+  deviation_critical_unavailable_resolved_info_promql       = "(${local.deviation_critical_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_unavailable_active_promql}))"
 
   # ── Deviation Breach annotations ─────────────────────────────────────────
   # Deviation-breach rules render the same Slack diagnostic lines, so we
@@ -259,20 +269,24 @@ locals {
   deviation_resolved_summary_annotation           = <<-EOT
     {{- if $values.Info -}}
       {{- $reason := index $values.Info.Labels "reason" -}}
-      {{- if eq $reason "recovered" -}}
-        Pool is back within tolerance.
-      {{- else if eq $reason "escalated_to_critical" -}}
-        Warning escalated to critical.
-      {{- else if eq $reason "deescalated_to_warning" -}}
-        Critical alert de-escalated to warning.
-      {{- else if eq $reason "deviation_ratio_unavailable" -}}
-        Deviation-ratio data is unavailable while the breach is still open.
-      {{- else if eq $reason "deviation_ratio_restored" -}}
-        Deviation-ratio data is available again while the breach is still open.
-      {{- else if eq $reason "fx_weekend_suppressed" -}}
-        Alert paused because FX weekend suppression is active.
+      {{- if $reason -}}
+        {{- if eq $reason "recovered" -}}
+          Pool is back within tolerance.
+        {{- else if eq $reason "escalated_to_critical" -}}
+          Warning escalated to critical.
+        {{- else if eq $reason "deescalated_to_warning" -}}
+          Critical alert de-escalated to warning.
+        {{- else if eq $reason "deviation_ratio_unavailable" -}}
+          Deviation-ratio data is unavailable while the breach is still open.
+        {{- else if eq $reason "deviation_ratio_restored" -}}
+          Deviation-ratio data is available again while the breach is still open.
+        {{- else if eq $reason "fx_weekend_suppressed" -}}
+          Alert paused because FX weekend suppression is active.
+        {{- else -}}
+          Alert stopped because of transition reason: {{ $reason }}.
+        {{- end -}}
       {{- else -}}
-        Alert stopped because of transition reason: {{ $reason }}.
+        Alert stopped, but the transition reason marker was unavailable.
       {{- end -}}
     {{- else -}}
       Alert stopped, but the transition reason marker was unavailable.
