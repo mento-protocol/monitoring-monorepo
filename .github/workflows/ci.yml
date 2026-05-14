@@ -119,6 +119,8 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
+      - name: Lint
+        run: pnpm --filter @mento-protocol/monitoring-config lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/monitoring-config knip
       - name: Test with coverage
@@ -151,9 +153,12 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      - name: Lint
+        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        # Trunk no longer runs ESLint — this is the CI ESLint source of truth.
+        run: pnpm --filter @mento-protocol/ui-dashboard lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/ui-dashboard knip
-      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: React Doctor (diff vs base)
         # PR-only: scans files changed vs the PR base and fails on any
         # warning/error in those files. The full-score floor below keeps the
@@ -236,6 +241,9 @@ jobs:
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
+      - name: Lint
+        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        run: pnpm --filter @mento-protocol/indexer-envio lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/indexer-envio knip
       - name: Test with coverage
@@ -264,9 +272,11 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
+      - name: Lint
+        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        run: pnpm --filter @mento-protocol/metrics-bridge lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/metrics-bridge knip
-      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
