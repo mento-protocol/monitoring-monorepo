@@ -7,6 +7,9 @@ import type { PoolRow } from "./types.js";
 
 export const DEVIATION_WARNING_PENDING_SECONDS = 900;
 export const DEVIATION_CRITICAL_FIRING_SECONDS = 3_660;
+const DEVIATION_CRITICAL_PENDING_SECONDS = 60;
+const DEVIATION_CRITICAL_THRESHOLD_SECONDS =
+  DEVIATION_CRITICAL_FIRING_SECONDS - DEVIATION_CRITICAL_PENDING_SECONDS;
 export const DEVIATION_TRANSITION_ACTIVE_SECONDS = 180;
 
 export type DeviationAlertState =
@@ -45,7 +48,16 @@ type StateSnapshot = {
   state: DeviationAlertState;
   breachStartedAt: number | null;
   enteredAt: number;
+  criticalSignal: CriticalSignalState | null;
+  criticalSignalEnteredAt: number | null;
 };
+
+type CriticalSignalState = "critical" | "deviation_ratio_unavailable_critical";
+
+type ClassifiedDeviationAlertState = Pick<
+  StateSnapshot,
+  "state" | "breachStartedAt" | "criticalSignal"
+>;
 
 const previousStates = new Map<string, StateSnapshot>();
 const recentTransitions = new Map<string, DeviationAlertTransition>();
@@ -127,10 +139,10 @@ export function classifyDeviationAlertState(
   pool: PoolRow,
   pair: string,
   nowSeconds: number,
-): Pick<StateSnapshot, "state" | "breachStartedAt"> {
+): ClassifiedDeviationAlertState {
   const breachStartedAt = Number(pool.deviationBreachStartedAt);
   if (!Number.isFinite(breachStartedAt)) {
-    return { state: "unknown", breachStartedAt: null };
+    return { state: "unknown", breachStartedAt: null, criticalSignal: null };
   }
 
   const breachActive = breachStartedAt > 0;
@@ -143,35 +155,32 @@ export function classifyDeviationAlertState(
     return {
       state: "fx_paused",
       breachStartedAt: breachActive ? breachStartedAt : null,
+      criticalSignal: null,
     };
   }
 
   if (!ratioPresent) {
-    if (!breachActive) return { state: "ok", breachStartedAt: null };
-    const ageSeconds = nowSeconds - breachStartedAt;
+    if (!breachActive) {
+      return { state: "ok", breachStartedAt: null, criticalSignal: null };
+    }
     return {
-      state:
-        ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS
-          ? "deviation_ratio_unavailable_critical"
-          : "deviation_ratio_unavailable_warning",
+      state: "deviation_ratio_unavailable_warning",
       breachStartedAt,
+      criticalSignal: "deviation_ratio_unavailable_critical",
     };
   }
 
   if (!ratioAboveTolerance) {
-    return { state: "ok", breachStartedAt: null };
+    return { state: "ok", breachStartedAt: null, criticalSignal: null };
   }
 
   const criticalMagnitude =
     ratio > DEVIATION_CRITICAL_RATIO ||
     openBreachPeakRatio(pool) > DEVIATION_CRITICAL_RATIO;
-  const criticalAge =
-    breachActive &&
-    nowSeconds - breachStartedAt > DEVIATION_CRITICAL_FIRING_SECONDS;
-
   return {
-    state: criticalMagnitude && criticalAge ? "critical" : "warning",
+    state: "warning",
     breachStartedAt: breachActive ? breachStartedAt : null,
+    criticalSignal: criticalMagnitude && breachActive ? "critical" : null,
   };
 }
 
@@ -214,21 +223,73 @@ function alertCouldHaveFired(
   snapshot: StateSnapshot,
   nowSeconds: number,
 ): boolean {
-  const anchor = snapshot.breachStartedAt ?? snapshot.enteredAt;
-  const ageSeconds = nowSeconds - anchor;
   if (
     snapshot.state === "warning" ||
     snapshot.state === "deviation_ratio_unavailable_warning"
   ) {
+    const ageSeconds = nowSeconds - snapshot.enteredAt;
     return ageSeconds >= DEVIATION_WARNING_PENDING_SECONDS;
   }
   if (
     snapshot.state === "critical" ||
     snapshot.state === "deviation_ratio_unavailable_critical"
   ) {
-    return ageSeconds > DEVIATION_CRITICAL_FIRING_SECONDS;
+    return true;
   }
   return false;
+}
+
+function criticalSignalEnteredAt(
+  previous: StateSnapshot | undefined,
+  currentState: ClassifiedDeviationAlertState,
+  nowSeconds: number,
+): number | null {
+  if (!currentState.criticalSignal) return null;
+  if (previous?.criticalSignal === currentState.criticalSignal) {
+    return previous.criticalSignalEnteredAt ?? nowSeconds;
+  }
+  return nowSeconds;
+}
+
+function criticalStateCanFire(
+  currentState: ClassifiedDeviationAlertState,
+  signalEnteredAt: number | null,
+  nowSeconds: number,
+): boolean {
+  if (!currentState.criticalSignal || !currentState.breachStartedAt) {
+    return false;
+  }
+  const conditionEnteredAt = Math.max(
+    signalEnteredAt ?? nowSeconds,
+    currentState.breachStartedAt + DEVIATION_CRITICAL_THRESHOLD_SECONDS,
+  );
+  return nowSeconds - conditionEnteredAt > DEVIATION_CRITICAL_PENDING_SECONDS;
+}
+
+function buildCurrentSnapshot(
+  previous: StateSnapshot | undefined,
+  currentState: ClassifiedDeviationAlertState,
+  nowSeconds: number,
+): StateSnapshot {
+  const signalEnteredAt = criticalSignalEnteredAt(
+    previous,
+    currentState,
+    nowSeconds,
+  );
+  const state: DeviationAlertState =
+    criticalStateCanFire(currentState, signalEnteredAt, nowSeconds) &&
+    currentState.criticalSignal
+      ? currentState.criticalSignal
+      : currentState.state;
+  const enteredAt =
+    previous && previous.state === state ? previous.enteredAt : nowSeconds;
+
+  return {
+    ...currentState,
+    state,
+    enteredAt,
+    criticalSignalEnteredAt: signalEnteredAt,
+  };
 }
 
 function shouldRecordTransition(
@@ -237,17 +298,23 @@ function shouldRecordTransition(
   nowSeconds: number,
 ): boolean {
   const reason = transitionReason(previous.state, current.state);
-  if (
-    reason === "breach_started" ||
-    reason === "fx_weekend_reopened" ||
-    reason === "state_changed"
-  ) {
-    return false;
+  switch (reason) {
+    case "breach_started":
+    case "fx_weekend_reopened":
+    case "state_changed":
+      return false;
+    case "escalated_to_critical":
+      return (
+        alertCouldHaveFired(previous, nowSeconds) &&
+        alertCouldHaveFired(current, nowSeconds)
+      );
+    case "recovered":
+    case "deescalated_to_warning":
+    case "deviation_ratio_unavailable":
+    case "deviation_ratio_restored":
+    case "fx_weekend_suppressed":
+      return alertCouldHaveFired(previous, nowSeconds);
   }
-  return (
-    alertCouldHaveFired(previous, nowSeconds) ||
-    alertCouldHaveFired(current, nowSeconds)
-  );
 }
 
 function pruneRecentTransitions(nowSeconds: number): void {
@@ -292,14 +359,7 @@ export function observeDeviationAlertState(
 
   const currentState = classifyDeviationAlertState(pool, pair, nowSeconds);
   const previous = previousStates.get(pool.id);
-  const enteredAt =
-    previous && previous.state === currentState.state
-      ? previous.enteredAt
-      : nowSeconds;
-  const current: StateSnapshot = {
-    ...currentState,
-    enteredAt,
-  };
+  const current = buildCurrentSnapshot(previous, currentState, nowSeconds);
 
   const newTransitions: DeviationAlertTransition[] = [];
   if (

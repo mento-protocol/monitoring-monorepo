@@ -102,19 +102,13 @@ locals {
     local.deviation_critical_magnitude_promql,
     local.fx_weekend_suppressed_breach_start_promql,
   )
-  # Critical deviation rules threshold on breach age > 1h and then use
-  # `for = "1m"` to smooth single-eval ruler glitches. Warning suppression
-  # waits two extra evals after that same grace so severe fresh breaches still
-  # send the warning page before the critical page takes over, without
-  # resolving the warning before the critical rule can definitely fire.
-  deviation_critical_suppression_seconds = 3780
-  deviation_critical_active_promql = format(
-    "(%s) > %d",
-    local.deviation_critical_gate_promql,
-    local.deviation_critical_suppression_seconds,
-  )
-  deviation_warning_active_promql              = "((mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_active_promql}))"
-  deviation_warning_unavailable_active_promql  = "((((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((time() - mento_pool_deviation_breach_start) <= ${local.deviation_critical_suppression_seconds})) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
+  # Metrics-bridge only publishes critical alert_state after the critical
+  # rule's own 1m dwell could have elapsed. Suppress warning coverage on that
+  # state, not on breach age alone, so late critical-magnitude or data-gap
+  # changes cannot resolve warning before critical can actually fire.
+  deviation_critical_ready_promql              = "mento_pool_deviation_alert_state{state=~\"critical|deviation_ratio_unavailable_critical\"} > 0"
+  deviation_warning_active_promql              = "((mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_ready_promql}))"
+  deviation_warning_unavailable_active_promql  = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_ready_promql})"
   deviation_critical_unavailable_active_promql = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
 
   # Transition markers let resolved notifications say why an alert stopped
