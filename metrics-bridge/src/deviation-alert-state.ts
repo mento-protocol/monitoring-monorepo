@@ -239,6 +239,14 @@ function alertCouldHaveFired(
   return false;
 }
 
+function isCriticalAlertState(
+  state: DeviationAlertState,
+): state is CriticalSignalState {
+  return (
+    state === "critical" || state === "deviation_ratio_unavailable_critical"
+  );
+}
+
 function criticalSignalEnteredAt(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
@@ -247,6 +255,9 @@ function criticalSignalEnteredAt(
   if (!currentState.criticalSignal) return null;
   if (previous?.criticalSignal === currentState.criticalSignal) {
     return previous.criticalSignalEnteredAt ?? nowSeconds;
+  }
+  if (previous && isCriticalAlertState(previous.state)) {
+    return previous.criticalSignalEnteredAt ?? previous.enteredAt;
   }
   return nowSeconds;
 }

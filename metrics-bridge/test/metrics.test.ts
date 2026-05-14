@@ -625,6 +625,73 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("keeps critical readiness when deviation-ratio data disappears", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713200000,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "1.060000",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203661,
+    );
+    updateMetrics(
+      [
+        makePool({
+          lastDeviationRatio: "-1",
+          deviationBreachStartedAt: "1713200000",
+          currentOpenBreachPeak: "10600",
+          currentOpenBreachEntryThreshold: 10000,
+        }),
+      ],
+      1713203720,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_alert_state", {
+        ...poolLabels,
+        state: "deviation_ratio_unavailable_critical",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "deviation_ratio_unavailable_warning",
+          reason: "deescalated_to_warning",
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_deviation_alert_transitions_total",
+        {
+          ...poolLabels,
+          from: "critical",
+          to: "deviation_ratio_unavailable_critical",
+          reason: "deviation_ratio_unavailable",
+        },
+      ),
+    ).toBe(1);
+  });
+
   it("records deviation-ratio unavailable and restored transitions", async () => {
     updateMetrics(
       [
