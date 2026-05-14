@@ -351,6 +351,14 @@ Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code 
 
 To use them you need [Claude Code](https://claude.com/claude-code). Personal/local-only commands belong in your own `~/.claude/commands/` (or in `.git/info/exclude` if you want to keep them in this directory but not share).
 
+## Codex Agent Skills
+
+Repo-tracked Codex skills live under `.agents/skills/`. Keep durable,
+team-shareable agent workflows there instead of relying on local-only
+`~/.codex` or `~/.claude` state. Project-level Codex MCP config lives in
+`.codex/config.toml`; local personal Codex settings still belong in
+`~/.codex/config.toml`.
+
 ### Status-polling commands use `Monitor`, not `/loop`
 
 For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.

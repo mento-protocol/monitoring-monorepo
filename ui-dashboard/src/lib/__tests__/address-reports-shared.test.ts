@@ -88,8 +88,11 @@ describe("upgradeReport", () => {
     expect(r.source).toBeUndefined();
   });
 
-  it("preserves a valid source value", () => {
-    const r = upgradeReport({ body: "x", source: "claude" });
-    expect(r.source).toBe("claude");
-  });
+  it.each(["manual", "claude", "Codex", "import"] as const)(
+    "preserves valid source value %s",
+    (source) => {
+      const r = upgradeReport({ body: "x", source });
+      expect(r.source).toBe(source);
+    },
+  );
 });
