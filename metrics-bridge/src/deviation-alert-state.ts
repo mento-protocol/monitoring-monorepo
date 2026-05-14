@@ -50,10 +50,11 @@ type StateSnapshot = {
 const previousStates = new Map<string, StateSnapshot>();
 const recentTransitions = new Map<string, DeviationAlertTransition>();
 
-// Mirrors terraform/alerts/main.tf's `usd_pegged_symbols_regex_part`.
-// Keep this list in sync with that HCL local until the FX classifier moves
-// into shared-config.
-const USD_PEGGED_SYMBOLS = new Set([
+// Mirrors ui-dashboard/src/lib/tokens.ts and terraform/alerts/main.tf's
+// `usd_pegged_symbols_regex_part`. The drift-protection test in
+// test/deviation-alert-state.test.ts enforces this until the FX classifier
+// moves into shared-config.
+export const USD_PEGGED_SYMBOLS: ReadonlySet<string> = new Set([
   "USDm",
   "USDC",
   "USDT",
