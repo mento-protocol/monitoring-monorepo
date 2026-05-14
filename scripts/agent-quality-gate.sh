@@ -106,9 +106,19 @@ cd "$repo_root"
 
 # Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
 # being writable — pre-push hooks fork off trunk's daemon, which may carry
-# a TMPDIR that's outside a host sandbox's writable allowlist.
+# a TMPDIR that's outside a host sandbox's writable allowlist. Also export
+# TMPDIR so mapped subprocesses (e.g. agent-quality-gate.test.sh's bare
+# `mktemp -d`) inherit a writable scratch path instead of falling back to
+# the system default (which sandboxed shells often cannot write to).
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
+export TMPDIR="$scratch_dir"
+
+# Trunk's pre-push hook callback runs the gate without a TTY and strips most
+# env vars from the calling shell. Re-assert non-interactive markers so the
+# mapped commands (e.g. pnpm install) take the CI codepath instead of asking
+# for TTY confirmation.
+export CI="${CI:-true}"
 
 tmpfiles=()
 cleanup_tmpfiles() {
@@ -142,7 +152,12 @@ else
     if [[ "$head_ref" == "HEAD" ]]; then
       git diff --name-only --no-renames
       git diff --cached --name-only --no-renames
-      git ls-files --others --exclude-standard
+      # The scratch dir is created at line 110 *before* this collection runs.
+      # In a repo where .tmp/ isn't gitignored (e.g. the fresh fixture repos
+      # built by scripts/agent-quality-gate.test.sh), the gate's own tmpfiles
+      # would otherwise be reported as untracked user changes and bleed into
+      # downstream args (e.g. the docs-only `./tools/trunk check` builder).
+      git ls-files --others --exclude-standard --exclude='.tmp/agent-quality-gate/'
     fi
   } | sed '/^$/d' | sort -u > "$changed_paths_file"
 fi

@@ -71,9 +71,11 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 > If you hit `ERR_PNPM_PACKAGE_TOO_YOUNG` — during `pnpm add`, a
 > lockfile-updating `pnpm install`, or `pnpm update` — pin to a slightly
 > older version or wait out the gate. For urgent CVE patches that need a
-> brand-new release immediately, override per-invocation with
-> `pnpm install --config.minimumReleaseAge=0`. `@mento-protocol/*` is
-> exempted so our own releases install same-day.
+> brand-new release immediately, override per-invocation by appending
+> `--config.minimumReleaseAge=0` to the failing command (e.g.
+> `pnpm add --config.minimumReleaseAge=0 <pkg>` or
+> `pnpm update --config.minimumReleaseAge=0 <pkg>`). `@mento-protocol/*`
+> is exempted so our own releases install same-day.
 
 ### Run the Indexer (local)
 
