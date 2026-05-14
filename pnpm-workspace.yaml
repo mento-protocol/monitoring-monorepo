@@ -4,6 +4,10 @@ packages:
   - ui-dashboard
   - metrics-bridge
 
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - "@mento-protocol/*"
+
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

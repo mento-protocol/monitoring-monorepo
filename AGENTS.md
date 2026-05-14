@@ -175,7 +175,9 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 ## Quick Commands
 
 ```bash
-# Install all deps
+# Install all deps (gated: pnpm refuses registry versions <3 days old via
+# minimumReleaseAge in pnpm-workspace.yaml; @mento-protocol/* is exempted.
+# Frozen-lockfile installs are unaffected.)
 pnpm install
 
 # Indexer
