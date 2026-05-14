@@ -23,16 +23,6 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
-    - linters: [eslint]
-      paths:
-        # Repo-root .mjs/.cjs (build/health scripts + dep-cruiser config).
-        # No root eslint config; each workspace package owns its own. Trunk
-        # otherwise probes from the root and errors. Each script's intent is
-        # narrow and reviewed at write-time.
-        - scripts/*.mjs
-        - scripts/*.cjs
-        - "*.cjs"
-        - "*.mjs"
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml
@@ -51,7 +41,12 @@ lint:
         - shared-config/__tests__/fixtures/known-pools.json
   enabled:
     - checkov@3.2.506
-    - eslint@10.0.2
+    # eslint is run per-package via `pnpm --filter X lint`, wired into the
+    # agent quality gate. Each package's lint script uses --max-warnings to
+    # ratchet the PR-2 baseline (no new warns allowed). Running ESLint
+    # twice — once via trunk, once via pnpm — duplicates work AND friction:
+    # trunk treats every ESLint warning as a check failure, defeating the
+    # warn-as-baseline mechanism. Per-package lint is the canonical path.
     - prettier@3.8.1
     - markdownlint@0.48.0
     - git-diff-check
