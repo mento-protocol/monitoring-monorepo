@@ -141,6 +141,8 @@ Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 
 
 By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash via the SAME atomic Lua upsert the API route uses — never split-read-modify-write, which races the editor and any other skill invocation.
 
+Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. The MCP approval prompt is the production write guard for this path.
+
 **Derive the uploader's email at runtime, not from a hardcoded value.** The skill is committed and runs from any teammate's checkout; hardcoding one email would mis-attribute every other person's reports and leak PII into git. Pull from `git config user.email`:
 
 ```bash
