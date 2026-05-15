@@ -34,6 +34,9 @@ importers:
       dependency-cruiser:
         specifier: 17.4.0
         version: 17.4.0
+      envio-cloud:
+        specifier: 0.9.2
+        version: 0.9.2
       eslint:
         specifier: ^10.0.2
         version: 10.0.3(jiti@2.7.0)
@@ -614,6 +617,31 @@ packages:
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
+
+  '@envio-dev/envio-cloud-darwin-arm64@0.9.2':
+    resolution: {integrity: sha512-uIMZOi4lPAGL3kxldIp6dkmHXwhBGiijBPglFZ2m3pcRx60zQZdRQUBwEuAmi5eesW5Ldv98olXsTHc44LTRZw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@envio-dev/envio-cloud-darwin-x64@0.9.2':
+    resolution: {integrity: sha512-w+OVPrKWeM6u/f6szpJ+QsZkgy/vsm/6/r72m110uVBiEG+Wmj0kuhTVYlspGAoiNTK3pmd8eYs2ZrtIXwAX3g==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@envio-dev/envio-cloud-linux-arm64@0.9.2':
+    resolution: {integrity: sha512-+z9N0apw9TESEpVb9YpCiNahPV/TQdp8XodA9X6PGjOaljkIHEt69x+Tmnt/ZOnuS1OzySWm8A3EgidP+zA5Yg==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@envio-dev/envio-cloud-linux-x64@0.9.2':
+    resolution: {integrity: sha512-8aRDtzH++a0m4uXYnMvvhiHJ1xk9kNvInLjWH4yMj74FhvCKPwQDYNVlJc/19ZKmYUtuGTxQfRmVAwi73dIWkg==}
+    cpu: [x64]
+    os: [linux]
+
+  '@envio-dev/envio-cloud-win32-x64@0.9.2':
+    resolution: {integrity: sha512-5MLYUpFoOCdPk25HtFh6HQeUeIHraJ3MMPwYInnZ4gLhdMLjq+QBWnoGDVFlWO7DnXeQAZgd1miqmn7kvRAmVw==}
+    cpu: [x64]
+    os: [win32]
 
   '@envio-dev/hyperfuel-client-darwin-arm64@1.2.2':
     resolution: {integrity: sha512-eQyd9kJCIz/4WCTjkjpQg80DA3pdneHP7qhJIVQ2ZG+Jew9o5XDG+uI0Y16AgGzZ6KGmJSJF6wyUaaAjJfbO1Q==}
@@ -3674,6 +3702,10 @@ packages:
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
     engines: {node: '>=0.12'}
+
+  envio-cloud@0.9.2:
+    resolution: {integrity: sha512-76PqmmuKo4pJRbKtX+0iBOQFqTpaMGicJPpDqFU7MuvY0IFrbQXgKnAh5achKGcd4tebymgKSt06r06qCZkvlA==}
+    hasBin: true
 
   envio-darwin-arm64@3.0.0-rc.0:
     resolution: {integrity: sha512-8ViVNaHj85VFQM8D3gSzES1i0lAtzHnp5pYMEIlI079hrQfK0nrZ9W2uOWoN90DU1GrfXcEek6zIfGMuAUmuKQ==}
@@ -7257,6 +7289,21 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@envio-dev/envio-cloud-darwin-arm64@0.9.2':
+    optional: true
+
+  '@envio-dev/envio-cloud-darwin-x64@0.9.2':
+    optional: true
+
+  '@envio-dev/envio-cloud-linux-arm64@0.9.2':
+    optional: true
+
+  '@envio-dev/envio-cloud-linux-x64@0.9.2':
+    optional: true
+
+  '@envio-dev/envio-cloud-win32-x64@0.9.2':
+    optional: true
+
   '@envio-dev/hyperfuel-client-darwin-arm64@1.2.2':
     optional: true
 
@@ -10102,6 +10149,14 @@ snapshots:
       tapable: 2.3.3
 
   entities@6.0.1: {}
+
+  envio-cloud@0.9.2:
+    optionalDependencies:
+      '@envio-dev/envio-cloud-darwin-arm64': 0.9.2
+      '@envio-dev/envio-cloud-darwin-x64': 0.9.2
+      '@envio-dev/envio-cloud-linux-arm64': 0.9.2
+      '@envio-dev/envio-cloud-linux-x64': 0.9.2
+      '@envio-dev/envio-cloud-win32-x64': 0.9.2
 
   envio-darwin-arm64@3.0.0-rc.0:
     optional: true

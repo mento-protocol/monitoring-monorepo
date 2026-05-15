@@ -5,7 +5,7 @@
 #   pnpm deploy:indexer:promote             → promote latest deployment
 #   pnpm deploy:indexer:promote <commit>    → promote specific deployment
 #
-# Requires: npx envio-cloud, authenticated (run `npx envio-cloud login` first)
+# Requires: workspace envio-cloud CLI dependency, authenticated (run `pnpm exec envio-cloud login` first)
 
 set -euo pipefail
 
@@ -17,7 +17,7 @@ shift 2>/dev/null || true
 
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
-  COMMIT=$(npx -q envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
     | node -e "
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
@@ -31,7 +31,7 @@ if [[ -z "$COMMIT" ]]; then
 fi
 
 echo "🚀 Promoting deployment $COMMIT to production..."
-npx -q envio-cloud deployment promote "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
+pnpm exec envio-cloud deployment promote "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
 echo ""
 echo "✅ Deployment $COMMIT is now production."
 echo "   Verify: https://monitoring.mento.org"
