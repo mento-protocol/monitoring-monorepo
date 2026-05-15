@@ -43,6 +43,7 @@
   },
   "pnpm": {
     "overrides": {
+      "envio>react": "19.2.6",
       "undici": ">=6.24.0",
       "flatted": ">=3.4.2",
       "serialize-javascript": ">=7.0.5",
