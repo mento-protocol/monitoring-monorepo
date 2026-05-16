@@ -29,35 +29,35 @@ module.exports = {
       name: "indexer-no-dashboard",
       severity: "error",
       comment:
-        "indexer-envio runs in Envio's runtime and must not import from ui-dashboard. Covers src/, test/, and the codegen/audit scripts under scripts/.",
-      from: { path: "^indexer-envio/(src|test|scripts)/" },
+        "indexer-envio runs in Envio's runtime and must not import from ui-dashboard. Whole-package scope: src/, test/, scripts/, AND package-root configs (eslint.config.mjs, vitest.config.ts, stryker.config.mjs, envio-env.d.ts). Generated dirs (.envio/, build/) are excluded at the options level below.",
+      from: { path: "^indexer-envio/" },
       to: { path: "^ui-dashboard/" },
     },
     {
       name: "indexer-no-bridge",
       severity: "error",
       comment:
-        "indexer-envio must not depend on metrics-bridge; the dependency flows the other way. Covers src/, test/, and scripts/.",
-      from: { path: "^indexer-envio/(src|test|scripts)/" },
+        "indexer-envio must not depend on metrics-bridge. Whole-package scope (see indexer-no-dashboard for the same rationale).",
+      from: { path: "^indexer-envio/" },
       to: { path: "^metrics-bridge/" },
     },
     {
       name: "indexer-no-shared-config",
       severity: "error",
       comment:
-        "indexer-envio is intentionally isolated. It must not import shared-config; chain/token data comes from the indexer's own config or @mento-protocol/contracts. Covers src/, test/, and scripts/.",
-      from: { path: "^indexer-envio/(src|test|scripts)/" },
+        "indexer-envio is intentionally isolated. It must not import shared-config; chain/token data comes from the indexer's own config or @mento-protocol/contracts. Whole-package scope.",
+      from: { path: "^indexer-envio/" },
       to: { path: "^shared-config/" },
     },
     {
       name: "dashboard-runtime-no-indexer",
       severity: "error",
       comment:
-        "ui-dashboard runtime must not import indexer-envio. Reads happen via Hasura/GraphQL. Covers src/ + scripts/ (data-seed + smoke-test helpers are package-owned entrypoints and need the same boundary as runtime code).",
+        "ui-dashboard runtime must not import indexer-envio. Reads happen via Hasura/GraphQL. Whole-package scope so package-root configs (next.config.ts, sentry.*.config.ts, vitest.config.ts, etc.) and scripts/ are also covered. Tests get their own narrower escape hatch — see next rule.",
       from: {
-        path: "^ui-dashboard/(src|scripts)/",
-        // Tests get their own (narrower) escape hatch — see next rule.
-        pathNot: "(/__tests__/|\\.test\\.)",
+        path: "^ui-dashboard/",
+        pathNot:
+          "(/__tests__/|\\.test\\.|^ui-dashboard/tests/|^ui-dashboard/next-env\\.d\\.ts$)",
       },
       to: { path: "^indexer-envio/" },
     },
@@ -88,10 +88,11 @@ module.exports = {
       name: "dashboard-no-bridge",
       severity: "error",
       comment:
-        "ui-dashboard must not import metrics-bridge source; the bridge is a separate Cloud Run service. Covers src/ + scripts/ to match the indexer-isolation pattern.",
+        "ui-dashboard must not import metrics-bridge source; the bridge is a separate Cloud Run service. Whole-package scope — same coverage as dashboard-runtime-no-indexer.",
       from: {
-        path: "^ui-dashboard/(src|scripts)/",
-        pathNot: "(/__tests__/|\\.test\\.)",
+        path: "^ui-dashboard/",
+        pathNot:
+          "(/__tests__/|\\.test\\.|^ui-dashboard/tests/|^ui-dashboard/next-env\\.d\\.ts$)",
       },
       to: { path: "^metrics-bridge/" },
     },
@@ -99,27 +100,25 @@ module.exports = {
       name: "bridge-no-indexer",
       severity: "error",
       comment:
-        "metrics-bridge must not import indexer-envio source; reads happen through the Hasura/GraphQL API. Covers `test/` too so test helpers can't smuggle in a cross-package path.",
-      from: { path: "^metrics-bridge/(src|test)/" },
+        "metrics-bridge must not import indexer-envio source; reads happen through the Hasura/GraphQL API. Whole-package scope: src/, test/, AND package-root configs (vitest.config.ts, stryker.config.mjs, etc.).",
+      from: { path: "^metrics-bridge/" },
       to: { path: "^indexer-envio/" },
     },
     {
       name: "bridge-no-dashboard",
       severity: "error",
       comment:
-        "metrics-bridge must not import ui-dashboard source (test/ included).",
-      from: { path: "^metrics-bridge/(src|test)/" },
+        "metrics-bridge must not import ui-dashboard source. Whole-package scope.",
+      from: { path: "^metrics-bridge/" },
       to: { path: "^ui-dashboard/" },
     },
     {
       name: "shared-config-stays-leaf",
       severity: "error",
       comment:
-        "shared-config is the leaf in the dep graph; no upward imports allowed. Tests get their own narrower escape hatch (see next rule); excluded here via pathNot because dep-cruiser evaluates each forbidden rule independently — without this exclusion the rule would fire on test config-JSON imports even though the next rule is supposed to allow them.",
+        "shared-config is the leaf in the dep graph; no upward imports allowed. Whole-package scope covers src/, __tests__/, AND eslint.config.mjs. Tests get their own narrower escape hatch (see next rule); excluded here via pathNot because dep-cruiser evaluates each forbidden rule independently — without this exclusion the rule would fire on test config-JSON imports even though the next rule is supposed to allow them.",
       from: {
-        path: "^shared-config/(src|__tests__)/",
-        // Mirror `dashboard-runtime-no-indexer`: exclude test files so the
-        // narrower test-allow rule below is the active gate for tests.
+        path: "^shared-config/",
         pathNot: "^shared-config/__tests__/",
       },
       to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
