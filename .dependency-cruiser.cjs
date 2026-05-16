@@ -94,15 +94,16 @@ module.exports = {
       name: "bridge-no-indexer",
       severity: "error",
       comment:
-        "metrics-bridge must not import indexer-envio source; reads happen through the Hasura/GraphQL API.",
-      from: { path: "^metrics-bridge/src/" },
+        "metrics-bridge must not import indexer-envio source; reads happen through the Hasura/GraphQL API. Covers `test/` too so test helpers can't smuggle in a cross-package path.",
+      from: { path: "^metrics-bridge/(src|test)/" },
       to: { path: "^indexer-envio/" },
     },
     {
       name: "bridge-no-dashboard",
       severity: "error",
-      comment: "metrics-bridge must not import ui-dashboard source.",
-      from: { path: "^metrics-bridge/src/" },
+      comment:
+        "metrics-bridge must not import ui-dashboard source (test/ included).",
+      from: { path: "^metrics-bridge/(src|test)/" },
       to: { path: "^ui-dashboard/" },
     },
     {

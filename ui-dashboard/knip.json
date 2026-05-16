@@ -1,7 +1,16 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/*.{mjs,ts}", "vitest.mutation.config.ts"],
-  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{mjs,ts}", "*.config.*"],
+  "entry": [
+    "scripts/*.{mjs,ts}",
+    "vitest.mutation.config.ts",
+    "tests/**/*.test.{ts,tsx}"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.{ts,tsx}",
+    "scripts/**/*.{mjs,ts}",
+    "*.config.*"
+  ],
   "ignoreDependencies": [
     "plotly.js-basic-dist-min",
     "tailwindcss",
