@@ -29,24 +29,24 @@ module.exports = {
       name: "indexer-no-dashboard",
       severity: "error",
       comment:
-        "indexer-envio runs in Envio's runtime and must not import from ui-dashboard.",
-      from: { path: "^indexer-envio/(src|test)/" },
+        "indexer-envio runs in Envio's runtime and must not import from ui-dashboard. Covers src/, test/, and the codegen/audit scripts under scripts/.",
+      from: { path: "^indexer-envio/(src|test|scripts)/" },
       to: { path: "^ui-dashboard/" },
     },
     {
       name: "indexer-no-bridge",
       severity: "error",
       comment:
-        "indexer-envio must not depend on metrics-bridge; the dependency flows the other way.",
-      from: { path: "^indexer-envio/(src|test)/" },
+        "indexer-envio must not depend on metrics-bridge; the dependency flows the other way. Covers src/, test/, and scripts/.",
+      from: { path: "^indexer-envio/(src|test|scripts)/" },
       to: { path: "^metrics-bridge/" },
     },
     {
       name: "indexer-no-shared-config",
       severity: "error",
       comment:
-        "indexer-envio is intentionally isolated. It must not import shared-config; chain/token data comes from the indexer's own config or @mento-protocol/contracts.",
-      from: { path: "^indexer-envio/(src|test)/" },
+        "indexer-envio is intentionally isolated. It must not import shared-config; chain/token data comes from the indexer's own config or @mento-protocol/contracts. Covers src/, test/, and scripts/.",
+      from: { path: "^indexer-envio/(src|test|scripts)/" },
       to: { path: "^shared-config/" },
     },
     {
@@ -110,9 +110,20 @@ module.exports = {
       name: "shared-config-stays-leaf",
       severity: "error",
       comment:
-        "shared-config is the leaf in the dep graph; no upward imports allowed.",
-      from: { path: "^shared-config/src/" },
+        "shared-config is the leaf in the dep graph; no upward imports allowed. Covers __tests__/ so cross-validation tests can't reach into indexer/dashboard/bridge runtime. The one legitimate cross-link — sync tests reading `indexer-envio/config/aggregators.json` — uses `new URL()` runtime filesystem access (not static imports), so dep-cruiser doesn't see it; if someone later switches to a static `import data from \"…/config/*.json\"` the next rule allows that narrowly.",
+      from: { path: "^shared-config/(src|__tests__)/" },
       to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+    },
+    {
+      name: "shared-config-tests-only-indexer-config-json",
+      severity: "error",
+      comment:
+        "shared-config tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits. Mirrors `dashboard-tests-only-indexer-config-json`.",
+      from: { path: "^shared-config/__tests__/" },
+      to: {
+        path: "^indexer-envio/",
+        pathNot: "^indexer-envio/config/.*\\.json$",
+      },
     },
   ],
   options: {

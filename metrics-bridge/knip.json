@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["vitest.mutation.config.ts"],
-  "project": ["src/**/*.ts", "*.config.*"],
+  "entry": ["vitest.mutation.config.ts", "test/**/*.test.ts"],
+  "project": ["src/**/*.ts", "test/**/*.ts", "*.config.*"],
   "ignoreDependencies": ["@stryker-mutator/api"],
   "rules": {
     "files": "error",
