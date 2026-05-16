@@ -402,6 +402,16 @@ get_root_package_json_class() {
 add_package_quality_commands() {
   local package_name="$1"
   local reason="$2"
+  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
+    # Both `tsc --noEmit` and `eslint .` (with the type-aware
+    # @typescript-eslint/no-unsafe-* rules active) require .envio/types.d.ts.
+    # On a fresh worktree, or a PR that only touches src/, codegen wouldn't
+    # otherwise run before quality commands and Envio entity imports would
+    # resolve to error-`any`, tripping the unsafe-* rules. Force codegen as
+    # a preflight; add_codegen_command dedups so concurrent triggers are
+    # cheap.
+    add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck/lint)"
+  fi
   add_command "pnpm --filter ${package_name} lint" "$reason"
   add_command "pnpm --filter ${package_name} typecheck" "$reason"
   if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
@@ -410,6 +420,7 @@ add_package_quality_commands() {
   add_command "pnpm --filter ${package_name} test" "$reason"
   add_command "pnpm --filter ${package_name} knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
+  add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
 }
 
 add_dashboard_quality_commands() {
@@ -602,11 +613,13 @@ while IFS= read -r path; do
     .dependency-cruiser.cjs)
       add_surface "tooling"
       add_command "pnpm code-health:deps" "dep-cruiser config changed (cross-package boundaries + cycles)"
+      add_checklist "docs/pr-checklists/code-health.md" "dep-cruiser config changed"
       ;;
     */knip.json)
       # Match knip.json regardless of which package owns it. The pnpm
       # filter scope below normalizes path to package.
       add_surface "tooling"
+      add_checklist "docs/pr-checklists/code-health.md" "knip config changed"
       case "$path" in
         shared-config/knip.json)
           add_command "pnpm --filter @mento-protocol/monitoring-config knip" "knip config changed"

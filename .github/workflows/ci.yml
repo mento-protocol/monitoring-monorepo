@@ -108,6 +108,8 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/monitoring-config knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/monitoring-config test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
@@ -138,6 +140,8 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/ui-dashboard knip
       # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: React Doctor (diff vs base)
         # PR-only: scans files changed vs the PR base and fails on any
@@ -221,6 +225,8 @@ jobs:
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/indexer-envio knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
@@ -247,6 +253,8 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/metrics-bridge knip
       # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
@@ -259,9 +267,31 @@ jobs:
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
+  deps:
+    name: Code Health (cross-package)
+    needs: changes
+    # Run on any workspace change. dep-cruiser is monorepo-wide — the rules
+    # for "shared-config must stay a leaf" and "indexer-envio is isolated"
+    # only fire when there's a path between packages, so we want every
+    # workspace edit to recheck the architecture.
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: dependency-cruiser (cross-package boundaries, blocking)
+        run: pnpm code-health:deps
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
   ci:
     name: ci
-    needs: [changes, shared, ui, indexer, bridge]
+    needs: [changes, shared, ui, indexer, bridge, deps]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -272,6 +302,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge
+          allowed-skips: shared,ui,indexer,bridge,deps
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

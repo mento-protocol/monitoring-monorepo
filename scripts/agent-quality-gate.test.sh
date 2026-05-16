@@ -357,7 +357,12 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow cha
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
 assert_not_contains "indexer:bridge-only:codegen"
 assert_not_contains "indexer:testnet:codegen"
-assert_not_contains "pnpm indexer:codegen"
+# Mainnet codegen now runs as a preflight for every indexer quality command
+# because @typescript-eslint/no-unsafe-* (enabled in PR 4) and `tsc` both
+# need .envio/types.d.ts to resolve Envio entity types. Bridge-only and
+# testnet variants still only fire for handler-registration changes; mainnet
+# is the canonical types source.
+assert_contains "- pnpm indexer:codegen (indexer-envio changed (codegen needed before indexer typecheck/lint))"
 
 run_gate "indexer-envio/src/EventHandlers.ts"
 assert_order \
