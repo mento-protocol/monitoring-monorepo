@@ -40,6 +40,7 @@ jobs:
       ui: ${{ steps.filter.outputs.ui }}
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
+      codeHealth: ${{ steps.filter.outputs.codeHealth }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - id: filter
@@ -88,6 +89,16 @@ jobs:
               - pnpm-workspace.yaml
               - pnpm-lock.yaml
               - package.json
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+            # Code-health policy files. A PR that touches ONLY the dep-cruiser
+            # rules or a package's knip config would otherwise leave all four
+            # package filters false → the cross-package `deps` job would skip
+            # → blocking architecture rule changes ship unvalidated. This
+            # filter fires the `deps` job whenever the policy itself moves.
+            codeHealth:
+              - .dependency-cruiser.cjs
+              - "*/knip.json"
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
@@ -273,8 +284,10 @@ jobs:
     # Run on any workspace change. dep-cruiser is monorepo-wide — the rules
     # for "shared-config must stay a leaf" and "indexer-envio is isolated"
     # only fire when there's a path between packages, so we want every
-    # workspace edit to recheck the architecture.
-    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true'
+    # workspace edit to recheck the architecture. Also fires on `codeHealth`
+    # (dep-cruiser config + knip configs) so a PR that only edits the
+    # rule file is validated against the codebase before merge.
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.codeHealth == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:

@@ -65,14 +65,22 @@ module.exports = {
       name: "dashboard-tests-only-indexer-config-json",
       severity: "error",
       comment:
-        "ui-dashboard tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits.",
+        "ui-dashboard tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits. Covers src test files AND the top-level `tests/` dir (Playwright fixtures, browser flows) so files in tests/ can't bypass the boundary.",
       from: {
-        path: "^ui-dashboard/src/.*(/__tests__/|\\.test\\.)",
+        path: "^ui-dashboard/(src/.*(/__tests__/|\\.test\\.)|tests/)",
       },
       to: {
         path: "^indexer-envio/",
         pathNot: "^indexer-envio/config/.*\\.json$",
       },
+    },
+    {
+      name: "dashboard-tests-no-bridge",
+      severity: "error",
+      comment:
+        "ui-dashboard's top-level tests/ dir (Playwright fixtures + browser flows) must not import metrics-bridge runtime. Same boundary the src rule enforces below.",
+      from: { path: "^ui-dashboard/tests/" },
+      to: { path: "^metrics-bridge/" },
     },
     {
       name: "dashboard-no-bridge",
