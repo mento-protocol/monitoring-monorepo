@@ -61,10 +61,20 @@ async function mockBlockedRebalanceProbe(page: Page) {
   });
 }
 
+// Pin the browser clock to a weekday inside the FX trading window so
+// `isWeekend()` (`ui-dashboard/src/lib/weekend.ts`) deterministically
+// returns false. Without this, the suite was passing only on weekdays:
+// during the Fri 21:00 UTC → Sun 23:00 UTC window `computeHealthStatus`
+// short-circuits to "WEEKEND", `useRebalanceCheck` skips the API call,
+// and the rebalance-blocked prose never renders. Wed 2026-04-15 12:00
+// UTC is mid-window for FX trading hours on every supported chain.
+const WEEKDAY_FIXTURE_INSTANT = new Date("2026-04-15T12:00:00Z");
+
 test.describe("dashboard browser flows", () => {
   let browserErrors: string[];
 
   test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: WEEKDAY_FIXTURE_INSTANT });
     browserErrors = trackUnexpectedBrowserErrors(page);
   });
 
