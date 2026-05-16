@@ -914,4 +914,31 @@ assert_contains "- docs"
 assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"
 assert_not_contains "- ./tools/trunk check docs/deleted.md"
 
+# Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
+# the cross-package dep-cruiser gate + surfaces the code-health checklist.
+run_gate ".dependency-cruiser.cjs"
+assert_contains "- tooling"
+assert_contains "- pnpm code-health:deps (dep-cruiser config changed (cross-package boundaries + cycles))"
+assert_contains "- docs/pr-checklists/code-health.md (dep-cruiser config changed)"
+
+# Code-health routing: each package's knip.json routes to the matching
+# `pnpm --filter <pkg> knip` command + the same checklist. A typo in the
+# case branch (e.g. swapping package names) would silently misroute the
+# gate, so test all four packages.
+run_gate "shared-config/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "ui-dashboard/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "indexer-envio/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "metrics-bridge/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
 echo "agent quality gate tests passed"

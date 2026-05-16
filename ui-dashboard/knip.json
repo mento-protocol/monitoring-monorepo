@@ -3,11 +3,12 @@
   "entry": [
     "scripts/*.{mjs,ts}",
     "vitest.mutation.config.ts",
-    "tests/**/*.test.{ts,tsx}"
+    "tests/**/*.test.{ts,tsx}",
+    "tests/browser/fixtures/hasura-fixture-server.mjs"
   ],
   "project": [
     "src/**/*.{ts,tsx}",
-    "tests/**/*.{ts,tsx}",
+    "tests/**/*.{mjs,ts,tsx}",
     "scripts/**/*.{mjs,ts}",
     "*.config.*"
   ],
