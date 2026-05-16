@@ -172,8 +172,13 @@ run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (package manager config changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
+# Workspace-wide triggers (npmrc, root pkg.json, ci.yml) intentionally do
+# NOT run the dashboard playwright suite — chromium --single-process mode
+# (required in sandbox) is flaky on keyboard/route-heavy tests, and CI's
+# ui-dashboard job runs the full suite anyway. Direct ui-dashboard/*
+# changes still trigger it via the per-package dispatch.
+assert_not_contains "playwright install chromium (package manager config changed)"
+assert_not_contains "test:browser (package manager config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
@@ -259,7 +264,9 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+# Workspace-wide triggers skip the dashboard playwright suite — see the
+# matching `assert_not_contains` block above .npmrc for the rationale.
+assert_not_contains "test:browser (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
@@ -294,7 +301,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+assert_not_contains "test:browser (root package script changed)"
 
 mixed_package_script_repo="$(mktemp -d)"
 (
@@ -331,7 +338,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+assert_not_contains "test:browser (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -606,7 +613,11 @@ run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (central CI workflow changed)"
+# Workspace-wide triggers (ci.yml here) deliberately skip the playwright
+# suite — CI runs it in its own ui-dashboard job and the local --single-process
+# chromium mode is flaky on keyboard/route-heavy tests.
+assert_not_contains "playwright install chromium (central CI workflow changed)"
+assert_not_contains "test:browser (central CI workflow changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (central CI workflow changed)" \

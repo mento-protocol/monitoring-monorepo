@@ -458,7 +458,15 @@ add_indexer_mutation_baseline() {
 add_workspace_quality_commands() {
   local reason="$1"
   add_all_indexer_codegen "$reason"
-  add_dashboard_quality_commands "$reason"
+  # Use the lightweight dashboard quality (typecheck/lint/test/knip) for
+  # workspace-wide triggers (root package.json, CI yaml, npmrc, etc.).
+  # Playwright `test:browser` is high-cost and chromium's --single-process
+  # mode (required in macOS sandbox per playwright.config.ts) is flaky for
+  # tests using keyboard events + page.route. CI runs the full browser
+  # suite in its own job — local workspace-wide triggers don't need to
+  # replicate it. Direct `ui-dashboard/*` path changes still hit the full
+  # `add_dashboard_quality_commands` from the per-package dispatch below.
+  add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
   add_ui_react_doctor_full_score "$reason"
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
