@@ -110,20 +110,33 @@ module.exports = {
       name: "shared-config-stays-leaf",
       severity: "error",
       comment:
-        "shared-config is the leaf in the dep graph; no upward imports allowed. Covers __tests__/ so cross-validation tests can't reach into indexer/dashboard/bridge runtime. The one legitimate cross-link — sync tests reading `indexer-envio/config/aggregators.json` — uses `new URL()` runtime filesystem access (not static imports), so dep-cruiser doesn't see it; if someone later switches to a static `import data from \"…/config/*.json\"` the next rule allows that narrowly.",
-      from: { path: "^shared-config/(src|__tests__)/" },
+        "shared-config is the leaf in the dep graph; no upward imports allowed. Tests get their own narrower escape hatch (see next rule); excluded here via pathNot because dep-cruiser evaluates each forbidden rule independently — without this exclusion the rule would fire on test config-JSON imports even though the next rule is supposed to allow them.",
+      from: {
+        path: "^shared-config/(src|__tests__)/",
+        // Mirror `dashboard-runtime-no-indexer`: exclude test files so the
+        // narrower test-allow rule below is the active gate for tests.
+        pathNot: "^shared-config/__tests__/",
+      },
       to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
     },
     {
       name: "shared-config-tests-only-indexer-config-json",
       severity: "error",
       comment:
-        "shared-config tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits. Mirrors `dashboard-tests-only-indexer-config-json`.",
+        "shared-config tests may only import indexer-envio config JSON (data) for cross-validation. Runtime source is still off-limits. Mirrors `dashboard-tests-only-indexer-config-json`. Today's `__tests__/aggregators.test.ts` uses `new URL()` filesystem access (not a static import) so dep-cruiser doesn't see it — this rule is forward-looking for any future static `import data from \"…/config/*.json\"`.",
       from: { path: "^shared-config/__tests__/" },
       to: {
         path: "^indexer-envio/",
         pathNot: "^indexer-envio/config/.*\\.json$",
       },
+    },
+    {
+      name: "shared-config-tests-no-dashboard-or-bridge",
+      severity: "error",
+      comment:
+        "shared-config tests must not import ui-dashboard or metrics-bridge runtime. The dashboard/bridge boundary has no data-only escape hatch like the indexer one.",
+      from: { path: "^shared-config/__tests__/" },
+      to: { path: "^(ui-dashboard|metrics-bridge)/" },
     },
   ],
   options: {
