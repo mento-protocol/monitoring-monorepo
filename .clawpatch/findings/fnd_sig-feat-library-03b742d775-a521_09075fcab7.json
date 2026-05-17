@@ -36,11 +36,21 @@
   "whyTestsDoNotAlreadyCoverThis": "The included tests verify trusted replace mode uses replaceSnapshotHashes and happy-path report imports, but they do not simulate importReports failing after labels have been written.",
   "suggestedRegressionTest": "Add a handleSnapshot test that mocks importLabels as successful and importReports as rejected, then asserts the implementation uses an atomic combined writer or does not leave label writes committed before returning failure.",
   "minimumFixScope": "ui-dashboard/src/lib/address-labels/snapshot.ts and the Redis write helper used for snapshot imports, plus a failure-ordering regression test",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: snapshot merge imports now write labels and reports through a combined Redis EVAL helper instead of sequential importLabels/importReports calls.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T11:55:20.741Z"
+    }
+  ],
   "signature": "sig_feat-library-03b742d775_a521dbe635",
   "linkedPatchAttemptIds": [],
   "createdByRunId": "20260517T112745-251359",
   "createdAt": "2026-05-17T11:30:30.518Z",
-  "updatedAt": "2026-05-17T11:30:30.518Z"
+  "updatedAt": "2026-05-17T11:55:20.741Z"
 }

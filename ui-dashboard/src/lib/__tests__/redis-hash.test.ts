@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   flattenHashReplacements,
   MAX_REDIS_HASH_REPLACE_BYTES,
+  mergeRedisHashes,
   REDIS_HSET_FIELD_CHUNK_SIZE,
   replaceRedisHashes,
 } from "@/lib/redis-hash";
@@ -67,5 +68,37 @@ describe("replaceRedisHashes", () => {
 
     expect(evalMock).not.toHaveBeenCalled();
     byteLengthSpy.mockRestore();
+  });
+});
+
+describe("mergeRedisHashes", () => {
+  it("merges multiple hashes in one EVAL payload without deleting keys", async () => {
+    const evalMock = vi.fn().mockResolvedValue(1);
+
+    await mergeRedisHashes({ eval: evalMock }, [
+      { key: "labels", fields: { "0xaaa": "label" } },
+      { key: "reports", fields: { "0xbbb": "report" } },
+    ]);
+
+    expect(evalMock).toHaveBeenCalledOnce();
+    const [script, keys, argv] = evalMock.mock.calls[0]!;
+    expect(script).toContain(
+      `local hsetFieldChunkSize = ${REDIS_HSET_FIELD_CHUNK_SIZE}`,
+    );
+    expect(script).not.toContain("redis.call('DEL', key)");
+    expect(script).toContain("redis.call('HSET', key");
+    expect(keys).toEqual(["labels", "reports"]);
+    expect(argv).toEqual(["1", "0xaaa", "label", "1", "0xbbb", "report"]);
+  });
+
+  it("skips empty merge replacements because merge mode must not clear hashes", async () => {
+    const evalMock = vi.fn().mockResolvedValue(1);
+
+    await mergeRedisHashes({ eval: evalMock }, [
+      { key: "labels", fields: {} },
+      { key: "reports", fields: {} },
+    ]);
+
+    expect(evalMock).not.toHaveBeenCalled();
   });
 });

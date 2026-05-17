@@ -57,11 +57,21 @@
   "whyTestsDoNotAlreadyCoverThis": "The stripArkhamProvenance test only covers an exact \"arkham\" tag, while the sanitizeAndFilter trimming test is separate and does not compose trimming with provenance stripping.",
   "suggestedRegressionTest": "Add a simple-format or helper pipeline test where tags: [\" arkham \", \"exchange\"] imports as tags: [\"exchange\"] with source undefined.",
   "minimumFixScope": "ui-dashboard/src/lib/address-labels/import-helpers.ts plus a focused regression in ui-dashboard/src/lib/address-labels/__tests__/import.test.ts",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: Arkham provenance stripping now removes tags whose trimmed lowercase value is the legacy arkham sentinel before sanitization can preserve it.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T11:55:17.474Z"
+    }
+  ],
   "signature": "sig_feat-library-03b742d775_fc5b3117a2",
   "linkedPatchAttemptIds": [],
   "createdByRunId": "20260517T112745-251359",
   "createdAt": "2026-05-17T11:30:30.518Z",
-  "updatedAt": "2026-05-17T11:30:30.518Z"
+  "updatedAt": "2026-05-17T11:55:17.473Z"
 }

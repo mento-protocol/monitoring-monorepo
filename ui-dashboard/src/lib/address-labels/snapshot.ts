@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import {
-  importLabels,
   getLabels,
   mergeEntries,
   upgradeEntries,
@@ -9,14 +8,16 @@ import {
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 import {
-  importReports,
   MAX_BODY_LENGTH as MAX_REPORT_BODY_LENGTH,
   MAX_TITLE_LENGTH as MAX_REPORT_TITLE_LENGTH,
   type AddressReport,
 } from "@/lib/address-reports";
 import { upgradeReport } from "@/lib/address-reports-shared";
 import { isValidAddress } from "@/lib/format";
-import { replaceSnapshotHashes } from "@/lib/address-label-restore-writes";
+import {
+  importSnapshotHashes,
+  replaceSnapshotHashes,
+} from "@/lib/address-label-restore-writes";
 import { mergeWithExisting, sanitizeAndFilter } from "./import-helpers";
 
 type SnapshotReportMetadataMode = "restamp" | "preserve";
@@ -172,24 +173,29 @@ export async function handleSnapshot(
           ...(hasReportPayload ? { reports: reportsToImport } : {}),
         });
       }
-    } else if (Object.keys(merged).length > 0) {
-      let existing: Record<string, AddressEntry>;
-      try {
-        existing = await getLabels();
-      } catch (err) {
-        return serverError(err, options.errorTag);
+    } else {
+      let labelsToImport: Record<string, AddressEntry> | undefined;
+      if (Object.keys(merged).length > 0) {
+        let existing: Record<string, AddressEntry>;
+        try {
+          existing = await getLabels();
+        } catch (err) {
+          return serverError(err, options.errorTag);
+        }
+        const mergedLabels =
+          labelProvenanceMode === "preserve"
+            ? mergePreservingProvenance(merged, existing)
+            : mergeWithExisting(merged, existing);
+        labelsToImport = sanitizeAndFilter(mergedLabels);
+        importedAddresses = Object.keys(labelsToImport).length;
       }
-      const mergedLabels =
-        labelProvenanceMode === "preserve"
-          ? mergePreservingProvenance(merged, existing)
-          : mergeWithExisting(merged, existing);
-      const finalLabels = sanitizeAndFilter(mergedLabels);
-      await importLabels(finalLabels);
-      importedAddresses = Object.keys(finalLabels).length;
-    }
 
-    if (writeMode !== "replace" && importedReports > 0) {
-      await importReports(reportsToImport);
+      if (labelsToImport !== undefined || importedReports > 0) {
+        await importSnapshotHashes({
+          ...(labelsToImport !== undefined ? { labels: labelsToImport } : {}),
+          ...(importedReports > 0 ? { reports: reportsToImport } : {}),
+        });
+      }
     }
     return NextResponse.json({
       ok: true,

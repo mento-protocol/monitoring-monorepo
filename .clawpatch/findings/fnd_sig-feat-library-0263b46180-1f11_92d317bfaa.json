@@ -43,11 +43,21 @@
   "whyTestsDoNotAlreadyCoverThis": "The included tests cover address label/report/auth/breach/breaker behavior. They do not exercise TimeSeriesChartCard legend toggling or prop changes while crossFadeEnabled is active.",
   "suggestedRegressionTest": "Add a TimeSeriesChartCard/useCrossFade test that toggles curveNumber 2 with three traces, rerenders with two traces, and asserts exactly one cross-fade overlay is active instead of all overlays having opacity 0.",
   "minimumFixScope": "ui-dashboard/src/components/time-series-chart-card-hooks.ts",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: cross-fade visibility now tracks BreakdownSeries identity and derives current trace indexes, so stale hidden indexes disappear after shrink/reorder.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T11:55:14.143Z"
+    }
+  ],
   "signature": "sig_feat-library-0263b46180_1f11d2248c",
   "linkedPatchAttemptIds": [],
   "createdByRunId": "20260517T112745-251359",
   "createdAt": "2026-05-17T11:30:58.716Z",
-  "updatedAt": "2026-05-17T11:30:58.716Z"
+  "updatedAt": "2026-05-17T11:55:14.143Z"
 }

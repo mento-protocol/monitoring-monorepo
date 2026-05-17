@@ -140,7 +140,7 @@
     "project-root:ui-dashboard"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": ["fnd_sig-feat-library-0263b46180-1f11_92d317bfaa"],
   "patchAttemptIds": [],
@@ -155,5 +155,5 @@
     }
   ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:30:58.716Z"
+  "updatedAt": "2026-05-17T11:55:14.164Z"
 }

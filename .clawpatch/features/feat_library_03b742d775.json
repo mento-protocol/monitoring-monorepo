@@ -52,7 +52,7 @@
     "project-root:ui-dashboard"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
     "fnd_sig-feat-library-03b742d775-fc5b_a1f7059781",
@@ -70,5 +70,5 @@
     }
   ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:30:30.520Z"
+  "updatedAt": "2026-05-17T11:55:20.763Z"
 }

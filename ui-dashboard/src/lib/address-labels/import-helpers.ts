@@ -18,7 +18,7 @@ export function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
   return {
     ...entry,
     source: undefined,
-    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+    tags: entry.tags.filter((t) => t.trim().toLowerCase() !== ARKHAM_TAG),
   };
 }
 
