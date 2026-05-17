@@ -106,7 +106,6 @@ after skipping blanks and comments. Refresh before starting a split.
 - [x] ~~**Enable `tseslint.configs.recommended` on `indexer-envio`.**~~ Done as part of PR 4 (the preset had already been re-added by an earlier change; PR 4 took the strictness one step further by re-enabling `no-unsafe-*`).
 - [ ] Split `ui-dashboard/src/components/global-pools-table.tsx`'s `GlobalPoolsTable` component to remove the scoped `max-lines-per-function` disable added while fixing the Clawpatch health-badge a11y finding.
 - [ ] Extract the row renderer in `ui-dashboard/src/components/global-pools-table.tsx` to remove the scoped `max-lines-per-function` disable on `sortedEntries.map(...)`.
-- [ ] Split `ui-dashboard/src/components/oracle-chart.tsx`'s `OracleChart` Plotly assembly to remove the scoped `max-lines-per-function` disable added while fixing non-finite deviation hover text.
 - [ ] Split `indexer-envio/src/leaderboardSnapshots.ts`'s `applyLeaderboardSnapshots` rollup writer to remove the scoped `max-lines-per-function` disable added while fixing dropped-swap heartbeat flushing.
 
 ## Envio v3 Migration Follow-Ups
