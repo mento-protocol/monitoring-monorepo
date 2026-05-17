@@ -17,10 +17,11 @@
     "**/__tests__/**",
     "**/*.test.{ts,tsx}",
     "**/test/**",
-    "indexer-envio/src/handlers/**",
-    "ui-dashboard/src/app/**/page.tsx",
-    "ui-dashboard/src/app/**/layout.tsx",
-    "ui-dashboard/src/lib/types.ts"
+    "**/indexer-envio/src/handlers/**",
+    "**/ui-dashboard/src/app/**/page.tsx",
+    "**/ui-dashboard/src/app/**/layout.tsx",
+    "**/ui-dashboard/src/app/**/opengraph-image.tsx",
+    "**/ui-dashboard/src/lib/types.ts"
   ],
   "reporters": ["console", "json", "html"],
   "output": "reports/jscpd",

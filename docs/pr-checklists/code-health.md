@@ -141,10 +141,13 @@ Eight prior baseline mechanisms were rejected:
 
 PR 3 (this PR): `jscpd` duplication check ships as a non-blocking CI job
 (`.github/workflows/code-health-duplication.yml`) with the HTML+JSON report
-uploaded as an artifact. Tests, handlers, and route entry files are excluded
-(they're intentionally repetitive). Initial baseline: 0 clones. Run locally
-via `pnpm code-health:duplication`. Future findings should drive
-extract-helper refactors, not knee-jerk suppression.
+uploaded as an artifact. Tests, handlers, route entry pages, layouts,
+opengraph images, and pure type modules are excluded (they're
+intentionally repetitive). Initial baseline: **218 clones** at min-tokens=50,
+min-lines=5. Run locally via `pnpm code-health:duplication`. The report
+is intended as an extract-helper-refactor backlog — non-blocking so PRs
+aren't gated on historical copy-paste, but visible so contributors can
+plan deduplication when they touch an affected file.
 
 PR 5: weekly cron renders `reports/code-health-history.md` and posts the
 hotspot/coupling delta to Slack.
