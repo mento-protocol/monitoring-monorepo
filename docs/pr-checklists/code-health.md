@@ -67,9 +67,10 @@ reported line. This content fingerprint:
 - An added tuple whose stripped key `(file, ruleId, message)` doesn't
   exist in the baseline → rejected.
 - An added tuple whose stripped key matches a baseline entry AND whose
-  `line` is within `ABSORB_LINE_DISTANCE` (currently 10) of that entry
+  `line` is within `ABSORB_LINE_DISTANCE` (currently 30) of that entry
   → absorbed as a legitimate refactor (comment edit, signature
-  reformat, small insert above a baselined function).
+  reformat, small insert above a baselined function, or natural drift
+  from sibling PRs landing on main).
 - An added tuple whose stripped key matches but `line` is farther than
   the proximity window → rejected. Larger jumps are likely a different
   violation introduced under the same rule, not the same one moved.
@@ -138,7 +139,15 @@ Eight prior baseline mechanisms were rejected:
    baseline. Lint can be green locally while CI rejects baseline
    growth that wasn't matched by removals.
 
-PR 3: `jscpd` duplication check ships as a non-blocking CI job.
+PR 3 (this PR): `jscpd` duplication check ships as a non-blocking CI job
+(`.github/workflows/code-health-duplication.yml`) with the HTML+JSON report
+uploaded as an artifact. Tests, handlers, route entry pages, layouts,
+opengraph images, and pure type modules are excluded (they're
+intentionally repetitive). Initial baseline: **218 clones** at min-tokens=50,
+min-lines=5. Run locally via `pnpm code-health:duplication`. The report
+is intended as an extract-helper-refactor backlog — non-blocking so PRs
+aren't gated on historical copy-paste, but visible so contributors can
+plan deduplication when they touch an affected file.
 
 PR 5: weekly cron renders `reports/code-health-history.md` and posts the
 hotspot/coupling delta to Slack.

@@ -21,6 +21,9 @@ dist/
 .claude/*.graphql
 .reviews/
 .tmp/
+# jscpd HTML report — hundreds of generated files per run, surfaced via
+# CI artifact upload instead. The JSON summary is kept regenerable.
+reports/jscpd/
 WORK.md
 CLAUDE.md
 .playwright-mcp/
