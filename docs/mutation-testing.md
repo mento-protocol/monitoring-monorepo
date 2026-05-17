@@ -47,9 +47,11 @@ Latest dashboard result after adding focused assertions:
 
 Latest metrics-bridge result after narrowing to the probe runner:
 
-- Runtime: 10s on the final root-script run (8-10s observed locally)
-- Mutation score: 90.27% total / covered
-- Mutants: 97 killed, 5 timed out, 11 survived, 0 no coverage
+- Runtime: 22s on the 2026-05-18 CI run / 9s locally
+- Mutation score: **83.94% total / covered** (regressed from the previous
+  90.27% baseline; the gate is now `break: 80` so this still passes, with a
+  4-pt margin; un-triaged survivors are tracked in `BACKLOG.md`).
+- Mutants: 111 killed, 4 timed out, 22 survived, 0 no coverage
 
 The first dashboard run was worth doing: it found real assertion gaps in the
 default `Date.now()` path, reversed weekend-overlap ranges, and the exact/future

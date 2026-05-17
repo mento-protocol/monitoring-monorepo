@@ -11,7 +11,8 @@ on:
     # Intentionally NO `paths:` filter — required-status workflows must run on
     # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
     # The bridge job decides internally whether to invoke `pnpm
-    # bridge:mutation` by checking the `changes` job's output.
+    # bridge:mutation` by checking the `changes` job's output. Fails closed
+    # when the change detector itself fails (see `decide` step below).
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +24,8 @@ permissions:
 jobs:
   changes:
     # PR-only detector. Computes whether this PR's diff is relevant to the
-    # bridge mutation gate. Always succeeds so it never blocks the workflow.
+    # bridge mutation gate. If this job fails or is skipped, the bridge job
+    # below treats it as "run the full gate" (fail-closed semantics).
     if: github.event_name == 'pull_request'
     name: Detect changes
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -74,34 +76,44 @@ jobs:
         run: pnpm dashboard:mutation
 
   bridge-rebalance-probe-baseline:
-    # Always runs on PRs so the check can be marked required. Internal
-    # condition gates the expensive mutation step: when no bridge-relevant
-    # file changed, the job logs a no-op message and exits 0.
+    # Always runs (required-status safe). The `decide` step computes whether
+    # to invoke `pnpm bridge:mutation`:
+    #   - cron / workflow_dispatch    → always run the mutation step
+    #   - PR + detector succeeded + bridge=true  → run
+    #   - PR + detector succeeded + bridge=false → no-op skip
+    #   - PR + detector failed/skipped           → run (fail-closed)
     # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so when the
     # mutation step does run, a score below 80% fails the job.
     name: Bridge rebalance probe baseline
     needs: changes
-    if: |
-      always() &&
-      (github.event_name != 'pull_request' || needs.changes.result == 'success')
+    if: always() && (github.event_name != 'pull_request' || needs.changes.result != 'cancelled')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - name: Skip if probe code unchanged
-        if: |
-          github.event_name == 'pull_request' &&
-          needs.changes.outputs.bridge != 'true'
-        run: echo "Bridge probe code + its mutation inputs unchanged — skipping mutation gate."
+      - name: Decide whether to run mutation
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BRIDGE_CHANGED: ${{ needs.changes.outputs.bridge }}
+        run: |
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by $EVENT — running mutation gate."
+          elif [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Change detector result is '$CHANGES_RESULT' (expected 'success') — failing closed, running mutation gate."
+          elif [[ "$BRIDGE_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Bridge probe inputs changed — running mutation gate."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Bridge probe code + its mutation inputs unchanged — skipping mutation gate."
+          fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: |
-          github.event_name != 'pull_request' ||
-          needs.changes.outputs.bridge == 'true'
+        if: steps.decide.outputs.run == 'true'
       - uses: ./.github/actions/pnpm-install
-        if: |
-          github.event_name != 'pull_request' ||
-          needs.changes.outputs.bridge == 'true'
+        if: steps.decide.outputs.run == 'true'
       - name: Run bridge mutation baseline
-        if: |
-          github.event_name != 'pull_request' ||
-          needs.changes.outputs.bridge == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: pnpm bridge:mutation
