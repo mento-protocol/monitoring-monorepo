@@ -62,8 +62,9 @@ function parseLimit(raw: string | null): number {
 /**
  * Cron-triggered enrichment of Mento counterparty addresses with Arkham data.
  *
- * Auth: Bearer CRON_SECRET (cron path) OR an authenticated session
- * (manual trigger by an admin).
+ * Auth: Bearer `CRON_SECRET`. This is a GET route with expensive side
+ * effects, so session-only auth is intentionally rejected by `requireCronAuth`
+ * to avoid CSRF-triggered enrichment runs.
  *
  * Query params:
  * - `mode=new` (default) — only enrich addresses not yet labelled.

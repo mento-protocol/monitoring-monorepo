@@ -165,6 +165,15 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toContain(">Chain</button>");
   });
 
+  it("does not make health badges dead tab stops", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} />,
+    );
+    expect(html).not.toMatch(/<button[^>]*title="[^"]*Oracle/);
+    expect(html).toContain("sr-only");
+    expect(html).toContain("Oracle stale — last update expired");
+  });
+
   it("hides Type column when no network has virtual pools", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry({}, CELO_NETWORK)]} />,

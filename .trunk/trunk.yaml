@@ -23,6 +23,11 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
+    - linters: [prettier]
+      paths:
+        # Clawpatch owns these generated state artifacts; formatting them
+        # creates churn without improving source review.
+        - .clawpatch/**/*.json
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml

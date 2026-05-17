@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-0e71f4c2f6-576e_fce4aa5c85",
+  "featureId": "feat_library_0e71f4c2f6",
+  "title": "Oracle chart renders misleading NaN deviation text for untrusted samples",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/oracle-chart.tsx",
+      "startLine": 35,
+      "endLine": 43,
+      "symbol": "OracleChart",
+      "quote": "const deviations = snapshots.map((s) => {\n    if (s.hasHealthData === false) return Number.NaN;"
+    },
+    {
+      "path": "ui-dashboard/src/components/oracle-chart.tsx",
+      "startLine": 58,
+      "endLine": 66,
+      "symbol": "OracleChart",
+      "quote": "const dev = deviations[i].toFixed(2);\n    return (\n      `<b>${ts}</b><br>` +\n      `Price: ${price} ${token1Symbol}/${token0Symbol}<br>` +\n      `Deviation: ${dev}%`\n    );"
+    }
+  ],
+  "reasoning": "The chart intentionally maps samples with hasHealthData=false to NaN so Plotly leaves a gap, but the hover text still formats that same NaN with toFixed and displays `Deviation: NaN%` on the price trace for the sample. That is confusing operationally because the code is trying to avoid showing an untrusted deviation signal, yet the tooltip still exposes a malformed numeric value.",
+  "reproduction": "Render OracleChart with a snapshot where hasHealthData is false and hover the price marker; the tooltip will include `Deviation: NaN%`.",
+  "recommendation": "When the deviation is not finite, render an explicit fallback such as `Deviation: N/A` or omit the deviation line from that point's hover text.",
+  "whyTestsDoNotAlreadyCoverThis": "The included component tests cover address labels, auth, breach history, and breaker panels, but none exercise OracleChart tooltip generation for hasHealthData=false snapshots.",
+  "suggestedRegressionTest": "Add a focused OracleChart test or extracted hover-text helper test that passes a snapshot with hasHealthData=false and asserts the hover text contains `N/A` rather than `NaN%`.",
+  "minimumFixScope": "Update OracleChart hover text formatting for non-finite deviation values and add a targeted regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Oracle hover text now renders N/A for non-finite deviation samples; unit test covers untrusted health-data gap",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T18:40:04.591Z"
+    }
+  ],
+  "signature": "sig_feat-library-0e71f4c2f6_576ed564ba",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T183510-2c3e76",
+  "createdAt": "2026-05-17T18:35:44.532Z",
+  "updatedAt": "2026-05-17T18:40:04.590Z"
+}

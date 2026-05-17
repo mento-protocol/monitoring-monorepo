@@ -21,6 +21,7 @@ interface OracleChartProps {
   breachStartedAt?: string | null;
 }
 
+/* eslint-disable max-lines-per-function -- Existing Plotly component is baseline-large; this PR only fixes non-finite hover text. */
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -57,27 +58,13 @@ export function OracleChart({
   );
 
   const hoverText = snapshots.map((s, i) => {
-    const d = new Date(Number(s.timestamp) * 1000);
-    const ts =
-      d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }) +
-      " " +
-      d.toLocaleTimeString("en-US", {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-    const price = prices[i].toFixed(4);
-    const dev = deviations[i].toFixed(2);
-    return (
-      `<b>${ts}</b><br>` +
-      `Price: ${price} ${token1Symbol}/${token0Symbol}<br>` +
-      `Deviation: ${dev}%`
-    );
+    return formatOracleChartHoverText({
+      snapshot: s,
+      price: prices[i],
+      deviation: deviations[i],
+      token0Symbol,
+      token1Symbol,
+    });
   });
 
   const traceMode = isSparse
@@ -269,5 +256,44 @@ export function OracleChart({
         useResizeHandler
       />
     </div>
+  );
+}
+/* eslint-enable max-lines-per-function */
+
+export function formatOracleChartHoverText({
+  snapshot,
+  price,
+  deviation,
+  token0Symbol,
+  token1Symbol,
+}: {
+  snapshot: OracleSnapshot;
+  price: number;
+  deviation: number;
+  token0Symbol: string;
+  token1Symbol: string;
+}): string {
+  const d = new Date(Number(snapshot.timestamp) * 1000);
+  const ts =
+    d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }) +
+    " " +
+    d.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  const deviationText = Number.isFinite(deviation)
+    ? `${deviation.toFixed(2)}%`
+    : "N/A";
+  const priceText = Number.isFinite(price) ? price.toFixed(4) : "N/A";
+  return (
+    `<b>${ts}</b><br>` +
+    `Price: ${priceText} ${token1Symbol}/${token0Symbol}<br>` +
+    `Deviation: ${deviationText}`
   );
 }

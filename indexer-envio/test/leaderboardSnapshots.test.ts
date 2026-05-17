@@ -782,6 +782,79 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(store.AggregatorTraderDayMarker.size, 0);
   });
 
+  it("uncomputable USD still advances the leaderboard window heartbeat", async () => {
+    const { context, store } = makeContext();
+    const nextDay = DAY_2026_05_04 + 86_400n;
+    const eventDay = nextDay + 86_400n;
+    store.LeaderboardChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: DAY_2026_05_04,
+      lastFlushedDayBroker: 0n,
+      updatedAtTimestamp: DAY_2026_05_04,
+    });
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_1,
+      pool: fakePool(),
+      caller: TRADER_A,
+      txTo: SQUID,
+      volumeUsdWei: 0n,
+      amounts: buyToken1,
+      blockTimestamp: eventDay + 100n,
+      blockNumber: 123n,
+    });
+
+    assert.equal(store.TraderDailySnapshot.size, 0);
+    assert.equal(store.LeaderboardWindowSnapshot.size, 5);
+    assert.ok(
+      store.LeaderboardWindowSnapshot.has(`${CHAIN}-all-${nextDay}`),
+      "closed day snapshot flushed even though trader rollups were skipped",
+    );
+    assert.equal(
+      store.LeaderboardChainState.get(`${CHAIN}`)?.lastFlushedDay,
+      nextDay,
+    );
+  });
+
+  it("missing caller still advances the leaderboard window heartbeat", async () => {
+    const { context, store } = makeContext();
+    const nextDay = DAY_2026_05_04 + 86_400n;
+    const eventDay = nextDay + 86_400n;
+    store.LeaderboardChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: DAY_2026_05_04,
+      lastFlushedDayBroker: 0n,
+      updatedAtTimestamp: DAY_2026_05_04,
+    });
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_1,
+      pool: fakePool(),
+      caller: "",
+      txTo: SQUID,
+      volumeUsdWei: 1n,
+      amounts: buyToken1,
+      blockTimestamp: eventDay + 100n,
+      blockNumber: 124n,
+    });
+
+    assert.equal(store.TraderDailySnapshot.size, 0);
+    assert.ok(
+      store.LeaderboardWindowSnapshot.size > 0,
+      "closed day snapshot flushed even though trader rollups were skipped",
+    );
+    assert.equal(
+      store.LeaderboardChainState.get(`${CHAIN}`)?.lastFlushedDay,
+      nextDay,
+    );
+  });
+
   it("callback-flow swap (both In and Out non-zero on same side) inflates direction-split per documented invariant break", async () => {
     // The src/usd.ts comment notes that for callback / flash-style flows
     // both amount0In AND amount0Out can be non-zero simultaneously. In the

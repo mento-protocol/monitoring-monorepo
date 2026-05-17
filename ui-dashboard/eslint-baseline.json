@@ -66,7 +66,7 @@
     "file": "src/app/api/arkham/enrich/route.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'GET' has too many lines (106). Maximum allowed is 100.",
-    "line": 78,
+    "line": 79,
     "linePreview": "// no body — `mode` and `limit` are query params — so GET is the right verb. | export async function GET(req: NextRequest): Promise<NextResponse> { | const authBail = await requireCronAuth(req, \"arkha"
   },
   {
@@ -696,29 +696,15 @@
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 37. Maximum allowed is 15.",
-    "line": 244,
-    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
-  },
-  {
-    "file": "src/components/global-pools-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Arrow function has too many lines (143). Maximum allowed is 100.",
-    "line": 244,
-    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
-  },
-  {
-    "file": "src/components/global-pools-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'GlobalPoolsTable' has too many lines (320). Maximum allowed is 100.",
-    "line": 67,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function GlobalPoolsTable({ | entries,"
+    "line": 246,
+    "linePreview": "{/* eslint-disable-next-line max-lines-per-function -- Existing dense row renderer; keeping the scoped Clawpatch a11y fix out of a broader table split. */} | {sortedEntries.map((e) => { | const { pool"
   },
   {
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed.",
-    "line": 244,
-    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
+    "line": 246,
+    "linePreview": "{/* eslint-disable-next-line max-lines-per-function -- Existing dense row renderer; keeping the scoped Clawpatch a11y fix out of a broader table split. */} | {sortedEntries.map((e) => { | const { pool"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
@@ -761,13 +747,6 @@
     "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
     "line": 55,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
-  },
-  {
-    "file": "src/components/oracle-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleChart' has too many lines (225). Maximum allowed is 100.",
-    "line": 24,
-    "linePreview": " | export function OracleChart({ | snapshots,"
   },
   {
     "file": "src/components/pool-config-panel.tsx",
