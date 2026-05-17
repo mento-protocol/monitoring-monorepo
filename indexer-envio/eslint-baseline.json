@@ -231,34 +231,6 @@
     "linePreview": "burnDelta?: boolean | undefined; | }): Promise<void> => { | const dayTs = dayBucket(blockTimestamp);"
   },
   {
-    "file": "src/protocolFeeSnapshot.ts",
-    "ruleId": "complexity",
-    "message": "Function 'mergeFeeSnapshot' has a complexity of 20. Maximum allowed is 15.",
-    "line": 91,
-    "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
-  },
-  {
-    "file": "src/protocolFeeSnapshot.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'mergeFeeSnapshot' has too many lines (120). Maximum allowed is 80.",
-    "line": 91,
-    "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
-  },
-  {
-    "file": "src/protocolFeeSnapshot.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
-    "line": 91,
-    "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
-  },
-  {
-    "file": "src/protocolFeeSnapshot.ts",
-    "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one.",
-    "line": 213,
-    "linePreview": "// canonical value — only flip from true→false here, never the reverse. | if (!shouldHeal) { | if (isUnresolvedInput || !isInputPegged) {"
-  },
-  {
     "file": "src/rpc.ts",
     "ruleId": "max-params",
     "message": "Async function 'updatePoolsOracleExpiry' has too many parameters (5). Maximum allowed is 4.",

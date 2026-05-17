@@ -939,38 +939,17 @@
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'buildDailyVolumeSeries' has a complexity of 24. Maximum allowed is 15.",
-    "line": 95,
-    "linePreview": "*/ | export function buildDailyVolumeSeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'VolumeOverTimeChart' has too many lines (113). Maximum allowed is 100.",
-    "line": 417,
+    "line": 441,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function VolumeOverTimeChart({ | networkData,"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "max-params",
     "message": "Function 'computeHeadline' has too many parameters (9). Maximum allowed is 5.",
-    "line": 314,
+    "line": 338,
     "linePreview": "// Broker outage even when v3 is fully synced. | function computeHeadline( | isLoading: boolean,"
-  },
-  {
-    "file": "src/components/volume-over-time-chart.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",
-    "line": 95,
-    "linePreview": "*/ | export function buildDailyVolumeSeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/components/volume-over-time-chart.tsx",
-    "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one.",
-    "line": 119,
-    "linePreview": "const timestamp = Number(snapshot.timestamp); | if (window) { | if (timestamp < window.from || timestamp >= window.to) continue;"
   },
   {
     "file": "src/lib/address-book.ts",
@@ -992,27 +971,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 43 to the 18 allowed.",
     "line": 65,
     "linePreview": "*/ | export function countImportLabels(parsed: unknown): number { | const addresses = new Set<string>();"
-  },
-  {
-    "file": "src/lib/address-labels-shared.ts",
-    "ruleId": "complexity",
-    "message": "Function 'upgradeEntry' has a complexity of 29. Maximum allowed is 15.",
-    "line": 213,
-    "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
-  },
-  {
-    "file": "src/lib/address-labels-shared.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed.",
-    "line": 213,
-    "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
-  },
-  {
-    "file": "src/lib/address-labels-shared.ts",
-    "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one.",
-    "line": 229,
-    "linePreview": "// valid legacy label from mixed/partially-corrupted data. | if (typeof entry.name === \"string\") { | if (entry.name.trim() || typeof entry.label !== \"string\") {"
   },
   {
     "file": "src/lib/address-labels/import.ts",
@@ -1258,27 +1216,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
     "line": 346,
     "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
-  },
-  {
-    "file": "src/lib/revenue.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildDailyFeeSeries' has a complexity of 26. Maximum allowed is 15.",
-    "line": 36,
-    "linePreview": "*/ | export function buildDailyFeeSeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/lib/revenue.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 35 to the 18 allowed.",
-    "line": 36,
-    "linePreview": "*/ | export function buildDailyFeeSeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/lib/revenue.ts",
-    "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one.",
-    "line": 90,
-    "linePreview": "const ts = Number(s.timestamp); | if (dayAlignedWindow) { | if (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to) continue;"
   },
   {
     "file": "src/lib/tokens.ts",

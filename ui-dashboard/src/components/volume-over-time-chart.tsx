@@ -92,59 +92,83 @@ const USD_WEI_PER_CENT = BigInt(10) ** BigInt(16);
  * D-7 (midnight). The chart's headline total therefore matches the exact
  * rolling-window period implied by the selected range tab.
  */
+type PerChainVolume = {
+  network: Network;
+  bucketTotals: Map<number, number>;
+};
+type NetworkAggregateState = {
+  perChain: Map<string, PerChainVolume>;
+  totalBuckets: Map<number, number>;
+  minSnapshotBucket: number;
+  skippedUntrustedDecimalSnapshot: boolean;
+};
+
+/**
+ * Accumulate one network's daily snapshots into the shared aggregate state.
+ * Returns `true` if any untrusted-decimal snapshot was skipped (so the caller
+ * can flag a partial result), `false` otherwise.
+ */
+function aggregateNetworkVolume(
+  state: NetworkAggregateState,
+  netData: NetworkData,
+  window: TimeRange | undefined,
+): void {
+  // Only skip on top-level failure. `snapshotsAllDailyError` may be set
+  // while `snapshotsAllDaily` still carries preserved recent rows (fail-open
+  // path for mid-loop pagination failure) — use those rows, the caller
+  // shows a partial-data badge separately.
+  if (netData.error !== null) return;
+  const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
+  for (const snapshot of netData.snapshotsAllDaily) {
+    const timestamp = Number(snapshot.timestamp);
+    if (window && (timestamp < window.from || timestamp >= window.to)) continue;
+    const pool = poolById.get(snapshot.poolId);
+    if (pool && pool.tokenDecimalsKnown !== true) {
+      state.skippedUntrustedDecimalSnapshot = true;
+      continue;
+    }
+    const volume = getSnapshotVolumeInUsd(
+      snapshot,
+      pool,
+      netData.network,
+      netData.rates,
+    );
+    if (volume === null) continue;
+    const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    state.minSnapshotBucket = Math.min(state.minSnapshotBucket, bucket);
+    state.totalBuckets.set(
+      bucket,
+      (state.totalBuckets.get(bucket) ?? 0) + volume,
+    );
+    let entry = state.perChain.get(netData.network.id);
+    if (!entry) {
+      entry = { network: netData.network, bucketTotals: new Map() };
+      state.perChain.set(netData.network.id, entry);
+    }
+    entry.bucketTotals.set(
+      bucket,
+      (entry.bucketTotals.get(bucket) ?? 0) + volume,
+    );
+  }
+}
+
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
   window?: TimeRange,
 ): DailyVolumeSeriesResult {
-  type PerChain = {
-    network: Network;
-    bucketTotals: Map<number, number>;
-  };
   // Keyed by Network.id so distinct configured networks that share a chainId
   // (e.g. celo-mainnet vs celo-mainnet-local) stay separate in the breakdown.
-  const perChain = new Map<string, PerChain>();
-  const totalBuckets = new Map<number, number>();
-  let minSnapshotBucket = Infinity;
-  let skippedUntrustedDecimalSnapshot = false;
-
+  const state: NetworkAggregateState = {
+    perChain: new Map(),
+    totalBuckets: new Map(),
+    minSnapshotBucket: Infinity,
+    skippedUntrustedDecimalSnapshot: false,
+  };
   for (const netData of networkData) {
-    // Only skip on top-level failure. `snapshotsAllDailyError` may be set
-    // while `snapshotsAllDaily` still carries preserved recent rows (fail-open
-    // path for mid-loop pagination failure) — use those rows, the caller
-    // shows a partial-data badge separately.
-    if (netData.error !== null) continue;
-    const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
-    for (const snapshot of netData.snapshotsAllDaily) {
-      const timestamp = Number(snapshot.timestamp);
-      if (window && (timestamp < window.from || timestamp >= window.to)) {
-        continue;
-      }
-      const pool = poolById.get(snapshot.poolId);
-      if (pool && pool.tokenDecimalsKnown !== true) {
-        skippedUntrustedDecimalSnapshot = true;
-        continue;
-      }
-      const volume = getSnapshotVolumeInUsd(
-        snapshot,
-        pool,
-        netData.network,
-        netData.rates,
-      );
-      if (volume === null) continue;
-      const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-      minSnapshotBucket = Math.min(minSnapshotBucket, bucket);
-      totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + volume);
-      let entry = perChain.get(netData.network.id);
-      if (!entry) {
-        entry = { network: netData.network, bucketTotals: new Map() };
-        perChain.set(netData.network.id, entry);
-      }
-      entry.bucketTotals.set(
-        bucket,
-        (entry.bucketTotals.get(bucket) ?? 0) + volume,
-      );
-    }
+    aggregateNetworkVolume(state, netData, window);
   }
+  const { perChain, totalBuckets, minSnapshotBucket } = state;
+  const skippedUntrustedDecimalSnapshot = state.skippedUntrustedDecimalSnapshot;
 
   const volumePartial = skippedUntrustedDecimalSnapshot
     ? Number.isFinite(minSnapshotBucket)

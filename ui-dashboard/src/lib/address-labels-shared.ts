@@ -210,71 +210,71 @@ export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
  * persisted timestamp sorts after `""`, which is the right "newer wins"
  * behaviour for a save that adds the timestamp).
  */
-export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
-  const entry = raw as Record<string, unknown>;
-
-  const normalizedTags = Array.isArray(entry.tags)
-    ? entry.tags.filter((t): t is string => typeof t === "string")
-    : [];
-
+function buildUpgradedEntry(
+  raw: Record<string, unknown>,
+  name: string,
+  tags: string[],
+): AddressEntry {
   const source =
-    typeof entry.source === "string" && entry.source ? entry.source : undefined;
+    typeof raw.source === "string" && raw.source ? raw.source : undefined;
   const createdAt =
-    typeof entry.createdAt === "string" && entry.createdAt
-      ? entry.createdAt
+    typeof raw.createdAt === "string" && raw.createdAt
+      ? raw.createdAt
       : undefined;
+  return {
+    name,
+    tags,
+    notes: typeof raw.notes === "string" ? raw.notes : undefined,
+    isPublic: raw.isPublic === true ? true : undefined,
+    ...(source ? { source } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  };
+}
+
+function normalizeTags(raw: unknown): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((t): t is string => typeof t === "string")
+    : [];
+}
+
+function tagsForLegacyV1(
+  normalizedTags: string[],
+  rawCategory: unknown,
+): string[] {
+  if (normalizedTags.length > 0) return normalizedTags;
+  if (typeof rawCategory === "string" && rawCategory.trim()) {
+    return [rawCategory.trim()];
+  }
+  return [];
+}
+
+export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
+  const normalizedTags = normalizeTags(raw.tags);
 
   // Already in v2 format — unless the name is blank and we can recover a
   // valid legacy label from mixed/partially-corrupted data.
   if (
-    typeof entry.name === "string" &&
-    (entry.name.trim() || typeof entry.label !== "string")
+    typeof raw.name === "string" &&
+    (raw.name.trim() || typeof raw.label !== "string")
   ) {
-    return {
-      name: entry.name,
-      tags: normalizedTags,
-      notes: typeof entry.notes === "string" ? entry.notes : undefined,
-      isPublic: entry.isPublic === true ? true : undefined,
-      ...(source ? { source } : {}),
-      ...(createdAt ? { createdAt } : {}),
-      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
-    };
+    return buildUpgradedEntry(raw, raw.name, normalizedTags);
   }
 
   // Legacy v1 format: { label, category?, ... }
-  if (typeof entry.label === "string") {
-    const tags = normalizedTags.length > 0 ? normalizedTags : [];
-    if (
-      tags.length === 0 &&
-      typeof entry.category === "string" &&
-      entry.category.trim()
-    ) {
-      tags.push(entry.category.trim());
-    }
-    return {
-      name: entry.label,
-      tags,
-      notes: typeof entry.notes === "string" ? entry.notes : undefined,
-      isPublic: entry.isPublic === true ? true : undefined,
-      ...(source ? { source } : {}),
-      ...(createdAt ? { createdAt } : {}),
-      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
-    };
+  if (typeof raw.label === "string") {
+    return buildUpgradedEntry(
+      raw,
+      raw.label,
+      tagsForLegacyV1(normalizedTags, raw.category),
+    );
   }
 
   // Fallback: no name/label — preserve any tags so tag-only entries
   // (the third shape `isEntriesMap` accepts) survive the upgrade pipeline
   // instead of getting silently dropped by the downstream `name !== "" ||
   // tags.length > 0` filter in `sanitizeAndFilter`.
-  return {
-    name: "",
-    tags: normalizedTags,
-    notes: typeof entry.notes === "string" ? entry.notes : undefined,
-    isPublic: entry.isPublic === true ? true : undefined,
-    ...(source ? { source } : {}),
-    ...(createdAt ? { createdAt } : {}),
-    updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
-  };
+  return buildUpgradedEntry(raw, "", normalizedTags);
 }
 
 export function upgradeEntries(
