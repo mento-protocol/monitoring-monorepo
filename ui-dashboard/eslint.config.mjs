@@ -6,6 +6,7 @@ import nextPlugin from "@next/eslint-plugin-next";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import reactNoUnneededEffect from "eslint-plugin-react-you-might-not-need-an-effect";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -110,6 +111,51 @@ export default tseslint.config(
     files: ["**/__tests__/**", "**/*.test.{ts,tsx}", "scripts/**"],
     rules: {
       "react-doctor/no-secrets-in-client-code": "off",
+    },
+  },
+  // Code-health budgets. Rules ship at `error` severity; pre-existing
+  // violations are captured in `eslint-baseline.json` and gated by
+  // `scripts/eslint-baseline-diff.mjs`. New violations not absorbed by
+  // line-proximity matching against the baseline fail the gate. See
+  // `docs/pr-checklists/code-health.md` for the full cleanup workflow
+  // and a record of the prior mechanisms (max-warnings, bulk
+  // suppressions, line-only keys, content-fingerprint keys) and why
+  // they were rejected. React components exempt from max-depth (JSX
+  // nesting isn't counted) and max-lines-per-function (component
+  // bodies legitimately long when they assemble many sub-elements).
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["error", 15],
+      "max-lines-per-function": [
+        "error",
+        { max: 100, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["error", 4],
+      "max-params": ["error", 5],
+      "sonarjs/cognitive-complexity": ["error", 18],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "error",
+    },
+  },
+  {
+    files: [
+      "**/__tests__/**",
+      "**/*.test.{ts,tsx}",
+      "src/lib/types.ts",
+      "scripts/**",
+    ],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
     },
   },
   {

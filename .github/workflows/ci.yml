@@ -41,14 +41,20 @@ jobs:
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
+      rootScripts: ${{ steps.filter.outputs.rootScripts }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - id: filter
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
+            # scripts/eslint-baseline-diff.mjs is the per-package lint
+            # wrapper. Any change to it needs to re-run every package's lint
+            # so a broken wrapper can't merge silently — see PR-423 codex
+            # finding (Run package lint when the lint gate changes).
             shared:
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -58,6 +64,7 @@ jobs:
             ui:
               - ui-dashboard/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -74,6 +81,7 @@ jobs:
             indexer:
               - indexer-envio/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -83,6 +91,7 @@ jobs:
             bridge:
               - metrics-bridge/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - cloudbuild.yaml
               - .gcloudignore
               - .node-version
@@ -101,6 +110,25 @@ jobs:
               - "*/knip.json"
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+            # Root scripts ESLint job. Per-package lint runs inside each
+            # workspace and never reaches repo-root scripts/*. This filter
+            # fires the standalone scripts-lint job so `no-undef`, unused
+            # imports, and syntax issues in build/quality scripts can't
+            # merge unnoticed — see PR-423 codex finding (Keep root scripts
+            # under ESLint).
+            rootScripts:
+              - scripts/**/*.mjs
+              - scripts/**/*.cjs
+              - scripts/**/*.js
+              - scripts/**/*.sh
+              - eslint.config.mjs
+              - .dependency-cruiser.cjs
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -117,8 +145,29 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # Fail closed if origin/main can't be reached — a silently-empty
+          # main baseline would skip the merge-base growth check and let a
+          # hand-grown HEAD baseline pass. Explicit refspec ensures
+          # refs/remotes/origin/main is updated regardless of the remote's
+          # configured fetch refmap.
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          # Only tolerate a genuinely missing baseline file on main
+          # (package didn't exist there yet) — not a missing ref or
+          # ls-tree failure.
+          if git ls-tree --name-only origin/main -- shared-config/eslint-baseline.json | grep -q .; then
+            git show origin/main:shared-config/eslint-baseline.json > /tmp/main-baseline-shared-config.json
+          else
+            : > /tmp/main-baseline-shared-config.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-shared-config.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
+      - name: Lint
+        run: pnpm --filter @mento-protocol/monitoring-config lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/monitoring-config knip
       - name: Test with coverage
@@ -149,11 +198,27 @@ jobs:
           # changed-files set against origin/${{ github.base_ref }}.
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # ui-dashboard uses checkout fetch-depth=0, so origin/main is
+          # already available without an extra fetch. Still guard against
+          # the missing-file case.
+          if git ls-tree --name-only origin/main -- ui-dashboard/eslint-baseline.json | grep -q .; then
+            git show origin/main:ui-dashboard/eslint-baseline.json > /tmp/main-baseline-ui-dashboard.json
+          else
+            : > /tmp/main-baseline-ui-dashboard.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-ui-dashboard.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      - name: Lint
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
+        # Trunk no longer runs ESLint — this is the CI ESLint source of truth.
+        run: pnpm --filter @mento-protocol/ui-dashboard lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/ui-dashboard knip
-      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: React Doctor (diff vs base)
         # PR-only: scans files changed vs the PR base and fails on any
         # warning/error in those files. The full-score floor below keeps the
@@ -234,8 +299,22 @@ jobs:
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- indexer-envio/eslint-baseline.json | grep -q .; then
+            git show origin/main:indexer-envio/eslint-baseline.json > /tmp/main-baseline-indexer-envio.json
+          else
+            : > /tmp/main-baseline-indexer-envio.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-indexer-envio.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
+      - name: Lint
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
+        run: pnpm --filter @mento-protocol/indexer-envio lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/indexer-envio knip
       - name: Test with coverage
@@ -262,11 +341,24 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- metrics-bridge/eslint-baseline.json | grep -q .; then
+            git show origin/main:metrics-bridge/eslint-baseline.json > /tmp/main-baseline-metrics-bridge.json
+          else
+            : > /tmp/main-baseline-metrics-bridge.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-metrics-bridge.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
+      - name: Lint
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
+        run: pnpm --filter @mento-protocol/metrics-bridge lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/metrics-bridge knip
-      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
@@ -275,6 +367,35 @@ jobs:
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  scripts:
+    name: Lint + test root scripts
+    needs: changes
+    if: needs.changes.outputs.rootScripts == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: ESLint root scripts
+        run: pnpm lint:scripts
+      - name: Agent quality-gate routing regression suite
+        # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
+        # Without this in CI, a routing regression only fails locally (pre-push)
+        # and could merge if a contributor bypasses the local gate.
+        run: pnpm agent:quality-gate:test
+      - name: ESLint baseline-diff semantic suite
+        # Direct behavioral coverage of scripts/eslint-baseline-diff.mjs
+        # (matching, growth detection, line-proximity absorption, merge-base
+        # check). The wrapper is now load-bearing CI policy; routing tests
+        # alone don't prove it behaves correctly.
+        run: node scripts/eslint-baseline-diff.test.mjs
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -304,7 +425,7 @@ jobs:
 
   ci:
     name: ci
-    needs: [changes, shared, ui, indexer, bridge, deps]
+    needs: [changes, shared, ui, indexer, bridge, deps, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -315,6 +436,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,deps
+          allowed-skips: shared,ui,indexer,bridge,deps,scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

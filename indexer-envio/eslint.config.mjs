@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import unusedImports from "eslint-plugin-unused-imports";
+import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import { fileURLToPath } from "node:url";
@@ -69,6 +70,56 @@ export default tseslint.config(
   {
     files: ["test/**/*.ts", "**/*.test.ts"],
     rules: { "max-lines": "off" },
+  },
+  // Code-health budgets. Rules ship at `error` severity; pre-existing
+  // violations live in `eslint-baseline.json` and are gated by
+  // `scripts/eslint-baseline-diff.mjs` (see docs/pr-checklists/code-health.md).
+  // Default (non-handler) src/ — moderate budgets. Handlers have looser
+  // budgets because Envio event-handler bodies are intentionally repetitive
+  // and long (one branch per event variant + state-machine boilerplate).
+  {
+    files: ["src/**/*.ts"],
+    plugins: { sonarjs },
+    rules: {
+      complexity: ["error", 15],
+      "max-lines-per-function": [
+        "error",
+        { max: 80, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["error", 4],
+      "max-params": ["error", 4],
+      "sonarjs/cognitive-complexity": ["error", 18],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
+      "sonarjs/no-redundant-jump": "error",
+      "sonarjs/no-small-switch": "error",
+    },
+  },
+  {
+    files: ["src/handlers/**/*.ts"],
+    rules: {
+      complexity: ["error", 25],
+      "max-lines-per-function": [
+        "error",
+        { max: 150, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      "max-depth": ["error", 5],
+      "max-params": ["error", 6],
+      "sonarjs/cognitive-complexity": ["error", 25],
+      "sonarjs/no-small-switch": "off",
+    },
+  },
+  {
+    files: ["test/**/*.ts", "**/*.test.ts"],
+    rules: {
+      complexity: "off",
+      "max-lines-per-function": "off",
+      "max-depth": "off",
+      "max-params": "off",
+      "sonarjs/cognitive-complexity": "off",
+      "sonarjs/no-identical-functions": "off",
+      "sonarjs/no-collapsible-if": "off",
+    },
   },
   {
     ignores: [

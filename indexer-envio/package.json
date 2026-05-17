@@ -27,7 +27,8 @@
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict-dry-run.json",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
-    "lint": "eslint ."
+    "lint": "node ../scripts/eslint-baseline-diff.mjs check",
+    "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -37,6 +38,7 @@
     "@types/node": "^22.19.13",
     "@vitest/coverage-v8": "^4.0.16",
     "eslint": "^10.0.2",
+    "eslint-plugin-sonarjs": "4.0.3",
     "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
     "knip": "6.12.2",

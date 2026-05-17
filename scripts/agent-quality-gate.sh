@@ -621,6 +621,9 @@ while IFS= read -r path; do
     .dependency-cruiser.cjs)
       add_surface "tooling"
       add_command "pnpm code-health:deps" "dep-cruiser config changed (cross-package boundaries + cycles)"
+      # `.dependency-cruiser.cjs` is also linted by `pnpm lint:scripts` (see
+      # eslint.config.mjs root coverage). A CJS-only edit must run both.
+      add_command "pnpm lint:scripts" "dep-cruiser config changed (root ESLint coverage)"
       add_checklist "docs/pr-checklists/code-health.md" "dep-cruiser config changed"
       ;;
     */knip.json)
@@ -839,6 +842,29 @@ while IFS= read -r path; do
           ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
+          ;;
+      esac
+      ;;
+    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
+      # `.dependency-cruiser.cjs` is handled fully by its dedicated case
+      # block above (runs `pnpm code-health:deps` + `pnpm lint:scripts`).
+      # Don't list it here too or `add_command` dedupes a redundant entry.
+      add_surface "scripts"
+      add_command "pnpm lint:scripts" "root build script changed"
+      case "$path" in
+        scripts/eslint-baseline-diff.mjs)
+          # The lint wrapper. A regression here would mask all per-package
+          # baseline drift. Re-run every package's lint to exercise the
+          # wrapper end-to-end, plus the semantic tests covering its
+          # matching/growth/absorption logic directly.
+          add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/monitoring-config" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/ui-dashboard" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/indexer-envio" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/metrics-bridge" "ESLint baseline wrapper changed"
+          ;;
+        scripts/eslint-baseline-diff.test.mjs)
+          add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper test changed"
           ;;
       esac
       ;;

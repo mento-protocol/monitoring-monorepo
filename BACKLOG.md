@@ -46,7 +46,7 @@ Current baseline:
 Lightweight plan:
 
 - [ ] Finish the known `indexer-envio` ESLint cleanup and enable the normal `@eslint/js` + `typescript-eslint` recommended baseline there.
-- [ ] Add code-health-style ESLint budgets across packages: cyclomatic complexity, max nesting depth, max params, max lines per function, and optionally `eslint-plugin-sonarjs` for cognitive complexity / suspicious patterns.
+- [x] **PR 2**: Added code-health ESLint budgets to all 4 packages as `warn`-only baseline: `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Per-package thresholds; `src/handlers/**` in indexer-envio gets looser budgets. Baseline (zero errors): shared-config 0w, metrics-bridge 11w, ui-dashboard 191w, indexer-envio 63w; recorded in `reports/eslint-health-baseline.json`. PR 6 will ratchet to `error` after cleanup.
 - [ ] Add `jscpd` for duplication detection, initially advisory or with conservative thresholds to avoid blocking on historical copy-paste.
 - [x] **PR 1 (this branch)**: Added `knip` to `shared-config`, `ui-dashboard`, `metrics-bridge` (was already in `indexer-envio`). Each package runs strict `knip` in CI; files/deps blocking, exports/types as warn-only.
 - [x] **PR 1**: Added `dependency-cruiser` with cross-package boundary rules (blocking) and a no-circular rule (warn-only baseline; promotes to error after the known indexer cycle is broken — see below).
