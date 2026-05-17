@@ -148,10 +148,21 @@ jobs:
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
-          git show origin/main:shared-config/eslint-baseline.json \
-            > /tmp/main-baseline-shared-config.json 2>/dev/null || \
+          set -euo pipefail
+          # Fail closed if origin/main can't be reached — a silently-empty
+          # main baseline would skip the merge-base growth check and let a
+          # hand-grown HEAD baseline pass. Explicit refspec ensures
+          # refs/remotes/origin/main is updated regardless of the remote's
+          # configured fetch refmap.
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          # Only tolerate a genuinely missing baseline file on main
+          # (package didn't exist there yet) — not a missing ref or
+          # ls-tree failure.
+          if git ls-tree --name-only origin/main -- shared-config/eslint-baseline.json | grep -q .; then
+            git show origin/main:shared-config/eslint-baseline.json > /tmp/main-baseline-shared-config.json
+          else
             : > /tmp/main-baseline-shared-config.json
+          fi
           echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-shared-config.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
@@ -190,9 +201,15 @@ jobs:
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |
-          git show origin/main:ui-dashboard/eslint-baseline.json \
-            > /tmp/main-baseline-ui-dashboard.json 2>/dev/null || \
+          set -euo pipefail
+          # ui-dashboard uses checkout fetch-depth=0, so origin/main is
+          # already available without an extra fetch. Still guard against
+          # the missing-file case.
+          if git ls-tree --name-only origin/main -- ui-dashboard/eslint-baseline.json | grep -q .; then
+            git show origin/main:ui-dashboard/eslint-baseline.json > /tmp/main-baseline-ui-dashboard.json
+          else
             : > /tmp/main-baseline-ui-dashboard.json
+          fi
           echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-ui-dashboard.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
@@ -285,10 +302,13 @@ jobs:
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
-          git show origin/main:indexer-envio/eslint-baseline.json \
-            > /tmp/main-baseline-indexer-envio.json 2>/dev/null || \
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- indexer-envio/eslint-baseline.json | grep -q .; then
+            git show origin/main:indexer-envio/eslint-baseline.json > /tmp/main-baseline-indexer-envio.json
+          else
             : > /tmp/main-baseline-indexer-envio.json
+          fi
           echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-indexer-envio.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
@@ -324,10 +344,13 @@ jobs:
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
-          git show origin/main:metrics-bridge/eslint-baseline.json \
-            > /tmp/main-baseline-metrics-bridge.json 2>/dev/null || \
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- metrics-bridge/eslint-baseline.json | grep -q .; then
+            git show origin/main:metrics-bridge/eslint-baseline.json > /tmp/main-baseline-metrics-bridge.json
+          else
             : > /tmp/main-baseline-metrics-bridge.json
+          fi
           echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-metrics-bridge.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
