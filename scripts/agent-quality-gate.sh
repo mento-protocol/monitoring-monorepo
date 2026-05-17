@@ -845,7 +845,10 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs|.dependency-cruiser.cjs)
+    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
+      # `.dependency-cruiser.cjs` is handled fully by its dedicated case
+      # block above (runs `pnpm code-health:deps` + `pnpm lint:scripts`).
+      # Don't list it here too or `add_command` dedupes a redundant entry.
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
