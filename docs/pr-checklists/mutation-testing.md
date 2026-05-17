@@ -15,11 +15,16 @@ one of the current mutation targets.
   limitation. Add tests only for real gaps.
 - **`metrics-bridge/src/rebalance-probe.ts` mutation is PR-blocking** (since
   PR 436): `metrics-bridge/stryker.config.mjs` sets `break: 80`, and
-  `.github/workflows/mutation-testing.yml` runs the bridge job on PRs that
-  touch probe code, the stryker config, the mutation vitest config, or the
-  bridge `package.json`. If your PR fails the gate, treat any new surviving
-  mutant as a real test gap unless you can classify it against the existing
-  taxonomy in `docs/mutation-testing.md` and update that doc in the same PR.
+  `.github/workflows/mutation-testing.yml` runs on every PR (required-status
+  safe — no `paths:` filter). A `changes` job decides whether `pnpm
+bridge:mutation` actually runs based on whether the probe code, test,
+  stryker config, mutation vitest config, `metrics-bridge/package.json`, or
+  root package-manager files (`package.json`, `pnpm-lock.yaml`,
+  `pnpm-workspace.yaml`, `.npmrc`) changed. When the mutation step does run
+  and the score is below 80%, the job fails. If your PR fails the gate,
+  treat any new surviving mutant as a real test gap unless you can classify
+  it against the existing taxonomy in `docs/mutation-testing.md` and update
+  that doc in the same PR.
 - The dashboard + indexer mutation baselines remain advisory (`break: null`)
   — the dashboard job is gated on the PR trigger so it only runs on cron +
   manual dispatch. Promotion follows the same pattern: prove runtime/noise

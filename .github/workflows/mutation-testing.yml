@@ -4,18 +4,14 @@ on:
   workflow_dispatch:
   schedule:
     # Weekly advisory baseline for the dashboard job (which stays advisory).
-    # The bridge job is blocking on PRs that touch bridge probe code — see the
-    # `pull_request` trigger + the `break: 80` gate in
-    # `metrics-bridge/stryker.config.mjs`.
+    # The bridge job is also re-run here so cron acts as a backstop signal
+    # even when no PR has touched probe code that week.
     - cron: 17 5 * * 1
   pull_request:
-    paths:
-      - metrics-bridge/src/rebalance-probe.ts
-      - metrics-bridge/test/rebalance-probe.test.ts
-      - metrics-bridge/stryker.config.mjs
-      - metrics-bridge/vitest.mutation.config.ts
-      - metrics-bridge/package.json
-      - .github/workflows/mutation-testing.yml
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The bridge job decides internally whether to invoke `pnpm
+    # bridge:mutation` by checking the `changes` job's output.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,9 +21,44 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # PR-only detector. Computes whether this PR's diff is relevant to the
+    # bridge mutation gate. Always succeeds so it never blocks the workflow.
+    if: github.event_name == 'pull_request'
+    name: Detect changes
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      bridge: ${{ steps.filter.outputs.bridge }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Anything that can affect the result of `pnpm bridge:mutation`:
+            # the probe source, its dedicated test, the stryker + mutation
+            # vitest configs, root package-manager files (script wiring +
+            # installed versions), and the workflow itself.
+            bridge:
+              - metrics-bridge/src/rebalance-probe.ts
+              - metrics-bridge/test/rebalance-probe.test.ts
+              - metrics-bridge/stryker.config.mjs
+              - metrics-bridge/vitest.mutation.config.ts
+              - metrics-bridge/package.json
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .github/workflows/mutation-testing.yml
+              - .github/actions/pnpm-install/**
+
   dashboard-logic-baseline:
-    # Advisory: only runs on cron + manual dispatch. PR runs skip this job —
-    # the dashboard mutation gate is not blocking yet (see BACKLOG).
+    # Advisory: cron + manual dispatch only. PR runs skip this job — the
+    # dashboard mutation gate is not blocking yet (see BACKLOG).
     if: github.event_name != 'pull_request'
     name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -39,14 +70,34 @@ jobs:
         run: pnpm dashboard:mutation
 
   bridge-rebalance-probe-baseline:
-    # Blocking on PRs that change bridge probe code; advisory on cron + manual.
-    # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so any score
-    # drop below 80% fails this job.
+    # Always runs on PRs so the check can be marked required. Internal
+    # condition gates the expensive mutation step: when no bridge-relevant
+    # file changed, the job logs a no-op message and exits 0.
+    # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so when the
+    # mutation step does run, a score below 80% fails the job.
     name: Bridge rebalance probe baseline
+    needs: changes
+    if: |
+      always() &&
+      (github.event_name != 'pull_request' || needs.changes.result == 'success')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
+      - name: Skip if probe code unchanged
+        if: |
+          github.event_name == 'pull_request' &&
+          needs.changes.outputs.bridge != 'true'
+        run: echo "Bridge probe code + its mutation inputs unchanged — skipping mutation gate."
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: |
+          github.event_name != 'pull_request' ||
+          needs.changes.outputs.bridge == 'true'
       - uses: ./.github/actions/pnpm-install
+        if: |
+          github.event_name != 'pull_request' ||
+          needs.changes.outputs.bridge == 'true'
       - name: Run bridge mutation baseline
+        if: |
+          github.event_name != 'pull_request' ||
+          needs.changes.outputs.bridge == 'true'
         run: pnpm bridge:mutation
