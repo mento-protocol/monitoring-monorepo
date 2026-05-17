@@ -88,39 +88,77 @@ function recomputeAllPegged(symbols: ReadonlyArray<string>): boolean {
  * amounts or transferCount — that contribution was already counted on the
  * original "add". Returns null (no-op) if the snapshot or slot doesn't exist.
  */
+type InputFlags = {
+  input: MergeInput;
+  inputContribution: bigint;
+  isInputPegged: boolean;
+  isUnresolvedInput: boolean;
+};
+
+function createFeeSnapshot(flags: InputFlags): PoolDailyFeeSnapshot {
+  const { input, inputContribution, isInputPegged, isUnresolvedInput } = flags;
+  return {
+    id: input.id,
+    chainId: input.chainId,
+    poolId: input.poolId,
+    poolAddress: input.poolAddress,
+    timestamp: input.timestamp,
+    tokens: [input.token],
+    tokenSymbols: [input.tokenSymbol],
+    tokenDecimals: [input.tokenDecimals],
+    amounts: [input.amount],
+    feesUsdWei: inputContribution,
+    allPegged: isInputPegged,
+    unresolvedCount: isUnresolvedInput ? 1 : 0,
+    transferCount: 1,
+    blockNumber: input.blockNumber,
+    updatedAtTimestamp: input.updatedAtTimestamp,
+  };
+}
+
+function appendNewTokenSlot(
+  existing: PoolDailyFeeSnapshot,
+  flags: InputFlags,
+): PoolDailyFeeSnapshot {
+  const { input, inputContribution, isInputPegged, isUnresolvedInput } = flags;
+  return {
+    ...existing,
+    tokens: [...existing.tokens, input.token],
+    tokenSymbols: [...existing.tokenSymbols, input.tokenSymbol],
+    tokenDecimals: [...existing.tokenDecimals, input.tokenDecimals],
+    amounts: [...existing.amounts, input.amount],
+    feesUsdWei: existing.feesUsdWei + inputContribution,
+    allPegged: existing.allPegged && isInputPegged,
+    unresolvedCount: existing.unresolvedCount + (isUnresolvedInput ? 1 : 0),
+    transferCount: existing.transferCount + 1,
+    blockNumber:
+      input.blockNumber > existing.blockNumber
+        ? input.blockNumber
+        : existing.blockNumber,
+    updatedAtTimestamp: input.updatedAtTimestamp,
+  };
+}
+
 export function mergeFeeSnapshot(
   existing: PoolDailyFeeSnapshot | undefined,
   input: MergeInput,
   mode: FeeSnapshotMode = "add",
 ): PoolDailyFeeSnapshot | null {
-  const isUnresolvedInput = input.tokenSymbol === "UNKNOWN";
-  const isInputPegged = USD_PEGGED_SYMBOLS.has(input.tokenSymbol);
-  const inputContribution = computeFeeUsdWei({
-    tokenSymbol: input.tokenSymbol,
-    tokenDecimals: input.tokenDecimals,
-    amount: input.amount,
-  });
+  const flags: InputFlags = {
+    input,
+    isUnresolvedInput: input.tokenSymbol === "UNKNOWN",
+    isInputPegged: USD_PEGGED_SYMBOLS.has(input.tokenSymbol),
+    inputContribution: computeFeeUsdWei({
+      tokenSymbol: input.tokenSymbol,
+      tokenDecimals: input.tokenDecimals,
+      amount: input.amount,
+    }),
+  };
 
   if (!existing) {
     // Heal mode requires an existing snapshot — caller misuse if missing.
     if (mode === "heal") return null;
-    return {
-      id: input.id,
-      chainId: input.chainId,
-      poolId: input.poolId,
-      poolAddress: input.poolAddress,
-      timestamp: input.timestamp,
-      tokens: [input.token],
-      tokenSymbols: [input.tokenSymbol],
-      tokenDecimals: [input.tokenDecimals],
-      amounts: [input.amount],
-      feesUsdWei: inputContribution,
-      allPegged: isInputPegged,
-      unresolvedCount: isUnresolvedInput ? 1 : 0,
-      transferCount: 1,
-      blockNumber: input.blockNumber,
-      updatedAtTimestamp: input.updatedAtTimestamp,
-    };
+    return createFeeSnapshot(flags);
   }
 
   const tokenIdx = existing.tokens.indexOf(input.token);
@@ -133,27 +171,12 @@ export function mergeFeeSnapshot(
       // reaching here implies state drift. Return existing unchanged.
       return existing;
     }
-    return {
-      ...existing,
-      tokens: [...existing.tokens, input.token],
-      tokenSymbols: [...existing.tokenSymbols, input.tokenSymbol],
-      tokenDecimals: [...existing.tokenDecimals, input.tokenDecimals],
-      amounts: [...existing.amounts, input.amount],
-      feesUsdWei: existing.feesUsdWei + inputContribution,
-      allPegged: existing.allPegged && isInputPegged,
-      unresolvedCount: existing.unresolvedCount + (isUnresolvedInput ? 1 : 0),
-      transferCount: existing.transferCount + 1,
-      blockNumber:
-        input.blockNumber > existing.blockNumber
-          ? input.blockNumber
-          : existing.blockNumber,
-      updatedAtTimestamp: input.updatedAtTimestamp,
-    };
+    return appendNewTokenSlot(existing, flags);
   }
 
   // ---- Same-token-already-tracked path -------------------------------------
   const slotWasUnknown = existing.tokenSymbols[tokenIdx] === "UNKNOWN";
-  const shouldHeal = slotWasUnknown && !isUnresolvedInput;
+  const shouldHeal = slotWasUnknown && !flags.isUnresolvedInput;
 
   let nextSymbols = existing.tokenSymbols;
   let nextDecimals = existing.tokenDecimals;
@@ -182,48 +205,81 @@ export function mergeFeeSnapshot(
     nextAllPegged = recomputeAllPegged(nextSymbols);
   }
 
-  if (mode === "heal") {
-    // Heal-only: don't add the input's amount or contribution; the original
-    // event's amount is already in amounts[tokenIdx] from the prior add.
-    return {
-      ...existing,
-      tokenSymbols: nextSymbols,
-      tokenDecimals: nextDecimals,
-      feesUsdWei: nextFeesUsdWei,
-      allPegged: nextAllPegged,
-      unresolvedCount: nextUnresolvedCount,
-      blockNumber:
-        input.blockNumber > existing.blockNumber
-          ? input.blockNumber
-          : existing.blockNumber,
-      updatedAtTimestamp: input.updatedAtTimestamp,
-    };
-  }
+  const state: MergedSlotState = {
+    nextSymbols,
+    nextDecimals,
+    nextFeesUsdWei,
+    nextAllPegged,
+    nextUnresolvedCount,
+  };
+  return mode === "heal"
+    ? finalizeHeal(existing, input, state)
+    : finalizeAdd(existing, { flags, tokenIdx, shouldHeal, state });
+}
 
-  // mode === "add": fold the new transfer's amount + contribution into the slot.
+type MergedSlotState = {
+  nextSymbols: readonly string[];
+  nextDecimals: readonly number[];
+  nextFeesUsdWei: bigint;
+  nextAllPegged: boolean;
+  nextUnresolvedCount: number;
+};
+
+function finalizeHeal(
+  existing: PoolDailyFeeSnapshot,
+  input: MergeInput,
+  state: MergedSlotState,
+): PoolDailyFeeSnapshot {
+  // Heal-only: don't add the input's amount or contribution; the original
+  // event's amount is already in amounts[tokenIdx] from the prior add.
+  return {
+    ...existing,
+    tokenSymbols: state.nextSymbols,
+    tokenDecimals: state.nextDecimals,
+    feesUsdWei: state.nextFeesUsdWei,
+    allPegged: state.nextAllPegged,
+    unresolvedCount: state.nextUnresolvedCount,
+    blockNumber:
+      input.blockNumber > existing.blockNumber
+        ? input.blockNumber
+        : existing.blockNumber,
+    updatedAtTimestamp: input.updatedAtTimestamp,
+  };
+}
+
+function finalizeAdd(
+  existing: PoolDailyFeeSnapshot,
+  ctx: {
+    flags: InputFlags;
+    tokenIdx: number;
+    shouldHeal: boolean;
+    state: MergedSlotState;
+  },
+): PoolDailyFeeSnapshot {
+  const { flags, tokenIdx, shouldHeal, state } = ctx;
+  const { input, isUnresolvedInput, isInputPegged, inputContribution } = flags;
   const nextAmounts = existing.amounts.map((a, i) =>
     i === tokenIdx ? a + input.amount : a,
   );
+  let nextFeesUsdWei = state.nextFeesUsdWei;
   if (!isUnresolvedInput) {
     nextFeesUsdWei += inputContribution;
   }
   // allPegged: if the new transfer is non-pegged (or UNKNOWN), the row can no
   // longer be all-pegged. If shouldHeal already recomputed it, that's the
   // canonical value — only flip from true→false here, never the reverse.
-  if (!shouldHeal) {
-    if (isUnresolvedInput || !isInputPegged) {
-      nextAllPegged = false;
-    }
+  let nextAllPegged = state.nextAllPegged;
+  if (!shouldHeal && (isUnresolvedInput || !isInputPegged)) {
+    nextAllPegged = false;
   }
-
   return {
     ...existing,
-    tokenSymbols: nextSymbols,
-    tokenDecimals: nextDecimals,
+    tokenSymbols: state.nextSymbols,
+    tokenDecimals: state.nextDecimals,
     amounts: nextAmounts,
     feesUsdWei: nextFeesUsdWei,
     allPegged: nextAllPegged,
-    unresolvedCount: nextUnresolvedCount,
+    unresolvedCount: state.nextUnresolvedCount,
     transferCount: existing.transferCount + 1,
     blockNumber:
       input.blockNumber > existing.blockNumber
