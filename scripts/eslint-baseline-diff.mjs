@@ -2,29 +2,33 @@
 /**
  * Diff-aware ESLint baseline enforcement.
  *
- * Reads ESLint's `--format json` output from stdin, compares each violation
- * tuple `(file, ruleId, message)` to a per-package `eslint-baseline.json`,
- * and exits non-zero on any NEW tuple (or any duplicate count increase)
- * that isn't already in the baseline.
+ * Compares each current ESLint violation tuple to the per-package
+ * `eslint-baseline.json` and exits non-zero on:
  *
- * Why not `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting
- * lets a PR delete one violation and add a different one and still pass.
+ *   - any NEW tuple not in the baseline (additions blocked),
+ *   - any STALE tuple (baseline says violation exists, current run says it
+ *     doesn't) in `check` mode — forces baseline pruning before merge.
  *
- * Why not ESLint 9.24+ bulk suppressions (codex P2 #3254553397): those are
- * count-based per `(file, ruleId)`, so a PR can swap one function's
- * `complexity` violation for another function's in the same file and still
- * pass — same gap, finer granularity, but not location-stable.
+ * Modes:
+ *   check  — fails on new tuples OR stale entries.
+ *   update — fails if it would ADD tuples vs the existing baseline; only
+ *            allows pruning. Baseline growth requires deleting the file
+ *            and re-running update from a clean state (initial seed only).
  *
- * This script uses `(file, ruleId, message)` as the violation identity. The
- * message contains rule-specific identifiers (function name + value for
- * `complexity` / `max-lines-per-function` / `sonarjs/cognitive-complexity`;
- * count for `max-params`; etc.), so renaming a function or changing its
- * complexity surfaces as a NEW tuple and fails — even if the file's count
- * stays the same.
+ * Why not `--max-warnings <N>` (count budget): a PR could swap one
+ * violation for another and pass. Why not ESLint 9.24+ bulk suppressions:
+ * count-per-(file, ruleId), so swap-in-same-file passes. This script
+ * uses tuple identity `(file, ruleId, message)` plus `line` for
+ * rules whose message doesn't already identify the violation location
+ * (`LOCATION_KEYED_RULES` below). For rules like `complexity` that embed
+ * function name + value in the message, the message itself is unique
+ * enough; for rules like `max-depth` that emit a generic
+ * "Blocks are nested too deeply (N)", we add line so two equally-deep
+ * blocks in the same file are distinguishable.
  *
  * Usage:
- *   pnpm exec eslint . --format json | node ../scripts/eslint-baseline-diff.mjs check
- *   pnpm exec eslint . --format json | node ../scripts/eslint-baseline-diff.mjs update
+ *   node ../scripts/eslint-baseline-diff.mjs check
+ *   node ../scripts/eslint-baseline-diff.mjs update
  *
  * Run from each package's directory. Looks for `eslint-baseline.json` in cwd.
  */
@@ -32,6 +36,22 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+// Rules whose message does NOT include enough context to distinguish two
+// violations in the same file. For these we include the source line in the
+// tuple key so swap-in-same-file is caught. A line shift from unrelated
+// edits will surface as both a stale entry AND a new tuple — running
+// `lint:baseline:update` then prunes the stale entry and the new tuple is
+// rejected unless it's a net-zero replacement (same key minus line).
+const LOCATION_KEYED_RULES = new Set([
+  "max-depth",
+  "sonarjs/no-collapsible-if",
+  "sonarjs/no-small-switch",
+  "sonarjs/no-redundant-jump",
+  "sonarjs/no-nested-functions",
+  "sonarjs/no-nested-conditional",
+  "sonarjs/no-nested-template-literals",
+]);
 
 const mode = process.argv[2] ?? "check";
 const cwd = process.cwd();
@@ -65,27 +85,86 @@ function flatten(output) {
     const rel = file.filePath.replace(cwd + "/", "");
     for (const m of file.messages) {
       if (m.severity !== 2) continue;
-      out.push({ file: rel, ruleId: m.ruleId, message: m.message });
+      const entry = { file: rel, ruleId: m.ruleId, message: m.message };
+      if (LOCATION_KEYED_RULES.has(m.ruleId) && typeof m.line === "number") {
+        entry.line = m.line;
+      }
+      out.push(entry);
     }
   }
   out.sort(
     (a, b) =>
       a.file.localeCompare(b.file) ||
       (a.ruleId ?? "").localeCompare(b.ruleId ?? "") ||
-      a.message.localeCompare(b.message),
+      a.message.localeCompare(b.message) ||
+      (a.line ?? 0) - (b.line ?? 0),
   );
   return out;
 }
 
+function keyOf(v) {
+  const locSuffix = v.line != null ? `\x00${v.line}` : "";
+  return `${v.file}\x00${v.ruleId ?? "<no-rule>"}\x00${v.message}${locSuffix}`;
+}
+
+function countMap(list) {
+  const m = new Map();
+  for (const v of list) {
+    const key = keyOf(v);
+    m.set(key, (m.get(key) ?? 0) + 1);
+  }
+  return m;
+}
+
+function describe(key, delta) {
+  const parts = key.split("\x00");
+  const [file, ruleId, message, line] = parts;
+  const loc = line ? `:${line}` : "";
+  return `  ${delta >= 0 ? "+" : ""}${delta}  ${file}${loc}\n         [${ruleId}] ${message}\n`;
+}
+
 const current = flatten(eslintOutput);
+const baseline = existsSync(baselinePath)
+  ? JSON.parse(readFileSync(baselinePath, "utf8"))
+  : null;
+
+const currentCounts = countMap(current);
+const baselineCounts = baseline ? countMap(baseline) : new Map();
 
 if (mode === "update") {
+  // Reject baseline growth: update mode prunes stale entries (and absorbs
+  // line shifts when message identity is otherwise stable) but refuses to
+  // ADD new tuples. New violations must be FIXED, not baselined. To grow
+  // a baseline deliberately (e.g. seeding a new package), delete
+  // eslint-baseline.json first; an absent file is treated as initial seed.
+  if (baseline !== null) {
+    const additions = [];
+    for (const [key, count] of currentCounts) {
+      const baselineCount = baselineCounts.get(key) ?? 0;
+      if (count > baselineCount) {
+        additions.push({ key, delta: count - baselineCount });
+      }
+    }
+    if (additions.length > 0) {
+      process.stderr.write(
+        `✖ update would add ${additions.length} new tuple(s) to ${baselinePath}:\n`,
+      );
+      for (const v of additions) process.stderr.write(describe(v.key, v.delta));
+      process.stderr.write(
+        `\nThe baseline is prune-only. Fix the new violations rather than baselining\n` +
+          `them. For a deliberate baseline reseed (e.g. accepting a new package), delete\n` +
+          `eslint-baseline.json first and re-run \`lint:baseline:update\`.\n`,
+      );
+      process.exit(1);
+    }
+  }
   writeFileSync(baselinePath, JSON.stringify(current, null, 2) + "\n");
   process.stdout.write(`wrote ${current.length} entries to ${baselinePath}\n`);
   process.exit(0);
 }
 
-if (!existsSync(baselinePath)) {
+// check mode
+if (baseline === null) {
   if (current.length === 0) {
     process.exit(0);
   }
@@ -96,28 +175,11 @@ if (!existsSync(baselinePath)) {
   process.exit(1);
 }
 
-const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
-
-function countMap(list) {
-  const m = new Map();
-  for (const v of list) {
-    const key = `${v.file}\x00${v.ruleId}\x00${v.message}`;
-    m.set(key, (m.get(key) ?? 0) + 1);
-  }
-  return m;
-}
-
-const baselineCounts = countMap(baseline);
-const currentCounts = countMap(current);
-
 const newViolations = [];
 for (const [key, count] of currentCounts) {
   const baselineCount = baselineCounts.get(key) ?? 0;
   if (count > baselineCount) {
-    newViolations.push({
-      key,
-      delta: count - baselineCount,
-    });
+    newViolations.push({ key, delta: count - baselineCount });
   }
 }
 
@@ -125,35 +187,37 @@ const staleEntries = [];
 for (const [key, count] of baselineCounts) {
   const currentCount = currentCounts.get(key) ?? 0;
   if (currentCount < count) {
-    staleEntries.push({ key, delta: count - currentCount });
+    staleEntries.push({ key, delta: currentCount - count });
   }
 }
+
+let failed = false;
 
 if (newViolations.length > 0) {
   process.stderr.write(
     `✖ ${newViolations.length} new ESLint violation(s) not in eslint-baseline.json:\n`,
   );
-  for (const v of newViolations) {
-    const [file, ruleId, message] = v.key.split("\x00");
-    process.stderr.write(
-      `  +${v.delta}  ${file}\n         [${ruleId}] ${message}\n`,
-    );
-  }
+  for (const v of newViolations) process.stderr.write(describe(v.key, v.delta));
   process.stderr.write(
-    `\nTo accept these as new baseline entries: pnpm lint:baseline:update\n`,
+    `\nFix these — the baseline is prune-only. (See scripts/eslint-baseline-diff.mjs.)\n`,
   );
-  process.exit(1);
+  failed = true;
 }
 
 if (staleEntries.length > 0) {
-  process.stdout.write(
-    `⚠ ${staleEntries.length} stale baseline entries (fixed but not pruned). ` +
-      `run pnpm lint:baseline:update to clean.\n`,
+  // Stale entries (baseline says violation exists, current run says it
+  // doesn't) used to warn-and-exit-0. That let an unrelated PR that
+  // happened to fix a violation leave the stale tuple in the baseline; a
+  // future PR could then re-introduce the same violation in the same file
+  // with the same message and the check would treat it as already
+  // baselined. Fail instead and require the author to run
+  // `lint:baseline:update` to prune.
+  process.stderr.write(
+    `✖ ${staleEntries.length} stale baseline entries (fixed but not pruned). ` +
+      `run \`pnpm lint:baseline:update\` to clean before merge.\n`,
   );
-  for (const v of staleEntries) {
-    const [file, ruleId, message] = v.key.split("\x00");
-    process.stdout.write(`  -${v.delta}  ${file} [${ruleId}] ${message}\n`);
-  }
+  for (const v of staleEntries) process.stderr.write(describe(v.key, v.delta));
+  failed = true;
 }
 
-process.exit(0);
+process.exit(failed ? 1 : 0);

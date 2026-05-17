@@ -42,7 +42,8 @@
   {
     "file": "src/rebalance-check.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (4). Maximum allowed is 3."
+    "message": "Blocks are nested too deeply (4). Maximum allowed is 3.",
+    "line": 442
   },
   {
     "file": "src/rebalance-check.ts",
@@ -52,6 +53,7 @@
   {
     "file": "src/rebalance-probe.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (4). Maximum allowed is 3."
+    "message": "Blocks are nested too deeply (4). Maximum allowed is 3.",
+    "line": 247
   }
 ]

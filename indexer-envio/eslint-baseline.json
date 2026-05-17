@@ -17,7 +17,8 @@
   {
     "file": "src/contractAddresses.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 129
   },
   {
     "file": "src/deviationBreach.ts",
@@ -182,7 +183,8 @@
   {
     "file": "src/protocolFeeSnapshot.ts",
     "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one."
+    "message": "Merge this if statement with the nested one.",
+    "line": 213
   },
   {
     "file": "src/rpc.ts",
@@ -202,37 +204,44 @@
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 165
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 202
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 271
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 319
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 341
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (6). Maximum allowed is 4.",
+    "line": 179
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (6). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (6). Maximum allowed is 4.",
+    "line": 209
   },
   {
     "file": "src/rpc/block-fallback.ts",

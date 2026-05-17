@@ -842,6 +842,21 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
+      add_surface "scripts"
+      add_command "pnpm lint:scripts" "root build script changed"
+      case "$path" in
+        scripts/eslint-baseline-diff.mjs)
+          # The lint wrapper. A regression here would mask all per-package
+          # baseline drift. Re-run every package's lint to exercise the
+          # wrapper end-to-end, not just the standalone ESLint pass.
+          add_package_quality_commands "@mento-protocol/monitoring-config" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/ui-dashboard" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/indexer-envio" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/metrics-bridge" "ESLint baseline wrapper changed"
+          ;;
+      esac
+      ;;
     scripts/*|tools/*)
       add_surface "scripts"
       ;;

@@ -692,7 +692,8 @@
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one."
+    "message": "Merge this if statement with the nested one.",
+    "line": 119
   },
   {
     "file": "src/lib/address-book.ts",
@@ -702,7 +703,8 @@
   {
     "file": "src/lib/address-book.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 130
   },
   {
     "file": "src/lib/address-book.ts",
@@ -722,7 +724,8 @@
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one."
+    "message": "Merge this if statement with the nested one.",
+    "line": 215
   },
   {
     "file": "src/lib/address-labels/import.ts",
@@ -777,7 +780,8 @@
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4."
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 299
   },
   {
     "file": "src/lib/arkham.ts",
@@ -927,7 +931,8 @@
   {
     "file": "src/lib/revenue.ts",
     "ruleId": "sonarjs/no-collapsible-if",
-    "message": "Merge this if statement with the nested one."
+    "message": "Merge this if statement with the nested one.",
+    "line": 90
   },
   {
     "file": "src/lib/tokens.ts",

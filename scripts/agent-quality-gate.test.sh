@@ -941,4 +941,23 @@ run_gate "metrics-bridge/knip.json"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge knip (knip config changed)"
 assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
 
+# Root-script routing: ESLint baseline wrapper changes must re-run every
+# package's lint AND lint the wrapper itself. A regression here would
+# mask all per-package baseline drift.
+run_gate "scripts/eslint-baseline-diff.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config lint (ESLint baseline wrapper changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard lint (ESLint baseline wrapper changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio lint (ESLint baseline wrapper changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint baseline wrapper changed)"
+
+# Other root-script changes only need the standalone scripts ESLint.
+run_gate "scripts/code-health-history.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_not_contains "(ESLint baseline wrapper changed)"
+
+# Root ESLint config changes trigger scripts lint.
+run_gate "eslint.config.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+
 echo "agent quality gate tests passed"

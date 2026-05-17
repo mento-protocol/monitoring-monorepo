@@ -42,11 +42,14 @@ lint:
   enabled:
     - checkov@3.2.506
     # eslint is run per-package via `pnpm --filter X lint`, wired into the
-    # agent quality gate. Each package's lint script uses --max-warnings to
-    # ratchet the PR-2 baseline (no new warns allowed). Running ESLint
-    # twice — once via trunk, once via pnpm — duplicates work AND friction:
-    # trunk treats every ESLint warning as a check failure, defeating the
-    # warn-as-baseline mechanism. Per-package lint is the canonical path.
+    # agent quality gate. Each package's lint script invokes
+    # `scripts/eslint-baseline-diff.mjs` against its `eslint-baseline.json`
+    # (prune-only diff check; fails on any new or stale tuple). Root-level
+    # build scripts under `scripts/` are linted by the standalone
+    # `pnpm lint:scripts` job in CI — see eslint.config.mjs at the repo
+    # root. Re-enabling trunk-eslint here would either duplicate that work
+    # or fight the baseline mechanism (trunk treats every warning as a
+    # check failure).
     - prettier@3.8.1
     - markdownlint@0.48.0
     - git-diff-check

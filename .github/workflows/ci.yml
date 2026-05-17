@@ -41,14 +41,20 @@ jobs:
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
+      rootScripts: ${{ steps.filter.outputs.rootScripts }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - id: filter
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
+            # scripts/eslint-baseline-diff.mjs is the per-package lint
+            # wrapper. Any change to it needs to re-run every package's lint
+            # so a broken wrapper can't merge silently — see PR-423 codex
+            # finding (Run package lint when the lint gate changes).
             shared:
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -58,6 +64,7 @@ jobs:
             ui:
               - ui-dashboard/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -74,6 +81,7 @@ jobs:
             indexer:
               - indexer-envio/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -83,6 +91,7 @@ jobs:
             bridge:
               - metrics-bridge/**
               - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
               - cloudbuild.yaml
               - .gcloudignore
               - .node-version
@@ -99,6 +108,23 @@ jobs:
             codeHealth:
               - .dependency-cruiser.cjs
               - "*/knip.json"
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+            # Root scripts ESLint job. Per-package lint runs inside each
+            # workspace and never reaches repo-root scripts/*. This filter
+            # fires the standalone scripts-lint job so `no-undef`, unused
+            # imports, and syntax issues in build/quality scripts can't
+            # merge unnoticed — see PR-423 codex finding (Keep root scripts
+            # under ESLint).
+            rootScripts:
+              - scripts/**/*.mjs
+              - scripts/**/*.cjs
+              - scripts/**/*.js
+              - eslint.config.mjs
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
@@ -154,7 +180,7 @@ jobs:
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Lint
-        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
         # Trunk no longer runs ESLint — this is the CI ESLint source of truth.
         run: pnpm --filter @mento-protocol/ui-dashboard lint
       - name: Knip (dead-code / dep hygiene, blocking)
@@ -242,7 +268,7 @@ jobs:
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
       - name: Lint
-        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
         run: pnpm --filter @mento-protocol/indexer-envio lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/indexer-envio knip
@@ -273,7 +299,7 @@ jobs:
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
       - name: Lint
-        # Caps warnings at the recorded baseline; ratchets down in PR 6.
+        # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
         run: pnpm --filter @mento-protocol/metrics-bridge lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/metrics-bridge knip
@@ -285,6 +311,24 @@ jobs:
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  scripts:
+    name: Lint root scripts
+    needs: changes
+    if: needs.changes.outputs.rootScripts == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 3
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: ESLint root scripts
+        run: pnpm lint:scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -314,7 +358,7 @@ jobs:
 
   ci:
     name: ci
-    needs: [changes, shared, ui, indexer, bridge, deps]
+    needs: [changes, shared, ui, indexer, bridge, deps, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -325,6 +369,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,deps
+          allowed-skips: shared,ui,indexer,bridge,deps,scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

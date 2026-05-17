@@ -43,28 +43,48 @@ PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
 `sonarjs/cognitive-complexity` plus four other sonarjs rules) ship at
 **`error` severity** with a diff-aware baseline in each package's
 `eslint-baseline.json`. The `pnpm --filter <pkg> lint` script runs
-`scripts/eslint-baseline-diff.mjs`, which compares each current
-`(file, ruleId, message)` tuple to the committed baseline and fails on
-any **new** tuple. Cleanup PRs fix a violation, run
-`pnpm --filter <pkg> lint:baseline:update`, and commit the pruned
-baseline.
+`scripts/eslint-baseline-diff.mjs`, which compares each current tuple
+to the committed baseline and fails on any **new** tuple OR any
+**stale** baseline entry (violation removed but not pruned).
+
+Tuple identity is `(file, ruleId, message)`. For rules whose message
+doesn't already identify the violation location (`max-depth`,
+`sonarjs/no-collapsible-if`, `sonarjs/no-small-switch`,
+`sonarjs/no-redundant-jump`, `sonarjs/no-nested-functions`,
+`sonarjs/no-nested-conditional`, `sonarjs/no-nested-template-literals`),
+the tuple also includes `line` so two equally-deep blocks in the same
+file are distinguishable.
+
+`lint:baseline:update` is **prune-only**: it refuses to write a baseline
+that adds new tuples relative to the existing baseline. New violations
+must be fixed, not baselined. For a deliberate reseed (e.g. accepting a
+new package), delete `eslint-baseline.json` first and re-run the update.
+
+Cleanup workflow:
+
+1. Fix a violation in the code.
+2. Run `pnpm --filter <pkg> lint` → it reports the stale baseline entry
+   and fails CI.
+3. Run `pnpm --filter <pkg> lint:baseline:update` → prunes the stale
+   entry from `eslint-baseline.json`.
+4. Commit the regenerated baseline alongside the code fix.
 
 Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 191,
 indexer-envio 63 entries.
 
-Two prior baseline mechanisms were rejected:
+Four prior baseline mechanisms were rejected:
 
 1. `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting,
    so a PR could delete one warning and add another without failing.
 2. ESLint 9.24+ bulk suppressions (codex P2 #3254553397): count-based
    per `(file, ruleId)`, so swapping one function's `complexity`
    violation for another's in the same file would still pass.
-
-The diff-check uses `(file, ruleId, message)`. ESLint embeds rule
-identifiers in the message (`Function 'foo' has a complexity of 17`,
-`Function 'bar' has too many parameters (8)`), so renaming a violating
-function or changing its complexity surfaces as a stale baseline entry
-plus a new tuple — and the new tuple fails the gate.
+3. Permissive `update` mode (codex P2, round 3): re-running update with
+   new violations silently grew the baseline. Now update is prune-only.
+4. Warn-and-pass on stale entries (codex P2, round 3): let an unrelated
+   fix leave the stale tuple committed, so a later PR could
+   re-introduce the same violation without detection. Now stale entries
+   fail CI.
 
 PR 3: `jscpd` duplication check ships as a non-blocking CI job.
 
