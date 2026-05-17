@@ -39,13 +39,17 @@ jobs:
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
-            # Anything that can affect the result of `pnpm bridge:mutation`:
-            # the probe source, its dedicated test, the stryker + mutation
-            # vitest configs, root package-manager files (script wiring +
-            # installed versions), and the workflow itself.
+            # Anything that can affect the result of `pnpm bridge:mutation`.
+            # `metrics-bridge/src/**` is broader than the mutated file alone:
+            # rebalance-probe.ts imports from sibling modules (config,
+            # metrics, rebalance-check, rpc, types), and a change there can
+            # change mutation survival. Same logic for the test: the
+            # mutation test imports `fixtures.ts` and the regular probe
+            # tests stress shared behavior. Configs + package-manager files
+            # (root + bridge) capture script wiring + version drift.
             bridge:
-              - metrics-bridge/src/rebalance-probe.ts
-              - metrics-bridge/test/rebalance-probe.test.ts
+              - metrics-bridge/src/**
+              - metrics-bridge/test/**
               - metrics-bridge/stryker.config.mjs
               - metrics-bridge/vitest.mutation.config.ts
               - metrics-bridge/package.json

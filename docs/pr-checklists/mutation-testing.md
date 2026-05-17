@@ -26,9 +26,12 @@ bridge:mutation` actually runs based on whether the probe code, test,
   it against the existing taxonomy in `docs/mutation-testing.md` and update
   that doc in the same PR.
 - The dashboard + indexer mutation baselines remain advisory (`break: null`)
-  — the dashboard job is gated on the PR trigger so it only runs on cron +
-  manual dispatch. Promotion follows the same pattern: prove runtime/noise
-  sane in CI runs, then flip `break` and add the package's files to the
-  `pull_request.paths` block.
+  — the dashboard job is gated on the workflow's `if: github.event_name !=
+'pull_request'` so it only runs on cron + manual dispatch. Promotion
+  follows the same pattern: prove runtime/noise sane in CI runs, then flip
+  `break`, add the package's files to the `changes` job's `filters` block
+  (NOT `pull_request.paths` — required-status workflows must keep the
+  workflow-level trigger unfiltered per `AGENTS.md`), and add a new
+  always-runs job that gates the expensive step on the new filter output.
 - Revisit `docs/mutation-testing.md` when adding a new target or changing the
   accepted survivor classification.
