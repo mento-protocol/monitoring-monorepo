@@ -60,6 +60,34 @@ Acceptance: the first implementation PR adds at least one blocking low-noise
 quality gate and one advisory CodeScene-like report, records baseline findings,
 and avoids adding another dashboard nobody reads.
 
+### Package-Manager Supply-Chain Hardening Review
+
+Why: the TanStack npm compromise shows that provenance and trusted publishing are
+not enough when a release pipeline restores poisoned package-manager cache
+contents. This repo already has useful defenses: minimumReleaseAge: 4320,
+onlyBuiltDependencies, high+ pnpm audit, SHA-pinned CI install actions in the
+shared install action, and a dedicated supply-chain workflow. The next step is a
+targeted review, not a blind pnpm major bump.
+
+- [ ] Compare current pnpm 10 protections with pnpm 11 security features and
+      migration risk for this monorepo.
+- [ ] Audit GitHub workflows for pull_request_target, writable token
+      permissions, package-manager caches restored before untrusted code runs,
+      and unpinned third-party actions; include .github/actions/pnpm-install
+      and .github/workflows/supply-chain.yml.
+- [ ] Decide whether minimumReleaseAge, minimumReleaseAgeExclude,
+      onlyBuiltDependencies, and ignoredBuiltDependencies need tighter docs,
+      tests, or policy checks.
+- [ ] Evaluate whether an external package firewall or advisory service
+      (Socket, Snyk, or equivalent) adds real signal beyond current pnpm audit
+      without turning every lockfile refresh into noise.
+- [ ] Produce a short recommendation PR: either implement the low-noise hardening
+      directly, or document why the existing controls are sufficient for now.
+
+Acceptance: any implementation must preserve CI stability, keep frozen-lockfile
+installs fast, and include a rollback path. Reject pnpm 11 or third-party
+scanners if the only benefit is theoretical.
+
 ## File Size And Lint Hygiene
 
 Current line counts for remaining watch files were refreshed on 2026-05-11.
