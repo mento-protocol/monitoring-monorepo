@@ -22,17 +22,17 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 
 ## How the gates behave
 
-| Gate                                 | Severity                        | What it catches                                                      | Fix                                                                                                                                                                                                      |
-| ------------------------------------ | ------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dependency-cruiser` cross-pkg       | **error**                       | dashboard/indexer/bridge cross-imports, shared-config upward imports | Refactor through `shared-config`, or — if it's data-only — narrow the allow list with `pathNot`                                                                                                          |
-| `dependency-cruiser` cycles          | warn (baseline)                 | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                             |
-| `knip` files / deps / unlisted       | **error**                       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                    |
-| `knip` exports / types / enumMembers | warn                            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                                                                                                                                       |
-| ESLint complexity budgets            | **error** (suppressed baseline) | over-complex / long / nested / many-arg functions                    | Refactor; new violations fail the gate. To remove a baseline entry: fix the code, then `pnpm --filter <pkg> exec eslint . --prune-suppressions` and commit the updated `<pkg>/eslint-suppressions.json`. |
-| `sonarjs/no-redundant-jump`          | **error**                       | dead control-flow jumps                                              | Trivial fix; never opt out                                                                                                                                                                               |
-| `sonarjs/cognitive-complexity`       | **error** (suppressed baseline) | hard-to-read nested logic                                            | Extract sub-functions; new violations fail. Cleanup pattern: same as above (fix + prune suppression).                                                                                                    |
-| `sonarjs/no-identical-functions`     | **error**                       | duplicate function bodies                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                                                                                                                                |
-| Code-health history report           | advisory                        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                                                                                                                                     |
+| Gate                                 | Severity                        | What it catches                                                      | Fix                                                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dependency-cruiser` cross-pkg       | **error**                       | dashboard/indexer/bridge cross-imports, shared-config upward imports | Refactor through `shared-config`, or — if it's data-only — narrow the allow list with `pathNot`                                                                                                       |
+| `dependency-cruiser` cycles          | warn (baseline)                 | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                          |
+| `knip` files / deps / unlisted       | **error**                       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                 |
+| `knip` exports / types / enumMembers | warn                            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                                                                                                                                    |
+| ESLint complexity budgets            | **error** (diff-aware baseline) | over-complex / long / nested / many-arg functions                    | Refactor; any new `(file, ruleId, message)` tuple not in `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline. |
+| `sonarjs/no-redundant-jump`          | **error**                       | dead control-flow jumps                                              | Trivial fix; never opt out                                                                                                                                                                            |
+| `sonarjs/cognitive-complexity`       | **error** (diff-aware baseline) | hard-to-read nested logic                                            | Extract sub-functions; new violations fail by tuple. Cleanup pattern: same as above (fix + regenerate baseline).                                                                                      |
+| `sonarjs/no-identical-functions`     | **error**                       | duplicate function bodies                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                                                                                                                             |
+| Code-health history report           | advisory                        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                                                                                                                                  |
 
 ## Ratchet pipeline (where this is going)
 
@@ -41,23 +41,38 @@ PR 1: blocking knip + dep-cruiser cross-pkg + advisory history report.
 PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
 `max-lines-per-function`, `max-depth`, `max-params`,
 `sonarjs/cognitive-complexity` plus four other sonarjs rules) ship at
-**`error` severity** with the pre-existing violations captured in each
-package's `eslint-suppressions.json` (ESLint 9.24+ bulk suppressions).
-**Any new violation not in the suppressions file fails the gate.**
-Baseline sizes: shared-config 0, metrics-bridge ~11, ui-dashboard ~191,
-indexer-envio ~63 suppressions. Cleanup PRs fix a violation and run
-`pnpm --filter <pkg> exec eslint . --prune-suppressions` to drop the
-entry. The `--max-warnings <N>` cap was the prior baseline mechanism;
-it was insufficient because warning-count budgeting let a PR delete one
-violation and add another without failing (codex P2 #3253043406).
+**`error` severity** with a diff-aware baseline in each package's
+`eslint-baseline.json`. The `pnpm --filter <pkg> lint` script runs
+`scripts/eslint-baseline-diff.mjs`, which compares each current
+`(file, ruleId, message)` tuple to the committed baseline and fails on
+any **new** tuple. Cleanup PRs fix a violation, run
+`pnpm --filter <pkg> lint:baseline:update`, and commit the pruned
+baseline.
+
+Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 191,
+indexer-envio 63 entries.
+
+Two prior baseline mechanisms were rejected:
+
+1. `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting,
+   so a PR could delete one warning and add another without failing.
+2. ESLint 9.24+ bulk suppressions (codex P2 #3254553397): count-based
+   per `(file, ruleId)`, so swapping one function's `complexity`
+   violation for another's in the same file would still pass.
+
+The diff-check uses `(file, ruleId, message)`. ESLint embeds rule
+identifiers in the message (`Function 'foo' has a complexity of 17`,
+`Function 'bar' has too many parameters (8)`), so renaming a violating
+function or changing its complexity surfaces as a stale baseline entry
+plus a new tuple — and the new tuple fails the gate.
 
 PR 3: `jscpd` duplication check ships as a non-blocking CI job.
 
 PR 5: weekly cron renders `reports/code-health-history.md` and posts the
 hotspot/coupling delta to Slack.
 
-PR 6: continue chipping at the suppression files via cleanup PRs. The
-goal is `eslint-suppressions.json` shrinking commit-by-commit until each
+PR 6: continue chipping at the baseline files via cleanup PRs. The
+goal is `eslint-baseline.json` shrinking commit-by-commit until each
 package's file is empty (or removed) — at which point the rules behave
 as plain `error` with no baseline carve-out. Promote dep-cruiser cycles
 to `error` after the `indexer-envio/src/{pool,deviationBreach}.ts`

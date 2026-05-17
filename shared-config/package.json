@@ -45,7 +45,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
+    "lint": "node ../scripts/eslint-baseline-diff.mjs check",
+    "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "test": "vitest run",

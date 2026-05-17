@@ -27,7 +27,8 @@
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict-dry-run.json",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
-    "lint": "eslint ."
+    "lint": "node ../scripts/eslint-baseline-diff.mjs check",
+    "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
