@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_5b931d96a2",
+  "title": "Node source ui-dashboard/src/app/leaderboard",
+  "summary": "Node/TypeScript source group ui-dashboard/src/app/leaderboard with 2 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/app/leaderboard",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page-client.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/aggregator-breakdown-section.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/v3-flow-insights.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_lib/__tests__/use-hero-rollup.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_lib/__tests__/use-pool-volume-snapshots.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/aggregator-breakdown-section.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/v3-flow-insights.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_lib/__tests__/use-hero-rollup.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_lib/__tests__/use-pool-volume-snapshots.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

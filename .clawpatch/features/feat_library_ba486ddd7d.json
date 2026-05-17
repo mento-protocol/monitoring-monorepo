@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_ba486ddd7d",
+  "title": "Node source ui-dashboard/src/app/leaderboard/_components",
+  "summary": "Node/TypeScript source group ui-dashboard/src/app/leaderboard/_components with 12 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/app/leaderboard/_components",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/aggregator-breakdown-section.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/flow-badge.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/hero-data-quality-banners.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/leaderboard-table.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/lp-friendliness-badge.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/system-address-chip.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/table-section-title.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/top-pools-list.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/v2-leaderboard-section.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/v3-flow-insights.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/v3-leaderboard-section.tsx",
+      "reason": "source group ui-dashboard/src/app/leaderboard/_components"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/aggregator-breakdown-section.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/v3-flow-insights.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/aggregator-breakdown-section.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/_components/__tests__/v3-flow-insights.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

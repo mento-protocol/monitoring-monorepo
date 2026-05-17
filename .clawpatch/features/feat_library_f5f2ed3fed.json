@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_f5f2ed3fed",
+  "title": "Node source ui-dashboard/src/lib/queries",
+  "summary": "Node/TypeScript source group ui-dashboard/src/lib/queries with 9 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/lib/queries",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/lib/queries/broker.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/config.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/leaderboard-via.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/leaderboard.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/lp.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/ols.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/pool-detail.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/pools.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/protocol.ts",
+      "reason": "source group ui-dashboard/src/lib/queries"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/ols.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/__tests__/leaderboard-via.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/__tests__/leaderboard.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/__tests__/leaderboard-broker-aliases.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/ols.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/__tests__/leaderboard-via.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/__tests__/leaderboard.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/__tests__/leaderboard-broker-aliases.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

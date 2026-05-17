@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_release_3d122ee1ee",
+  "title": "Package script lint (@mento-protocol/indexer-envio)",
+  "summary": "Package script 'lint' in indexer-envio/package.json: eslint .",
+  "kind": "release",
+  "source": "package-json-script",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "indexer-envio/package.json",
+      "symbol": "lint",
+      "route": null,
+      "command": "lint"
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "indexer-envio/package.json",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "node",
+    "package-script",
+    "project:@mento-protocol/indexer-envio",
+    "project-root:indexer-envio"
+  ],
+  "trustBoundaries": ["process-exec", "filesystem"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

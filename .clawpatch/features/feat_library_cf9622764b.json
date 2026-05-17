@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_cf9622764b",
+  "title": "Node source ui-dashboard/src/components/breach-history",
+  "summary": "Node/TypeScript source group ui-dashboard/src/components/breach-history with 5 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/components/breach-history",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/components/breach-history/breach-row.tsx",
+      "reason": "source group ui-dashboard/src/components/breach-history"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history/breach-table.tsx",
+      "reason": "source group ui-dashboard/src/components/breach-history"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history/bucket-filter.tsx",
+      "reason": "source group ui-dashboard/src/components/breach-history"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history/duration-filter.tsx",
+      "reason": "source group ui-dashboard/src/components/breach-history"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history/filters.ts",
+      "reason": "source group ui-dashboard/src/components/breach-history"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

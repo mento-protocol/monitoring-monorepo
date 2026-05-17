@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_2ac1b8d499",
+  "title": "Node package @mento-protocol/ui-dashboard",
+  "summary": "Node package manifest at ui-dashboard/package.json.",
+  "kind": "library",
+  "source": "node-package",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "@mento-protocol/ui-dashboard",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/tsconfig.json",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/next.config.ts",
+      "reason": "project context"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "package",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard",
+    "workspace"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

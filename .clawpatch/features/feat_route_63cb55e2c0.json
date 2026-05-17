@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_63cb55e2c0",
+  "title": "@mento-protocol/ui-dashboard route /api/address-labels/export",
+  "summary": "Web route implemented by ui-dashboard/src/app/api/address-labels/export/route.ts in project @mento-protocol/ui-dashboard.",
+  "kind": "route",
+  "source": "next-app-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/route.ts",
+      "symbol": null,
+      "route": "/api/address-labels/export",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/route.ts",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/tsconfig.json",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/next.config.ts",
+      "reason": "project context"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/__tests__/route.test.ts",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "next",
+    "web",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-03b742d775-fc5b_a1f7059781",
+  "featureId": "feat_library_03b742d775",
+  "title": "Whitespace-padded arkham tags bypass provenance stripping",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/address-labels/import-helpers.ts",
+      "startLine": 17,
+      "endLine": 22,
+      "symbol": "stripArkhamProvenance",
+      "quote": "tags: entry.tags.filter((t) => t !== ARKHAM_TAG)"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/import-helpers.ts",
+      "startLine": 72,
+      "endLine": 76,
+      "symbol": "sanitizeAndFilter",
+      "quote": "const sanitized = sanitizeEntry(e);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/import.ts",
+      "startLine": 127,
+      "endLine": 130,
+      "symbol": "handleSimpleFormat",
+      "quote": "const finalLabels = sanitizeAndFilter(mergeWithExisting(upgraded, existing));"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/snapshot.ts",
+      "startLine": 182,
+      "endLine": 186,
+      "symbol": "handleSnapshot",
+      "quote": "const finalLabels = sanitizeAndFilter(mergedLabels);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/__tests__/import.test.ts",
+      "startLine": 295,
+      "endLine": 299,
+      "symbol": "stripArkhamProvenance test",
+      "quote": "entry({ tags: [\"arkham\", \"exchange\"] })"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/__tests__/import.test.ts",
+      "startLine": 410,
+      "endLine": 414,
+      "symbol": "sanitizeAndFilter test",
+      "quote": "tags: [\" Whale \", \"whale\", \"Whale\"]"
+    }
+  ],
+  "reasoning": "The provenance guard strips only raw tags exactly equal to ARKHAM_TAG, then the simple and snapshot import paths sanitize afterward. The tests establish that sanitization trims tags, so a user-controlled simple/snapshot import with tags like [\" arkham \"] survives stripArkhamProvenance, is later trimmed to \"arkham\", and becomes indistinguishable from the legacy Arkham provenance sentinel the comments say users must never be able to claim.",
+  "reproduction": "Import simple JSON with labels containing a valid address entry whose tags are [\" arkham \"] and any non-empty name. mergeWithExisting keeps the raw tag, sanitizeAndFilter trims it to \"arkham\", and importLabels receives the sentinel tag.",
+  "recommendation": "Normalize before removing provenance, or make stripArkhamProvenance remove tags whose trimmed value equals ARKHAM_TAG. Keep the source clearing behavior, but ensure no later sanitizer can turn a retained tag into the sentinel.",
+  "whyTestsDoNotAlreadyCoverThis": "The stripArkhamProvenance test only covers an exact \"arkham\" tag, while the sanitizeAndFilter trimming test is separate and does not compose trimming with provenance stripping.",
+  "suggestedRegressionTest": "Add a simple-format or helper pipeline test where tags: [\" arkham \", \"exchange\"] imports as tags: [\"exchange\"] with source undefined.",
+  "minimumFixScope": "ui-dashboard/src/lib/address-labels/import-helpers.ts plus a focused regression in ui-dashboard/src/lib/address-labels/__tests__/import.test.ts",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-03b742d775_fc5b3117a2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T112745-251359",
+  "createdAt": "2026-05-17T11:30:30.518Z",
+  "updatedAt": "2026-05-17T11:30:30.518Z"
+}

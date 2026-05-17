@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_79804c71b3",
+  "title": "Node source indexer-envio/src/rpc",
+  "summary": "Node/TypeScript source group indexer-envio/src/rpc with 11 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "indexer-envio/package.json",
+      "symbol": "indexer-envio/src/rpc",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "indexer-envio/src/rpc/biPoolManager.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/block-fallback.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/breakers.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/client.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/effects.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/http-test-mock-bridge.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/http-test-mocks.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/log.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/oracle-state.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/pool-fees.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    },
+    {
+      "path": "indexer-envio/src/rpc/pool-state.ts",
+      "reason": "source group indexer-envio/src/rpc"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "indexer-envio/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "indexer-envio/test/biPoolManager.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/breakers.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/effects.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "indexer-envio/test/biPoolManager.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/breakers.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/effects.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/indexer-envio",
+    "project-root:indexer-envio"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

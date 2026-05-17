@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_b4d65318ca",
+  "title": "Node source ui-dashboard/src/components#1",
+  "summary": "Node/TypeScript source group ui-dashboard/src/components#1 with 12 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/components#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/components/address-label-editor.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-label-form.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-labels-provider.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-link.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-report-editor.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/auth-status.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/badges.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history-chart.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history-panel.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/breakdown-tile.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/breaker-panel.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    },
+    {
+      "path": "ui-dashboard/src/components/bridge-provider-badge.tsx",
+      "reason": "source group ui-dashboard/src/components#1"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

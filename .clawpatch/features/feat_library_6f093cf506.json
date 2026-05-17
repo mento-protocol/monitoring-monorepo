@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_6f093cf506",
+  "title": "Node source ui-dashboard/src/app/revenue",
+  "summary": "Node/TypeScript source group ui-dashboard/src/app/revenue with 2 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/app/revenue",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/revenue/_components/revenue-page-client.tsx",
+      "reason": "source group ui-dashboard/src/app/revenue"
+    },
+    {
+      "path": "ui-dashboard/src/app/revenue/page.tsx",
+      "reason": "source group ui-dashboard/src/app/revenue"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pools/__tests__/page.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pools/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

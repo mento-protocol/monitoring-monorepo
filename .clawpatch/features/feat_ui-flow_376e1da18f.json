@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_376e1da18f",
+  "title": "React component bridge-volume-chart",
+  "summary": "React component implemented by ui-dashboard/src/components/bridge-volume-chart.tsx.",
+  "kind": "ui-flow",
+  "source": "react-component",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/components/bridge-volume-chart.tsx",
+      "symbol": "bridge-volume-chart",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/components/bridge-volume-chart.tsx",
+      "reason": "component implementation"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": ["react", "component", "web"],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}
