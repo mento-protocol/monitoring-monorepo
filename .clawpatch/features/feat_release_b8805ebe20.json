@@ -28,7 +28,10 @@
     "project:@mento-protocol/ui-dashboard",
     "project-root:ui-dashboard"
   ],
-  "trustBoundaries": ["process-exec", "filesystem"],
+  "trustBoundaries": [
+    "process-exec",
+    "filesystem"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

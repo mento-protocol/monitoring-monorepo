@@ -111,7 +111,10 @@
     "project:@mento-protocol/monitoring-config",
     "project-root:shared-config"
   ],
-  "trustBoundaries": ["filesystem", "database"],
+  "trustBoundaries": [
+    "filesystem",
+    "database"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

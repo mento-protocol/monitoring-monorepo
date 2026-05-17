@@ -28,7 +28,10 @@
     "project:@mento-protocol/monitoring-config",
     "project-root:shared-config"
   ],
-  "trustBoundaries": ["process-exec", "filesystem"],
+  "trustBoundaries": [
+    "process-exec",
+    "filesystem"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

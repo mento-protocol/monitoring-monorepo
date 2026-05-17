@@ -34,7 +34,10 @@
     "project-root:shared-config",
     "workspace"
   ],
-  "trustBoundaries": ["filesystem", "database"],
+  "trustBoundaries": [
+    "filesystem",
+    "database"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],
