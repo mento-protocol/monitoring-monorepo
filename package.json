@@ -24,7 +24,7 @@
     "code-health:deps:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot shared-config ui-dashboard indexer-envio metrics-bridge | dot -T svg > reports/dep-graph.svg",
     "code-health:history": "node scripts/code-health-history.mjs",
     "code-health": "pnpm code-health:knip && pnpm code-health:deps",
-    "lint:scripts": "eslint scripts/",
+    "lint:scripts": "eslint scripts/ eslint.config.mjs .dependency-cruiser.cjs",
     "indexer:mutation": "pnpm --filter @mento-protocol/indexer-envio test:mutation",
     "indexer:testnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml",
     "indexer:testnet:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.testnet.yaml",

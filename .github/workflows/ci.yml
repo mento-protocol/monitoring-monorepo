@@ -143,6 +143,14 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
+          git show origin/main:shared-config/eslint-baseline.json \
+            > /tmp/main-baseline-shared-config.json 2>/dev/null || \
+            : > /tmp/main-baseline-shared-config.json
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-shared-config.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
       - name: Lint
@@ -177,6 +185,13 @@ jobs:
           # changed-files set against origin/${{ github.base_ref }}.
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          git show origin/main:ui-dashboard/eslint-baseline.json \
+            > /tmp/main-baseline-ui-dashboard.json 2>/dev/null || \
+            : > /tmp/main-baseline-ui-dashboard.json
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-ui-dashboard.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Lint
@@ -265,6 +280,14 @@ jobs:
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
+          git show origin/main:indexer-envio/eslint-baseline.json \
+            > /tmp/main-baseline-indexer-envio.json 2>/dev/null || \
+            : > /tmp/main-baseline-indexer-envio.json
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-indexer-envio.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
       - name: Lint
@@ -296,6 +319,14 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin main 2>/dev/null || true
+          git show origin/main:metrics-bridge/eslint-baseline.json \
+            > /tmp/main-baseline-metrics-bridge.json 2>/dev/null || \
+            : > /tmp/main-baseline-metrics-bridge.json
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-metrics-bridge.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
       - name: Lint

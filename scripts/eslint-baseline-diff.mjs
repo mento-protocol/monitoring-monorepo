@@ -129,6 +129,16 @@ function keyOf(v) {
   return `${v.file}\x00${v.ruleId ?? "<no-rule>"}\x00${v.message}\x00${v.linePreview ?? ""}`;
 }
 
+// Stripped key = (file, ruleId, message), no linePreview. Used to absorb
+// "harmless fingerprint shifts" — adjacent edits that change the source
+// content around a baselined violation without changing the violation
+// itself. A 1-for-1 add+remove on the same stripped key is treated as a
+// refactor, not as growth.
+function strippedKeyOf(key) {
+  const parts = key.split("\x00");
+  return parts.slice(0, 3).join("\x00");
+}
+
 function countMap(list) {
   const m = new Map();
   for (const v of list) {
@@ -144,6 +154,43 @@ function describe(key, delta) {
   return `  ${delta >= 0 ? "+" : ""}${delta}  ${file}\n         [${ruleId}] ${message}${hint}\n`;
 }
 
+// Detect baseline growth vs a reference counts map using stripped-key
+// absorption. Same `(file, ruleId, message)` add+remove pairs cancel
+// (legitimate refactor); only NET additions per stripped key count as
+// growth. Returns an array of `{strippedKey, net}` entries, empty if no
+// growth.
+function strippedKeyGrowth(referenceCounts, currentCounts) {
+  const additionsByStripped = new Map();
+  const removalsByStripped = new Map();
+  for (const [key, count] of currentCounts) {
+    const referenceCount = referenceCounts.get(key) ?? 0;
+    if (count > referenceCount) {
+      const s = strippedKeyOf(key);
+      additionsByStripped.set(
+        s,
+        (additionsByStripped.get(s) ?? 0) + (count - referenceCount),
+      );
+    }
+  }
+  for (const [key, count] of referenceCounts) {
+    const currentCount = currentCounts.get(key) ?? 0;
+    if (count > currentCount) {
+      const s = strippedKeyOf(key);
+      removalsByStripped.set(
+        s,
+        (removalsByStripped.get(s) ?? 0) + (count - currentCount),
+      );
+    }
+  }
+  const growth = [];
+  for (const [s, addCount] of additionsByStripped) {
+    const removeCount = removalsByStripped.get(s) ?? 0;
+    const net = addCount - removeCount;
+    if (net > 0) growth.push({ strippedKey: s, net });
+  }
+  return growth;
+}
+
 const current = flatten(eslintOutput);
 const baseline = existsSync(baselinePath)
   ? JSON.parse(readFileSync(baselinePath, "utf8"))
@@ -153,29 +200,30 @@ const currentCounts = countMap(current);
 const baselineCounts = baseline ? countMap(baseline) : new Map();
 
 if (mode === "update") {
-  // Reject baseline growth: update mode prunes stale entries but refuses
-  // to ADD new tuples. New violations must be FIXED, not baselined. Pure
-  // line shifts (same source content, different line number) produce no
-  // diff because linePreview is the content fingerprint, not the line
-  // number. To grow a baseline deliberately (e.g. seeding a new package),
-  // delete eslint-baseline.json first; an absent file is treated as
-  // initial seed.
+  // Update mode rejects NET baseline growth per stripped key. A 1-for-1
+  // add+remove on the same `(file, ruleId, message)` is treated as a
+  // legitimate refactor (function renamed, signature reformatted,
+  // adjacent edit shifted the linePreview window). A genuine new
+  // violation — a new stripped key, or extra count on an existing one —
+  // is rejected; the author must fix the violation. To grow a baseline
+  // deliberately (e.g. seeding a new package), delete eslint-baseline.json
+  // first; an absent file is treated as initial seed.
   if (baseline !== null) {
-    const additions = [];
-    for (const [key, count] of currentCounts) {
-      const baselineCount = baselineCounts.get(key) ?? 0;
-      if (count > baselineCount) {
-        additions.push({ key, delta: count - baselineCount });
-      }
-    }
-    if (additions.length > 0) {
+    const growth = strippedKeyGrowth(baselineCounts, currentCounts);
+    if (growth.length > 0) {
       process.stderr.write(
-        `✖ update would add ${additions.length} new tuple(s) to ${baselinePath}:\n`,
+        `✖ update would grow ${baselinePath} by ${growth.length} net tuple(s):\n`,
       );
-      for (const v of additions) process.stderr.write(describe(v.key, v.delta));
+      for (const v of growth) {
+        const [file, ruleId, message] = v.strippedKey.split("\x00");
+        process.stderr.write(
+          `  +${v.net}  ${file}\n         [${ruleId}] ${message}\n`,
+        );
+      }
       process.stderr.write(
         `\nThe baseline is prune-only. Fix the new violations rather than baselining\n` +
-          `them. For a deliberate baseline reseed (e.g. accepting a new package), delete\n` +
+          `them. (Same-(file,ruleId,message) refactors absorb as 1-for-1 swaps.)\n` +
+          `For a deliberate reseed (e.g. accepting a new package), delete\n` +
           `eslint-baseline.json first and re-run \`lint:baseline:update\`.\n`,
       );
       process.exit(1);
@@ -241,6 +289,50 @@ if (staleEntries.length > 0) {
   );
   for (const v of staleEntries) process.stderr.write(describe(v.key, v.delta));
   failed = true;
+}
+
+// Optional merge-base check: when `ESLINT_BASELINE_MAIN` env var points
+// at a copy of main's `eslint-baseline.json`, also assert that HEAD's
+// baseline doesn't grow net tuples vs main. This catches PRs that edit
+// the baseline file itself (manually or via reseed) to admit new
+// violations alongside the code that introduces them — `update` mode's
+// prune-only guarantee only protects the path through `update`, not
+// hand-edits. Stripped-key absorption matches the update-mode policy:
+// legitimate refactors that move a violation within the same
+// `(file, ruleId, message)` bucket pass; net growth fails. CI extracts
+// main's baseline via `git show origin/main:<pkg>/eslint-baseline.json`
+// and passes the path via this env var.
+const mainBaselinePath = process.env.ESLINT_BASELINE_MAIN;
+if (mainBaselinePath) {
+  let mainBaseline = null;
+  try {
+    const txt = readFileSync(mainBaselinePath, "utf8").trim();
+    if (txt.length > 0) mainBaseline = JSON.parse(txt);
+  } catch {
+    // File missing or unreadable — skip the check rather than failing.
+    // Most commonly: package didn't exist on main yet.
+  }
+  if (Array.isArray(mainBaseline)) {
+    const mainCounts = countMap(mainBaseline);
+    const headCounts = baselineCounts;
+    const growth = strippedKeyGrowth(mainCounts, headCounts);
+    if (growth.length > 0) {
+      process.stderr.write(
+        `✖ ${growth.length} baseline tuple(s) added vs origin/main (per stripped key):\n`,
+      );
+      for (const v of growth) {
+        const [file, ruleId, message] = v.strippedKey.split("\x00");
+        process.stderr.write(
+          `  +${v.net}  ${file}\n         [${ruleId}] ${message}\n`,
+        );
+      }
+      process.stderr.write(
+        `\nBaseline can only shrink across PRs. Fix the new violations rather than\n` +
+          `baselining them. (Same-(file,ruleId,message) refactors absorb as 1-for-1.)\n`,
+      );
+      failed = true;
+    }
+  }
 }
 
 process.exit(failed ? 1 : 0);

@@ -62,10 +62,24 @@ reported line. This content fingerprint:
   different location yields different source content → different
   fingerprint → check fails.
 
-`lint:baseline:update` is **prune-only**: it refuses to write a baseline
-that adds new tuples relative to the existing baseline. New violations
-must be fixed, not baselined. For a deliberate reseed (e.g. accepting a
-new package), delete `eslint-baseline.json` first and re-run the update.
+`lint:baseline:update` is **prune-only with stripped-key absorption**:
+
+- Adding a tuple whose stripped key `(file, ruleId, message)` doesn't
+  exist in the baseline (or exists at a lower count) → rejected.
+- Adding a tuple whose stripped key already exists with a fixed-count
+  swap (1 added + 1 removed) → absorbed as a refactor. This is the
+  case for function renames, signature reformatting, and adjacent edits
+  that shift the linePreview window around an existing violation.
+- Removing tuples → always allowed.
+
+For a deliberate reseed (e.g. accepting a new package), delete
+`eslint-baseline.json` first and re-run the update.
+
+CI also runs a **merge-base growth check** (PRs only): the same
+stripped-key rule applied to the diff between HEAD's
+`eslint-baseline.json` and main's. Hand-editing or reseeding the
+baseline file to admit new violations alongside the introducing code
+gets caught here even when local `update` was bypassed.
 
 Cleanup workflow:
 
@@ -79,7 +93,7 @@ Cleanup workflow:
 Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 191,
 indexer-envio 63 entries.
 
-Six prior baseline mechanisms were rejected:
+Eight prior baseline mechanisms were rejected:
 
 1. `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting,
    so a PR could delete one warning and add another without failing.
@@ -100,6 +114,17 @@ Six prior baseline mechanisms were rejected:
    pure line shifts (unrelated edit above a violation) treated as
    additions, forcing reseeds for non-substantive changes. Now keyed
    on source content, which is stable across shifts.
+7. Strict update mode (codex P2 round 5 #3254674897): adjacent edits
+   that shift the linePreview window around an existing violation
+   reported as forbidden additions, breaking the documented prune
+   workflow. Now `update` absorbs 1-for-1 swaps within the same
+   `(file, ruleId, message)` stripped key.
+8. No CI-side baseline-diff check (codex P2 round 5 #3254674887):
+   `update`'s prune-only guarantee didn't cover hand-edits or
+   `rm + update` reseeds. CI now runs a merge-base growth check on
+   PRs — same stripped-key rule applied to HEAD baseline vs main
+   baseline. Lint can be green locally while CI rejects baseline
+   growth that wasn't matched by removals.
 
 PR 3: `jscpd` duplication check ships as a non-blocking CI job.
 
