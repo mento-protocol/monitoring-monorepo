@@ -3,9 +3,19 @@ name: Mutation Testing
 on:
   workflow_dispatch:
   schedule:
-    # Non-required baseline signal. Keep this out of pull_request until the
-    # runtime/noise tradeoff is re-evaluated.
+    # Weekly advisory baseline for the dashboard job (which stays advisory).
+    # The bridge job is blocking on PRs that touch bridge probe code — see the
+    # `pull_request` trigger + the `break: 80` gate in
+    # `metrics-bridge/stryker.config.mjs`.
     - cron: 17 5 * * 1
+  pull_request:
+    paths:
+      - metrics-bridge/src/rebalance-probe.ts
+      - metrics-bridge/test/rebalance-probe.test.ts
+      - metrics-bridge/stryker.config.mjs
+      - metrics-bridge/vitest.mutation.config.ts
+      - metrics-bridge/package.json
+      - .github/workflows/mutation-testing.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +26,9 @@ permissions:
 
 jobs:
   dashboard-logic-baseline:
+    # Advisory: only runs on cron + manual dispatch. PR runs skip this job —
+    # the dashboard mutation gate is not blocking yet (see BACKLOG).
+    if: github.event_name != 'pull_request'
     name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
@@ -26,6 +39,9 @@ jobs:
         run: pnpm dashboard:mutation
 
   bridge-rebalance-probe-baseline:
+    # Blocking on PRs that change bridge probe code; advisory on cron + manual.
+    # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so any score
+    # drop below 80% fails this job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
