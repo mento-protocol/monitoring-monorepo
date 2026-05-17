@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_42cbbd7adc",
+  "title": "Node source shared-config/src",
+  "summary": "Node/TypeScript source group shared-config/src with 8 files.",
+  "kind": "service",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "shared-config/package.json",
+      "symbol": "shared-config/src",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "shared-config/src/aggregators.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/chains.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/erc20-abi.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/format.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/rebalance-abi.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/thresholds.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/tokens.ts",
+      "reason": "source group shared-config/src"
+    },
+    {
+      "path": "shared-config/src/units.ts",
+      "reason": "source group shared-config/src"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "shared-config/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "shared-config/__tests__/aggregators.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "shared-config/__tests__/chains.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "shared-config/__tests__/format.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "shared-config/__tests__/thresholds.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "shared-config/__tests__/tokens.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "shared-config/__tests__/units.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "shared-config/__tests__/aggregators.test.ts",
+      "command": "pnpm --dir shared-config test"
+    },
+    {
+      "path": "shared-config/__tests__/chains.test.ts",
+      "command": "pnpm --dir shared-config test"
+    },
+    {
+      "path": "shared-config/__tests__/format.test.ts",
+      "command": "pnpm --dir shared-config test"
+    },
+    {
+      "path": "shared-config/__tests__/thresholds.test.ts",
+      "command": "pnpm --dir shared-config test"
+    },
+    {
+      "path": "shared-config/__tests__/tokens.test.ts",
+      "command": "pnpm --dir shared-config test"
+    },
+    {
+      "path": "shared-config/__tests__/units.test.ts",
+      "command": "pnpm --dir shared-config test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/monitoring-config",
+    "project-root:shared-config"
+  ],
+  "trustBoundaries": ["filesystem", "database"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

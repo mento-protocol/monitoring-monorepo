@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-03b742d775-a521_09075fcab7",
+  "featureId": "feat_library_03b742d775",
+  "title": "Snapshot imports can partially commit labels when report writes fail",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/address-labels/snapshot.ts",
+      "startLine": 186,
+      "endLine": 192,
+      "symbol": "handleSnapshot",
+      "quote": "await importLabels(finalLabels);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/snapshot.ts",
+      "startLine": 191,
+      "endLine": 192,
+      "symbol": "handleSnapshot",
+      "quote": "await importReports(reportsToImport);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/address-labels/__tests__/import.test.ts",
+      "startLine": 751,
+      "endLine": 834,
+      "symbol": "handleSnapshot trusted restore mode tests",
+      "quote": null
+    }
+  ],
+  "reasoning": "In merge mode, a snapshot containing both labels and reports writes labels first and reports second. If importReports rejects after importLabels succeeds, the handler returns a generic 500 but Redis has already accepted the label changes, leaving the import half-applied. The tests cover trusted replace mode and happy paths, but not this failure ordering for user-uploaded snapshot imports.",
+  "reproduction": "Mock importLabels to resolve and importReports to reject, then call handleSnapshot with both addresses and reports in default merge mode. The response is 500 while importLabels has already been called with the new labels.",
+  "recommendation": "Write snapshot labels and reports through one atomic Redis helper for merge-mode imports, or otherwise restructure the API so failures cannot report a full import failure after committing only one half. At minimum, add explicit partial-success handling instead of returning an indistinguishable 500.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests verify trusted replace mode uses replaceSnapshotHashes and happy-path report imports, but they do not simulate importReports failing after labels have been written.",
+  "suggestedRegressionTest": "Add a handleSnapshot test that mocks importLabels as successful and importReports as rejected, then asserts the implementation uses an atomic combined writer or does not leave label writes committed before returning failure.",
+  "minimumFixScope": "ui-dashboard/src/lib/address-labels/snapshot.ts and the Redis write helper used for snapshot imports, plus a failure-ordering regression test",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: snapshot merge imports now write labels and reports through a combined Redis EVAL helper instead of sequential importLabels/importReports calls.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T11:55:20.741Z"
+    }
+  ],
+  "signature": "sig_feat-library-03b742d775_a521dbe635",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T112745-251359",
+  "createdAt": "2026-05-17T11:30:30.518Z",
+  "updatedAt": "2026-05-17T11:55:20.741Z"
+}

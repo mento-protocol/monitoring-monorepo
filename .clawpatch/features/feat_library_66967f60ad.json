@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_66967f60ad",
+  "title": "Node source ui-dashboard/src/app/api/hasura",
+  "summary": "Node/TypeScript source file ui-dashboard/src/app/api/hasura/[networkId]/route.ts.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/app/api/hasura",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/api/hasura/[networkId]/route.ts",
+      "reason": "source group ui-dashboard/src/app/api/hasura"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/backup/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/restore/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-reports/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/__tests__/route.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/hasura/[networkId]/__tests__/route.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/backup/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/restore/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-reports/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/hasura/[networkId]/__tests__/route.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

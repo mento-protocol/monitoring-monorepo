@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_b1ca2ca596",
+  "title": "@mento-protocol/ui-dashboard route /",
+  "summary": "Web route implemented by ui-dashboard/src/app/page.tsx in project @mento-protocol/ui-dashboard.",
+  "kind": "route",
+  "source": "next-app-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/app/page.tsx",
+      "symbol": null,
+      "route": "/",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/page.tsx",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/tsconfig.json",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/next.config.ts",
+      "reason": "project context"
+    },
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "reason": "nearby test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts",
+      "reason": "nearby test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "reason": "nearby test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "reason": "nearby test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "next",
+    "web",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

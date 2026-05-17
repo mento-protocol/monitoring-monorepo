@@ -1,7 +1,7 @@
 import {
-  ARKHAM_TAG,
   sanitizeEntry,
   type AddressEntry,
+  withoutArkhamTags,
 } from "@/lib/address-labels-shared";
 
 /**
@@ -18,7 +18,7 @@ export function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
   return {
     ...entry,
     source: undefined,
-    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+    tags: withoutArkhamTags(entry.tags),
   };
 }
 

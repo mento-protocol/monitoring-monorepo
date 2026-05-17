@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_service_ae4d4cdaac",
+  "title": "Node package @mento-protocol/monitoring-config",
+  "summary": "Node package manifest at shared-config/package.json.",
+  "kind": "service",
+  "source": "node-package",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "shared-config/package.json",
+      "symbol": "@mento-protocol/monitoring-config",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "shared-config/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "shared-config/tsconfig.json",
+      "reason": "package context"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "package",
+    "project:@mento-protocol/monitoring-config",
+    "project-root:shared-config",
+    "workspace"
+  ],
+  "trustBoundaries": ["filesystem", "database"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

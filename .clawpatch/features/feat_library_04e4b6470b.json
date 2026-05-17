@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_04e4b6470b",
+  "title": "Node package @mento-protocol/indexer-envio",
+  "summary": "Node package manifest at indexer-envio/package.json.",
+  "kind": "library",
+  "source": "node-package",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "indexer-envio/package.json",
+      "symbol": "@mento-protocol/indexer-envio",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "indexer-envio/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "indexer-envio/README.md",
+      "reason": "package context"
+    },
+    {
+      "path": "indexer-envio/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "indexer-envio/tsconfig.json",
+      "reason": "package context"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "package",
+    "project:@mento-protocol/indexer-envio",
+    "project-root:indexer-envio",
+    "workspace"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

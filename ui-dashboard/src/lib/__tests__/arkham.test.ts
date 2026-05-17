@@ -360,10 +360,10 @@ describe("isArkhamSourced", () => {
     expect(isArkhamSourced({ source: "", tags: ["exchange"] })).toBe(false);
   });
 
-  it("is case-sensitive on the legacy sentinel", () => {
-    // A user-supplied tag "Arkham" or "ARKHAM" must NOT count as Arkham-sourced.
-    expect(isArkhamSourced({ tags: ["Arkham"] })).toBe(false);
+  it("does not treat non-exact manual display tags as Arkham provenance", () => {
+    expect(isArkhamSourced({ tags: [" Arkham "] })).toBe(false);
     expect(isArkhamSourced({ tags: ["ARKHAM"] })).toBe(false);
+    expect(isArkhamSourced({ tags: ["arkhamist"] })).toBe(false);
   });
 });
 
@@ -372,6 +372,26 @@ describe("normalizeArkhamLegacy", () => {
     const entry: AddressEntry = {
       name: "Binance",
       tags: [ARKHAM_TAG, "exchange"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const normalized = normalizeArkhamLegacy(entry);
+    expect(normalized.source).toBe("arkham");
+    expect(normalized.tags).toEqual(["exchange"]);
+  });
+
+  it("leaves non-exact manual display tags untouched", () => {
+    const entry: AddressEntry = {
+      name: "Binance",
+      tags: [" Arkham ", "exchange"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(normalizeArkhamLegacy(entry)).toBe(entry);
+  });
+
+  it("strips reserved Arkham tag variants once exact legacy provenance exists", () => {
+    const entry: AddressEntry = {
+      name: "Binance",
+      tags: [ARKHAM_TAG, " ARKHAM ", "exchange"],
       updatedAt: "2026-01-01T00:00:00Z",
     };
     const normalized = normalizeArkhamLegacy(entry);
@@ -593,7 +613,7 @@ describe("mergeRefreshEntry", () => {
     // Merge must still treat it as Arkham-sourced AND strip the sentinel.
     const legacy: AddressEntry = {
       name: "Binance",
-      tags: [ARKHAM_TAG, "exchange", "user-curated"],
+      tags: [ARKHAM_TAG, " ARKHAM ", "exchange", "user-curated"],
       notes: "user note",
       isPublic: true,
       updatedAt: "2026-01-01T00:00:00Z",
@@ -601,6 +621,7 @@ describe("mergeRefreshEntry", () => {
     const merged = mergeRefreshEntry(legacy, fresh);
     expect(merged.source).toBe("arkham");
     expect(merged.tags).not.toContain(ARKHAM_TAG);
+    expect(merged.tags).not.toContain(" ARKHAM ");
     expect(merged.tags).toContain("user-curated");
     expect(merged.tags).toContain("exchange");
     expect(merged.notes).toBe("user note");

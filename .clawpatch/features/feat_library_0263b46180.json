@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_0263b46180",
+  "title": "Node source ui-dashboard/src/components#5",
+  "summary": "Node/TypeScript source group ui-dashboard/src/components#5 with 11 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/components#5",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/components/table-search.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/table.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/tag-input.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/tag-pills.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/tags-cell.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/time-series-chart-card-hooks.ts",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/time-series-chart-card-overlays.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/time-series-chart-card.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/tvl-over-time-chart.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/tx-hash-cell.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    },
+    {
+      "path": "ui-dashboard/src/components/volume-over-time-chart.tsx",
+      "reason": "source group ui-dashboard/src/components#5"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-form.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-link.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breaker-panel.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": ["fnd_sig-feat-library-0263b46180-1f11_92d317bfaa"],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260517T112745-251359",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-17T11:30:58.716Z"
+    }
+  ],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:55:14.164Z"
+}

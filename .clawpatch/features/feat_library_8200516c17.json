@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_8200516c17",
+  "title": "Node source ui-dashboard/src/app/address-book",
+  "summary": "Node/TypeScript source group ui-dashboard/src/app/address-book with 4 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/app/address-book",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/address-book/AddressBookClient.tsx",
+      "reason": "source group ui-dashboard/src/app/address-book"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/error.tsx",
+      "reason": "source group ui-dashboard/src/app/address-book"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/loading.tsx",
+      "reason": "source group ui-dashboard/src/app/address-book"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/page.tsx",
+      "reason": "source group ui-dashboard/src/app/address-book"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/AddressBookClient.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/row-composition.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/_lib/address-book-rows.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/AddressBookClient.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/row-composition.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/_lib/address-book-rows.test.ts",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

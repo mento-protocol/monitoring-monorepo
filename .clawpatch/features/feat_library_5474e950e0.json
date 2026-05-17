@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_5474e950e0",
+  "title": "Node source metrics-bridge/src",
+  "summary": "Node/TypeScript source group metrics-bridge/src with 11 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "metrics-bridge/package.json",
+      "symbol": "metrics-bridge/src",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "metrics-bridge/src/config.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/deviation-alert-state.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/graphql.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/main.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/metrics.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/poller.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/rebalance-check.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/rebalance-probe.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/rpc.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/server.ts",
+      "reason": "source group metrics-bridge/src"
+    },
+    {
+      "path": "metrics-bridge/src/types.ts",
+      "reason": "source group metrics-bridge/src"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "metrics-bridge/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "metrics-bridge/test/deviation-alert-state.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/graphql.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/metrics.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/poller.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/rebalance-check.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/rebalance-probe.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/rpc.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "metrics-bridge/test/server.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "metrics-bridge/test/deviation-alert-state.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/graphql.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/metrics.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/poller.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/rebalance-check.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/rebalance-probe.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/rpc.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    },
+    {
+      "path": "metrics-bridge/test/server.test.ts",
+      "command": "pnpm --dir metrics-bridge test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/metrics-bridge",
+    "project-root:metrics-bridge"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

@@ -35,13 +35,17 @@ vi.mock("@/lib/address-reports", async () => {
 });
 
 vi.mock("@/lib/address-label-restore-writes", () => ({
+  importSnapshotHashes: vi.fn().mockResolvedValue(undefined),
   replaceSnapshotHashes: vi.fn().mockResolvedValue(undefined),
 }));
 
 import type { AddressEntry } from "@/lib/address-labels";
 import { getLabels, importLabels } from "@/lib/address-labels";
 import { importReports } from "@/lib/address-reports";
-import { replaceSnapshotHashes } from "@/lib/address-label-restore-writes";
+import {
+  importSnapshotHashes,
+  replaceSnapshotHashes,
+} from "@/lib/address-label-restore-writes";
 
 import {
   emptyCounts,
@@ -73,6 +77,9 @@ beforeEach(() => {
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (importSnapshotHashes as ReturnType<typeof vi.fn>).mockResolvedValue(
+    undefined,
+  );
   (replaceSnapshotHashes as ReturnType<typeof vi.fn>).mockResolvedValue(
     undefined,
   );
@@ -295,6 +302,13 @@ describe("stripArkhamProvenance", () => {
   it("removes the legacy `arkham` tag from tags", () => {
     const result = stripArkhamProvenance(
       entry({ tags: ["arkham", "exchange"] }),
+    );
+    expect(result.tags).toEqual(["exchange"]);
+  });
+
+  it("removes whitespace-padded arkham provenance before tag sanitization", () => {
+    const result = stripArkhamProvenance(
+      entry({ tags: [" arkham ", "exchange"] }),
     );
     expect(result.tags).toEqual(["exchange"]);
   });
@@ -748,6 +762,82 @@ describe("emptyCounts", () => {
   });
 });
 
+describe("handleSnapshot merge mode", () => {
+  it("writes labels and reports through one combined snapshot import", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({ name: "Imported label", tags: ["exchange"] }),
+        },
+        reports: {
+          [ADDR_B]: {
+            body: "report",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+            version: 1,
+          },
+        },
+      },
+      { importerEmail: "alice@mentolabs.xyz" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      imported: { addresses: 1, reports: 1 },
+    });
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+    expect(importSnapshotHashes).toHaveBeenCalledWith({
+      labels: {
+        [ADDR_A]: expect.objectContaining({
+          name: "Imported label",
+          tags: ["exchange"],
+          source: undefined,
+        }),
+      },
+      reports: {
+        [ADDR_B]: expect.objectContaining({
+          body: "report",
+          authorEmail: "alice@mentolabs.xyz",
+          source: "import",
+          version: 1,
+        }),
+      },
+    });
+  });
+
+  it("does not write labels separately when the combined snapshot import fails", async () => {
+    (importSnapshotHashes as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("redis down"),
+    );
+
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({ name: "Imported label", tags: ["exchange"] }),
+        },
+        reports: {
+          [ADDR_B]: {
+            body: "report",
+            createdAt: "2026-05-01T00:00:00.000Z",
+            updatedAt: "2026-05-02T00:00:00.000Z",
+            version: 1,
+          },
+        },
+      },
+      { importerEmail: "alice@mentolabs.xyz" },
+    );
+
+    expect(res.status).toBe(500);
+    expect(importSnapshotHashes).toHaveBeenCalledOnce();
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleSnapshot trusted restore mode", () => {
   it("replaces labels and reports while preserving trusted provenance metadata", async () => {
     const res = await handleSnapshot(
@@ -786,6 +876,7 @@ describe("handleSnapshot trusted restore mode", () => {
       imported: { addresses: 1, reports: 1 },
     });
     expect(getLabels).not.toHaveBeenCalled();
+    expect(importSnapshotHashes).not.toHaveBeenCalled();
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
     expect(replaceSnapshotHashes).toHaveBeenCalledWith({
@@ -829,6 +920,7 @@ describe("handleSnapshot trusted restore mode", () => {
       labels: {},
       reports: {},
     });
+    expect(importSnapshotHashes).not.toHaveBeenCalled();
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
   });

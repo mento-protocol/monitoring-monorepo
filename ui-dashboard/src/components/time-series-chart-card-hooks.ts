@@ -28,7 +28,7 @@ export type CrossFadeCombo = {
  * stay cheap (≤3 → 8 plots).
  *
  * Returns:
- * - `hiddenIdx` / `setHiddenIdx` — current trace-visibility state.
+ * - `hiddenIdx` — current trace-visibility state.
  * - `handleLegendClick` — Plotly legend handler that toggles visibility
  *   through React state instead of Plotly's internal toggle (returns
  *   `false` to suppress the native handler).
@@ -45,12 +45,16 @@ export function useCrossFade(params: {
   baseLayout: ChartLayout;
 }): {
   hiddenIdx: Set<number>;
-  setHiddenIdx: React.Dispatch<React.SetStateAction<Set<number>>>;
   handleLegendClick: (e: { readonly curveNumber: number }) => boolean;
   crossFadeData: CrossFadeCombo[] | null;
 } {
   const { enabled, breakdownCount, series, breakdown, baseLayout } = params;
-  const [hiddenIdx, setHiddenIdx] = useState<Set<number>>(() => new Set());
+  const currentBreakdown = useMemo(() => breakdown ?? [], [breakdown]);
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(() => new Set());
+  const hiddenIdx = useMemo(
+    () => hiddenSeriesKeysToIndexes(currentBreakdown, hiddenKeys),
+    [currentBreakdown, hiddenKeys],
+  );
 
   const combos = useMemo(() => {
     if (!enabled) return [];
@@ -65,10 +69,9 @@ export function useCrossFade(params: {
 
   const crossFadeData = useMemo<CrossFadeCombo[] | null>(() => {
     if (!enabled) return null;
-    const breakdownArr = breakdown ?? [];
     return combos.map((combo) => {
       const dayBuckets = new Map<number, number>();
-      breakdownArr.forEach((b, i) => {
+      currentBreakdown.forEach((b, i) => {
         if (combo.has(i)) return;
         b.series.forEach((p) => {
           dayBuckets.set(
@@ -83,7 +86,7 @@ export function useCrossFade(params: {
       );
       const yRange: [number, number] = [0, Math.max(visibleMax * 1.1, 1)];
 
-      const comboTraces = breakdownArr.map((b, i) => {
+      const comboTraces = currentBreakdown.map((b, i) => {
         const safeName = escapePlotText(b.name);
         return {
           x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
@@ -115,21 +118,45 @@ export function useCrossFade(params: {
         layout: comboLayout,
       };
     });
-  }, [enabled, series, breakdown, combos, baseLayout]);
+  }, [enabled, series, currentBreakdown, combos, baseLayout]);
 
   // Returns false to suppress Plotly's native legend toggle so visibility
   // flows through React state (which drives the cross-fade).
-  const handleLegendClick = (e: { readonly curveNumber: number }): boolean => {
-    setHiddenIdx((prev) => {
-      const next = new Set(prev);
-      if (next.has(e.curveNumber)) next.delete(e.curveNumber);
-      else next.add(e.curveNumber);
-      return next;
-    });
-    return false;
-  };
+  const handleLegendClick = useCallback(
+    (e: { readonly curveNumber: number }): boolean => {
+      const seriesKey = currentBreakdown[e.curveNumber]
+        ? breakdownVisibilityKey(currentBreakdown[e.curveNumber])
+        : null;
+      if (seriesKey === null) return false;
+      setHiddenKeys((prev) => {
+        const next = new Set(prev);
+        if (next.has(seriesKey)) next.delete(seriesKey);
+        else next.add(seriesKey);
+        return next;
+      });
+      return false;
+    },
+    [currentBreakdown],
+  );
 
-  return { hiddenIdx, setHiddenIdx, handleLegendClick, crossFadeData };
+  return { hiddenIdx, handleLegendClick, crossFadeData };
+}
+
+export function breakdownVisibilityKey(series: BreakdownSeries): string {
+  return series.id ?? `${series.color}-${series.name}`;
+}
+
+export function hiddenSeriesKeysToIndexes(
+  breakdown: ReadonlyArray<BreakdownSeries>,
+  hiddenKeys: ReadonlySet<string>,
+): Set<number> {
+  const hiddenIdx = new Set<number>();
+  breakdown.forEach((series, index) => {
+    if (hiddenKeys.has(breakdownVisibilityKey(series))) {
+      hiddenIdx.add(index);
+    }
+  });
+  return hiddenIdx;
 }
 
 export function setEquals<T>(a: Set<T>, b: Set<T>): boolean {

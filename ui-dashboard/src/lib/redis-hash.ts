@@ -35,25 +35,75 @@ end
 return 1
 `;
 
+const MERGE_HASHES_SCRIPT = `
+local hsetFieldChunkSize = ${REDIS_HSET_FIELD_CHUNK_SIZE}
+local argIndex = 1
+for keyIndex = 1, #KEYS do
+  local key = KEYS[keyIndex]
+  local fieldCount = tonumber(ARGV[argIndex])
+  argIndex = argIndex + 1
+
+  if fieldCount > 0 then
+    local remainingFields = fieldCount
+    while remainingFields > 0 do
+      local chunkFieldCount = math.min(remainingFields, hsetFieldChunkSize)
+      local chunkEndArg = argIndex + (chunkFieldCount * 2) - 1
+      redis.call('HSET', key, unpack(ARGV, argIndex, chunkEndArg))
+      argIndex = chunkEndArg + 1
+      remainingFields = remainingFields - chunkFieldCount
+    end
+  end
+end
+return 1
+`;
+
 export async function replaceRedisHashes(
   redis: RedisEvalClient,
   replacements: RedisHashReplacement[],
+): Promise<void> {
+  await evalHashWriteScript(
+    redis,
+    REPLACE_HASHES_SCRIPT,
+    replacements,
+    "replacement",
+  );
+}
+
+export async function mergeRedisHashes(
+  redis: RedisEvalClient,
+  replacements: RedisHashReplacement[],
+): Promise<void> {
+  await evalHashWriteScript(
+    redis,
+    MERGE_HASHES_SCRIPT,
+    replacements.filter(
+      (replacement) => Object.keys(replacement.fields).length > 0,
+    ),
+    "merge",
+  );
+}
+
+async function evalHashWriteScript(
+  redis: RedisEvalClient,
+  script: string,
+  replacements: RedisHashReplacement[],
+  operation: "replacement" | "merge",
 ): Promise<void> {
   if (replacements.length === 0) return;
 
   const keys = replacements.map((replacement) => replacement.key);
   const argv = flattenHashReplacements(replacements);
   const requestBytes = Buffer.byteLength(
-    JSON.stringify([REPLACE_HASHES_SCRIPT, keys, argv]),
+    JSON.stringify([script, keys, argv]),
     "utf8",
   );
   if (requestBytes > MAX_REDIS_HASH_REPLACE_BYTES) {
     throw new Error(
-      `Redis hash replacement payload exceeds ${MAX_REDIS_HASH_REPLACE_BYTES} bytes`,
+      `Redis hash ${operation} payload exceeds ${MAX_REDIS_HASH_REPLACE_BYTES} bytes`,
     );
   }
 
-  await redis.eval(REPLACE_HASHES_SCRIPT, keys, argv);
+  await redis.eval(script, keys, argv);
 }
 
 export function flattenHashReplacements(

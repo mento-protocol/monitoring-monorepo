@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_4ce67c1b09",
+  "title": "@mento-protocol/ui-dashboard route /pool/:poolId",
+  "summary": "Web route implemented by ui-dashboard/src/app/pool/[poolId]/page.tsx in project @mento-protocol/ui-dashboard.",
+  "kind": "route",
+  "source": "next-app-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.tsx",
+      "symbol": null,
+      "route": "/pool/:poolId",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.tsx",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/tsconfig.json",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/next.config.ts",
+      "reason": "project context"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/page.test.tsx",
+      "reason": "nearby test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.test.tsx",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/__tests__/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/page.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": [
+    "next",
+    "web",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

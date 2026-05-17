@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_release_d51cee03c1",
+  "title": "Package script start (@mento-protocol/indexer-envio)",
+  "summary": "Package script 'start' in indexer-envio/package.json: node ./scripts/run-envio-with-env.mjs start",
+  "kind": "release",
+  "source": "package-json-script",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "indexer-envio/package.json",
+      "symbol": "start",
+      "route": null,
+      "command": "start"
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "indexer-envio/package.json",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "node",
+    "package-script",
+    "project:@mento-protocol/indexer-envio",
+    "project-root:indexer-envio"
+  ],
+  "trustBoundaries": ["process-exec", "filesystem"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

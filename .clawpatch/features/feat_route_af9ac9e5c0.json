@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_route_af9ac9e5c0",
+  "title": "@mento-protocol/ui-dashboard route /leaderboard",
+  "summary": "Web route implemented by ui-dashboard/src/app/leaderboard/page.tsx in project @mento-protocol/ui-dashboard.",
+  "kind": "route",
+  "source": "next-app-route",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page.tsx",
+      "symbol": null,
+      "route": "/leaderboard",
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page.tsx",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/AGENTS.md",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/tsconfig.json",
+      "reason": "package context"
+    },
+    {
+      "path": "ui-dashboard/next.config.ts",
+      "reason": "project context"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "next",
+    "web",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

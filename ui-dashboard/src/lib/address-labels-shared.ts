@@ -76,16 +76,29 @@ export const ARKHAM_TAG = "arkham";
 /** Provenance marker for the MiniPay tagging cron. */
 export const MINIPAY_SOURCE = "minipay";
 
+function isReservedArkhamTag(tag: string): boolean {
+  return tag.trim().toLowerCase() === ARKHAM_TAG;
+}
+
+export function withoutArkhamTags(tags: readonly string[]): string[] {
+  return tags.filter((tag) => !isReservedArkhamTag(tag));
+}
+
+function hasLegacyArkhamSentinel(tags: readonly string[] | undefined): boolean {
+  return tags?.includes(ARKHAM_TAG) === true;
+}
+
 /**
  * True when an existing entry was written by the Arkham enrichment cron.
  * Accepts both the new shape (`source === "arkham"`) and legacy entries
- * predating the source field (`tags` includes the sentinel).
+ * predating the source field (`tags` includes the exact sentinel). Non-exact
+ * display tags such as "Arkham" remain manual labels.
  */
 export function isArkhamSourced(entry: {
   source?: string;
   tags?: string[];
 }): boolean {
-  return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
+  return entry.source === "arkham" || hasLegacyArkhamSentinel(entry.tags);
 }
 
 /** True when an existing entry was written by the MiniPay tagging cron. */
@@ -161,9 +174,10 @@ export function mergeEntries(
 }
 
 /**
- * Normalise a legacy-shaped entry (`tags` carries the `ARKHAM_TAG` sentinel,
- * no `source` field) into the new shape (`source: "arkham"`, sentinel removed
- * from tags). New-shape entries pass through untouched.
+ * Normalise a legacy-shaped entry (`tags` carries the exact `ARKHAM_TAG`
+ * sentinel, no `source` field) into the new shape (`source: "arkham"`,
+ * reserved sentinel variants removed from tags). New-shape entries pass
+ * through untouched.
  *
  * Apply this at READ-direction UI boundaries so editor pre-fill, autocomplete
  * suggestions, and the table all see the same clean tag list. Do NOT apply
@@ -171,13 +185,13 @@ export function mergeEntries(
  * `tags: ["arkham"]` to Arkham-sourced (see `stripArkhamProvenance` instead).
  */
 export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
-  if (entry.source === "arkham" || !entry.tags?.includes(ARKHAM_TAG)) {
+  if (entry.source === "arkham" || !hasLegacyArkhamSentinel(entry.tags)) {
     return entry;
   }
   return {
     ...entry,
     source: "arkham",
-    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+    tags: withoutArkhamTags(entry.tags),
   };
 }
 

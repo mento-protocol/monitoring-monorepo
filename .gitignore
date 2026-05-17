@@ -17,6 +17,8 @@ dist/
 .claude/worktrees
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+.claude/*.jq
+.claude/*.graphql
 .reviews/
 .tmp/
 WORK.md
@@ -34,3 +36,9 @@ CLAUDE.md
 # in a public git history. Drafts live here, get reviewed locally, and
 # get uploaded to Upstash via the `/forensic-report` skill — not git.
 .investigations/
+
+# clawpatch.ai
+.clawpatch/runs/
+.clawpatch/patches/
+.clawpatch/reports/
+.clawpatch/locks/

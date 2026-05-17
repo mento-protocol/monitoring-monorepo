@@ -4,6 +4,7 @@ import type { AddressEntry } from "@/lib/address-labels-shared";
 import type { AddressReport } from "@/lib/address-reports-shared";
 import { getRedis } from "@/lib/redis";
 import {
+  mergeRedisHashes,
   replaceRedisHashes,
   type RedisHashReplacement,
 } from "@/lib/redis-hash";
@@ -16,6 +17,18 @@ type SnapshotHashReplacement = {
 export async function replaceSnapshotHashes(
   replacement: SnapshotHashReplacement,
 ): Promise<void> {
+  await replaceRedisHashes(getRedis(), snapshotHashReplacements(replacement));
+}
+
+export async function importSnapshotHashes(
+  replacement: SnapshotHashReplacement,
+): Promise<void> {
+  await mergeRedisHashes(getRedis(), snapshotHashReplacements(replacement));
+}
+
+function snapshotHashReplacements(
+  replacement: SnapshotHashReplacement,
+): RedisHashReplacement[] {
   const replacements: RedisHashReplacement[] = [];
   if (replacement.labels !== undefined) {
     replacements.push({
@@ -30,5 +43,5 @@ export async function replaceSnapshotHashes(
     });
   }
 
-  await replaceRedisHashes(getRedis(), replacements);
+  return replacements;
 }

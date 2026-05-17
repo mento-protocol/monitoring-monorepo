@@ -38,9 +38,15 @@ vi.mock("@/lib/address-reports", async () => {
   };
 });
 
+vi.mock("@/lib/address-label-restore-writes", () => ({
+  importSnapshotHashes: vi.fn().mockResolvedValue(undefined),
+  replaceSnapshotHashes: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { getAuthSession } from "@/auth";
 import { importLabels, getLabels } from "@/lib/address-labels";
 import { importReports } from "@/lib/address-reports";
+import { importSnapshotHashes } from "@/lib/address-label-restore-writes";
 
 type ImportedCounts = { addresses: number };
 
@@ -75,6 +81,9 @@ beforeEach(() => {
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (importLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   (importReports as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (importSnapshotHashes as ReturnType<typeof vi.fn>).mockResolvedValue(
+    undefined,
+  );
 });
 
 describe("POST /api/address-labels/import", () => {
@@ -184,6 +193,7 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
+    expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
     expect(importReports).not.toHaveBeenCalled();
   });
 
@@ -210,10 +220,13 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(importLabels).toHaveBeenCalledTimes(1);
-    expect(importReports).toHaveBeenCalledTimes(1);
-    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+    expect(importLabels).not.toHaveBeenCalled();
+    expect(importReports).not.toHaveBeenCalled();
+    expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
+    const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
+      .mock.calls[0];
+    const reportArg = snapshotArg.reports;
+    expect(reportArg).toBeDefined();
     const restored = reportArg[validAddress.toLowerCase()];
     expect(restored.body).toBe("Investigation");
     // Server-controlled metadata is re-stamped: importer's email becomes
@@ -245,8 +258,11 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [reportArg] = (importReports as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+    expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
+    const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
+      .mock.calls[0];
+    const reportArg = snapshotArg.reports;
+    expect(reportArg).toBeDefined();
     const restored = reportArg[validAddress.toLowerCase()];
     expect(restored.authorEmail).toBe("alice@mentolabs.xyz");
     expect(restored.source).toBe("import");
@@ -274,7 +290,14 @@ describe("POST /api/address-labels/import", () => {
     );
     expect(res.status).toBe(200);
     expect(importLabels).not.toHaveBeenCalled();
-    expect(importReports).toHaveBeenCalledTimes(1);
+    expect(importReports).not.toHaveBeenCalled();
+    expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
+    const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
+      .mock.calls[0];
+    expect(snapshotArg.labels).toBeUndefined();
+    expect(snapshotArg.reports[validAddress.toLowerCase()].body).toBe(
+      "Investigation only",
+    );
   });
 
   it("rejects a snapshot whose `reports` key is not a plain object", async () => {

@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_ed610b501e",
+  "title": "Node source indexer-envio/src#1",
+  "summary": "Node/TypeScript source group indexer-envio/src#1 with 12 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "indexer-envio/package.json",
+      "symbol": "indexer-envio/src#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "indexer-envio/src/EventHandlers.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/EventHandlersBridgeOnly.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/abis.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/aggregators.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/breakers.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/bridge.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/constants.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/contractAddresses.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/deviationBreach.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/feeToken.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/healthScore.ts",
+      "reason": "source group indexer-envio/src#1"
+    },
+    {
+      "path": "indexer-envio/src/helpers.ts",
+      "reason": "source group indexer-envio/src#1"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "indexer-envio/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "indexer-envio/test/aggregators.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/breakers.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/bridge.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/deviationBreach.test.ts",
+      "reason": "associated test"
+    },
+    {
+      "path": "indexer-envio/test/healthScore.test.ts",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "indexer-envio/test/aggregators.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/breakers.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/bridge.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/deviationBreach.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    },
+    {
+      "path": "indexer-envio/test/healthScore.test.ts",
+      "command": "pnpm --dir indexer-envio test"
+    }
+  ],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/indexer-envio",
+    "project-root:indexer-envio"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

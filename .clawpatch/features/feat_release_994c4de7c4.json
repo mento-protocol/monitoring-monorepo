@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_release_994c4de7c4",
+  "title": "Package script lint (@mento-protocol/metrics-bridge)",
+  "summary": "Package script 'lint' in metrics-bridge/package.json: eslint .",
+  "kind": "release",
+  "source": "package-json-script",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "metrics-bridge/package.json",
+      "symbol": "lint",
+      "route": null,
+      "command": "lint"
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "metrics-bridge/package.json",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "node",
+    "package-script",
+    "project:@mento-protocol/metrics-bridge",
+    "project-root:metrics-bridge"
+  ],
+  "trustBoundaries": ["process-exec", "filesystem"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

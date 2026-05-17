@@ -181,7 +181,7 @@ describe("PUT /api/address-labels", () => {
       jsonReq({
         address: VALID_ADDR,
         name: "Alice",
-        tags: ["arkham", "minipay", "whale"],
+        tags: ["arkham", " Arkham ", "minipay", "whale"],
       }),
     );
     expect(res.status).toBe(200);
@@ -217,6 +217,20 @@ describe("PUT /api/address-labels", () => {
     const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(entry.source).toBe("arkham");
     expect(entry.createdAt).toBe("2025-01-01T00:00:00Z");
+  });
+
+  it("does not preserve Arkham source from non-exact manual display tags", async () => {
+    (getLabel as ReturnType<typeof vi.fn>).mockResolvedValue({
+      name: "Manual Arkham tag",
+      tags: ["ARKHAM"],
+      updatedAt: "2025-01-01T00:00:00Z",
+    });
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "User edit", tags: ["whale"] }),
+    );
+    expect(res.status).toBe(200);
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(entry.source).toBeUndefined();
   });
 
   it("preserves MiniPay source on edit", async () => {

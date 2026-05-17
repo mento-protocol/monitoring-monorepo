@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_8bd8f6b268",
+  "title": "React component deviation-cell",
+  "summary": "React component implemented by ui-dashboard/src/components/pool-header/deviation-cell.tsx.",
+  "kind": "ui-flow",
+  "source": "react-component",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/src/components/pool-header/deviation-cell.tsx",
+      "symbol": "deviation-cell",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/components/pool-header/deviation-cell.tsx",
+      "reason": "component implementation"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/deviation-cell.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/oracle-price-value.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/rebalance-status-value.test.tsx",
+      "reason": "associated test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/uptime-value.test.tsx",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/deviation-cell.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/oracle-price-value.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/rebalance-status-value.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/__tests__/uptime-value.test.tsx",
+      "command": "pnpm --dir ui-dashboard test"
+    }
+  ],
+  "tags": ["react", "component", "web"],
+  "trustBoundaries": ["user-input", "network", "serialization"],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}

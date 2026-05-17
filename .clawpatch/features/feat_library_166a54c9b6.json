@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_166a54c9b6",
+  "title": "Node source ui-dashboard/src/lib/network-fetcher",
+  "summary": "Node/TypeScript source group ui-dashboard/src/lib/network-fetcher with 2 files.",
+  "kind": "library",
+  "source": "node-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "ui-dashboard/package.json",
+      "symbol": "ui-dashboard/src/lib/network-fetcher",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "ui-dashboard/src/lib/network-fetcher/fetch.ts",
+      "reason": "source group ui-dashboard/src/lib/network-fetcher"
+    },
+    {
+      "path": "ui-dashboard/src/lib/network-fetcher/types.ts",
+      "reason": "source group ui-dashboard/src/lib/network-fetcher"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "ui-dashboard/package.json",
+      "reason": "package manifest"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "node",
+    "typescript",
+    "source-group",
+    "project:@mento-protocol/ui-dashboard",
+    "project-root:ui-dashboard"
+  ],
+  "trustBoundaries": [],
+  "status": "pending",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [],
+  "createdAt": "2026-05-17T11:26:44.015Z",
+  "updatedAt": "2026-05-17T11:26:44.015Z"
+}
