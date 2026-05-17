@@ -120,6 +120,7 @@ jobs:
               - scripts/**/*.mjs
               - scripts/**/*.cjs
               - scripts/**/*.js
+              - scripts/**/*.sh
               - eslint.config.mjs
               - .dependency-cruiser.cjs
               - pnpm-lock.yaml
@@ -347,11 +348,11 @@ jobs:
         if: always()
 
   scripts:
-    name: Lint root scripts
+    name: Lint + test root scripts
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 3
+    timeout-minutes: 5
     permissions:
       checks: write
       contents: read
@@ -361,6 +362,17 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
+      - name: Agent quality-gate routing regression suite
+        # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
+        # Without this in CI, a routing regression only fails locally (pre-push)
+        # and could merge if a contributor bypasses the local gate.
+        run: pnpm agent:quality-gate:test
+      - name: ESLint baseline-diff semantic suite
+        # Direct behavioral coverage of scripts/eslint-baseline-diff.mjs
+        # (matching, growth detection, line-proximity absorption, merge-base
+        # check). The wrapper is now load-bearing CI policy; routing tests
+        # alone don't prove it behaves correctly.
+        run: node scripts/eslint-baseline-diff.test.mjs
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
