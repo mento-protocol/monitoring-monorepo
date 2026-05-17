@@ -2,961 +2,1147 @@
   {
     "file": "src/app/address-book/_components/address-table-row.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressTableRow' has a complexity of 28. Maximum allowed is 15."
+    "message": "Function 'AddressTableRow' has a complexity of 28. Maximum allowed is 15.",
+    "linePreview": " | export function AddressTableRow({ | address,"
   },
   {
     "file": "src/app/address-book/_components/address-table-row.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressTableRow' has too many lines (202). Maximum allowed is 100."
+    "message": "Function 'AddressTableRow' has too many lines (202). Maximum allowed is 100.",
+    "linePreview": " | export function AddressTableRow({ | address,"
   },
   {
     "file": "src/app/address-book/_components/address-table-row.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed.",
+    "linePreview": " | export function AddressTableRow({ | address,"
   },
   {
     "file": "src/app/address-book/[address]/_components/address-detail-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressDetailPageClient' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'AddressDetailPageClient' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
   },
   {
     "file": "src/app/address-book/[address]/_components/address-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressDetailPageClient' has too many lines (215). Maximum allowed is 100."
+    "message": "Function 'AddressDetailPageClient' has too many lines (215). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
   },
   {
     "file": "src/app/address-book/AddressBookClient.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressBookPage' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'AddressBookPage' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
   },
   {
     "file": "src/app/address-book/AddressBookClient.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressBookPage' has too many lines (332). Maximum allowed is 100."
+    "message": "Function 'AddressBookPage' has too many lines (332). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
   },
   {
     "file": "src/app/api/address-labels/import/route.ts",
     "ruleId": "complexity",
-    "message": "Async function 'POST' has a complexity of 18. Maximum allowed is 15."
+    "message": "Async function 'POST' has a complexity of 18. Maximum allowed is 15.",
+    "linePreview": "*/ | export async function POST(req: NextRequest): Promise<NextResponse> { | const session = await getAuthSession();"
   },
   {
     "file": "src/app/api/address-labels/route.ts",
     "ruleId": "complexity",
-    "message": "Async function 'PUT' has a complexity of 19. Maximum allowed is 15."
+    "message": "Async function 'PUT' has a complexity of 19. Maximum allowed is 15.",
+    "linePreview": " | export async function PUT(req: NextRequest): Promise<NextResponse> { | const session = await getAuthSession();"
   },
   {
     "file": "src/app/api/arkham/enrich/route.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'GET' has too many lines (106). Maximum allowed is 100."
+    "message": "Async function 'GET' has too many lines (106). Maximum allowed is 100.",
+    "linePreview": "// no body — `mode` and `limit` are query params — so GET is the right verb. | export async function GET(req: NextRequest): Promise<NextResponse> { | const authBail = await requireCronAuth(req, \"arkha"
   },
   {
     "file": "src/app/api/bridge-redeem/route.ts",
     "ruleId": "complexity",
-    "message": "Async function 'GET' has a complexity of 20. Maximum allowed is 15."
+    "message": "Async function 'GET' has a complexity of 20. Maximum allowed is 15.",
+    "linePreview": " | export async function GET(request: NextRequest) { | const txHash = request.nextUrl.searchParams.get(\"txHash\")?.trim() ?? \"\";"
   },
   {
     "file": "src/app/api/hasura/[networkId]/route.ts",
     "ruleId": "complexity",
-    "message": "Function 'resolveLocalHasuraConfig' has a complexity of 16. Maximum allowed is 15."
+    "message": "Function 'resolveLocalHasuraConfig' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": " | function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null { | switch (networkId as LocalNetworkId) {"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'BridgeFlowsContent' has a complexity of 44. Maximum allowed is 15."
+    "message": "Function 'BridgeFlowsContent' has a complexity of 44. Maximum allowed is 15.",
+    "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeFlowsContent' has too many lines (194). Maximum allowed is 100."
+    "message": "Function 'BridgeFlowsContent' has too many lines (194). Maximum allowed is 100.",
+    "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
+    "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-overview-section.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeOverviewSection' has too many lines (109). Maximum allowed is 100."
+    "message": "Function 'BridgeOverviewSection' has too many lines (109). Maximum allowed is 100.",
+    "linePreview": " | export function BridgeOverviewSection({ | snapshots,"
   },
   {
     "file": "src/app/bridge-flows/_components/transfers-table.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 17. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": "<tbody> | {sorted.map((t) => { | const status = deriveBridgeStatus(t);"
   },
   {
     "file": "src/app/bridge-flows/_components/transfers-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TransfersTable' has too many lines (209). Maximum allowed is 100."
+    "message": "Function 'TransfersTable' has too many lines (209). Maximum allowed is 100.",
+    "linePreview": " | export function TransfersTable({ | transfers,"
   },
   {
     "file": "src/app/bridge-flows/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'Card' has too many lines (129). Maximum allowed is 100."
+    "message": "Function 'Card' has too many lines (129). Maximum allowed is 100.",
+    "linePreview": " | function Card({ data }: { data: BridgeFlowsOgData | null }) { | // null → \"—\" (snapshot query failed); 0 → \"$0\" (genuinely no bridge"
   },
   {
     "file": "src/app/leaderboard/_components/aggregator-breakdown-section.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AggregatorTable' has too many lines (144). Maximum allowed is 100."
+    "message": "Function 'AggregatorTable' has too many lines (144). Maximum allowed is 100.",
+    "linePreview": " | function AggregatorTable({ | aggregators,"
   },
   {
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "complexity",
-    "message": "Function 'TraderRow' has a complexity of 16. Maximum allowed is 15."
+    "message": "Function 'TraderRow' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": " | function TraderRow({ | rank,"
   },
   {
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'ExpandedBreakdown' has too many lines (115). Maximum allowed is 100."
+    "message": "Function 'ExpandedBreakdown' has too many lines (115). Maximum allowed is 100.",
+    "linePreview": " | function ExpandedBreakdown({ | rows,"
   },
   {
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LeaderboardTable' has too many lines (132). Maximum allowed is 100."
+    "message": "Function 'LeaderboardTable' has too many lines (132). Maximum allowed is 100.",
+    "linePreview": " | export function LeaderboardTable({ | cutoff,"
   },
   {
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100."
+    "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100.",
+    "linePreview": " | function TraderRow({ | rank,"
   },
   {
     "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
     "ruleId": "complexity",
-    "message": "Function 'V2LeaderboardTraderTable' has a complexity of 28. Maximum allowed is 15."
+    "message": "Function 'V2LeaderboardTraderTable' has a complexity of 28. Maximum allowed is 15.",
+    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
   },
   {
     "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'V2LeaderboardTraderTable' has too many lines (201). Maximum allowed is 100."
+    "message": "Function 'V2LeaderboardTraderTable' has too many lines (201). Maximum allowed is 100.",
+    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
   },
   {
     "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
+    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
   },
   {
     "file": "src/app/leaderboard/_components/v3-flow-insights.tsx",
     "ruleId": "complexity",
-    "message": "Function 'V3FlowInsights' has a complexity of 21. Maximum allowed is 15."
+    "message": "Function 'V3FlowInsights' has a complexity of 21. Maximum allowed is 15.",
+    "linePreview": " | export function V3FlowInsights({ | range,"
   },
   {
     "file": "src/app/leaderboard/_components/v3-flow-insights.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'V3FlowInsights' has too many lines (152). Maximum allowed is 100."
+    "message": "Function 'V3FlowInsights' has too many lines (152). Maximum allowed is 100.",
+    "linePreview": " | export function V3FlowInsights({ | range,"
   },
   {
     "file": "src/app/leaderboard/_lib/url-state.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'useLeaderboardUrlState' has too many lines (111). Maximum allowed is 100."
+    "message": "Function 'useLeaderboardUrlState' has too many lines (111). Maximum allowed is 100.",
+    "linePreview": "*/ | export function useLeaderboardUrlState(): { | range: LeaderboardRangeKey;"
   },
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "complexity",
-    "message": "Function 'useHeroRollup' has a complexity of 40. Maximum allowed is 15."
+    "message": "Function 'useHeroRollup' has a complexity of 40. Maximum allowed is 15.",
+    "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'useHeroRollup' has too many lines (213). Maximum allowed is 100."
+    "message": "Function 'useHeroRollup' has too many lines (213). Maximum allowed is 100.",
+    "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
+    "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LeaderboardClient' has a complexity of 61. Maximum allowed is 15."
+    "message": "Function 'LeaderboardClient' has a complexity of 61. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LeaderboardClient' has too many lines (406). Maximum allowed is 100."
+    "message": "Function 'LeaderboardClient' has too many lines (406). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 46 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 46 to the 18 allowed.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
     "file": "src/app/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'Card' has too many lines (158). Maximum allowed is 100."
+    "message": "Function 'Card' has too many lines (158). Maximum allowed is 100.",
+    "linePreview": " | function Card({ data }: { data: HomepageOgData | null }) { | // null → \"—\" (unavailable); 0 → \"$0.00\" (real empty state)."
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 35. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
+    "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'GlobalContent' has a complexity of 21. Maximum allowed is 15."
+    "message": "Function 'GlobalContent' has a complexity of 21. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'GlobalContent' has too many lines (269). Maximum allowed is 100."
+    "message": "Function 'GlobalContent' has too many lines (269). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
+    "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "if (!searchQuery) return events; | return events.filter((e) => { | const givenSym = tokenSymbol(network, e.tokenGivenToPool);"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
-    "message": "Function 'OlsLiquidityEvents' has a complexity of 35. Maximum allowed is 15."
+    "message": "Function 'OlsLiquidityEvents' has a complexity of 35. Maximum allowed is 15.",
+    "linePreview": "*/ | export function OlsLiquidityEvents({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OlsLiquidityEvents' has too many lines (144). Maximum allowed is 100."
+    "message": "Function 'OlsLiquidityEvents' has too many lines (144). Maximum allowed is 100.",
+    "linePreview": "*/ | export function OlsLiquidityEvents({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-table.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "<tbody> | {events.map((e) => { | const givenSym = tokenSymbol(network, e.tokenGivenToPool);"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-status-panel.tsx",
     "ruleId": "complexity",
-    "message": "Function 'OlsStatusPanel' has a complexity of 19. Maximum allowed is 15."
+    "message": "Function 'OlsStatusPanel' has a complexity of 19. Maximum allowed is 15.",
+    "linePreview": " | export function OlsStatusPanel({ | olsPool,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-status-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OlsStatusPanel' has too many lines (164). Maximum allowed is 100."
+    "message": "Function 'OlsStatusPanel' has too many lines (164). Maximum allowed is 100.",
+    "linePreview": " | export function OlsStatusPanel({ | olsPool,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'PoolDetail' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'PoolDetail' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolDetail' has too many lines (177). Maximum allowed is 100."
+    "message": "Function 'PoolDetail' has too many lines (177). Maximum allowed is 100.",
+    "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100."
+    "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
+    "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "complexity",
-    "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15."
+    "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15.",
+    "linePreview": " | export function PoolHeader({ | pool,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolHeader' has too many lines (193). Maximum allowed is 100."
+    "message": "Function 'PoolHeader' has too many lines (193). Maximum allowed is 100.",
+    "linePreview": " | export function PoolHeader({ | pool,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/v2-exchange-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'V2ExchangePanel' has too many lines (151). Maximum allowed is 100."
+    "message": "Function 'V2ExchangePanel' has too many lines (151). Maximum allowed is 100.",
+    "linePreview": "*/ | export function V2ExchangePanel({ | pool,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LiquidityTab' has a complexity of 36. Maximum allowed is 15."
+    "message": "Function 'LiquidityTab' has a complexity of 36. Maximum allowed is 15.",
+    "linePreview": " | export function LiquidityTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LiquidityTab' has too many lines (191). Maximum allowed is 100."
+    "message": "Function 'LiquidityTab' has too many lines (191). Maximum allowed is 100.",
+    "linePreview": " | export function LiquidityTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "<tbody> | {pagedPositions.map((position) => { | const fmtTok = ("
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15."
+    "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15.",
+    "linePreview": " | export function LpsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LpsTab' has too many lines (250). Maximum allowed is 100."
+    "message": "Function 'LpsTab' has too many lines (250). Maximum allowed is 100.",
+    "linePreview": " | export function LpsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'OracleTab' has a complexity of 31. Maximum allowed is 15."
+    "message": "Function 'OracleTab' has a complexity of 31. Maximum allowed is 15.",
+    "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleSnapshotsTable' has too many lines (116). Maximum allowed is 100."
+    "message": "Function 'OracleSnapshotsTable' has too many lines (116). Maximum allowed is 100.",
+    "linePreview": " | function OracleSnapshotsTable({ | rows,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleTab' has too many lines (147). Maximum allowed is 100."
+    "message": "Function 'OracleTab' has too many lines (147). Maximum allowed is 100.",
+    "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'RebalancesTab' has a complexity of 28. Maximum allowed is 15."
+    "message": "Function 'RebalancesTab' has a complexity of 28. Maximum allowed is 15.",
+    "linePreview": " | export function RebalancesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'RebalancesTab' has too many lines (271). Maximum allowed is 100."
+    "message": "Function 'RebalancesTab' has too many lines (271). Maximum allowed is 100.",
+    "linePreview": " | export function RebalancesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "<tbody> | {filteredRows.map((r) => { | const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'ReservesTab' has a complexity of 20. Maximum allowed is 15."
+    "message": "Function 'ReservesTab' has a complexity of 20. Maximum allowed is 15.",
+    "linePreview": " | export function ReservesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'ReservesTab' has too many lines (152). Maximum allowed is 100."
+    "message": "Function 'ReservesTab' has too many lines (152). Maximum allowed is 100.",
+    "linePreview": " | export function ReservesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'SwapsTab' has a complexity of 44. Maximum allowed is 15."
+    "message": "Function 'SwapsTab' has a complexity of 44. Maximum allowed is 15.",
+    "linePreview": " | export function SwapsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'SwapsTab' has too many lines (245). Maximum allowed is 100."
+    "message": "Function 'SwapsTab' has too many lines (245). Maximum allowed is 100.",
+    "linePreview": " | export function SwapsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
     "ruleId": "complexity",
-    "message": "Function 'Card' has a complexity of 24. Maximum allowed is 15."
+    "message": "Function 'Card' has a complexity of 24. Maximum allowed is 15.",
+    "linePreview": " | function Card({ data }: { data: PoolOgData | null }) { | const name = data?.name ?? \"Mento Pool\";"
   },
   {
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'Card' has too many lines (121). Maximum allowed is 100."
+    "message": "Function 'Card' has too many lines (121). Maximum allowed is 100.",
+    "linePreview": " | function Card({ data }: { data: PoolOgData | null }) { | const name = data?.name ?? \"Mento Pool\";"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolsContent' has too many lines (210). Maximum allowed is 100."
+    "message": "Function 'PoolsContent' has too many lines (210). Maximum allowed is 100.",
+    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
+    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 17. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'RevenueContent' has too many lines (135). Maximum allowed is 100."
+    "message": "Function 'RevenueContent' has too many lines (135). Maximum allowed is 100.",
+    "linePreview": " | function RevenueContent() { | // Slim fees-only fetch. `useAllNetworksData` would pull paginated daily"
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
+    "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
   },
   {
     "file": "src/components/address-label-editor.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressLabelEditor' has too many lines (141). Maximum allowed is 100."
+    "message": "Function 'AddressLabelEditor' has too many lines (141). Maximum allowed is 100.",
+    "linePreview": " | export function AddressLabelEditor({ | address,"
   },
   {
     "file": "src/components/address-label-form.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15."
+    "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressLabelForm(props: Props) { | const {"
   },
   {
     "file": "src/components/address-label-form.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressLabelForm' has too many lines (275). Maximum allowed is 100."
+    "message": "Function 'AddressLabelForm' has too many lines (275). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressLabelForm(props: Props) { | const {"
   },
   {
     "file": "src/components/address-labels-provider.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'useAddressLabelsValue' has too many lines (245). Maximum allowed is 100."
+    "message": "Function 'useAddressLabelsValue' has too many lines (245). Maximum allowed is 100.",
+    "linePreview": " | function useAddressLabelsValue(): AddressLabelsContextValue { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/address-report-editor.tsx",
     "ruleId": "complexity",
-    "message": "Async arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Async arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": " | const handleSave = useCallback(async () => { | if (!isAddressValid) {"
   },
   {
     "file": "src/components/address-report-editor.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressReportEditor' has a complexity of 49. Maximum allowed is 15."
+    "message": "Function 'AddressReportEditor' has a complexity of 49. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
   },
   {
     "file": "src/components/address-report-editor.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressReportEditor' has too many lines (356). Maximum allowed is 100."
+    "message": "Function 'AddressReportEditor' has too many lines (356). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
   },
   {
     "file": "src/components/address-report-editor.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
   },
   {
     "file": "src/components/breach-history-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryChart' has too many lines (116). Maximum allowed is 100."
+    "message": "Function 'BreachHistoryChart' has too many lines (116). Maximum allowed is 100.",
+    "linePreview": "*/ | export function BreachHistoryChart({ breaches }: Props) { | if (breaches.length === 0) return null;"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "complexity",
-    "message": "Function 'BreachHistoryPanelInner' has a complexity of 30. Maximum allowed is 15."
+    "message": "Function 'BreachHistoryPanelInner' has a complexity of 30. Maximum allowed is 15.",
+    "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryPanelInner' has too many lines (195). Maximum allowed is 100."
+    "message": "Function 'BreachHistoryPanelInner' has too many lines (195). Maximum allowed is 100.",
+    "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 18 allowed.",
+    "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
     "file": "src/components/breach-history/breach-row.tsx",
     "ruleId": "complexity",
-    "message": "Function 'BreachRow' has a complexity of 17. Maximum allowed is 15."
+    "message": "Function 'BreachRow' has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": " | export function BreachRow({ | breach,"
   },
   {
     "file": "src/components/breaker-panel.tsx",
     "ruleId": "complexity",
-    "message": "Function 'BreakerPanel' has a complexity of 58. Maximum allowed is 15."
+    "message": "Function 'BreakerPanel' has a complexity of 58. Maximum allowed is 15.",
+    "linePreview": " | export function BreakerPanel({ pool }: Props): React.ReactElement | null { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/breaker-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BreakerPanel' has too many lines (239). Maximum allowed is 100."
+    "message": "Function 'BreakerPanel' has too many lines (239). Maximum allowed is 100.",
+    "linePreview": " | export function BreakerPanel({ pool }: Props): React.ReactElement | null { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/breaker-panel.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 37 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 37 to the 18 allowed.",
+    "linePreview": " | export function BreakerPanel({ pool }: Props): React.ReactElement | null { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/bridge-redeem-cta.tsx",
     "ruleId": "complexity",
-    "message": "Async function 'handleClick' has a complexity of 16. Maximum allowed is 15."
+    "message": "Async function 'handleClick' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": " | async function handleClick() { | if (phase !== \"idle\") return;"
   },
   {
     "file": "src/components/bridge-redeem-cta.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeRedeemPill' has too many lines (115). Maximum allowed is 100."
+    "message": "Function 'BridgeRedeemPill' has too many lines (115). Maximum allowed is 100.",
+    "linePreview": " | export function BridgeRedeemPill({ | sentTxHash,"
   },
   {
     "file": "src/components/bridge-token-breakdown-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (131). Maximum allowed is 100."
+    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (131). Maximum allowed is 100.",
+    "linePreview": " | export function BridgeTokenBreakdownChart({ | snapshots,"
   },
   {
     "file": "src/components/fee-over-time-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'FeeOverTimeChart' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'FeeOverTimeChart' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function FeeOverTimeChart({ | networkData,"
   },
   {
     "file": "src/components/fee-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Arrow function has too many lines (105). Maximum allowed is 100."
+    "message": "Arrow function has too many lines (105). Maximum allowed is 100.",
+    "linePreview": " | const { traces, layout } = useMemo(() => { | const xs = visibleSeries.map((p) =>"
   },
   {
     "file": "src/components/fee-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'FeeOverTimeChart' has too many lines (248). Maximum allowed is 100."
+    "message": "Function 'FeeOverTimeChart' has too many lines (248). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function FeeOverTimeChart({ | networkData,"
   },
   {
     "file": "src/components/fee-over-time-chart.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 25 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 25 to the 18 allowed.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function FeeOverTimeChart({ | networkData,"
   },
   {
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 37. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 37. Maximum allowed is 15.",
+    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
   },
   {
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Arrow function has too many lines (143). Maximum allowed is 100."
+    "message": "Arrow function has too many lines (143). Maximum allowed is 100.",
+    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
   },
   {
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'GlobalPoolsTable' has too many lines (320). Maximum allowed is 100."
+    "message": "Function 'GlobalPoolsTable' has too many lines (320). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function GlobalPoolsTable({ | entries,"
   },
   {
     "file": "src/components/global-pools-table.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed.",
+    "linePreview": "<tbody> | {sortedEntries.map((e) => { | const { pool: p, network } = e;"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 58. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/liquidity-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LiquidityChart' has a complexity of 18. Maximum allowed is 15."
+    "message": "Function 'LiquidityChart' has a complexity of 18. Maximum allowed is 15.",
+    "linePreview": " | export function LiquidityChart({ | snapshots,"
   },
   {
     "file": "src/components/liquidity-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LiquidityChart' has too many lines (105). Maximum allowed is 100."
+    "message": "Function 'LiquidityChart' has too many lines (105). Maximum allowed is 100.",
+    "linePreview": " | export function LiquidityChart({ | snapshots,"
   },
   {
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15."
+    "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15.",
+    "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100."
+    "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
+    "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/oracle-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleChart' has too many lines (225). Maximum allowed is 100."
+    "message": "Function 'OracleChart' has too many lines (225). Maximum allowed is 100.",
+    "linePreview": " | export function OracleChart({ | snapshots,"
   },
   {
     "file": "src/components/pool-config-panel.tsx",
     "ruleId": "complexity",
-    "message": "Function 'PoolConfigPanel' has a complexity of 20. Maximum allowed is 15."
+    "message": "Function 'PoolConfigPanel' has a complexity of 20. Maximum allowed is 15.",
+    "linePreview": "*  page survives the indexer deploy+resync window. */ | export function PoolConfigPanel({ pool }: PoolConfigPanelProps) { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/pool-config-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolConfigPanel' has too many lines (106). Maximum allowed is 100."
+    "message": "Function 'PoolConfigPanel' has too many lines (106). Maximum allowed is 100.",
+    "linePreview": "*  page survives the indexer deploy+resync window. */ | export function PoolConfigPanel({ pool }: PoolConfigPanelProps) { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/pool-header/deviation-cell.tsx",
     "ruleId": "complexity",
-    "message": "Function 'DeviationCell' has a complexity of 23. Maximum allowed is 15."
+    "message": "Function 'DeviationCell' has a complexity of 23. Maximum allowed is 15.",
+    "linePreview": " | export function DeviationCell({ | pool,"
   },
   {
     "file": "src/components/pool-header/oracle-price-value.tsx",
     "ruleId": "complexity",
-    "message": "Function 'OraclePriceValue' has a complexity of 22. Maximum allowed is 15."
+    "message": "Function 'OraclePriceValue' has a complexity of 22. Maximum allowed is 15.",
+    "linePreview": " | export function OraclePriceValue({ | pool,"
   },
   {
     "file": "src/components/pool-header/oracle-price-value.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
+    "linePreview": " | export function OraclePriceValue({ | pool,"
   },
   {
     "file": "src/components/pool-header/rebalance-status-value.tsx",
     "ruleId": "complexity",
-    "message": "Function 'RebalanceStatusValue' has a complexity of 19. Maximum allowed is 15."
+    "message": "Function 'RebalanceStatusValue' has a complexity of 19. Maximum allowed is 15.",
+    "linePreview": " | export function RebalanceStatusValue({ | pool,"
   },
   {
     "file": "src/components/pool-header/rebalance-status-value.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'RebalanceStatusValue' has too many lines (114). Maximum allowed is 100."
+    "message": "Function 'RebalanceStatusValue' has too many lines (114). Maximum allowed is 100.",
+    "linePreview": " | export function RebalanceStatusValue({ | pool,"
   },
   {
     "file": "src/components/pool-header/uptime-value.tsx",
     "ruleId": "complexity",
-    "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15."
+    "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15.",
+    "linePreview": " | export function UptimeValue({ pool }: { pool: Pool }) { | const isVirtual = isVirtualPool(pool);"
   },
   {
     "file": "src/components/reserve-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15."
+    "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
     "file": "src/components/reserve-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'ReserveChart' has too many lines (103). Maximum allowed is 100."
+    "message": "Function 'ReserveChart' has too many lines (103). Maximum allowed is 100.",
+    "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
     "file": "src/components/reserves-panel.tsx",
     "ruleId": "complexity",
-    "message": "Function 'ReservesPanel' has a complexity of 58. Maximum allowed is 15."
+    "message": "Function 'ReservesPanel' has a complexity of 58. Maximum allowed is 15.",
+    "linePreview": " | export function ReservesPanel({ | pool,"
   },
   {
     "file": "src/components/reserves-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'ReservesPanel' has too many lines (141). Maximum allowed is 100."
+    "message": "Function 'ReservesPanel' has too many lines (141). Maximum allowed is 100.",
+    "linePreview": " | export function ReservesPanel({ | pool,"
   },
   {
     "file": "src/components/reserves-panel.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 105 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 105 to the 18 allowed.",
+    "linePreview": " | export function ReservesPanel({ | pool,"
   },
   {
     "file": "src/components/revenue-by-pool-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'RevenueByPoolTable' has too many lines (123). Maximum allowed is 100."
+    "message": "Function 'RevenueByPoolTable' has too many lines (123). Maximum allowed is 100.",
+    "linePreview": " | export function RevenueByPoolTable({ | networkData,"
   },
   {
     "file": "src/components/tag-input.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TagInput' has too many lines (152). Maximum allowed is 100."
+    "message": "Function 'TagInput' has too many lines (152). Maximum allowed is 100.",
+    "linePreview": " | export function TagInput({ | tags,"
   },
   {
     "file": "src/components/time-series-chart-card-hooks.ts",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 17. Maximum allowed is 15."
+    "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": "}); | const { traces, layout } = useMemo(() => { | const xs = series.map((point) =>"
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "complexity",
-    "message": "Function 'TimeSeriesChartCard' has a complexity of 42. Maximum allowed is 15."
+    "message": "Function 'TimeSeriesChartCard' has a complexity of 42. Maximum allowed is 15.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Arrow function has too many lines (123). Maximum allowed is 100."
+    "message": "Arrow function has too many lines (123). Maximum allowed is 100.",
+    "linePreview": "}); | const { traces, layout } = useMemo(() => { | const xs = series.map((point) =>"
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TimeSeriesChartCard' has too many lines (334). Maximum allowed is 100."
+    "message": "Function 'TimeSeriesChartCard' has too many lines (334). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
   },
   {
     "file": "src/components/tvl-over-time-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'buildDailySeries' has a complexity of 27. Maximum allowed is 15."
+    "message": "Function 'buildDailySeries' has a complexity of 27. Maximum allowed is 15.",
+    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/components/tvl-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'buildDailySeries' has too many lines (118). Maximum allowed is 100."
+    "message": "Function 'buildDailySeries' has too many lines (118). Maximum allowed is 100.",
+    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/components/tvl-over-time-chart.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
+    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "complexity",
-    "message": "Function 'buildDailyVolumeSeries' has a complexity of 24. Maximum allowed is 15."
+    "message": "Function 'buildDailyVolumeSeries' has a complexity of 24. Maximum allowed is 15.",
+    "linePreview": "*/ | export function buildDailyVolumeSeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'VolumeOverTimeChart' has too many lines (113). Maximum allowed is 100."
+    "message": "Function 'VolumeOverTimeChart' has too many lines (113). Maximum allowed is 100.",
+    "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function VolumeOverTimeChart({ | networkData,"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "max-params",
-    "message": "Function 'computeHeadline' has too many parameters (9). Maximum allowed is 5."
+    "message": "Function 'computeHeadline' has too many parameters (9). Maximum allowed is 5.",
+    "linePreview": "// Broker outage even when v3 is fully synced. | function computeHeadline( | isLoading: boolean,"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",
+    "linePreview": "*/ | export function buildDailyVolumeSeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "sonarjs/no-collapsible-if",
     "message": "Merge this if statement with the nested one.",
-    "line": 119
+    "linePreview": "const timestamp = Number(snapshot.timestamp); | if (window) { | if (timestamp < window.from || timestamp >= window.to) continue;"
   },
   {
     "file": "src/lib/address-book.ts",
     "ruleId": "complexity",
-    "message": "Function 'countImportLabels' has a complexity of 29. Maximum allowed is 15."
+    "message": "Function 'countImportLabels' has a complexity of 29. Maximum allowed is 15.",
+    "linePreview": "*/ | export function countImportLabels(parsed: unknown): number { | const addresses = new Set<string>();"
   },
   {
     "file": "src/lib/address-book.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "line": 130
+    "linePreview": ") { | for (const address of Object.keys(entries)) { | addresses.add(address.toLowerCase());"
   },
   {
     "file": "src/lib/address-book.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 43 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 43 to the 18 allowed.",
+    "linePreview": "*/ | export function countImportLabels(parsed: unknown): number { | const addresses = new Set<string>();"
   },
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "complexity",
-    "message": "Function 'upgradeEntry' has a complexity of 29. Maximum allowed is 15."
+    "message": "Function 'upgradeEntry' has a complexity of 29. Maximum allowed is 15.",
+    "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
   },
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed.",
+    "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
   },
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "sonarjs/no-collapsible-if",
     "message": "Merge this if statement with the nested one.",
-    "line": 215
+    "linePreview": "// valid legacy label from mixed/partially-corrupted data. | if (typeof entry.name === \"string\") { | if (entry.name.trim() || typeof entry.label !== \"string\") {"
   },
   {
     "file": "src/lib/address-labels/import.ts",
     "ruleId": "complexity",
-    "message": "Function 'parseCsv' has a complexity of 23. Maximum allowed is 15."
-  },
-  {
-    "file": "src/lib/address-labels/import.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed."
+    "message": "Function 'parseCsv' has a complexity of 23. Maximum allowed is 15.",
+    "linePreview": "*/ | export function parseCsv(text: string): CsvParseResult { | // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports."
   },
   {
     "file": "src/lib/address-labels/import.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
+    "linePreview": "*/ | export function parseCsv(text: string): CsvParseResult { | // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports."
+  },
+  {
+    "file": "src/lib/address-labels/import.ts",
+    "ruleId": "sonarjs/cognitive-complexity",
+    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
+    "linePreview": "/** Split a single CSV line respecting double-quoted fields. */ | export function splitCsvLine( | line: string,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "complexity",
-    "message": "Async function 'handleSnapshot' has a complexity of 35. Maximum allowed is 15."
+    "message": "Async function 'handleSnapshot' has a complexity of 35. Maximum allowed is 15.",
+    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "complexity",
-    "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'handleSnapshot' has too many lines (127). Maximum allowed is 100."
+    "message": "Async function 'handleSnapshot' has too many lines (127). Maximum allowed is 100.",
+    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
+    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
+    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-reports-shared.ts",
     "ruleId": "complexity",
-    "message": "Function 'upgradeReport' has a complexity of 19. Maximum allowed is 15."
+    "message": "Function 'upgradeReport' has a complexity of 19. Maximum allowed is 15.",
+    "linePreview": "*/ | export function upgradeReport(raw: Record<string, unknown>): AddressReport { | const body = typeof raw.body === \"string\" ? raw.body : \"\";"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "complexity",
-    "message": "Function 'toAddressEntry' has a complexity of 31. Maximum allowed is 15."
+    "message": "Function 'toAddressEntry' has a complexity of 31. Maximum allowed is 15.",
+    "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "line": 299
+    "linePreview": "} catch (retryErr) { | if (retryErr instanceof ArkhamAuthError) throw retryErr; | results.push({"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
+    "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 30 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 30 to the 18 allowed.",
+    "linePreview": " | export async function enrichBatch( | addresses: string[],"
   },
   {
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "complexity",
-    "message": "Function 'buildGlobalPoolEntries' has a complexity of 22. Maximum allowed is 15."
+    "message": "Function 'buildGlobalPoolEntries' has a complexity of 22. Maximum allowed is 15.",
+    "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 41 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 41 to the 18 allowed.",
+    "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/health.ts",
     "ruleId": "complexity",
-    "message": "Function 'liveHealthCounters' has a complexity of 23. Maximum allowed is 15."
+    "message": "Function 'liveHealthCounters' has a complexity of 23. Maximum allowed is 15.",
+    "linePreview": "*/ | export function liveHealthCounters( | pool: HealthCounterState,"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "complexity",
-    "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15."
+    "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15.",
+    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100."
+    "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100.",
+    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
+    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/leaderboard-hero.ts",
     "ruleId": "complexity",
-    "message": "Function 'buildHeroPartialOverlapQueryInput' has a complexity of 18. Maximum allowed is 15."
+    "message": "Function 'buildHeroPartialOverlapQueryInput' has a complexity of 18. Maximum allowed is 15.",
+    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
   },
   {
     "file": "src/lib/leaderboard-hero.ts",
     "ruleId": "complexity",
-    "message": "Function 'mergeHeroSnapshot' has a complexity of 30. Maximum allowed is 15."
+    "message": "Function 'mergeHeroSnapshot' has a complexity of 30. Maximum allowed is 15.",
+    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
   },
   {
     "file": "src/lib/leaderboard-hero.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'mergeHeroSnapshot' has too many lines (123). Maximum allowed is 100."
+    "message": "Function 'mergeHeroSnapshot' has too many lines (123). Maximum allowed is 100.",
+    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
   },
   {
     "file": "src/lib/leaderboard-hero.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
+    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
   },
   {
     "file": "src/lib/leaderboard-hero.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 55 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 55 to the 18 allowed.",
+    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
   },
   {
     "file": "src/lib/leaderboard-pool.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'aggregatePoolDailyVolume' has too many lines (106). Maximum allowed is 100."
+    "message": "Function 'aggregatePoolDailyVolume' has too many lines (106). Maximum allowed is 100.",
+    "linePreview": "*/ | export function aggregatePoolDailyVolume( | rows: readonly PoolDailyVolumeRow[],"
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "complexity",
-    "message": "Async function 'fetchNetworkData' has a complexity of 40. Maximum allowed is 15."
+    "message": "Async function 'fetchNetworkData' has a complexity of 40. Maximum allowed is 15.",
+    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchNetworkData' has too many lines (277). Maximum allowed is 100."
+    "message": "Async function 'fetchNetworkData' has too many lines (277). Maximum allowed is 100.",
+    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
+    "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 28 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 28 to the 18 allowed.",
+    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
   },
   {
     "file": "src/lib/pool-og.ts",
     "ruleId": "complexity",
-    "message": "Async function 'fetchPoolOgDataUncached' has a complexity of 26. Maximum allowed is 15."
+    "message": "Async function 'fetchPoolOgDataUncached' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
   },
   {
     "file": "src/lib/pool-og.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchPoolOgDataUncached' has too many lines (128). Maximum allowed is 100."
+    "message": "Async function 'fetchPoolOgDataUncached' has too many lines (128). Maximum allowed is 100.",
+    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
   },
   {
     "file": "src/lib/pool-og.ts",
     "ruleId": "max-params",
-    "message": "Function 'sumVolumeInWindow' has too many parameters (7). Maximum allowed is 5."
+    "message": "Function 'sumVolumeInWindow' has too many parameters (7). Maximum allowed is 5.",
+    "linePreview": "// the volume WoW percentage. | function sumVolumeInWindow( | daily: PoolSnapshot[],"
   },
   {
     "file": "src/lib/pool-og.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
+    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
   },
   {
     "file": "src/lib/protocol-fee-snapshots.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
+    "linePreview": " | export function aggregateFeeSnapshotsByPool( | snapshots: ReadonlyArray<PoolDailyFeeSnapshot>,"
   },
   {
     "file": "src/lib/protocol-fees.ts",
     "ruleId": "complexity",
-    "message": "Function 'aggregateProtocolFees' has a complexity of 16. Maximum allowed is 15."
+    "message": "Function 'aggregateProtocolFees' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "*/ | export function aggregateProtocolFees( | snapshots: ReadonlyArray<PoolDailyFeeSnapshot>,"
   },
   {
     "file": "src/lib/protocol-fees.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
+    "linePreview": "*/ | export function aggregateProtocolFees( | snapshots: ReadonlyArray<PoolDailyFeeSnapshot>,"
   },
   {
     "file": "src/lib/rebalance-check.ts",
     "ruleId": "complexity",
-    "message": "Async function 'handleRevert' has a complexity of 16. Maximum allowed is 15."
+    "message": "Async function 'handleRevert' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": " | async function handleRevert( | err: unknown,"
   },
   {
     "file": "src/lib/rebalance-check.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
+    "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
   },
   {
     "file": "src/lib/revenue.ts",
     "ruleId": "complexity",
-    "message": "Function 'buildDailyFeeSeries' has a complexity of 26. Maximum allowed is 15."
+    "message": "Function 'buildDailyFeeSeries' has a complexity of 26. Maximum allowed is 15.",
+    "linePreview": "*/ | export function buildDailyFeeSeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/revenue.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 35 to the 18 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 35 to the 18 allowed.",
+    "linePreview": "*/ | export function buildDailyFeeSeries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/revenue.ts",
     "ruleId": "sonarjs/no-collapsible-if",
     "message": "Merge this if statement with the nested one.",
-    "line": 90
+    "linePreview": "const ts = Number(s.timestamp); | if (dayAlignedWindow) { | if (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to) continue;"
   },
   {
     "file": "src/lib/tokens.ts",
     "ruleId": "complexity",
-    "message": "Function 'buildOracleRateMap' has a complexity of 16. Maximum allowed is 15."
+    "message": "Function 'buildOracleRateMap' has a complexity of 16. Maximum allowed is 15.",
+    "linePreview": "*/ | export function buildOracleRateMap( | pools: ReadonlyArray<OracleRatePool>,"
   },
   {
     "file": "src/lib/tokens.ts",
     "ruleId": "complexity",
-    "message": "Function 'poolTvlUSD' has a complexity of 17. Maximum allowed is 15."
+    "message": "Function 'poolTvlUSD' has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": "*/ | export function poolTvlUSD( | pool: {"
   },
   {
     "file": "src/lib/use-roving-tab-index.ts",
     "ruleId": "complexity",
-    "message": "Function 'handleKeyDown' has a complexity of 17. Maximum allowed is 15."
+    "message": "Function 'handleKeyDown' has a complexity of 17. Maximum allowed is 15.",
+    "linePreview": " | function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) { | const key = e.key;"
   },
   {
     "file": "src/lib/use-table-sort.ts",
     "ruleId": "max-params",
-    "message": "Function 'buildNextSearch' has too many parameters (6). Maximum allowed is 5."
+    "message": "Function 'buildNextSearch' has too many parameters (6). Maximum allowed is 5.",
+    "linePreview": " | function buildNextSearch<K extends string>( | currentSearch: string,"
   },
   {
     "file": "src/lib/use-table-sort.ts",
     "ruleId": "max-params",
-    "message": "Function 'readSortFromParams' has too many parameters (6). Maximum allowed is 5."
+    "message": "Function 'readSortFromParams' has too many parameters (6). Maximum allowed is 5.",
+    "linePreview": " | function readSortFromParams<K extends string>( | params: URLSearchParams,"
   }
 ]

@@ -47,13 +47,20 @@ PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
 to the committed baseline and fails on any **new** tuple OR any
 **stale** baseline entry (violation removed but not pruned).
 
-Tuple identity is `(file, ruleId, message)`. For rules whose message
-doesn't already identify the violation location (`max-depth`,
-`sonarjs/no-collapsible-if`, `sonarjs/no-small-switch`,
-`sonarjs/no-redundant-jump`, `sonarjs/no-nested-functions`,
-`sonarjs/no-nested-conditional`, `sonarjs/no-nested-template-literals`),
-the tuple also includes `line` so two equally-deep blocks in the same
-file are distinguishable.
+Tuple identity is `(file, ruleId, message, linePreview)`, where
+`linePreview` is a three-line window of trimmed source content
+(`line-1 | line | line+1`, capped at 200 chars) around the violation's
+reported line. This content fingerprint:
+
+- Distinguishes anonymous-function collisions (e.g. two arrows with
+  identical `}): Promise<void> => {` signatures in the same file are
+  separated by the differing next-statement line).
+- Absorbs pure line shifts: an unrelated edit above a baselined
+  violation moves the line number, but the source content at that
+  location is unchanged → same fingerprint → no diff to commit.
+- Catches swap-in-place: fixing one violation and adding another at a
+  different location yields different source content → different
+  fingerprint → check fails.
 
 `lint:baseline:update` is **prune-only**: it refuses to write a baseline
 that adds new tuples relative to the existing baseline. New violations
@@ -72,7 +79,7 @@ Cleanup workflow:
 Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 191,
 indexer-envio 63 entries.
 
-Four prior baseline mechanisms were rejected:
+Six prior baseline mechanisms were rejected:
 
 1. `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting,
    so a PR could delete one warning and add another without failing.
@@ -85,6 +92,14 @@ Four prior baseline mechanisms were rejected:
    fix leave the stale tuple committed, so a later PR could
    re-introduce the same violation without detection. Now stale entries
    fail CI.
+5. `(file, ruleId, message)` keys (codex P2 round 4 #3254614043,
+   #3254614044): collisions on anonymous-function violations (two
+   arrows in the same file with identical signatures share the same
+   message). Now keyed on `linePreview` content fingerprint instead.
+6. `(file, ruleId, message, line)` keys (codex P2 round 4 #3254614042):
+   pure line shifts (unrelated edit above a violation) treated as
+   additions, forcing reseeds for non-substantive changes. Now keyed
+   on source content, which is stable across shifts.
 
 PR 3: `jscpd` duplication check ships as a non-blocking CI job.
 

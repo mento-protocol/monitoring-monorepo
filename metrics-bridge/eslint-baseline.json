@@ -2,58 +2,67 @@
   {
     "file": "src/deviation-alert-state.ts",
     "ruleId": "complexity",
-    "message": "Function 'classifyDeviationAlertState' has a complexity of 16. Maximum allowed is 10."
+    "message": "Function 'classifyDeviationAlertState' has a complexity of 16. Maximum allowed is 10.",
+    "linePreview": " | export function classifyDeviationAlertState( | pool: PoolRow,"
   },
   {
     "file": "src/deviation-alert-state.ts",
     "ruleId": "complexity",
-    "message": "Function 'shouldRecordTransition' has a complexity of 11. Maximum allowed is 10."
+    "message": "Function 'shouldRecordTransition' has a complexity of 11. Maximum allowed is 10.",
+    "linePreview": " | function shouldRecordTransition( | previous: StateSnapshot,"
   },
   {
     "file": "src/deviation-alert-state.ts",
     "ruleId": "complexity",
-    "message": "Function 'transitionReason' has a complexity of 17. Maximum allowed is 10."
+    "message": "Function 'transitionReason' has a complexity of 17. Maximum allowed is 10.",
+    "linePreview": " | function transitionReason( | from: DeviationAlertState,"
   },
   {
     "file": "src/metrics.ts",
     "ruleId": "complexity",
-    "message": "Function 'updateMetrics' has a complexity of 23. Maximum allowed is 10."
+    "message": "Function 'updateMetrics' has a complexity of 23. Maximum allowed is 10.",
+    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
   },
   {
     "file": "src/metrics.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'updateMetrics' has too many lines (126). Maximum allowed is 60."
+    "message": "Function 'updateMetrics' has too many lines (126). Maximum allowed is 60.",
+    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
   },
   {
     "file": "src/metrics.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 15 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 15 allowed.",
+    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
   },
   {
     "file": "src/rebalance-check.ts",
     "ruleId": "complexity",
-    "message": "Function 'decodeBlockedRevert' has a complexity of 11. Maximum allowed is 10."
+    "message": "Function 'decodeBlockedRevert' has a complexity of 11. Maximum allowed is 10.",
+    "linePreview": " | function decodeBlockedRevert(err: unknown): RebalanceProbeResult { | const revertData = extractRevertData(err);"
   },
   {
     "file": "src/rebalance-check.ts",
     "ruleId": "complexity",
-    "message": "Function 'extractRevertData' has a complexity of 12. Maximum allowed is 10."
+    "message": "Function 'extractRevertData' has a complexity of 12. Maximum allowed is 10.",
+    "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
   },
   {
     "file": "src/rebalance-check.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (4). Maximum allowed is 3.",
-    "line": 442
+    "linePreview": "const nested = (current.data as Record<string, unknown>).data as string; | if (nested.startsWith(\"0x\")) return nested as Hex; | }"
   },
   {
     "file": "src/rebalance-check.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 15 allowed."
+    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 15 allowed.",
+    "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
   },
   {
     "file": "src/rebalance-probe.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (4). Maximum allowed is 3.",
-    "line": 247
+    "linePreview": "// `rebalance-check.ts:decodeBlockedRevert`). | if (result.diagnostic) { | console.warn("
   }
 ]

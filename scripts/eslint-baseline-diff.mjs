@@ -15,16 +15,26 @@
  *            allows pruning. Baseline growth requires deleting the file
  *            and re-running update from a clean state (initial seed only).
  *
- * Why not `--max-warnings <N>` (count budget): a PR could swap one
- * violation for another and pass. Why not ESLint 9.24+ bulk suppressions:
- * count-per-(file, ruleId), so swap-in-same-file passes. This script
- * uses tuple identity `(file, ruleId, message)` plus `line` for
- * rules whose message doesn't already identify the violation location
- * (`LOCATION_KEYED_RULES` below). For rules like `complexity` that embed
- * function name + value in the message, the message itself is unique
- * enough; for rules like `max-depth` that emit a generic
- * "Blocks are nested too deeply (N)", we add line so two equally-deep
- * blocks in the same file are distinguishable.
+ * Tuple identity is `(file, ruleId, message, linePreview)`, where
+ * `linePreview` is the trimmed source content (first 80 chars) at the
+ * violation's reported line. Why content fingerprint instead of line
+ * number or message alone:
+ *
+ *   - `--max-warnings <N>`: a PR could swap one violation for another and
+ *     pass the count budget.
+ *   - ESLint 9.24+ bulk suppressions are count-per-(file, ruleId), so
+ *     swap-in-same-file at finer granularity still passes.
+ *   - Message-only keys collide for anonymous functions: `complexity` and
+ *     `sonarjs/cognitive-complexity` produce identical messages
+ *     ("Async arrow function has a complexity of 18...") for distinct
+ *     unnamed arrows in the same file. Swap-in-place would pass.
+ *   - Line-only keys break on pure line shifts: an unrelated edit
+ *     anywhere above a baselined function changes only the `line`,
+ *     forcing reseeds for non-substantive changes.
+ *
+ * The content fingerprint is stable across pure line shifts (same source
+ * line moves up or down, same content → same key) and discriminating
+ * across swap-in-place (different source content → different key).
  *
  * Usage:
  *   node ../scripts/eslint-baseline-diff.mjs check
@@ -36,22 +46,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-
-// Rules whose message does NOT include enough context to distinguish two
-// violations in the same file. For these we include the source line in the
-// tuple key so swap-in-same-file is caught. A line shift from unrelated
-// edits will surface as both a stale entry AND a new tuple — running
-// `lint:baseline:update` then prunes the stale entry and the new tuple is
-// rejected unless it's a net-zero replacement (same key minus line).
-const LOCATION_KEYED_RULES = new Set([
-  "max-depth",
-  "sonarjs/no-collapsible-if",
-  "sonarjs/no-small-switch",
-  "sonarjs/no-redundant-jump",
-  "sonarjs/no-nested-functions",
-  "sonarjs/no-nested-conditional",
-  "sonarjs/no-nested-template-literals",
-]);
 
 const mode = process.argv[2] ?? "check";
 const cwd = process.cwd();
@@ -79,17 +73,46 @@ if (!eslintRun.stdout || !eslintRun.stdout.trim().startsWith("[")) {
 }
 const eslintOutput = JSON.parse(eslintRun.stdout);
 
+const sourceCache = new Map();
+function getSourceLines(absPath) {
+  if (sourceCache.has(absPath)) return sourceCache.get(absPath);
+  let lines = [];
+  try {
+    lines = readFileSync(absPath, "utf8").split("\n");
+  } catch {
+    // empty array is fine; linePreview falls through to ""
+  }
+  sourceCache.set(absPath, lines);
+  return lines;
+}
+
+// Three-line window joined with " | ". Single-line previews collide for
+// duplicate function signatures (e.g. two anonymous arrows in the same
+// file with `}): Promise<void> => {` at their reported `m.line`). The
+// previous and next non-empty lines almost always include the unique
+// const-assignment name or first body statement, which discriminates.
+const LINE_PREVIEW_MAX = 200;
+function linePreview(file, lineNo) {
+  if (typeof lineNo !== "number" || lineNo < 1) return "";
+  const lines = getSourceLines(resolve(cwd, file));
+  const before = lines[lineNo - 2]?.trim() ?? "";
+  const at = lines[lineNo - 1]?.trim() ?? "";
+  const after = lines[lineNo]?.trim() ?? "";
+  return `${before} | ${at} | ${after}`.slice(0, LINE_PREVIEW_MAX);
+}
+
 function flatten(output) {
   const out = [];
   for (const file of output) {
     const rel = file.filePath.replace(cwd + "/", "");
     for (const m of file.messages) {
       if (m.severity !== 2) continue;
-      const entry = { file: rel, ruleId: m.ruleId, message: m.message };
-      if (LOCATION_KEYED_RULES.has(m.ruleId) && typeof m.line === "number") {
-        entry.line = m.line;
-      }
-      out.push(entry);
+      out.push({
+        file: rel,
+        ruleId: m.ruleId,
+        message: m.message,
+        linePreview: linePreview(rel, m.line),
+      });
     }
   }
   out.sort(
@@ -97,14 +120,13 @@ function flatten(output) {
       a.file.localeCompare(b.file) ||
       (a.ruleId ?? "").localeCompare(b.ruleId ?? "") ||
       a.message.localeCompare(b.message) ||
-      (a.line ?? 0) - (b.line ?? 0),
+      a.linePreview.localeCompare(b.linePreview),
   );
   return out;
 }
 
 function keyOf(v) {
-  const locSuffix = v.line != null ? `\x00${v.line}` : "";
-  return `${v.file}\x00${v.ruleId ?? "<no-rule>"}\x00${v.message}${locSuffix}`;
+  return `${v.file}\x00${v.ruleId ?? "<no-rule>"}\x00${v.message}\x00${v.linePreview ?? ""}`;
 }
 
 function countMap(list) {
@@ -117,10 +139,9 @@ function countMap(list) {
 }
 
 function describe(key, delta) {
-  const parts = key.split("\x00");
-  const [file, ruleId, message, line] = parts;
-  const loc = line ? `:${line}` : "";
-  return `  ${delta >= 0 ? "+" : ""}${delta}  ${file}${loc}\n         [${ruleId}] ${message}\n`;
+  const [file, ruleId, message, preview] = key.split("\x00");
+  const hint = preview ? `\n         > ${preview}` : "";
+  return `  ${delta >= 0 ? "+" : ""}${delta}  ${file}\n         [${ruleId}] ${message}${hint}\n`;
 }
 
 const current = flatten(eslintOutput);
@@ -132,11 +153,13 @@ const currentCounts = countMap(current);
 const baselineCounts = baseline ? countMap(baseline) : new Map();
 
 if (mode === "update") {
-  // Reject baseline growth: update mode prunes stale entries (and absorbs
-  // line shifts when message identity is otherwise stable) but refuses to
-  // ADD new tuples. New violations must be FIXED, not baselined. To grow
-  // a baseline deliberately (e.g. seeding a new package), delete
-  // eslint-baseline.json first; an absent file is treated as initial seed.
+  // Reject baseline growth: update mode prunes stale entries but refuses
+  // to ADD new tuples. New violations must be FIXED, not baselined. Pure
+  // line shifts (same source content, different line number) produce no
+  // diff because linePreview is the content fingerprint, not the line
+  // number. To grow a baseline deliberately (e.g. seeding a new package),
+  // delete eslint-baseline.json first; an absent file is treated as
+  // initial seed.
   if (baseline !== null) {
     const additions = [];
     for (const [key, count] of currentCounts) {
