@@ -942,14 +942,20 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge knip (knip confi
 assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
 
 # Root-script routing: ESLint baseline wrapper changes must re-run every
-# package's lint AND lint the wrapper itself. A regression here would
-# mask all per-package baseline drift.
+# package's lint, run the wrapper's own semantic tests, AND lint the
+# wrapper itself. A regression here would mask all per-package baseline
+# drift.
 run_gate "scripts/eslint-baseline-diff.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint baseline wrapper changed)"
+
+# Editing the test file itself should also run the test.
+run_gate "scripts/eslint-baseline-diff.test.mjs"
+assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper test changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"

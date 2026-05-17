@@ -37,7 +37,9 @@ export default tseslint.config(
     files: ["test/**/*.ts", "**/*.test.ts"],
     rules: { "max-lines": "off" },
   },
-  // Code-health budgets (PR 2 baseline, warn-only).
+  // Code-health budgets. Rules ship at `error` severity; pre-existing
+  // violations live in `eslint-baseline.json` and are gated by
+  // `scripts/eslint-baseline-diff.mjs` (see docs/pr-checklists/code-health.md).
   // Small Cloud Run service; budgets stricter than dashboard but a notch
   // looser than shared-config to allow real-world I/O glue code.
   {

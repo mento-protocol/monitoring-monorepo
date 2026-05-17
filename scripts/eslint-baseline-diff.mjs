@@ -64,27 +64,39 @@ const mode = process.argv[2] ?? "check";
 const cwd = process.cwd();
 const baselinePath = resolve(cwd, "eslint-baseline.json");
 
-// Run eslint directly so we can distinguish "no violations" from
-// "eslint crashed and produced no output." The diff-check is the gate;
-// running eslint inside the script keeps the contract self-contained.
-const eslintRun = spawnSync(
-  "pnpm",
-  ["exec", "eslint", ".", "--format", "json"],
-  { cwd, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 },
-);
-if (eslintRun.error) {
-  process.stderr.write(
-    `eslint invocation failed: ${eslintRun.error.message}\n`,
+// `ESLINT_BASELINE_INPUT` lets tests inject canned ESLint JSON output
+// instead of spawning eslint. Production runs (CI, dev `pnpm lint`)
+// don't set it and fall through to the spawn path. The injected JSON
+// must be ESLint's `--format json` shape with absolute `filePath`s
+// rooted at cwd so the relative-path stripping below behaves the same
+// as a real run.
+let eslintOutput;
+const eslintInputPath = process.env.ESLINT_BASELINE_INPUT;
+if (eslintInputPath) {
+  eslintOutput = JSON.parse(readFileSync(eslintInputPath, "utf8"));
+} else {
+  // Run eslint directly so we can distinguish "no violations" from
+  // "eslint crashed and produced no output." The diff-check is the gate;
+  // running eslint inside the script keeps the contract self-contained.
+  const eslintRun = spawnSync(
+    "pnpm",
+    ["exec", "eslint", ".", "--format", "json"],
+    { cwd, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 },
   );
-  process.exit(2);
+  if (eslintRun.error) {
+    process.stderr.write(
+      `eslint invocation failed: ${eslintRun.error.message}\n`,
+    );
+    process.exit(2);
+  }
+  if (!eslintRun.stdout || !eslintRun.stdout.trim().startsWith("[")) {
+    process.stderr.write(
+      `eslint produced no JSON output (exit ${eslintRun.status}):\n${eslintRun.stderr}\n`,
+    );
+    process.exit(2);
+  }
+  eslintOutput = JSON.parse(eslintRun.stdout);
 }
-if (!eslintRun.stdout || !eslintRun.stdout.trim().startsWith("[")) {
-  process.stderr.write(
-    `eslint produced no JSON output (exit ${eslintRun.status}):\n${eslintRun.stderr}\n`,
-  );
-  process.exit(2);
-}
-const eslintOutput = JSON.parse(eslintRun.stdout);
 
 const sourceCache = new Map();
 function getSourceLines(absPath) {

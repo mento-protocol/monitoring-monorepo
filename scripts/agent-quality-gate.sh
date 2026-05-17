@@ -852,11 +852,16 @@ while IFS= read -r path; do
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
           # baseline drift. Re-run every package's lint to exercise the
-          # wrapper end-to-end, not just the standalone ESLint pass.
+          # wrapper end-to-end, plus the semantic tests covering its
+          # matching/growth/absorption logic directly.
+          add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/monitoring-config" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/ui-dashboard" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/metrics-bridge" "ESLint baseline wrapper changed"
+          ;;
+        scripts/eslint-baseline-diff.test.mjs)
+          add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper test changed"
           ;;
       esac
       ;;

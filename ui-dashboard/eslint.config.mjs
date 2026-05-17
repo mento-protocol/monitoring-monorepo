@@ -114,14 +114,15 @@ export default tseslint.config(
     },
   },
   // Code-health budgets. Rules ship at `error` severity; pre-existing
-  // violations are captured in `eslint-suppressions.json` (ESLint bulk
-  // suppressions, 9.24+). New violations not in that file fail the gate
-  // — the `--max-warnings` cap was insufficient (codex P2 #3253043406):
-  // a PR could delete one warning and add a different one and stay under
-  // the cap. Cleanup PRs fix a violation and run `eslint --prune-suppressions`
-  // to drop the entry. React components exempt from max-depth (JSX nesting
-  // isn't counted) and max-lines-per-function (component bodies legitimately
-  // long when they assemble many sub-elements).
+  // violations are captured in `eslint-baseline.json` and gated by
+  // `scripts/eslint-baseline-diff.mjs`. New violations not absorbed by
+  // line-proximity matching against the baseline fail the gate. See
+  // `docs/pr-checklists/code-health.md` for the full cleanup workflow
+  // and a record of the prior mechanisms (max-warnings, bulk
+  // suppressions, line-only keys, content-fingerprint keys) and why
+  // they were rejected. React components exempt from max-depth (JSX
+  // nesting isn't counted) and max-lines-per-function (component
+  // bodies legitimately long when they assemble many sub-elements).
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: { sonarjs },

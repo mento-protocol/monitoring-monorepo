@@ -37,10 +37,11 @@ export default tseslint.config(
     files: ["__tests__/**", "**/*.test.ts"],
     rules: { "max-lines": "off" },
   },
-  // Code-health budgets (PR 2 baseline, warn-only).
-  // Promotion to error in a follow-up PR after baseline cleanup —
-  // see docs/pr-checklists/code-health.md. Stricter here than other
-  // packages because shared-config is small, pure, and data-shaped.
+  // Code-health budgets. Rules ship at `error` severity; pre-existing
+  // violations live in `eslint-baseline.json` and are gated by
+  // `scripts/eslint-baseline-diff.mjs` (see docs/pr-checklists/code-health.md).
+  // Stricter here than other packages because shared-config is small,
+  // pure, and data-shaped.
   {
     files: ["src/**/*.ts"],
     plugins: { sonarjs },
