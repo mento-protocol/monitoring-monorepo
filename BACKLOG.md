@@ -54,7 +54,6 @@ Lightweight plan:
 - [x] **PR 1**: Added `scripts/code-health-history.mjs` + `pnpm code-health:history`. First baseline committed to `reports/code-health-history.md`.
 - [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
 - [ ] Document which signals are blocking vs advisory in `AGENTS.md` and the PR handoff checklist once the tool mix is validated. _Partially done in PR 1 (`AGENTS.md` "Code health budgets" + `docs/pr-checklists/code-health.md`); revisit when later tiers land._
-- [ ] **PR 1 follow-up**: Break the circular import between `indexer-envio/src/pool.ts` and `indexer-envio/src/deviationBreach.ts` (probably by extracting `recordBreachTransition`). Once clean, promote `no-circular` from `warn` → `error` in `.dependency-cruiser.cjs`.
 - [x] ~~**PR 1 follow-up**: Remove the temporary `knip`, `oxlint`, `@oxlint/*` entries from `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` block~~ Done in the round-8 commit; the pinned versions (knip@6.12.2 from 2026-05-09, oxlint@1.64.0 from 2026-05-11) have aged past the 3-day gate, so future bumps now go through the standard supply-chain wait again.
 
 Acceptance: the first implementation PR adds at least one blocking low-noise
