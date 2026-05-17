@@ -360,10 +360,10 @@ describe("isArkhamSourced", () => {
     expect(isArkhamSourced({ source: "", tags: ["exchange"] })).toBe(false);
   });
 
-  it("is case-sensitive on the legacy sentinel", () => {
-    // A user-supplied tag "Arkham" or "ARKHAM" must NOT count as Arkham-sourced.
-    expect(isArkhamSourced({ tags: ["Arkham"] })).toBe(false);
-    expect(isArkhamSourced({ tags: ["ARKHAM"] })).toBe(false);
+  it("normalizes legacy sentinel tags", () => {
+    expect(isArkhamSourced({ tags: [" Arkham "] })).toBe(true);
+    expect(isArkhamSourced({ tags: ["ARKHAM"] })).toBe(true);
+    expect(isArkhamSourced({ tags: ["arkhamist"] })).toBe(false);
   });
 });
 
@@ -372,6 +372,17 @@ describe("normalizeArkhamLegacy", () => {
     const entry: AddressEntry = {
       name: "Binance",
       tags: [ARKHAM_TAG, "exchange"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const normalized = normalizeArkhamLegacy(entry);
+    expect(normalized.source).toBe("arkham");
+    expect(normalized.tags).toEqual(["exchange"]);
+  });
+
+  it("strips normalized legacy sentinel tags", () => {
+    const entry: AddressEntry = {
+      name: "Binance",
+      tags: [" Arkham ", "exchange"],
       updatedAt: "2026-01-01T00:00:00Z",
     };
     const normalized = normalizeArkhamLegacy(entry);
@@ -593,7 +604,7 @@ describe("mergeRefreshEntry", () => {
     // Merge must still treat it as Arkham-sourced AND strip the sentinel.
     const legacy: AddressEntry = {
       name: "Binance",
-      tags: [ARKHAM_TAG, "exchange", "user-curated"],
+      tags: [" ARKHAM ", "exchange", "user-curated"],
       notes: "user note",
       isPublic: true,
       updatedAt: "2026-01-01T00:00:00Z",
@@ -601,6 +612,7 @@ describe("mergeRefreshEntry", () => {
     const merged = mergeRefreshEntry(legacy, fresh);
     expect(merged.source).toBe("arkham");
     expect(merged.tags).not.toContain(ARKHAM_TAG);
+    expect(merged.tags).not.toContain(" ARKHAM ");
     expect(merged.tags).toContain("user-curated");
     expect(merged.tags).toContain("exchange");
     expect(merged.notes).toBe("user note");

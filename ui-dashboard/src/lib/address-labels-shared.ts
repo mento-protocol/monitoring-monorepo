@@ -76,6 +76,14 @@ export const ARKHAM_TAG = "arkham";
 /** Provenance marker for the MiniPay tagging cron. */
 export const MINIPAY_SOURCE = "minipay";
 
+function isArkhamTag(tag: string): boolean {
+  return tag.trim().toLowerCase() === ARKHAM_TAG;
+}
+
+export function withoutArkhamTags(tags: readonly string[]): string[] {
+  return tags.filter((tag) => !isArkhamTag(tag));
+}
+
 /**
  * True when an existing entry was written by the Arkham enrichment cron.
  * Accepts both the new shape (`source === "arkham"`) and legacy entries
@@ -85,7 +93,7 @@ export function isArkhamSourced(entry: {
   source?: string;
   tags?: string[];
 }): boolean {
-  return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
+  return entry.source === "arkham" || entry.tags?.some(isArkhamTag) === true;
 }
 
 /** True when an existing entry was written by the MiniPay tagging cron. */
@@ -171,13 +179,13 @@ export function mergeEntries(
  * `tags: ["arkham"]` to Arkham-sourced (see `stripArkhamProvenance` instead).
  */
 export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
-  if (entry.source === "arkham" || !entry.tags?.includes(ARKHAM_TAG)) {
+  if (entry.source === "arkham" || !entry.tags?.some(isArkhamTag)) {
     return entry;
   }
   return {
     ...entry,
     source: "arkham",
-    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+    tags: withoutArkhamTags(entry.tags),
   };
 }
 

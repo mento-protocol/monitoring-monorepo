@@ -10,10 +10,10 @@
  */
 
 import {
-  ARKHAM_TAG,
   isArkhamSourced,
   sanitizeEntry,
   type AddressEntry,
+  withoutArkhamTags,
 } from "@/lib/address-labels-shared";
 
 const ARKHAM_BASE = "https://api.arkm.com";
@@ -336,8 +336,8 @@ export function mergeRefreshEntry(
   if (!existing || !isArkhamSourced(existing)) return fresh;
 
   const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
-  const tags = Array.from(new Set([...fresh.tags, ...existing.tags])).filter(
-    (t) => t !== ARKHAM_TAG,
+  const tags = withoutArkhamTags(
+    Array.from(new Set([...fresh.tags, ...existing.tags])),
   );
 
   return sanitizeEntry({
