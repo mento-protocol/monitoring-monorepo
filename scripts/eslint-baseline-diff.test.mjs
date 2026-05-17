@@ -243,7 +243,7 @@ test("check: stale baseline entry (not in current) → exit 1", (dir) => {
   );
 });
 
-test("check: line-proximity absorption (≤10 lines) passes", (dir) => {
+test("check: line-proximity absorption (within window) passes", (dir) => {
   writeBaseline(dir, [
     {
       file: "sample.ts",
@@ -253,12 +253,12 @@ test("check: line-proximity absorption (≤10 lines) passes", (dir) => {
       linePreview: "// Line 1 | function foo() { | return 1;",
     },
   ]);
-  // Same stripped key, line shifted by 5 (within ABSORB_LINE_DISTANCE=10).
+  // Same stripped key, line shifted by 20 (within ABSORB_LINE_DISTANCE=30).
   const r = runScript(dir, [
     {
       ruleId: "complexity",
       message: "Function foo has a complexity of 11.",
-      line: 7,
+      line: 22,
     },
   ]);
   assert(
@@ -267,7 +267,7 @@ test("check: line-proximity absorption (≤10 lines) passes", (dir) => {
   );
 });
 
-test("check: line-proximity rejected beyond 10 lines", (dir) => {
+test("check: line-proximity rejected beyond window", (dir) => {
   writeBaseline(dir, [
     {
       file: "sample.ts",

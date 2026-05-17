@@ -878,7 +878,7 @@
     "file": "src/components/time-series-chart-card-hooks.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 171,
+    "line": 198,
     "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
@@ -997,21 +997,21 @@
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "complexity",
     "message": "Function 'upgradeEntry' has a complexity of 29. Maximum allowed is 15.",
-    "line": 199,
+    "line": 213,
     "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
   },
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 44 to the 18 allowed.",
-    "line": 199,
+    "line": 213,
     "linePreview": "*/ | export function upgradeEntry(raw: Record<string, unknown>): AddressEntry { | const entry = raw as Record<string, unknown>;"
   },
   {
     "file": "src/lib/address-labels-shared.ts",
     "ruleId": "sonarjs/no-collapsible-if",
     "message": "Merge this if statement with the nested one.",
-    "line": 215,
+    "line": 229,
     "linePreview": "// valid legacy label from mixed/partially-corrupted data. | if (typeof entry.name === \"string\") { | if (entry.name.trim() || typeof entry.label !== \"string\") {"
   },
   {
@@ -1038,36 +1038,36 @@
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "complexity",
-    "message": "Async function 'handleSnapshot' has a complexity of 35. Maximum allowed is 15.",
-    "line": 52,
+    "message": "Async function 'handleSnapshot' has a complexity of 37. Maximum allowed is 15.",
+    "line": 53,
     "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "complexity",
     "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15.",
-    "line": 219,
+    "line": 225,
     "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'handleSnapshot' has too many lines (127). Maximum allowed is 100.",
-    "line": 52,
+    "message": "Async function 'handleSnapshot' has too many lines (132). Maximum allowed is 100.",
+    "line": 53,
     "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 219,
+    "line": 225,
     "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 52,
+    "message": "Refactor this function to reduce its Cognitive Complexity from 50 to the 18 allowed.",
+    "line": 53,
     "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {

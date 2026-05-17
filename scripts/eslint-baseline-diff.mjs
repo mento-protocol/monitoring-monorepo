@@ -184,10 +184,17 @@ function describe(v, delta) {
 // same-message swaps to be caught, not absorbed by stripped-key
 // matching. Line proximity threads the needle: same stripped key +
 // nearby line = refactor (absorbed); same stripped key + distant line
-// = different violation (flagged). The proximity threshold below is a
-// pragmatic limit on "how far can a baselined violation move and still
-// be called the same one"; tune as the baselines mature.
-const ABSORB_LINE_DISTANCE = 10;
+// = different violation (flagged).
+//
+// The threshold is wide enough to absorb realistic drift between
+// back-to-back PRs (an unrelated PR adding a 10-20 line helper above a
+// baselined function shifts every later violation by that amount), but
+// narrow enough that cross-section swaps in larger files still surface.
+// Started at 10 in PR 423; bumped to 30 in PR 424 after observing
+// 14-27 line natural drift on `ui-dashboard` (PR #429 changed source
+// without updating the baseline) made `lint` fail on every fresh PR
+// branch that rebased onto main.
+const ABSORB_LINE_DISTANCE = 30;
 
 function growth(referenceEntries, currentEntries) {
   // Group entries by stripped key so we can pair add/remove within each

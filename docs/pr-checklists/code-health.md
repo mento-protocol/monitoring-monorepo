@@ -67,9 +67,10 @@ reported line. This content fingerprint:
 - An added tuple whose stripped key `(file, ruleId, message)` doesn't
   exist in the baseline → rejected.
 - An added tuple whose stripped key matches a baseline entry AND whose
-  `line` is within `ABSORB_LINE_DISTANCE` (currently 10) of that entry
+  `line` is within `ABSORB_LINE_DISTANCE` (currently 30) of that entry
   → absorbed as a legitimate refactor (comment edit, signature
-  reformat, small insert above a baselined function).
+  reformat, small insert above a baselined function, or natural drift
+  from sibling PRs landing on main).
 - An added tuple whose stripped key matches but `line` is farther than
   the proximity window → rejected. Larger jumps are likely a different
   violation introduced under the same rule, not the same one moved.
