@@ -3,378 +3,441 @@
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'bootstrapFeedBreakerConfigs' has too many parameters (5). Maximum allowed is 4.",
+    "line": 208,
     "linePreview": " | export async function bootstrapFeedBreakerConfigs( | context: EvmOnEventContext,"
   },
   {
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'ensureBreaker' has too many parameters (5). Maximum allowed is 4.",
+    "line": 71,
     "linePreview": "* Caller passes the event block number (used as the bootstrap block). */ | export async function ensureBreaker( | context: EvmOnEventContext,"
   },
   {
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'ensureBreakerConfig' has too many parameters (5). Maximum allowed is 4.",
+    "line": 120,
     "linePreview": "* from the loaded state. Returns null if RPC bootstrap fails. */ | export async function ensureBreakerConfig( | context: EvmOnEventContext,"
   },
   {
     "file": "src/contractAddresses.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 129,
     "linePreview": "const label = PRICING_MODULE_LABELS[rawName]; | if (label && entry.address) { | index.set(entry.address.toLowerCase(), label);"
   },
   {
     "file": "src/deviationBreach.ts",
     "ruleId": "complexity",
     "message": "Async function 'recordBreachTransition' has a complexity of 26. Maximum allowed is 15.",
+    "line": 102,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
     "file": "src/deviationBreach.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'recordBreachTransition' has too many lines (131). Maximum allowed is 80.",
+    "line": 102,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
     "file": "src/deviationBreach.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 32 to the 18 allowed.",
+    "line": 102,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
     "file": "src/handlers/biPoolManager.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 26. Maximum allowed is 25.",
+    "line": 294,
     "linePreview": "{ contract: \"BiPoolManager\", event: \"ExchangeCreated\" }, | async ({ event, context }) => { | const id = exchangeRowId(event.chainId, event.params.exchangeId);"
   },
   {
     "file": "src/handlers/biPoolManager.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'ensureBiPoolExchange' has too many lines (153). Maximum allowed is 150.",
+    "line": 70,
     "linePreview": " | async function ensureBiPoolExchange( | context: EvmOnEventContext,"
   },
   {
     "file": "src/handlers/biPoolManager.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 39 to the 25 allowed.",
+    "line": 70,
     "linePreview": " | async function ensureBiPoolExchange( | context: EvmOnEventContext,"
   },
   {
     "file": "src/handlers/broker.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 33. Maximum allowed is 25.",
+    "line": 63,
     "linePreview": "{ contract: \"Broker\", event: \"Swap\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {
     "file": "src/handlers/fpmm.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (157). Maximum allowed is 150.",
+    "line": 25,
     "linePreview": "{ contract: \"FPMM\", event: \"Swap\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {
     "file": "src/handlers/fpmm/state-sync.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 26. Maximum allowed is 25.",
+    "line": 257,
     "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {
     "file": "src/handlers/fpmm/state-sync.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (179). Maximum allowed is 150.",
+    "line": 257,
     "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {
     "file": "src/handlers/sortedOracles.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (153). Maximum allowed is 150.",
+    "line": 309,
     "linePreview": "await Promise.all( | poolIds.map(async (poolId) => { | const initial = await context.Pool.get(poolId);"
   },
   {
     "file": "src/handlers/sortedOracles.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (222). Maximum allowed is 150.",
+    "line": 276,
     "linePreview": "{ contract: \"SortedOracles\", event: \"MedianUpdated\" }, | async ({ event, context }) => { | const rateFeedID = asAddress(event.params.token);"
   },
   {
     "file": "src/healthScore.ts",
     "ruleId": "max-params",
     "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",
+    "line": 307,
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
     "file": "src/leaderboardSnapshots.ts",
     "ruleId": "complexity",
     "message": "Async function 'applyLeaderboardSnapshots' has a complexity of 108. Maximum allowed is 15.",
+    "line": 90,
     "linePreview": "*/ | export async function applyLeaderboardSnapshots( | args: ApplyLeaderboardSnapshotsArgs,"
   },
   {
     "file": "src/leaderboardSnapshots.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'applyLeaderboardSnapshots' has too many lines (298). Maximum allowed is 80.",
+    "line": 90,
     "linePreview": "*/ | export async function applyLeaderboardSnapshots( | args: ApplyLeaderboardSnapshotsArgs,"
   },
   {
     "file": "src/leaderboardSnapshots.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 51 to the 18 allowed.",
+    "line": 90,
     "linePreview": "*/ | export async function applyLeaderboardSnapshots( | args: ApplyLeaderboardSnapshotsArgs,"
   },
   {
     "file": "src/leaderboardWindowSnapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",
+    "line": 112,
     "linePreview": "*  has an empty inclusive range. */ | export function aggregatePerWindow( | rows: ReadonlyArray<TraderDailyRow>,"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 57. Maximum allowed is 15.",
+    "line": 283,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (191). Maximum allowed is 80.",
+    "line": 227,
     "linePreview": " | export const upsertPool = async ({ | context,"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
+    "line": 283,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "complexity",
     "message": "Async function 'mirrorTokensAndDecimalsToPool' has a complexity of 28. Maximum allowed is 15.",
+    "line": 448,
     "linePreview": "* because the decimals fetcher uses `tokenDecimalsScalingEffect`. */ | export async function mirrorTokensAndDecimalsToPool( | context: {"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "complexity",
     "message": "Async function 'selfHealWrappedExchangeId' has a complexity of 27. Maximum allowed is 15.",
+    "line": 183,
     "linePreview": "* No-op on pools that already have `wrappedExchangeId` set. */ | export async function selfHealWrappedExchangeId( | context: PoolContext,"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'selfHealWrappedExchangeId' has too many lines (131). Maximum allowed is 80.",
+    "line": 183,
     "linePreview": "* No-op on pools that already have `wrappedExchangeId` set. */ | export async function selfHealWrappedExchangeId( | context: PoolContext,"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "max-params",
     "message": "Async function 'mirrorFeedIdToPool' has too many parameters (5). Maximum allowed is 4.",
+    "line": 412,
     "linePreview": "* (upsertPool path) and HandlerContext (event handlers) work. */ | export async function mirrorFeedIdToPool( | context: { Pool: PoolContext[\"Pool\"] },"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "max-params",
     "message": "Async function 'mirrorTokensAndDecimalsToPool' has too many parameters (6). Maximum allowed is 4.",
+    "line": 448,
     "linePreview": "* because the decimals fetcher uses `tokenDecimalsScalingEffect`. */ | export async function mirrorTokensAndDecimalsToPool( | context: {"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
+    "line": 448,
     "linePreview": "* because the decimals fetcher uses `tokenDecimalsScalingEffect`. */ | export async function mirrorTokensAndDecimalsToPool( | context: {"
   },
   {
     "file": "src/pool/self-heal.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 28 to the 18 allowed.",
+    "line": 183,
     "linePreview": "* No-op on pools that already have `wrappedExchangeId` set. */ | export async function selfHealWrappedExchangeId( | context: PoolContext,"
   },
   {
     "file": "src/pool/snapshots.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 18. Maximum allowed is 15.",
-    "linePreview": "burnDelta?: boolean | undefined; | }): Promise<void> => { | const dayTs = dayBucket(blockTimestamp);"
+    "line": 32,
+    "linePreview": "burnDelta?: boolean | undefined; | }): Promise<void> => { | const hourTs = hourBucket(blockTimestamp);"
   },
   {
     "file": "src/pool/snapshots.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 18. Maximum allowed is 15.",
-    "linePreview": "burnDelta?: boolean | undefined; | }): Promise<void> => { | const hourTs = hourBucket(blockTimestamp);"
+    "line": 113,
+    "linePreview": "burnDelta?: boolean | undefined; | }): Promise<void> => { | const dayTs = dayBucket(blockTimestamp);"
   },
   {
     "file": "src/protocolFeeSnapshot.ts",
     "ruleId": "complexity",
     "message": "Function 'mergeFeeSnapshot' has a complexity of 20. Maximum allowed is 15.",
+    "line": 91,
     "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
   },
   {
     "file": "src/protocolFeeSnapshot.ts",
     "ruleId": "max-lines-per-function",
     "message": "Function 'mergeFeeSnapshot' has too many lines (120). Maximum allowed is 80.",
+    "line": 91,
     "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
   },
   {
     "file": "src/protocolFeeSnapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
+    "line": 91,
     "linePreview": "*/ | export function mergeFeeSnapshot( | existing: PoolDailyFeeSnapshot | undefined,"
   },
   {
     "file": "src/protocolFeeSnapshot.ts",
     "ruleId": "sonarjs/no-collapsible-if",
     "message": "Merge this if statement with the nested one.",
+    "line": 213,
     "linePreview": "// canonical value — only flip from true→false here, never the reverse. | if (!shouldHeal) { | if (isUnresolvedInput || !isInputPegged) {"
   },
   {
     "file": "src/rpc.ts",
     "ruleId": "max-params",
     "message": "Async function 'updatePoolsOracleExpiry' has too many parameters (5). Maximum allowed is 4.",
+    "line": 125,
     "linePreview": " | export async function updatePoolsOracleExpiry( | context: EvmOnEventContext,"
   },
   {
     "file": "src/rpc/biPoolManager.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchPoolExchange' has too many parameters (5). Maximum allowed is 4.",
+    "line": 104,
     "linePreview": " | export async function fetchPoolExchange( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "complexity",
     "message": "Async function 'readContractWithBlockFallback' has a complexity of 41. Maximum allowed is 15.",
+    "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "linePreview": "); | try { | const result = await makeCall(fallbackClient, blockNumber);"
-  },
-  {
-    "file": "src/rpc/block-fallback.ts",
-    "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "linePreview": "} catch (fallbackErr) { | if ( | fallbackErr instanceof Error &&"
-  },
-  {
-    "file": "src/rpc/block-fallback.ts",
-    "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "linePreview": "} catch (retryErr) { | if ( | !(retryErr instanceof Error) ||"
-  },
-  {
-    "file": "src/rpc/block-fallback.ts",
-    "ruleId": "max-depth",
-    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 165,
     "linePreview": "} catch (retryErr) { | if (!isRateLimitError(retryErr)) { | // Archive-depth error surfaced after the rate-limit cleared:"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 202,
+    "linePreview": "); | try { | const result = await makeCall(fallbackClient, blockNumber);"
+  },
+  {
+    "file": "src/rpc/block-fallback.ts",
+    "ruleId": "max-depth",
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 271,
     "linePreview": "// error. | if ( | fallbackErr instanceof Error &&"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 319,
+    "linePreview": "} catch (retryErr) { | if ( | !(retryErr instanceof Error) ||"
+  },
+  {
+    "file": "src/rpc/block-fallback.ts",
+    "ruleId": "max-depth",
+    "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
+    "line": 341,
+    "linePreview": "} catch (fallbackErr) { | if ( | fallbackErr instanceof Error &&"
+  },
+  {
+    "file": "src/rpc/block-fallback.ts",
+    "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (6). Maximum allowed is 4.",
+    "line": 179,
     "linePreview": "// behaviour for the same retry-surfaced shape. | if ( | retryErr instanceof Error &&"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (6). Maximum allowed is 4.",
+    "line": 209,
     "linePreview": "// skip the secondary entirely. | if ( | blockNumber !== undefined &&"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'readContractWithBlockFallback' has too many lines (156). Maximum allowed is 80.",
+    "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Async function 'readContractWithBlockFallback' has too many parameters (6). Maximum allowed is 4.",
+    "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Method 'logRpcFailure' has too many parameters (5). Maximum allowed is 4.",
+    "line": 97,
     "linePreview": "isRateLimitError: (err: unknown): boolean => isRateLimitError(err), | logRpcFailure: ( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 97 to the 18 allowed.",
+    "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchBreakerFeedState' has a complexity of 16. Maximum allowed is 15.",
+    "line": 392,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchBreakerDefaults' has too many lines (96). Maximum allowed is 80.",
+    "line": 280,
     "linePreview": "* (revert-safe — MarketHours has neither and falls back to 0). */ | export async function fetchBreakerDefaults( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchBreakerFeedState' has too many lines (170). Maximum allowed is 80.",
+    "line": 392,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchBreakerDefaults' has too many parameters (5). Maximum allowed is 4.",
+    "line": 280,
     "linePreview": "* (revert-safe — MarketHours has neither and falls back to 0). */ | export async function fetchBreakerDefaults( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchBreakerFeedState' has too many parameters (6). Maximum allowed is 4.",
+    "line": 392,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'probeFunction' has too many parameters (6). Maximum allowed is 4.",
+    "line": 182,
     "linePreview": "* the call succeeds (even with zero result), false on revert. */ | async function probeFunction( | chainId: number,"
   },
   {
     "file": "src/rpc/client.ts",
     "ruleId": "max-params",
     "message": "Function 'logRpcFailure' has too many parameters (6). Maximum allowed is 4.",
+    "line": 78,
     "linePreview": "*/ | export function logRpcFailure( | chainId: number,"
   },
   {
     "file": "src/rpc/http-test-mocks.ts",
     "ruleId": "complexity",
     "message": "Function 'handleRpcCall' has a complexity of 16. Maximum allowed is 15.",
+    "line": 152,
     "linePreview": " | function handleRpcCall(chainId: number, request: JsonRpcRequest): object { | const id = request.id;"
   },
   {
     "file": "src/rpc/pool-fees.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchFees' has a complexity of 17. Maximum allowed is 15.",
+    "line": 227,
     "linePreview": "* so self-heal stops retrying permanently-missing getters. */ | export async function fetchFees( | chainId: number,"
   },
   {
     "file": "src/rpc/pool-fees.ts",
     "ruleId": "max-params",
     "message": "Async function 'readFeeGetter' has too many parameters (6). Maximum allowed is 4.",
+    "line": 99,
     "linePreview": " | async function readFeeGetter( | client: ReturnType<typeof getRpcClient>,"
   },
   {
     "file": "src/rpc/pool-state.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchTradingLimits' has too many parameters (5). Maximum allowed is 4.",
+    "line": 469,
     "linePreview": " | export async function fetchTradingLimits( | chainId: number,"
   },
   {
     "file": "src/usd.ts",
     "ruleId": "max-params",
     "message": "Function 'pickPeggedSide' has too many parameters (7). Maximum allowed is 4.",
+    "line": 52,
     "linePreview": "*/ | function pickPeggedSide( | chainId: number,"
   }
 ]

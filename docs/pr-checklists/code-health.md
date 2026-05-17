@@ -62,24 +62,36 @@ reported line. This content fingerprint:
   different location yields different source content → different
   fingerprint → check fails.
 
-`lint:baseline:update` is **prune-only with stripped-key absorption**:
+`lint:baseline:update` is **prune-only with line-proximity absorption**:
 
-- Adding a tuple whose stripped key `(file, ruleId, message)` doesn't
-  exist in the baseline (or exists at a lower count) → rejected.
-- Adding a tuple whose stripped key already exists with a fixed-count
-  swap (1 added + 1 removed) → absorbed as a refactor. This is the
-  case for function renames, signature reformatting, and adjacent edits
-  that shift the linePreview window around an existing violation.
+- An added tuple whose stripped key `(file, ruleId, message)` doesn't
+  exist in the baseline → rejected.
+- An added tuple whose stripped key matches a baseline entry AND whose
+  `line` is within `ABSORB_LINE_DISTANCE` (currently 10) of that entry
+  → absorbed as a legitimate refactor (comment edit, signature
+  reformat, small insert above a baselined function).
+- An added tuple whose stripped key matches but `line` is farther than
+  the proximity window → rejected. Larger jumps are likely a different
+  violation introduced under the same rule, not the same one moved.
 - Removing tuples → always allowed.
 
-For a deliberate reseed (e.g. accepting a new package), delete
-`eslint-baseline.json` first and re-run the update.
+For a deliberate reseed (e.g. accepting a new package, or after a
+large refactor that moves a violation farther than the proximity
+window), delete `eslint-baseline.json` first and re-run the update.
 
 CI also runs a **merge-base growth check** (PRs only): the same
-stripped-key rule applied to the diff between HEAD's
+line-proximity rule applied to the diff between HEAD's
 `eslint-baseline.json` and main's. Hand-editing or reseeding the
 baseline file to admit new violations alongside the introducing code
 gets caught here even when local `update` was bypassed.
+
+**Known gap.** A swap-in-place within `ABSORB_LINE_DISTANCE` lines
+(fix one violation, add a different one with the same
+`(file, ruleId, message)` nearby) still absorbs. The line-proximity
+heuristic prefers refactor UX over catching this narrow attack —
+codex has flip-flopped on the trade-off across rounds; this is the
+current compromise. The PR diff makes the baseline rewrite visible
+to human reviewers, which is the actual safety net.
 
 Cleanup workflow:
 

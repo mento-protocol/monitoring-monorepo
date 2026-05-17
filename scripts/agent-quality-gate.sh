@@ -621,6 +621,9 @@ while IFS= read -r path; do
     .dependency-cruiser.cjs)
       add_surface "tooling"
       add_command "pnpm code-health:deps" "dep-cruiser config changed (cross-package boundaries + cycles)"
+      # `.dependency-cruiser.cjs` is also linted by `pnpm lint:scripts` (see
+      # eslint.config.mjs root coverage). A CJS-only edit must run both.
+      add_command "pnpm lint:scripts" "dep-cruiser config changed (root ESLint coverage)"
       add_checklist "docs/pr-checklists/code-health.md" "dep-cruiser config changed"
       ;;
     */knip.json)
@@ -842,7 +845,7 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
+    scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs|.dependency-cruiser.cjs)
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in

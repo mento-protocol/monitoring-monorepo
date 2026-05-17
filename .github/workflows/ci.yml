@@ -121,6 +121,7 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - eslint.config.mjs
+              - .dependency-cruiser.cjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
