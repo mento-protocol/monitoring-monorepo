@@ -80,10 +80,20 @@ jobs:
               - metrics-bridge/vitest.mutation.config.ts
               - metrics-bridge/package.json
               - metrics-bridge/tsconfig.json
+              # Upstream workspace deps: rebalance-probe.ts, config.ts, and
+              # rebalance-check.ts import @mento-protocol/monitoring-config
+              # subpaths (format, thresholds, rebalance-abi, tokens, etc.).
+              - shared-config/src/**
+              - shared-config/*.json
+              - shared-config/package.json
+              - shared-config/tsconfig.json
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
               - .npmrc
+              # `.github/actions/pnpm-install` uses `.node-version` to set
+              # the Node runtime that Stryker + the mutation tests run on.
+              - .node-version
               - .github/workflows/mutation-testing.yml
               - .github/actions/pnpm-install/**
       - name: Decide whether to run mutation

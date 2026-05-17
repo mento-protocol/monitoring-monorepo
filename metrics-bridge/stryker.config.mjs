@@ -13,7 +13,7 @@ const config = {
     low: 80,
     // Blocking gate: `pnpm bridge:mutation` exits non-zero when the mutation
     // score on `src/rebalance-probe.ts` drops below 80%. The CI workflow
-    // wires this into the bridge-mutation-pr job (see
+    // wires this into the `bridge-rebalance-probe-baseline` job (see
     // `.github/workflows/mutation-testing.yml`). Current baseline: 83.94%
     // — see `docs/mutation-testing.md` for survivor classification.
     break: 80,
