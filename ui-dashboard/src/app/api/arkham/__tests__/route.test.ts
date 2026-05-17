@@ -301,6 +301,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     });
     mockGetLabels.mockResolvedValue(
       existingLabels({
+        // Mix legacy ARKHAM_TAG labels with source-tagged entries so refresh
+        // rotation keeps covering both Arkham-attribution formats.
         "0xnewer": {
           name: "Newer",
           tags: ["arkham"],

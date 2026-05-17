@@ -37,4 +37,18 @@ describe("formatOracleChartHoverText", () => {
     expect(text).toContain("Deviation: N/A");
     expect(text).not.toContain("NaN");
   });
+
+  it("uses N/A for non-finite price samples", () => {
+    const text = formatOracleChartHoverText({
+      snapshot: oracleSnapshot(),
+      price: Number.NaN,
+      deviation: 12.345,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+    });
+
+    expect(text).toContain("Price: N/A USDC/cUSD");
+    expect(text).toContain("Deviation: 12.35%");
+    expect(text).not.toContain("NaN");
+  });
 });

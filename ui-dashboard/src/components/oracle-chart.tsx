@@ -290,9 +290,10 @@ export function formatOracleChartHoverText({
   const deviationText = Number.isFinite(deviation)
     ? `${deviation.toFixed(2)}%`
     : "N/A";
+  const priceText = Number.isFinite(price) ? price.toFixed(4) : "N/A";
   return (
     `<b>${ts}</b><br>` +
-    `Price: ${price.toFixed(4)} ${token1Symbol}/${token0Symbol}<br>` +
+    `Price: ${priceText} ${token1Symbol}/${token0Symbol}<br>` +
     `Deviation: ${deviationText}`
   );
 }
