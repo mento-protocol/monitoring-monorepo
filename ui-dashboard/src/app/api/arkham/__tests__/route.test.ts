@@ -294,6 +294,47 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     );
   });
 
+  it("refresh mode rotates oldest Arkham-sourced entries first", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xnewer", "0xoldest", "0xmiddle"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
+        "0xnewer": {
+          name: "Newer",
+          tags: ["arkham"],
+          source: "arkham",
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
+        "0xoldest": {
+          name: "Oldest",
+          tags: [ARKHAM_TAG],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+        "0xmiddle": {
+          name: "Middle",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-02-01T00:00:00Z",
+        },
+      }),
+    );
+    mockEnrichBatch.mockResolvedValue([]);
+
+    await GET(
+      makeReq({
+        bearer: "cron-secret",
+        searchParams: { mode: "refresh", limit: "2" },
+      }),
+    );
+
+    expect(mockEnrichBatch).toHaveBeenCalledWith(
+      ["0xoldest", "0xmiddle"],
+      expect.anything(),
+    );
+  });
+
   it("dryRun mode skips Redis writes", async () => {
     mockDiscover.mockResolvedValue({
       addresses: ["0xnew"],

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-04e4b6470b-6cec_29bda37095",
+  "featureId": "feat_library_04e4b6470b",
+  "title": "Bridge-only config scripts reference a config file that is not documented as a generated or optional artifact",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/package.json",
+      "startLine": 16,
+      "endLine": 18,
+      "symbol": "scripts",
+      "quote": "\"indexer:bridge-only:codegen\": \"node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.bridge-only.yaml\""
+    },
+    {
+      "path": "indexer-envio/README.md",
+      "startLine": 58,
+      "endLine": 62,
+      "symbol": null,
+      "quote": "`config.multichain.bridge-only.yaml` | Local bridge-flow validation harness"
+    }
+  ],
+  "reasoning": "The package manifest exposes first-class bridge-only codegen/dev/start commands that require config.multichain.bridge-only.yaml to exist in the package root. The context docs list the file as an available config, but the provided owned/context file set does not include it or explain it as generated. If this file is absent from the package at install/checkout time, these scripts fail immediately and any automation or developer following README/package scripts hits a release/build hazard. Confidence is medium because the review bundle does not include the full repository tree, so the file may exist outside the provided evidence set.",
+  "reproduction": "From indexer-envio, run `pnpm indexer:bridge-only:codegen` in a checkout that lacks `config.multichain.bridge-only.yaml`; Envio will fail to load the requested config path.",
+  "recommendation": "Ensure `indexer-envio/config.multichain.bridge-only.yaml` is tracked if these scripts are supported, or remove/rename the bridge-only scripts and README row if the harness is no longer part of the package contract.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were linked for package scripts or config-file existence, and package.json script targets are not validated by the provided context.",
+  "suggestedRegressionTest": "Add a lightweight script-target validation test that parses indexer-envio/package.json, extracts `--config <path>` arguments, and asserts each referenced config file exists.",
+  "minimumFixScope": "Either add the missing bridge-only config file or delete/update the three bridge-only scripts plus the matching README documentation.",
+  "status": "false-positive",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "false-positive",
+      "note": "config.multichain.bridge-only.yaml exists in indexer-envio; script target is a real tracked config",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T18:39:51.753Z"
+    }
+  ],
+  "signature": "sig_feat-library-04e4b6470b_6cec26f570",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T183510-2c3e76",
+  "createdAt": "2026-05-17T18:35:40.667Z",
+  "updatedAt": "2026-05-17T18:39:51.752Z"
+}

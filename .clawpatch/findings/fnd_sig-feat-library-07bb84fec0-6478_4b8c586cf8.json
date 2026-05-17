@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-07bb84fec0-6478_4b8c586cf8",
+  "featureId": "feat_library_07bb84fec0",
+  "title": "Refresh rotation is untested, so stale Arkham entries can silently starve again",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/arkham/enrich/route.ts",
+      "startLine": 123,
+      "endLine": 136,
+      "symbol": "GET",
+      "quote": "if (mode === \"refresh\") {\n          candidates = candidates.sort((a, b) => {\n            const ua = existing[a]?.updatedAt ?? \"\";\n            const ub = existing[b]?.updatedAt ?? \"\";\n            return ua.localeCompare(ub);\n          });\n        }\n        candidates = candidates.slice(0, maxAddresses);"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/__tests__/route.test.ts",
+      "startLine": 255,
+      "endLine": 286,
+      "symbol": null,
+      "quote": "it(\"refresh mode re-enriches source-tagged entries\", async () => {\n    mockDiscover.mockResolvedValue({\n      addresses: [\"0xark\"],\n      perEntity: [],\n    });"
+    }
+  ],
+  "reasoning": "The route contains explicit round-robin refresh behavior: sort Arkham-sourced candidates by ascending updatedAt before applying the limit, so large labeled sets eventually refresh past the alphabetical prefix. The current route tests cover refresh eligibility with one candidate, but they do not cover ordering plus limit. A future change that moves slice before sort, removes the sort, or sorts the wrong direction would still pass the included tests while causing the same prefix of Arkham labels to refresh every month and the tail to remain stale indefinitely.",
+  "reproduction": null,
+  "recommendation": "Add a route-level test for mode=refresh with at least three Arkham-sourced existing labels, intentionally unsorted discovered addresses, and limit=2. Assert enrichBatch receives the two oldest updatedAt addresses in order.",
+  "whyTestsDoNotAlreadyCoverThis": "The included refresh tests use a single candidate, so ordering and truncation behavior are not exercised.",
+  "suggestedRegressionTest": "In ui-dashboard/src/app/api/arkham/__tests__/route.test.ts, mock discovered addresses [\"0xnewer\", \"0xoldest\", \"0xmiddle\"], existing Arkham entries with updatedAt values ordered oldest/middle/newer, call GET with mode=refresh&limit=2, and assert enrichBatch is called with [\"0xoldest\", \"0xmiddle\"].",
+  "minimumFixScope": "Add one focused test in ui-dashboard/src/app/api/arkham/__tests__/route.test.ts.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "added route test proving refresh mode orders Arkham-sourced candidates oldest-first before applying limit",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T18:40:04.453Z"
+    }
+  ],
+  "signature": "sig_feat-library-07bb84fec0_6478e710cd",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T183510-2c3e76",
+  "createdAt": "2026-05-17T18:36:35.979Z",
+  "updatedAt": "2026-05-17T18:40:04.453Z"
+}

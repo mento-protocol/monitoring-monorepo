@@ -79,6 +79,7 @@ function subtractWei(value: bigint, amount: bigint): bigint {
   return value > amount ? value - amount : 0n;
 }
 
+/* eslint-disable max-lines-per-function -- Existing large rollup writer; this PR only adds heartbeat calls for intentional early returns. */
 /**
  * Update all leaderboard rollup entities for one swap. Idempotent at the (id)
  * level — re-running on the same event yields the same final state because:
@@ -103,10 +104,22 @@ export async function applyLeaderboardSnapshots(
     blockNumber,
   } = args;
 
+  const flushLeaderboardWindow = () =>
+    maybeHeartbeatFlushV3({
+      context,
+      chainId,
+      blockTimestamp,
+      blockNumber,
+    });
+
   // Skip swaps where caller is missing — Envio's transaction.from fallback
   // to "" can produce these and a blank trader key would corrupt the
-  // leaderboard's primary axis. Better to drop than to bucket as "".
-  if (!caller) return;
+  // leaderboard's primary axis. Better to drop than to bucket as "", but
+  // still run the chain heartbeat because the event proves time advanced.
+  if (!caller) {
+    await flushLeaderboardWindow();
+    return;
+  }
 
   // Skip uncomputable USD swaps. `computeSwapUsdWei` returns 0n in two
   // cases: (1) a degenerate zero-amount swap (impossible from a real
@@ -118,7 +131,10 @@ export async function applyLeaderboardSnapshots(
   // unit token amounts and the original `volumeUsdWei = 0n` — a future
   // PR can backfill the rollups via a recovery job once a proper rate
   // map is wired up indexer-side.
-  if (volumeUsdWei === 0n) return;
+  if (volumeUsdWei === 0n) {
+    await flushLeaderboardWindow();
+    return;
+  }
 
   const day = dayBucket(blockTimestamp);
   const dayKey = day.toString();
@@ -449,10 +465,6 @@ export async function applyLeaderboardSnapshots(
   //    [windowStartDay, snapshotDay] inclusive — today's row is excluded
   //    by the upper bound, so we never write a "today" snapshot. The
   //    dashboard adds today's partial from a small direct query.
-  await maybeHeartbeatFlushV3({
-    context,
-    chainId,
-    blockTimestamp,
-    blockNumber,
-  });
+  await flushLeaderboardWindow();
 }
+/* eslint-enable max-lines-per-function */

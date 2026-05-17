@@ -60,6 +60,7 @@ interface GlobalPoolsTableProps {
   reservePoolKeys?: Set<string>;
 }
 
+/* eslint-disable max-lines-per-function -- Existing large table component; this PR only replaces a dead health-button with accessible static details. */
 // Component is over the no-giant-component threshold — table sort/filter state,
 // row selection, per-row formatting, and shared column helpers move together.
 // Split the row component and sort/filter state when adding more behavior.
@@ -241,6 +242,7 @@ export function GlobalPoolsTable({
           </tr>
         </thead>
         <tbody>
+          {/* eslint-disable-next-line max-lines-per-function -- Existing dense row renderer; keeping the scoped Clawpatch a11y fix out of a broader table split. */}
           {sortedEntries.map((e) => {
             const { pool: p, network } = e;
             const key = globalPoolKey(e);
@@ -252,6 +254,12 @@ export function GlobalPoolsTable({
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = resolveLimitStatus(p);
             const effectiveStatus = computeEffectiveStatus(p, network.chainId);
+            const healthDetails = combinedTooltip(
+              healthStatus,
+              limitStatus,
+              p,
+              network,
+            );
             const tvl = tvlByKey.get(key) ?? null;
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
@@ -300,18 +308,10 @@ export function GlobalPoolsTable({
                   </td>
                 )}
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <button
-                    type="button"
-                    title={combinedTooltip(
-                      healthStatus,
-                      limitStatus,
-                      p,
-                      network,
-                    )}
-                    className="cursor-default appearance-none bg-transparent border-0 p-0"
-                  >
-                    <HealthBadge status={effectiveStatus} />
-                  </button>
+                  <HealthBadgeWithDetails
+                    status={effectiveStatus}
+                    details={healthDetails}
+                  />
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono text-right">
                   {(() => {
@@ -392,5 +392,21 @@ export function GlobalPoolsTable({
         </tbody>
       </Table>
     </>
+  );
+}
+/* eslint-enable max-lines-per-function */
+
+function HealthBadgeWithDetails({
+  status,
+  details,
+}: {
+  status: string;
+  details: string;
+}) {
+  return (
+    <span title={details} className="inline-flex cursor-help">
+      <HealthBadge status={status} />
+      <span className="sr-only">{details}</span>
+    </span>
   );
 }

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-072d81a7a7-73d4_95873a1ea0",
+  "featureId": "feat_library_072d81a7a7",
+  "title": "Leaderboard heartbeat is skipped for dropped swaps",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/leaderboardSnapshots.ts",
+      "startLine": 106,
+      "endLine": 121,
+      "symbol": "applyLeaderboardSnapshots",
+      "quote": "if (!caller) return; ... if (volumeUsdWei === 0n) return;"
+    },
+    {
+      "path": "indexer-envio/src/leaderboardSnapshots.ts",
+      "startLine": 446,
+      "endLine": 457,
+      "symbol": "applyLeaderboardSnapshots",
+      "quote": "await maybeHeartbeatFlushV3({ context, chainId, blockTimestamp, blockNumber, });"
+    },
+    {
+      "path": "indexer-envio/src/swap.ts",
+      "startLine": 72,
+      "endLine": 87,
+      "symbol": "buildSwapTraderFields",
+      "quote": "const usdGated = pool.tokenDecimalsKnown === false; ... volumeUsdWei: usdGated ? 0n : computeSwapUsdWei(...)"
+    },
+    {
+      "path": "indexer-envio/test/leaderboardSnapshots.test.ts",
+      "startLine": 758,
+      "endLine": 783,
+      "symbol": null,
+      "quote": "uncomputable USD (volumeUsdWei === 0n) is dropped — no entities created"
+    }
+  ],
+  "reasoning": "The heartbeat that finalizes closed-day LeaderboardWindowSnapshot rows only runs at the end of applyLeaderboardSnapshots. Both early-return paths exit before that heartbeat. This is not only a synthetic zero-volume case: buildSwapTraderFields intentionally emits volumeUsdWei=0n while token decimals are unknown, so a real swap at the first block of a new UTC day can be dropped from rollups and also fail to advance LeaderboardChainState or flush yesterday's snapshot. The dashboard then sees stale/missing window snapshots until a later computable swap happens on that chain.",
+  "reproduction": "Seed a context with LeaderboardChainState.lastFlushedDay before yesterday and TraderDailySnapshot rows for yesterday, then call applyLeaderboardSnapshots with blockTimestamp today and volumeUsdWei: 0n. The function returns at line 121, so no LeaderboardWindowSnapshot rows are written and lastFlushedDay remains stale.",
+  "recommendation": "Run maybeHeartbeatFlushV3 for every swap event that carries chainId/blockTimestamp/blockNumber, even when the trader rollup work is skipped. A minimal fix is to move the heartbeat before the early returns, or wrap the rollup body in guards and keep the heartbeat in a finally-style tail path.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing early-return tests assert no trader/aggregator entities are created, but they do not assert LeaderboardChainState or LeaderboardWindowSnapshot behavior. The heartbeat tests call maybeHeartbeatFlushV3 directly, so they miss the integration path where applyLeaderboardSnapshots returns before invoking it.",
+  "suggestedRegressionTest": "Add an applyLeaderboardSnapshots test with a prior closed-day TraderDailySnapshot and stale LeaderboardChainState, then invoke a today swap with volumeUsdWei: 0n and assert yesterday's LeaderboardWindowSnapshot rows are written and lastFlushedDay advances while trader/aggregator rollups remain untouched.",
+  "minimumFixScope": "indexer-envio/src/leaderboardSnapshots.ts plus an integration regression in indexer-envio/test/leaderboardSnapshots.test.ts",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "zero-USD and missing-caller early returns now run the v3 leaderboard heartbeat before dropping trader rollups; regression test covers closed-day flush",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-17T18:40:04.336Z"
+    }
+  ],
+  "signature": "sig_feat-library-072d81a7a7_73d4829d2b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260517T183510-2c3e76",
+  "createdAt": "2026-05-17T18:36:48.827Z",
+  "updatedAt": "2026-05-17T18:40:04.336Z"
+}

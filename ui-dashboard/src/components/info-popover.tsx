@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 /**
  * Minimal popover for info-icon explainers. Click / Enter / Space toggles
@@ -20,6 +20,7 @@ export function InfoPopover({
   content: string;
 }) {
   const [open, setOpen] = useState(false);
+  const tooltipId = useId();
   const wrapperRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -44,6 +45,8 @@ export function InfoPopover({
         type="button"
         aria-label={label}
         aria-expanded={open}
+        aria-controls={open ? tooltipId : undefined}
+        aria-describedby={open ? tooltipId : undefined}
         title={content}
         onClick={() => setOpen((o) => !o)}
         className="cursor-help text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-500 focus:rounded"
@@ -52,6 +55,7 @@ export function InfoPopover({
       </button>
       {open && (
         <span
+          id={tooltipId}
           role="tooltip"
           className="absolute z-20 left-0 top-full mt-1 w-72 whitespace-pre-line rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-normal leading-relaxed text-slate-200 shadow-lg"
         >
