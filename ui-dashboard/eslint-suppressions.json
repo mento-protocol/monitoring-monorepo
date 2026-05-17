@@ -1,0 +1,679 @@
+{
+  "src/app/address-book/AddressBookClient.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/address-book/[address]/_components/address-detail-page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/address-book/_components/address-table-row.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/api/address-labels/import/route.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/app/api/address-labels/route.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/app/api/arkham/enrich/route.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/api/bridge-redeem/route.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/app/api/hasura/[networkId]/route.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/app/bridge-flows/_components/bridge-flows-page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/bridge-flows/_components/bridge-overview-section.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/bridge-flows/_components/transfers-table.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/bridge-flows/opengraph-image.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/_components/aggregator-breakdown-section.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/_components/leaderboard-table.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 3
+    }
+  },
+  "src/app/leaderboard/_components/v2-leaderboard-tables.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/_components/v3-flow-insights.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/_lib/url-state.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/_lib/use-hero-rollup.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/leaderboard/page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/opengraph-image.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/page-client.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_components/ols-liquidity-table.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_components/ols-status-panel.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/app/pool/[poolId]/_components/pool-header.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_components/v2-exchange-panel.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/lps-tab.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/oracle-tab.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/reserves-tab.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/_tabs/swaps-tab.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pool/[poolId]/opengraph-image.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/app/pools/_components/pools-page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/app/revenue/_components/revenue-page-client.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/address-label-editor.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/address-label-form.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/address-labels-provider.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/address-report-editor.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/breach-history-chart.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/breach-history-panel.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/breach-history/breach-row.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/components/breaker-panel.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/bridge-redeem-cta.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/bridge-token-breakdown-chart.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/fee-over-time-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/global-pools-table.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/global-pools-table/sort.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/liquidity-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/lp-concentration-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/oracle-chart.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/pool-config-panel.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/pool-header/deviation-cell.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/components/pool-header/oracle-price-value.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/pool-header/rebalance-status-value.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/pool-header/uptime-value.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/components/reserve-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/reserves-panel.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/revenue-by-pool-table.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/tag-input.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/components/time-series-chart-card-hooks.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/components/time-series-chart-card.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/tvl-over-time-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/components/volume-over-time-chart.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    },
+    "sonarjs/no-collapsible-if": {
+      "count": 1
+    }
+  },
+  "src/lib/address-book.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-depth": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/address-labels-shared.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    },
+    "sonarjs/no-collapsible-if": {
+      "count": 1
+    }
+  },
+  "src/lib/address-labels/import.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/address-labels/snapshot.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/address-reports-shared.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/arkham.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-depth": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/global-pool-entries.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/health.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/homepage-og.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/leaderboard-hero.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/leaderboard-pool.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/lib/network-fetcher/fetch.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/pool-og.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/protocol-fee-snapshots.ts": {
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/protocol-fees.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/rebalance-check.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/revenue.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    },
+    "sonarjs/no-collapsible-if": {
+      "count": 1
+    }
+  },
+  "src/lib/tokens.ts": {
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/lib/use-roving-tab-index.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/lib/use-table-sort.ts": {
+    "max-params": {
+      "count": 2
+    }
+  }
+}

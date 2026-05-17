@@ -27,7 +27,7 @@
     "typecheck:strict": "tsc --noEmit -p tsconfig.strict-dry-run.json",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
-    "lint": "eslint . --max-warnings 63"
+    "lint": "eslint ."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

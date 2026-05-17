@@ -113,27 +113,31 @@ export default tseslint.config(
       "react-doctor/no-secrets-in-client-code": "off",
     },
   },
-  // Code-health budgets (PR 2 baseline, warn-only).
-  // React components are exempt from max-depth (JSX nesting isn't counted)
-  // and from max-lines-per-function (component bodies legitimately long
-  // when they assemble many sub-elements). Thresholds set to surface real
-  // outliers without flooding the IDE on first install.
+  // Code-health budgets. Rules ship at `error` severity; pre-existing
+  // violations are captured in `eslint-suppressions.json` (ESLint bulk
+  // suppressions, 9.24+). New violations not in that file fail the gate
+  // — the `--max-warnings` cap was insufficient (codex P2 #3253043406):
+  // a PR could delete one warning and add a different one and stay under
+  // the cap. Cleanup PRs fix a violation and run `eslint --prune-suppressions`
+  // to drop the entry. React components exempt from max-depth (JSX nesting
+  // isn't counted) and max-lines-per-function (component bodies legitimately
+  // long when they assemble many sub-elements).
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: { sonarjs },
     rules: {
-      complexity: ["warn", 15],
+      complexity: ["error", 15],
       "max-lines-per-function": [
-        "warn",
+        "error",
         { max: 100, skipBlankLines: true, skipComments: true, IIFEs: true },
       ],
-      "max-depth": ["warn", 4],
-      "max-params": ["warn", 5],
-      "sonarjs/cognitive-complexity": ["warn", 18],
-      "sonarjs/no-identical-functions": "warn",
-      "sonarjs/no-collapsible-if": "warn",
+      "max-depth": ["error", 4],
+      "max-params": ["error", 5],
+      "sonarjs/cognitive-complexity": ["error", 18],
+      "sonarjs/no-identical-functions": "error",
+      "sonarjs/no-collapsible-if": "error",
       "sonarjs/no-redundant-jump": "error",
-      "sonarjs/no-small-switch": "warn",
+      "sonarjs/no-small-switch": "error",
     },
   },
   {

@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --max-warnings 11",
+    "lint": "eslint .",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "test": "vitest run",
