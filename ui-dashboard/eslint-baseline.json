@@ -1038,37 +1038,16 @@
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "complexity",
-    "message": "Async function 'handleSnapshot' has a complexity of 37. Maximum allowed is 15.",
-    "line": 53,
-    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "complexity",
     "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15.",
-    "line": 225,
+    "line": 239,
     "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'handleSnapshot' has too many lines (132). Maximum allowed is 100.",
-    "line": 53,
-    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-labels/snapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 225,
+    "line": 239,
     "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 50 to the 18 allowed.",
-    "line": 53,
-    "linePreview": " | export async function handleSnapshot( | body: AddressLabelsSnapshot,"
   },
   {
     "file": "src/lib/address-reports-shared.ts",

@@ -50,20 +50,35 @@ type SnapshotImportOptions = {
   errorTag?: string;
 };
 
-export async function handleSnapshot(
-  body: AddressLabelsSnapshot,
-  options: SnapshotImportOptions,
-): Promise<NextResponse> {
-  // Merge every entry from {addresses, global, chains} into a single
-  // address-keyed map. Old backups carry `global` + `chains`; new backups
-  // carry `addresses` (plus `global`/`chains` if the migration captured a
-  // pre-existing flat hash alongside legacy scopes).
-  //
-  // When the same address appears in multiple sources, use `mergeEntries`
-  // (union tags + updatedAt-newer-wins on scalars) instead of
-  // `Object.assign`'s last-write-wins. Otherwise importing a backup that
-  // captured both flat + legacy entries for the same address would silently
-  // drop tags / notes / source from one of them.
+type LabelParseResult =
+  | { merged: Record<string, AddressEntry>; hasLabelPayload: boolean }
+  | { error: string };
+
+/**
+ * Merge every entry from {addresses, global, chains} into a single
+ * address-keyed map. Old backups carry `global` + `chains`; new backups
+ * carry `addresses` (plus `global`/`chains` if the migration captured a
+ * pre-existing flat hash alongside legacy scopes).
+ *
+ * When the same address appears in multiple sources, use `mergeEntries`
+ * (union tags + updatedAt-newer-wins on scalars) instead of last-write-wins.
+ * Otherwise importing a backup that captured both flat + legacy entries for
+ * the same address would silently drop tags / notes / source from one of them.
+ */
+function parseLabelPayload(body: AddressLabelsSnapshot): LabelParseResult {
+  // Reject the mixed `{ labels, reports }` shape explicitly. The simple
+  // format uses `labels` (not `addresses`), and `isSnapshot` now matches
+  // anything with a `reports` key — so a legacy `{ labels, reports }`
+  // payload routes here instead of to handleSimpleFormat. Without this
+  // guard, the labels would be silently ignored and the caller would see a
+  // 200 with `imported.addresses = 0`. Surface the contradiction instead.
+  if ((body as { labels?: unknown }).labels !== undefined) {
+    return {
+      error:
+        "Snapshot must use `addresses` (not `labels`); a payload with both `labels` and `reports` is ambiguous — pick the simple format ({labels}) or the snapshot format ({addresses, reports}).",
+    };
+  }
+
   const merged: Record<string, AddressEntry> = {};
   function mergeIn(source: Record<string, AddressEntry>): void {
     for (const [addr, entry] of Object.entries(source)) {
@@ -73,58 +88,87 @@ export async function handleSnapshot(
     }
   }
 
-  // Reject the mixed `{ labels, reports }` shape explicitly. The simple
-  // format uses `labels` (not `addresses`), and `isSnapshot` now matches
-  // anything with a `reports` key — so a legacy `{ labels, reports }`
-  // payload routes here instead of to handleSimpleFormat. Without this
-  // guard, the labels would be silently ignored (handleSnapshot only reads
-  // `addresses`/`global`/`chains`) and the caller would see a 200 with
-  // `imported.addresses = 0`. Surface the contradiction instead.
-  if ((body as { labels?: unknown }).labels !== undefined) {
-    return NextResponse.json(
-      {
-        error:
-          "Snapshot must use `addresses` (not `labels`); a payload with both `labels` and `reports` is ambiguous — pick the simple format ({labels}) or the snapshot format ({addresses, reports}).",
-      },
-      { status: 400 },
-    );
-  }
-
   if (body.addresses !== undefined) {
     if (!isEntriesMap(body.addresses)) {
-      return NextResponse.json(
-        { error: "Invalid labels map for addresses" },
-        { status: 400 },
-      );
+      return { error: "Invalid labels map for addresses" };
     }
     mergeIn(upgradeEntries(body.addresses as Record<string, unknown>));
   }
   if (body.global !== undefined) {
     if (!isEntriesMap(body.global)) {
-      return NextResponse.json(
-        { error: "Invalid labels map for legacy global scope" },
-        { status: 400 },
-      );
+      return { error: "Invalid labels map for legacy global scope" };
     }
     mergeIn(upgradeEntries(body.global as Record<string, unknown>));
   }
   if (body.chains !== undefined) {
     if (typeof body.chains !== "object" || body.chains === null) {
-      return NextResponse.json(
-        { error: "chains must be an object" },
-        { status: 400 },
-      );
+      return { error: "chains must be an object" };
     }
     for (const [key, labels] of Object.entries(body.chains)) {
       if (!isEntriesMap(labels)) {
-        return NextResponse.json(
-          { error: `Invalid labels map for legacy chain ${key}` },
-          { status: 400 },
-        );
+        return { error: `Invalid labels map for legacy chain ${key}` };
       }
       mergeIn(upgradeEntries(labels as Record<string, unknown>));
     }
   }
+
+  const hasLabelPayload =
+    body.addresses !== undefined ||
+    body.global !== undefined ||
+    body.chains !== undefined;
+  return { merged, hasLabelPayload };
+}
+
+async function applyReplace(
+  merged: Record<string, AddressEntry>,
+  reportsToImport: Record<string, AddressReport>,
+  flags: { hasLabelPayload: boolean; hasReportPayload: boolean },
+): Promise<number> {
+  const finalLabels = flags.hasLabelPayload
+    ? sanitizeAndFilter(merged)
+    : undefined;
+  if (flags.hasLabelPayload || flags.hasReportPayload) {
+    await replaceSnapshotHashes({
+      ...(finalLabels !== undefined ? { labels: finalLabels } : {}),
+      ...(flags.hasReportPayload ? { reports: reportsToImport } : {}),
+    });
+  }
+  return finalLabels ? Object.keys(finalLabels).length : 0;
+}
+
+async function applyMerge(
+  merged: Record<string, AddressEntry>,
+  reportsToImport: Record<string, AddressReport>,
+  labelProvenanceMode: SnapshotLabelProvenanceMode,
+): Promise<number> {
+  let labelsToImport: Record<string, AddressEntry> | undefined;
+  if (Object.keys(merged).length > 0) {
+    const existing = await getLabels();
+    const mergedLabels =
+      labelProvenanceMode === "preserve"
+        ? mergePreservingProvenance(merged, existing)
+        : mergeWithExisting(merged, existing);
+    labelsToImport = sanitizeAndFilter(mergedLabels);
+  }
+  const importedReports = Object.keys(reportsToImport).length;
+  if (labelsToImport !== undefined || importedReports > 0) {
+    await importSnapshotHashes({
+      ...(labelsToImport !== undefined ? { labels: labelsToImport } : {}),
+      ...(importedReports > 0 ? { reports: reportsToImport } : {}),
+    });
+  }
+  return labelsToImport ? Object.keys(labelsToImport).length : 0;
+}
+
+export async function handleSnapshot(
+  body: AddressLabelsSnapshot,
+  options: SnapshotImportOptions,
+): Promise<NextResponse> {
+  const labelResult = parseLabelPayload(body);
+  if ("error" in labelResult) {
+    return NextResponse.json({ error: labelResult.error }, { status: 400 });
+  }
+  const { merged, hasLabelPayload } = labelResult;
 
   const reportsValidation = validateSnapshotReports(body.reports, {
     importerEmail: options.importerEmail,
@@ -136,17 +180,14 @@ export async function handleSnapshot(
       { status: 400 },
     );
   }
-  const reportsToImport: Record<string, AddressReport> =
-    reportsValidation.reports;
+  const reportsToImport = reportsValidation.reports;
   const importedReports = Object.keys(reportsToImport).length;
   const writeMode = options.writeMode ?? "merge";
-  const labelProvenanceMode = options.labelProvenanceMode ?? "strip";
-  const hasLabelPayload =
-    body.addresses !== undefined ||
-    body.global !== undefined ||
-    body.chains !== undefined;
   const hasReportPayload = body.reports !== undefined;
 
+  // No-op short-circuit for merge mode with empty payload. Replace mode with
+  // an explicit empty payload still goes through so callers can intentionally
+  // clear a hash.
   if (
     Object.keys(merged).length === 0 &&
     importedReports === 0 &&
@@ -159,44 +200,17 @@ export async function handleSnapshot(
   }
 
   try {
-    let importedAddresses = 0;
-    if (writeMode === "replace") {
-      const finalLabels = hasLabelPayload
-        ? sanitizeAndFilter(merged)
-        : undefined;
-      if (finalLabels !== undefined) {
-        importedAddresses = Object.keys(finalLabels).length;
-      }
-      if (hasLabelPayload || hasReportPayload) {
-        await replaceSnapshotHashes({
-          ...(finalLabels !== undefined ? { labels: finalLabels } : {}),
-          ...(hasReportPayload ? { reports: reportsToImport } : {}),
-        });
-      }
-    } else {
-      let labelsToImport: Record<string, AddressEntry> | undefined;
-      if (Object.keys(merged).length > 0) {
-        let existing: Record<string, AddressEntry>;
-        try {
-          existing = await getLabels();
-        } catch (err) {
-          return serverError(err, options.errorTag);
-        }
-        const mergedLabels =
-          labelProvenanceMode === "preserve"
-            ? mergePreservingProvenance(merged, existing)
-            : mergeWithExisting(merged, existing);
-        labelsToImport = sanitizeAndFilter(mergedLabels);
-        importedAddresses = Object.keys(labelsToImport).length;
-      }
-
-      if (labelsToImport !== undefined || importedReports > 0) {
-        await importSnapshotHashes({
-          ...(labelsToImport !== undefined ? { labels: labelsToImport } : {}),
-          ...(importedReports > 0 ? { reports: reportsToImport } : {}),
-        });
-      }
-    }
+    const importedAddresses =
+      writeMode === "replace"
+        ? await applyReplace(merged, reportsToImport, {
+            hasLabelPayload,
+            hasReportPayload,
+          })
+        : await applyMerge(
+            merged,
+            reportsToImport,
+            options.labelProvenanceMode ?? "strip",
+          );
     return NextResponse.json({
       ok: true,
       imported: { addresses: importedAddresses, reports: importedReports },
