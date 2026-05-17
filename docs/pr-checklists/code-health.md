@@ -103,8 +103,9 @@ Cleanup workflow:
    entry from `eslint-baseline.json`.
 4. Commit the regenerated baseline alongside the code fix.
 
-Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 191,
-indexer-envio 63 entries.
+Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 188,
+indexer-envio 63 entries (as of PR 4 / 425). The ui-dashboard count
+dropped from 191 → 188 in PR 4's `handleSnapshot` refactor.
 
 Eight prior baseline mechanisms were rejected:
 
