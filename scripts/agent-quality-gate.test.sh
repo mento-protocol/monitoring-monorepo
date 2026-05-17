@@ -172,8 +172,13 @@ run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (package manager config changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
+# Workspace-wide triggers (npmrc, root pkg.json, ci.yml) intentionally do
+# NOT run the dashboard playwright suite — chromium --single-process mode
+# (required in sandbox) is flaky on keyboard/route-heavy tests, and CI's
+# ui-dashboard job runs the full suite anyway. Direct ui-dashboard/*
+# changes still trigger it via the per-package dispatch.
+assert_not_contains "playwright install chromium (package manager config changed)"
+assert_not_contains "test:browser (package manager config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
@@ -259,7 +264,9 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+# Workspace-wide triggers skip the dashboard playwright suite — see the
+# matching `assert_not_contains` block above .npmrc for the rationale.
+assert_not_contains "test:browser (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
@@ -294,7 +301,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+assert_not_contains "test:browser (root package script changed)"
 
 mixed_package_script_repo="$(mktemp -d)"
 (
@@ -331,7 +338,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
+assert_not_contains "test:browser (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -357,7 +364,12 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow cha
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
 assert_not_contains "indexer:bridge-only:codegen"
 assert_not_contains "indexer:testnet:codegen"
-assert_not_contains "pnpm indexer:codegen"
+# Mainnet codegen now runs as a preflight for every indexer quality command
+# because @typescript-eslint/no-unsafe-* (enabled in PR 4) and `tsc` both
+# need .envio/types.d.ts to resolve Envio entity types. Bridge-only and
+# testnet variants still only fire for handler-registration changes; mainnet
+# is the canonical types source.
+assert_contains "- pnpm indexer:codegen (indexer-envio changed (codegen needed before indexer typecheck/lint))"
 
 run_gate "indexer-envio/src/EventHandlers.ts"
 assert_order \
@@ -601,7 +613,11 @@ run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (central CI workflow changed)"
+# Workspace-wide triggers (ci.yml here) deliberately skip the playwright
+# suite — CI runs it in its own ui-dashboard job and the local --single-process
+# chromium mode is flaky on keyboard/route-heavy tests.
+assert_not_contains "playwright install chromium (central CI workflow changed)"
+assert_not_contains "test:browser (central CI workflow changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (central CI workflow changed)" \
@@ -897,5 +913,32 @@ run_gate "docs/deleted.md"
 assert_contains "- docs"
 assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"
 assert_not_contains "- ./tools/trunk check docs/deleted.md"
+
+# Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
+# the cross-package dep-cruiser gate + surfaces the code-health checklist.
+run_gate ".dependency-cruiser.cjs"
+assert_contains "- tooling"
+assert_contains "- pnpm code-health:deps (dep-cruiser config changed (cross-package boundaries + cycles))"
+assert_contains "- docs/pr-checklists/code-health.md (dep-cruiser config changed)"
+
+# Code-health routing: each package's knip.json routes to the matching
+# `pnpm --filter <pkg> knip` command + the same checklist. A typo in the
+# case branch (e.g. swapping package names) would silently misroute the
+# gate, so test all four packages.
+run_gate "shared-config/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "ui-dashboard/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "indexer-envio/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
+
+run_gate "metrics-bridge/knip.json"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge knip (knip config changed)"
+assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
 
 echo "agent quality gate tests passed"

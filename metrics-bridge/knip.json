@@ -1,14 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "src/EventHandlers.ts",
-    "src/EventHandlersBridgeOnly.ts",
-    "src/indexer.ts",
-    "vitest.mutation.config.ts",
-    "scripts/*.mjs"
-  ],
-  "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs", "*.config.*"],
-  "ignoreDependencies": ["@vitest/coverage-v8"],
+  "entry": ["vitest.mutation.config.ts", "test/**/*.test.ts"],
+  "project": ["src/**/*.ts", "test/**/*.ts", "*.config.*"],
+  "ignoreDependencies": ["@stryker-mutator/api"],
   "rules": {
     "files": "error",
     "dependencies": "error",

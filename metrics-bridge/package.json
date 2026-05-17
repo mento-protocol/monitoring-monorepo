@@ -9,6 +9,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "knip": "knip --config knip.json --no-progress",
+    "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run"
@@ -29,6 +31,7 @@
     "eslint": "^10.0.2",
     "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
+    "knip": "6.12.2",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",

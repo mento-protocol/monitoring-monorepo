@@ -118,10 +118,16 @@ and metrics-bridge pure logic. See
 [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope, runtime,
 score, and survivor classification.
 
-For indexer-only unused-code discovery, run the report-only scan:
+For unused-code discovery across all packages (report-only, doesn't exit non-zero), run:
 
 ```bash
-pnpm indexer:knip
+pnpm code-health:knip:report
+```
+
+For a strict run that fails on unused files / unlisted deps (the same gate CI runs):
+
+```bash
+pnpm code-health:knip
 ```
 
 ## Environment Variables

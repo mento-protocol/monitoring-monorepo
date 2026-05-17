@@ -19,6 +19,18 @@ function trackUnexpectedBrowserErrors(page: Page): string[] {
   return errors;
 }
 
+// Pin the browser clock to a weekday inside the FX trading window so
+// `isWeekend()` (`ui-dashboard/src/lib/weekend.ts`) deterministically
+// returns false. Without this, the suite was passing only on weekdays:
+// during the Fri 21:00 UTC → Sun 23:00 UTC window `computeHealthStatus`
+// short-circuits to "WEEKEND", `useRebalanceCheck` skips the API call,
+// and the rebalance-blocked prose never renders. Wed 2026-04-15 12:00
+// UTC is mid-window for FX trading hours on every supported chain.
+const WEEKDAY_FIXTURE_INSTANT = new Date("2026-04-15T12:00:00Z");
+const FIXTURE_NOW_SECONDS = Math.floor(
+  WEEKDAY_FIXTURE_INSTANT.getTime() / 1000,
+);
+
 async function mockBlockedRebalanceProbe(page: Page) {
   await page.route("**/graphql", async (route) => {
     const body = route.request().postData() ?? "";
@@ -29,7 +41,14 @@ async function mockBlockedRebalanceProbe(page: Page) {
 
     const response = await route.fetch();
     const json = await response.json();
-    const staleOracleTimestamp = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+    // Compute stale relative to the pinned browser clock (not real Node
+    // time): from the browser's perspective the page sees
+    // WEEKDAY_FIXTURE_INSTANT as "now", so the mock has to be two hours
+    // *before that*, not two hours before real wall-clock. Otherwise the
+    // pretended-stale oracle timestamp is a real-world month in the
+    // future and any code path that gates on oracle freshness wouldn't
+    // trip into the stale branch.
+    const staleOracleTimestamp = FIXTURE_NOW_SECONDS - 2 * 60 * 60;
     json.data.Pool = json.data.Pool.map((pool: Record<string, unknown>) => ({
       ...pool,
       oracleTimestamp: String(staleOracleTimestamp),
@@ -65,6 +84,7 @@ test.describe("dashboard browser flows", () => {
   let browserErrors: string[];
 
   test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: WEEKDAY_FIXTURE_INSTANT });
     browserErrors = trackUnexpectedBrowserErrors(page);
   });
 

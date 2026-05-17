@@ -402,12 +402,25 @@ get_root_package_json_class() {
 add_package_quality_commands() {
   local package_name="$1"
   local reason="$2"
+  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
+    # Both `tsc --noEmit` and `eslint .` (with the type-aware
+    # @typescript-eslint/no-unsafe-* rules active) require .envio/types.d.ts.
+    # On a fresh worktree, or a PR that only touches src/, codegen wouldn't
+    # otherwise run before quality commands and Envio entity imports would
+    # resolve to error-`any`, tripping the unsafe-* rules. Force codegen as
+    # a preflight; add_codegen_command dedups so concurrent triggers are
+    # cheap.
+    add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck/lint)"
+  fi
   add_command "pnpm --filter ${package_name} lint" "$reason"
   add_command "pnpm --filter ${package_name} typecheck" "$reason"
   if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
     add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
   fi
   add_command "pnpm --filter ${package_name} test" "$reason"
+  add_command "pnpm --filter ${package_name} knip" "$reason (knip: unused files/deps/exports)"
+  add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
+  add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
 }
 
 add_dashboard_quality_commands() {
@@ -445,7 +458,15 @@ add_indexer_mutation_baseline() {
 add_workspace_quality_commands() {
   local reason="$1"
   add_all_indexer_codegen "$reason"
-  add_dashboard_quality_commands "$reason"
+  # Use the lightweight dashboard quality (typecheck/lint/test/knip) for
+  # workspace-wide triggers (root package.json, CI yaml, npmrc, etc.).
+  # Playwright `test:browser` is high-cost and chromium's --single-process
+  # mode (required in macOS sandbox per playwright.config.ts) is flaky for
+  # tests using keyboard events + page.route. CI runs the full browser
+  # suite in its own job — local workspace-wide triggers don't need to
+  # replicate it. Direct `ui-dashboard/*` path changes still hit the full
+  # `add_dashboard_quality_commands` from the per-package dispatch below.
+  add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
   add_ui_react_doctor_full_score "$reason"
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
@@ -596,6 +617,31 @@ while IFS= read -r path; do
       ;;
     pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true
+      ;;
+    .dependency-cruiser.cjs)
+      add_surface "tooling"
+      add_command "pnpm code-health:deps" "dep-cruiser config changed (cross-package boundaries + cycles)"
+      add_checklist "docs/pr-checklists/code-health.md" "dep-cruiser config changed"
+      ;;
+    */knip.json)
+      # Match knip.json regardless of which package owns it. The pnpm
+      # filter scope below normalizes path to package.
+      add_surface "tooling"
+      add_checklist "docs/pr-checklists/code-health.md" "knip config changed"
+      case "$path" in
+        shared-config/knip.json)
+          add_command "pnpm --filter @mento-protocol/monitoring-config knip" "knip config changed"
+          ;;
+        ui-dashboard/knip.json)
+          add_command "pnpm --filter @mento-protocol/ui-dashboard knip" "knip config changed"
+          ;;
+        indexer-envio/knip.json)
+          add_command "pnpm --filter @mento-protocol/indexer-envio knip" "knip config changed"
+          ;;
+        metrics-bridge/knip.json)
+          add_command "pnpm --filter @mento-protocol/metrics-bridge knip" "knip config changed"
+          ;;
+      esac
       ;;
     .npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs)
       package_script_risk_changed=true

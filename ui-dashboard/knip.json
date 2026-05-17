@@ -1,14 +1,23 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "src/EventHandlers.ts",
-    "src/EventHandlersBridgeOnly.ts",
-    "src/indexer.ts",
+    "scripts/*.{mjs,ts}",
     "vitest.mutation.config.ts",
-    "scripts/*.mjs"
+    "tests/**/*.test.{ts,tsx}",
+    "tests/browser/fixtures/hasura-fixture-server.mjs"
   ],
-  "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs", "*.config.*"],
-  "ignoreDependencies": ["@vitest/coverage-v8"],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.{mjs,ts,tsx}",
+    "scripts/**/*.{mjs,ts}",
+    "*.config.*"
+  ],
+  "ignoreDependencies": [
+    "plotly.js-basic-dist-min",
+    "tailwindcss",
+    "axe-core",
+    "@stryker-mutator/api"
+  ],
   "rules": {
     "files": "error",
     "dependencies": "error",

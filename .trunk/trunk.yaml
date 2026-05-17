@@ -23,6 +23,16 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
+    - linters: [eslint]
+      paths:
+        # Repo-root .mjs/.cjs (build/health scripts + dep-cruiser config).
+        # No root eslint config; each workspace package owns its own. Trunk
+        # otherwise probes from the root and errors. Each script's intent is
+        # narrow and reviewed at write-time.
+        - scripts/*.mjs
+        - scripts/*.cjs
+        - "*.cjs"
+        - "*.mjs"
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml
