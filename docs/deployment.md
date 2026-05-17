@@ -65,7 +65,7 @@ git push origin main:envio
 To check whether Envio's persistent effect cache is active for a deployment:
 
 ```bash
-npx -q envio-cloud deployment info mento <commit> mento-protocol -o json
+pnpm exec envio-cloud deployment info mento <commit> mento-protocol -o json
 ```
 
 `cacheEnabled: true` here means that specific deployment restored from an Envio

@@ -45,7 +45,11 @@
     "project:@mento-protocol/ui-dashboard",
     "project-root:ui-dashboard"
   ],
-  "trustBoundaries": ["user-input", "network", "serialization"],
+  "trustBoundaries": [
+    "user-input",
+    "network",
+    "serialization"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

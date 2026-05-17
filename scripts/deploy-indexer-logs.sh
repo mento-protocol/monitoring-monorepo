@@ -8,7 +8,7 @@
 #   pnpm deploy:indexer:logs --build        → show build logs instead
 #   pnpm deploy:indexer:logs --json         → JSON output
 #
-# Requires: npx envio-cloud, authenticated (run `npx envio-cloud login` first)
+# Requires: workspace envio-cloud CLI dependency, authenticated (run `pnpm exec envio-cloud login` first)
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
 
 # Get latest deployment commit hash
-COMMIT=$(npx -q envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
   | node -e "
     const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
     const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
@@ -32,4 +32,4 @@ echo "📋 Logs for deployment: $COMMIT"
 echo ""
 
 # Pass all flags through
-npx -q envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
+pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
