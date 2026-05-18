@@ -1,28 +1,22 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-04-29
+Last updated: 2026-05-18
 
-## Next — Indexer: CDP strategy entity
+## Next — CDP Monitoring Follow-Ups
 
-Dashboard currently detects CDP-backed FPMMs via a runtime RPC probe (`ui-dashboard/src/lib/strategy-detection.ts`, added in PR #214). The indexer has all the data — the strategy is set via `LiquidityStrategyUpdated` and the `CDPLiquidityStrategy` address is recoverable — so this belongs in the schema.
+The first CDP implementation adds Liquity v2 Celo entities, handlers, `CdpPool`
+rows, and `/cdps` dashboard routes. Keep the remaining rollout work explicit so
+the deploy sequence does not silently mix alerting, backfills, and UI cutovers.
 
-- [ ] **New `CdpPool` entity** — mirror the `OlsPool` pattern (one-per-pool-with-a-CDP-strategy), registered on `LiquidityStrategyUpdated` when the configured strategy resolves to a `CDPLiquidityStrategy`.
-- [ ] **Dashboard cutover** — replace `detectProbedStrategies()` with `ALL_CDP_POOLS` + `ALL_RESERVE_POOLS` GraphQL queries, delete the RPC probe module. See `TODO(cdp-indexer)` in the stopgap.
-
-Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handlers/fpmm.ts:887`, dashboard replaces `strategy-detection.ts`.
+- [ ] **Deploy and backfill CDP indexer** — deploy the branch indexer, wait for the Celo Liquity contract range to sync, promote it, then verify hosted Hasura exposes the new CDP entities before deploying the dashboard routes.
+- [ ] **Global pools table cutover** — replace the current runtime RPC probe (`ui-dashboard/src/lib/strategy-detection.ts`) with `ALL_CDP_POOLS`/`ALL_RESERVE_POOLS` once CdpPool rows are backfilled on every network that can expose CDP-backed FPMMs. Keep the Monad fallback until Monad `CDPLiquidityStrategy` events are indexed.
+- [ ] **`service=cdps` alerts** — add stability-pool headroom, shutdown, redemption, liquidation, and shortfall-subsidy rules after the CDP indexer has production history.
 
 ---
 
 ## Backlog — Indexer Enhancements
 
-- [ ] **Liquity v2 CDP indexing** — unblocks `service=cdps` stability-pool alerts + the Liquity v2 dashboard instance (spec §4 "Liquity v2 instance")
-  - Events: TroveManager (`TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`), StabilityPool (`UserDepositChanged`, `PoolBalanceUpdated`)
-  - Contracts: TroveManager `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`, StabilityPool `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
-  - New entities: `Trove` (per-CDP ICR snapshot + status), `StabilityPoolSnapshot`, `LiquityInstanceSnapshot` (one per instance, rolled hourly like `PoolSnapshot`)
-  - Required latest-value metrics (spec §2): `spDepositsGbpm`, `spCollUsdM`, `spMinBufferGbpm`, `spHeadroomGbpm` (= deposits − minimum buffer), `systemColl`, `systemDebt`, `tcr`, `redemptionRate`
-  - Required ICR distribution (spec §2): `icrP1`, `icrP5`, `icrP50`, `icrFracBelowMcr`. Not free from the event stream — needs a per-Trove scan at rollup time (or a sorted-insert index keyed by ICR so percentiles are O(1))
-  - Required cumulative-since-T0 (spec §2): `liqCountCum`, `liqVolumeCum`, `redemptionCountCum`, `redemptionVolumeCum`
-  - Minimum-buffer source: Liquity v2 config read — `spMinBufferGbpm` isn't event-sourced, needs periodic contract view call or a config snapshot entity
+- [ ] **CDP live risk refinements** — compute live TCR/ICR percentiles from accrued interest and add a governance-owned stability-pool buffer source if the protocol wants headroom measured against more than zero deposits.
 - [ ] **`turnoverCum` per pool** — cumulative `notionalCum / time-weighted-avg(tvlUsdM)` since T0 (spec §2). We track `notionalVolume0/1` but never compute time-weighted TVL; needs a TWAP-style accumulator on `Pool` updated on every reserves change (∑ tvl·dt, ∑ dt)
 - [ ] **`timeInWarnCum` per pool** — cumulative seconds spent in warn (deviation breach inside grace window, pre-critical) since T0. Mirror the existing critical rollup (`Pool.cumulativeCriticalSeconds`, which already covers `timeInCriticalCum`); requires tracking warn-state transitions the same way `DeviationBreach` tracks critical
 - [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL, `chainProtocolFeesCum` / `globalProtocolFeesCum` from spec §2)

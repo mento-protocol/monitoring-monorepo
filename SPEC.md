@@ -205,7 +205,12 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 **What:** Is there enough collateral in the Stability Pool to absorb liquidations?
 
-**Fields:** TBD (requires Liquity v2 indexing — Phase 2)
+**Fields:** `LiquityInstance.spDeposits`, `spColl`, `spHeadroom`,
+`systemColl`, `systemDebt`, `tcrBps`, `currentRedemptionRateBps`,
+`activeTroveCount`, `icrP1Bps`, `icrP5Bps`, `icrP50Bps`,
+`icrFracBelowMcrBps`, `liqCountCum`, `liqDebtOffsetCum`,
+`redemptionCountCum`, `redemptionDebtCum`, plus hourly/daily
+`LiquityInstanceSnapshot` buckets.
 
 **Applies to:** Liquity v2 CDP pools (GBPm TroveManager / StabilityPool)
 
@@ -310,15 +315,15 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 ## 9. Known Limitations
 
-| Limitation                             | Details                                                                                                                            |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Endpoint hash changes on each deploy   | Envio free tier generates new URL per deploy; requires Vercel env var update                                                       |
-| Hasura 1000-row cap                    | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups                    |
-| Cannot run two indexers locally        | Shared Hasura port 8080; use separate Docker projects                                                                              |
-| SortedOracles on Sepolia               | Contracts return zero address; oracle indexing mainnet-only                                                                        |
-| Gap-fill not yet implemented           | PoolSnapshot charts may show gaps for periods with no activity                                                                     |
-| No Liquity v2 indexing                 | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                                           |
-| CDP strategy detection is an RPC probe | `ui-dashboard/src/lib/strategy-detection.ts` probes strategy addresses at runtime. Indexer `CdpPool` entity pending — see BACKLOG. |
+| Limitation                             | Details                                                                                                                                |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint hash changes on each deploy   | Envio free tier generates new URL per deploy; requires Vercel env var update                                                           |
+| Hasura 1000-row cap                    | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups                        |
+| Cannot run two indexers locally        | Shared Hasura port 8080; use separate Docker projects                                                                                  |
+| SortedOracles on Sepolia               | Contracts return zero address; oracle indexing mainnet-only                                                                            |
+| Gap-fill not yet implemented           | PoolSnapshot charts may show gaps for periods with no activity                                                                         |
+| CDP indexer not yet backfilled in prod | New TroveManager / StabilityPool entities need branch deploy, sync, promotion, and hosted Hasura verification before alert rollout     |
+| CDP strategy detection is an RPC probe | Global pools table still probes strategy addresses at runtime until indexed `CdpPool` rows are backfilled on every CDP-capable network |
 
 ---
 
@@ -456,12 +461,13 @@ Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Graf
 
 ### Next
 
-- **Indexer `CdpPool` entity** — mirror `OlsPool`, registered on `LiquidityStrategyUpdated` when the strategy resolves to `CDPLiquidityStrategy`. Unblocks retiring the runtime RPC probe in `ui-dashboard/src/lib/strategy-detection.ts`.
+- **CDP production rollout** — deploy and backfill the Liquity v2 indexer changes, promote the synced deployment, verify hosted Hasura exposes the CDP entities, then enable production dashboard and alert consumption.
+- **Global CDP badge cutover** — replace the runtime RPC probe with indexed `CdpPool` rows after all CDP-capable networks have strategy events indexed or a documented fallback.
 
 ### Backlog
 
 - Oracle report-outlier alerts (`service=oracles`) — indexer support for historical oracle prices pending
-- Liquity v2 CDP indexing (TroveManager, StabilityPool) — unblocks `service=cdps` stability-pool alerts
+- `service=cdps` alert rules for stability-pool headroom, shutdowns, liquidations, redemptions, and shortfall subsidies
 - `lastOracleUpdateTxHash` on `Pool` — unblocks tx-link enrichment in Slack alerts
 - ChainStat / GlobalStat aggregate entities
 - Gap-fill logic for snapshot charts

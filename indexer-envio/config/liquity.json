@@ -1,0 +1,69 @@
+{
+  "markets": [
+    {
+      "chainId": 42220,
+      "collIndex": 0,
+      "symbol": "GBPm",
+      "debtToken": "0x191347f9d9a73ff9f41de39464c93d08254fe07e",
+      "collToken": "0x106cc9ff5a2c488780635be8afc07c68522b7ea5",
+      "collateralRegistry": "0x1bedd4334335522b0a0e8e610d326b16b0a605fb",
+      "troveManager": "0xb38aef2bf4e34b997330d626ebcd7629de3885c9",
+      "stabilityPool": "0x2d5d7e2767c5493610cae84e0ab7f9d2cce8c1a5",
+      "borrowerOperations": "0x8ec9a81871f816f1ef007a82293703057a943b8a",
+      "troveNFT": "0x46273a5792013973b64a42e760e6f81d0472c6b6",
+      "sortedTroves": "0x46d0c9e51e05d6ff38b2a19d6310488f3112bf9b",
+      "activePool": "0xa7873f4bf2a1ea2eb20b1e8a992c4748e78473b2",
+      "defaultPool": "0x95191e52d01ec060cea753cdadfeeb07b78d0047",
+      "collSurplusPool": "0xfff48ee3bd2d534e35b54d538de30a9d7709d4b6",
+      "addressesRegistry": "0xb3136dbadb14ab587ffa91545538126938fe0c6e",
+      "systemParams": "0xddd2de5db7e81e22553cc68ea6125b8a817ac8ea",
+      "cdpLiquidityStrategy": "0x4e78bd9565341eabe99cdc024acb044d9bdcb985",
+      "slug": "gbpm"
+    },
+    {
+      "chainId": 42220,
+      "collIndex": 1,
+      "symbol": "CHFm",
+      "debtToken": "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+      "collToken": "0x106cc9ff5a2c488780635be8afc07c68522b7ea5",
+      "collateralRegistry": "0x8530ee22a4adc37b02d1cd37fc120508663fedf8",
+      "troveManager": "0x4e105fef015db26320c077427bd605acead9262e",
+      "stabilityPool": "0x8a68cbb2fff99ea400ff330dbd1a7904775b4b44",
+      "borrowerOperations": "0x7fe90cf5a41473179fce89df55bc9afcd1c5c0be",
+      "troveNFT": "0xbadb30028f9f5043efd32b1c00e3b367e874a39e",
+      "sortedTroves": "0x06d9ac9912546e773884f4d965f6322278bbd391",
+      "activePool": "0x9947cee121586fc31b0b0a162a40d6516979e7cb",
+      "defaultPool": "0x542191e79732a4498f263e793cc47942956f33f7",
+      "collSurplusPool": "0xc45a4781609fa9ba1ad6d904630a2f92425715d4",
+      "addressesRegistry": "0xca70801d91576d069190d1d4cfddebdc237a4537",
+      "systemParams": "0x66cf2aa9fc91ffbf2cc8e8057e54e5ea670029c1",
+      "cdpLiquidityStrategy": "0x4e78bd9565341eabe99cdc024acb044d9bdcb985",
+      "slug": "chfm"
+    },
+    {
+      "chainId": 42220,
+      "collIndex": 2,
+      "symbol": "JPYm",
+      "debtToken": "0x7431419fe761e7da37587245c55a35e5a356c91b",
+      "collToken": "0x106cc9ff5a2c488780635be8afc07c68522b7ea5",
+      "collateralRegistry": "0x343815db498d60a04ecf666f2ff9e5d6a2ac6d0e",
+      "troveManager": "0xd2e65af47d927d5e84f384ae6bac4f97c3da65df",
+      "stabilityPool": "0x107ecce37c1fe3c8154b67f9ddd3d5a1446f084b",
+      "borrowerOperations": "0x4944fc84d675a0cc4758a8098c1619a2e4724a7f",
+      "troveNFT": "0x411db4f90088101c76a51413f2d668fc409cbdcf",
+      "sortedTroves": "0xf024701edbe5d8a9869efc8e01d7f95d3ef29a77",
+      "activePool": "0x90b8a5ad63bdb2a3dc636da926ab5c039ea426a4",
+      "defaultPool": "0x094c0cd42f21289ad7279285dd3793cd8c998916",
+      "collSurplusPool": "0x52f659c562f5ba9668ac71db2ac860af10040b15",
+      "addressesRegistry": "0x8f99aac2fe09a1390617d4acdd1519f775ee931a",
+      "systemParams": "0xf68f400798329a3a2d312f010a96e4f2cc30ad4e",
+      "cdpLiquidityStrategy": "0x4e78bd9565341eabe99cdc024acb044d9bdcb985",
+      "slug": "jpym"
+    }
+  ],
+  "shared": {
+    "reserveTroveFactory": "0x02859465dcc7d7f2bee183fc7fac78544c9519e1",
+    "oracleAdapterCollateral": "0xeb23e1339b2119c0f4a0097cb294e990c1fa6423"
+  },
+  "poolFallbacks": {}
+}

@@ -847,27 +847,6 @@
     "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
-    "file": "src/components/time-series-chart-card.tsx",
-    "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
-    "line": 205,
-    "linePreview": "}); | const { traces, layout } = useMemo(() => { | const xs = series.map((point) =>"
-  },
-  {
-    "file": "src/components/time-series-chart-card.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'TimeSeriesChartCard' has a complexity of 42. Maximum allowed is 15.",
-    "line": 129,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
-  },
-  {
-    "file": "src/components/time-series-chart-card.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
-    "line": 129,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
-  },
-  {
     "file": "src/components/tvl-over-time-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'buildDailySeries' has a complexity of 27. Maximum allowed is 15.",

@@ -1,0 +1,17 @@
+export const OP = {
+  OPEN_TROVE: 0,
+  CLOSE_TROVE: 1,
+  ADJUST_TROVE: 2,
+  ADJUST_TROVE_INTEREST_RATE: 3,
+  APPLY_PENDING_DEBT: 4,
+  LIQUIDATE: 5,
+  REDEEM_COLLATERAL: 6,
+  OPEN_TROVE_AND_JOIN_BATCH: 7,
+  SET_INTEREST_BATCH_MANAGER: 8,
+  REMOVE_FROM_BATCH: 9,
+} as const;
+
+export const isBatchMembershipOperation = (op: number): boolean =>
+  op === OP.OPEN_TROVE_AND_JOIN_BATCH ||
+  op === OP.SET_INTEREST_BATCH_MANAGER ||
+  op === OP.REMOVE_FROM_BATCH;

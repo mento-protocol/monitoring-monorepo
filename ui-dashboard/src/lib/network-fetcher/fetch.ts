@@ -461,9 +461,8 @@ export async function fetchNetworkData(
         tokenDecimalsKnown?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
-    // RPC probe — no indexer entity for CDP strategy, so we detect by
-    // calling `getCDPConfig` on each unique rebalancer contract. Cached at
-    // module scope so the cost is ~1 call per deployed strategy per TTL.
+    // RPC probe remains the global badge path until indexed CdpPool rows are
+    // backfilled on every network that can expose CDP-backed FPMMs.
     detectProbedStrategies(network, pools),
   ]);
 

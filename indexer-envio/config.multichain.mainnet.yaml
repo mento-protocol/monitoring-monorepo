@@ -122,6 +122,78 @@ contracts:
       - event: RebalanceCooldownSet
       - event: LiquidityMoved
 
+  - name: LiquityTroveManager
+    abi_file_path: abis/liquity/TroveManager.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: TroveOperation(uint256 indexed _troveId, uint8 _operation, uint256 _annualInterestRate, uint256 _debtIncreaseFromRedist, uint256 _debtIncreaseFromUpfrontFee, int256 _debtChangeFromOperation, uint256 _collIncreaseFromRedist, int256 _collChangeFromOperation)
+      - event: TroveUpdated(uint256 indexed _troveId, uint256 _debt, uint256 _coll, uint256 _stake, uint256 _annualInterestRate, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
+      - event: BatchedTroveUpdated(uint256 indexed _troveId, address _interestBatchManager, uint256 _batchDebtShares, uint256 _coll, uint256 _stake, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
+      - event: BatchUpdated(address indexed _interestBatchManager, uint8 _operation, uint256 _debt, uint256 _coll, uint256 _annualInterestRate, uint256 _annualManagementFee, uint256 _totalDebtShares, uint256 _debtIncreaseFromUpfrontFee)
+      - event: Liquidation(uint256 _debtOffsetBySP, uint256 _debtRedistributed, uint256 _boldGasCompensation, uint256 _collGasCompensation, uint256 _collSentToSP, uint256 _collRedistributed, uint256 _collSurplus, uint256 _L_ETH, uint256 _L_boldDebt, uint256 _price)
+      - event: Redemption(uint256 _attemptedBoldAmount, uint256 _actualBoldAmount, uint256 _ETHSent, uint256 _ETHFee, uint256 _price, uint256 _redemptionPrice)
+      - event: RedemptionFeePaidToTrove(uint256 indexed _troveId, uint256 _ETHFee)
+
+  - name: LiquityStabilityPool
+    abi_file_path: abis/liquity/StabilityPool.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DepositOperation(address indexed _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)
+      - event: DepositUpdated(address indexed _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)
+      - event: StabilityPoolBoldBalanceUpdated(uint256 _newBalance)
+      - event: StabilityPoolCollBalanceUpdated(uint256 _newBalance)
+      - event: RebalanceExecuted(uint256 amountCollIn, uint256 amountStableOut)
+
+  - name: LiquityTroveNFT
+    abi_file_path: abis/liquity/TroveNFT.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+
+  - name: LiquityBorrowerOperations
+    abi_file_path: abis/liquity/BorrowerOperations.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ShutDown(uint256 _tcr)
+
+  - name: LiquityCollateralRegistry
+    abi_file_path: abis/liquity/CollateralRegistry.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: BaseRateUpdated(uint256 _baseRate)
+      - event: LastFeeOpTimeUpdated(uint256 _lastFeeOpTime)
+      - event: LiquidityStrategyUpdated(address indexed _liquidityStrategy)
+
+  - name: CDPLiquidityStrategy
+    abi_file_path: abis/liquity/CDPLiquidityStrategy.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: PoolAdded
+      - event: PoolRemoved(address indexed pool)
+      - event: LiquidityMoved(address indexed pool, uint8 indexed direction, address tokenGivenToPool, uint256 amountGivenToPool, address tokenTakenFromPool, uint256 amountTakenFromPool)
+      - event: RebalanceCooldownSet(address indexed pool, uint32 cooldown)
+      - event: RedemptionShortfallSubsidized(address indexed pool, uint256 shortfall)
+
+  - name: ReserveTroveFactory
+    abi_file_path: abis/liquity/ReserveTroveFactory.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ReserveTroveCreated(address indexed addressesRegistry, uint256 indexed troveId, uint256 debtAmount, uint256 collateralAmount)
+
+  - name: LiquityActivePool
+    abi_file_path: abis/liquity/ActivePool.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ActivePoolBoldDebtUpdated(uint256 _recordedDebtSum)
+      - event: ActivePoolCollBalanceUpdated(uint256 _collBalance)
+
+  - name: LiquityDefaultPool
+    abi_file_path: abis/liquity/DefaultPool.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DefaultPoolBoldDebtUpdated(uint256 _boldDebt)
+      - event: DefaultPoolCollBalanceUpdated(uint256 _collBalance)
+
   - name: ERC20FeeToken
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
@@ -223,6 +295,47 @@ chains:
       - name: OpenLiquidityStrategy
         address:
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+      - name: LiquityTroveManager
+        address:
+          - 0xb38aEf2bF4e34B997330D626EBCd7629De3885C9 # GBPm
+          - 0x4E105FEF015db26320C077427BD605AceAd9262E # CHFm
+          - 0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df # JPYm
+      - name: LiquityStabilityPool
+        address:
+          - 0x2d5d7E2767c5493610caE84E0AB7F9D2CCE8C1A5 # GBPm
+          - 0x8a68CBB2fFF99Ea400FF330DBD1a7904775B4b44 # CHFm
+          - 0x107eCcE37c1FE3C8154B67F9ddD3d5A1446f084B # JPYm
+      - name: LiquityTroveNFT
+        address:
+          - 0x46273A5792013973b64a42E760E6F81d0472C6b6 # GBPm
+          - 0xBadB30028F9F5043Efd32b1C00E3B367E874a39E # CHFm
+          - 0x411DB4F90088101c76A51413F2D668FC409cbDCF # JPYm
+      - name: LiquityBorrowerOperations
+        address:
+          - 0x8ec9A81871F816F1EF007a82293703057A943B8A # GBPm
+          - 0x7Fe90CF5A41473179fCE89Df55bc9afcd1c5c0be # CHFm
+          - 0x4944Fc84D675a0Cc4758A8098C1619A2E4724a7F # JPYm
+      - name: LiquityCollateralRegistry
+        address:
+          - 0x1bEDD4334335522B0a0e8e610d326B16B0a605Fb # GBPm
+          - 0x8530ee22A4AdC37B02d1Cd37fC120508663fEdf8 # CHFm
+          - 0x343815Db498D60a04ecf666F2FF9E5d6A2AC6d0E # JPYm
+      - name: CDPLiquidityStrategy
+        address:
+          - 0x4e78BD9565341EAbe99cDC024acB044d9BDcB985
+      - name: ReserveTroveFactory
+        address:
+          - 0x02859465DCC7D7F2Bee183fC7FaC78544c9519e1
+      - name: LiquityActivePool
+        address:
+          - 0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2 # GBPm
+          - 0x9947CEe121586fC31b0b0a162A40D6516979E7cB # CHFm
+          - 0x90b8A5Ad63bDB2a3DC636DA926aB5c039EA426a4 # JPYm
+      - name: LiquityDefaultPool
+        address:
+          - 0x95191e52d01eC060cEA753CDADfEEB07b78D0047 # GBPm
+          - 0x542191E79732A4498f263e793Cc47942956f33f7 # CHFm
+          - 0x094C0cD42f21289AD7279285dD3793CD8C998916 # JPYm
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
       - name: BreakerBox
@@ -276,6 +389,24 @@ chains:
           # CREATE2 deterministic — same address as Celo.
           # Verified deployed on Monad mainnet (eth_getCode returned bytecode).
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+      - name: LiquityTroveManager
+        address: [] # No Liquity v2 market contracts on Monad.
+      - name: LiquityStabilityPool
+        address: []
+      - name: LiquityTroveNFT
+        address: []
+      - name: LiquityBorrowerOperations
+        address: []
+      - name: LiquityCollateralRegistry
+        address: []
+      - name: CDPLiquidityStrategy
+        address: [] # Keep dashboard RPC fallback until Monad CDP strategy is indexed/backfilled.
+      - name: ReserveTroveFactory
+        address: []
+      - name: LiquityActivePool
+        address: []
+      - name: LiquityDefaultPool
+        address: []
       - name: BreakerBox
         address:
           - 0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722

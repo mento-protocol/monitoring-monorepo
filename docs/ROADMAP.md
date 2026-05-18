@@ -1,6 +1,6 @@
 # Monitoring Monorepo — Roadmap
 
-Last updated: 2026-04-24
+Last updated: 2026-05-18
 
 ## Done
 
@@ -32,6 +32,7 @@ Last updated: 2026-04-24
 - [x] **FX weekend exclusion** — healthscore math excludes FX market closing hours
 - [x] FX calendar extracted to `shared-config` package
 - [x] Retry + fallback RPC on rate limit and block-out-of-range errors
+- [x] **Liquity v2 CDP indexing substrate** — Celo CDP contract declarations, vendored ABIs, Trove/StabilityPool/instance entities, and CdpPool linkage rows
 
 ### Dashboard
 
@@ -46,7 +47,7 @@ Last updated: 2026-04-24
 - [x] **Fully multichain** — network switcher dropped; all chains shown together with chain icon prefix
 - [x] Token symbol mapping via `isFpmm()` in `tokens.ts`
 - [x] Shared `PoolsTable` component (reused across home + pools pages)
-- [x] **CDP strategy badge** on global pools table (stopgap RPC probe — indexer entity pending)
+- [x] **CDP strategy badge** on global pools table (runtime RPC probe; indexed CdpPool cutover pending backfill)
 - [x] **LimitBadge + LimitPanel** — `limitStatus` / `limitPressure0/1` from TradingLimit entity
 - [x] **RebalancerBadge + RebalancerPanel** — rebalancer liveness status + diagnostics
 - [x] **TVL on global page** — TVL-over-time chart + KPI tiles with 24h/7d/30d change %
@@ -60,6 +61,7 @@ Last updated: 2026-04-24
 - [x] **Auth hardening** — verify Google `hd` + `email_verified`, middleware-enforced allowlist, 1h JWT
 - [x] **Security** — full CSP + HSTS headers; unauthenticated label endpoints retired; Plotly XSS escape; RSC label-leak guard; callback-URL sanitizer
 - [x] **Chain icon prefix** — chain identifier on pool IDs in multichain view
+- [x] **CDPs dashboard routes** — `/cdps` market overview and `/cdps/[symbol]` detail views backed by Liquity v2 GraphQL queries
 
 ### Shared packages
 
@@ -132,15 +134,16 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ### Deferred
 
 - **Oracle report outliers** (`service=oracles`) — large deltas between consecutive reports. Needs indexer to surface historical oracle prices; design still TBD.
-- **Stability Pool headroom** (`service=cdps`) — blocked on Liquity v2 CDP indexing.
+- **Stability Pool headroom** (`service=cdps`) — blocked on production CDP backfill and alert-rule rollout.
 
 ---
 
 ## Next
 
-### Indexer: CDP strategy entity
+### CDP Monitoring Rollout
 
-- [ ] Mirror the `OlsPool` pattern with a `CdpPool` entity registered on `LiquidityStrategyUpdated` when the strategy resolves to `CDPLiquidityStrategy`. Unblocks retiring the runtime RPC probe in `ui-dashboard/src/lib/strategy-detection.ts`.
+- [ ] Deploy and backfill the Liquity v2 Celo indexer changes, promote the synced deployment, and verify hosted Hasura exposes the CDP schema before production dashboard rollout.
+- [ ] Cut the global pools table from the RPC strategy probe to indexed `CdpPool` rows once all CDP-capable networks have strategy events indexed or an explicit fallback.
 
 ---
 
@@ -148,11 +151,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 ### Indexer Enhancements
 
-- [ ] **Liquity v2 CDP indexing** — unblocks `service=cdps` alerts + the Liquity v2 dashboard instance
-  - Events: TroveManager + StabilityPool
-  - Contracts: TroveManager `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`, StabilityPool `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
-  - Metrics to surface (spec §2): `spDeposits/CollUsdM`, `spMinBufferGbpm` / `spHeadroomGbpm`, `systemColl` / `systemDebt` / `tcr`, `redemptionRate`, ICR distribution (`icrP1` / `icrP5` / `icrP50` / `icrFracBelowMcr` — needs per-Trove scan at rollup time), `liq/redemptionCountCum` + volumes
-  - Config reads: `spMinBufferGbpm` is Liquity v2 config, not event-sourced — needs a view-call snapshot path
+- [ ] **CDP live risk refinements** — compute live TCR/ICR percentiles from accrued interest and add a governance-owned stability-pool buffer source if headroom should be measured against a non-zero target.
 - [ ] **`turnoverCum` per pool** — cumulative notional over time-weighted TVL (spec §2); needs TWAP-style accumulator on `Pool`
 - [ ] **`timeInWarnCum` per pool** — warn-state rollup mirroring the existing `cumulativeCriticalSeconds`
 - [ ] **ChainStat / GlobalStat aggregate entities** — protocol-level metrics; sources `chainProtocolFeesCum` / `globalProtocolFeesCum`
