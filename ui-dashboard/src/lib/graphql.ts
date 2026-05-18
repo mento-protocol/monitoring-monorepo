@@ -1,6 +1,6 @@
 import { GraphQLClient } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
-import type { ZodSchema } from "zod";
+import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
@@ -69,7 +69,7 @@ export function useGQL<T>(
     timeoutMs?: number;
     /** Optional Zod schema to validate the response. When provided,
      *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
-    schema?: ZodSchema<T>;
+    schema?: ZodType<T>;
   },
 ): SWRResponse<T> {
   const { network } = useNetwork();

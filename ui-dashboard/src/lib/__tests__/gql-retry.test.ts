@@ -1,6 +1,7 @@
 import { ClientError } from "graphql-request";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitAwareRetry, retryAfterMs } from "@/lib/gql-retry";
+import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 
 function makeClientError(status: number, retryAfter?: string): ClientError {
   const headers = new Headers();
@@ -188,6 +189,22 @@ describe("rateLimitAwareRetry", () => {
     });
     vi.runAllTimers();
     expect(revalidate).toHaveBeenCalled();
+  });
+
+  it("does not retry GraphQLSchemaError (deterministic failure)", () => {
+    // Schema-drift errors are deterministic — retrying the same request will
+    // hit the same parse failure. The retry handler must short-circuit so we
+    // don't burn Hasura quota or spam Sentry on every poll cycle.
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(
+      new GraphQLSchemaError([], "TestQuery"),
+      "key",
+      baseConfig,
+      revalidate,
+      { retryCount: 0, dedupe: true },
+    );
+    vi.runAllTimers();
+    expect(revalidate).not.toHaveBeenCalled();
   });
 
   it("respects an explicit errorRetryCount cap for non-429", () => {

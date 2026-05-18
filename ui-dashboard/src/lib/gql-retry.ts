@@ -1,5 +1,6 @@
 import { ClientError } from "graphql-request";
 import type { SWRConfiguration } from "swr";
+import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 // Envio's "small" tier returns 429 "Tier Quota" without a Retry-After header
@@ -114,6 +115,12 @@ function scheduleWhenActive(
 export const rateLimitAwareRetry: NonNullable<
   SWRConfiguration["onErrorRetry"]
 > = (err, _key, config, revalidate, opts) => {
+  // Schema-validation failures are deterministic: the response shape doesn't
+  // match what the schema expects, and retrying the same request will hit the
+  // same failure. Surface the error once and let the next normal refresh (or
+  // manual `mutate`) decide when to retry — otherwise we burn Hasura quota
+  // and spam Sentry on every poll cycle during a schema-drift incident.
+  if (err instanceof GraphQLSchemaError) return;
   const backoff = retryAfterMs(err);
   if (backoff !== null) {
     scheduleWhenActive(revalidate, opts, backoff);
