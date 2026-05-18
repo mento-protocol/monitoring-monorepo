@@ -43,7 +43,17 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/no-misused-promises": "error",
+      // `checksVoidReturn.attributes: false` is the standard React config:
+      // React's synthetic event system handles async event-handler attributes
+      // (`<button onClick={async () => ...}>`) correctly — rejected promises
+      // are swallowed without becoming unhandled rejections. Other void-return
+      // contexts (setTimeout callbacks, function arguments, etc.) still fire
+      // and catch genuine bugs like the `poller.ts` floating-loop fixed in
+      // this PR.
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        { checksVoidReturn: { attributes: false } },
+      ],
       "@typescript-eslint/switch-exhaustiveness-check": "error",
     },
   },

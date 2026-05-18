@@ -21,13 +21,6 @@
     "linePreview": " | export function AddressTableRow({ | address,"
   },
   {
-    "file": "src/app/address-book/[address]/_components/address-detail-header.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 142,
-    "linePreview": "type=\"button\" | onClick={async () => { | try {"
-  },
-  {
     "file": "src/app/address-book/[address]/_components/address-detail-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressDetailPageClient' has a complexity of 26. Maximum allowed is 15.",
@@ -40,13 +33,6 @@
     "message": "Function 'AddressDetailPageClient' has too many lines (215). Maximum allowed is 100.",
     "line": 18,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
-  },
-  {
-    "file": "src/app/address-book/AddressBookClient.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 213,
-    "linePreview": "onImportClick={handleImportClick} | onFileChange={handleFileChange} | />"
   },
   {
     "file": "src/app/address-book/AddressBookClient.tsx",
@@ -554,20 +540,6 @@
   },
   {
     "file": "src/components/address-label-form.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 313,
-    "linePreview": "return ( | <form onSubmit={handleSave} noValidate> | {/* `<fieldset disabled>` cascades to every form control inside —"
-  },
-  {
-    "file": "src/components/address-label-form.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 464,
-    "linePreview": "type=\"button\" | onClick={handleDelete} | disabled={deleting || saving || externallyDisabled}"
-  },
-  {
-    "file": "src/components/address-label-form.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15.",
     "line": 160,
@@ -586,27 +558,6 @@
     "message": "Function 'useAddressLabelsValue' has too many lines (245). Maximum allowed is 100.",
     "line": 139,
     "linePreview": " | function useAddressLabelsValue(): AddressLabelsContextValue { | const { network } = useNetwork();"
-  },
-  {
-    "file": "src/components/address-report-editor.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 311,
-    "linePreview": "type=\"button\" | onClick={() => mutate()} | className=\"rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors\""
-  },
-  {
-    "file": "src/components/address-report-editor.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 444,
-    "linePreview": "type=\"button\" | onClick={handleDelete} | disabled={deleting || saving}"
-  },
-  {
-    "file": "src/components/address-report-editor.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 455,
-    "linePreview": "type=\"button\" | onClick={handleSave} | // Block while the initial lookup is pending — without this, the"
   },
   {
     "file": "src/components/address-report-editor.tsx",
@@ -635,13 +586,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed.",
     "line": 65,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
-  },
-  {
-    "file": "src/components/auth-status.tsx",
-    "ruleId": "@typescript-eslint/no-misused-promises",
-    "message": "Promise-returning function provided to attribute where a void return was expected.",
-    "line": 81,
-    "linePreview": "type=\"button\" | onClick={handleSignOut} | className=\"text-xs text-slate-500 hover:text-slate-300 transition-colors\""
   },
   {
     "file": "src/components/breach-history-chart.tsx",
