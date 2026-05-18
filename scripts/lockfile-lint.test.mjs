@@ -369,6 +369,28 @@ test("passes when packages: contains a local file: dependency without integrity"
   );
 });
 
+// 19. (cursor Medium) If a future pnpm v9.x point-release changes the
+// on-disk shape such that the regex matches zero entries, the script
+// must fail loudly — not silently pass with "All 0 packages have valid
+// sha512 integrity". Synthesize a packages: section with a non-empty
+// body that the current parser can't recognize.
+test("fails loudly when the parser matches zero entries against a non-empty packages: section", () => {
+  // Replace the `<name>@<ver>:` key shape with a future hypothetical that
+  // doesn't include `@` — current regex won't match, totalEntries=0.
+  const lockfile = `lockfileVersion: '9.0'\n\nimporters:\n\npackages:\n\n  some-future-key-shape:\n    resolution: {integrity: ${VALID_SHA512}}\n\nsnapshots:\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("regex is likely out of sync") ||
+      out.includes("no top-level package"),
+    `expected parser-out-of-sync error: ${out}`,
+  );
+});
+
 // 18. The pnpm-workspace.yaml top-level `registry:` key (singular) is
 // resolved by `pnpm config get registry --location project` and overrides
 // the default registry for the whole workspace. Must be rejected when it

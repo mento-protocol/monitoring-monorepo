@@ -150,6 +150,22 @@ const totalLocalSources = (packagesSection.match(LOCAL_SOURCE_ENTRY) ?? [])
   .length;
 const expectedRegistryEntries = totalEntries - totalLocalSources;
 
+// Sanity floor: if the regex matched zero top-level entries against a
+// non-empty `packages:` section, the regex is out of sync with the
+// lockfile format (e.g., a future pnpm v9.x point-release that changes
+// the on-disk shape) and the gate would silently pass with "All 0
+// packages have valid sha512". Fail loudly instead so the script is
+// updated, not bypassed.
+if (totalEntries === 0) {
+  fail(
+    "pnpm-lock.yaml `packages:` section is non-empty but no top-level package " +
+      "entries matched the parser. The lockfile-lint regex is likely out of sync " +
+      "with pnpm v9's on-disk format. Inspect `scripts/lockfile-lint.mjs` and " +
+      "update PKG_ENTRY / LOCAL_SOURCE_ENTRY / totalEntries patterns to match.",
+  );
+  process.exit(1);
+}
+
 if (expectedRegistryEntries !== totalPackages) {
   const missingResolution =
     expectedRegistryEntries - (totalResolutions - totalLocalSources);
