@@ -27,27 +27,30 @@ deployment_commit_from_list() {
     const target = process.argv[1];
     const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
     const deps = [...(d.data?.deployments ?? [])].sort((a,b) => b.created_time.localeCompare(a.created_time));
-    const match = target
-      ? deps.find((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target))
-      : deps[0];
+    if (!target) {
+      process.stdout.write(deps[0]?.commit_hash ?? '');
+      process.exit(0);
+    }
+    const matches = deps.filter((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target));
+    if (matches.length > 1) {
+      console.error('Ambiguous deployment commit ' + target + ' matches: ' + matches.map((dep) => dep.commit_hash).join(', '));
+      process.exit(2);
+    }
+    const match = matches[0];
     process.stdout.write(match?.commit_hash ?? '');
   " "$target"
 }
 
 latest_deployment_commit() {
   local deployments_json=""
-  if ! deployments_json=$(deployment_list_json 2>/dev/null); then
-    return 0
-  fi
+  deployments_json=$(deployment_list_json)
   printf '%s' "$deployments_json" | deployment_commit_from_list ""
 }
 
 resolve_deployment_commit() {
   local target="$1"
   local deployments_json=""
-  if ! deployments_json=$(deployment_list_json 2>/dev/null); then
-    return 0
-  fi
+  deployments_json=$(deployment_list_json)
   printf '%s' "$deployments_json" | deployment_commit_from_list "$target"
 }
 
@@ -218,8 +221,12 @@ if [[ "$JSON" != "true" ]]; then
   echo ""
 fi
 
-if [[ "$WATCH" == "true" && "$JSON" != "true" ]]; then
-  watch_status
+if [[ "$WATCH" == "true" ]]; then
+  if [[ "$JSON" == "true" ]]; then
+    pnpm exec envio-cloud deployment status "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" --watch-till-synced -o json
+  else
+    watch_status
+  fi
   exit $?
 fi
 

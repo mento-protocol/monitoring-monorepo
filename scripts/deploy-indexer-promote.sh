@@ -21,7 +21,7 @@ fi
 
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
-  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
     | node -e "
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
@@ -34,12 +34,17 @@ if [[ -z "$COMMIT" ]]; then
   fi
 else
   TARGET_COMMIT="$COMMIT"
-  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
     | node -e "
       const target = process.argv[1];
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       const deps = [...(d.data?.deployments ?? [])].sort((a,b) => b.created_time.localeCompare(a.created_time));
-      const match = deps.find((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target));
+      const matches = deps.filter((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target));
+      if (matches.length > 1) {
+        console.error('Ambiguous deployment commit ' + target + ' matches: ' + matches.map((dep) => dep.commit_hash).join(', '));
+        process.exit(2);
+      }
+      const match = matches[0];
       process.stdout.write(match?.commit_hash ?? '');
     " "$TARGET_COMMIT")
 

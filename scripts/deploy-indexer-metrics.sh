@@ -19,14 +19,30 @@ else
   COMMIT=""
 fi
 
-COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+JSON_OUTPUT=false
+for arg in "$@"; do
+  case "$arg" in
+    -o=json|--output=json) JSON_OUTPUT=true ;;
+    -o|--output) ;;
+    json) JSON_OUTPUT=true ;;
+  esac
+done
+
+COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
   | node -e "
     const target = process.argv[1];
     const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
     const deps = [...(d.data?.deployments ?? [])].sort((a,b) => b.created_time.localeCompare(a.created_time));
-    const match = target
-      ? deps.find((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target))
-      : deps[0];
+    if (!target) {
+      process.stdout.write(deps[0]?.commit_hash ?? '');
+      process.exit(0);
+    }
+    const matches = deps.filter((dep) => target.startsWith(dep.commit_hash) || dep.commit_hash.startsWith(target));
+    if (matches.length > 1) {
+      console.error('Ambiguous deployment commit ' + target + ' matches: ' + matches.map((dep) => dep.commit_hash).join(', '));
+      process.exit(2);
+    }
+    const match = matches[0];
     process.stdout.write(match?.commit_hash ?? '');
   " "$COMMIT")
 
@@ -36,6 +52,8 @@ if [[ -z "$COMMIT" ]]; then
   exit 1
 fi
 
-echo "Metrics for deployment: $COMMIT"
-echo ""
+if [[ "$JSON_OUTPUT" != "true" ]]; then
+  echo "Metrics for deployment: $COMMIT"
+  echo ""
+fi
 pnpm exec envio-cloud deployment metrics "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
