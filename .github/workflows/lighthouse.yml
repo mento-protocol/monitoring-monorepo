@@ -1,0 +1,273 @@
+name: Lighthouse CI
+
+# Core Web Vitals + accessibility regression detection for the ui-dashboard.
+# Runs against the Vercel preview deployment for every PR so regressions are
+# caught before merge rather than after production deploy.
+#
+# REQUIRED-STATUS SAFETY:
+#   No workflow-level `paths:` filter — required-status workflows must run on
+#   every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+#   The internal `filter` step uses dorny/paths-filter and is
+#   `continue-on-error: true`. The `decide` step then either runs Lighthouse
+#   (dashboard changed) or skips cleanly (no dashboard change). A filter
+#   failure falls closed → Lighthouse always runs when detection fails.
+#
+# VERCEL PREVIEW URL:
+#   The workflow polls the GitHub Deployments API (no Vercel token needed) to
+#   find the preview URL Vercel posts for the current SHA. It waits up to
+#   5 minutes for the deployment to become active. When the dashboard filter
+#   says "skip", the Vercel wait + Lighthouse steps are also skipped, keeping
+#   run time under 30 s for non-dashboard PRs.
+#
+# PR COMMENT:
+#   lhci autorun with `upload.target: temporary-public-storage` produces a
+#   public report URL. A subsequent step posts/updates a sticky PR comment
+#   via peter-evans/create-or-update-comment so the result is always
+#   visible on the PR without requiring an LHCI server.
+
+on:
+  pull_request:
+    branches: [main]
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The job uses an internal path-detection step that is continue-on-error,
+    # so a detector failure cannot fail the workflow (fail-closed: the
+    # Lighthouse step then runs anyway).
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to run Lighthouse:
+    #   - PR + filter succeeded + dashboard=true  → run
+    #   - PR + filter succeeded + dashboard=false → no-op skip
+    #   - PR + filter failed (any cause)           → run (fail-closed)
+    # When Lighthouse does run, a performance/accessibility assertion failure
+    # warns/errors per the budgets in .lighthouserc.cjs.
+    name: Core Web Vitals + accessibility (ui-dashboard)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      # `deployments: read` lets the job query the GitHub Deployments API to
+      # find the Vercel preview URL without needing a Vercel API token.
+      deployments: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Mirrors the filter in .github/workflows/size-limit.yml — any path
+            # that can affect the dashboard's rendered output should trigger
+            # Lighthouse. .lighthouserc.cjs itself is included so a budget change
+            # re-runs the audit against the current build.
+            dashboard:
+              - ui-dashboard/src/**
+              - ui-dashboard/*.ts
+              - ui-dashboard/*.mjs
+              - ui-dashboard/*.cjs
+              - ui-dashboard/*.js
+              - ui-dashboard/*.json
+              - shared-config/**
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .node-version
+              - .lighthouserc.cjs
+              - .github/workflows/lighthouse.yml
+
+      - name: Decide whether to run Lighthouse
+        id: decide
+        env:
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+        run: |
+          if [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running Lighthouse."
+          elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Dashboard inputs changed — running Lighthouse."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Dashboard code + its Lighthouse inputs unchanged — skipping Lighthouse."
+          fi
+
+      - name: Wait for Vercel preview deployment
+        id: vercel-url
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const sha = context.sha;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+            const pollIntervalMs = 10 * 1000; // 10 seconds
+            const start = Date.now();
+
+            core.info(`Waiting for Vercel preview deployment for SHA ${sha}...`);
+
+            while (Date.now() - start < maxWaitMs) {
+              const { data: deployments } = await github.rest.repos.listDeployments({
+                owner,
+                repo,
+                sha,
+                environment: "Preview",
+                per_page: 10,
+              });
+
+              for (const deployment of deployments) {
+                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                  owner,
+                  repo,
+                  deployment_id: deployment.id,
+                  per_page: 5,
+                });
+
+                const active = statuses.find(s => s.state === "success");
+                if (active && active.environment_url) {
+                  const previewUrl = active.environment_url;
+                  core.info(`Found active Vercel preview: ${previewUrl}`);
+                  core.setOutput("preview_url", previewUrl);
+                  return;
+                }
+              }
+
+              core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+              await new Promise(r => setTimeout(r, pollIntervalMs));
+            }
+
+            // Timed out: fall back to the PR's head ref preview URL pattern.
+            // Vercel deploys to <project>-git-<branch>-<team>.vercel.app for
+            // branch names that can be normalised. This is best-effort — if
+            // the deployment URL doesn't resolve, lhci will error on the
+            // collect step and the job will surface that clearly.
+            core.warning("Timed out waiting for Vercel preview deployment. Attempting branch-slug fallback.");
+
+            const branchRef = context.payload.pull_request?.head?.ref ?? "";
+            const slug = branchRef
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, "-")
+              .replace(/-+/g, "-")
+              .replace(/^-|-$/g, "")
+              .slice(0, 63);
+
+            if (slug) {
+              const fallbackUrl = `https://monitoring-dashboard-git-${slug}-mentolabs.vercel.app`;
+              core.info(`Fallback preview URL: ${fallbackUrl}`);
+              core.setOutput("preview_url", fallbackUrl);
+            } else {
+              core.setFailed("Could not determine Vercel preview URL.");
+            }
+
+      - name: Setup Node for lhci
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install Chromium dependencies
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          # lhci autorun launches Chromium via puppeteer internally.
+          # The required system libraries are not present on the runner by default.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libnss3 libnspr4 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2
+
+      - name: Run Lighthouse CI
+        if: steps.decide.outputs.run == 'true'
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+        run: |
+          PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
+          npx --yes @lhci/cli@0.15.x autorun \
+            --collect.url="${PREVIEW_URL}/" \
+            --collect.url="${PREVIEW_URL}/pools" \
+            2>&1 | tee /tmp/lhci-output.txt
+
+      - name: Post Lighthouse results as PR comment
+        if: steps.decide.outputs.run == 'true' && always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require("fs");
+            const lhciOutput = fs.existsSync("/tmp/lhci-output.txt")
+              ? fs.readFileSync("/tmp/lhci-output.txt", "utf8")
+              : "(No lhci output captured)";
+
+            // Extract report URLs from lhci output (temporary-public-storage URLs)
+            const reportUrls = [...lhciOutput.matchAll(/https:\/\/storage\.googleapis\.com\/lighthouse-infrastructure\.appspot\.com\/reports\/\S+\.html/g)]
+              .map(m => m[0]);
+
+            // Extract summary scores from lhci output
+            const scoreLine = [...lhciOutput.matchAll(/(\w+):\s+([\d.]+)\s*(\([^)]+\))?/g)].slice(0, 20);
+
+            const previewUrl = "${{ steps.vercel-url.outputs.preview_url }}";
+
+            let body = `## Lighthouse CI Results\n\n`;
+            body += `Audited: [${previewUrl}/](${previewUrl}/) and [${previewUrl}/pools](${previewUrl}/pools)\n\n`;
+
+            if (reportUrls.length > 0) {
+              body += `### Reports\n`;
+              reportUrls.forEach((url, i) => {
+                body += `- [Run ${i + 1}](${url})\n`;
+              });
+              body += "\n";
+            }
+
+            // Summarise assertion results
+            const passed = (lhciOutput.match(/✅/g) || []).length;
+            const warned = (lhciOutput.match(/⚠️/g) || []).length;
+            const failed = (lhciOutput.match(/❌/g) || []).length;
+            const jobStatus = failed > 0 ? "❌ failed" : warned > 0 ? "⚠️ warnings" : "✅ passed";
+
+            body += `**Status:** ${jobStatus}`;
+            if (passed + warned + failed > 0) {
+              body += ` (${passed} passed, ${warned} warned, ${failed} failed)`;
+            }
+            body += "\n\n";
+            body += `<details><summary>Raw lhci output</summary>\n\n\`\`\`\n${lhciOutput.slice(0, 8000)}\n\`\`\`\n</details>\n`;
+            body += `\n<!-- lighthouse-ci-comment -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes("<!-- lighthouse-ci-comment -->"));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
