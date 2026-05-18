@@ -40,7 +40,7 @@ export const CDP_MARKET_DETAIL = `
         collateralId: { _eq: $collateralId }
         status: { _in: ["active", "zombie"] }
       }
-      order_by: { icrBps: asc }
+      order_by: { lastUpdatedAt: desc }
       limit: 50
     ) {
       id troveId owner status debt coll icrBps interestRate interestBatchId

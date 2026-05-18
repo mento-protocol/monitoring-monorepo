@@ -1,10 +1,6 @@
 import Link from "next/link";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
-import {
-  cdpSymbolSlug,
-  formatBpsPercent,
-  formatTokenAmount,
-} from "../_lib/format";
+import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
 
 export function CdpMarketCard({
   collateral,
@@ -34,7 +30,10 @@ export function CdpMarketCard({
           label="System Debt"
           value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
         />
-        <Metric label="TCR" value={formatBpsPercent(instance?.tcrBps)} />
+        <Metric
+          label="System Collateral"
+          value={formatTokenAmount(instance?.systemColl, "USDm")}
+        />
         <Metric
           label="SP Headroom"
           value={formatTokenAmount(instance?.spHeadroom, collateral.symbol)}

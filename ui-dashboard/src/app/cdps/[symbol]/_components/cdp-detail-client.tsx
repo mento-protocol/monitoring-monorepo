@@ -17,11 +17,7 @@ import type {
   CdpPoolRow,
   CdpTrove,
 } from "../../_lib/types";
-import {
-  cdpSymbolSlug,
-  formatBpsPercent,
-  formatTokenAmount,
-} from "../../_lib/format";
+import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
@@ -158,7 +154,10 @@ function CdpDetailContent({
           label="System Debt"
           value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
         />
-        <Tile label="TCR" value={formatBpsPercent(instance?.tcrBps)} />
+        <Tile
+          label="System Collateral"
+          value={formatTokenAmount(instance?.systemColl, "USDm")}
+        />
         <Tile
           label="Stability Pool"
           value={formatTokenAmount(instance?.spDeposits, collateral.symbol)}
@@ -167,7 +166,7 @@ function CdpDetailContent({
         <Tile
           label="Active Troves"
           value={instance == null ? "—" : String(instance.activeTroveCount)}
-          subtitle={`Median ICR ${formatBpsPercent(instance?.icrP50Bps)}`}
+          subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
         />
       </section>
 
@@ -184,39 +183,45 @@ function CdpDetailContent({
         />
       </section>
 
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-3">CDP Pools</h2>
-        {cdpPools.length === 0 ? (
-          <EmptyBox message="No active FPMM pools linked to this CDP market." />
-        ) : (
-          <Table>
-            <thead>
-              <Row>
-                <Th>Pool</Th>
-                <Th align="right">Cooldown</Th>
-                <Th align="right">Updated</Th>
-              </Row>
-            </thead>
-            <tbody>
-              {cdpPools.map((pool) => (
-                <Row key={pool.id}>
-                  <Td mono>
-                    <Link
-                      href={buildPoolDetailHref(pool.poolId)}
-                      className="text-indigo-400 hover:text-indigo-300"
-                    >
-                      {truncateAddress(pool.poolId)}
-                    </Link>
-                  </Td>
-                  <Td align="right">{pool.rebalanceCooldownSec}s</Td>
-                  <Td align="right">{relativeTime(pool.updatedAtTimestamp)}</Td>
-                </Row>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </section>
+      <CdpPoolsTable cdpPools={cdpPools} />
     </div>
+  );
+}
+
+function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-white mb-3">CDP Pools</h2>
+      {cdpPools.length === 0 ? (
+        <EmptyBox message="No active FPMM pools linked to this CDP market." />
+      ) : (
+        <Table>
+          <thead>
+            <Row>
+              <Th>Pool</Th>
+              <Th align="right">Cooldown</Th>
+              <Th align="right">Updated</Th>
+            </Row>
+          </thead>
+          <tbody>
+            {cdpPools.map((pool) => (
+              <Row key={pool.id}>
+                <Td mono>
+                  <Link
+                    href={buildPoolDetailHref(pool.poolId)}
+                    className="text-indigo-400 hover:text-indigo-300"
+                  >
+                    {truncateAddress(pool.poolId)}
+                  </Link>
+                </Td>
+                <Td align="right">{pool.rebalanceCooldownSec}s</Td>
+                <Td align="right">{relativeTime(pool.updatedAtTimestamp)}</Td>
+              </Row>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </section>
   );
 }
 
@@ -231,7 +236,9 @@ function TroveTable({
 }) {
   return (
     <section>
-      <h2 className="text-lg font-semibold text-white mb-3">Riskiest Troves</h2>
+      <h2 className="text-lg font-semibold text-white mb-3">
+        Recent Live Troves
+      </h2>
       {troves.length === 0 ? (
         <EmptyBox message="No troves indexed yet." />
       ) : (
@@ -241,7 +248,7 @@ function TroveTable({
               <Th>Owner</Th>
               <Th>Status</Th>
               <Th align="right">Debt</Th>
-              <Th align="right">ICR</Th>
+              <Th align="right">Updated</Th>
             </Row>
           </thead>
           <tbody>
@@ -252,7 +259,7 @@ function TroveTable({
                 </Td>
                 <Td>{trove.status}</Td>
                 <Td align="right">{formatTokenAmount(trove.debt, symbol)}</Td>
-                <Td align="right">{formatBpsPercent(trove.icrBps)}</Td>
+                <Td align="right">{relativeTime(trove.lastUpdatedAt)}</Td>
               </Row>
             ))}
           </tbody>

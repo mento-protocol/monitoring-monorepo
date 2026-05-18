@@ -12,6 +12,15 @@ import {
   transitionTroveStatus,
 } from "./troves.js";
 
+const statusFromCollateral = (
+  debt: bigint,
+  collateral: { minDebt: bigint; systemParamsLoaded: boolean } | undefined,
+): string => {
+  if (debt === 0n) return TROVE_STATUS.REDEEMED;
+  if (collateral?.systemParamsLoaded !== true) return TROVE_STATUS.ZOMBIE;
+  return statusFromDebt(debt, collateral.minDebt);
+};
+
 const OP = {
   OPEN_TROVE: 0,
   CLOSE_TROVE: 1,
@@ -139,7 +148,7 @@ indexer.onEvent(
           negativeToPositive(event.params._debtChangeFromOperation),
       };
       const collateral = await context.LiquityCollateral.get(collateralId);
-      const nextStatus = statusFromDebt(trove.debt, collateral?.minDebt ?? 0n);
+      const nextStatus = statusFromCollateral(trove.debt, collateral);
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
       instance = transitioned.instance;
@@ -231,7 +240,7 @@ indexer.onEvent(
       trove.status !== TROVE_STATUS.LIQUIDATED
     ) {
       const collateral = await context.LiquityCollateral.get(collateralId);
-      const nextStatus = statusFromDebt(trove.debt, collateral?.minDebt ?? 0n);
+      const nextStatus = statusFromCollateral(trove.debt, collateral);
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
       instance = transitioned.instance;
@@ -360,7 +369,7 @@ indexer.onEvent(
           lastUpdatedAt: blockTimestamp,
           lastUpdatedBlock: blockNumber,
         },
-        statusFromDebt(nextDebt, collateral?.minDebt ?? 0n),
+        statusFromCollateral(nextDebt, collateral),
         instance,
       );
       trove = transitioned.trove;
