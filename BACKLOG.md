@@ -79,8 +79,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
-- [ ] Split `indexer-envio/src/leaderboardSnapshots.ts`'s `applyLeaderboardSnapshots` rollup writer to remove the scoped `max-lines-per-function` disable added while fixing dropped-swap heartbeat flushing.
-
 ## Envio v3 Migration Follow-Ups
 
 - [ ] **Pin `envio` to stable `^3.0.0` once released.** The migration currently targets `3.0.0-rc.0`; after the stable release, bump the dependency, regenerate code, and rerun codegen/typecheck/tests to catch API drift.
