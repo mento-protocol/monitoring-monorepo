@@ -219,6 +219,22 @@ metrics:
       - [PHPUSD]
       - [XOFUSD]
       - [ZARUSD]
+      # celo/stable (for gas payments)
+      - [CELOAUD]
+      - [CELOBRL]
+      - [CELOCAD]
+      - [CELOCHF]
+      - [CELOCOP]
+      - [CELOETH]
+      - [CELOEUR]
+      - [CELOGBP]
+      - [CELOGHS]
+      - [CELOJPY]
+      - [CELOKES]
+      - [CELONGN]
+      - [CELOPHP]
+      - [CELOXOF]
+      - [CELOZAR]
 
   # Trading limits state - tracks all three netflow limits
   # Netflow represents the net amount traded in/out, used to prevent price manipulation
@@ -448,6 +464,7 @@ metrics:
       - [RelayerSignerCELOAUD]
       - [RelayerSignerCELOCAD]
       - [RelayerSignerCELOCHF]
+      - [RelayerSignerCELOETH]
       - [RelayerSignerCELOCOP]
       - [RelayerSignerCELOGBP]
       - [RelayerSignerCELOGHS]
