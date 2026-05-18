@@ -46,6 +46,9 @@ importers:
       globals:
         specifier: ^17.4.0
         version: 17.4.0
+      graphql:
+        specifier: 16.13.1
+        version: 16.13.1
       jscpd:
         specifier: 4.0.9
         version: 4.0.9
