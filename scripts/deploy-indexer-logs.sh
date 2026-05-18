@@ -23,8 +23,32 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
 fi
 
 ARGS=()
+JSON_OUTPUT=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --json|-j)
+      JSON_OUTPUT=true
+      ARGS+=(-o json)
+      shift
+      ;;
+    -o|--output)
+      ARGS+=("$1")
+      shift
+      if [[ $# -gt 0 ]]; then
+        if [[ "$1" == "json" ]]; then
+          JSON_OUTPUT=true
+        fi
+        ARGS+=("$1")
+        shift
+      fi
+      ;;
+    --output=*)
+      if [[ "${1#--output=}" == "json" ]]; then
+        JSON_OUTPUT=true
+      fi
+      ARGS+=("$1")
+      shift
+      ;;
     --limit)
       if [[ "${2:-}" =~ ^[0-9]+$ && "$2" -gt 50 ]]; then
         echo "⚠️  envio-cloud deployment logs caps --limit at 50; using 50 instead of $2" >&2
@@ -73,8 +97,10 @@ if [[ -z "$COMMIT" ]]; then
   exit 1
 fi
 
-echo "📋 Logs for deployment: $COMMIT"
-echo ""
+if [[ "$JSON_OUTPUT" != "true" ]]; then
+  echo "📋 Logs for deployment: $COMMIT"
+  echo ""
+fi
 
 # Pass normalized flags through
 pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
