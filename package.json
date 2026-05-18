@@ -5,6 +5,7 @@
   "scripts": {
     "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
+    "dashboard:size-limit": "pnpm --filter @mento-protocol/ui-dashboard size-limit",
     "dashboard:dev": "pnpm --filter @mento-protocol/ui-dashboard dev",
     "dashboard:mutation": "pnpm --filter @mento-protocol/ui-dashboard test:mutation",
     "dashboard:react-doctor": "pnpm --filter @mento-protocol/ui-dashboard react-doctor",
