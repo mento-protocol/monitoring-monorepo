@@ -1,6 +1,6 @@
 resource "grafana_message_template" "oracle_stale_price_alert_title" {
   name     = "Discord: Stale Price Alert Title"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.oracle_stale_price_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
 {{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
@@ -12,7 +12,7 @@ EOT
 
 resource "grafana_message_template" "oracle_stale_price_alert_message" {
   name     = "Discord: Stale Price Alert Message"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.oracle_stale_price_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
 {{ range .Alerts.Firing }}
@@ -29,7 +29,7 @@ EOT
 
 resource "grafana_message_template" "oracle_relayer_low_celo_balance_alert_title" {
   name     = "Discord: Low CELO Balance Alert Title"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.oracle_relayer_low_celo_balance_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] Low CELO Balance Alert
 {{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.owner }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
@@ -41,7 +41,7 @@ EOT
 
 resource "grafana_message_template" "oracle_relayer_low_celo_balance_alert_message" {
   name     = "Discord: Low CELO Balance Alert Message"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.oracle_relayer_low_celo_balance_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
 {{ range .Alerts.Firing }}

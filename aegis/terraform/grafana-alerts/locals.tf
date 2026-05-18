@@ -71,7 +71,7 @@ locals {
     }
   }
   alert_config = {
-    title = <<EOT
+    title = <<-EOT
     {{ $alertName := .CommonLabels.alertname }}
     %{for alert_type, config in local.alert_types~}
     %{for index, name in config.names~}
@@ -89,7 +89,7 @@ locals {
     {{ end }}
     EOT
 
-    message = <<EOT
+    message = <<-EOT
     {{ $alertName := .CommonLabels.alertname }}
     %{for alert_type, config in local.alert_types~}
     %{for index, name in config.names~}

@@ -196,7 +196,7 @@ The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento)
 ```bash
 pnpm aegis:build
 pnpm aegis:typecheck
-pnpm aegis:deploy
+pnpm aegis:deploy   # builds, then deploys to App Engine in mento-prod
 pnpm aegis:logs
 ```
 

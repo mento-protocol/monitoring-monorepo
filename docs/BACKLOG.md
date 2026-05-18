@@ -124,7 +124,6 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 ## Backlog — Infrastructure
 
 - [ ] **Grafana Agent → Grafana Alloy migration** — Grafana Agent reached EOL on 2025-11-01 and is already deprecated; Grafana Alloy is the OTel-collector-based successor. Today the Agent runs on App Engine in `mento-prod` (config at `aegis/grafana-agent/agent.yaml.tmpl`) scraping both Aegis `/metrics` and metrics-bridge `/metrics`. Path: run `alloy convert` against `agent.yaml.tmpl`, swap the App Engine service image, render remote-write credentials at runtime instead of baking the materialized `agent.yaml` into the image layer, verify both scrape jobs still remote-write to Grafana Cloud, then delete the agent config. Refs: <https://grafana.com/blog/2024/04/09/grafana-agent-to-grafana-alloy-opentelemetry-collector-faq/>, <https://grafana.com/docs/alloy/latest/set-up/migrate/>
-- [ ] **Aegis stateless gcloud deploy script** — `aegis/bin/deploy.sh` still sets global `gcloud` project/quota-project before `gcloud app deploy`, preserving old repo behavior during the migration. Replace with command-scoped project flags after the migration PR lands so concurrent local deploys cannot mutate a developer's active gcloud config.
 
 ## Backlog — Future
 

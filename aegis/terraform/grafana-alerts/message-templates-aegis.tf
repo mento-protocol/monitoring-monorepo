@@ -1,6 +1,6 @@
 resource "grafana_message_template" "aegis_service_alert_title" {
   name     = "Discord: Aegis Service Alert Title"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.aegis_service_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
 {{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.alertname }}{{ end }}{{ end }}
@@ -11,7 +11,7 @@ EOT
 
 resource "grafana_message_template" "aegis_service_alert_message" {
   name     = "Discord: Aegis Service Alert Message"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.aegis_service_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
 {{ range .Alerts.Firing }}

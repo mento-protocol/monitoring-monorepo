@@ -5,9 +5,8 @@ set -u          # Treat unset variables as an error when substituting
 
 cd "$(dirname "$0")/.."
 
-# Make sure the mento-prod project is set as the default project
-gcloud config set project mento-prod
-gcloud auth application-default set-quota-project mento-prod
+# Build the App Engine entrypoint before uploading this checkout.
+pnpm build
 
 # Deploy aegis to the mento-prod project
-gcloud app deploy --quiet
+gcloud app deploy --project mento-prod --quiet

@@ -1,6 +1,6 @@
 resource "grafana_message_template" "reserve_balance_alert_title" {
   name     = "Discord: Reserve Balance Alert Title"
-  template = <<EOT
+  template = <<-EOT
   {{ define "discord.reserve_balance_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
   {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
@@ -11,7 +11,7 @@ resource "grafana_message_template" "reserve_balance_alert_title" {
 
 resource "grafana_message_template" "reserve_balance_alert_message" {
   name     = "Discord: Reserve Balance Alert Message"
-  template = <<EOT
+  template = <<-EOT
   {{ define "discord.reserve_balance_alert_message" }}
   {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
   {{ range .Alerts.Firing -}}

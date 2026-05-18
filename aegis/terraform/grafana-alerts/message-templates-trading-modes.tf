@@ -1,6 +1,6 @@
 resource "grafana_message_template" "trading_mode_alert_title" {
   name     = "Discord: Trading Mode Alert Title"
-  template = <<EOT
+  template = <<-EOT
   {{ define "discord.trading_mode_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
   {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
@@ -11,7 +11,7 @@ resource "grafana_message_template" "trading_mode_alert_title" {
 
 resource "grafana_message_template" "trading_mode_alert_message" {
   name     = "Discord: Trading Mode Alert Message"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithHyphen := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}

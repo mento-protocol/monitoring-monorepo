@@ -1,6 +1,6 @@
 resource "grafana_message_template" "trading_limits_alert_title" {
   name     = "Discord: Trading Limits Alert Title"
-  template = <<EOT
+  template = <<-EOT
   {{ define "discord.trading_limits_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
   {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
@@ -11,7 +11,7 @@ resource "grafana_message_template" "trading_limits_alert_title" {
 
 resource "grafana_message_template" "trading_limits_alert_message" {
   name     = "Discord: Trading Limits Alert Message"
-  template = <<EOT
+  template = <<-EOT
 {{ define "discord.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $chain := .Labels.chain | title -}}
@@ -33,4 +33,3 @@ resource "grafana_message_template" "trading_limits_alert_message" {
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
 EOT
 }
-
