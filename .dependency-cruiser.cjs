@@ -6,9 +6,12 @@
  *   - no cross-package leakage between dashboard / indexer / metrics-bridge / aegis
  *   - shared-config must stay a leaf (no imports of other workspace packages)
  *
- * Tier 3 layer rules (intra-package: e.g. ui-dashboard `lib/` not importing
- * `components/`, indexer `handlers/` reaching into internals) ship in a later
- * PR as `warn` until a baseline is recorded.
+ * Tier 3 intra-package layer rules (also in this file, blocking):
+ *   - dashboard: lib/ must not import components/ (direction: components → lib)
+ *   - dashboard: route-private _components/ and _tabs/ stay inside their route
+ *   - indexer: handlers must not reach into rpc/ implementation files directly;
+ *     they must go through rpc/effects.ts (Effect API) or the rpc.ts barrel
+ *     (DB helpers). Pre-inventory found zero violations; rules ship at error.
  *
  * Run: `pnpm code-health:deps`
  * Graph: `pnpm code-health:deps:graph`  (requires graphviz `dot`)
@@ -163,6 +166,131 @@ module.exports = {
         "shared-config is the leaf in the dep graph and must not import from Aegis.",
       from: { path: "^shared-config/" },
       to: { path: "^aegis/" },
+    },
+
+    // -------------------------------------------------------------------------
+    // Intra-package layer rules (Tier 3)
+    // Pre-inventory (PR #444) found zero violations for all three rules, so
+    // they ship directly at error severity.
+    // -------------------------------------------------------------------------
+
+    {
+      name: "dashboard-lib-no-components",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/lib/ must not import from src/components/. The allowed direction is components → lib (components may use lib utilities), never the reverse. lib/ is pure logic; components/ owns React rendering. Importing a component from lib would create an upward dependency and couple pure logic to the render layer. Tests under lib/ are excluded because test helpers may reference component types for assertion utilities.",
+      from: {
+        path: "^ui-dashboard/src/lib/",
+        pathNot: "(/__tests__/|\\.test\\.)",
+      },
+      to: { path: "^ui-dashboard/src/components/" },
+    },
+    // Route-private encapsulation: one rule per route that owns _components/ or
+    // _tabs/. Each rule forbids code from ANYWHERE in the dashboard source tree
+    // (not just app/) from importing that route's private directory. The
+    // `from.path` is intentionally `^ui-dashboard/src/` — a lib/ or components/
+    // file reaching into route-private code is the same violation as a
+    // neighbour-route doing so. The `from.pathNot` excludes only the owning
+    // route's own subtree, so within-route imports (page.tsx → same-route
+    // _components/, _tabs/ → same-route _components/, etc.) remain allowed.
+    //
+    // address-book: two rules, one per sub-route, so that
+    // `address-book/AddressBookClient.tsx` cannot import
+    // `address-book/[address]/_components/` (and vice versa). Excluding the
+    // whole `address-book/` subtree in a single rule would allow that leakage.
+    //
+    // Pre-inventory (PR #444): zero cross-route violations; rules ship at error.
+    {
+      name: "dashboard-route-private-pools",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/pools/_components/ is private to the pools route. No code outside app/pools/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/pools/",
+      },
+      to: { path: "^ui-dashboard/src/app/pools/_components/" },
+    },
+    {
+      name: "dashboard-route-private-pool-detail",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/pool/[poolId]/_components/ and _tabs/ are private to the pool-detail route. No code outside app/pool/[poolId]/ — including lib/, components/, or sibling routes — may import from them.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/pool/\\[poolId\\]/",
+      },
+      to: {
+        path: "^ui-dashboard/src/app/pool/\\[poolId\\]/(_components|_tabs)/",
+      },
+    },
+    {
+      name: "dashboard-route-private-leaderboard",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/leaderboard/_components/ is private to the leaderboard route. No code outside app/leaderboard/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/leaderboard/",
+      },
+      to: { path: "^ui-dashboard/src/app/leaderboard/_components/" },
+    },
+    {
+      name: "dashboard-route-private-address-book-root",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/address-book/_components/ is private to the address-book list route. The detail route (address-book/[address]/) must not import it, nor may any other file outside app/address-book/ (excluding the [address] sub-route).",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/address-book/(?!\\[address\\])[^/]",
+      },
+      to: { path: "^ui-dashboard/src/app/address-book/_components/" },
+    },
+    {
+      name: "dashboard-route-private-address-book-detail",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/address-book/[address]/_components/ is private to the address-detail route. The list route (address-book/, outside the [address] sub-tree) must not import it, nor may any other file outside app/address-book/[address]/.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/address-book/\\[address\\]/",
+      },
+      to: {
+        path: "^ui-dashboard/src/app/address-book/\\[address\\]/_components/",
+      },
+    },
+    {
+      name: "dashboard-route-private-bridge-flows",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/bridge-flows/_components/ is private to the bridge-flows route. No code outside app/bridge-flows/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/bridge-flows/",
+      },
+      to: { path: "^ui-dashboard/src/app/bridge-flows/_components/" },
+    },
+    {
+      name: "dashboard-route-private-revenue",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/revenue/_components/ is private to the revenue route. No code outside app/revenue/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/revenue/",
+      },
+      to: { path: "^ui-dashboard/src/app/revenue/_components/" },
+    },
+    {
+      name: "indexer-handlers-no-rpc-internals",
+      severity: "error",
+      comment:
+        "indexer-envio handlers must not import directly from rpc/ implementation files (pool-state, oracle-state, biPoolManager, breakers, etc.). The allowed paths are: rpc/effects.ts (the Envio Effect API facade, which provides per-batch memoisation, deduplication, and rate-limiting) and the rpc.ts barrel (which re-exports client primitives and the DB-query helpers used by SortedOracles). Bypassing effects.ts with a direct fetcher call means each handler invocation fires two RPC reads (preload + processing) instead of one, and loses cross-handler deduplication. Pre-inventory (PR #444): zero violations.",
+      from: { path: "^indexer-envio/src/handlers/" },
+      to: {
+        path: "^indexer-envio/src/rpc/",
+        pathNot: "^indexer-envio/src/rpc/effects\\.ts$",
+      },
     },
   ],
   options: {
