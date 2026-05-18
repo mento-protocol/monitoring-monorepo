@@ -9,8 +9,8 @@
   {
     "file": "src/metric.ts",
     "ruleId": "complexity",
-    "message": "Method 'parse' has a complexity of 31. Maximum allowed is 10.",
-    "line": 190,
+    "message": "Method 'parse' has a complexity of 30. Maximum allowed is 10.",
+    "line": 192,
     "linePreview": " | parse( | output: unknown,"
   },
   {
@@ -23,8 +23,8 @@
   {
     "file": "src/metric.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Method 'parse' has too many lines (96). Maximum allowed is 60.",
-    "line": 190,
+    "message": "Method 'parse' has too many lines (93). Maximum allowed is 60.",
+    "line": 192,
     "linePreview": " | parse( | output: unknown,"
   },
   {

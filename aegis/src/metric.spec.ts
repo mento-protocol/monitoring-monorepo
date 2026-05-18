@@ -98,6 +98,27 @@ describe('Metric.parse', () => {
     });
   });
 
+  describe('SortedOracles.medianRate()', () => {
+    it('should preserve fixed-point precision before converting to number', () => {
+      const output: [bigint, bigint] = [
+        1234567890123456789012345n,
+        1_000_000_000_000_000_000_000_000n,
+      ];
+
+      const result = metric.parse(output, 'SortedOracles', 'medianRate');
+
+      expect(result).toEqual([1.234567890123, 1e24]);
+    });
+
+    it('should throw an error if the denominator is zero', () => {
+      const output: [bigint, bigint] = [1n, 0n];
+
+      expect(() => metric.parse(output, 'SortedOracles', 'medianRate')).toThrow(
+        'medianRate denominator is zero',
+      );
+    });
+  });
+
   describe('Broker.tradingLimitsState()', () => {
     it('should parse and return all five values in correct order', () => {
       const output: [bigint, bigint, bigint, bigint, bigint] = [

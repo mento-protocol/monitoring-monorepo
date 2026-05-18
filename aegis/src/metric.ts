@@ -13,6 +13,8 @@ const SOLIDITY_TYPE_BOUNDS = {
   int48: { min: -140737488355328n, max: 140737488355327n },
 } as const;
 
+const ORACLE_RATE_DECIMAL_SCALE = 1_000_000_000_000n;
+
 const inputName = (input: { name?: string }, index: number): string =>
   input.name ?? `in${index}`;
 
@@ -230,12 +232,7 @@ export class Metric {
         // rate is typically multiplied by denominator (usually 1e24)
         // We need to return rate / denominator to get the actual exchange rate
         const [rate, denominator] = output as [bigint, bigint];
-        if (denominator === 0n) {
-          throw new Error('medianRate denominator is zero');
-        }
-        // Calculate the actual rate as a decimal
-        // For safety, we convert to number after division to maintain precision
-        const actualRate = Number(rate) / Number(denominator);
+        const actualRate = this.oracleRateToNumber(rate, denominator);
         // Return rate and denominator separately for flexibility in Grafana
         return [actualRate, Number(denominator)];
 
@@ -314,5 +311,24 @@ export class Metric {
           `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
         );
     }
+  }
+
+  private oracleRateToNumber(rate: bigint, denominator: bigint): number {
+    if (denominator === 0n) {
+      throw new Error('medianRate denominator is zero');
+    }
+
+    const integerPart = rate / denominator;
+    const remainder = rate % denominator;
+    if (integerPart > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`Value ${integerPart} is too large to be a safe integer`);
+    }
+
+    const scaledFraction =
+      (remainder * ORACLE_RATE_DECIMAL_SCALE) / denominator;
+    return (
+      Number(integerPart) +
+      Number(scaledFraction) / Number(ORACLE_RATE_DECIMAL_SCALE)
+    );
   }
 }
