@@ -91,17 +91,23 @@ if (!packagesSection.trim()) {
 
 // ── 2. Integrity validation ───────────────────────────────────────────────────
 //
-// Every top-level package entry looks like:
+// Every registry-tarball top-level package entry looks like:
 //
 //   '@scope/name@version':            ← key at 2-space indent
 //     resolution: {integrity: sha512-<base64>==}
 //
-// Packages resolved from `file:` or `link:` paths appear in `importers:`,
-// not in `packages:`, so they are not subject to this check.
+// pnpm v9 also writes local file/directory dependencies under `packages:`,
+// keyed as `<name>@file:<path>` with `resolution: {directory: ..., type: directory}`.
+// Those entries don't carry an integrity hash (they're not registry tarballs)
+// and must be exempted from the integrity check.
 
-/** Regex to extract package name + version and its resolution integrity. */
+/** Regex to extract a registry-tarball package entry + its sha512 integrity. */
 const PKG_ENTRY =
   /^ {2}('?[^':\n]+@[^\n:']+?'?):\s*\n\s+resolution:\s*\{integrity:\s*(sha512-[A-Za-z0-9+/]+=*)\}/gm;
+
+/** Regex to identify local-source entries that legitimately have no integrity. */
+const LOCAL_SOURCE_ENTRY =
+  /^ {2}('[^':\n]+@(?:file|link|git\+ssh|git\+https|github):[^\n']+'|[^':\n]+@(?:file|link|git\+ssh|git\+https|github):[^\n:']+):/gm;
 
 /** sha512 integrity: "sha512-" followed by base64 and "=" padding. */
 const SHA512_RE = /^sha512-[A-Za-z0-9+/]{86,}={0,2}$/;
@@ -128,20 +134,26 @@ while ((match = PKG_ENTRY.exec(packagesSection)) !== null) {
 const totalResolutions = (packagesSection.match(/^\s+resolution:/gm) ?? [])
   .length;
 
-// Cross-check #2: every top-level package entry must HAVE a resolution block.
-// Codex P2: an entry without any `resolution:` line would otherwise slip past
-// both counters above. Count top-level keys directly — `^  '<name>@...':` or
-// `^  <name>@...:` at 2-space indent followed by `:`. The trailing newline is
-// part of the match so multi-line blocks aren't double-counted.
+// Cross-check #2: every top-level package entry must have either a sha512
+// integrity (registry tarball) OR be a local-source entry (file:/link:/git+).
+// Without this an entry whose `resolution:` line was stripped entirely would
+// slip past the integrity counter and the bare-resolution counter alike.
 const totalEntries = (
   packagesSection.match(
     /^ {2}('[^':\n]+@[^\n']+'|[^':\n][^:\n]*@[^\n:']+):/gm,
   ) ?? []
 ).length;
 
-if (totalEntries !== totalPackages) {
-  const missingResolution = totalEntries - totalResolutions;
-  const missingIntegrity = totalResolutions - totalPackages;
+// Count local-source entries so the discrepancy check doesn't false-positive
+// on legitimate `file:` / `link:` / git deps that don't carry sha512 hashes.
+const totalLocalSources = (packagesSection.match(LOCAL_SOURCE_ENTRY) ?? [])
+  .length;
+const expectedRegistryEntries = totalEntries - totalLocalSources;
+
+if (expectedRegistryEntries !== totalPackages) {
+  const missingResolution =
+    expectedRegistryEntries - (totalResolutions - totalLocalSources);
+  const missingIntegrity = totalResolutions - totalLocalSources - totalPackages;
   if (missingResolution > 0) {
     fail(
       `${missingResolution} package entry/entries in pnpm-lock.yaml have NO resolution block. ` +
@@ -155,8 +167,12 @@ if (totalEntries !== totalPackages) {
     );
   }
 } else if (integrityErrors === 0) {
+  const localNote =
+    totalLocalSources > 0
+      ? ` (${totalLocalSources} local file:/link:/git deps exempted from the integrity check)`
+      : "";
   ok(
-    `All ${totalPackages} packages in pnpm-lock.yaml have valid sha512 integrity hashes.`,
+    `All ${totalPackages} registry-tarball packages in pnpm-lock.yaml have valid sha512 integrity hashes${localNote}.`,
   );
 }
 
@@ -170,10 +186,10 @@ if (totalEntries !== totalPackages) {
 // Workspace `link:` and `file:` protocol entries are fine — they are internal
 // refs, not registry fetches.
 
-// Codex P2: walk the repo for every `.npmrc` (excluding `.git/` and
-// `node_modules/`) — pnpm reads `.npmrc` from every package directory it
-// finds, so a future workspace adding its own `.npmrc` with `registry=...`
-// would silently bypass a fixed allowlist.
+// Walk the repo for every `.npmrc` (excluding `.git/` and `node_modules/`)
+// — pnpm reads `.npmrc` from every package directory it finds, so a future
+// workspace adding its own `.npmrc` with `registry=...` would silently
+// bypass a fixed allowlist.
 /**
  * @param {string} dir
  * @param {string[]} out
@@ -201,9 +217,10 @@ const npmrcFiles = [];
 findNpmrcs(ROOT, npmrcFiles);
 
 /**
- * Codex P1 / Cursor High: registry-host check must be exact-canonical, NOT
- * prefix-based. `startsWith("https://registry.npmjs.org")` accepts the
- * attacker-controlled lookalike `https://registry.npmjs.org.evil.com/`.
+ * Registry-host check is exact-canonical (NOT prefix-based) so an attacker
+ * cannot bypass with a lookalike host like
+ * `https://registry.npmjs.org.evil.com/` — that string starts with
+ * "https://registry.npmjs.org" but is a different host.
  * @param {string} val
  */
 function isOfficialNpmRegistry(val) {
@@ -253,10 +270,30 @@ for (const absPath of npmrcFiles) {
   }
 }
 
-// Check pnpm-workspace.yaml for registries: block.
+// Check pnpm-workspace.yaml for BOTH the singular `registry:` top-level key
+// (default registry override; `pnpm config get registry --location project`
+// resolves it) AND the plural `registries:` block (scoped overrides). Either
+// can redirect installs away from npmjs.org.
 const workspacePath = resolve(ROOT, "pnpm-workspace.yaml");
 if (existsSync(workspacePath)) {
   const ws = readFileSync(workspacePath, "utf8");
+  const lines = ws.split("\n");
+  for (const [i, line] of lines.entries()) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    // Top-level `registry: <url>` key (YAML scalar at column 0).
+    const singularMatch = /^registry\s*:\s*(.+?)\s*$/.exec(line);
+    if (singularMatch) {
+      const raw = singularMatch[1].replace(/^['"]|['"]$/g, "");
+      if (!isOfficialNpmRegistry(raw)) {
+        fail(
+          `pnpm-workspace.yaml:${i + 1} — non-npmjs default registry: "${raw}". ` +
+            "All packages must resolve from https://registry.npmjs.org.",
+        );
+        registryErrors++;
+      }
+    }
+  }
   if (/^registries:/m.test(ws)) {
     fail(
       "pnpm-workspace.yaml contains a `registries:` block, which configures custom package " +

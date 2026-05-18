@@ -299,9 +299,9 @@ test("fails cleanly when pnpm-lock.yaml does not exist", () => {
   }
 });
 
-// 14. (codex P1 + cursor High) Lookalike scoped registry must be rejected
-// even though its host starts with `registry.npmjs.org`. Prefix-match is
-// the original bug; exact-canonical host is the fix.
+// 14. Lookalike scoped registry must be rejected even though its host
+// starts with `registry.npmjs.org`. Prefix-match would let it through;
+// exact-canonical-host validation rejects it.
 test("fails when scope-specific registry is a lookalike (registry.npmjs.org.evil.com)", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -318,8 +318,8 @@ test("fails when scope-specific registry is a lookalike (registry.npmjs.org.evil
   );
 });
 
-// 15. (codex P2) A nested workspace `.npmrc` deeper than the original
-// hardcoded allowlist (e.g. `tools/some-pkg/.npmrc`) must still be discovered.
+// 15. A nested workspace `.npmrc` deeper than any fixed allowlist
+// (e.g. `tools/some-pkg/.npmrc`) must still be discovered via repo walk.
 test("discovers .npmrc in any nested workspace directory", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -336,9 +336,9 @@ test("discovers .npmrc in any nested workspace directory", () => {
   );
 });
 
-// 16. (codex P2) A package entry with NO `resolution:` block at all must
-// fail — neither the integrity counter nor the resolution counter would
-// catch it without an explicit top-level entry count.
+// 16. A package entry with NO `resolution:` block at all must fail —
+// neither the integrity counter nor the resolution counter would catch
+// it without an explicit top-level entry count.
 test("fails when a package entry has no resolution block", () => {
   // Hand-craft the lockfile so one package omits `resolution:` entirely.
   const lockfile = `lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {integrity: ${VALID_SHA512}}\n\n  no-resolution-pkg@1.0.0:\n    engines: {node: '>=18'}\n\nsnapshots:\n`;
@@ -348,6 +348,44 @@ test("fails when a package entry has no resolution block", () => {
   assert(
     out.includes("NO resolution block"),
     `expected missing-resolution detection: ${out}`,
+  );
+});
+
+// 17. pnpm v9 writes local `file:` / `link:` dependencies under `packages:`
+// keyed as `<name>@file:<path>` with `resolution: {directory: ..., type:
+// directory}` — no integrity hash. Those entries must be exempted from
+// the integrity gate, not flagged as "resolution block without sha512".
+test("passes when packages: contains a local file: dependency without integrity", () => {
+  const lockfile = `lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {integrity: ${VALID_SHA512}}\n\n  internal-pkg@file:packages/internal-pkg:\n    resolution: {directory: packages/internal-pkg, type: directory}\n\nsnapshots:\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  assert(
+    stdout.includes("local file:/link:/git deps exempted") ||
+      stdout.includes("registry-tarball packages"),
+    `expected file-dep exemption message: ${stdout}`,
+  );
+});
+
+// 18. The pnpm-workspace.yaml top-level `registry:` key (singular) is
+// resolved by `pnpm config get registry --location project` and overrides
+// the default registry for the whole workspace. Must be rejected when it
+// points off-npmjs, same as a `.npmrc` registry= line.
+test("fails when pnpm-workspace.yaml top-level registry: points off-npmjs", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - shared-config\nregistry: https://evil.example.com/\n",
+    },
+  );
+  assert(exitCode !== 0, `Expected non-zero exit, got ${exitCode}`);
+  const out = stdout + stderr;
+  assert(
+    out.includes("non-npmjs default registry"),
+    `expected top-level registry rejection: ${out}`,
   );
 });
 
