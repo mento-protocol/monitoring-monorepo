@@ -85,8 +85,8 @@ resource "grafana_rule_group" "oracle_relayers" {
       no_data_state  = "NoData"
 
       annotations = {
-        summary        = "Low CELO balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ humanize (index $values \"balance\").Value }} CELO"
-        currentBalance = "{{ humanize (index $values \"balance\").Value }}"
+        summary        = "Low CELO balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} CELO"
+        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
       }
 
       labels = {

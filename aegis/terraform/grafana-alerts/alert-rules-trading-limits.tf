@@ -12,7 +12,7 @@ resource "grafana_rule_group" "trading_limits" {
     no_data_state  = "NoData"
 
     annotations = {
-      summary = "L0 (short-term) trading limit at {{ printf \"%.1f\" (index $values \"utilization\").Value }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      summary = "L0 (short-term) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
     }
 
     labels = {
@@ -134,7 +134,7 @@ resource "grafana_rule_group" "trading_limits" {
     no_data_state  = "NoData"
 
     annotations = {
-      summary = "L1 (medium-term) trading limit at {{ printf \"%.1f\" (index $values \"utilization\").Value }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      summary = "L1 (medium-term) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
     }
 
     labels = {
@@ -256,7 +256,7 @@ resource "grafana_rule_group" "trading_limits" {
     no_data_state  = "NoData"
 
     annotations = {
-      summary = "LG (global lifetime) trading limit at {{ printf \"%.1f\" (index $values \"utilization\").Value }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      summary = "LG (global lifetime) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
     }
 
     labels = {

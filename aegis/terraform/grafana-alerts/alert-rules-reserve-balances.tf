@@ -24,9 +24,9 @@ resource "grafana_rule_group" "reserve_balances" {
       no_data_state  = "NoData"
 
       annotations = {
-        summary        = "Low ${rule.key} Reserve Balance: {{ humanize (index $values \"balance\").Value }} ${rule.key}"
+        summary        = "Low ${rule.key} Reserve Balance: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.key}"
         threshold      = "{{ humanize (${rule.value.threshold}) }}"
-        currentBalance = "{{ humanize (index $values \"balance\").Value }} ${rule.key}"
+        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.key}"
       }
       labels = {
         service  = "reserve"
