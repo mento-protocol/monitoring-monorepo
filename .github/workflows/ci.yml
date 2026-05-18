@@ -432,6 +432,15 @@ jobs:
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+      - name: Terraform format check
+        run: terraform -chdir=aegis/terraform fmt -check -recursive
+      - name: Terraform init (no backend)
+        run: terraform -chdir=aegis/terraform init -backend=false -input=false
+      - name: Terraform validate
+        run: terraform -chdir=aegis/terraform validate -no-color
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

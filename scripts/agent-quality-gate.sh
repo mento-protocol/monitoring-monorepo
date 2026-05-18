@@ -543,9 +543,10 @@ add_bridge_codegen_then_restore_mainnet() {
 add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
-  add_command "terraform -chdir=${module} fmt -check -recursive" "$reason"
-  add_command "terraform -chdir=${module} init -backend=false -input=false" "$reason"
-  add_command "terraform -chdir=${module} validate -no-color" "$reason"
+  local tf_data_dir="${module}/.terraform-agent-gate"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
 
 docs_targeted_trunk_command() {

@@ -38,7 +38,6 @@ locals {
     },
     low_reserve_balance = {
       names = [
-        "Low CELO Reserve Balance Alert",
         "Low USDC Reserve Balance Alert",
         "Low USDT Reserve Balance Alert",
         "Low axlUSDC Reserve Balance Alert"

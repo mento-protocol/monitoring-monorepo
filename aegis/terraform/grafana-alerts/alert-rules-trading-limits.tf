@@ -54,6 +54,22 @@ resource "grafana_rule_group" "trading_limits" {
     }
 
     data {
+      ref_id         = "flags"
+      datasource_uid = "grafanacloud-prom"
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId   = "flags"
+        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        instant = true
+      })
+    }
+
+    data {
       ref_id         = "utilization"
       datasource_uid = "__expr__"
 
@@ -65,7 +81,7 @@ resource "grafana_rule_group" "trading_limits" {
       model = jsonencode({
         refId      = "utilization"
         type       = "math"
-        expression = "(abs($netflow) / $limit) * 100"
+        expression = "(abs($netflow) / $limit) * 100 * $flags"
         datasource = {
           type = "__expr__"
           uid  = "__expr__"
@@ -160,6 +176,22 @@ resource "grafana_rule_group" "trading_limits" {
     }
 
     data {
+      ref_id         = "flags"
+      datasource_uid = "grafanacloud-prom"
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId   = "flags"
+        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        instant = true
+      })
+    }
+
+    data {
       ref_id         = "utilization"
       datasource_uid = "__expr__"
 
@@ -171,7 +203,7 @@ resource "grafana_rule_group" "trading_limits" {
       model = jsonencode({
         refId      = "utilization"
         type       = "math"
-        expression = "(abs($netflow) / $limit) * 100"
+        expression = "(abs($netflow) / $limit) * 100 * $flags"
         datasource = {
           type = "__expr__"
           uid  = "__expr__"
@@ -266,6 +298,22 @@ resource "grafana_rule_group" "trading_limits" {
     }
 
     data {
+      ref_id         = "flags"
+      datasource_uid = "grafanacloud-prom"
+
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+
+      model = jsonencode({
+        refId   = "flags"
+        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        instant = true
+      })
+    }
+
+    data {
       ref_id         = "utilization"
       datasource_uid = "__expr__"
 
@@ -277,7 +325,7 @@ resource "grafana_rule_group" "trading_limits" {
       model = jsonencode({
         refId      = "utilization"
         type       = "math"
-        expression = "(abs($netflow) / $limit) * 100"
+        expression = "(abs($netflow) / $limit) * 100 * $flags"
         datasource = {
           type = "__expr__"
           uid  = "__expr__"
@@ -321,4 +369,3 @@ resource "grafana_rule_group" "trading_limits" {
     }
   }
 }
-

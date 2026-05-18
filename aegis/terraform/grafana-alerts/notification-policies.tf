@@ -46,6 +46,12 @@ resource "grafana_notification_policy" "all" {
         value = "page"
       }
 
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
       # Only weekend-disabled feeds
       matcher {
         label = "rateFeed"
