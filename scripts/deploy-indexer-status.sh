@@ -91,6 +91,15 @@ render_status_json() {
       const numerator = Math.max(Math.min(processed, head) - start, 0);
       return (numerator / denominator) * 100;
     };
+    const progressParts = (row) => {
+      const start = Number(row.start_block ?? 0);
+      const head = Number(row.block_height ?? 0);
+      const processed = Number(row.latest_processed_block ?? 0);
+      return {
+        denominator: Math.max(head - start, 0),
+        numerator: Math.max(Math.min(processed, head) - start, 0),
+      };
+    };
     const fmtPct = (value) => `${value.toFixed(2)}%`;
     const fmtNum = (value) => Number(value ?? 0).toLocaleString('en-US');
     const widths = [8, 10, 14, 14, 10, 10, 20];
@@ -109,11 +118,9 @@ render_status_json() {
         row.timestamp_caught_up_to_head_or_endblock ? row.timestamp_caught_up_to_head_or_endblock.replace('T', ' ').slice(0, 19) : '-',
       ]));
     }
-    const totalStart = rows.reduce((sum, row) => sum + Number(row.start_block ?? 0), 0);
-    const totalHead = rows.reduce((sum, row) => sum + Number(row.block_height ?? 0), 0);
-    const totalProcessed = rows.reduce((sum, row) => sum + Math.min(Number(row.latest_processed_block ?? 0), Number(row.block_height ?? 0)), 0);
-    const totalDenominator = Math.max(totalHead - totalStart, 1);
-    const totalNumerator = Math.max(totalProcessed - totalStart, 0);
+    const totalParts = rows.map(progressParts);
+    const totalDenominator = Math.max(totalParts.reduce((sum, part) => sum + part.denominator, 0), 1);
+    const totalNumerator = totalParts.reduce((sum, part) => sum + part.numerator, 0);
     const allCaughtUp = rows.length > 0 && rows.every((row) => row.timestamp_caught_up_to_head_or_endblock);
     console.log('');
     console.log(`Overall catch-up: ${fmtPct((totalNumerator / totalDenominator) * 100)} (${fmtNum(totalNumerator)}/${fmtNum(totalDenominator)} blocks since start)`);
