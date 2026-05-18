@@ -66,7 +66,7 @@ const ALL_ENTRIES: ContractEntry[] = (() => {
         rawName,
         canonicalName,
         type,
-        decimals: info.decimals,
+        ...(info.decimals !== undefined && { decimals: info.decimals }),
       });
     }
   }
