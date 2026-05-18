@@ -105,9 +105,15 @@ if (!packagesSection.trim()) {
 const PKG_ENTRY =
   /^ {2}('?[^':\n]+@[^\n:']+?'?):\s*\n\s+resolution:\s*\{integrity:\s*(sha512-[A-Za-z0-9+/]+=*)\}/gm;
 
-/** Regex to identify local-source entries that legitimately have no integrity. */
+/**
+ * Regex to identify TRULY LOCAL entries (`file:` / `link:` only) that
+ * legitimately have no integrity hash. Remote git protocols (`git+ssh:`,
+ * `git+https:`, `github:`) are NOT exempted — pnpm v9 stores integrity
+ * for those too, and treating them as local would let a PR add an
+ * unaudited remote git dep that bypasses the registry gate.
+ */
 const LOCAL_SOURCE_ENTRY =
-  /^ {2}('[^':\n]+@(?:file|link|git\+ssh|git\+https|github):[^\n']+'|[^':\n]+@(?:file|link|git\+ssh|git\+https|github):[^\n:']+):/gm;
+  /^ {2}('[^':\n]+@(?:file|link):[^\n']+'|[^':\n]+@(?:file|link):[^\n:']+):/gm;
 
 /** sha512 integrity: "sha512-" followed by base64 and "=" padding. */
 const SHA512_RE = /^sha512-[A-Za-z0-9+/]{86,}={0,2}$/;
