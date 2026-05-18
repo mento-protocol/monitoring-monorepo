@@ -794,7 +794,7 @@ while IFS= read -r path; do
     aegis/*)
       add_surface "aegis"
       case "$path" in
-        aegis/src/*|aegis/config.yaml|aegis/app.yaml|aegis/contracts/*|aegis/foundry.toml|aegis/foundry.lock|aegis/package.json|aegis/tsconfig*.json|aegis/nest-cli.json)
+        aegis/src/*|aegis/config.yaml|aegis/app.yaml|aegis/contracts/*|aegis/foundry.toml|aegis/foundry.lock|aegis/package.json|aegis/tsconfig*.json|aegis/nest-cli.json|aegis/eslint.config.js|aegis/eslint-baseline.json)
           add_aegis_quality_commands "aegis changed"
           ;;
         aegis/terraform/*)

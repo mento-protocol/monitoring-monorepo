@@ -10,4 +10,4 @@ gcloud config set project mento-prod
 gcloud auth application-default set-quota-project mento-prod
 
 # Deploy aegis to the mento-prod project
-gcloud app deploy
+gcloud app deploy --quiet
