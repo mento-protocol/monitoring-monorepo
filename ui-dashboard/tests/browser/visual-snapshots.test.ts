@@ -114,9 +114,16 @@ function timestampMasks(page: Page) {
     page.locator('[data-testid="last-updated"]'),
     // "Created 33d ago" anchor/span in pool-header (title="Created on YYYY-MM-DD")
     page.locator('[title*="Created "]'),
-    // Any element whose visible text contains " ago" (catches oracle freshness,
-    // swap row timestamps, LP position timestamps, etc.)
+    // Any element whose visible text contains "Xd/h/m/s ago" (oracle freshness,
+    // LP position timestamps, etc.)
     page.locator(':text-matches("\\d+[smhd] ago")'),
+    // Swap row time cell: renders as "Xd ago" when pinned clock > real time, or
+    // as an absolute locale date (e.g. "5/19/2026, 12:12:36 AM") when the fixture
+    // timestamp is newer than the pinned browser clock (diff < 0 → formatTimestamp
+    // fallback in relativeTime()). The <td> element gets title={formatTimestamp(...)}
+    // so we match it by the fact that its title contains a localized date.
+    // Using :text-matches to catch both the "Xd ago" and absolute-date variants.
+    page.locator(':text-matches("\\d{1,2}/\\d{1,2}/\\d{4}")'),
   ];
 }
 
