@@ -857,6 +857,367 @@ type OlsLifecycleEvent {
   blockTimestamp: BigInt!
 }
 
+# ─── Liquity v2 CDPs ───────────────────────────────────────────
+
+type LiquityCollateral {
+  id: ID!
+  chainId: Int! @index
+  collIndex: Int!
+  symbol: String!
+  debtToken: String!
+  collToken: String!
+  collateralRegistry: String!
+  troveManager: String!
+  stabilityPool: String!
+  borrowerOperations: String!
+  troveNFT: String!
+  sortedTroves: String!
+  activePool: String!
+  defaultPool: String!
+  collSurplusPool: String!
+  addressesRegistry: String!
+  systemParams: String!
+  mcrBps: Int!
+  ccrBps: Int!
+  scrBps: Int!
+  bcrBps: Int!
+  minDebt: BigInt!
+  minBoldInSp: BigInt!
+  minBoldAfterRebalance: BigInt!
+  minAnnualInterestRate: BigInt!
+  spYieldSplitBps: Int!
+  liquidationPenaltySpBps: Int!
+  liquidationPenaltyRedistributionBps: Int!
+  ethGasCompensation: BigInt!
+  redemptionFeeFloorBps: Int!
+  redemptionBeta: BigInt!
+  redemptionMinuteDecayFactor: BigInt!
+  initialBaseRateBps: Int!
+  systemParamsLoaded: Boolean!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+}
+
+type Trove
+  @index(fields: ["collateralId", "status"])
+  @index(fields: ["collateralId", "icrBps"]) {
+  id: ID!
+  chainId: Int! @index
+  collateralId: String! @index
+  troveId: String! @index
+  owner: String! @index
+  previousOwner: String!
+  status: String! @index
+  debt: BigInt!
+  coll: BigInt!
+  stake: BigInt!
+  snapshotOfTotalCollRedist: BigInt!
+  snapshotOfTotalDebtRedist: BigInt!
+  interestRate: BigInt!
+  interestBatchId: String
+  batchDebtShares: BigInt!
+  icrBps: Int! @index
+  liquidatedColl: BigInt
+  liquidatedDebt: BigInt
+  collSurplus: BigInt
+  priceAtLiquidation: BigInt
+  redemptionCount: Int!
+  redeemedColl: BigInt!
+  redeemedDebt: BigInt!
+  redemptionFeePaidCum: BigInt!
+  openedAt: BigInt!
+  openedAtBlock: BigInt!
+  openedTxHash: String!
+  closedAt: BigInt
+  closedAtBlock: BigInt
+  closedTxHash: String
+  lastUserActionAt: BigInt!
+  lastUpdatedAt: BigInt!
+  lastUpdatedBlock: BigInt!
+}
+
+type InterestRateBracket @index(fields: ["collateralId", "rate"]) {
+  id: ID!
+  collateralId: String! @index
+  rate: BigInt!
+  totalDebt: BigInt!
+  sumDebtTimesRateD36: BigInt! @config(precision: 78)
+  pendingDebtTimesOneYearD36: BigInt! @config(precision: 78)
+  updatedAt: BigInt!
+}
+
+type InterestBatch {
+  id: ID!
+  collateralId: String! @index
+  batchManager: String! @index
+  debt: BigInt!
+  coll: BigInt!
+  totalDebtShares: BigInt!
+  annualInterestRate: BigInt!
+  annualManagementFee: BigInt!
+  updatedAt: BigInt!
+}
+
+type PendingBatchedTroveUpdate @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  collateralId: String! @index
+  txHash: String! @index
+  batchManager: String! @index
+  troveId: String!
+  batchDebtShares: BigInt!
+  coll: BigInt!
+  stake: BigInt!
+  snapshotOfTotalCollRedist: BigInt!
+  snapshotOfTotalDebtRedist: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
+type PendingRedemption @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  collateralId: String! @index
+  txHash: String! @index
+  troveId: String!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
+type BorrowerInfo {
+  id: ID!
+  chainId: Int! @index
+  address: String! @index
+  troves: Int!
+  trovesByCollateral: [String!]!
+}
+
+type StabilityPoolDepositor
+  @index(fields: ["collateralId", "lastTouchedDeposit"]) {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  address: String! @index
+  lastTouchedDeposit: BigInt!
+  stashedColl: BigInt!
+  yieldGainClaimedCum: BigInt!
+  ethGainClaimedCum: BigInt!
+  firstDepositAt: BigInt!
+  lastUpdatedAt: BigInt!
+  cumulativeDeposited: BigInt!
+  cumulativeWithdrawn: BigInt!
+}
+
+type LiquityInstance {
+  id: ID!
+  collateralId: String! @index
+  chainId: Int! @index
+  activePoolDebt: BigInt!
+  defaultPoolDebt: BigInt!
+  activePoolColl: BigInt!
+  defaultPoolColl: BigInt!
+  systemColl: BigInt!
+  systemDebt: BigInt!
+  tcrBps: Int!
+  spDeposits: BigInt!
+  spColl: BigInt!
+  spHeadroom: BigInt!
+  baseRate: BigInt!
+  lastFeeOpTime: BigInt!
+  currentRedemptionRateBps: Int!
+  activeTroveCount: Int!
+  icrP1Bps: Int!
+  icrP5Bps: Int!
+  icrP50Bps: Int!
+  icrFracBelowMcrBps: Int!
+  liqCountCum: Int!
+  liqDebtOffsetCum: BigInt!
+  liqDebtRedistributedCum: BigInt!
+  liqCollSentToSpCum: BigInt!
+  liqCollRedistributedCum: BigInt!
+  latestTotalCollRedist: BigInt!
+  latestTotalDebtRedist: BigInt!
+  redemptionCountCum: Int!
+  redemptionDebtCum: BigInt!
+  redemptionFeeCum: BigInt!
+  borrowingFeeCum: BigInt!
+  spRebalanceCount: Int!
+  spRebalanceCollInCum: BigInt!
+  spRebalanceStableOutCum: BigInt!
+  shortfallSubsidyCum: BigInt!
+  troveOpenedCountBucket: Int!
+  troveClosedCountBucket: Int!
+  liqCountBucket: Int!
+  liqDebtOffsetBucket: BigInt!
+  redemptionCountBucket: Int!
+  redemptionDebtBucket: BigInt!
+  spRebalanceCountBucket: Int!
+  shortfallSubsidyBucket: BigInt!
+  currentHourBucket: BigInt!
+  troveOpenedCountDayBucket: Int!
+  troveClosedCountDayBucket: Int!
+  liqCountDayBucket: Int!
+  liqDebtOffsetDayBucket: BigInt!
+  redemptionCountDayBucket: Int!
+  redemptionDebtDayBucket: BigInt!
+  spRebalanceCountDayBucket: Int!
+  shortfallSubsidyDayBucket: BigInt!
+  currentDayBucket: BigInt!
+  isShutDown: Boolean!
+  shutDownAt: BigInt
+  shutDownTcrBps: Int
+  lastEventBlock: BigInt!
+  lastEventTimestamp: BigInt!
+}
+
+type LiquityInstanceSnapshot @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  timestamp: BigInt! @index
+  systemColl: BigInt!
+  systemDebt: BigInt!
+  tcrBps: Int!
+  spDeposits: BigInt!
+  spColl: BigInt!
+  spHeadroom: BigInt!
+  currentRedemptionRateBps: Int!
+  activeTroveCount: Int!
+  icrP1Bps: Int!
+  icrP5Bps: Int!
+  icrP50Bps: Int!
+  icrFracBelowMcrBps: Int!
+  isShutDown: Boolean!
+  troveOpenedCount: Int!
+  troveClosedCount: Int!
+  liqCount: Int!
+  liqDebtOffsetBucket: BigInt!
+  redemptionCount: Int!
+  redemptionDebtBucket: BigInt!
+  spRebalanceCount: Int!
+  shortfallSubsidyBucket: BigInt!
+  liqCountCum: Int!
+  redemptionCountCum: Int!
+  blockNumber: BigInt!
+}
+
+type LiquityInstanceDailySnapshot @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  timestamp: BigInt! @index
+  systemColl: BigInt!
+  systemDebt: BigInt!
+  tcrBps: Int!
+  spDeposits: BigInt!
+  spColl: BigInt!
+  spHeadroom: BigInt!
+  currentRedemptionRateBps: Int!
+  activeTroveCount: Int!
+  icrP1Bps: Int!
+  icrP5Bps: Int!
+  icrP50Bps: Int!
+  icrFracBelowMcrBps: Int!
+  isShutDown: Boolean!
+  troveOpenedCount: Int!
+  troveClosedCount: Int!
+  liqCount: Int!
+  liqDebtOffsetBucket: BigInt!
+  redemptionCount: Int!
+  redemptionDebtBucket: BigInt!
+  spRebalanceCount: Int!
+  shortfallSubsidyBucket: BigInt!
+  liqCountCum: Int!
+  redemptionCountCum: Int!
+  blockNumber: BigInt!
+}
+
+type LiquidationEvent @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  debtOffsetBySP: BigInt!
+  debtRedistributed: BigInt!
+  boldGasCompensation: BigInt!
+  collGasCompensation: BigInt!
+  collSentToSP: BigInt!
+  collRedistributed: BigInt!
+  collSurplus: BigInt!
+  L_ETH: BigInt!
+  L_boldDebt: BigInt!
+  priceAtLiquidation: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
+type RedemptionEvent @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  attemptedBoldAmount: BigInt!
+  actualBoldAmount: BigInt!
+  ETHSent: BigInt!
+  ETHFee: BigInt!
+  price: BigInt!
+  redemptionPrice: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
+type SpRebalanceEvent @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  amountCollIn: BigInt!
+  amountStableOut: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
+type CdpPool {
+  id: ID!
+  chainId: Int! @index
+  collateralId: String @index
+  debtToken: String! @index
+  poolId: String! @index
+  strategyAddress: String!
+  rebalanceCooldownSec: Int!
+  addedAtBlock: BigInt!
+  addedAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+  removed: Boolean!
+}
+
+type ReserveTrove {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  poolId: String @index
+  addressesRegistry: String!
+  troveId: String!
+  initialDebt: BigInt!
+  initialColl: BigInt!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  createdTxHash: String!
+}
+
+type CdpLiquidityMove @index(fields: ["poolId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  poolId: String! @index
+  direction: Int!
+  tokenGivenToPool: String!
+  amountGivenToPool: BigInt!
+  tokenTakenFromPool: String!
+  amountTakenFromPool: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
 # ============================================================================
 # Circuit Breakers (BreakerBox + MedianDeltaBreaker + ValueDeltaBreaker)
 #

@@ -61,3 +61,14 @@ export const ALL_OLS_POOLS = `
     }
   }
 `;
+
+export const ALL_CDP_POOLS = `
+  query AllCdpPools($chainId: Int!) {
+    CdpPool(
+      where: { removed: { _eq: false }, chainId: { _eq: $chainId } }
+      limit: 1000
+    ) {
+      poolId collateralId
+    }
+  }
+`;

@@ -51,6 +51,9 @@ const EXPECTED_EXPORT_NAMES = [
   "OLS_LIQUIDITY_EVENTS_PAGE",
   "OLS_LIQUIDITY_EVENTS_COUNT",
   "ALL_OLS_POOLS",
+  "ALL_CDP_POOLS",
+  "CDP_MARKETS",
+  "CDP_MARKET_DETAIL",
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
   "VIRTUAL_POOL_LIFECYCLE",
@@ -396,6 +399,11 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
   it("ALL_OLS_POOLS filters isActive: true scoped to chainId", () => {
     expect(queries.ALL_OLS_POOLS).toContain("isActive: { _eq: true }");
     expect(queries.ALL_OLS_POOLS).toContain("chainId: { _eq: $chainId }");
+  });
+
+  it("ALL_CDP_POOLS filters removed pools scoped to chainId", () => {
+    expect(queries.ALL_CDP_POOLS).toContain("removed: { _eq: false }");
+    expect(queries.ALL_CDP_POOLS).toContain("chainId: { _eq: $chainId }");
   });
 
   it("POOL_BREAKER_CONFIG queries both BreakerConfig and BreakerTripEvent in one round-trip", () => {

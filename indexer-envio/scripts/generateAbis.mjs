@@ -26,7 +26,7 @@
  * Update those by hand if upstream Wormhole NTT events ever change.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,7 @@ const UPSTREAM_DIR = resolve(
   "node_modules/@mento-protocol/contracts/abis",
 );
 const VENDORED_DIR = resolve(REPO, "abis");
+const LIQUITY_DIR = resolve(VENDORED_DIR, "liquity");
 
 // Explicit allow-list. Add a new entry here when the indexer starts consuming
 // another upstream ABI. The explicit list is intentional — it doubles as
@@ -52,13 +53,27 @@ const ABIS = [
   "VirtualPoolFactory",
 ];
 
+const LIQUITY_ABIS = [
+  "ActivePool",
+  "AddressesRegistry",
+  "BorrowerOperations",
+  "CDPLiquidityStrategy",
+  "CollateralRegistry",
+  "DefaultPool",
+  "ReserveTroveFactory",
+  "StabilityPool",
+  "SystemParams",
+  "TroveManager",
+  "TroveNFT",
+];
+
 let copied = 0;
 let unchanged = 0;
 const missing = [];
 
-for (const name of ABIS) {
+function copyAbi(name, targetDir = VENDORED_DIR) {
   const src = resolve(UPSTREAM_DIR, `${name}.json`);
-  const dst = resolve(VENDORED_DIR, `${name}.json`);
+  const dst = resolve(targetDir, `${name}.json`);
 
   let srcRaw;
   try {
@@ -66,7 +81,7 @@ for (const name of ABIS) {
   } catch (err) {
     if (err.code === "ENOENT") {
       missing.push(name);
-      continue;
+      return;
     }
     throw err;
   }
@@ -84,14 +99,18 @@ for (const name of ABIS) {
   }
 
   if (prev === dstRaw) {
-    console.log(`  unchanged  ${name}.json`);
+    console.log(`  unchanged  ${dst.replace(`${VENDORED_DIR}/`, "")}`);
     unchanged += 1;
   } else {
+    mkdirSync(targetDir, { recursive: true });
     writeFileSync(dst, dstRaw);
-    console.log(`  wrote      ${name}.json`);
+    console.log(`  wrote      ${dst.replace(`${VENDORED_DIR}/`, "")}`);
     copied += 1;
   }
 }
+
+for (const name of ABIS) copyAbi(name);
+for (const name of LIQUITY_ABIS) copyAbi(name, LIQUITY_DIR);
 
 if (missing.length > 0) {
   console.error(
@@ -105,5 +124,5 @@ if (missing.length > 0) {
 }
 
 console.log(
-  `\n[generateAbis] ${copied} updated, ${unchanged} unchanged (${ABIS.length} total).`,
+  `\n[generateAbis] ${copied} updated, ${unchanged} unchanged (${ABIS.length + LIQUITY_ABIS.length} total).`,
 );
