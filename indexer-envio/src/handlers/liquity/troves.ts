@@ -285,7 +285,7 @@ export async function reclassifyTrovesForLoadedParams(
   const instance = await context.LiquityInstance.get(collateralId);
   if (instance === undefined) return;
   let nextInstance =
-    instance.spHeadroom === -1n && instance.spDeposits > 0n
+    instance.spHeadroom === -1n
       ? { ...instance, spHeadroom: instance.spDeposits - minBoldInSp }
       : instance;
   for (const status of [TROVE_STATUS.ACTIVE, TROVE_STATUS.ZOMBIE]) {

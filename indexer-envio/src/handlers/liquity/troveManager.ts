@@ -30,6 +30,21 @@ const statusFromCollateral = (
   return statusFromDebt(debt, collateral.minDebt);
 };
 
+const statusFromBatchReplay = (
+  trove: Parameters<typeof isPlaceholderClosedTrove>[0] & { status: string },
+  debt: bigint,
+  collateral: { minDebt: bigint; systemParamsLoaded: boolean } | undefined,
+): string => {
+  if (
+    (trove.status === TROVE_STATUS.CLOSED &&
+      !isPlaceholderClosedTrove(trove)) ||
+    trove.status === TROVE_STATUS.LIQUIDATED
+  ) {
+    return trove.status;
+  }
+  return statusFromCollateral(debt, collateral);
+};
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -259,6 +274,10 @@ indexer.onEvent(
         blockTimestamp,
       );
       instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
+      const reclassifiedTrove = await context.Trove.get(trove.id);
+      if (reclassifiedTrove !== undefined) {
+        trove = { ...trove, status: reclassifiedTrove.status };
+      }
       const nextStatus = statusFromCollateral(trove.debt, collateral);
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
@@ -364,6 +383,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     for (const pending of pendingRows) {
       if (
         pending.collateralId !== collateralId ||
@@ -434,7 +454,7 @@ indexer.onEvent(
           lastUpdatedAt: blockTimestamp,
           lastUpdatedBlock: blockNumber,
         },
-        statusFromCollateral(nextDebt, collateral),
+        statusFromBatchReplay(trove, nextDebt, collateral),
         instance,
       );
       trove = transitioned.trove;
@@ -442,7 +462,6 @@ indexer.onEvent(
       context.Trove.set(trove);
       context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
     }
-    instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
 
     context.LiquityInstance.set({
       ...touchLiquityInstance(instance, blockNumber, blockTimestamp),
