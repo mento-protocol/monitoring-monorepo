@@ -175,10 +175,13 @@ export async function runWithConcurrency<T, R>(
       while (true) {
         const idx = nextIdx++;
         if (idx >= items.length) return;
-        // Bounds check above proves the index is in range; the `??` keeps
-        // `noUncheckedIndexedAccess` happy without losing the assertion.
+        // Bounds check above proves the index is in range; the guard exists
+        // only to satisfy `noUncheckedIndexedAccess`. Use `continue` (not
+        // `return`) so a hypothetical undefined slot doesn't terminate the
+        // whole worker — defensive against any future iteration mode where
+        // index reuse is possible.
         const item = items[idx];
-        if (item === undefined) return;
+        if (item === undefined) continue;
         results[idx] = await fn(item);
       }
     },
