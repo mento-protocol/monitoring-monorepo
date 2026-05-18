@@ -35,7 +35,7 @@ the code-health history report, and `indexer-envio` `no-unsafe-*`. See
 `AGENTS.md` "Code health budgets" and `docs/pr-checklists/code-health.md` for
 the landed mechanism + severities.
 
-- [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
+- [ ] Promote dashboard + indexer mutation gates from advisory (`break: null`) to PR-blocking once the same "runtime + noise sane in CI" + survivor-triage evidence we collected for bridge in PR 436 is captured for each. Pattern: trigger the workflow manually on `main`, confirm runtime ≤ 1 min, triage every survivor (add tests for real gaps; classify equivalents in `docs/mutation-testing.md`), then flip `break` to the post-triage rounded floor with a 2-pt margin, and add a new always-runs job (with inline `filter` + `decide` + `continue-on-error` shape) for that package — NOT a workflow-level `pull_request.paths` filter, since required-status checks must keep the trigger unfiltered (see `AGENTS.md`).
 
 ### Package-Manager Supply-Chain Hardening Review
 

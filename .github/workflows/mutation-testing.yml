@@ -3,9 +3,16 @@ name: Mutation Testing
 on:
   workflow_dispatch:
   schedule:
-    # Non-required baseline signal. Keep this out of pull_request until the
-    # runtime/noise tradeoff is re-evaluated.
+    # Weekly advisory baseline for the dashboard job (which stays advisory).
+    # The bridge job is also re-run here so cron acts as a backstop signal
+    # even when no PR has touched probe code that week.
     - cron: 17 5 * * 1
+  pull_request:
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The bridge job uses an internal path-detection step that is
+    # continue-on-error, so a detector failure cannot fail the workflow
+    # (fail-closed: the mutation step then runs anyway).
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +23,9 @@ permissions:
 
 jobs:
   dashboard-logic-baseline:
+    # Advisory: cron + manual dispatch only. PR runs skip this job — the
+    # dashboard mutation gate is not blocking yet (see BACKLOG).
+    if: github.event_name != 'pull_request'
     name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
@@ -26,11 +36,88 @@ jobs:
         run: pnpm dashboard:mutation
 
   bridge-rebalance-probe-baseline:
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to invoke `pnpm bridge:mutation`:
+    #   - cron / workflow_dispatch    → always run the mutation step
+    #   - PR + filter succeeded + bridge=true   → run
+    #   - PR + filter succeeded + bridge=false  → no-op skip
+    #   - PR + filter failed (any cause)        → run (fail-closed)
+    # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so when the
+    # mutation step does run, a score below 80% fails the job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
+    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Anything that can affect the result of `pnpm bridge:mutation`.
+            # `metrics-bridge/src/**` is broader than the mutated file alone:
+            # rebalance-probe.ts imports from sibling modules (config,
+            # metrics, rebalance-check, rpc, types), and a change there can
+            # change mutation survival. Same logic for the test: the
+            # mutation test imports `fixtures.ts` and the regular probe
+            # tests stress shared behavior. Bridge tsconfig matters because
+            # it controls TS compilation / module resolution. Configs +
+            # package-manager files (root + bridge) capture script wiring +
+            # version drift.
+            bridge:
+              - metrics-bridge/src/**
+              - metrics-bridge/test/**
+              - metrics-bridge/stryker.config.mjs
+              - metrics-bridge/vitest.mutation.config.ts
+              - metrics-bridge/package.json
+              - metrics-bridge/tsconfig.json
+              # Upstream workspace deps: rebalance-probe.ts, config.ts, and
+              # rebalance-check.ts import @mento-protocol/monitoring-config
+              # subpaths (format, thresholds, rebalance-abi, tokens, etc.).
+              - shared-config/src/**
+              - shared-config/*.json
+              - shared-config/package.json
+              - shared-config/tsconfig.json
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              # `.github/actions/pnpm-install` uses `.node-version` to set
+              # the Node runtime that Stryker + the mutation tests run on.
+              - .node-version
+              - .github/workflows/mutation-testing.yml
+              - .github/actions/pnpm-install/**
+      - name: Decide whether to run mutation
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          BRIDGE_CHANGED: ${{ steps.filter.outputs.bridge }}
+        run: |
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by $EVENT — running mutation gate."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running mutation gate."
+          elif [[ "$BRIDGE_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Bridge probe inputs changed — running mutation gate."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Bridge probe code + its mutation inputs unchanged — skipping mutation gate."
+          fi
       - uses: ./.github/actions/pnpm-install
+        if: steps.decide.outputs.run == 'true'
       - name: Run bridge mutation baseline
+        if: steps.decide.outputs.run == 'true'
         run: pnpm bridge:mutation
