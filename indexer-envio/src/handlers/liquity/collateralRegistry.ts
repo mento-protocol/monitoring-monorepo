@@ -4,6 +4,7 @@ import { getOrCreateLiquityInstance } from "./bootstrap.js";
 import { findLiquityMarketByEventSource } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { toBpsFromD18 } from "./math.js";
+import { getOrLoadSystemParams } from "./systemParams.js";
 
 indexer.contractRegister(
   { contract: "LiquityCollateralRegistry", event: "LiquidityStrategyUpdated" },
@@ -22,21 +23,32 @@ indexer.onEvent(
     if (market === undefined) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const instance = await getOrCreateLiquityInstance(
+    let instance = await getOrCreateLiquityInstance(
       context,
       market,
       blockNumber,
       blockTimestamp,
     );
+    const collateral = await getOrLoadSystemParams(
+      context,
+      market,
+      blockNumber,
+      blockTimestamp,
+    );
+    instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     const next = touchLiquityInstance(
       flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
       blockNumber,
       blockTimestamp,
     );
+    const baseRateBps = toBpsFromD18(event.params._baseRate);
     context.LiquityInstance.set({
       ...next,
       baseRate: event.params._baseRate,
-      currentRedemptionRateBps: toBpsFromD18(event.params._baseRate),
+      currentRedemptionRateBps:
+        collateral?.systemParamsLoaded === true
+          ? baseRateBps + collateral.redemptionFeeFloorBps
+          : -1,
     });
   },
 );

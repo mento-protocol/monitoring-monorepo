@@ -161,6 +161,6 @@ export async function getOrLoadSystemParams(
     systemParamsLoaded: true,
   };
   context.LiquityCollateral.set(next);
-  await reclassifyTrovesForLoadedParams(context, id, minDebt);
+  await reclassifyTrovesForLoadedParams(context, id, minDebt, minBoldInSp);
   return next;
 }

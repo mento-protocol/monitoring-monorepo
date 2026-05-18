@@ -971,6 +971,7 @@ type PendingBatchedTroveUpdate @index(fields: ["collateralId", "txHash"]) {
   snapshotOfTotalDebtRedist: BigInt!
   timestamp: BigInt!
   blockNumber: BigInt!
+  logIndex: Int!
 }
 
 type PendingBatchMembershipOperation

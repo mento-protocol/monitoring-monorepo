@@ -14,6 +14,7 @@ import { getOrLoadSystemParams } from "./systemParams.js";
 import {
   TROVE_STATUS,
   getOrCreateTrove,
+  isPlaceholderClosedTrove,
   moveInterestRateBracketDebt,
   statusFromDebt,
   tracksIndividualInterest,
@@ -247,7 +248,8 @@ indexer.onEvent(
       lastUpdatedBlock: blockNumber,
     };
     if (
-      trove.status !== TROVE_STATUS.CLOSED &&
+      (trove.status !== TROVE_STATUS.CLOSED ||
+        isPlaceholderClosedTrove(trove)) &&
       trove.status !== TROVE_STATUS.LIQUIDATED
     ) {
       const collateral = await getOrLoadSystemParams(
@@ -256,6 +258,7 @@ indexer.onEvent(
         blockNumber,
         blockTimestamp,
       );
+      instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
       const nextStatus = statusFromCollateral(trove.debt, collateral);
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
@@ -299,6 +302,7 @@ indexer.onEvent(
       snapshotOfTotalDebtRedist: event.params._snapshotOfTotalDebtRedist,
       timestamp: asBigInt(event.block.timestamp),
       blockNumber: asBigInt(event.block.number),
+      logIndex: event.logIndex,
     });
   },
 );
@@ -363,7 +367,8 @@ indexer.onEvent(
     for (const pending of pendingRows) {
       if (
         pending.collateralId !== collateralId ||
-        pending.batchManager !== batchManager
+        pending.batchManager !== batchManager ||
+        pending.logIndex >= event.logIndex
       ) {
         continue;
       }
@@ -437,6 +442,7 @@ indexer.onEvent(
       context.Trove.set(trove);
       context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
     }
+    instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
 
     context.LiquityInstance.set({
       ...touchLiquityInstance(instance, blockNumber, blockTimestamp),

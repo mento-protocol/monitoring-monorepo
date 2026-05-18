@@ -104,7 +104,7 @@ indexer.onEvent(
     if (market === undefined) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const instance = await getOrCreateLiquityInstance(
+    let instance = await getOrCreateLiquityInstance(
       context,
       market,
       blockNumber,
@@ -116,6 +116,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     const next = touchLiquityInstance(
       flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
       blockNumber,

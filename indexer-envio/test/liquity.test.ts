@@ -215,6 +215,8 @@ describe("Liquity CDP helpers", () => {
         {
           ...makeLiquityInstance(collateralId, 42220, 0n),
           activeTroveCount: 1,
+          spDeposits: 150n,
+          spHeadroom: -1n,
         },
       ],
     ]);
@@ -238,11 +240,12 @@ describe("Liquity CDP helpers", () => {
       },
     };
 
-    await reclassifyTrovesForLoadedParams(context, collateralId, 100n);
+    await reclassifyTrovesForLoadedParams(context, collateralId, 100n, 40n);
 
     assert.equal(troves.get("t")?.status, TROVE_STATUS.ACTIVE);
     assert.equal(troves.get("low")?.status, TROVE_STATUS.ZOMBIE);
     assert.equal(instances.get(collateralId)?.activeTroveCount, 1);
+    assert.equal(instances.get(collateralId)?.spHeadroom, 110n);
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {

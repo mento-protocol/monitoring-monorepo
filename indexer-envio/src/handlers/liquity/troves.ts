@@ -71,6 +71,14 @@ export const tracksIndividualInterest = (
   trove: Pick<Trove, "interestBatchId">,
 ): boolean => trove.interestBatchId === undefined;
 
+export const isPlaceholderClosedTrove = (
+  trove: Pick<Trove, "status" | "closedAt" | "closedAtBlock" | "closedTxHash">,
+): boolean =>
+  trove.status === TROVE_STATUS.CLOSED &&
+  trove.closedAt === undefined &&
+  trove.closedAtBlock === undefined &&
+  trove.closedTxHash === undefined;
+
 export const makePlaceholderTrove = ({
   id,
   chainId,
@@ -272,10 +280,14 @@ export async function reclassifyTrovesForLoadedParams(
   context: ReclassifyTrovesContext,
   collateralId: string,
   minDebt: bigint,
+  minBoldInSp: bigint,
 ): Promise<void> {
   const instance = await context.LiquityInstance.get(collateralId);
   if (instance === undefined) return;
-  let nextInstance = instance;
+  let nextInstance =
+    instance.spHeadroom === -1n && instance.spDeposits > 0n
+      ? { ...instance, spHeadroom: instance.spDeposits - minBoldInSp }
+      : instance;
   for (const status of [TROVE_STATUS.ACTIVE, TROVE_STATUS.ZOMBIE]) {
     const troves = await context.Trove.getWhere({
       collateralId: { _eq: collateralId },
