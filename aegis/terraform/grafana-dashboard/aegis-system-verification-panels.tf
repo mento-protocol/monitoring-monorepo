@@ -90,7 +90,7 @@ locals {
     targets = [
       {
         datasource_uid      = "grafanacloud-prom"
-        expr                = "delta(view_call_query_duration_count{status=\"error\"}[5m])"
+        expr                = "increase(view_call_query_duration_count{status=\"error\"}[5m])"
         fullMetaSearch      = false
         includeNullMetadata = true
         instant             = false
