@@ -219,7 +219,7 @@
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'useHeroRollup' has too many lines (224). Maximum allowed is 100.",
+    "message": "Function 'useHeroRollup' has too many lines (229). Maximum allowed is 100.",
     "line": 67,
     "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
