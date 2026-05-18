@@ -25,7 +25,7 @@ export function getClusterMetadata(
     chainId: meta.chainId,
     deployer: meta.deployer,
     explorerUrl: meta.explorerUrl,
-    note: meta.$note,
+    ...(meta.$note !== undefined && { note: meta.$note }),
   };
 }
 

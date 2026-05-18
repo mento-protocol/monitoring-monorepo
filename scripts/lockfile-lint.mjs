@@ -22,8 +22,8 @@
  * CI: .github/workflows/supply-chain.yml
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { resolve, join, relative } from "node:path";
 
 // ROOT defaults to cwd so the script works from any worktree root without
 // path-hardcoding. Tests override via LOCKFILE_LINT_ROOT env var so they can
@@ -122,17 +122,38 @@ while ((match = PKG_ENTRY.exec(packagesSection)) !== null) {
   }
 }
 
-// Cross-check: total resolution: entries must equal entries with sha512.
-// A missing integrity would not match PKG_ENTRY so we count separately.
+// Cross-check #1: every entry with a `resolution:` block must carry a sha512.
+// A `resolution:` line that's not followed by `{integrity: sha512-...}` won't
+// match PKG_ENTRY, so we count `resolution:` lines and compare.
 const totalResolutions = (packagesSection.match(/^\s+resolution:/gm) ?? [])
   .length;
 
-if (totalResolutions !== totalPackages) {
-  const missing = totalResolutions - totalPackages;
-  fail(
-    `${missing} package(s) in pnpm-lock.yaml have a resolution block without a sha512 ` +
-      "integrity hash. Run `pnpm install` with a known-good registry and re-inspect.",
-  );
+// Cross-check #2: every top-level package entry must HAVE a resolution block.
+// Codex P2: an entry without any `resolution:` line would otherwise slip past
+// both counters above. Count top-level keys directly — `^  '<name>@...':` or
+// `^  <name>@...:` at 2-space indent followed by `:`. The trailing newline is
+// part of the match so multi-line blocks aren't double-counted.
+const totalEntries = (
+  packagesSection.match(
+    /^ {2}('[^':\n]+@[^\n']+'|[^':\n][^:\n]*@[^\n:']+):/gm,
+  ) ?? []
+).length;
+
+if (totalEntries !== totalPackages) {
+  const missingResolution = totalEntries - totalResolutions;
+  const missingIntegrity = totalResolutions - totalPackages;
+  if (missingResolution > 0) {
+    fail(
+      `${missingResolution} package entry/entries in pnpm-lock.yaml have NO resolution block. ` +
+        "Re-run `pnpm install` from a known-good registry and re-inspect.",
+    );
+  }
+  if (missingIntegrity > 0) {
+    fail(
+      `${missingIntegrity} package(s) in pnpm-lock.yaml have a resolution block without a sha512 ` +
+        "integrity hash. Re-run `pnpm install` from a known-good registry and re-inspect.",
+    );
+  }
 } else if (integrityErrors === 0) {
   ok(
     `All ${totalPackages} packages in pnpm-lock.yaml have valid sha512 integrity hashes.`,
@@ -149,19 +170,55 @@ if (totalResolutions !== totalPackages) {
 // Workspace `link:` and `file:` protocol entries are fine — they are internal
 // refs, not registry fetches.
 
-const npmrcFiles = [
-  ".npmrc",
-  "indexer-envio/.npmrc",
-  "ui-dashboard/.npmrc",
-  "metrics-bridge/.npmrc",
-  "shared-config/.npmrc",
-];
+// Codex P2: walk the repo for every `.npmrc` (excluding `.git/` and
+// `node_modules/`) — pnpm reads `.npmrc` from every package directory it
+// finds, so a future workspace adding its own `.npmrc` with `registry=...`
+// would silently bypass a fixed allowlist.
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+function findNpmrcs(dir, out) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      findNpmrcs(full, out);
+    } else if (entry.isFile() && entry.name === ".npmrc") {
+      out.push(full);
+    }
+  }
+}
+
+/** @type {string[]} */
+const npmrcFiles = [];
+findNpmrcs(ROOT, npmrcFiles);
+
+/**
+ * Codex P1 / Cursor High: registry-host check must be exact-canonical, NOT
+ * prefix-based. `startsWith("https://registry.npmjs.org")` accepts the
+ * attacker-controlled lookalike `https://registry.npmjs.org.evil.com/`.
+ * @param {string} val
+ */
+function isOfficialNpmRegistry(val) {
+  const canonical = "https://registry.npmjs.org";
+  return (
+    val === canonical ||
+    val === canonical + "/" ||
+    val.startsWith(canonical + "/")
+  );
+}
 
 let registryErrors = 0;
 
-for (const rel of npmrcFiles) {
-  const absPath = resolve(ROOT, rel);
-  if (!existsSync(absPath)) continue;
+for (const absPath of npmrcFiles) {
+  const rel = relative(ROOT, absPath);
   const content = readFileSync(absPath, "utf8");
   const lines = content.split("\n");
   for (const [i, line] of lines.entries()) {
@@ -171,12 +228,7 @@ for (const rel of npmrcFiles) {
     // Flag any `registry=` line that doesn't point to the official npm registry.
     if (/^registry\s*=/.test(trimmed)) {
       const val = trimmed.split("=").slice(1).join("=").trim();
-      const canonical = "https://registry.npmjs.org";
-      const isOfficial =
-        val === canonical ||
-        val === canonical + "/" ||
-        val.startsWith("https://registry.npmjs.org/");
-      if (!isOfficial) {
+      if (!isOfficialNpmRegistry(val)) {
         fail(
           `${rel}:${i + 1} — non-npmjs registry detected: "${val}". ` +
             "All packages must resolve from https://registry.npmjs.org.",
@@ -185,9 +237,12 @@ for (const rel of npmrcFiles) {
       }
     }
     // Flag scope-specific registries (@scope:registry=...) pointing off-npmjs.
+    // Use the SAME exact-canonical check as the unscoped branch — a lookalike
+    // like `registry.npmjs.org.evil.com` must NOT be accepted for scoped
+    // registries either.
     if (/^@[^:]+:registry\s*=/.test(trimmed)) {
       const val = trimmed.split("=").slice(1).join("=").trim();
-      if (!val.startsWith("https://registry.npmjs.org")) {
+      if (!isOfficialNpmRegistry(val)) {
         fail(
           `${rel}:${i + 1} — scope-specific non-npmjs registry: "${trimmed}". ` +
             "If this is intentional, document why and add an exemption comment above this line.",

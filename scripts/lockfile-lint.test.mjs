@@ -299,6 +299,58 @@ test("fails cleanly when pnpm-lock.yaml does not exist", () => {
   }
 });
 
+// 14. (codex P1 + cursor High) Lookalike scoped registry must be rejected
+// even though its host starts with `registry.npmjs.org`. Prefix-match is
+// the original bug; exact-canonical host is the fix.
+test("fails when scope-specific registry is a lookalike (registry.npmjs.org.evil.com)", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".npmrc":
+        "@mento-protocol:registry=https://registry.npmjs.org.evil.com/\n",
+    },
+  );
+  assert(exitCode !== 0, `Expected non-zero exit, got ${exitCode}`);
+  const out = stdout + stderr;
+  assert(
+    out.includes("scope-specific non-npmjs registry"),
+    `expected lookalike rejection: ${out}`,
+  );
+});
+
+// 15. (codex P2) A nested workspace `.npmrc` deeper than the original
+// hardcoded allowlist (e.g. `tools/some-pkg/.npmrc`) must still be discovered.
+test("discovers .npmrc in any nested workspace directory", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "tools/some-future-pkg/.npmrc":
+        "registry=https://my-private-registry.example.com/\n",
+    },
+  );
+  assert(exitCode !== 0, `Expected non-zero exit, got ${exitCode}`);
+  const out = stdout + stderr;
+  assert(
+    out.includes("non-npmjs registry detected"),
+    `expected nested-npmrc detection: ${out}`,
+  );
+});
+
+// 16. (codex P2) A package entry with NO `resolution:` block at all must
+// fail — neither the integrity counter nor the resolution counter would
+// catch it without an explicit top-level entry count.
+test("fails when a package entry has no resolution block", () => {
+  // Hand-craft the lockfile so one package omits `resolution:` entirely.
+  const lockfile = `lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {integrity: ${VALID_SHA512}}\n\n  no-resolution-pkg@1.0.0:\n    engines: {node: '>=18'}\n\nsnapshots:\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  assert(exitCode !== 0, `Expected non-zero exit, got ${exitCode}`);
+  const out = stdout + stderr;
+  assert(
+    out.includes("NO resolution block"),
+    `expected missing-resolution detection: ${out}`,
+  );
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(
