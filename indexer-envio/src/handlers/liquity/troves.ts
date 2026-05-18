@@ -37,6 +37,11 @@ export const makeTroveId = (
 ): string =>
   `${collateralId}-${typeof troveId === "bigint" ? troveId.toString(16) : troveId}`;
 
+export const makeInterestRateBracketId = (
+  collateralId: string,
+  rawRate: bigint,
+): string => `${collateralId}-${floorInterestRateBracket(rawRate)}`;
+
 export const normalizeTroveTokenId = (troveId: bigint | string): string =>
   typeof troveId === "bigint" ? `0x${troveId.toString(16)}` : troveId;
 
@@ -235,7 +240,7 @@ async function applyBracketDelta(
 ): Promise<void> {
   if (rawRate === 0n || debtDelta === 0n) return;
   const rate = floorInterestRateBracket(rawRate);
-  const id = `${collateralId}-${rate}`;
+  const id = makeInterestRateBracketId(collateralId, rawRate);
   const existing = await context.InterestRateBracket.get(id);
   const bracket = existing ?? {
     id,

@@ -135,21 +135,37 @@ async function loadSystemParamValues(
   return params;
 }
 
-export function preloadSystemParams(
+export async function preloadSystemParams(
   context: SystemParamsContext,
   market: LiquityMarketConfig,
 ): Promise<ParamValues | null> {
-  return context.effect(liquitySystemParamsEffect, {
+  const values = await context.effect(liquitySystemParamsEffect, {
     chainId: market.chainId,
     systemParams: market.systemParams,
   });
+  if (values === null) return null;
+
+  const id = makeCollateralId(market);
+  const existing = await context.LiquityCollateral.get(id);
+  if (existing?.systemParamsLoaded !== true) {
+    await Promise.all([
+      context.LiquityInstance.get(id),
+      context.Trove.getWhere({ collateralId: { _eq: id } }),
+    ]);
+  }
+  return values;
 }
 
 async function getOrLoadSystemParamValues(
   context: SystemParamsContext,
   market: LiquityMarketConfig,
 ): Promise<ParamValues | undefined> {
-  return (await preloadSystemParams(context, market)) ?? undefined;
+  return (
+    (await context.effect(liquitySystemParamsEffect, {
+      chainId: market.chainId,
+      systemParams: market.systemParams,
+    })) ?? undefined
+  );
 }
 
 export async function getOrLoadSystemParams(
