@@ -233,7 +233,7 @@ pnpm aegis:build              # Build the Aegis service
 pnpm aegis:typecheck          # Typecheck the Aegis service
 pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
-pnpm aegis:deploy             # Build and deploy Aegis to App Engine in mento-prod
+pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-prod
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-prod
 pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
 pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply

@@ -18,7 +18,7 @@
     "aegis:typecheck": "pnpm --filter @mento-protocol/aegis typecheck",
     "aegis:test": "pnpm --filter @mento-protocol/aegis test",
     "aegis:lint": "pnpm --filter @mento-protocol/aegis lint",
-    "aegis:deploy": "pnpm --filter @mento-protocol/aegis deploy",
+    "aegis:deploy": "pnpm --filter @mento-protocol/aegis run deploy",
     "aegis:logs": "pnpm --filter @mento-protocol/aegis logs",
     "aegis:tf:init": "pnpm --filter @mento-protocol/aegis tf:init",
     "aegis:tf:plan": "pnpm --filter @mento-protocol/aegis tf:plan",

@@ -89,7 +89,8 @@ pnpm aegis:deploy
 ```
 
 From inside `aegis/`, `pnpm deploy` is equivalent. The deploy script rebuilds
-`dist/` before uploading the App Engine service to `mento-prod`.
+`dist/`, creates a temporary App Engine app root with the root pnpm lockfile's
+Aegis importer, and uploads that staged service to `mento-prod`.
 
 To deploy the `grafana-agent` follow the instructions in [grafana-agent/README.md](./grafana-agent/README.md)
 
@@ -112,7 +113,7 @@ pnpm aegis:tf:apply
 1. [optional] If it's an FX rate feed with disabled trading on weekends because we don't get new price data on weekends:
    - Add the rate feed name to the `weekend_disabled_feeds` array in [grafana-alerts/locals.tf](./terraform/grafana-alerts/locals.tf#L7)
 1. Test the new config locally by running `pnpm start` and checking for any errors in the logs
-1. After code review, deploy the new config via `pnpm aegis:deploy` (this rebuilds the service before upload)
+1. After code review, deploy the new config via `pnpm aegis:deploy` (this rebuilds and stages the service before upload)
 1. After successful deployment, check the logs for any errors via `pnpm aegis:logs`
 1. Check that the new metrics appear in the Grafana Dashboard: `pnpm --filter @mento-protocol/aegis grafana`
    - New rate feeds should be picked up automatically, it might take a few minutes after they show up
@@ -243,7 +244,7 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
    1. If you already see another `case` for an existing view call using the same logic (i.e. another call returning a simple `uint256`), you can add the function name of your view call to that `case`
    1. If your view call requires new or adjusted logic, add a new `case` for your function name with the appropriate logic
 1. Try out your changes locally by running `pnpm aegis:dev` and see if the logs output the values you expect
-1. If everything works locally, deploy your changes via `pnpm aegis:deploy` (this rebuilds the service before upload)
+1. If everything works locally, deploy your changes via `pnpm aegis:deploy` (this rebuilds and stages the service before upload)
 1. After successful deployment, check if everything works as expected by monitoring the logs via `pnpm aegis:logs`
 1. Create a new Grafana visualization consuming your newly added metric
    1. If you're not a Grafana expert, the easiest would be to create a new empty dashboard and manually compose your query via the UI. You can also take inspiration from viewing the configuration of existing queries on other dashboards.
