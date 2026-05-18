@@ -60,8 +60,16 @@
       "command": "pnpm --dir ui-dashboard test"
     }
   ],
-  "tags": ["react", "component", "web"],
-  "trustBoundaries": ["user-input", "network", "serialization"],
+  "tags": [
+    "react",
+    "component",
+    "web"
+  ],
+  "trustBoundaries": [
+    "user-input",
+    "network",
+    "serialization"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

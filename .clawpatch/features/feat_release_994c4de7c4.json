@@ -28,7 +28,10 @@
     "project:@mento-protocol/metrics-bridge",
     "project-root:metrics-bridge"
   ],
-  "trustBoundaries": ["process-exec", "filesystem"],
+  "trustBoundaries": [
+    "process-exec",
+    "filesystem"
+  ],
   "status": "pending",
   "lock": null,
   "findingIds": [],

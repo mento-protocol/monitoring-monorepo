@@ -22,17 +22,21 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 
 ## How the gates behave
 
-| Gate                                 | Severity                        | What it catches                                                      | Fix                                                                                                                                                                                                   |
-| ------------------------------------ | ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dependency-cruiser` cross-pkg       | **error**                       | dashboard/indexer/bridge cross-imports, shared-config upward imports | Refactor through `shared-config`, or — if it's data-only — narrow the allow list with `pathNot`                                                                                                       |
-| `dependency-cruiser` cycles          | warn (baseline)                 | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                          |
-| `knip` files / deps / unlisted       | **error**                       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                 |
-| `knip` exports / types / enumMembers | warn                            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                                                                                                                                    |
-| ESLint complexity budgets            | **error** (diff-aware baseline) | over-complex / long / nested / many-arg functions                    | Refactor; any new `(file, ruleId, message)` tuple not in `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline. |
-| `sonarjs/no-redundant-jump`          | **error**                       | dead control-flow jumps                                              | Trivial fix; never opt out                                                                                                                                                                            |
-| `sonarjs/cognitive-complexity`       | **error** (diff-aware baseline) | hard-to-read nested logic                                            | Extract sub-functions; new violations fail by tuple. Cleanup pattern: same as above (fix + regenerate baseline).                                                                                      |
-| `sonarjs/no-identical-functions`     | **error**                       | duplicate function bodies                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                                                                                                                             |
-| Code-health history report           | advisory                        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                                                                                                                                  |
+| Gate                                             | Severity                        | What it catches                                                      | Fix                                                                                                                                                                                                   |
+| ------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dependency-cruiser` cross-pkg                   | **error**                       | dashboard/indexer/bridge cross-imports, shared-config upward imports | Refactor through `shared-config`, or — if it's data-only — narrow the allow list with `pathNot`                                                                                                       |
+| `dependency-cruiser` cycles                      | **error**                       | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                          |
+| `knip` files / deps / unlisted                   | **error**                       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                 |
+| `knip` exports / types / enumMembers             | warn                            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                                                                                                                                    |
+| ESLint complexity budgets                        | **error** (diff-aware baseline) | over-complex / long / nested / many-arg functions                    | Refactor; any new `(file, ruleId, message)` tuple not in `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline. |
+| `sonarjs/no-redundant-jump`                      | **error**                       | dead control-flow jumps                                              | Trivial fix; never opt out                                                                                                                                                                            |
+| `sonarjs/cognitive-complexity`                   | **error** (diff-aware baseline) | hard-to-read nested logic                                            | Extract sub-functions; new violations fail by tuple. Cleanup pattern: same as above (fix + regenerate baseline).                                                                                      |
+| `sonarjs/no-identical-functions`                 | **error**                       | duplicate function bodies                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                                                                                                                             |
+| `@typescript-eslint/no-floating-promises`        | **error** (diff-aware baseline) | missing `await` on a side-effect promise                             | Add `await`, or `void doSomething()` for an intentional fire-and-forget; never bypass                                                                                                                 |
+| `@typescript-eslint/no-misused-promises`         | **error** (diff-aware baseline) | passing an async callback where a void return is expected            | Wrap in a sync closure: `() => { void doAsync(); }`. UI-dashboard has a baselined-debt cleanup task in BACKLOG                                                                                        |
+| `@typescript-eslint/switch-exhaustiveness-check` | **error**                       | switch on enum/union missing a case (even when there's a `default:`) | Add an explicit `case "X":` branch for the missing union member; the default is fine but the rule wants intent                                                                                        |
+| `noUncheckedIndexedAccess` (tsconfig)            | **error** (3/4 packages)        | `arr[i]` assumed defined when it could be `undefined`                | Add a guard `if (item === undefined) continue` or destructure with `?? defaultValue`. Dashboard deferred — see BACKLOG.                                                                               |
+| Code-health history report                       | advisory                        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                                                                                                                                  |
 
 ## Ratchet pipeline (where this is going)
 
@@ -156,9 +160,7 @@ hotspot/coupling delta to Slack.
 PR 6: continue chipping at the baseline files via cleanup PRs. The
 goal is `eslint-baseline.json` shrinking commit-by-commit until each
 package's file is empty (or removed) — at which point the rules behave
-as plain `error` with no baseline carve-out. Promote dep-cruiser cycles
-to `error` after the `indexer-envio/src/{pool,deviationBreach}.ts`
-cycle is broken.
+as plain `error` with no baseline carve-out.
 
 ## Decision log
 
@@ -168,6 +170,7 @@ cycle is broken.
   adding signal.
 - History report uses pure Node (no extra runtime deps) — spawns `git log`
   directly. Adding it doesn't grow the supply-chain surface.
-- The known cycle `indexer-envio/src/pool.ts ↔ src/deviationBreach.ts` is the
-  recorded warn-baseline. Breaking it requires extracting
-  `recordBreachTransition` into a third module; tracked in `BACKLOG.md`.
+- The historical `indexer-envio/src/pool.ts ↔ src/deviationBreach.ts`
+  cycle was broken by importing health predicates directly from
+  `pool/health.js` instead of through the `pool.js` barrel re-export.
+  `no-circular` is now `error` with no baseline carve-out.

@@ -33,6 +33,11 @@ export default tseslint.config(
       // Generic Trunk CI runs before Envio codegen. Without .envio/types.d.ts,
       // imported entity types degrade to parser error-any and trip this rule.
       "@typescript-eslint/no-redundant-type-constituents": "off",
+      // Not in `recommendedTypeChecked` but a high-value forward-compat
+      // guard: forces every `switch` on a discriminated union / enum to
+      // handle each variant. Catches the "new event variant added, old
+      // switch silently falls through" class of bug.
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
     },
   },
   {

@@ -25,6 +25,38 @@ export default tseslint.config(
       parserOptions: { tsconfigRootDir: __dirname },
     },
   },
+  // Type-aware async-safety + exhaustiveness rules. `projectService: true`
+  // pulls TS type info. Scoped to `src/**/*.{ts,tsx}` minus tests + `.d.ts`
+  // ambient declarations: the project service doesn't pick those up (they
+  // aren't reachable from the entry points it loads), and the rules add
+  // little signal there — test mocks naturally use async callbacks, and
+  // `.d.ts` files are type-only. Tests don't have runtime async surfaces
+  // worth gating.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.d.ts", "src/**/__tests__/**", "src/**/*.test.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      // `checksVoidReturn.attributes: false` is the standard React config:
+      // React's synthetic event system handles async event-handler attributes
+      // (`<button onClick={async () => ...}>`) correctly — rejected promises
+      // are swallowed without becoming unhandled rejections. Other void-return
+      // contexts (setTimeout callbacks, function arguments, etc.) still fire
+      // and catch genuine bugs like the `poller.ts` floating-loop fixed in
+      // this PR.
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        { checksVoidReturn: { attributes: false } },
+      ],
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+    },
+  },
   {
     plugins: { "@next/next": nextPlugin },
     rules: {

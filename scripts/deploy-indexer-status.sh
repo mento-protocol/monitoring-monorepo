@@ -7,7 +7,7 @@
 #   pnpm deploy:indexer:status <commit> --watch → poll until synced
 #   pnpm deploy:indexer:status --json           → JSON output
 #
-# Requires: npx envio-cloud (auto-installed on first run)
+# Requires: workspace envio-cloud CLI dependency
 
 set -euo pipefail
 
@@ -36,7 +36,7 @@ done
 
 if [[ -z "$COMMIT" ]]; then
   # Get latest deployment commit hash
-  COMMIT=$(npx -q envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
     | node -e "
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
@@ -69,4 +69,4 @@ if [[ "$JSON" == "true" ]]; then
   EXTRA_FLAGS+=(-o json)
 fi
 
-npx -q envio-cloud deployment status "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${EXTRA_FLAGS[@]}"
+pnpm exec envio-cloud deployment status "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${EXTRA_FLAGS[@]}"

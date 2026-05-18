@@ -41,7 +41,15 @@ export function retryAfterMs(err: unknown): number | null {
 // "skip onErrorRetry while inactive" gate, so this helper is the only thing
 // protecting the quota during the retry window.
 function scheduleWhenActive(
-  revalidate: (opts: { retryCount: number; dedupe: boolean }) => void,
+  // SWR's `Revalidator` actually returns `Promise<boolean>`; previously this
+  // parameter was typed as `() => void`, which silently hid the fact that we
+  // were dropping the promise. Keep the type honest so `no-misused-promises`
+  // doesn't have to flag the call sites — the `void revalidate(opts)` inside
+  // `fire` makes the discard explicit.
+  revalidate: (opts: {
+    retryCount: number;
+    dedupe: boolean;
+  }) => Promise<unknown> | void,
   opts: { retryCount: number; dedupe: boolean },
   delayMs: number,
 ): void {
@@ -79,7 +87,10 @@ function scheduleWhenActive(
   };
   const fire = () => {
     if (canRun()) {
-      revalidate(opts);
+      // Discard the returned promise — SWR's `Revalidator` resolves with a
+      // boolean we don't need, and rejection bubbles up to SWR's own
+      // `onErrorRetry` path (this function IS the onErrorRetry handler).
+      void revalidate(opts);
       return;
     }
     attach();

@@ -7,12 +7,15 @@ packages:
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@mento-protocol/*"
+  - envio-cloud
+  - "@envio-dev/envio-cloud-*"
 
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
 
 onlyBuiltDependencies:
+  - envio-cloud
   - "@sentry/cli"
   - es5-ext
   - esbuild

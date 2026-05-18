@@ -21,7 +21,7 @@ import {
   DEVIATION_BREACH_GRACE_SECONDS,
   effectiveThreshold,
   isAboveCriticalMagnitude,
-} from "./pool.js";
+} from "./pool/health.js";
 import { tradingSecondsInRange } from "./healthScore.js";
 
 export type BreachContext = {
