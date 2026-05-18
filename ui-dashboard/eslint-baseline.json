@@ -862,20 +862,6 @@
   },
   {
     "file": "src/components/time-series-chart-card.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Arrow function has too many lines (123). Maximum allowed is 100.",
-    "line": 205,
-    "linePreview": "}); | const { traces, layout } = useMemo(() => { | const xs = series.map((point) =>"
-  },
-  {
-    "file": "src/components/time-series-chart-card.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'TimeSeriesChartCard' has too many lines (334). Maximum allowed is 100.",
-    "line": 129,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
-  },
-  {
-    "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
     "line": 129,
