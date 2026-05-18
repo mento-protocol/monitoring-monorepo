@@ -16,9 +16,8 @@ resource "grafana_message_template" "trading_limits_alert_message" {
 {{ range .Alerts.Firing -}}
 {{ $chain := .Labels.chain | title -}}
 {{ $limitType := .Labels.limitType -}}
-{{ $utilization := printf "%.1f" .Values.utilization.Value -}}
-**🚨 Trading Limit {{ $limitType }} at {{ $utilization }}% for [{{ .Labels.limitId }}]({{ .GeneratorURL }}&tab=instances) on {{ $chain }}**
-- Current utilization: {{ $utilization }}%
+**🚨 Trading Limit {{ $limitType }} at {{ with index .Values "utilization" }}{{ . }}{{ else }}unknown{{ end }}% for [{{ .Labels.limitId }}]({{ .GeneratorURL }}&tab=instances) on {{ $chain }}**
+- Current utilization: {{ with index .Values "utilization" }}{{ . }}{{ else }}unknown{{ end }}%
 - Limit Type: {{ $limitType }}{{ if eq $limitType "L0" }} - short-term (5 minutes){{ else if eq $limitType "L1" }} - medium-term (daily){{ else if eq $limitType "LG" }} - global (has to be manually reset){{ end }}{{ if or (eq $limitType "L1") (eq $limitType "LG") }}
 - **Action Required**: This is a {{ if eq $limitType "L1" }}medium-term (daily){{ else }}lifetime{{ end }} limit breach{{ end }}
 {{ end -}}

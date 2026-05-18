@@ -1,7 +1,7 @@
 FROM grafana/agent:v0.35.0
 
 # Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost:12345/-/healthy || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost:8080/-/healthy || exit 1
 
 # Create a non-root user for security.
 # `grafana/agent:v0.35.0` is Debian-based (BusyBox `addgroup`/`adduser -D`
@@ -19,3 +19,5 @@ COPY --chown=agent:agent agent.yaml /etc/agent/agent.yaml
 
 # Switch to non-root user
 USER agent
+
+CMD ["-config.file=/etc/agent/agent.yaml", "-server.http.address=0.0.0.0:8080"]
