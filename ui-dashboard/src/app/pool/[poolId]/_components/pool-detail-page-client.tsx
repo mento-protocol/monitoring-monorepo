@@ -20,6 +20,7 @@ import {
   POOL_DETAIL_WITH_HEALTH,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { PoolDetailWithHealthSchema } from "@/lib/queries/pool-detail-schemas";
 import { buildPoolDetailUrl } from "@/lib/routing";
 import {
   buildOracleRateMap,
@@ -128,10 +129,12 @@ function PoolDetail() {
     data: poolData,
     error: poolErr,
     isLoading: poolLoading,
-  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, {
-    id: normalizedPoolId,
-    chainId: network.chainId,
-  });
+  } = useGQL<{ Pool: Pool[] }>(
+    POOL_DETAIL_WITH_HEALTH,
+    { id: normalizedPoolId, chainId: network.chainId },
+    undefined,
+    { schema: PoolDetailWithHealthSchema },
+  );
 
   const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,

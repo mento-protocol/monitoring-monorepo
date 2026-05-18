@@ -1,7 +1,9 @@
 import { GraphQLClient } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
+import type { ZodSchema } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Network } from "@/lib/networks";
 
@@ -9,6 +11,10 @@ import type { Network } from "@/lib/networks";
 // should target `@/lib/hasura-timeout` directly to avoid pulling
 // useSWR / useNetwork into the server bundle (codex P1 PR #372).
 export { HASURA_TIMEOUT_MS };
+
+// Re-export so callers that `import { GraphQLSchemaError } from "@/lib/graphql"`
+// continue to work without a second import path.
+export { GraphQLSchemaError };
 
 // Cache clients per Hasura URL so we don't recreate on every render
 const clientCache = new Map<string, GraphQLClient>();
@@ -34,6 +40,12 @@ const DEFAULT_REFRESH_MS = 30_000;
  *
  * When the network's Hasura URL is empty (unconfigured network),
  * the fetch is skipped and a descriptive error is returned immediately.
+ *
+ * Pass `schema` to validate the response at the fetch boundary. On parse
+ * failure the hook throws `GraphQLSchemaError` (surfaced via SWR's error
+ * path). Adoption is opt-in — callers that omit `schema` behave exactly as
+ * before. This turns silent Hasura schema-drift bugs into typed errors caught
+ * at fetch time rather than at render time as mysterious `undefined` values.
  */
 export function useGQL<T>(
   query: string | null,
@@ -55,25 +67,40 @@ export function useGQL<T>(
     revalidateOnFocus?: boolean;
     revalidateOnReconnect?: boolean;
     timeoutMs?: number;
+    /** Optional Zod schema to validate the response. When provided,
+     *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
+    schema?: ZodSchema<T>;
   },
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
 
-  // Split `timeoutMs` (custom, fetcher-only) from genuine SWR options before
-  // spreading. SWR ignores unknown properties but the partition keeps the
-  // config object honest for any future config-validating SWR plugin.
-  const { timeoutMs, ...swrConfigOverrides } = swrOptions ?? {};
+  // Split `timeoutMs` and `schema` (custom, fetcher-only) from genuine SWR
+  // options before spreading. SWR ignores unknown properties but the partition
+  // keeps the config object honest for any future config-validating SWR plugin.
+  const { timeoutMs, schema, ...swrConfigOverrides } = swrOptions ?? {};
+
+  async function fetcher(): Promise<T> {
+    const raw = await (timeoutMs == null
+      ? client.request<T>(query!, variables)
+      : client.request<T>({
+          document: query!,
+          variables,
+          signal: AbortSignal.timeout(timeoutMs),
+        }));
+    if (schema != null) {
+      const result = schema.safeParse(raw);
+      if (!result.success) {
+        throw new GraphQLSchemaError(result.error.issues, query ?? undefined);
+      }
+      return result.data;
+    }
+    return raw;
+  }
+
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
-    () =>
-      timeoutMs == null
-        ? client.request<T>(query!, variables)
-        : client.request<T>({
-            document: query!,
-            variables,
-            signal: AbortSignal.timeout(timeoutMs),
-          }),
+    fetcher,
     {
       refreshInterval,
       revalidateOnFocus: false,

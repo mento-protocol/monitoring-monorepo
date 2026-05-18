@@ -37,7 +37,8 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "swr": "^2.4.1",
-    "viem": "2.47.0"
+    "viem": "2.47.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint-react/eslint-plugin": "^2.13.0",

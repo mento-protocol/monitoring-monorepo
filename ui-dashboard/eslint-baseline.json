@@ -332,21 +332,21 @@
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolDetail' has a complexity of 26. Maximum allowed is 15.",
-    "line": 72,
+    "line": 73,
     "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolDetail' has too many lines (177). Maximum allowed is 100.",
-    "line": 72,
+    "message": "Function 'PoolDetail' has too many lines (179). Maximum allowed is 100.",
+    "line": 73,
     "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
-    "line": 473,
+    "line": 476,
     "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
@@ -744,8 +744,8 @@
   {
     "file": "src/components/pool-config-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolConfigPanel' has too many lines (106). Maximum allowed is 100.",
-    "line": 35,
+    "message": "Function 'PoolConfigPanel' has too many lines (108). Maximum allowed is 100.",
+    "line": 36,
     "linePreview": "*  page survives the indexer deploy+resync window. */ | export function PoolConfigPanel({ pool }: PoolConfigPanelProps) { | const { network } = useNetwork();"
   },
   {

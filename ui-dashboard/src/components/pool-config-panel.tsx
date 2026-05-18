@@ -7,6 +7,7 @@ import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
 import { POOL_CONFIG_EXT } from "@/lib/queries";
+import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
 import { useNetwork } from "@/components/network-provider";
 import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
@@ -39,6 +40,8 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(
     isVirtual ? null : POOL_CONFIG_EXT,
     { id: pool.id, chainId: pool.chainId },
+    undefined,
+    { schema: PoolConfigExtSchema },
   );
 
   if (isVirtual) return null;
