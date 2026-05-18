@@ -10,7 +10,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -408,6 +414,123 @@ test("fails when pnpm-workspace.yaml top-level registry: points off-npmjs", () =
   assert(
     out.includes("non-npmjs default registry"),
     `expected top-level registry rejection: ${out}`,
+  );
+});
+
+// 20. Reject SHA-512 integrity longer than the canonical 88-char base64
+// shape. The previous regex used `{86,}` (unbounded) and accepted ~100
+// chars; pnpm would reject those at install time, but the gate let them
+// merge.
+test("fails when SHA-512 integrity is longer than canonical 88-char base64", () => {
+  const overlong = "sha512-" + "A".repeat(100) + "==";
+  const lockfile = `lockfileVersion: '9.0'\n\nimporters:\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {integrity: ${overlong}}\n\nsnapshots:\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 21. A colon-bearing key like `name@git+file://path:` must be counted by
+// the top-level entry regex. Otherwise the discrepancy check can pass
+// even though a git entry has no sha512.
+test("counts colon-bearing git package entries (so missing integrity is detected)", () => {
+  const lockfile = `lockfileVersion: '9.0'\n\nimporters:\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {integrity: ${VALID_SHA512}}\n\n  some-pkg@git+file://path/to/dep:\n    resolution: {repo: file://path/to/dep, type: git, commit: abc123}\n\nsnapshots:\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  // The git entry has no sha512 and is NOT in the file:/link: exemption,
+  // so the discrepancy check must trip and fail the gate.
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 22. Quoted `'registry':` in pnpm-workspace.yaml is the same key as the
+// unquoted form for pnpm; both must be validated.
+test("fails when pnpm-workspace.yaml quoted 'registry': points off-npmjs", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - shared-config\n"registry": https://evil.example.com/\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 23. Quoted `"registry"=...` in .npmrc must be validated.
+test('fails when .npmrc uses quoted "registry"= override pointing off-npmjs', () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".npmrc": '"registry"=https://evil.example.com/\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 24. A `.npmrc` that's a symlink must be read — pnpm follows the symlink
+// at install time, so registry config can't hide behind a symlink.
+test("reads .npmrc when it's a symlink", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lockfile-lint-test-"));
+  try {
+    writeFileSync(
+      join(dir, "pnpm-lock.yaml"),
+      makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "pnpm-workspace.yaml"),
+      "packages:\n  - shared-config\n",
+      "utf8",
+    );
+    // Write the actual config to a separate file...
+    writeFileSync(
+      join(dir, "evilrc"),
+      "registry=https://evil.example.com/\n",
+      "utf8",
+    );
+    // ...then symlink .npmrc → evilrc.
+    symlinkSync("evilrc", join(dir, ".npmrc"));
+    const result = spawnSync(process.execPath, [SCRIPT], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, LOCKFILE_LINT_ROOT: dir },
+    });
+    const exitCode = result.status ?? 1;
+    assert(
+      exitCode !== 0,
+      `Expected non-zero exit, got ${exitCode}\n${result.stdout}\n${result.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 25. `.npmrc` with `userconfig=path` makes pnpm read a SECOND config
+// file. Reject the directive outright so the indirection bypass can't
+// hide an attacker `registry=` line in the referenced file.
+test("fails when .npmrc uses userconfig= indirection", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".npmrc": "userconfig=./evilrc\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("forbidden") || out.includes("userconfig"),
+    `expected userconfig rejection: ${out}`,
   );
 });
 

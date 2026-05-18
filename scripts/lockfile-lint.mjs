@@ -115,8 +115,14 @@ const PKG_ENTRY =
 const LOCAL_SOURCE_ENTRY =
   /^ {2}('[^':\n]+@(?:file|link):[^\n']+'|[^':\n]+@(?:file|link):[^\n:']+):/gm;
 
-/** sha512 integrity: "sha512-" followed by base64 and "=" padding. */
-const SHA512_RE = /^sha512-[A-Za-z0-9+/]{86,}={0,2}$/;
+/**
+ * sha512 integrity. SHA-512 = 64 raw bytes = exactly 88 base64 chars total
+ * (86 data chars + 2 `=` padding). The previous `{86,}={0,2}` upper-bound
+ * was unbounded, accepting malformed SRI like 100-char base64 strings that
+ * would later fail at frozen-install time. Lock to the SHA-512 canonical
+ * shape so the gate rejects malformed integrity at PR time.
+ */
+const SHA512_RE = /^sha512-[A-Za-z0-9+/]{86}={2}$/;
 
 let totalPackages = 0;
 let integrityErrors = 0;
@@ -144,9 +150,17 @@ const totalResolutions = (packagesSection.match(/^\s+resolution:/gm) ?? [])
 // integrity (registry tarball) OR be a local-source entry (file:/link:/git+).
 // Without this an entry whose `resolution:` line was stripped entirely would
 // slip past the integrity counter and the bare-resolution counter alike.
+// Match any EXACTLY-2-space-indented YAML key ending in `:` at end-of-line.
+// Sub-keys (`resolution:`, `engines:`, etc.) and dependency name keys live
+// at 4+ space indent so don't match. The `[^':\n ]` after `^ {2}` rejects
+// further whitespace, anchoring at exactly the 2-indent level (the old
+// `[^':\n]` accidentally accepted a space → matched 4/6/8-space deeper
+// keys whose first char happened to be space). The `\s*$` anchor lets
+// the key spec contain embedded `:` characters (e.g. `name@git+file://path:`)
+// — only the terminator `:` must sit at line end.
 const totalEntries = (
   packagesSection.match(
-    /^ {2}('[^':\n]+@[^\n']+'|[^':\n][^:\n]*@[^\n:']+):/gm,
+    /^ {2}('[^':\n]+@[^\n']+'|[^':\n ][^:\n]*@[^\n]+?):\s*$/gm,
   ) ?? []
 ).length;
 
@@ -228,7 +242,13 @@ function findNpmrcs(dir, out) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       findNpmrcs(full, out);
-    } else if (entry.isFile() && entry.name === ".npmrc") {
+    } else if (
+      (entry.isFile() || entry.isSymbolicLink()) &&
+      entry.name === ".npmrc"
+    ) {
+      // Include symlinks — pnpm follows them at install time, so a `.npmrc`
+      // pointing to a malicious file via symlink would bypass the gate
+      // unless we read the resolved target.
       out.push(full);
     }
   }
@@ -256,6 +276,16 @@ function isOfficialNpmRegistry(val) {
 
 let registryErrors = 0;
 
+/**
+ * Strip optional surrounding quotes from an npmrc/yaml key. pnpm accepts
+ * `"registry"=...` and `'registry'=...` as equivalent to bare `registry=`,
+ * so we normalize the left-hand side before matching.
+ * @param {string} key
+ */
+function unquote(key) {
+  return key.replace(/^['"]|['"]$/g, "");
+}
+
 for (const absPath of npmrcFiles) {
   const rel = relative(ROOT, absPath);
   const content = readFileSync(absPath, "utf8");
@@ -264,9 +294,31 @@ for (const absPath of npmrcFiles) {
     const trimmed = line.trim();
     // Skip comments and empty lines.
     if (!trimmed || trimmed.startsWith("#")) continue;
+    // Reject userconfig / globalconfig indirection: those directives make
+    // pnpm read a SECOND config file whose contents could carry the
+    // attacker's `registry=...`. Detecting and rejecting them outright is
+    // simpler (and safer) than recursively resolving + scanning every
+    // possible target.
+    if (/^['"]?(userconfig|globalconfig)['"]?\s*=/.test(trimmed)) {
+      fail(
+        `${rel}:${i + 1} — npmrc directive forbidden: "${trimmed}". ` +
+          "pnpm follows `userconfig=` / `globalconfig=` to a second config " +
+          "file, which can carry an attacker-controlled `registry=` line " +
+          "and bypass this check. Inline any required config in the same " +
+          ".npmrc instead.",
+      );
+      registryErrors++;
+      continue;
+    }
+    // Split on `=` and normalize the key half so `"registry"=` and
+    // `'registry'=` parse the same as `registry=`.
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const rawKey = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    const key = unquote(rawKey);
     // Flag any `registry=` line that doesn't point to the official npm registry.
-    if (/^registry\s*=/.test(trimmed)) {
-      const val = trimmed.split("=").slice(1).join("=").trim();
+    if (key === "registry") {
       if (!isOfficialNpmRegistry(val)) {
         fail(
           `${rel}:${i + 1} — non-npmjs registry detected: "${val}". ` +
@@ -274,13 +326,11 @@ for (const absPath of npmrcFiles) {
         );
         registryErrors++;
       }
+      continue;
     }
-    // Flag scope-specific registries (@scope:registry=...) pointing off-npmjs.
-    // Use the SAME exact-canonical check as the unscoped branch — a lookalike
-    // like `registry.npmjs.org.evil.com` must NOT be accepted for scoped
-    // registries either.
-    if (/^@[^:]+:registry\s*=/.test(trimmed)) {
-      const val = trimmed.split("=").slice(1).join("=").trim();
+    // Scope-specific registries: key looks like `@scope:registry` (possibly
+    // quoted as `"@scope:registry"`). Use the SAME exact-canonical check.
+    if (/^@[^:]+:registry$/.test(key)) {
       if (!isOfficialNpmRegistry(val)) {
         fail(
           `${rel}:${i + 1} — scope-specific non-npmjs registry: "${trimmed}". ` +
@@ -303,10 +353,13 @@ if (existsSync(workspacePath)) {
   for (const [i, line] of lines.entries()) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-    // Top-level `registry: <url>` key (YAML scalar at column 0).
-    const singularMatch = /^registry\s*:\s*(.+?)\s*$/.exec(line);
-    if (singularMatch) {
-      const raw = singularMatch[1].replace(/^['"]|['"]$/g, "");
+    // Top-level `registry: <url>` key. Accept quoted variants too (YAML
+    // allows `'registry':` or `"registry":` as equivalent), since pnpm
+    // resolves all three to the same key.
+    const singularMatch = /^['"]?(registry)['"]?\s*:\s*(.+?)\s*$/.exec(line);
+    if (singularMatch && /^\s/.test(line) === false) {
+      // Require the key to start at column 0 (top-level YAML scalar).
+      const raw = unquote(singularMatch[2].trim());
       if (!isOfficialNpmRegistry(raw)) {
         fail(
           `pnpm-workspace.yaml:${i + 1} — non-npmjs default registry: "${raw}". ` +
@@ -315,13 +368,17 @@ if (existsSync(workspacePath)) {
         registryErrors++;
       }
     }
-  }
-  if (/^registries:/m.test(ws)) {
-    fail(
-      "pnpm-workspace.yaml contains a `registries:` block, which configures custom package " +
-        "registries. Verify this is intentional and every non-npmjs registry entry is audited.",
-    );
-    registryErrors++;
+    // Plural `registries:` mapping — quoted or unquoted.
+    if (
+      /^['"]?registries['"]?\s*:/.test(trimmed) &&
+      /^\s/.test(line) === false
+    ) {
+      fail(
+        `pnpm-workspace.yaml:${i + 1} — \`registries:\` block configures custom package ` +
+          "registries. Verify this is intentional and every non-npmjs registry entry is audited.",
+      );
+      registryErrors++;
+    }
   }
 }
 
