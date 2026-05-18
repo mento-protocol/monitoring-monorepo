@@ -69,6 +69,13 @@ export const marketByDebtToken = new Map(
   ]),
 );
 
+export const marketByAddressesRegistry = new Map(
+  LIQUITY_MARKETS.map((market) => [
+    `${market.chainId}-${market.addressesRegistry}`,
+    market,
+  ]),
+);
+
 const addressRoles = [
   "collateralRegistry",
   "troveManager",
@@ -103,11 +110,7 @@ export const findLiquityMarketByAddressesRegistry = (
   chainId: number,
   addressesRegistry: string,
 ): LiquityMarketConfig | undefined =>
-  LIQUITY_MARKETS.find(
-    (market) =>
-      market.chainId === chainId &&
-      market.addressesRegistry === asAddress(addressesRegistry),
-  );
+  marketByAddressesRegistry.get(`${chainId}-${asAddress(addressesRegistry)}`);
 
 export const findCollateralIdByPoolFallback = (
   chainId: number,

@@ -5,36 +5,39 @@ import { getOrCreateLiquityInstance } from "./bootstrap.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 
-const OP_BY_DEPOSITOR = new Map<
-  string,
-  {
-    topUpOrWithdrawal: bigint;
-    yieldGainClaimed: bigint;
-    ethGainClaimed: bigint;
-  }
->();
-
 const pendingDepositKey = (
   chainId: number,
   txHash: string,
+  collateralId: string,
   depositor: string,
-): string => `${chainId}-${txHash}-${asAddress(depositor)}`;
+): string => `${chainId}-${txHash}-${collateralId}-${asAddress(depositor)}`;
 
 indexer.onEvent(
   { contract: "LiquityStabilityPool", event: "DepositOperation" },
-  async ({ event }) => {
-    OP_BY_DEPOSITOR.set(
-      pendingDepositKey(
+  async ({ event, context }) => {
+    const market = findLiquityMarketByEventSource(
+      event.chainId,
+      event.srcAddress,
+    );
+    if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    const depositor = asAddress(event.params._depositor);
+    context.PendingDepositOperation.set({
+      id: pendingDepositKey(
         event.chainId,
         event.transaction.hash,
-        event.params._depositor,
+        collateralId,
+        depositor,
       ),
-      {
-        topUpOrWithdrawal: event.params._topUpOrWithdrawal,
-        yieldGainClaimed: event.params._yieldGainClaimed,
-        ethGainClaimed: event.params._ethGainClaimed,
-      },
-    );
+      collateralId,
+      txHash: event.transaction.hash,
+      depositor,
+      topUpOrWithdrawal: event.params._topUpOrWithdrawal,
+      yieldGainClaimed: event.params._yieldGainClaimed,
+      ethGainClaimed: event.params._ethGainClaimed,
+      timestamp: asBigInt(event.block.timestamp),
+      blockNumber: asBigInt(event.block.number),
+    });
   },
 );
 
@@ -54,10 +57,13 @@ indexer.onEvent(
     const pendingKey = pendingDepositKey(
       event.chainId,
       event.transaction.hash,
+      collateralId,
       depositor,
     );
-    const pending = OP_BY_DEPOSITOR.get(pendingKey);
-    OP_BY_DEPOSITOR.delete(pendingKey);
+    const pending = await context.PendingDepositOperation.get(pendingKey);
+    if (pending !== undefined) {
+      context.PendingDepositOperation.deleteUnsafe(pendingKey);
+    }
     const topUp = pending?.topUpOrWithdrawal ?? 0n;
     const next: StabilityPoolDepositor = {
       id,

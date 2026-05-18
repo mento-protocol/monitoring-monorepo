@@ -36,7 +36,10 @@ export const CDP_MARKET_DETAIL = `
       isShutDown shutDownAt shutDownTcrBps lastEventBlock lastEventTimestamp
     }
     Trove(
-      where: { collateralId: { _eq: $collateralId } }
+      where: {
+        collateralId: { _eq: $collateralId }
+        status: { _in: ["active", "zombie"] }
+      }
       order_by: { icrBps: asc }
       limit: 50
     ) {

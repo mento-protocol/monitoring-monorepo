@@ -38,6 +38,7 @@ type CdpDetailResponse = {
 
 export function CdpDetailClient({ symbol }: { symbol: string }) {
   const { network } = useNetwork();
+  const symbolSlug = cdpSymbolSlug(symbol);
   const markets = useGQL<CdpMarketsResponse>(
     network.chainId === 42220 ? CDP_MARKETS : null,
     { chainId: network.chainId },
@@ -45,9 +46,9 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
   const collateral = useMemo(
     () =>
       (markets.data?.LiquityCollateral ?? []).find(
-        (row) => cdpSymbolSlug(row.symbol) === symbol.toLowerCase(),
+        (row) => cdpSymbolSlug(row.symbol) === symbolSlug,
       ),
-    [markets.data, symbol],
+    [markets.data, symbolSlug],
   );
   const detail = useGQL<CdpDetailResponse>(
     collateral == null ? null : CDP_MARKET_DETAIL,

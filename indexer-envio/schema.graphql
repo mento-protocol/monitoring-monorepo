@@ -982,6 +982,18 @@ type PendingRedemption @index(fields: ["collateralId", "txHash"]) {
   blockNumber: BigInt!
 }
 
+type PendingDepositOperation @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  collateralId: String! @index
+  txHash: String! @index
+  depositor: String! @index
+  topUpOrWithdrawal: BigInt!
+  yieldGainClaimed: BigInt!
+  ethGainClaimed: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
 type BorrowerInfo {
   id: ID!
   chainId: Int! @index

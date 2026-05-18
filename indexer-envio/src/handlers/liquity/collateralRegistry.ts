@@ -1,7 +1,7 @@
 import { indexer } from "../../indexer.js";
-import { asAddress, asBigInt } from "../../helpers.js";
+import { asBigInt } from "../../helpers.js";
 import { getOrCreateLiquityInstance } from "./bootstrap.js";
-import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
+import { findLiquityMarketByEventSource } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { toBpsFromD18 } from "./math.js";
 
@@ -79,15 +79,6 @@ indexer.onEvent(
     if (market === undefined) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const existing = await context.LiquityCollateral.get(
-      makeCollateralId(market),
-    );
-    if (existing !== undefined) {
-      context.LiquityCollateral.set({
-        ...existing,
-        collateralRegistry: asAddress(event.srcAddress),
-      });
-    }
     const instance = await getOrCreateLiquityInstance(
       context,
       market,

@@ -239,11 +239,12 @@ async function applyBracketDelta(
   const pending =
     bracket.pendingDebtTimesOneYearD36 + bracket.sumDebtTimesRateD36 * elapsed;
   const totalDebt = bracket.totalDebt + debtDelta;
+  const sumDebtTimesRateD36 =
+    bracket.sumDebtTimesRateD36 + debtTimesRateD36(debtDelta, rate);
   context.InterestRateBracket.set({
     ...bracket,
     totalDebt: totalDebt > 0n ? totalDebt : 0n,
-    sumDebtTimesRateD36:
-      bracket.sumDebtTimesRateD36 + debtTimesRateD36(debtDelta, rate),
+    sumDebtTimesRateD36: sumDebtTimesRateD36 > 0n ? sumDebtTimesRateD36 : 0n,
     pendingDebtTimesOneYearD36: pending,
     updatedAt: timestamp,
   });

@@ -322,6 +322,7 @@ indexer.onEvent(
 
     const pendingRows = await context.PendingBatchedTroveUpdate.getWhere({
       txHash: { _eq: event.transaction.hash },
+      batchManager: { _eq: batchManager },
     });
     const collateral = await context.LiquityCollateral.get(collateralId);
     for (const pending of pendingRows) {

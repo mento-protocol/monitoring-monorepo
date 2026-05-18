@@ -1,6 +1,7 @@
 import { strict as assert } from "assert";
 import {
   LIQUITY_MARKETS,
+  findLiquityMarketByAddressesRegistry,
   findLiquityMarketByDebtToken,
   findLiquityMarketByEventSource,
   makeCollateralId,
@@ -11,6 +12,7 @@ import {
 } from "../src/handlers/liquity/math";
 import {
   TROVE_STATUS,
+  moveInterestRateBracketDebt,
   statusFromDebt,
   transitionTroveStatus,
 } from "../src/handlers/liquity/troves";
@@ -35,6 +37,13 @@ describe("Liquity CDP helpers", () => {
       );
       assert.equal(
         findLiquityMarketByDebtToken(market.chainId, market.debtToken),
+        market,
+      );
+      assert.equal(
+        findLiquityMarketByAddressesRegistry(
+          market.chainId,
+          market.addressesRegistry,
+        ),
         market,
       );
       assert.match(id, /^42220-0x[0-9a-f]{40}$/);
@@ -134,5 +143,36 @@ describe("Liquity CDP helpers", () => {
       stillActive.instance,
     );
     assert.equal(zombie.instance.activeTroveCount, 0);
+  });
+
+  it("floors interest bracket debt and weighted debt when debits overshoot", async () => {
+    const rows = new Map<string, Record<string, unknown>>();
+    const context = {
+      InterestRateBracket: {
+        get: async (id: string) => rows.get(id),
+        set: (entity: Record<string, unknown>) =>
+          rows.set(String(entity.id), entity),
+      },
+    } as unknown as Parameters<typeof moveInterestRateBracketDebt>[0];
+    const rate = 5n * 10n ** 16n;
+    await moveInterestRateBracketDebt(context, {
+      collateralId: "42220-0xabc",
+      prevRate: 0n,
+      nextRate: rate,
+      prevDebt: 0n,
+      nextDebt: 100n,
+      timestamp: 1n,
+    });
+    await moveInterestRateBracketDebt(context, {
+      collateralId: "42220-0xabc",
+      prevRate: rate,
+      nextRate: 0n,
+      prevDebt: 101n,
+      nextDebt: 0n,
+      timestamp: 2n,
+    });
+    const bracket = rows.get(`42220-0xabc-${rate}`);
+    assert.equal(bracket?.totalDebt, 0n);
+    assert.equal(bracket?.sumDebtTimesRateD36, 0n);
   });
 });

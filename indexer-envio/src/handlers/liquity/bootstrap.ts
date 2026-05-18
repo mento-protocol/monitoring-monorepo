@@ -151,14 +151,32 @@ export async function bootstrapCollaterals(
   }
 }
 
+async function ensureMarketBootstrap(
+  context: LiquityBootstrapContext,
+  market: LiquityMarketConfig,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<LiquityInstance> {
+  const id = makeCollateralId(market);
+  const existingCollateral = await context.LiquityCollateral.get(id);
+  if (existingCollateral === undefined) {
+    context.LiquityCollateral.set(
+      makeLiquityCollateral(market, blockNumber, blockTimestamp),
+    );
+  }
+
+  const existingInstance = await context.LiquityInstance.get(id);
+  if (existingInstance !== undefined) return existingInstance;
+  const instance = makeLiquityInstance(id, market.chainId, blockTimestamp);
+  context.LiquityInstance.set(instance);
+  return instance;
+}
+
 export async function getOrCreateLiquityInstance(
   context: LiquityBootstrapContext,
   market: LiquityMarketConfig,
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<LiquityInstance> {
-  await bootstrapCollaterals(context, blockNumber, blockTimestamp);
-  const id = makeCollateralId(market);
-  const existing = await context.LiquityInstance.get(id);
-  return existing ?? makeLiquityInstance(id, market.chainId, blockTimestamp);
+  return ensureMarketBootstrap(context, market, blockNumber, blockTimestamp);
 }
