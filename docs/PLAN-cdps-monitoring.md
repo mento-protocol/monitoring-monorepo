@@ -145,17 +145,17 @@ The BACKLOG named GBPm only. Mento actually runs **GBPm + CHFm + JPYm** Liquity 
 
 | Instance | CollateralRegistry                           | TroveManager                                 | StabilityPool                                | BorrowerOperations                           | TroveNFT                                     | SortedTroves                                 | ActivePool                                   | DefaultPool                                  | CollSurplusPool                              | AddressesRegistry                            | SystemParams                                 |
 | -------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
-| **GBPm** | `0x1bEDD4334335522B0a0e8e610d326B16B0a605Fb` | `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9` | `0x06346c0fAB682dBde9f245D2D84677592E8aaa15` | `0x8ec9A81871F816F1EF007a82293703057A943B8A` | `0x46273A5792013973b64a42E760E6F81d0472C6b6` | `0x46D0C9e51e05D6ff38B2a19D6310488f3112Bf9b` | `0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2` | `0x95191e52d01eC060cEA753CDADfEEB07b78D0047` | `0xfFF48ee3bd2D534E35b54D538de30a9d7709d4B6` | `0xB3136DBadB14Ab587FFa91545538126938Fe0C6E` | `0x064D8bCC79711cF51dF7Ca0a7fe531A271Cd74E9` |
-| **CHFm** | `0x8530ee22A4AdC37B02d1Cd37fC120508663fEdf8` | `0x4E105FEF015db26320C077427BD605AceAd9262E` | `0xc415cA43aB6Ab246E64559696b8DCAcdd08A39e8` | `0x7Fe90CF5A41473179fCE89Df55bc9afcd1c5c0be` | `0xBadB30028F9F5043Efd32b1C00E3B367E874a39E` | `0x06D9ac9912546E773884F4D965f6322278Bbd391` | `0x9947CEe121586fC31b0b0a162A40D6516979E7cB` | `0x542191E79732A4498f263e793Cc47942956f33f7` | `0xC45a4781609fA9BA1ad6D904630A2F92425715d4` | `0xCa70801D91576d069190d1D4CFDDEbdc237A4537` | `0x66cf2AA9FC91ffbf2CC8E8057E54e5Ea670029C1` |
-| **JPYm** | `0x343815Db498D60a04ecf666F2FF9E5d6A2AC6d0E` | `0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df` | `0x62A519b4D0693E976b78b195E34a548BcF1D2355` | `0x4944Fc84D675a0Cc4758A8098C1619A2E4724a7F` | `0x411DB4F90088101c76A51413F2D668FC409cbDCF` | `0xf024701eDbE5d8A9869eFC8e01d7f95D3ef29A77` | `0x90b8A5Ad63bDB2a3DC636DA926aB5c039EA426a4` | `0x094C0cD42f21289AD7279285dD3793CD8C998916` | `0x52f659C562f5bA9668Ac71DB2ac860aF10040b15` | `0x8f99Aac2FE09A1390617D4AcDD1519f775eE931A` | `0xf68F400798329A3a2D312F010A96e4f2CC30aD4E` |
+| **GBPm** | `0x1bEDD4334335522B0a0e8e610d326B16B0a605Fb` | `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9` | `0x2d5d7E2767c5493610caE84E0AB7F9D2CCE8C1A5` | `0x8ec9A81871F816F1EF007a82293703057A943B8A` | `0x46273A5792013973b64a42E760E6F81d0472C6b6` | `0x46D0C9e51e05D6ff38B2a19D6310488f3112Bf9b` | `0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2` | `0x95191e52d01eC060cEA753CDADfEEB07b78D0047` | `0xfFF48ee3bd2D534E35b54D538de30a9d7709d4B6` | `0xB3136DBadB14Ab587FFa91545538126938Fe0C6E` | `0x064D8bCC79711cF51dF7Ca0a7fe531A271Cd74E9` |
+| **CHFm** | `0x8530ee22A4AdC37B02d1Cd37fC120508663fEdf8` | `0x4E105FEF015db26320C077427BD605AceAd9262E` | `0x8a68CBB2fFF99Ea400FF330DBD1a7904775B4b44` | `0x7Fe90CF5A41473179fCE89Df55bc9afcd1c5c0be` | `0xBadB30028F9F5043Efd32b1C00E3B367E874a39E` | `0x06D9ac9912546E773884F4D965f6322278Bbd391` | `0x9947CEe121586fC31b0b0a162A40D6516979E7cB` | `0x542191E79732A4498f263e793Cc47942956f33f7` | `0xC45a4781609fA9BA1ad6D904630A2F92425715d4` | `0xCa70801D91576d069190d1D4CFDDEbdc237A4537` | `0x66cf2AA9FC91ffbf2CC8E8057E54e5Ea670029C1` |
+| **JPYm** | `0x343815Db498D60a04ecf666F2FF9E5d6A2AC6d0E` | `0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df` | `0x107eCcE37c1FE3C8154B67F9ddD3d5A1446f084B` | `0x4944Fc84D675a0Cc4758A8098C1619A2E4724a7F` | `0x411DB4F90088101c76A51413F2D668FC409cbDCF` | `0xf024701eDbE5d8A9869eFC8e01d7f95D3ef29A77` | `0x90b8A5Ad63bDB2a3DC636DA926aB5c039EA426a4` | `0x094C0cD42f21289AD7279285dD3793CD8C998916` | `0x52f659C562f5bA9668Ac71DB2ac860aF10040b15` | `0x8f99Aac2FE09A1390617D4AcDD1519f775eE931A` | `0xf68F400798329A3a2D312F010A96e4f2CC30aD4E` |
 
 Shared registry contracts (one of each):
 
-| Contract                | Address                                      | Purpose                                                                                |
-| ----------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------- |
-| CDPLiquidityStrategy    | `0x4e78BD9565341EAbe99cDC024acB044d9BDcB985` | Mento-specific: bridges FPMM pool reserves to Liquity Troves. Mirror of OLS.           |
-| ReserveTroveFactory     | `0x02859465DCC7D7F2Bee183fC7FaC78544c9519e1` | Mento-specific: emits `ReserveTroveCreated` when the Reserve opens a Trove for a pool. |
-| OracleAdapterCollateral | `0xEB23E1339b2119c0f4a0097Cb294E990C1fA6423` | Oracle adapter for USDm collateral pricing inside the Liquity instances.               |
+| Contract                | Address                                      | Purpose                                                                                                                 |
+| ----------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| CDPLiquidityStrategy    | `0x4e78BD9565341EAbe99cDC024acB044d9BDcB985` | Mento-specific: bridges FPMM pool reserves to Liquity Troves. Mirror of OLS.                                            |
+| ReserveTroveFactory     | `0x02859465DCC7D7F2Bee183fC7FaC78544c9519e1` | Mento-specific: emits `ReserveTroveCreated` when the Reserve opens a Trove; pool linkage must be correlated separately. |
+| OracleAdapterCollateral | `0xEB23E1339b2119c0f4a0097Cb294E990C1fA6423` | Oracle adapter for USDm collateral pricing inside the Liquity instances.                                                |
 
 **Implication**: the plan now indexes 30+ contracts across 3 instances. Schema must key entities by `{chainId}-{collIndex}-{...}` or `{chainId}-{troveManagerAddress}-{...}` to disambiguate. The `Collateral` entity is no longer future-proofing — it's load-bearing on day 1.
 
@@ -174,7 +174,7 @@ Verified from ABIs in `@mento-protocol/contracts@0.8.0/abis/`. Bolded events are
 - **`RedemptionFeePaidToTrove(indexed uint256 _troveId, uint256 _ETHFee)`** — per-trove redemption fee record
 - Skip: all `*AddressChanged` admin events (one-time wiring)
 
-**StabilityPool** (per instance) — BACKLOG's `UserDepositChanged` / `PoolBalanceUpdated` names are wrong. Real events:
+**StabilityPool** (per instance) — BACKLOG's `UserDepositChanged` / `PoolBalanceUpdated` names are wrong. Use the `StabilityPoolv300*` addresses from the current namespace, not the older `StabilityPool*` addresses. Real events:
 
 - **`DepositOperation(indexed address _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)`**
 - **`DepositUpdated(indexed address _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)`** — post-op state
@@ -208,13 +208,15 @@ Verified from ABIs in `@mento-protocol/contracts@0.8.0/abis/`. Bolded events are
 
 **ReserveTroveFactory** (shared):
 
-- **`ReserveTroveCreated(indexed address addressesRegistry, indexed uint256 troveId, uint256 debtAmount, uint256 collateralAmount)`** — canonical event when the Reserve opens a Trove for a pool. Links FPMM Pool → Liquity Trove.
+- **`ReserveTroveCreated(indexed address addressesRegistry, indexed uint256 troveId, uint256 debtAmount, uint256 collateralAmount)`** — canonical event when the Reserve opens a Trove. It does **not** include the FPMM pool address; the implementation must correlate it with `CDPLiquidityStrategy.PoolAdded` / strategy call context or a vendored fallback map before claiming a pool-level link.
 
-**ActivePool** (per instance):
+**ActivePool + DefaultPool** (per instance):
 
 - `ActivePoolBoldDebtUpdated(uint256 _recordedDebtSum)` — system debt gauge
 - `ActivePoolCollBalanceUpdated(uint256 _collBalance)` — system collateral gauge
-- Optional — can also derive from TroveManager events alone. Indexing ActivePool gives a cheap sanity check on the derived totals (drift detection). Recommend **opt-in** for day 1; index if it's cheap, skip if it adds significant sync time.
+- `DefaultPoolBoldDebtUpdated(uint256 _recordedDebtSum)` — redistributed liquidation debt that remains outside ActivePool until applied to troves
+- `DefaultPoolCollBalanceUpdated(uint256 _collBalance)` — redistributed liquidation collateral that remains outside ActivePool until applied to troves
+- Required on day 1. Trove deltas alone understate system debt/collateral after partially redistributed liquidations because the liquidated trove is removed immediately while redistributed debt/collateral sits in DefaultPool until future borrower actions apply it.
 
 ### SystemParams resolves `spMinBufferGbpm`
 
@@ -366,8 +368,8 @@ New ABI files (committed under `indexer-envio/abis/liquity/`):
 - `ReserveTroveFactory.json`
 - `SystemParams.json` (for view-call effects)
 - `AddressesRegistry.json` (for instance-discovery view calls)
-
-`ActivePool.json` is optional (see verification note above — only useful as a drift-check). Skip on day 1.
+- `ActivePool.json` (system collateral/debt gauge)
+- `DefaultPool.json` (redistributed liquidation collateral/debt gauge)
 
 No source-from-bytecode work needed. Update `indexer-envio/scripts/generateAbis.mjs` to add a `LIQUITY_ABIS` array and copy them into `abis/liquity/`. Add to the "Done" pattern documented in BACKLOG line 175.
 
@@ -445,6 +447,7 @@ type Trove
   redemptionCount: Int!
   redeemedColl: BigInt!
   redeemedDebt: BigInt!
+  redemptionFeePaidCum: BigInt! # fee income from RedemptionFeePaidToTrove; not redeemed collateral
   # Timestamps
   openedAt: BigInt!
   openedAtBlock: BigInt!
@@ -526,7 +529,11 @@ type LiquityInstance {
   id: ID! # "{chainId}-{troveManager}"
   collateralId: String! @index
   chainId: Int! @index
-  # System totals (event-sourced from TroveManager / ActivePool / DefaultPool)
+  # System totals (event-sourced from ActivePool + DefaultPool gauges)
+  activePoolDebt: BigInt!
+  defaultPoolDebt: BigInt!
+  activePoolColl: BigInt!
+  defaultPoolColl: BigInt!
   systemColl: BigInt!
   systemDebt: BigInt!
   tcrBps: Int! # derived; -1 if oracle USD price unavailable
@@ -539,7 +546,7 @@ type LiquityInstance {
   # Redemption state (computed in-handler from BaseRateUpdated + decay)
   baseRate: BigInt!
   lastFeeOpTime: BigInt!
-  currentRedemptionRateBps: Int! # re-derived per snapshot tick
+  currentRedemptionRateBps: Int! # materialized snapshot value; UI/metrics recompute decay at read time
   # ICR distribution (refreshed at hourly rollup tick, NOT per event)
   activeTroveCount: Int!
   icrP1Bps: Int!
@@ -682,6 +689,7 @@ type ReserveTrove {
   id: ID! # "{chainId}-{addressesRegistry}-{troveId}"
   chainId: Int!
   collateralId: String! @index
+  poolId: String @index # resolved by same-tx PoolAdded/strategy correlation; null only until repaired
   addressesRegistry: String!
   troveId: String!
   initialDebt: BigInt!
@@ -773,6 +781,20 @@ File: `indexer-envio/config.multichain.mainnet.yaml`. Global `contracts:` block 
   handler: src/EventHandlers.ts
   events:
     - event: ReserveTroveCreated(indexed address addressesRegistry, indexed uint256 troveId, uint256 debtAmount, uint256 collateralAmount)
+
+- name: LiquityActivePool
+  abi_file_path: abis/liquity/ActivePool.json
+  handler: src/EventHandlers.ts
+  events:
+    - event: ActivePoolBoldDebtUpdated(uint256 _recordedDebtSum)
+    - event: ActivePoolCollBalanceUpdated(uint256 _collBalance)
+
+- name: LiquityDefaultPool
+  abi_file_path: abis/liquity/DefaultPool.json
+  handler: src/EventHandlers.ts
+  events:
+    - event: DefaultPoolBoldDebtUpdated(uint256 _recordedDebtSum)
+    - event: DefaultPoolCollBalanceUpdated(uint256 _collBalance)
 ```
 
 Note: I use the `Liquity` prefix on shared upstream names (`LiquityTroveManager` etc.) to avoid collision with `TroveManager` if Mento ever ships a re-named v2 contract; matches our existing `WormholeNttManager` / `WormholeTransceiver` naming.
@@ -787,9 +809,9 @@ Under `chains:` → Celo (42220) block, append (one entry per contract type, all
     - 0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df # JPYm
 - name: LiquityStabilityPool
   address:
-    - 0x06346c0fAB682dBde9f245D2D84677592E8aaa15 # GBPm
-    - 0xc415cA43aB6Ab246E64559696b8DCAcdd08A39e8 # CHFm
-    - 0x62A519b4D0693E976b78b195E34a548BcF1D2355 # JPYm
+    - 0x2d5d7E2767c5493610caE84E0AB7F9D2CCE8C1A5 # StabilityPoolv300GBPm
+    - 0x8a68CBB2fFF99Ea400FF330DBD1a7904775B4b44 # StabilityPoolv300CHFm
+    - 0x107eCcE37c1FE3C8154B67F9ddD3d5A1446f084B # StabilityPoolv300JPYm
 - name: LiquityTroveNFT
   address:
     - 0x46273A5792013973b64a42E760E6F81d0472C6b6 # GBPm
@@ -811,11 +833,21 @@ Under `chains:` → Celo (42220) block, append (one entry per contract type, all
 - name: ReserveTroveFactory
   address:
     - 0x02859465DCC7D7F2Bee183fC7FaC78544c9519e1 # shared
+- name: LiquityActivePool
+  address:
+    - 0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2 # GBPm
+    - 0x9947CEe121586fC31b0b0a162A40D6516979E7cB # CHFm
+    - 0x90b8A5Ad63bDB2a3DC636DA926aB5c039EA426a4 # JPYm
+- name: LiquityDefaultPool
+  address:
+    - 0x95191e52d01eC060cEA753CDADfEEB07b78D0047 # GBPm
+    - 0x542191E79732A4498f263e793Cc47942956f33f7 # CHFm
+    - 0x094C0cD42f21289AD7279285dD3793CD8C998916 # JPYm
 ```
 
-> **Per-handler instance routing**: every event arrives with `event.srcAddress` (Envio v3 API). Handlers route to the correct `LiquityCollateral` row by matching `srcAddress` against `collateral.collateralRegistry` / `troveManager` / `stabilityPool` / etc. The router table is seeded from `shared-config/liquity.ts` with the verified per-market contract set above, then refreshed opportunistically by `bootstrapCollaterals`. Cache the map in module-scope state (mirrors the existing `feeToken` registry pattern).
+> **Per-handler instance routing**: every event arrives with `event.srcAddress` (Envio v3 API). Handlers route to the correct `LiquityCollateral` row by matching `srcAddress` against `collateral.collateralRegistry` / `troveManager` / `stabilityPool` / etc. The indexer router table is seeded from vendored `indexer-envio/config/liquity.json` with the verified per-market contract set above, then refreshed opportunistically by `bootstrapCollaterals`. Do not import `@mento-protocol/monitoring-config` from indexer handlers; hosted Envio/codegen can build outside the pnpm workspace. Cache the map in module-scope state (mirrors the existing `feeToken` registry pattern).
 
-Under Monad (143) block, add empty arrays for all seven contracts:
+Under Monad (143) block, add empty arrays for all nine contract groups:
 
 ```yaml
 - name: LiquityTroveManager
@@ -832,7 +864,13 @@ Under Monad (143) block, add empty arrays for all seven contracts:
   address: []
 - name: ReserveTroveFactory
   address: []
+- name: LiquityActivePool
+  address: []
+- name: LiquityDefaultPool
+  address: []
 ```
+
+Apply the same global contract declarations to `indexer-envio/config.multichain.testnet.yaml` and add empty arrays under both testnet chains (Celo Sepolia and Monad testnet) until Liquity testnet addresses exist. The shared `src/EventHandlers.ts` imports the Liquity handlers for every config, so `pnpm indexer:testnet:codegen` must see the same contract names even when no addresses are subscribed.
 
 > **`start_block` on Celo**: the Liquity instances were deployed after the existing FPMM start block (60664500). For backfill performance, set per-contract `start_block` overrides on the Liquity contracts to the earliest deploy block among the three instances. Find it via `cast publication-block` (or read `BorrowerOperations.deploymentTimestamp` if available) for `0x8ec9A81871F816F1EF007a82293703057A943B8A` (GBPm BorrowerOps), then take min across all three instances. Plan TBD until block discovery — flag for the implementer.
 
@@ -848,6 +886,7 @@ import "./handlers/liquity/troveNFT";
 import "./handlers/liquity/borrowerOperations";
 import "./handlers/liquity/cdpLiquidityStrategy";
 import "./handlers/liquity/reserveTroveFactory";
+import "./handlers/liquity/pools";
 ```
 
 **Files:**
@@ -856,7 +895,7 @@ import "./handlers/liquity/reserveTroveFactory";
 
 `bootstrap.ts` — helper module. `bootstrapCollaterals(context)`:
 
-1. Seed the three known markets from `shared-config/liquity.ts`: `collateralRegistry`, `troveManager`, `addressesRegistry`, `systemParams`, debt token, collateral token, and UI slug. This static map is the fallback when a deployed ABI lacks a discovery accessor.
+1. Seed the three known markets from vendored `indexer-envio/config/liquity.json`: `collateralRegistry`, `troveManager`, `addressesRegistry`, `systemParams`, debt token, collateral token, and UI slug. This static map is the fallback when a deployed ABI lacks a discovery accessor. `shared-config/liquity.ts` may mirror or generate from the same source for dashboard slug helpers, but indexer code must not import the workspace package directly.
 2. For each market, optionally verify the mapping by reading its CollateralRegistry (`totalCollaterals()` + `getToken(i)` / `getTroveManager(i)`) and its AddressesRegistry pools (`stabilityPool()` / `troveNFT()` / `sortedTroves()` / `activePool()` / `defaultPool()` / `collSurplusPool()` / `borrowerOperations()`).
 3. **Do not read `systemParams()` from AddressesRegistry** unless the ABI proves that accessor exists. The verified plan table already carries the per-market SystemParams address; treat that static address as canonical until an accessor is confirmed.
 4. Read full `SystemParams` config (MCR/CCR/SCR/BCR/MIN_BOLD_IN_SP/MIN_DEBT/etc.) from the per-market SystemParams contract.
@@ -885,11 +924,11 @@ const OP = {
 Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph/src/TroveManager.mapping.ts`):
 
 - **`TroveOperation`** — primary source of Trove status/cumulative updates. Identify by `srcAddress → collateralId`. On `OPEN_TROVE` / `OPEN_TROVE_AND_JOIN_BATCH`: create or update a placeholder Trove with `status=active`, `openedAt=block.timestamp`, `owner=ZERO_ADDRESS`, and `previousOwner=ZERO_ADDRESS`; do **not** update `BorrowerInfo` here because the event does not include the borrower address. On `CLOSE_TROVE`: `status=closed`, `closedAt=block.timestamp`. On `LIQUIDATE`: `status=liquidated`, set `liquidatedColl=-_collChangeFromOperation`, `liquidatedDebt=-_debtChangeFromOperation`. On `REDEEM_COLLATERAL`: `status=redeemed`, increment `redemptionCount`, accumulate `redeemedColl/redeemedDebt` (subtract the negative `_*ChangeFromOperation` values per upstream convention). On `APPLY_PENDING_DEBT`: no status change; just timestamps. Don't bump `lastUserActionAt` on `REDEEM_COLLATERAL` / `LIQUIDATE` / `APPLY_PENDING_DEBT` (forced ops, per upstream).
-- **`TroveUpdated`** — write authoritative `debt`, `coll`, `stake`, `interestRate` onto the Trove. Compute `icrBps` using the per-market collateral/debt price, not a single USDm/USD price (see TCR helper). Update interest-rate bracket via `updateRateBracketDebt(prevRate, newRate, prevDebt, newDebt, ...)` per upstream pattern. Also update `LiquityInstance.systemColl` and `systemDebt` by applying the delta between the previous Trove row and the new row; because ActivePool / DefaultPool indexing is out of scope, this delta path is the source of latest system totals.
-- **`BatchedTroveUpdated`** + **`BatchUpdated`** — Envio v3 processes events in log-index order within a tx; `BatchUpdated` arrives after one or more `BatchedTroveUpdated` logs. The first handler cannot read the future batch totals. Persist a short-lived `PendingBatchedTroveUpdate` record keyed by `{chainId}-{txHash}-{batchManager}-{troveId}` (or a JSON list on a tx-scoped pending entity), then have `BatchUpdated` replay every pending trove for that batch using `trove.debt = batchUpdated.debt * batchDebtShares / batchUpdated.totalDebtShares`, update collateral/stake, update brackets, update `LiquityInstance` system total deltas, and delete the pending records.
-- **`Liquidation`** — append immutable `LiquidationEvent` row. Bump `LiquityInstance.liqCountCum`, `liqDebtOffsetCum`, `liqCollSentToSpCum`, etc.
+- **`TroveUpdated`** — write authoritative `debt`, `coll`, `stake`, `interestRate` onto the Trove. Compute `icrBps` using the per-market collateral/debt price, not a single USDm/USD price (see TCR helper). Update interest-rate bracket via `updateRateBracketDebt(prevRate, newRate, prevDebt, newDebt, ...)` per upstream pattern. Do not treat Trove deltas as the authoritative system totals; ActivePool + DefaultPool gauge handlers own `LiquityInstance.systemColl` and `systemDebt` so redistributed liquidation debt remains counted while it sits in DefaultPool.
+- **`BatchedTroveUpdated`** + **`BatchUpdated`** — Envio v3 processes events in log-index order within a tx; `BatchUpdated` arrives after one or more `BatchedTroveUpdated` logs. The first handler cannot read the future batch totals. Persist a short-lived `PendingBatchedTroveUpdate` record keyed by `{chainId}-{txHash}-{batchManager}-{troveId}` (or a JSON list on a tx-scoped pending entity), then have `BatchUpdated` replay every pending trove for that batch using `trove.debt = batchUpdated.debt * batchDebtShares / batchUpdated.totalDebtShares`, update collateral/stake, update brackets, and delete the pending records. System aggregate totals still come from ActivePool + DefaultPool gauge events.
+- **`Liquidation`** — append immutable `LiquidationEvent` row. Bump `LiquityInstance.liqCountCum`, `liqDebtOffsetCum`, `liqDebtRedistributedCum`, `liqCollSentToSpCum`, etc. Do not subtract redistributed debt/collateral from system totals here; the following ActivePool/DefaultPool gauge events materialize the correct aggregate.
 - **`Redemption`** — append immutable `RedemptionEvent` row. Bump `LiquityInstance.redemptionCountCum`, `redemptionDebtCum`, `redemptionFeeCum`.
-- **`RedemptionFeePaidToTrove`** — per-trove fee record; bump `Trove.redeemedColl` if not already accounted by the matching `TroveOperation` (upstream's pattern uses `TroveOperation` as the canonical source and treats `RedemptionFeePaidToTrove` as a fee-amount detail).
+- **`RedemptionFeePaidToTrove`** — per-trove fee record only. Store the fee separately (`Trove.redemptionFeePaidCum` if per-trove fee display is needed, otherwise only the immutable event detail) and never add `_ETHFee` to `Trove.redeemedColl`; redeemed collateral remains sourced from the matching `TroveOperation`.
 
 `stabilityPool.ts` — handlers for the 5 StabilityPool events. Routes via `srcAddress → collateralId`:
 
@@ -898,12 +937,18 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 - **`DepositOperation`** + **`DepositUpdated`** — same-tx pair. `DepositUpdated` carries the authoritative new state. Upsert `StabilityPoolDepositor`: `deposit=_newDeposit`, `stashedColl=_stashedColl`. From `DepositOperation`: accumulate `cumulativeDeposited` / `cumulativeWithdrawn` from `_topUpOrWithdrawal` (positive=deposit, negative=withdraw), accumulate `yieldGainClaimedCum` / `ethGainClaimedCum`.
 - **`RebalanceExecuted`** — append immutable `SpRebalanceEvent`. Bump `LiquityInstance.spRebalanceCount`, `spRebalanceCollInCum`, `spRebalanceStableOutCum`. Note: this is Mento-specific; SP collateral gets converted back to debt-token. Affects `spDeposits` indirectly but `StabilityPoolBoldBalanceUpdated` fires immediately after in the same tx, so no manual reconciliation needed.
 
+`pools.ts` — handlers for ActivePool + DefaultPool gauge events. Routes via `srcAddress → collateralId`:
+
+- **`ActivePoolBoldDebtUpdated` / `DefaultPoolBoldDebtUpdated`** — store `activePoolDebt` and `defaultPoolDebt` helper fields in module/entity state, then set `LiquityInstance.systemDebt = activePoolDebt + defaultPoolDebt`.
+- **`ActivePoolCollBalanceUpdated` / `DefaultPoolCollBalanceUpdated`** — store `activePoolColl` and `defaultPoolColl`, then set `LiquityInstance.systemColl = activePoolColl + defaultPoolColl`.
+- This is required for redistributed liquidations: DefaultPool values are part of system debt/collateral even before a later `TroveUpdated` applies them to active troves.
+
 `troveNFT.ts` — handles `Transfer(from, to, tokenId)`:
 
 - Route via `srcAddress → collateralId`.
 - If `from == ZERO_ADDRESS`: mint event during trove open. Upsert the Trove if `TroveOperation` has not run yet, set `owner = to`, then increment `BorrowerInfo` for `to` exactly once. If `TroveOperation` already created a placeholder with `owner=ZERO_ADDRESS`, this mint fills the owner.
-- If `to == ZERO_ADDRESS`: burn event during trove close; no-op (Trove handler already flipped `status=closed`).
-- Otherwise: ownership transfer. Set `Trove.previousOwner = current owner`, `Trove.owner = to`.
+- If `to == ZERO_ADDRESS`: burn event during trove close; decrement `BorrowerInfo` for `from` exactly once if the active-owner count still includes this Trove.
+- Otherwise: ownership transfer. Set `Trove.previousOwner = current owner`, `Trove.owner = to`; decrement `BorrowerInfo` for the previous owner and increment `BorrowerInfo` for `to` (including `trovesByCollateral`) in the same write batch.
 
 `borrowerOperations.ts` — handles `ShutDown(_tcr)`:
 
@@ -917,21 +962,23 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 - **`PoolRemoved`** — set `CdpPool.removed = true`.
 - **`LiquidityMoved`** — append `CdpLiquidityMove` event row.
 - **`RebalanceCooldownSet`** — update `CdpPool.rebalanceCooldownSec`.
-- **`RedemptionShortfallSubsidized`** — increment the matching `LiquityInstance.shortfallSubsidyCum` by reading `CdpPool.collateralId` for the pool. If `CdpPool` is missing because the event stream starts after `PoolAdded`, fall back to the `shared-config/liquity.ts` pool → instance map and repair the missing `CdpPool` row.
+- **`RedemptionShortfallSubsidized`** — increment the matching `LiquityInstance.shortfallSubsidyCum` by reading `CdpPool.collateralId` for the pool. If `CdpPool` is missing because the event stream starts after `PoolAdded`, fall back to the vendored `indexer-envio/config/liquity.json` pool → instance map and repair the missing `CdpPool` row.
 
 `reserveTroveFactory.ts` — handles `ReserveTroveCreated(addressesRegistry, troveId, debtAmount, collateralAmount)`:
 
 - Lookup `LiquityCollateral` via `addressesRegistry` field (one-shot map lookup).
-- Write `ReserveTrove` entity.
+- Resolve `poolId` before writing the entity. `ReserveTroveCreated` does not include the pool address, so correlate with same-transaction `CDPLiquidityStrategy.PoolAdded` / strategy call context when available, or with a vendored pool→instance/trove fallback map. Leave `poolId=null` only for unresolved historical rows and repair it as soon as the matching `CdpPool` row appears.
+- Write `ReserveTrove` entity including `poolId` when resolved so `CDP_POOLS_FOR_INSTANCE` can join by pool without guessing.
 - Defensively re-trigger `bootstrapCollaterals` if not yet loaded for this addressesRegistry (handles cold-start ordering).
 
 `instance.ts` — helper module:
 
-- `recomputeRedemptionRate(instance, collateral, blockTimestamp)`: deterministic in-handler computation. Formula = `min(1, baseRate + REDEMPTION_FEE_FLOOR)` adjusted by minute decay since `lastFeeOpTime`. Use `REDEMPTION_MINUTE_DECAY_FACTOR` from `LiquityCollateral`. Set `currentRedemptionRateBps`. Call from `BaseRateUpdated` / `LastFeeOpTimeUpdated` / on the snapshot tick.
+- `computeDecayedRedemptionRate(instance, collateral, timestamp)`: pure deterministic computation. Formula = `min(1, baseRate + REDEMPTION_FEE_FLOOR)` adjusted by minute decay since `lastFeeOpTime`. Use `REDEMPTION_MINUTE_DECAY_FACTOR` from `LiquityCollateral`.
+- `recomputeRedemptionRate(instance, collateral, blockTimestamp)`: materializes a snapshot value from `computeDecayedRedemptionRate` on `BaseRateUpdated` / `LastFeeOpTimeUpdated` / snapshot writes. Dashboard and metrics-bridge must also recompute from `baseRate`, `lastFeeOpTime`, and decay factor at read time so the displayed/gauged rate decays during quiet periods with no Liquity events.
 - `rollLiquityInstanceSnapshot(context, instance, hourBucket)`:
   1. Pull active Troves for this instance via `Trove.getWhere.collateralId.eq(collateralId)` then JS-filter `status === "active"`; verify a single-field index exposes the helper, with pagination as fallback.
   2. Compute `[icrP1Bps, icrP5Bps, icrP50Bps]` by sorting `icrBps` array; `icrFracBelowMcrBps` from count below `LiquityCollateral.mcrBps`.
-  3. Compute system TCR via `tcr.ts` helper.
+  3. First materialize current debt with accrued interest from `InterestRateBracket` / `InterestBatch` state, then compute system TCR via `tcr.ts` helper. Snapshots and alerts must not consume stale event-only `systemDebt` during quiet periods.
   4. Write `LiquityInstanceSnapshot` for hour bucket + roll to `LiquityInstanceDailySnapshot` on day-boundary crossings.
 
 `tcr.ts` — helper module:
@@ -942,7 +989,7 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 
 > **Multi-handler-in-one-tx ordering**: a liquidation tx emits TroveOperation (op=LIQUIDATE) + TroveUpdated + Liquidation (from TroveManager) + DepositUpdated + StabilityPoolBoldBalanceUpdated + StabilityPoolCollBalanceUpdated (from StabilityPool) all in the same tx, plus TroveNFT.Transfer if the burn fires. Envio processes them in log-index order. **Critical**: every handler must use the "read-modify-write the full entity" pattern — no incremental updates that depend on ordering. The `pool.ts` upsert helper is the precedent; mirror it.
 >
-> **Hourly rollup trigger**: every event handler in `instance.ts` (after applying its own writes) checks if `block.timestamp` has crossed an hour boundary since the LiquityInstance's `lastEventTimestamp`. If so, call `rollLiquityInstanceSnapshot` for the prior hour bucket before processing the new event. Same per-tick pattern as `appendPoolSnapshot` in `pool.ts`.
+> **Hourly rollup trigger**: every event handler first checks whether `block.timestamp` has crossed an hour boundary since the LiquityInstance's `lastEventTimestamp`. If so, flush `rollLiquityInstanceSnapshot` for the prior hour bucket using the pre-event instance state and bucket counters, then process the new event into the new bucket. Same per-tick pattern as `appendPoolSnapshot` in `pool.ts`, but the boundary flush must happen before the new event mutates state.
 
 #### A.5 — Unit tests
 
@@ -962,6 +1009,10 @@ Test cases:
 - **Borrower attribution**: TroveOperation open followed by TroveNFT mint sets owner and increments BorrowerInfo; TroveNFT mint followed by TroveOperation open preserves the owner instead of resetting it to ZERO_ADDRESS.
 - **ShutDown handler** → LiquityInstance.isShutDown flips true, shutDownAt set.
 - **TroveNFT.Transfer**: from!=ZERO and to!=ZERO → previousOwner updates, owner updates.
+- **TroveNFT borrower counts**: secondary transfer decrements the previous owner's `BorrowerInfo` and increments the recipient's counts; burn decrements the current owner exactly once.
+- **System totals after redistribution**: liquidation with `_debtRedistributed > 0` leaves `systemDebt = activePoolDebt + defaultPoolDebt`, not just the sum of updated Trove rows.
+- **Hourly snapshot boundary**: first event after an hour boundary writes the prior-hour snapshot from pre-event state, then applies the new event to the new bucket.
+- **Read-time redemption decay**: no-event interval after `BaseRateUpdated` still renders/computes a lower decayed redemption rate at `now`.
 
 ### Phase B — Dashboard (same PR)
 
@@ -1009,7 +1060,7 @@ New files under `ui-dashboard/src/components/cdps/`:
   - **System Collateral (USDm)**.
   - **Active Troves**.
   - **SP Headroom** — red when negative, amber when < 10% of `spDeposits`. Sentinel `-1` renders "Loading config…".
-  - **Redemption Rate** — current rate in bps.
+  - **Redemption Rate** — current rate in bps, recomputed at render time from `baseRate`, `lastFeeOpTime`, and `redemptionMinuteDecayFactor` so quiet markets keep decaying without a fresh indexed event.
   - **Status** — `LIVE` / `SHUT DOWN`. Shutdown shows the at-shutdown TCR.
 - `cdps-overview.tsx` — landing-page summary cards (TCR + headroom + active troves per market side-by-side).
 - `icr-distribution-chart.tsx` — Plotly histogram of active Trove ICRs. Overlay vertical lines at `mcrBps` and 1.2× MCR (warn line). Per market.
@@ -1061,43 +1112,46 @@ For completeness; do not implement now. Follow-up PR:
 
 ## Critical files to modify
 
-| Path                                                                                                                                                                                  | Change                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `docs/ROADMAP.md`                                                                                                                                                                     | Refresh Done lists per Part 1; move Liquity to Next                                                                                                                                                                                                                                                                                        |
-| `SPEC.md` (§5.5, §11)                                                                                                                                                                 | Liquity status → "Phase 2 in progress"; Next swap                                                                                                                                                                                                                                                                                          |
-| `docs/BACKLOG.md`                                                                                                                                                                     | Drop the Liquity entry + CDP-strategy entry (both ship in this PR); add `service=cdps` alerts follow-up                                                                                                                                                                                                                                    |
-| `indexer-envio/scripts/generateAbis.mjs`                                                                                                                                              | EDIT — extend to copy 9 Liquity ABIs from `@mento-protocol/contracts`                                                                                                                                                                                                                                                                      |
-| `indexer-envio/abis/liquity/{TroveManager,StabilityPool,TroveNFT,BorrowerOperations,CollateralRegistry,CDPLiquidityStrategy,ReserveTroveFactory,SystemParams,AddressesRegistry}.json` | NEW — vendored ABIs (committed)                                                                                                                                                                                                                                                                                                            |
-| `indexer-envio/schema.graphql`                                                                                                                                                        | Append `LiquityCollateral`, `Trove`, `InterestRateBracket`, `InterestBatch`, `PendingBatchedTroveUpdate`, `BorrowerInfo`, `StabilityPoolDepositor`, `LiquityInstance`, `LiquityInstanceSnapshot`, `LiquityInstanceDailySnapshot`, `LiquidationEvent`, `RedemptionEvent`, `SpRebalanceEvent`, `CdpPool`, `ReserveTrove`, `CdpLiquidityMove` |
-| `indexer-envio/config.multichain.mainnet.yaml`                                                                                                                                        | Add 7 contracts (global + Celo addresses + Monad empties); set per-Liquity-contract `start_block` overrides                                                                                                                                                                                                                                |
-| `indexer-envio/src/EventHandlers.ts`                                                                                                                                                  | 7 side-effect imports for new handlers                                                                                                                                                                                                                                                                                                     |
-| `indexer-envio/src/handlers/liquity/bootstrap.ts`                                                                                                                                     | NEW — CollateralRegistry discovery, SystemParams snapshot, AddressesRegistry reads                                                                                                                                                                                                                                                         |
-| `indexer-envio/src/handlers/liquity/collateralRegistry.ts`                                                                                                                            | NEW — `BaseRateUpdated` / `LastFeeOpTimeUpdated` / `LiquidityStrategyUpdated`                                                                                                                                                                                                                                                              |
-| `indexer-envio/src/handlers/liquity/troveManager.ts`                                                                                                                                  | NEW — 7-event handler set incl. operation-enum dispatch                                                                                                                                                                                                                                                                                    |
-| `indexer-envio/src/handlers/liquity/stabilityPool.ts`                                                                                                                                 | NEW — 5-event handler set                                                                                                                                                                                                                                                                                                                  |
-| `indexer-envio/src/handlers/liquity/troveNFT.ts`                                                                                                                                      | NEW — Transfer handler                                                                                                                                                                                                                                                                                                                     |
-| `indexer-envio/src/handlers/liquity/borrowerOperations.ts`                                                                                                                            | NEW — ShutDown handler                                                                                                                                                                                                                                                                                                                     |
-| `indexer-envio/src/handlers/liquity/cdpLiquidityStrategy.ts`                                                                                                                          | NEW — PoolAdded/Removed/LiquidityMoved/RebalanceCooldownSet/RedemptionShortfallSubsidized                                                                                                                                                                                                                                                  |
-| `indexer-envio/src/handlers/liquity/reserveTroveFactory.ts`                                                                                                                           | NEW — ReserveTroveCreated handler                                                                                                                                                                                                                                                                                                          |
-| `indexer-envio/src/handlers/liquity/instance.ts`                                                                                                                                      | NEW — rollup, redemption-rate decay, headroom                                                                                                                                                                                                                                                                                              |
-| `indexer-envio/src/handlers/liquity/tcr.ts`                                                                                                                                           | NEW — TCR / ICR math                                                                                                                                                                                                                                                                                                                       |
-| `indexer-envio/src/handlers/liquity/*.test.ts`                                                                                                                                        | NEW — unit tests per A.5                                                                                                                                                                                                                                                                                                                   |
-| `indexer-envio/src/rpc/effects.ts`                                                                                                                                                    | EDIT — add `readSystemParamsEffect`, `readAddressesRegistryEffect` (mirror `selfHealRebalanceThresholds`)                                                                                                                                                                                                                                  |
-| `shared-config/liquity.ts`                                                                                                                                                            | NEW — symbol → collateralId map (gbpm/chfm/jpym → chain+troveManager); slug helpers; pool→instance fallback map if cdpLiquidityStrategy resolution proves brittle                                                                                                                                                                          |
-| `ui-dashboard/src/lib/queries/liquity.ts`                                                                                                                                             | NEW — 10 GraphQL queries per B.1                                                                                                                                                                                                                                                                                                           |
-| `ui-dashboard/src/lib/queries.ts`                                                                                                                                                     | EDIT — re-export liquity queries                                                                                                                                                                                                                                                                                                           |
-| `ui-dashboard/src/lib/strategy-detection.ts`                                                                                                                                          | DELETE — replaced by CdpPool query                                                                                                                                                                                                                                                                                                         |
-| `ui-dashboard/src/app/cdps/page.tsx`                                                                                                                                                  | NEW — CDPs landing                                                                                                                                                                                                                                                                                                                         |
-| `ui-dashboard/src/app/cdps/_components/cdps-index-client.tsx`                                                                                                                         | NEW — landing client                                                                                                                                                                                                                                                                                                                       |
-| `ui-dashboard/src/app/cdps/[symbol]/page.tsx`                                                                                                                                         | NEW — per-market entry                                                                                                                                                                                                                                                                                                                     |
-| `ui-dashboard/src/app/cdps/[symbol]/_components/cdp-market-client.tsx`                                                                                                                | NEW — per-market dashboard client                                                                                                                                                                                                                                                                                                          |
-| `ui-dashboard/src/app/cdps/{loading,error}.tsx`                                                                                                                                       | NEW                                                                                                                                                                                                                                                                                                                                        |
-| `ui-dashboard/src/components/cdps/*`                                                                                                                                                  | NEW — 13 components per B.3                                                                                                                                                                                                                                                                                                                |
-| `ui-dashboard/src/components/global-pools-table.tsx`                                                                                                                                  | EDIT — swap RPC-probed `cdp` badge to `CdpPool` join                                                                                                                                                                                                                                                                                       |
-| `ui-dashboard/src/app/pool/[poolId]/_components/*`                                                                                                                                    | EDIT — add "CDP Market" link tile for any pool with a CdpPool row                                                                                                                                                                                                                                                                          |
-| `ui-dashboard/src/app/layout.tsx` (or nav file)                                                                                                                                       | EDIT — add "CDPs" nav entry                                                                                                                                                                                                                                                                                                                |
-| `ui-dashboard/src/app/revenue/_components/*`                                                                                                                                          | EDIT — wire `redemptionFeeCum` sum into "CDP Borrowing Fees" tile                                                                                                                                                                                                                                                                          |
-| `ui-dashboard/src/__tests__/dashboard-flows.test.ts`                                                                                                                                  | EDIT — update existing CDP-related mocks that reference `stabilityPoolBalance` / `stabilityPoolTokenSymbol`                                                                                                                                                                                                                                |
+| Path                                                                                                                                                                                                         | Change                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `docs/ROADMAP.md`                                                                                                                                                                                            | Refresh Done lists per Part 1; move Liquity to Next                                                                                                                                                                                                                                                                                        |
+| `SPEC.md` (§5.5, §11)                                                                                                                                                                                        | Liquity status → "Phase 2 in progress"; Next swap                                                                                                                                                                                                                                                                                          |
+| `docs/BACKLOG.md`                                                                                                                                                                                            | Drop the Liquity entry + CDP-strategy entry (both ship in this PR); add `service=cdps` alerts follow-up                                                                                                                                                                                                                                    |
+| `indexer-envio/scripts/generateAbis.mjs`                                                                                                                                                                     | EDIT — extend to copy 9 Liquity ABIs from `@mento-protocol/contracts`                                                                                                                                                                                                                                                                      |
+| `indexer-envio/abis/liquity/{TroveManager,StabilityPool,TroveNFT,BorrowerOperations,CollateralRegistry,CDPLiquidityStrategy,ReserveTroveFactory,SystemParams,AddressesRegistry,ActivePool,DefaultPool}.json` | NEW — vendored ABIs (committed)                                                                                                                                                                                                                                                                                                            |
+| `indexer-envio/schema.graphql`                                                                                                                                                                               | Append `LiquityCollateral`, `Trove`, `InterestRateBracket`, `InterestBatch`, `PendingBatchedTroveUpdate`, `BorrowerInfo`, `StabilityPoolDepositor`, `LiquityInstance`, `LiquityInstanceSnapshot`, `LiquityInstanceDailySnapshot`, `LiquidationEvent`, `RedemptionEvent`, `SpRebalanceEvent`, `CdpPool`, `ReserveTrove`, `CdpLiquidityMove` |
+| `indexer-envio/config/liquity.json`                                                                                                                                                                          | NEW — vendored Liquity market table consumed by indexer handlers and deployable outside the pnpm workspace                                                                                                                                                                                                                                 |
+| `indexer-envio/config.multichain.mainnet.yaml`                                                                                                                                                               | Add 9 contract groups (global + Celo addresses + Monad empties); set per-Liquity-contract `start_block` overrides                                                                                                                                                                                                                          |
+| `indexer-envio/config.multichain.testnet.yaml`                                                                                                                                                               | Add the same 9 contract groups with empty arrays under Celo Sepolia + Monad testnet so testnet codegen/typecheck sees every generated binding                                                                                                                                                                                              |
+| `indexer-envio/src/EventHandlers.ts`                                                                                                                                                                         | 7 side-effect imports for new handlers                                                                                                                                                                                                                                                                                                     |
+| `indexer-envio/src/handlers/liquity/bootstrap.ts`                                                                                                                                                            | NEW — CollateralRegistry discovery, SystemParams snapshot, AddressesRegistry reads                                                                                                                                                                                                                                                         |
+| `indexer-envio/src/handlers/liquity/collateralRegistry.ts`                                                                                                                                                   | NEW — `BaseRateUpdated` / `LastFeeOpTimeUpdated` / `LiquidityStrategyUpdated`                                                                                                                                                                                                                                                              |
+| `indexer-envio/src/handlers/liquity/troveManager.ts`                                                                                                                                                         | NEW — 7-event handler set incl. operation-enum dispatch                                                                                                                                                                                                                                                                                    |
+| `indexer-envio/src/handlers/liquity/stabilityPool.ts`                                                                                                                                                        | NEW — 5-event handler set                                                                                                                                                                                                                                                                                                                  |
+| `indexer-envio/src/handlers/liquity/troveNFT.ts`                                                                                                                                                             | NEW — Transfer handler                                                                                                                                                                                                                                                                                                                     |
+| `indexer-envio/src/handlers/liquity/borrowerOperations.ts`                                                                                                                                                   | NEW — ShutDown handler                                                                                                                                                                                                                                                                                                                     |
+| `indexer-envio/src/handlers/liquity/cdpLiquidityStrategy.ts`                                                                                                                                                 | NEW — PoolAdded/Removed/LiquidityMoved/RebalanceCooldownSet/RedemptionShortfallSubsidized                                                                                                                                                                                                                                                  |
+| `indexer-envio/src/handlers/liquity/reserveTroveFactory.ts`                                                                                                                                                  | NEW — ReserveTroveCreated handler                                                                                                                                                                                                                                                                                                          |
+| `indexer-envio/src/handlers/liquity/pools.ts`                                                                                                                                                                | NEW — ActivePool/DefaultPool gauge handlers for authoritative system debt/collateral                                                                                                                                                                                                                                                       |
+| `indexer-envio/src/handlers/liquity/instance.ts`                                                                                                                                                             | NEW — rollup, redemption-rate decay, headroom                                                                                                                                                                                                                                                                                              |
+| `indexer-envio/src/handlers/liquity/tcr.ts`                                                                                                                                                                  | NEW — TCR / ICR math                                                                                                                                                                                                                                                                                                                       |
+| `indexer-envio/src/handlers/liquity/*.test.ts`                                                                                                                                                               | NEW — unit tests per A.5                                                                                                                                                                                                                                                                                                                   |
+| `indexer-envio/src/rpc/effects.ts`                                                                                                                                                                           | EDIT — add `readSystemParamsEffect`, `readAddressesRegistryEffect` (mirror `selfHealRebalanceThresholds`)                                                                                                                                                                                                                                  |
+| `shared-config/liquity.ts`                                                                                                                                                                                   | NEW — dashboard-facing symbol → collateralId map and slug helpers, generated from or manually mirrored with `indexer-envio/config/liquity.json`; not imported by indexer handlers                                                                                                                                                          |
+| `ui-dashboard/src/lib/queries/liquity.ts`                                                                                                                                                                    | NEW — 10 GraphQL queries per B.1                                                                                                                                                                                                                                                                                                           |
+| `ui-dashboard/src/lib/queries.ts`                                                                                                                                                                            | EDIT — re-export liquity queries                                                                                                                                                                                                                                                                                                           |
+| `ui-dashboard/src/lib/strategy-detection.ts`                                                                                                                                                                 | DELETE — replaced by CdpPool query                                                                                                                                                                                                                                                                                                         |
+| `ui-dashboard/src/app/cdps/page.tsx`                                                                                                                                                                         | NEW — CDPs landing                                                                                                                                                                                                                                                                                                                         |
+| `ui-dashboard/src/app/cdps/_components/cdps-index-client.tsx`                                                                                                                                                | NEW — landing client                                                                                                                                                                                                                                                                                                                       |
+| `ui-dashboard/src/app/cdps/[symbol]/page.tsx`                                                                                                                                                                | NEW — per-market entry                                                                                                                                                                                                                                                                                                                     |
+| `ui-dashboard/src/app/cdps/[symbol]/_components/cdp-market-client.tsx`                                                                                                                                       | NEW — per-market dashboard client                                                                                                                                                                                                                                                                                                          |
+| `ui-dashboard/src/app/cdps/{loading,error}.tsx`                                                                                                                                                              | NEW                                                                                                                                                                                                                                                                                                                                        |
+| `ui-dashboard/src/components/cdps/*`                                                                                                                                                                         | NEW — 13 components per B.3                                                                                                                                                                                                                                                                                                                |
+| `ui-dashboard/src/components/global-pools-table.tsx`                                                                                                                                                         | EDIT — swap RPC-probed `cdp` badge to `CdpPool` join                                                                                                                                                                                                                                                                                       |
+| `ui-dashboard/src/app/pool/[poolId]/_components/*`                                                                                                                                                           | EDIT — add "CDP Market" link tile for any pool with a CdpPool row                                                                                                                                                                                                                                                                          |
+| `ui-dashboard/src/app/layout.tsx` (or nav file)                                                                                                                                                              | EDIT — add "CDPs" nav entry                                                                                                                                                                                                                                                                                                                |
+| `ui-dashboard/src/app/revenue/_components/*`                                                                                                                                                                 | EDIT — wire `redemptionFeeCum` sum into "CDP Borrowing Fees" tile                                                                                                                                                                                                                                                                          |
+| `ui-dashboard/src/__tests__/dashboard-flows.test.ts`                                                                                                                                                         | EDIT — update existing CDP-related mocks that reference `stabilityPoolBalance` / `stabilityPoolTokenSymbol`                                                                                                                                                                                                                                |
 
 ## Existing utilities to reuse
 
@@ -1128,7 +1182,7 @@ End-to-end:
 
 1. **Indexer-local**: `pnpm indexer:dev` scoped to a Celo block range that includes the GBPm deployment block + at least one TroveOperation + one Liquidation + one Redemption. Hit local Hasura: `SELECT * FROM "LiquityCollateral"` (expect 3 rows), `SELECT * FROM "LiquityInstance"` (expect 3 rows), `SELECT * FROM "Trove" WHERE status='active' LIMIT 10`. Cross-check ICR values against Celoscan-decoded TroveUpdated logs.
 2. **Unit tests**: `pnpm --filter @mento-protocol/indexer-envio test` — Phase A.5 tests must pass.
-3. **TCR sanity check**: pick a recent TroveOperation tx; compute expected TCR from on-chain `TroveManager.getTCR(price)` view; compare to our derived `LiquityInstance.tcrBps`. Tolerance ±100 bps (interest accrual drift); investigate if larger.
+3. **TCR sanity check**: pick a recent TroveOperation tx; compute expected TCR from on-chain `TroveManager.getTCR(price)` view; compare to our derived `LiquityInstance.tcrBps` after applying interest accrual to the snapshot timestamp. Tolerance ±25 bps; investigate if larger.
 4. **Hasura prod**: post-deploy curl-verify each query before the UI relies on it:
    ```bash
    curl 'https://<endpoint>/v1/graphql' -H 'content-type: application/json' \
@@ -1137,7 +1191,7 @@ End-to-end:
    Also verify `LIQUITY_INSTANCE_SNAPSHOTS` paginates correctly under the 1000-row cap.
 5. **Browser** (chrome-devtools MCP): hit `/cdps`, then `/cdps/gbpm`, `/cdps/chfm`, `/cdps/jpym`. Assert KPI tiles render finite values, ICR chart loads, trove table sorts by ICR ascending, address-book labels render on the depositors list.
 6. **Cross-instance**: confirm the homepage `CDP strategy badge` swaps from RPC-probe to indexer query without behavior regression on existing CDP-backed pools.
-7. **Typecheck + lint**: `pnpm agent:quality-gate --run` and the mapped package checks. Re-run after merging if the dashboard diff touches react-doctor-gated files.
+7. **Typecheck + lint**: `pnpm agent:quality-gate --run` and the mapped package checks, plus `pnpm indexer:testnet:codegen` after adding testnet empty contract stubs. Re-run after merging if the dashboard diff touches react-doctor-gated files.
 8. **PR review**: ship via `/ship`; address human and automated review comments, and reply to every inline PR comment with the commit that fixed it or a technical won't-fix reason.
 
 ## Risks + things to verify before starting code
@@ -1145,14 +1199,14 @@ End-to-end:
 The bulk of the original risk list (event signature uncertainty, MCR view-call name, etc.) has been **resolved** by the verification pass against `@mento-protocol/contracts@0.8.0`. The remaining open risks:
 
 1. **Envio v3 multi-address subscription**. The plan registers three TroveManager addresses under a single contract name. Confirm Envio v3 dispatches each event with `event.srcAddress` populated so handlers can route per instance. If it doesn't, fall back to separate contract definitions per instance (more YAML, same semantics).
-2. **`AddressesRegistry` / `SystemParams` discovery accessors**. The implementation must not assume `AddressesRegistry.systemParams()` exists. Verify the deployed ABIs before using discovery calls; otherwise use the static per-market contract table in `shared-config/liquity.ts` for AddressesRegistry and SystemParams.
+2. **`AddressesRegistry` / `SystemParams` discovery accessors**. The implementation must not assume `AddressesRegistry.systemParams()` exists. Verify the deployed ABIs before using discovery calls; otherwise use the static per-market contract table in `indexer-envio/config/liquity.json` for AddressesRegistry and SystemParams.
 3. **`Trove.id` collision across CHFm/JPYm reusing the same troveId integer.** Liquity v2 emits `_troveId: uint256` per instance. Two instances can independently emit `_troveId=0`. The schema's `id` key uses `{chainId}-{troveManager}-{troveIdHex}` to disambiguate; verify the upstream subgraph's `troveFullId = collId + ":" + troveId.toHexString()` convention matches. Cross-instance NFT transfers are not possible (TroveNFT is per-instance) so the chain+troveManager+troveId triple is sound.
 4. **CDPLiquidityStrategy `params` tuple decoding**. The `PoolAdded(indexed address pool, tuple params)` event uses an inline-struct tuple and includes the debt token that identifies the CDP market. Envio codegen should handle this; if not, decode manually from `event.params.params` ABI. Verify shape by reading the contract source on Celoscan.
 5. **`previousOwner` initial value on Trove**. ERC721 mints fire `Transfer(0x0, owner, tokenId)`. The plan defaults `previousOwner = ZERO_ADDRESS` until a real transfer; the upstream subgraph schema is non-null so make sure our schema marks it `String!` with the ZERO_ADDRESS default rather than nullable.
 6. **Interest-bracket rate flooring precision**. Upstream floors at 3 decimals (0.1%). Implementations use D18 floor. Cross-check with a unit test against a known mainnet TroveOperation rate value to confirm bracket assignment.
 7. **`SP_YIELD_SPLIT` interpretation**. SystemParams returns this as uint256 — bps or fraction? Read the deployed value (likely 7500 = 75% if bps) before using.
 8. **Start-block discovery**. The TroveManager + StabilityPool deployment block must be set per-contract or backfill will scan from FPMM start (60664500), wasting time. Action: query Celoscan for the deploy tx of `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9` (GBPm TroveManager), `0x4E105FEF015db26320C077427BD605AceAd9262E` (CHFm), `0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df` (JPYm); use the min.
-9. **CDPLiquidityStrategy ↔ instance resolution**. `RedemptionShortfallSubsidized(pool, shortfall)` doesn't include the instance. The primary key is `CdpPool.collateralId` persisted at `PoolAdded` from `params.debtToken`; if historical ordering or a missing PoolAdded row leaves it absent, fall back to a `pool → collateralId` map in `shared-config/liquity.ts` and repair the row.
+9. **CDPLiquidityStrategy ↔ instance resolution**. `RedemptionShortfallSubsidized(pool, shortfall)` doesn't include the instance. The primary key is `CdpPool.collateralId` persisted at `PoolAdded` from `params.debtToken`; if historical ordering or a missing PoolAdded row leaves it absent, fall back to a `pool → collateralId` map in `indexer-envio/config/liquity.json` and repair the row.
 10. **Cross-handler bracket update race**. The same Trove can fire `TroveOperation` (state change) and `TroveUpdated` (new state) in the same tx. Both call `updateRateBracketDebt`. **Must apply only once** — pick `TroveUpdated` as the canonical "rate/debt changed" source and have `TroveOperation` skip bracket updates. Match upstream's pattern.
 
 ## What this plan does NOT include
@@ -1163,7 +1217,6 @@ The bulk of the original risk list (event signature uncertainty, MCR view-call n
 - A `RateFeed` entity to fix the Oracle Source heuristic (separate BACKLOG item).
 - The `mightBeLeveraged` heuristic via FlashLoan-log scanning (deferred per upstream-cross-check section).
 - StabilityPool internal accumulators (`P_Updated`, `S_Updated`, etc.) — defer until a use case needs accurate per-depositor pending-gains math.
-- ActivePool / DefaultPool event indexing — TroveManager events are sufficient; revisit if drift detection becomes a use case.
 - LQTY governance entities (`GovernanceVotingPower` etc.) — Mento doesn't ship them.
 - CollSurplusPool user-claim flow — not load-bearing for monitoring.
 - Streamlit / ClickHouse access (future).
