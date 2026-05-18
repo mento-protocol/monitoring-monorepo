@@ -512,6 +512,12 @@ export function TimeSeriesChartCard({
                     // flip past the opacity fade so the cross-fade still
                     // reads when leaving active.
                     visibility: active ? "visible" : "hidden",
+                    // Lift the active overlay above fading-out siblings so
+                    // its Plotly drag rect is the topmost hit target during
+                    // the 250ms fade — without this, the previously-active
+                    // overlay (still `visibility: visible` until the delayed
+                    // flip) can intercept hover and draw a stale label.
+                    zIndex: active ? 1 : 0,
                     transition: active
                       ? "opacity 250ms ease-out"
                       : "opacity 250ms ease-out, visibility 0s 250ms",
