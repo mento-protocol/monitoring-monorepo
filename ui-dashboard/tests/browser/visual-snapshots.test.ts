@@ -117,13 +117,16 @@ function timestampMasks(page: Page) {
     // Any element whose visible text contains "Xd/h/m/s ago" (oracle freshness,
     // LP position timestamps, etc.)
     page.locator(':text-matches("\\d+[smhd] ago")'),
-    // Swap row time cell: renders as "Xd ago" when pinned clock > real time, or
-    // as an absolute locale date (e.g. "5/19/2026, 12:12:36 AM") when the fixture
-    // timestamp is newer than the pinned browser clock (diff < 0 → formatTimestamp
-    // fallback in relativeTime()). The <td> element gets title={formatTimestamp(...)}
-    // so we match it by the fact that its title contains a localized date.
-    // Using :text-matches to catch both the "Xd ago" and absolute-date variants.
+    // Swap row time cell: renders as an absolute locale date (e.g.
+    // "5/19/2026, 12:12:36 AM") when the fixture timestamp is newer than the
+    // pinned browser clock (diff < 0 → formatTimestamp fallback in relativeTime).
+    // Match the <td> cell whose visible text contains a locale date pattern.
     page.locator(':text-matches("\\d{1,2}/\\d{1,2}/\\d{4}")'),
+    // Oracle freshness: "last <date> / 60m expiry" — the element with
+    // title="5/19/2026, 12:23:20 AM" (locale datetime). The HH:MM:SS changes
+    // every run and causes sub-pixel text shifts in surrounding characters.
+    // Match on the title attribute which always contains the AM/PM suffix.
+    page.locator('[title*="AM"], [title*="PM"]'),
   ];
 }
 
