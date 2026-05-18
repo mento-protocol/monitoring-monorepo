@@ -870,8 +870,8 @@
   {
     "file": "src/components/time-series-chart-card.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TimeSeriesChartCard' has too many lines (325). Maximum allowed is 100.",
-    "line": 156,
+    "message": "Function 'TimeSeriesChartCard' has too many lines (334). Maximum allowed is 100.",
+    "line": 129,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function TimeSeriesChartCard({ | title,"
   },
   {
