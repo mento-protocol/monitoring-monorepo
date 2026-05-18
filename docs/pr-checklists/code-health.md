@@ -25,7 +25,7 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | Gate                                 | Severity                        | What it catches                                                      | Fix                                                                                                                                                                                                   |
 | ------------------------------------ | ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dependency-cruiser` cross-pkg       | **error**                       | dashboard/indexer/bridge cross-imports, shared-config upward imports | Refactor through `shared-config`, or — if it's data-only — narrow the allow list with `pathNot`                                                                                                       |
-| `dependency-cruiser` cycles          | warn (baseline)                 | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                          |
+| `dependency-cruiser` cycles          | **error**                       | new circular deps anywhere                                           | Extract the shared piece into a third module                                                                                                                                                          |
 | `knip` files / deps / unlisted       | **error**                       | unused files, unused listed deps, imports of unlisted deps           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                 |
 | `knip` exports / types / enumMembers | warn                            | unused exports, types, enum entries                                  | Delete on touch; not auto-blocking                                                                                                                                                                    |
 | ESLint complexity budgets            | **error** (diff-aware baseline) | over-complex / long / nested / many-arg functions                    | Refactor; any new `(file, ruleId, message)` tuple not in `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline. |
@@ -156,9 +156,7 @@ hotspot/coupling delta to Slack.
 PR 6: continue chipping at the baseline files via cleanup PRs. The
 goal is `eslint-baseline.json` shrinking commit-by-commit until each
 package's file is empty (or removed) — at which point the rules behave
-as plain `error` with no baseline carve-out. Promote dep-cruiser cycles
-to `error` after the `indexer-envio/src/{pool,deviationBreach}.ts`
-cycle is broken.
+as plain `error` with no baseline carve-out.
 
 ## Decision log
 
@@ -168,6 +166,7 @@ cycle is broken.
   adding signal.
 - History report uses pure Node (no extra runtime deps) — spawns `git log`
   directly. Adding it doesn't grow the supply-chain surface.
-- The known cycle `indexer-envio/src/pool.ts ↔ src/deviationBreach.ts` is the
-  recorded warn-baseline. Breaking it requires extracting
-  `recordBreachTransition` into a third module; tracked in `BACKLOG.md`.
+- The historical `indexer-envio/src/pool.ts ↔ src/deviationBreach.ts`
+  cycle was broken by importing health predicates directly from
+  `pool/health.js` instead of through the `pool.js` barrel re-export.
+  `no-circular` is now `error` with no baseline carve-out.

@@ -36,7 +36,6 @@ the code-health history report, and `indexer-envio` `no-unsafe-*`. See
 the landed mechanism + severities.
 
 - [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
-- [ ] **PR 1 follow-up**: Break the circular import between `indexer-envio/src/pool.ts` and `indexer-envio/src/deviationBreach.ts` (probably by extracting `recordBreachTransition`). Once clean, promote `no-circular` from `warn` → `error` in `.dependency-cruiser.cjs`.
 
 ### Package-Manager Supply-Chain Hardening Review
 

@@ -17,9 +17,7 @@ module.exports = {
   forbidden: [
     {
       name: "no-circular",
-      // PR1 baseline records the known cycle indexer-envio/src/{pool,deviationBreach}.ts.
-      // Promote to "error" in a follow-up after that cycle is broken (BACKLOG.md).
-      severity: "warn",
+      severity: "error",
       comment:
         "Circular dependencies make refactors fragile and obscure init order. Break the cycle by extracting the shared piece.",
       from: {},
