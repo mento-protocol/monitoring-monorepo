@@ -14,6 +14,13 @@ import {
   aggregatorDailyTopQuery,
 } from "@/lib/queries/leaderboard";
 import {
+  AggregatorDailyTopSchema,
+  BrokerAggregatorDailyTopSchema,
+  BrokerTraderDailyTopSchema,
+  PoolsForLeaderboardSchema,
+  TraderDailyTopSchema,
+} from "@/lib/queries/leaderboard-schemas";
+import {
   LEADERBOARD_RANGES,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
@@ -88,11 +95,14 @@ export function LeaderboardClient() {
       isSystemAddressIn,
       limit: ENVIO_MAX_ROWS,
     },
+    undefined,
+    { schema: TraderDailyTopSchema },
   );
   const poolsResult = useGQL<{ Pool: PoolRow[] }>(
     venue === "v3" ? POOLS_FOR_LEADERBOARD : null,
     undefined,
     300_000, // pool metadata barely changes; refresh every 5 min
+    { schema: PoolsForLeaderboardSchema },
   );
 
   // Per-pool stacked chart data (v3-only). Separate from `TRADER_DAILY_TOP`
@@ -108,22 +118,29 @@ export function LeaderboardClient() {
     venue === "v3" ? aggregatorDailyTopQuery(showSystem) : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
     undefined,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: AggregatorDailyTopSchema },
   );
 
   const v2TradersResult = useGQL<{
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
-  }>(venue === "v2" ? BROKER_TRADER_DAILY_TOP : null, {
-    afterTimestamp: cutoff,
-    isSystemAddressIn,
-    limit: ENVIO_MAX_ROWS,
-  });
+  }>(
+    venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
+    {
+      afterTimestamp: cutoff,
+      isSystemAddressIn,
+      limit: ENVIO_MAX_ROWS,
+    },
+    undefined,
+    { schema: BrokerTraderDailyTopSchema },
+  );
   const v2AggregatorsResult = useGQL<{
     BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];
-  }>(venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null, {
-    afterTimestamp: cutoff,
-    limit: ENVIO_MAX_ROWS,
-  });
+  }>(
+    venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null,
+    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    undefined,
+    { schema: BrokerAggregatorDailyTopSchema },
+  );
 
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];

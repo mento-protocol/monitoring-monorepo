@@ -22,6 +22,7 @@ import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/leaderboard";
+import { TraderPoolDailyForTraderSchema } from "@/lib/queries/leaderboard-schemas";
 import { FlowBadge } from "./flow-badge";
 import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 import { SystemAddressChip } from "./system-address-chip";
@@ -204,6 +205,7 @@ function TraderRow({
       afterTimestamp: cutoff,
     },
     60_000,
+    { schema: TraderPoolDailyForTraderSchema },
   );
   const breakdownRows: TraderPoolWindowRow[] = useMemo(() => {
     if (!breakdown.data?.TraderPoolDailySnapshot) return [];

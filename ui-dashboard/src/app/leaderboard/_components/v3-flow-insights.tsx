@@ -32,6 +32,11 @@ import {
   TRADER_DAILY_WINDOW_TOP,
   TRADER_POOL_DAILY_TOP,
 } from "@/lib/queries/leaderboard";
+import {
+  SwapEventOutliersSchema,
+  TraderDailyWindowTopSchema,
+  TraderPoolDailyTopSchema,
+} from "@/lib/queries/leaderboard-schemas";
 import { networkForChainId } from "@/lib/networks";
 import { explorerTxUrl, poolName } from "@/lib/tokens";
 import type { PoolMeta } from "../_lib/types";
@@ -80,7 +85,7 @@ export function V3FlowInsights({
         }
       : undefined,
     60_000,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: TraderDailyWindowTopSchema },
   );
   const traderPoolResult = useGQL<{
     TraderPoolDailySnapshot: TraderPoolDailyRow[];
@@ -88,7 +93,7 @@ export function V3FlowInsights({
     TRADER_POOL_DAILY_TOP,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
     60_000,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: TraderPoolDailyTopSchema },
   );
   const swapOutliersResult = useGQL<{
     SwapEvent: SwapOutlierRow[];
@@ -96,7 +101,7 @@ export function V3FlowInsights({
     SWAP_EVENT_OUTLIERS,
     { afterTimestamp: cutoff, limit: SWAP_OUTLIER_FETCH_LIMIT },
     60_000,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: SwapEventOutliersSchema },
   );
 
   const allowedTraderDayKeys = useMemo(() => {

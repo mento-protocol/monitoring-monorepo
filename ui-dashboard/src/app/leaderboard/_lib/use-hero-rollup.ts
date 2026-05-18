@@ -15,6 +15,18 @@ import {
   LEADERBOARD_YESTERDAY_TRADERS,
 } from "@/lib/queries/leaderboard";
 import {
+  BrokerLeaderboardPartialOverlapTradersSchema,
+  BrokerLeaderboardTodayTradersSchema,
+  BrokerLeaderboardWindowFirstDayLatestSchema,
+  BrokerLeaderboardWindowLatestSchema,
+  BrokerLeaderboardYesterdayTradersSchema,
+  LeaderboardPartialOverlapTradersSchema,
+  LeaderboardTodayTradersSchema,
+  LeaderboardWindowFirstDayLatestSchema,
+  LeaderboardWindowLatestSchema,
+  LeaderboardYesterdayTradersSchema,
+} from "@/lib/queries/leaderboard-schemas";
+import {
   buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
   top10Concentration,
@@ -91,12 +103,22 @@ export function useHeroRollup({
   // added client-side.
   const heroV3Result = useGQL<{
     LeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, { windowKey: range });
+  }>(
+    venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null,
+    { windowKey: range },
+    undefined,
+    {
+      schema: LeaderboardWindowLatestSchema,
+    },
+  );
   const heroV2Result = useGQL<{
     BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null, {
-    windowKey: range,
-  });
+  }>(
+    venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null,
+    { windowKey: range },
+    undefined,
+    { schema: BrokerLeaderboardWindowLatestSchema },
+  );
 
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
   // yesterday, so today's TraderDailySnapshot rows fill in the gap.
@@ -108,16 +130,20 @@ export function useHeroRollup({
   );
   const todayV3Result = useGQL<{
     TraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null, {
-    todayMidnight,
-    isSystemAddressIn,
-  });
+  }>(
+    venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null,
+    { todayMidnight, isSystemAddressIn },
+    undefined,
+    { schema: LeaderboardTodayTradersSchema },
+  );
   const todayV2Result = useGQL<{
     BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null, {
-    todayMidnight,
-    isSystemAddressIn,
-  });
+  }>(
+    venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null,
+    { todayMidnight, isSystemAddressIn },
+    undefined,
+    { schema: BrokerLeaderboardTodayTradersSchema },
+  );
 
   const snapshotRows =
     venue === "v3"
@@ -135,14 +161,20 @@ export function useHeroRollup({
   // `mergeHeroSnapshot`.
   const heroFirstDayV3Result = useGQL<{
     LeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
-  }>(venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
-    windowKey: range,
-  });
+  }>(
+    venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null,
+    { windowKey: range },
+    undefined,
+    { schema: LeaderboardWindowFirstDayLatestSchema },
+  );
   const heroFirstDayV2Result = useGQL<{
     BrokerLeaderboardWindowSnapshot: LeaderboardWindowFirstDayRow[];
-  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null, {
-    windowKey: range,
-  });
+  }>(
+    venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null,
+    { windowKey: range },
+    undefined,
+    { schema: BrokerLeaderboardWindowFirstDayLatestSchema },
+  );
   const firstDayRows =
     venue === "v3"
       ? heroFirstDayV3Result.data?.LeaderboardWindowSnapshot
@@ -176,11 +208,9 @@ export function useHeroRollup({
     venue === "v3" && degradedChainsForGate.length > 0
       ? LEADERBOARD_YESTERDAY_TRADERS
       : null,
-    {
-      yesterdayMidnight,
-      isSystemAddressIn,
-      chainIdIn: degradedChainsForGate,
-    },
+    { yesterdayMidnight, isSystemAddressIn, chainIdIn: degradedChainsForGate },
+    undefined,
+    { schema: LeaderboardYesterdayTradersSchema },
   );
   const yesterdayV2Result = useGQL<{
     BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
@@ -188,11 +218,9 @@ export function useHeroRollup({
     venue === "v2" && degradedChainsForGate.length > 0
       ? BROKER_LEADERBOARD_YESTERDAY_TRADERS
       : null,
-    {
-      yesterdayMidnight,
-      isSystemAddressIn,
-      chainIdIn: degradedChainsForGate,
-    },
+    { yesterdayMidnight, isSystemAddressIn, chainIdIn: degradedChainsForGate },
+    undefined,
+    { schema: BrokerLeaderboardYesterdayTradersSchema },
   );
   const yesterdayPartialRows =
     venue === "v3"
@@ -228,7 +256,7 @@ export function useHeroRollup({
       : null,
     partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
     undefined,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: LeaderboardPartialOverlapTradersSchema },
   );
   const partialOverlapV2Result = useGQL<{
     BrokerTraderDailySnapshot: LeaderboardPartialOverlapRow[];
@@ -238,7 +266,7 @@ export function useHeroRollup({
       : null,
     partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
     undefined,
-    { timeoutMs: 8_000 },
+    { timeoutMs: 8_000, schema: BrokerLeaderboardPartialOverlapTradersSchema },
   );
   const partialOverlapRows =
     partialOverlapInput === null
