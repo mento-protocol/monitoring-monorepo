@@ -151,7 +151,13 @@ test.describe("visual snapshots", () => {
 
     await expect(page).toHaveScreenshot("pools-list.png", {
       maxDiffPixels: 100,
-      mask: timestampMasks(page),
+      // Mask timestamps AND the entire Recent Swaps section: the fixture server
+      // generates a fresh swap (with a new timestamp AND new amounts) on every
+      // server startup, so every cell in that table is volatile.
+      mask: [
+        ...timestampMasks(page),
+        page.getByRole("region", { name: "Recent Swaps" }),
+      ],
       fullPage: false,
     });
   });
