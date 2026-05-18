@@ -8,6 +8,7 @@ pnpm monorepo with three packages:
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 - `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
+- `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Agent, dashboards, and alert-rule Terraform
 
 ## Operating Rule (read this before opening PRs)
 
@@ -177,7 +178,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
 ratchet in over PR 2-6 of the BACKLOG plan.
 
-- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard` and `metrics-bridge` may import only from `shared-config` + externals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
+- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard`, `metrics-bridge`, and `aegis` must not import each other's internals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
 - **No circular dependencies (blocking)**: `pnpm code-health:deps` fails on any cycle. The historical `indexer-envio/src/{pool,deviationBreach}.ts` cycle was broken by importing health predicates directly from `pool/health.js`; no baseline carve-out remains.
 - **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
 - **Complexity / size / cognitive-complexity budgets (blocking, diff-aware baseline)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Pre-existing violations live in each package's `eslint-baseline.json`; new violations fail `pnpm --filter <pkg> lint` via `scripts/eslint-baseline-diff.mjs`. See `docs/pr-checklists/code-health.md`.
@@ -218,6 +219,16 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser  # Fixture-driven browse
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
+# Aegis
+pnpm aegis:dev                # Start the NestJS App Engine service locally
+pnpm aegis:build              # Build the Aegis service
+pnpm aegis:test               # Jest tests
+pnpm aegis:lint               # Trunk checks for Aegis
+pnpm aegis:deploy             # Deploy Aegis to App Engine in mento-prod
+pnpm aegis:logs               # Tail Aegis App Engine logs
+pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
+pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
+
 # Infrastructure (Terraform)
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
@@ -236,6 +247,16 @@ terraform plan  -var-file=/Users/chapati/code/mento/monitoring-monorepo/terrafor
 Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.
 
 ## Package Details
+
+### aegis
+
+- **Package:** `@mento-protocol/aegis`
+- **Runtime:** NestJS service deployed to GCP App Engine in `mento-prod` (`aegis/app.yaml`)
+- **Purpose:** Polls v2 on-chain contract state via RPC view calls and exposes Prometheus metrics at `/metrics`
+- **Grafana Agent:** `aegis/grafana-agent/` remains the App Engine service that scrapes Aegis and metrics-bridge, then remote-writes to Grafana Cloud
+- **Terraform:** `aegis/terraform/` owns the Aegis Grafana dashboards, folders, alert rules, Discord contact points, and Splunk On-Call routing. The backend remains `gs://mento-terraform-tfstate-6ed6/aegis`.
+- **Contracts:** `aegis/contracts/` uses Foundry with submodules under `aegis/lib/`; run `forge test` from `aegis/` when Solidity helpers change.
+- **Commands:** Use the root `pnpm aegis:*` scripts for build/dev/test/lint/deploy/logs/Terraform/Grafana Agent deploy.
 
 ### shared-config
 

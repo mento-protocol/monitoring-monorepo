@@ -105,7 +105,7 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
-- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (aegis repo, App Engine in `mento-prod`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-prod`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 - **Terraform module** `terraform/alerts/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`).
 - **Slack channels.** Severity-split: `#alerts-critical` (page-worthy) + `#alerts-warnings` (muted by default). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed.
 
@@ -170,8 +170,8 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 ### Infrastructure Backlog
 
-- [ ] **Merge Aegis into the monorepo** — pull `../aegis/` under `services/aegis/`, fold its Terraform into this repo's `terraform/` tree, retire the standalone repo once App Engine deploys run from monorepo CI
-- [ ] **Grafana Agent → Alloy migration** — Agent reached EOL 2025-11-01. Alloy is the OTel-collector successor. Run `alloy convert` against `../aegis/grafana-agent/agent.yaml.tmpl`, swap the App Engine image, verify scrape jobs still remote-write. Best sequenced _after_ Aegis merges into the monorepo so the Alloy config lives alongside the services it scrapes.
+- [x] **Merge Aegis into the monorepo** — top-level `aegis/` workspace package; App Engine deploy workflow, Grafana Agent, Discord/Splunk routing, and Terraform backend prefix preserved
+- [ ] **Grafana Agent → Alloy migration** — Agent reached EOL 2025-11-01. Alloy is the OTel-collector successor. Run `alloy convert` against `aegis/grafana-agent/agent.yaml.tmpl`, swap the App Engine image, verify scrape jobs still remote-write.
 
 ### Future
 
@@ -202,7 +202,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ┌───────────┐ ┌────────────────┐        ┌──────────────────────┐
 │ Next.js   │ │ metrics-bridge │        │  Grafana Agent       │
 │ Dashboard │ │ (Cloud Run,    │        │  (GCP App Engine,    │
-│ (Vercel)  │ │  mento-        │        │   aegis repo)        │
+│ (Vercel)  │ │  mento-        │        │   aegis/)            │
 │ monitoring│ │  monitoring    │        └──────────┬───────────┘
 │ .mento.org│ │  GCP project)  │                   │
 └───────────┘ └────────┬───────┘        remote_write (two scrape jobs)
@@ -249,9 +249,9 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | FX calendar         | `shared-config/fx-calendar.json`                                                 |
 | Technical spec      | `SPEC.md`                                                                        |
 | Deployment guide    | `docs/deployment.md`                                                             |
-| Aegis config        | `../aegis/config.yaml`                                                           |
-| Aegis alert rules   | `../aegis/terraform/grafana-alerts/`                                             |
-| Aegis dashboards    | `../aegis/terraform/grafana-dashboard/`                                          |
+| Aegis config        | `aegis/config.yaml`                                                              |
+| Aegis alert rules   | `aegis/terraform/grafana-alerts/`                                                |
+| Aegis dashboards    | `aegis/terraform/grafana-dashboard/`                                             |
 | v3 metrics bridge   | `metrics-bridge/`                                                                |
-| v3 agent scrape cfg | `../aegis/grafana-agent/agent.yaml.tmpl`                                         |
+| v3 agent scrape cfg | `aegis/grafana-agent/agent.yaml.tmpl`                                            |
 | v3 alert rules      | `terraform/alerts/`                                                              |

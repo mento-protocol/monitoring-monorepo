@@ -1,0 +1,114 @@
+# For shared local values that are used across multiple resources
+# See https://www.terraform.io/docs/language/values/locals.html
+locals {
+  chains = ["celo", "celo-sepolia"]
+
+  # Weekend-disabled feeds that don't receive updates during market closing hours
+  weekend_disabled_feeds = [
+    "PHPUSD",
+    "COPUSD",
+    "GHSUSD",
+    "CELOPHP",
+    "CELOCOP",
+    "CELOGHS",
+    "CELOXOF",
+    "EUROCXOF",
+    "EURXOF"
+  ]
+
+  # Create a regex pattern for the weekend-disabled feeds
+  weekend_disabled_feeds_pattern = join("|", local.weekend_disabled_feeds)
+
+  alert_types = {
+    oracle_stale_price = {
+      names = [
+        "Oldest Report Expired [Celo-Sepolia]",
+        "Oldest Report Expired [Celo]"
+      ],
+      title_template   = "discord.oracle_stale_price_alert_title",
+      message_template = "discord.oracle_stale_price_alert_message"
+    },
+    oracle_relayer_low_celo_balance = {
+      names = [
+        "Low CELO Balance [Celo-Sepolia]",
+        "Low CELO Balance [Celo]"
+      ],
+      title_template   = "discord.oracle_relayer_low_celo_balance_alert_title",
+      message_template = "discord.oracle_relayer_low_celo_balance_alert_message"
+    },
+    low_reserve_balance = {
+      names = [
+        "Low CELO Reserve Balance Alert",
+        "Low USDC Reserve Balance Alert",
+        "Low USDT Reserve Balance Alert",
+        "Low EUROC Reserve Balance Alert"
+      ],
+      title_template   = "discord.reserve_balance_alert_title",
+      message_template = "discord.reserve_balance_alert_message"
+    },
+    trading_halted = {
+      names = [
+        "Trading Mode Alert [Celo-Sepolia]",
+        "Trading Mode Alert [Celo]"
+      ],
+      title_template   = "discord.trading_mode_alert_title",
+      message_template = "discord.trading_mode_alert_message"
+    },
+    aegis_service_issues = {
+      names = [
+        "Number of failed rpc calls",
+        "Aegis does not report new data"
+      ],
+      title_template   = "discord.aegis_service_alert_title",
+      message_template = "discord.aegis_service_alert_message"
+    },
+    trading_limits = {
+      names = [
+        "L0 Trading Limit Alert [Celo]",
+        "L1 Trading Limit Alert [Celo]",
+        "LG Trading Limit Alert [Celo]"
+      ],
+      title_template   = "discord.trading_limits_alert_title",
+      message_template = "discord.trading_limits_alert_message"
+    }
+  }
+  alert_config = {
+    title = <<EOT
+    {{ $alertName := .CommonLabels.alertname }}
+    %{for alert_type, config in local.alert_types~}
+    %{for index, name in config.names~}
+    %{if index == 0 && alert_type == keys(local.alert_types)[0]~}
+    {{ if eq $alertName "${name}" }}
+    %{else~}
+    {{ else if eq $alertName "${name}" }}
+    %{endif~}
+    {{ template "${config.title_template}" . }}
+    %{endfor~}
+    %{endfor~}
+    {{ else }}
+    {{ $alertName }}
+    {{ .CommonLabels }}
+    {{ end }}
+    EOT
+
+    message = <<EOT
+    {{ $alertName := .CommonLabels.alertname }}
+    %{for alert_type, config in local.alert_types~}
+    %{for index, name in config.names~}
+    %{if index == 0 && alert_type == keys(local.alert_types)[0]~}
+    {{ if (eq $alertName "${name}") }}
+    %{else~}
+    {{ else if (eq $alertName "${name}") }}
+    %{endif~}
+    {{ template "${config.message_template}" . }}
+    %{endfor~}
+    %{endfor~}
+    {{ else if (eq $alertName "DatasourceError") }}
+    The Grafana alert query might be broken. Please check the alert configuration.
+    {{ else }}
+    {{ $alertName}}
+    {{ .CommonLabels }}
+    {{ end }}
+    EOT
+  }
+}

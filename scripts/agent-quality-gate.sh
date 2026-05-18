@@ -450,6 +450,17 @@ add_bridge_mutation_baseline() {
   add_command "pnpm bridge:mutation" "$reason"
 }
 
+add_aegis_quality_commands() {
+  local reason="$1"
+  add_command "pnpm --filter @mento-protocol/aegis typecheck" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis build" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis lint" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis test" "$reason"
+  add_command "cd aegis && forge test" "$reason"
+  add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
+  add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
+}
+
 add_indexer_mutation_baseline() {
   local reason="$1"
   add_command "pnpm indexer:mutation" "$reason"
@@ -471,6 +482,7 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
+  add_aegis_quality_commands "$reason"
 }
 
 add_agent_quality_gate_package_script_checks() {
@@ -775,6 +787,25 @@ while IFS= read -r path; do
       esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
+    aegis/*)
+      add_surface "aegis"
+      case "$path" in
+        aegis/src/*|aegis/config.yaml|aegis/app.yaml|aegis/contracts/*|aegis/foundry.toml|aegis/foundry.lock|aegis/package.json|aegis/tsconfig*.json|aegis/nest-cli.json)
+          add_aegis_quality_commands "aegis changed"
+          ;;
+        aegis/terraform/*)
+          add_terraform_validate_commands "aegis/terraform" "Aegis Terraform changed"
+          add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Aegis Terraform/deploy-adjacent path changed"
+          ;;
+        aegis/grafana-agent/*|aegis/bin/*)
+          add_aegis_quality_commands "aegis runtime/deploy path changed"
+          add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Aegis deploy path changed"
+          ;;
+        aegis/lib/*)
+          add_command "cd aegis && forge test" "Aegis Foundry dependency changed"
+          ;;
+      esac
+      ;;
     shared-config/*)
       add_surface "shared-config"
       add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
@@ -799,6 +830,9 @@ while IFS= read -r path; do
           ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
+          ;;
+        .github/workflows/aegis-app-engine.yml)
+          add_aegis_quality_commands "Aegis App Engine workflow changed"
           ;;
         .github/actions/pnpm-install/*)
           add_surface "workspace"

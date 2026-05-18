@@ -123,8 +123,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 
 ## Backlog — Infrastructure
 
-- [ ] **Migrate Aegis into the monorepo** — Aegis (v2 alerting NestJS service + Grafana alert rules + dashboards) lives in a sibling repo today (`../aegis/`). Merging it into `monitoring-monorepo` removes cross-repo coordination for scrape-config edits, unifies the Terraform state layout (Aegis TF already shares `clabsmento.grafana.net` with `terraform/alerts/`), and lets `shared-config/` be a first-class dependency rather than a published package. Plan: pull `aegis/` under `services/aegis/`, fold `aegis/terraform/grafana-alerts` + `grafana-dashboard` into this repo's `terraform/` module tree, keep `aegis/grafana-agent/` until the Alloy migration (see below), and retire the aegis repo once App Engine deploys run from monorepo CI.
-- [ ] **Grafana Agent → Grafana Alloy migration** — Grafana Agent reached EOL on 2025-11-01 and is already deprecated; Grafana Alloy is the OTel-collector-based successor. Today the Agent runs on App Engine in `mento-prod` (config at `../aegis/grafana-agent/agent.yaml.tmpl`) scraping both Aegis `/metrics` and metrics-bridge `/metrics`. Path: run `alloy convert` against `agent.yaml.tmpl`, swap the App Engine service image, verify both scrape jobs still remote-write to Grafana Cloud, then delete the agent config. Best sequenced _after_ the Aegis monorepo merge so the Alloy config lives alongside the services it scrapes. Refs: <https://grafana.com/blog/2024/04/09/grafana-agent-to-grafana-alloy-opentelemetry-collector-faq/>, <https://grafana.com/docs/alloy/latest/set-up/migrate/>
+- [ ] **Grafana Agent → Grafana Alloy migration** — Grafana Agent reached EOL on 2025-11-01 and is already deprecated; Grafana Alloy is the OTel-collector-based successor. Today the Agent runs on App Engine in `mento-prod` (config at `aegis/grafana-agent/agent.yaml.tmpl`) scraping both Aegis `/metrics` and metrics-bridge `/metrics`. Path: run `alloy convert` against `agent.yaml.tmpl`, swap the App Engine service image, verify both scrape jobs still remote-write to Grafana Cloud, then delete the agent config. Refs: <https://grafana.com/blog/2024/04/09/grafana-agent-to-grafana-alloy-opentelemetry-collector-faq/>, <https://grafana.com/docs/alloy/latest/set-up/migrate/>
 
 ## Backlog — Future
 
@@ -243,6 +242,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 
 - [x] Aegis NestJS service on GCP App Engine — polls v2 contract state via RPC
 - [x] Grafana Agent on GCP → pushes Prometheus metrics to Grafana Cloud
+- [x] **Migrate Aegis into the monorepo** — top-level `aegis/` workspace package, App Engine deploy workflow, existing Grafana Agent and `aegis` Terraform backend preserved
 - [x] Grafana dashboard: "Aegis — On-chain Metrics"
 - [x] Alert rules: oracle relayers (stale feeds, low CELO balance)
 - [x] Alert rules: reserve balances (low USDC/USDT/axlUSDC)

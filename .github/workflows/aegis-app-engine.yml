@@ -1,0 +1,59 @@
+name: Aegis App Engine
+
+# Deploy-only workflow. Quality checks live in .github/workflows/ci.yml under
+# the `aegis` job and are gated by the required `CI / ci` check on main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - aegis/**
+      - .node-version
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
+      - package.json
+      - .github/workflows/aegis-app-engine.yml
+      - .github/actions/pnpm-install/**
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+  deploy:
+    name: Deploy (aegis)
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://mento-prod.uc.r.appspot.com
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/pnpm-install
+
+      - name: Build
+        run: pnpm aegis:build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Deploy to App Engine
+        run: pnpm aegis:deploy
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()

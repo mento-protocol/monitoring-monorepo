@@ -5,7 +5,7 @@
   "minLines": 5,
   "mode": "strict",
   "format": ["typescript", "tsx", "javascript", "jsx"],
-  "pattern": "{shared-config,ui-dashboard,indexer-envio,metrics-bridge}/src/**/*.{ts,tsx,js,jsx}",
+  "pattern": "{shared-config,ui-dashboard,indexer-envio,metrics-bridge,aegis}/src/**/*.{ts,tsx,js,jsx}",
   "ignore": [
     "**/node_modules/**",
     "**/.next/**",
