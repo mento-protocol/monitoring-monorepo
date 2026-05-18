@@ -79,8 +79,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
-- [ ] Split `ui-dashboard/src/components/global-pools-table.tsx`'s `GlobalPoolsTable` component to remove the scoped `max-lines-per-function` disable added while fixing the Clawpatch health-badge a11y finding.
-- [ ] Extract the row renderer in `ui-dashboard/src/components/global-pools-table.tsx` to remove the scoped `max-lines-per-function` disable on `sortedEntries.map(...)`.
 - [ ] Split `indexer-envio/src/leaderboardSnapshots.ts`'s `applyLeaderboardSnapshots` rollup writer to remove the scoped `max-lines-per-function` disable added while fixing dropped-swap heartbeat flushing.
 
 ## Envio v3 Migration Follow-Ups
