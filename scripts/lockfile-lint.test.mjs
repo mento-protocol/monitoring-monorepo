@@ -369,11 +369,11 @@ test("passes when packages: contains a local file: dependency without integrity"
   );
 });
 
-// 19. (cursor Medium) If a future pnpm v9.x point-release changes the
-// on-disk shape such that the regex matches zero entries, the script
-// must fail loudly — not silently pass with "All 0 packages have valid
-// sha512 integrity". Synthesize a packages: section with a non-empty
-// body that the current parser can't recognize.
+// 19. If a future pnpm v9.x point-release changes the on-disk shape
+// such that the regex matches zero entries, the script must fail
+// loudly — not silently pass with "All 0 packages have valid sha512
+// integrity". Synthesize a packages: section with a non-empty body
+// that the current parser can't recognize.
 test("fails loudly when the parser matches zero entries against a non-empty packages: section", () => {
   // Replace the `<name>@<ver>:` key shape with a future hypothetical that
   // doesn't include `@` — current regex won't match, totalEntries=0.
