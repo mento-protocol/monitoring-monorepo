@@ -1,12 +1,5 @@
 "use client";
 
-// File-level: TimeSeriesChartCard + its inner useMemo are intentionally over
-// the `max-lines-per-function` budget pending the BACKLOG architecture split
-// (already inline-disabled for `react-doctor/no-giant-component` below) —
-// the merge-base baseline embeds line counts in its messages, blocking
-// strict shrinks from passing CI.
-/* eslint-disable max-lines-per-function */
-
 import dynamic from "next/dynamic";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -131,7 +124,11 @@ interface TimeSeriesChartCardProps {
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
 // builder + range picker are tightly coupled to Plotly layout state. Revisit
-// only with a focused chart-component split.
+// only with a focused chart-component split. Same rationale silences
+// `max-lines-per-function` on this function + its inner useMemo (the
+// merge-base baseline embeds line counts in its messages, which would
+// otherwise flag every size change as a new violation).
+/* eslint-disable max-lines-per-function */
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function TimeSeriesChartCard({
   title,
@@ -575,3 +572,4 @@ export function TimeSeriesChartCard({
     </section>
   );
 }
+/* eslint-enable max-lines-per-function */
