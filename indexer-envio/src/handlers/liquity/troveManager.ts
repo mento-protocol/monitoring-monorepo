@@ -60,10 +60,7 @@ type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
     get: (id: string) => Promise<unknown>;
   };
   PendingBatchedTroveUpdate: {
-    getWhere: (args: {
-      txHash: { _eq: string };
-      batchManager: { _eq: string };
-    }) => Promise<
+    getWhere: (args: { txHash: { _eq: string } }) => Promise<
       Array<{
         collateralId: string;
         batchManager: string;
@@ -98,7 +95,6 @@ async function preloadBatchReplay(args: {
 }): Promise<void> {
   const pendingRows = await args.context.PendingBatchedTroveUpdate.getWhere({
     txHash: { _eq: args.txHash },
-    batchManager: { _eq: args.batchManager },
   });
   const relevantRows = pendingRows.filter(
     (pending) =>
@@ -478,7 +474,6 @@ indexer.onEvent(
 
     const pendingRows = await context.PendingBatchedTroveUpdate.getWhere({
       txHash: { _eq: event.transaction.hash },
-      batchManager: { _eq: batchManager },
     });
     const collateral = await getOrLoadSystemParams(
       context,

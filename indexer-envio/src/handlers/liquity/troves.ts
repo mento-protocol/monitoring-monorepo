@@ -269,10 +269,7 @@ type ReclassifyTrovesContext = {
   };
   Trove: {
     set: (entity: Trove) => void;
-    getWhere: (args: {
-      collateralId: { _eq: string };
-      status: { _eq: string };
-    }) => Promise<Trove[]>;
+    getWhere: (args: { collateralId: { _eq: string } }) => Promise<Trove[]>;
   };
 };
 
@@ -288,12 +285,12 @@ export async function reclassifyTrovesForLoadedParams(
     instance.spHeadroom === -1n
       ? { ...instance, spHeadroom: instance.spDeposits - minBoldInSp }
       : instance;
+  const troves = await context.Trove.getWhere({
+    collateralId: { _eq: collateralId },
+  });
   for (const status of [TROVE_STATUS.ACTIVE, TROVE_STATUS.ZOMBIE]) {
-    const troves = await context.Trove.getWhere({
-      collateralId: { _eq: collateralId },
-      status: { _eq: status },
-    });
     for (const trove of troves) {
+      if (trove.status !== status) continue;
       const nextStatus = statusFromDebt(trove.debt, minDebt);
       const transitioned = transitionTroveStatus(
         trove,

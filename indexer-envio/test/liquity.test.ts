@@ -228,15 +228,12 @@ describe("Liquity CDP helpers", () => {
       },
       Trove: {
         set: (entity: typeof baseTrove) => troves.set(entity.id, entity),
-        getWhere: async (args: {
-          collateralId: { _eq: string };
-          status: { _eq: string };
-        }) =>
-          [...troves.values()].filter(
-            (trove) =>
-              trove.collateralId === args.collateralId._eq &&
-              trove.status === args.status._eq,
-          ),
+        getWhere: async (args: { collateralId: { _eq: string } }) => {
+          assert.deepEqual(Object.keys(args), ["collateralId"]);
+          return [...troves.values()].filter(
+            (trove) => trove.collateralId === args.collateralId._eq,
+          );
+        },
       },
     };
 

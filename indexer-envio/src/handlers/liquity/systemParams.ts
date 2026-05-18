@@ -93,10 +93,7 @@ type SystemParamsContext = {
   Trove: {
     get: (id: string) => Promise<Trove | undefined>;
     set: (entity: Trove) => void;
-    getWhere: (args: {
-      collateralId: { _eq: string };
-      status: { _eq: string };
-    }) => Promise<Trove[]>;
+    getWhere: (args: { collateralId: { _eq: string } }) => Promise<Trove[]>;
   };
 };
 
