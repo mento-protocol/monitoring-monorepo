@@ -21,7 +21,6 @@ interface OracleChartProps {
   breachStartedAt?: string | null;
 }
 
-/* eslint-disable max-lines-per-function -- Existing Plotly component is baseline-large; this PR only fixes non-finite hover text. */
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -30,15 +29,58 @@ export function OracleChart({
 }: OracleChartProps) {
   if (snapshots.length === 0) return null;
 
-  const isSparse = snapshots.length < 20;
+  const plotData = buildOraclePlotData({
+    snapshots,
+    token0Symbol,
+    token1Symbol,
+  });
+  const shapes = buildOracleShapes(breachStartedAt);
+  const layout = buildOracleLayout({
+    shapes,
+    xaxis: buildOracleXaxis(plotData.timestamps, plotData.isSparse),
+  });
 
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
+      <h3 className="text-sm font-medium text-slate-400 mb-3">
+        Oracle Price History &amp; Deviation Health
+      </h3>
+      <OracleChartLegend breachStartedAt={breachStartedAt} />
+      <Plot
+        data={[plotData.priceTrace, plotData.deviationTrace]}
+        layout={layout}
+        config={PLOTLY_CONFIG}
+        style={{ width: "100%", height: 420 }}
+        useResizeHandler
+      />
+    </div>
+  );
+}
+
+interface OraclePlotData {
+  priceTrace: Record<string, unknown>;
+  deviationTrace: Record<string, unknown>;
+  timestamps: string[];
+  isSparse: boolean;
+}
+
+function buildOraclePlotData({
+  snapshots,
+  token0Symbol,
+  token1Symbol,
+}: {
+  snapshots: OracleSnapshot[];
+  token0Symbol: string;
+  token1Symbol: string;
+}): OraclePlotData {
+  const isSparse = snapshots.length < 20;
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
 
   // Normalise oracle price to human-readable float in pool direction (token0→token1)
   const prices = snapshots.map((s) =>
-    parseOraclePriceToNumber(s.oraclePrice ?? null, token0Symbol ?? ""),
+    parseOraclePriceToNumber(s.oraclePrice ?? null, token0Symbol),
   );
 
   // Deviation % of rebalance threshold. `hasHealthData=false` rows have a
@@ -52,20 +94,19 @@ export function OracleChart({
     return threshold > 0 ? (Number(s.priceDifference) / threshold) * 100 : 0;
   });
 
-  // Per-point marker colours based on oracleOk
   const markerColors = snapshots.map((s) =>
     s.oracleOk ? "#22c55e" : "#ef4444",
   );
 
-  const hoverText = snapshots.map((s, i) => {
-    return formatOracleChartHoverText({
+  const hoverText = snapshots.map((s, i) =>
+    formatOracleChartHoverText({
       snapshot: s,
       price: prices[i],
       deviation: deviations[i],
       token0Symbol,
       token1Symbol,
-    });
-  });
+    }),
+  );
 
   const traceMode = isSparse
     ? ("markers" as const)
@@ -96,7 +137,13 @@ export function OracleChart({
     hoverinfo: "skip" as const,
   };
 
-  // Background health bands on y2 axis
+  return { priceTrace, deviationTrace, timestamps, isSparse };
+}
+
+function buildOracleShapes(
+  breachStartedAt: string | null | undefined,
+): Plotly.Layout["shapes"] {
+  // Background health bands on y2 axis (green/yellow/red) + rebalance trigger line at 100%
   const shapes: Plotly.Layout["shapes"] = [
     {
       type: "rect",
@@ -137,7 +184,6 @@ export function OracleChart({
       line: { width: 0 },
       layer: "below",
     },
-    // Rebalance trigger threshold line at 100%
     {
       type: "line",
       xref: "paper",
@@ -151,7 +197,6 @@ export function OracleChart({
     },
   ];
 
-  // Breach-start vertical marker
   if (breachStartedAt && Number(breachStartedAt) > 0) {
     const breachIso = new Date(Number(breachStartedAt) * 1000).toISOString();
     shapes.push({
@@ -167,7 +212,11 @@ export function OracleChart({
     });
   }
 
-  // Auto-zoom to data range when sparse — avoids tiny dots in vast empty chart
+  return shapes;
+}
+
+function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
+  // Auto-zoom to data range when sparse — avoids tiny dots in a vast empty chart
   const xaxisBase = makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY);
   if (isSparse && timestamps.length >= 2) {
     const minTs = new Date(timestamps[0]).getTime();
@@ -179,11 +228,20 @@ export function OracleChart({
     ];
     xaxisBase.autorange = false;
   }
+  return xaxisBase;
+}
 
-  const layout = {
+function buildOracleLayout({
+  shapes,
+  xaxis,
+}: {
+  shapes: Plotly.Layout["shapes"];
+  xaxis: ReturnType<typeof buildOracleXaxis>;
+}) {
+  return {
     ...PLOTLY_BASE_LAYOUT,
     shapes,
-    xaxis: xaxisBase,
+    xaxis,
     yaxis: {
       title: { text: "Price", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
@@ -210,55 +268,48 @@ export function OracleChart({
     autosize: true,
     dragmode: "pan" as const,
   };
+}
 
+function OracleChartLegend({
+  breachStartedAt,
+}: {
+  breachStartedAt: string | null | undefined;
+}) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
-      <h3 className="text-sm font-medium text-slate-400 mb-3">
-        Oracle Price History &amp; Deviation Health
-      </h3>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/40" />
+        Healthy
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-yellow-500/20 border border-yellow-500/40" />
+        Warning
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500/20 border border-red-500/40" />
+        Critical
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+        OK
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+        Expired
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-4 border-t-2 border-dashed border-red-500" />
+        Threshold
+      </span>
+      {breachStartedAt && Number(breachStartedAt) > 0 && (
         <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/40" />
-          Healthy
+          <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
+          Breach start
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-yellow-500/20 border border-yellow-500/40" />
-          Warning
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500/20 border border-red-500/40" />
-          Critical
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-          OK
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-          Expired
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-4 border-t-2 border-dashed border-red-500" />
-          Threshold
-        </span>
-        {breachStartedAt && Number(breachStartedAt) > 0 && (
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-            Breach start
-          </span>
-        )}
-      </div>
-      <Plot
-        data={[priceTrace, deviationTrace]}
-        layout={layout}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 420 }}
-        useResizeHandler
-      />
+      )}
     </div>
   );
 }
-/* eslint-enable max-lines-per-function */
 
 export function formatOracleChartHoverText({
   snapshot,
