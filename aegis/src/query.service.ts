@@ -99,11 +99,12 @@ export class QueryService {
         functionName,
         args,
       });
-      timer({ status: 'success' });
       if (!functionName) {
         throw new Error(`Missing function name for metric ${metric.name}`);
       }
-      return metric.parse(data, contractName, functionName);
+      const value = metric.parse(data, contractName, functionName);
+      timer({ status: 'success' });
+      return value;
     } catch (e) {
       // TODO: Add error handling
       this.logger.error(e);
