@@ -474,6 +474,13 @@ add_workspace_quality_commands() {
   # `add_dashboard_quality_commands` from the per-package dispatch below.
   add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
   add_ui_react_doctor_full_score "$reason"
+  # Bundle size budget mirrors the workspace-wide CI gate in
+  # `.github/workflows/size-limit.yml` — root package-manager files
+  # (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`,
+  # `.node-version`) appear in that workflow's filter because dep/runtime
+  # changes can alter the emitted JS/CSS. Codex P2 review on PR #446
+  # caught the local gate diverging from CI here.
+  add_ui_size_limit "$reason"
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
@@ -804,6 +811,11 @@ while IFS= read -r path; do
       add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
       add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
       add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
+      # shared-config is imported into the dashboard client bundle via
+      # `@mento-protocol/monitoring-config` — changes to chain/token
+      # metadata or helpers can shift the emitted JS. Mirrors the
+      # `shared-config/**` entry in `.github/workflows/size-limit.yml`.
+      add_ui_size_limit "shared-config exports feed the dashboard bundle"
       case "$path" in
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
           add_all_indexer_codegen "shared-config vendored indexer fixture changed"
