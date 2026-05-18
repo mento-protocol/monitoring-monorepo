@@ -13,6 +13,7 @@ import type { EvmOnEventContext, Pool, BreakerConfig } from "envio";
 // that import from "./rpc.js" continue to work after the split.
 export {
   getRpcClient,
+  getFallbackRpcClient,
   withHyperRpcToken,
   _clearRpcClients,
   _setRpcClientForTests,

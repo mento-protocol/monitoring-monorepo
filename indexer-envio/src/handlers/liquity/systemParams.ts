@@ -1,7 +1,10 @@
 import type { LiquityCollateral } from "envio";
 import systemParamsAbi from "../../../abis/liquity/SystemParams.json" with { type: "json" };
-import { getFallbackRpcClient, getRpcClient } from "../../rpc/client.js";
-import { readContractWithBlockFallback } from "../../rpc/block-fallback.js";
+import {
+  getFallbackRpcClient,
+  getRpcClient,
+  readContractWithBlockFallback,
+} from "../../rpc.js";
 import type { LiquityMarketConfig } from "./config.js";
 import { makeCollateralId } from "./config.js";
 import { makeLiquityCollateral } from "./bootstrap.js";
