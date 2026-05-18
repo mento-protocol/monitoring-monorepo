@@ -182,9 +182,10 @@ describe("PoolDetailWithHealthSchema", () => {
   });
 
   it("preserves token decimals through the schema (no silent strip)", () => {
-    // Regression for claude[bot] P0: token0Decimals/token1Decimals were not
-    // declared in the schema, so Zod stripped them from the parsed output
-    // even though POOL_DETAIL_WITH_HEALTH queries them.
+    // POOL_DETAIL_WITH_HEALTH queries token0Decimals/token1Decimals; both must
+    // round-trip through the schema since the USD math and `tokenDecimalsKnown`
+    // trust gate depend on them. If they're ever dropped from the row schema,
+    // Zod will silently strip them and this test catches it.
     const row = { ...minimalRow, token0Decimals: 18, token1Decimals: 6 };
     const result = PoolDetailWithHealthSchema.safeParse({ Pool: [row] });
     expect(result.success).toBe(true);

@@ -191,10 +191,13 @@ describe("rateLimitAwareRetry", () => {
     expect(revalidate).toHaveBeenCalled();
   });
 
-  it("does not retry GraphQLSchemaError (deterministic failure)", () => {
-    // Schema-drift errors are deterministic — retrying the same request will
-    // hit the same parse failure. The retry handler must short-circuit so we
-    // don't burn Hasura quota or spam Sentry on every poll cycle.
+  it("schedules a 60s recovery probe for GraphQLSchemaError (no quota burn, no permanent wedge)", () => {
+    // Schema-drift errors are deterministic for a given response shape, so
+    // SWR's default exponential backoff would burn Hasura quota during a
+    // sustained drift. But SWR's polling loop also skips revalidation while
+    // `cache.error` is set — without a scheduled retry, the hook stays stuck
+    // until remount/manual mutate even after the indexer heals. 60s probe
+    // threads the needle.
     const revalidate = vi.fn();
     rateLimitAwareRetry(
       new GraphQLSchemaError([], "TestQuery"),
@@ -203,8 +206,11 @@ describe("rateLimitAwareRetry", () => {
       revalidate,
       { retryCount: 0, dedupe: true },
     );
-    vi.runAllTimers();
     expect(revalidate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(59_999);
+    expect(revalidate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
   });
 
   it("respects an explicit errorRetryCount cap for non-429", () => {

@@ -10,6 +10,17 @@ import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 const RATE_LIMIT_BACKOFF_MS = 60_000;
 const RATE_LIMIT_BACKOFF_MAX_MS = 5 * 60_000;
 
+// Schema-drift recovery cadence. Schema validation failures are deterministic
+// for a given response shape, so we don't want SWR's default exponential
+// backoff burning Hasura quota during a multi-minute resync window. But once
+// the indexer redeploys and Hasura starts returning the expected shape, the
+// hook needs to recover automatically — SWR's polling loop skips revalidation
+// while `cache.error` is set, so without a scheduled retry the page would
+// stay stuck in the error state until remount or manual mutate. 60s recovery
+// cadence: long enough to avoid quota burn, short enough that the heal
+// window after a deploy is invisible to users.
+const SCHEMA_ERROR_BACKOFF_MS = 60_000;
+
 function clampBackoff(ms: number): number {
   return Math.min(
     Math.max(ms, RATE_LIMIT_BACKOFF_MS),
@@ -115,12 +126,18 @@ function scheduleWhenActive(
 export const rateLimitAwareRetry: NonNullable<
   SWRConfiguration["onErrorRetry"]
 > = (err, _key, config, revalidate, opts) => {
-  // Schema-validation failures are deterministic: the response shape doesn't
-  // match what the schema expects, and retrying the same request will hit the
-  // same failure. Surface the error once and let the next normal refresh (or
-  // manual `mutate`) decide when to retry — otherwise we burn Hasura quota
-  // and spam Sentry on every poll cycle during a schema-drift incident.
-  if (err instanceof GraphQLSchemaError) return;
+  // Schema-validation failures are deterministic: retrying the same request
+  // hits the same parse failure until the underlying schema heals (typically
+  // an indexer redeploy + resync). Replace SWR's default exponential backoff
+  // with a low-frequency recovery probe so we (a) don't burn Hasura quota
+  // while a drift is sustained, and (b) DO unstick the hook once the indexer
+  // catches up — SWR's polling loop skips revalidation while `cache.error` is
+  // set, so an unconditional early-return here would leave the page errored
+  // until remount/manual mutate.
+  if (err instanceof GraphQLSchemaError) {
+    scheduleWhenActive(revalidate, opts, SCHEMA_ERROR_BACKOFF_MS);
+    return;
+  }
   const backoff = retryAfterMs(err);
   if (backoff !== null) {
     scheduleWhenActive(revalidate, opts, backoff);
