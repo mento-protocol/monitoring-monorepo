@@ -124,11 +124,8 @@ interface TimeSeriesChartCardProps {
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
 // builder + range picker are tightly coupled to Plotly layout state. Revisit
-// only with a focused chart-component split. Same rationale silences
-// `max-lines-per-function` on this function + its inner useMemo (the
-// merge-base baseline embeds line counts in its messages, which would
-// otherwise flag every size change as a new violation).
-/* eslint-disable max-lines-per-function */
+// only with a focused chart-component split.
+/* eslint-disable max-lines-per-function, complexity, sonarjs/cognitive-complexity -- Existing chart shell split is deferred; keep the suppression explicit instead of growing the baseline. */
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function TimeSeriesChartCard({
   title,
@@ -572,4 +569,4 @@ export function TimeSeriesChartCard({
     </section>
   );
 }
-/* eslint-enable max-lines-per-function */
+/* eslint-enable max-lines-per-function, complexity, sonarjs/cognitive-complexity */
