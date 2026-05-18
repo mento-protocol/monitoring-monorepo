@@ -59,8 +59,12 @@ targeted review, not a blind pnpm major bump.
 - [ ] Evaluate whether an external package firewall or advisory service
       (Socket, Snyk, or equivalent) adds real signal beyond current pnpm audit
       without turning every lockfile refresh into noise.
-- [ ] Produce a short recommendation PR: either implement the low-noise hardening
+- [x] Produce a short recommendation PR: either implement the low-noise hardening
       directly, or document why the existing controls are sufficient for now.
+      → Done: `scripts/lockfile-lint.mjs` + `supply-chain.yml` lockfile-lint job.
+      Validates sha512 integrity on all lockfile packages + blocks custom registry
+      overrides. Note: `lockfile-lint` npm package doesn't support pnpm v9 format
+      (no `resolved:` URLs); check is a custom zero-dep Node.js script instead.
 
 Acceptance: any implementation must preserve CI stability, keep frozen-lockfile
 installs fast, and include a rollback path. Reject pnpm 11 or third-party

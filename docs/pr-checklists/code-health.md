@@ -37,6 +37,7 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | `@typescript-eslint/switch-exhaustiveness-check` | **error**                       | switch on enum/union missing a case (even when there's a `default:`) | Add an explicit `case "X":` branch for the missing union member; the default is fine but the rule wants intent                                                                                        |
 | `noUncheckedIndexedAccess` (tsconfig)            | **error** (3/4 packages)        | `arr[i]` assumed defined when it could be `undefined`                | Add a guard `if (item === undefined) continue` or destructure with `?? defaultValue`. Dashboard deferred — see BACKLOG.                                                                               |
 | Code-health history report                       | advisory                        | hotspots, change coupling, ownership risk                            | Use the report to plan refactors; never gates merges                                                                                                                                                  |
+| `pnpm lockfile:lint`                             | **error**                       | missing/invalid sha512 hash, custom registry config in .npmrc        | Re-run `pnpm install` from a known-good registry; remove `registry=` overrides from `.npmrc`; remove `registries:` from `pnpm-workspace.yaml`                                                         |
 
 ## Ratchet pipeline (where this is going)
 
