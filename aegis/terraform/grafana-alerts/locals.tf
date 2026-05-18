@@ -41,7 +41,7 @@ locals {
         "Low CELO Reserve Balance Alert",
         "Low USDC Reserve Balance Alert",
         "Low USDT Reserve Balance Alert",
-        "Low EUROC Reserve Balance Alert"
+        "Low axlUSDC Reserve Balance Alert"
       ],
       title_template   = "discord.reserve_balance_alert_title",
       message_template = "discord.reserve_balance_alert_message"

@@ -78,6 +78,9 @@ export class QueryService {
     }
     const contractName = metric.source.contract;
     const functionName = metric.source.functionAbi.name;
+    if (!functionName) {
+      throw new Error(`Missing function name for metric ${metric.name}`);
+    }
     const abi = metric.source.functionAbi;
     const args = metric.args.map((arg) => {
       const value = vars[arg];
@@ -99,9 +102,6 @@ export class QueryService {
         functionName,
         args,
       });
-      if (!functionName) {
-        throw new Error(`Missing function name for metric ${metric.name}`);
-      }
       const value = metric.parse(data, contractName, functionName);
       timer({ status: 'success' });
       return value;

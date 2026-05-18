@@ -16,7 +16,7 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       }
 
       datasource_uid = "grafanacloud-prom"
-      model          = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"sum(delta(view_call_query_duration_count{chain=\\\"celo\\\", status=\\\"error\\\"}[5m]))\",\"fullMetaSearch\":false,\"includeNullMetadata\":true,\"instant\":true,\"intervalMs\":600000,\"legendFormat\":\"__auto\",\"maxDataPoints\":43200,\"range\":false,\"refId\":\"errorCount\",\"useBackend\":false}"
+      model          = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"sum(increase(view_call_query_duration_count{status=\\\"error\\\"}[5m]))\",\"fullMetaSearch\":false,\"includeNullMetadata\":true,\"instant\":true,\"intervalMs\":600000,\"legendFormat\":\"__auto\",\"maxDataPoints\":43200,\"range\":false,\"refId\":\"errorCount\",\"useBackend\":false}"
     }
     data {
       ref_id = "B"

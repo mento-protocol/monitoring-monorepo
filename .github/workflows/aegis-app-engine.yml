@@ -8,7 +8,15 @@ on:
   push:
     branches: [main]
     paths:
-      - aegis/**
+      - aegis/.gcloudignore
+      - aegis/app.yaml
+      - aegis/bin/deploy.sh
+      - aegis/config.yaml
+      - aegis/nest-cli.json
+      - aegis/package.json
+      - aegis/src/**
+      - aegis/tsconfig.build.json
+      - aegis/tsconfig.json
       - .node-version
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
