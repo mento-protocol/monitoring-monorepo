@@ -12,7 +12,7 @@ Two coupled deliverables:
 
 **Constraints carried in.**
 
-- Single PR: indexer + UI together, deploy-sequenced (indexer from branch tip → re-sync → merge → promote).
+- Single PR: indexer + UI together, deploy-sequenced (indexer from branch tip → re-sync → promote caught-up indexer → verify production Hasura schema → merge so Vercel can deploy UI against the new schema).
 - All three Liquity instances in scope from day 1 (multi-collateral architecture is already live; ignoring CHFm/JPYm would leave half the system unmonitored).
 - ICR percentiles via per-Trove scan at hourly rollup (simpler; revisit if active-trove count gets large).
 - Alerts deferred to a follow-up PR.
@@ -873,7 +873,7 @@ Under Monad (143) block, add empty arrays for all nine contract groups:
 
 Apply the same global contract declarations to `indexer-envio/config.multichain.testnet.yaml` and add empty arrays under both testnet chains (Celo Sepolia and Monad testnet) until Liquity testnet addresses exist. The shared `src/EventHandlers.ts` imports the Liquity handlers for every config, so `pnpm indexer:testnet:codegen` must see the same contract names even when no addresses are subscribed.
 
-> **`start_block` on Celo**: the Liquity instances were deployed after the existing FPMM start block (60664500). For backfill performance, set per-contract `start_block` overrides on the Liquity contracts to the earliest deploy block among the three instances. Find it via `cast publication-block` (or read `BorrowerOperations.deploymentTimestamp` if available) for `0x8ec9A81871F816F1EF007a82293703057A943B8A` (GBPm BorrowerOps), then take min across all three instances. Plan TBD until block discovery — flag for the implementer.
+> **`start_block` on Celo**: the Liquity instances and shared CDP contracts were deployed after the existing FPMM start block (60664500). For backfill performance, set per-contract `start_block` overrides, but choose them from the minimum deploy/event block across every subscribed Liquity/CDP contract: the three TroveManager/StabilityPool/TroveNFT/BorrowerOperations/registry sets plus shared `CDPLiquidityStrategy` and `ReserveTroveFactory`. If shared CDP contracts emitted `PoolAdded` or `ReserveTroveCreated` before the earliest instance block, their own lower start block must be preserved or existing CDP-backed pools will be missed. Plan TBD until block discovery — flag for the implementer.
 
 #### A.4 — Handlers
 
@@ -896,12 +896,13 @@ import "./handlers/liquity/pools";
 
 `bootstrap.ts` — helper module. `bootstrapCollaterals(context)`:
 
-1. Seed the three known markets from vendored `indexer-envio/config/liquity.json`: `collateralRegistry`, `troveManager`, `addressesRegistry`, `systemParams`, debt token, collateral token, and UI slug. This static map is the fallback when a deployed ABI lacks a discovery accessor. `shared-config/liquity.ts` may mirror or generate from the same source for dashboard slug helpers, but indexer code must not import the workspace package directly.
+1. Seed the three known markets from vendored `indexer-envio/config/liquity.json`: `collateralRegistry`, `troveManager`, `addressesRegistry`, `systemParams`, debt token, collateral token, current active CDP strategy, and UI slug. This static map is the fallback when a deployed ABI lacks a discovery accessor. `shared-config/liquity.ts` may mirror or generate from the same source for dashboard slug helpers, but indexer code must not import the workspace package directly.
 2. For each market, optionally verify the mapping by reading its CollateralRegistry (`totalCollaterals()` + `getToken(i)` / `getTroveManager(i)`) and its AddressesRegistry pools (`stabilityPool()` / `troveNFT()` / `sortedTroves()` / `activePool()` / `defaultPool()` / `collSurplusPool()` / `borrowerOperations()`).
 3. **Do not read `systemParams()` from AddressesRegistry** unless the ABI proves that accessor exists. The verified plan table already carries the per-market SystemParams address; treat that static address as canonical until an accessor is confirmed.
 4. Read full `SystemParams` config (MCR/CCR/SCR/BCR/MIN_BOLD_IN_SP/MIN_DEBT/etc.) from the per-market SystemParams contract.
 5. Read debt token `symbol()` to derive `LiquityCollateral.symbol` (GBPm/CHFm/JPYm), with the shared-config slug as fallback.
-6. Write `LiquityCollateral` row with `systemParamsLoaded=true`.
+6. Register the current active CDP strategy with `context.chain.CDPLiquidityStrategy.add(...)` during bootstrap, either from the vendored current strategy address or from a verified registry/effect read. This covers strategy replacements that happened before the indexer's optimized start block; `LiquidityStrategyUpdated` handles future replacements.
+7. Write `LiquityCollateral` row with `systemParamsLoaded=true`.
 
 Idempotent — re-run on `LiquidityStrategyUpdated` to refresh the strategy linkage and register the replacement strategy address for future CDP strategy events. Use the `experimental_createEffect` pattern from `selfHealRebalanceThresholds` (the existing implementation in `indexer-envio/src/rpc/effects.ts`); these are full-node RPC calls, not HyperRPC.
 
@@ -927,7 +928,7 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 - **Status transitions** — route every Trove status write through a helper (`setTroveStatus(prev, next, instance)`) that updates `LiquityInstance.activeTroveCount` exactly once when a Trove enters or leaves `active`. Opens and re-borrows increment only on non-active → active, closes/liquidations/full redemptions decrement only on active → non-active. The hourly rollup also recomputes the active count from active Troves and writes it back to `LiquityInstance` as a reconciliation guard.
 - **`TroveOperation`** — primary source of Trove operation/cumulative updates. Identify by `srcAddress → collateralId`. On `OPEN_TROVE` / `OPEN_TROVE_AND_JOIN_BATCH`: create or update a placeholder Trove with `status=active` and `openedAt=block.timestamp`; set `owner=ZERO_ADDRESS` and `previousOwner=ZERO_ADDRESS` only when the Trove does not already have a non-zero owner. If the TroveNFT mint event was processed first, preserve that owner and do not touch `BorrowerInfo` because the operation event does not include the borrower address. On `CLOSE_TROVE`: `status=closed`, `closedAt=block.timestamp`. On `LIQUIDATE`: `status=liquidated`, set `liquidatedColl=-_collChangeFromOperation`, `liquidatedDebt=-_debtChangeFromOperation`. On `REDEEM_COLLATERAL`: increment `redemptionCount`, accumulate `redeemedColl/redeemedDebt` (subtract the negative `_*ChangeFromOperation` values per upstream convention), and record a tx-scoped `pendingRedemption` marker; **do not set `status=redeemed` here** because Liquity v2 emits the operation for both partial and full redemptions. Accumulate `_debtIncreaseFromUpfrontFee` into `LiquityInstance.borrowingFeeCum` so revenue reporting can distinguish borrowing fees from redemption fees. On `APPLY_PENDING_DEBT`: no status change; just timestamps. Don't bump `lastUserActionAt` on `REDEEM_COLLATERAL` / `LIQUIDATE` / `APPLY_PENDING_DEBT` (forced ops, per upstream).
 - **`TroveUpdated`** — write authoritative `debt`, `coll`, `stake`, `interestRate` onto the Trove. Compute `icrBps` using the per-market collateral/debt price, not a single USDm/USD price (see TCR helper). If the trove is not closed or liquidated and the post-update `debt > 0`, set `status=active` even when no redemption marker exists; this handles a previously fully redeemed open trove borrowing again. If this update follows a `REDEEM_COLLATERAL` marker, leave `status=active` when resulting `debt > 0`; set `status=redeemed` only when the post-update debt is zero. Use the shared status-transition helper so `activeTroveCount` stays synchronized. Update interest-rate bracket via `updateRateBracketDebt(prevRate, newRate, prevDebt, newDebt, ...)` per upstream pattern. Do not treat Trove deltas as the authoritative system totals; ActivePool + DefaultPool gauge handlers own `LiquityInstance.systemColl` and `systemDebt` so redistributed liquidation debt remains counted while it sits in DefaultPool.
-- **`BatchedTroveUpdated`** + **`BatchUpdated`** — Envio v3 processes events in log-index order within a tx; `BatchUpdated` arrives after one or more `BatchedTroveUpdated` logs. The first handler cannot read the future batch totals. Persist a short-lived `PendingBatchedTroveUpdate` record keyed by `{chainId}-{txHash}-{batchManager}-{troveId}` (or a JSON list on a tx-scoped pending entity), then have `BatchUpdated` replay every pending trove for that batch using `trove.debt = batchUpdated.debt * batchDebtShares / batchUpdated.totalDebtShares`, update collateral/stake, update brackets, and delete the pending records. System aggregate totals still come from ActivePool + DefaultPool gauge events.
+- **`BatchedTroveUpdated`** + **`BatchUpdated`** — Envio v3 processes events in log-index order within a tx; `BatchUpdated` arrives after one or more `BatchedTroveUpdated` logs. The first handler cannot read the future batch totals. Persist a short-lived `PendingBatchedTroveUpdate` record keyed by `{chainId}-{txHash}-{batchManager}-{troveId}` (or a JSON list on a tx-scoped pending entity), then have `BatchUpdated` replay every pending trove for that batch using `trove.debt = batchUpdated.debt * batchDebtShares / batchUpdated.totalDebtShares`, update collateral/stake, update brackets, and delete the pending records. Handle `SET_INTEREST_BATCH_MANAGER` and `REMOVE_FROM_BATCH` through the same batch-transition helper so `Trove.interestBatchId` is set/cleared when a trove joins, leaves, or changes batches after opening. System aggregate totals still come from ActivePool + DefaultPool gauge events.
 - **`Liquidation`** — append immutable `LiquidationEvent` row. Bump `LiquityInstance.liqCountCum`, `liqDebtOffsetCum`, `liqDebtRedistributedCum`, `liqCollSentToSpCum`, etc. Do not subtract redistributed debt/collateral from system totals here; the following ActivePool/DefaultPool gauge events materialize the correct aggregate.
 - **`Redemption`** — append immutable `RedemptionEvent` row. Bump `LiquityInstance.redemptionCountCum`, `redemptionDebtCum`, `redemptionFeeCum`.
 - **`RedemptionFeePaidToTrove`** — per-trove fee record only. Store the fee separately (`Trove.redemptionFeePaidCum` if per-trove fee display is needed, otherwise only the immutable event detail) and never add `_ETHFee` to `Trove.redeemedColl`; redeemed collateral remains sourced from the matching `TroveOperation`.
@@ -943,7 +944,7 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 
 - **`ActivePoolBoldDebtUpdated` / `DefaultPoolBoldDebtUpdated`** — store `activePoolDebt` and `defaultPoolDebt` helper fields in module/entity state, then set `LiquityInstance.systemDebt = activePoolDebt + defaultPoolDebt`.
 - **`ActivePoolCollBalanceUpdated` / `DefaultPoolCollBalanceUpdated`** — store `activePoolColl` and `defaultPoolColl`, then set `LiquityInstance.systemColl = activePoolColl + defaultPoolColl`.
-- After every pool-gauge write, recompute latest `LiquityInstance.tcrBps` from the updated `systemColl` / `systemDebt` and the market-specific price. Use the existing `-1` sentinel when the price is unavailable so CDP KPI tiles and alerts do not wait for an hourly rollup to see TCR changes.
+- After every pool-gauge write, recompute latest `LiquityInstance.tcrBps` from the updated `systemColl` / `systemDebt` and the market-specific price. Use the existing `-1` sentinel when the price is unavailable so CDP KPI tiles and alerts do not wait for an hourly rollup to see TCR changes. Because oracle prices and interest accrual can move during quiet periods without pool-gauge events, the dashboard and metrics-bridge must also recompute current TCR at read time from latest system state, accrued debt, and current market price; the materialized field is a cached snapshot, not the only source for "current" TCR.
 - This is required for redistributed liquidations: DefaultPool values are part of system debt/collateral even before a later `TroveUpdated` applies them to active troves.
 
 `troveNFT.ts` — handles `Transfer(from, to, tokenId)`:
@@ -1012,6 +1013,8 @@ Test cases:
 - **Rollup ICR freshness**: persisted `Trove.icrBps` values are stale, but the rollup recomputes current debt + current price at the bucket timestamp before sorting percentiles and computing below-MCR fraction bps.
 - **Active-trove count sync**: status-transition helper increments/decrements `LiquityInstance.activeTroveCount` exactly once per transition; hourly rollup recomputes and repairs the latest count from active Troves.
 - **Pool-gauge TCR recompute**: ActivePool/DefaultPool gauge events update system totals and recompute latest `tcrBps` in the same write; missing price keeps `tcrBps=-1`.
+- **Batch membership transitions**: SET_INTEREST_BATCH_MANAGER sets `Trove.interestBatchId`; REMOVE_FROM_BATCH clears it; changing batches updates old/new batch membership and bracket state once.
+- **Config parity**: shared dashboard Liquity config and vendored indexer Liquity config agree on slug, debt token, troveManager-derived collateralId, and current CDP strategy address for every market.
 - **Redemption-rate decay**: baseRate=0.05, REDEMPTION_FEE_FLOOR=0.005, lastFeeOpTime=t-1m, MINUTE_DECAY=0.999 → expected rate matches the upstream `getRedemptionRateWithDecay` reference: `baseRate` decays first, then the fee floor is added, and the floor itself never decays away.
 - **CDPLiquidityStrategy.PoolAdded** → CdpPool row created with `removed=false`, `debtToken`, and `collateralId`; subsequent PoolRemoved → `removed=true`.
 - **Borrower attribution**: TroveOperation open followed by TroveNFT mint sets owner and increments BorrowerInfo; TroveNFT mint followed by TroveOperation open preserves the owner instead of resetting it to ZERO_ADDRESS.
@@ -1036,7 +1039,7 @@ Queries (all parameterized by `collateralId` = `{chainId}-{troveManager}`):
 - `LIQUITY_INSTANCE_LATEST(collateralId)` — full latest state.
 - `LIQUITY_INSTANCE_SNAPSHOTS(collateralId, from, to)` — time-series for TCR / headroom / ICR percentiles. Use `LiquityInstanceDailySnapshot` for windows >7d to avoid Hasura's 1000-row cap.
 - `LIQUITY_TROVES_BY_ICR(collateralId, status, limit, offset)` — paginated trove table. Default `status="active"`, `limit=100`.
-- `LIQUITY_ACTIVE_TROVES_FOR_DISTRIBUTION(collateralId, cursor)` — all active trove ICR rows for the histogram, fetched with the existing offset-pagination/all-pages pattern. Do not build the histogram from the first `LIQUITY_TROVES_BY_ICR` table page.
+- `LIQUITY_ACTIVE_TROVES_FOR_DISTRIBUTION(collateralId, cursor)` — all active trove rows needed for the histogram, fetched with the existing offset-pagination/all-pages pattern. Include debt, collateral, rate/batch membership, and the fields needed to recompute current ICR at render time; do not chart stale persisted `Trove.icrBps` or build the histogram from the first `LIQUITY_TROVES_BY_ICR` table page.
 - `LIQUITY_DEPOSITORS_TOP(collateralId, limit)` — top SP depositors by `deposit` descending.
 - `LIQUITY_LIQUIDATIONS_RECENT(collateralId, limit)` — last 50 `LiquidationEvent` rows.
 - `LIQUITY_REDEMPTIONS_RECENT(collateralId, limit)` — last 50 `RedemptionEvent` rows.
@@ -1064,7 +1067,7 @@ Files:
 New files under `ui-dashboard/src/components/cdps/`:
 
 - `cdp-market-header.tsx` — KPI tile row (per market):
-  - **TCR** — color thresholds keyed to the market's own `ccrBps` (warn at 1.2× CCR, critical at CCR). Pull from `LiquityCollateral`, not hardcoded.
+  - **TCR** — recompute current TCR at render time from latest system state, accrued debt, and current market price; use the materialized `LiquityInstance.tcrBps` only as a degraded fallback when the live inputs are unavailable. Color thresholds are keyed to the market's own `ccrBps` (warn at 1.2× CCR, critical at CCR). Pull from `LiquityCollateral`, not hardcoded.
   - **System Debt** (in the market's debt token: GBPm / CHFm / JPYm).
   - **System Collateral (USDm)**.
   - **Active Troves**.
@@ -1072,7 +1075,7 @@ New files under `ui-dashboard/src/components/cdps/`:
   - **Redemption Rate** — current rate in bps, recomputed at render time from `baseRate`, `lastFeeOpTime`, and `redemptionMinuteDecayFactor` so quiet markets keep decaying without a fresh indexed event.
   - **Status** — `LIVE` / `SHUT DOWN`. Shutdown shows the at-shutdown TCR.
 - `cdps-overview.tsx` — landing-page summary cards (TCR + headroom + active troves per market side-by-side).
-- `icr-distribution-chart.tsx` — Plotly histogram of all active Trove ICRs from `LIQUITY_ACTIVE_TROVES_FOR_DISTRIBUTION` (or a future rollup entity), not the paginated table query. Overlay vertical lines at `mcrBps` and 1.2× MCR (warn line). Per market.
+- `icr-distribution-chart.tsx` — Plotly histogram of all active Trove ICRs from `LIQUITY_ACTIVE_TROVES_FOR_DISTRIBUTION` (or a future rollup entity), not the paginated table query. Recompute current ICRs from current price + accrued debt inputs before binning so quiet-period price/interest drift is reflected. Overlay vertical lines at `mcrBps` and 1.2× MCR (warn line). Per market.
 - `icr-percentile-chart.tsx` — line chart of p1/p5/p50 ICR over time from `LiquityInstanceSnapshot`.
 - `trove-table.tsx` — sortable: troveId, owner, status, debt, coll, ICR, interestRate, batch. Default sort: ICR ascending. Status filter dropdown. Owner column uses the existing address-book label hook. UI strings use "trove" (industry-standard CDP term, no Liquity brand attached).
 - `interest-rate-distribution-chart.tsx` — `InterestRateBracket` rows for the market; renders total debt per rate bracket as bars.
@@ -1118,10 +1121,11 @@ For completeness; do not implement now. Follow-up PR:
 
 - `metrics-bridge` adds `mento_liquity_*` gauges by polling `LIQUITY_INSTANCE_LATEST` on the same 30s tick.
   - Do not export raw sentinel values as alertable samples. For TCR, keep the `-1` no-data sentinel in GraphQL but guard PromQL with `mento_liquity_tcr_bps >= 0`. For Stability Pool headroom, negative values are real alertable deficits, so pair the gauge with an explicit `mento_liquity_sp_headroom_known` gauge or omit the headroom sample until `systemParamsLoaded=true`; do not rely on `-1` as a Prometheus sentinel for this metric.
+  - Export per-market threshold gauges from `LiquityCollateral` (`mento_liquity_mcr_bps`, `mento_liquity_ccr_bps`, optionally `mento_liquity_tcr_warning_bps`) and join alerts against them. Do not hardcode 115%/110%; each market's SystemParams own recovery/critical thresholds.
 - `terraform/alerts/rules-cdps.tf` with `service=cdps` rules:
   - **Stability Pool Headroom Critical** — `mento_liquity_sp_headroom <= 0 and on(chain, symbol) mento_liquity_sp_headroom_known == 1` for 5m.
-  - **TCR Low Warning** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < 11500` for 15m.
-  - **TCR Critical** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < 11000` for 5m.
+  - **TCR Low Warning** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < on(chain, symbol) mento_liquity_tcr_warning_bps` for 15m.
+  - **TCR Critical** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < on(chain, symbol) mento_liquity_ccr_bps` for 5m.
   - **ICR Below MCR Spike** — `mento_liquity_icr_frac_below_mcr_bps > 500` (5% of troves underwater) for 10m.
 
 ---
