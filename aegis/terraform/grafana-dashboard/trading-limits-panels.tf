@@ -83,6 +83,7 @@ locals {
             /
             clamp_min(abs(Broker_tradingLimitsConfig_limit0{chain="celo"}), 1)
           ) * 100
+          * (Broker_tradingLimitsConfig_flags{chain="celo"} % 2 >= bool 1)
         EOT
         legendFormat = "{{limitId}}"
         refId        = "L0_utilization"
@@ -165,6 +166,7 @@ locals {
             /
             clamp_min(abs(Broker_tradingLimitsConfig_limit1{chain="celo"}), 1)
           ) * 100
+          * (floor(Broker_tradingLimitsConfig_flags{chain="celo"} / 2) % 2 >= bool 1)
         EOT
         legendFormat = "{{limitId}}"
         refId        = "L1_utilization"
@@ -247,6 +249,7 @@ locals {
             /
             clamp_min(abs(Broker_tradingLimitsConfig_limitGlobal{chain="celo"}), 1)
           ) * 100
+          * (floor(Broker_tradingLimitsConfig_flags{chain="celo"} / 4) % 2 >= bool 1)
         EOT
         legendFormat = "{{limitId}}"
         refId        = "Global_utilization"

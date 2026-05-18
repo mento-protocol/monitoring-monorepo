@@ -110,6 +110,7 @@ jobs:
               - .node-version
               - .gitmodules
               - .github/workflows/ci.yml
+              - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
             # Code-health policy files. A PR that touches ONLY the dep-cruiser
             # rules or a package's knip config would otherwise leave all four

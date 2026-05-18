@@ -423,6 +423,7 @@ metrics:
       - [RelayerSignerCELOZAR]
       - [RelayerSignerCHFUSD]
       - [RelayerSignerCOPUSD]
+      - [RelayerSignerEUROCEUR]
       - [RelayerSignerEURUSD]
       - [RelayerSignerEURXOF]
       - [RelayerSignerGBPUSD]

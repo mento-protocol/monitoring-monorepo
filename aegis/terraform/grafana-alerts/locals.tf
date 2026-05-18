@@ -12,7 +12,6 @@ locals {
     "CELOCOP",
     "CELOGHS",
     "CELOXOF",
-    "EUROCXOF",
     "EURXOF"
   ]
 

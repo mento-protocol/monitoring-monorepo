@@ -18,7 +18,7 @@ resource "grafana_message_template" "aegis_service_alert_message" {
 {{ if eq .Labels.alertname "Number of failed rpc calls" }}
 **🚨 FIRING: High number of failed RPC calls detected**
 - More than 10 errors were detected in a 5-minute timespan
-- Check the Aegis service logs for potential issues via `pnpm logs`
+- Check the Aegis service logs for potential issues via `pnpm aegis:logs`
 - Verify RPC endpoint connectivity and stability
 {{ else if eq .Labels.alertname "Aegis does not report new data" }}
 **🚨 FIRING: Aegis service is not reporting new data**

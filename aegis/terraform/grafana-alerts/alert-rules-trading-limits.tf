@@ -64,7 +64,7 @@ resource "grafana_rule_group" "trading_limits" {
 
       model = jsonencode({
         refId   = "flags"
-        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} % 2 >= bool 1"
         instant = true
       })
     }
@@ -186,7 +186,7 @@ resource "grafana_rule_group" "trading_limits" {
 
       model = jsonencode({
         refId   = "flags"
-        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        expr    = "floor(Broker_tradingLimitsConfig_flags{chain=\"celo\"} / 2) % 2 >= bool 1"
         instant = true
       })
     }
@@ -308,7 +308,7 @@ resource "grafana_rule_group" "trading_limits" {
 
       model = jsonencode({
         refId   = "flags"
-        expr    = "Broker_tradingLimitsConfig_flags{chain=\"celo\"} > bool 0"
+        expr    = "floor(Broker_tradingLimitsConfig_flags{chain=\"celo\"} / 4) % 2 >= bool 1"
         instant = true
       })
     }
