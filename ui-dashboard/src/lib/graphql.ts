@@ -91,7 +91,10 @@ export function useGQL<T>(
     if (schema != null) {
       const result = schema.safeParse(raw);
       if (!result.success) {
-        throw new GraphQLSchemaError(result.error.issues, query ?? undefined);
+        // Pass the operation name (not the full GQL document) as the hint
+        // so Sentry titles stay readable.
+        const hint = query?.match(/\b(?:query|mutation)\s+(\w+)/)?.[1];
+        throw new GraphQLSchemaError(result.error.issues, hint);
       }
       return result.data;
     }

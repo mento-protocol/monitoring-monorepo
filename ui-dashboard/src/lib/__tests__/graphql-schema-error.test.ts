@@ -147,6 +147,8 @@ describe("PoolDetailWithHealthSchema", () => {
   it("passes with all optional fields set", () => {
     const full = {
       ...minimalRow,
+      token0Decimals: 18,
+      token1Decimals: 6,
       healthStatus: "ok",
       oracleOk: true,
       oraclePrice: "1.0001",
@@ -173,6 +175,23 @@ describe("PoolDetailWithHealthSchema", () => {
     };
     const result = PoolDetailWithHealthSchema.safeParse({ Pool: [full] });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.Pool[0].token0Decimals).toBe(18);
+      expect(result.data.Pool[0].token1Decimals).toBe(6);
+    }
+  });
+
+  it("preserves token decimals through the schema (no silent strip)", () => {
+    // Regression for claude[bot] P0: token0Decimals/token1Decimals were not
+    // declared in the schema, so Zod stripped them from the parsed output
+    // even though POOL_DETAIL_WITH_HEALTH queries them.
+    const row = { ...minimalRow, token0Decimals: 18, token1Decimals: 6 };
+    const result = PoolDetailWithHealthSchema.safeParse({ Pool: [row] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.Pool[0].token0Decimals).toBe(18);
+      expect(result.data.Pool[0].token1Decimals).toBe(6);
+    }
   });
 
   it("fails when a required string field is missing", () => {
@@ -222,15 +241,33 @@ describe("schema validation logic", () => {
     }
   });
 
-  it("passes extra fields through when schema is lenient (backward-compat)", () => {
-    // Zod strips unknown keys by default in .parse but safeParse with a
-    // strict schema would fail on extra fields — use z.object to confirm
-    // that extra fields on a lenient schema don't cause issues.
-    const lenient = z.object({ Pool: z.array(z.object({ id: z.string() })) });
-    // Hasura can return extra fields; the schema only validates known fields.
-    const raw = { Pool: [{ id: "0x1" }] };
-    const result = lenient.safeParse(raw);
+  it("extracts the operation name from a multi-line GraphQL document", () => {
+    // The fetcher passes the operation name (not the whole doc) as the
+    // queryHint so Sentry alert titles stay readable.
+    const extract = (q: string) => q.match(/\b(?:query|mutation)\s+(\w+)/)?.[1];
+    expect(
+      extract(`\n  query PoolDetailWithHealth($id: String!) { Pool { id } }\n`),
+    ).toBe("PoolDetailWithHealth");
+    expect(extract(`mutation UpdatePool { update_pool { id } }`)).toBe(
+      "UpdatePool",
+    );
+    expect(extract(`{ Pool { id } }`)).toBeUndefined(); // anonymous query
+  });
+
+  it("strips unknown keys by default (Zod behavior note)", () => {
+    // Zod's z.object() strips unknown keys from parsed output (it does NOT
+    // fail on them). Hasura can return extra fields the schema doesn't
+    // declare; they're silently dropped from `data` unless the schema uses
+    // .passthrough(). This test pins down the strip behavior so future
+    // schema-validation work (e.g. adding .passthrough() to a row schema)
+    // can break this test deliberately as a tripwire.
+    const schema = z.object({ Pool: z.array(z.object({ id: z.string() })) });
+    const raw = { Pool: [{ id: "0x1", unknown: 42 }] };
+    const result = schema.safeParse(raw);
     expect(result.success).toBe(true);
-    if (result.success) expect(result.data.Pool[0].id).toBe("0x1");
+    if (result.success) {
+      expect(result.data.Pool[0].id).toBe("0x1");
+      expect("unknown" in result.data.Pool[0]).toBe(false);
+    }
   });
 });

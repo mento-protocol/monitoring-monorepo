@@ -54,6 +54,18 @@ const PoolDetailRowSchema = z.object({
   chainId: z.number(),
   token0: z.string().nullable(),
   token1: z.string().nullable(),
+  // Decimals are queried but may be null on older indexer rows; coerce so the
+  // inferred type stays compatible with Pool.token0Decimals?: number.
+  token0Decimals: z
+    .number()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
+  token1Decimals: z
+    .number()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
   source: z.string(),
   createdAtBlock: z.string(),
   createdAtTimestamp: z.string(),
