@@ -27,7 +27,7 @@ import { describe, it } from "vitest";
 import { strict as assert } from "assert";
 import * as fc from "fast-check";
 import { mergeFeeSnapshot } from "../src/protocolFeeSnapshot.js";
-import { computeFeeUsdWei, USD_PEGGED_SYMBOLS } from "../src/usd.js";
+import { USD_PEGGED_SYMBOLS } from "../src/usd.js";
 import { dayBucket, makePoolId } from "../src/helpers.js";
 
 // ---------------------------------------------------------------------------

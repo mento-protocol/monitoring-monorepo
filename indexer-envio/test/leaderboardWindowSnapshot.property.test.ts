@@ -34,7 +34,6 @@ import type {
 } from "envio";
 import {
   WINDOW_KEYS,
-  WINDOW_DAYS,
   aggregatePerWindow,
   buildLeaderboardWindowSnapshot,
   windowStartDay,
@@ -59,17 +58,6 @@ const arbDayTimestamp: fc.Arbitrary<bigint> = fc
     // 2020-01-01 00:00:00 UTC = 1577836800
     const base = 1577836800n;
     return base + BigInt(offset) * SECONDS_PER_DAY;
-  });
-
-/** A valid block timestamp: some second within a day (not necessarily aligned). */
-const arbBlockTimestamp: fc.Arbitrary<bigint> = fc
-  .tuple(
-    fc.nat({ max: 365 * 20 }), // day offset from 2020-01-01
-    fc.nat({ max: 86399 }), // seconds within the day
-  )
-  .map(([dayOffset, secondsOffset]) => {
-    const base = 1577836800n;
-    return base + BigInt(dayOffset) * SECONDS_PER_DAY + BigInt(secondsOffset);
   });
 
 /** A non-negative bigint up to 10^30 (represents fee amounts in wei). */
