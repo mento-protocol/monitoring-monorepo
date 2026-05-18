@@ -208,6 +208,12 @@ pnpm install
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
 pnpm indexer:dev                   # Start indexer (multichain mainnet: Celo + Monad)
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
+pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
+pnpm deploy:indexer:status <commit> --watch  # Wait for registration, then watch sync
+pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issues
+pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
+pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
+pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
 
 # Code health (CodeScene-equivalent OSS checks)
 pnpm code-health:knip              # Strict knip across all packages (blocking)

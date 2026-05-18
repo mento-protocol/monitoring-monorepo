@@ -1,6 +1,9 @@
 import { indexer } from "../../indexer.js";
 import { asBigInt, eventId } from "../../helpers.js";
-import { getOrCreateLiquityInstance } from "./bootstrap.js";
+import {
+  getOrCreateLiquityInstance,
+  preloadLiquityMarket,
+} from "./bootstrap.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
@@ -10,11 +13,13 @@ import {
   setPendingBatchMembershipOperation,
   setPendingRedemption,
 } from "./pendingOperations.js";
-import { getOrLoadSystemParams } from "./systemParams.js";
+import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
   TROVE_STATUS,
   getOrCreateTrove,
   isPlaceholderClosedTrove,
+  makeTroveId,
+  normalizeTroveTokenId,
   moveInterestRateBracketDebt,
   statusFromDebt,
   tracksIndividualInterest,
@@ -45,6 +50,79 @@ const statusFromBatchReplay = (
   return statusFromCollateral(debt, collateral);
 };
 
+const isForcedOperation = (op: number): boolean =>
+  op === OP.REDEEM_COLLATERAL ||
+  op === OP.LIQUIDATE ||
+  op === OP.APPLY_PENDING_DEBT;
+
+type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
+  PendingBatchMembershipOperation: {
+    get: (id: string) => Promise<unknown>;
+  };
+  PendingBatchedTroveUpdate: {
+    getWhere: (args: {
+      txHash: { _eq: string };
+      batchManager: { _eq: string };
+    }) => Promise<
+      Array<{
+        collateralId: string;
+        batchManager: string;
+        logIndex: number;
+        troveId: string;
+      }>
+    >;
+  };
+};
+
+async function preloadTroveAndMarket(
+  context: TroveManagerPreloadContext,
+  market: Parameters<typeof preloadSystemParams>[1],
+  collateralId: string,
+  troveId: string,
+): Promise<void> {
+  await Promise.all([
+    preloadLiquityMarket(context, market),
+    context.Trove.get(makeTroveId(collateralId, troveId)),
+    context.LiquityCollateral.get(collateralId),
+  ]);
+}
+
+async function preloadBatchReplay(args: {
+  context: TroveManagerPreloadContext;
+  market: Parameters<typeof preloadSystemParams>[1];
+  chainId: number;
+  txHash: string;
+  collateralId: string;
+  batchManager: string;
+  eventLogIndex: number;
+}): Promise<void> {
+  const pendingRows = await args.context.PendingBatchedTroveUpdate.getWhere({
+    txHash: { _eq: args.txHash },
+    batchManager: { _eq: args.batchManager },
+  });
+  const relevantRows = pendingRows.filter(
+    (pending) =>
+      pending.collateralId === args.collateralId &&
+      pending.batchManager === args.batchManager &&
+      pending.logIndex < args.eventLogIndex,
+  );
+  await Promise.all([
+    preloadLiquityMarket(args.context, args.market),
+    preloadSystemParams(args.context, args.market),
+    ...relevantRows.flatMap((pending) => [
+      args.context.Trove.get(makeTroveId(args.collateralId, pending.troveId)),
+      args.context.PendingBatchMembershipOperation.get(
+        pendingTroveKey(
+          args.chainId,
+          args.txHash,
+          args.collateralId,
+          pending.troveId,
+        ),
+      ),
+    ]),
+  ]);
+}
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -54,6 +132,11 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
+    const troveId = normalizeTroveTokenId(event.params._troveId);
+    if (context.isPreload) {
+      await preloadTroveAndMarket(context, market, collateralId, troveId);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     let instance = await getOrCreateLiquityInstance(
@@ -79,10 +162,7 @@ indexer.onEvent(
     });
 
     const op = Number(event.params._operation);
-    const forced =
-      op === OP.REDEEM_COLLATERAL ||
-      op === OP.LIQUIDATE ||
-      op === OP.APPLY_PENDING_DEBT;
+    const forced = isForcedOperation(op);
 
     if (op === OP.OPEN_TROVE || op === OP.OPEN_TROVE_AND_JOIN_BATCH) {
       const transitioned = transitionTroveStatus(
@@ -210,6 +290,22 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
+    const troveId = normalizeTroveTokenId(event.params._troveId);
+    const pendingId = pendingTroveKey(
+      event.chainId,
+      event.transaction.hash,
+      collateralId,
+      troveId,
+    );
+    if (context.isPreload) {
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadSystemParams(context, market),
+        context.Trove.get(makeTroveId(collateralId, troveId)),
+        context.PendingRedemption.get(pendingId),
+      ]);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     let instance = await getOrCreateLiquityInstance(
@@ -243,12 +339,6 @@ indexer.onEvent(
       });
     }
 
-    const pendingId = pendingTroveKey(
-      event.chainId,
-      event.transaction.hash,
-      collateralId,
-      trove.troveId,
-    );
     const pendingRedemption = await context.PendingRedemption.get(pendingId);
     trove = {
       ...trove,
@@ -302,7 +392,8 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
-    const troveId = `0x${event.params._troveId.toString(16)}`;
+    if (context.isPreload) return;
+    const troveId = normalizeTroveTokenId(event.params._troveId);
     context.PendingBatchedTroveUpdate.set({
       id: pendingTroveKey(
         event.chainId,
@@ -339,6 +430,19 @@ indexer.onEvent(
     const batchId = `${collateralId}-${batchManager}`;
     const blockTimestamp = asBigInt(event.block.timestamp);
     const existing = await context.InterestBatch.get(batchId);
+    const blockNumber = asBigInt(event.block.number);
+    if (context.isPreload) {
+      await preloadBatchReplay({
+        context,
+        market,
+        chainId: event.chainId,
+        txHash: event.transaction.hash,
+        collateralId,
+        batchManager,
+        eventLogIndex: event.logIndex,
+      });
+      return;
+    }
     await moveInterestRateBracketDebt(context, {
       collateralId,
       prevRate: existing?.annualInterestRate ?? 0n,
@@ -359,7 +463,6 @@ indexer.onEvent(
       updatedAt: blockTimestamp,
     });
 
-    const blockNumber = asBigInt(event.block.number);
     let instance = await getOrCreateLiquityInstance(
       context,
       market,
@@ -479,6 +582,10 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     const instance = await getOrCreateLiquityInstance(
@@ -536,6 +643,10 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     const instance = await getOrCreateLiquityInstance(
@@ -588,6 +699,12 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
+    if (context.isPreload) {
+      await context.Trove.get(
+        makeTroveId(collateralId, normalizeTroveTokenId(event.params._troveId)),
+      );
+      return;
+    }
     const trove = await getOrCreateTrove(context, {
       chainId: event.chainId,
       collateralId,

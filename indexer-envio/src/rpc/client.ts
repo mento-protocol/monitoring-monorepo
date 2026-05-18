@@ -403,6 +403,8 @@ export function fallbackLikelyHasBlock(
  * Provider-specific phrasings observed in production:
  * - QuickNode (Celo): `request limit reached`, `125/second request limit reached`
  * - rpc2.monad.xyz: `Request exceeds defined limit.`
+ * - viem wrapping a malformed provider response: `Cannot read properties of
+ *   undefined (reading 'error')`
  * - Generic / RFC 6585: `429`, `too many requests`, `throttled`
  *
  * Add new provider phrasings here when they show up in `[RPC_FAILURE]`
@@ -411,7 +413,7 @@ export function fallbackLikelyHasBlock(
  * skipped and the error escapes to the caller (visible as a viem stack
  * trace dump in the logs). */
 const RATE_LIMIT_RE =
-  /rate limit|request limit reached|exceeds defined limit|too many requests|429|throttl/i;
+  /rate limit|request limit reached|exceeds defined limit|too many requests|429|throttl|Cannot read properties of undefined \(reading 'error'\)/i;
 
 /** Returns true if the error looks like a rate-limit / 429 response. */
 export function isRateLimitError(err: unknown): boolean {
