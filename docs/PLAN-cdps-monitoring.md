@@ -17,7 +17,7 @@ Two coupled deliverables:
 - ICR percentiles via per-Trove scan at hourly rollup (simpler; revisit if active-trove count gets large).
 - Alerts deferred to a follow-up PR.
 - CDP market pages are Celo mainnet only — Liquity v2 TroveManager/StabilityPool markets are not deployed on Monad. The shared `CDPLiquidityStrategy` classifier still exists on Monad, so the replacement for the dashboard RPC probe must either index Monad `CDPLiquidityStrategy.PoolAdded` events too or keep the RPC fallback for networks whose strategy events are not indexed.
-- The BACKLOG "CDP strategy entity" item gets folded in as a side effect — `CDPLiquidityStrategy.PoolAdded` indexing replaces the runtime RPC probe in `ui-dashboard/src/lib/strategy-detection.ts`, retiring that stopgap.
+- The BACKLOG "CDP strategy entity" item gets folded in as a side effect — `CDPLiquidityStrategy.PoolAdded` indexing replaces the runtime RPC probe in `ui-dashboard/src/lib/strategy-detection.ts` on networks whose strategy stream is indexed; keep a Monad-scoped fallback until Monad strategy events are subscribed and backfilled.
 
 **Two sections below — "Liquity upstream subgraph cross-check" and "Mento contracts verification" — establish ground truth on event signatures, addresses, and architecture before Part 2 dives into implementation.** Read those before the implementation phases; the BACKLOG entry's event list was speculative and is partially wrong.
 
@@ -47,15 +47,15 @@ The BACKLOG named `TroveOpened` / `TroveClosed` / `TroveUpdated` / `LiquidationE
 Real event signatures from upstream's `subgraph.yaml`:
 
 ```
-TroveOperation(indexed uint256 troveId, uint8 operation,
+TroveOperation(uint256 indexed troveId, uint8 operation,
                uint256 annualInterestRate, uint256 debtIncreaseFromRedist,
                uint256 debtIncreaseFromUpfrontFee, int256 debtChangeFromOperation,
                uint256 collIncreaseFromRedist, int256 collChangeFromOperation)  [receipt: true]
-TroveUpdated(indexed uint256 troveId, uint256 debt, uint256 coll, uint256 stake,
+TroveUpdated(uint256 indexed troveId, uint256 debt, uint256 coll, uint256 stake,
              uint256 annualInterestRate, uint256 snapshotOfTotalCollRedist,
              uint256 snapshotOfTotalDebtRedist)
-BatchedTroveUpdated(indexed uint256, address, uint256, uint256, uint256, uint256, uint256)  [receipt: true]
-BatchUpdated(indexed address, uint8, uint256, uint256, uint256, uint256, uint256, uint256)
+BatchedTroveUpdated(uint256 indexed troveId, address interestBatchManager, uint256 batchDebtShares, uint256 coll, uint256 stake, uint256 snapshotOfTotalCollRedist, uint256 snapshotOfTotalDebtRedist)  [receipt: true]
+BatchUpdated(address indexed interestBatchManager, uint8 operation, uint256 debt, uint256 coll, uint256 annualInterestRate, uint256 annualManagementFee, uint256 totalDebtShares, uint256 debtIncreaseFromUpfrontFee)
 ```
 
 Upstream's subgraph uses transaction receipts to scan sibling logs for extra
@@ -76,7 +76,7 @@ Liquity v2 is **multi-collateral by design**. `BoldToken.CollateralRegistryAddre
 
 ### Trove ownership is ERC721 via `TroveNFT.Transfer`
 
-Each Trove is an NFT owned by the borrower. The Trove's "owner" changes via `TroveNFT.Transfer`, not via TroveManager events. Schema needs a `previousOwner` field. Handler set must include `TroveNFT.Transfer(indexed address, indexed address, indexed uint256)`. Without this, the `Trove.owner` field decays on NFT transfers — a real possibility now that NFT-backed CDP markets exist.
+Each Trove is an NFT owned by the borrower. The Trove's "owner" changes via `TroveNFT.Transfer`, not via TroveManager events. Schema needs a `previousOwner` field. Handler set must include `TroveNFT.Transfer(address indexed from, address indexed to, uint256 indexed tokenId)`. Without this, the `Trove.owner` field decays on NFT transfers — a real possibility now that NFT-backed CDP markets exist.
 
 ### Continuous interest model — `InterestRateBracket` is non-optional
 
@@ -166,19 +166,19 @@ Verified from ABIs in `@mento-protocol/contracts@0.8.0/abis/`. Bolded events are
 
 **TroveManager** (per instance):
 
-- **`TroveOperation(indexed uint256 _troveId, uint8 _operation, uint256 _annualInterestRate, uint256 _debtIncreaseFromRedist, uint256 _debtIncreaseFromUpfrontFee, int256 _debtChangeFromOperation, uint256 _collIncreaseFromRedist, int256 _collChangeFromOperation)`** — every state change
-- **`TroveUpdated(indexed uint256 _troveId, uint256 _debt, uint256 _coll, uint256 _stake, uint256 _annualInterestRate, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)`** — post-op state
-- **`BatchedTroveUpdated(indexed uint256, address _interestBatchManager, uint256 _batchDebtShares, uint256 _coll, uint256 _stake, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)`**
-- **`BatchUpdated(indexed address _interestBatchManager, uint8 _operation, uint256 _debt, uint256 _coll, uint256 _annualInterestRate, uint256 _annualManagementFee, uint256 _totalDebtShares, uint256 _debtIncreaseFromUpfrontFee)`**
+- **`TroveOperation(uint256 indexed _troveId, uint8 _operation, uint256 _annualInterestRate, uint256 _debtIncreaseFromRedist, uint256 _debtIncreaseFromUpfrontFee, int256 _debtChangeFromOperation, uint256 _collIncreaseFromRedist, int256 _collChangeFromOperation)`** — every state change
+- **`TroveUpdated(uint256 indexed _troveId, uint256 _debt, uint256 _coll, uint256 _stake, uint256 _annualInterestRate, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)`** — post-op state
+- **`BatchedTroveUpdated(uint256 indexed _troveId, address _interestBatchManager, uint256 _batchDebtShares, uint256 _coll, uint256 _stake, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)`**
+- **`BatchUpdated(address indexed _interestBatchManager, uint8 _operation, uint256 _debt, uint256 _coll, uint256 _annualInterestRate, uint256 _annualManagementFee, uint256 _totalDebtShares, uint256 _debtIncreaseFromUpfrontFee)`**
 - **`Liquidation(uint256 _debtOffsetBySP, uint256 _debtRedistributed, uint256 _boldGasCompensation, uint256 _collGasCompensation, uint256 _collSentToSP, uint256 _collRedistributed, uint256 _collSurplus, uint256 _L_ETH, uint256 _L_boldDebt, uint256 _price)`** — TOP-LEVEL event including `_price`. **The upstream subgraph has to scan receipts for this; we don't — big win.**
 - **`Redemption(uint256 _attemptedBoldAmount, uint256 _actualBoldAmount, uint256 _ETHSent, uint256 _ETHFee, uint256 _price, uint256 _redemptionPrice)`** — top-level
-- **`RedemptionFeePaidToTrove(indexed uint256 _troveId, uint256 _ETHFee)`** — per-trove redemption fee record
+- **`RedemptionFeePaidToTrove(uint256 indexed _troveId, uint256 _ETHFee)`** — per-trove redemption fee record
 - Skip: all `*AddressChanged` admin events (one-time wiring)
 
 **StabilityPool** (per instance) — BACKLOG's `UserDepositChanged` / `PoolBalanceUpdated` names are wrong. Use the `StabilityPoolv300*` addresses from the current namespace, not the older `StabilityPool*` addresses. Real events:
 
-- **`DepositOperation(indexed address _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)`**
-- **`DepositUpdated(indexed address _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)`** — post-op state
+- **`DepositOperation(address indexed _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)`**
+- **`DepositUpdated(address indexed _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)`** — post-op state
 - **`StabilityPoolBoldBalanceUpdated(uint256 _newBalance)`** — total deposits (the gauge we need for headroom)
 - **`StabilityPoolCollBalanceUpdated(uint256 _newBalance)`** — total collateral in SP from liquidations
 - **`RebalanceExecuted(uint256 amountCollIn, uint256 amountStableOut)`** — Mento-specific SP collateral-to-stables rebalance. Affects `spDepositsGbpm` accounting; must be modeled.
@@ -186,7 +186,7 @@ Verified from ABIs in `@mento-protocol/contracts@0.8.0/abis/`. Bolded events are
 
 **TroveNFT** (per instance):
 
-- **`Transfer(indexed address from, indexed address to, indexed uint256 tokenId)`** — ERC721 ownership changes
+- **`Transfer(address indexed from, address indexed to, uint256 indexed tokenId)`** — ERC721 ownership changes
 
 **BorrowerOperations** (per instance):
 
@@ -195,21 +195,21 @@ Verified from ABIs in `@mento-protocol/contracts@0.8.0/abis/`. Bolded events are
 
 **CollateralRegistry** (per market):
 
-- **`LiquidityStrategyUpdated(indexed address _liquidityStrategy)`** — when the active CDPLiquidityStrategy changes
+- **`LiquidityStrategyUpdated(address indexed _liquidityStrategy)`** — when the active CDPLiquidityStrategy changes
 - **`BaseRateUpdated(uint256 _baseRate)`** — redemption-rate base before time decay. Needed to surface live redemption rate.
 - **`LastFeeOpTimeUpdated(uint256 _lastFeeOpTime)`** — used in the redemption-rate decay formula
 
 **CDPLiquidityStrategy** (shared) — Mento-specific FPMM ↔ Trove bridge:
 
-- **`PoolAdded(indexed address pool, tuple params)`** — FPMM pool registered to CDP strategy
-- **`PoolRemoved(indexed address pool)`**
-- **`LiquidityMoved(indexed address pool, indexed uint8 direction, address tokenGivenToPool, uint256 amountGivenToPool, address tokenTakenFromPool, uint256 amountTakenFromPool)`** — reserves migrate between FPMM and Trove
-- **`RebalanceCooldownSet(indexed address pool, uint32 cooldown)`**
-- **`RedemptionShortfallSubsidized(indexed address pool, uint256 shortfall)`** — Mento-specific: protocol absorbs redemption shortfalls. Critical economic event.
+- **`PoolAdded(address indexed pool, (address pool, address debtToken, uint32 cooldown, address protocolFeeRecipient, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) params)`** — FPMM pool registered to CDP strategy
+- **`PoolRemoved(address indexed pool)`**
+- **`LiquidityMoved(address indexed pool, uint8 indexed direction, address tokenGivenToPool, uint256 amountGivenToPool, address tokenTakenFromPool, uint256 amountTakenFromPool)`** — reserves migrate between FPMM and Trove
+- **`RebalanceCooldownSet(address indexed pool, uint32 cooldown)`**
+- **`RedemptionShortfallSubsidized(address indexed pool, uint256 shortfall)`** — Mento-specific: protocol absorbs redemption shortfalls. Critical economic event.
 
 **ReserveTroveFactory** (shared):
 
-- **`ReserveTroveCreated(indexed address addressesRegistry, indexed uint256 troveId, uint256 debtAmount, uint256 collateralAmount)`** — canonical event when the Reserve opens a Trove. It does **not** include the FPMM pool address; the implementation must correlate it with `CDPLiquidityStrategy.PoolAdded` / strategy call context or a vendored fallback map before claiming a pool-level link.
+- **`ReserveTroveCreated(address indexed addressesRegistry, uint256 indexed troveId, uint256 debtAmount, uint256 collateralAmount)`** — canonical event when the Reserve opens a Trove. It does **not** include the FPMM pool address; the implementation must correlate it with `CDPLiquidityStrategy.PoolAdded` / strategy call context or a vendored fallback map before claiming a pool-level link.
 
 **ActivePool + DefaultPool** (per instance):
 
@@ -586,7 +586,7 @@ type LiquityInstance {
   spRebalanceCollInCum: BigInt!
   spRebalanceStableOutCum: BigInt!
   shortfallSubsidyCum: BigInt! # CDPLiquidityStrategy.RedemptionShortfallSubsidized
-  # Current bucket counters. These are reset after each hourly/daily snapshot
+  # Current hourly bucket counters. These are reset after each hourly snapshot
   # flush so the first event after a boundary can write the prior bucket from
   # pre-event state without reconstructing deltas from cumulative totals.
   troveOpenedCountBucket: Int!
@@ -597,6 +597,16 @@ type LiquityInstance {
   redemptionDebtBucket: BigInt!
   spRebalanceCountBucket: Int!
   shortfallSubsidyBucket: BigInt!
+  # Current daily bucket counters. Hourly flushes must not reset these; they
+  # are reset only after writing LiquityInstanceDailySnapshot.
+  troveOpenedCountDayBucket: Int!
+  troveClosedCountDayBucket: Int!
+  liqCountDayBucket: Int!
+  liqDebtOffsetDayBucket: BigInt!
+  redemptionCountDayBucket: Int!
+  redemptionDebtDayBucket: BigInt!
+  spRebalanceCountDayBucket: Int!
+  shortfallSubsidyDayBucket: BigInt!
   # System status
   isShutDown: Boolean!
   shutDownAt: BigInt # null unless shut down
@@ -782,20 +792,20 @@ File: `indexer-envio/config.multichain.mainnet.yaml`. Global `contracts:` block 
   abi_file_path: abis/liquity/TroveManager.json
   handler: src/EventHandlers.ts
   events:
-    - event: TroveOperation(indexed uint256 _troveId, uint8 _operation, uint256 _annualInterestRate, uint256 _debtIncreaseFromRedist, uint256 _debtIncreaseFromUpfrontFee, int256 _debtChangeFromOperation, uint256 _collIncreaseFromRedist, int256 _collChangeFromOperation)
-    - event: TroveUpdated(indexed uint256 _troveId, uint256 _debt, uint256 _coll, uint256 _stake, uint256 _annualInterestRate, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
-    - event: BatchedTroveUpdated(indexed uint256 _troveId, address _interestBatchManager, uint256 _batchDebtShares, uint256 _coll, uint256 _stake, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
-    - event: BatchUpdated(indexed address _interestBatchManager, uint8 _operation, uint256 _debt, uint256 _coll, uint256 _annualInterestRate, uint256 _annualManagementFee, uint256 _totalDebtShares, uint256 _debtIncreaseFromUpfrontFee)
+    - event: TroveOperation(uint256 indexed _troveId, uint8 _operation, uint256 _annualInterestRate, uint256 _debtIncreaseFromRedist, uint256 _debtIncreaseFromUpfrontFee, int256 _debtChangeFromOperation, uint256 _collIncreaseFromRedist, int256 _collChangeFromOperation)
+    - event: TroveUpdated(uint256 indexed _troveId, uint256 _debt, uint256 _coll, uint256 _stake, uint256 _annualInterestRate, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
+    - event: BatchedTroveUpdated(uint256 indexed _troveId, address _interestBatchManager, uint256 _batchDebtShares, uint256 _coll, uint256 _stake, uint256 _snapshotOfTotalCollRedist, uint256 _snapshotOfTotalDebtRedist)
+    - event: BatchUpdated(address indexed _interestBatchManager, uint8 _operation, uint256 _debt, uint256 _coll, uint256 _annualInterestRate, uint256 _annualManagementFee, uint256 _totalDebtShares, uint256 _debtIncreaseFromUpfrontFee)
     - event: Liquidation(uint256 _debtOffsetBySP, uint256 _debtRedistributed, uint256 _boldGasCompensation, uint256 _collGasCompensation, uint256 _collSentToSP, uint256 _collRedistributed, uint256 _collSurplus, uint256 _L_ETH, uint256 _L_boldDebt, uint256 _price)
     - event: Redemption(uint256 _attemptedBoldAmount, uint256 _actualBoldAmount, uint256 _ETHSent, uint256 _ETHFee, uint256 _price, uint256 _redemptionPrice)
-    - event: RedemptionFeePaidToTrove(indexed uint256 _troveId, uint256 _ETHFee)
+    - event: RedemptionFeePaidToTrove(uint256 indexed _troveId, uint256 _ETHFee)
 
 - name: LiquityStabilityPool
   abi_file_path: abis/liquity/StabilityPool.json
   handler: src/EventHandlers.ts
   events:
-    - event: DepositOperation(indexed address _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)
-    - event: DepositUpdated(indexed address _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)
+    - event: DepositOperation(address indexed _depositor, uint8 _operation, uint256 _depositLossSinceLastOperation, int256 _topUpOrWithdrawal, uint256 _yieldGainSinceLastOperation, uint256 _yieldGainClaimed, uint256 _ethGainSinceLastOperation, uint256 _ethGainClaimed)
+    - event: DepositUpdated(address indexed _depositor, uint256 _newDeposit, uint256 _stashedColl, uint256 _snapshotP, uint256 _snapshotS, uint256 _snapshotB, uint256 _snapshotScale)
     - event: StabilityPoolBoldBalanceUpdated(uint256 _newBalance)
     - event: StabilityPoolCollBalanceUpdated(uint256 _newBalance)
     - event: RebalanceExecuted(uint256 amountCollIn, uint256 amountStableOut)
@@ -804,7 +814,7 @@ File: `indexer-envio/config.multichain.mainnet.yaml`. Global `contracts:` block 
   abi_file_path: abis/liquity/TroveNFT.json
   handler: src/EventHandlers.ts
   events:
-    - event: Transfer(indexed address from, indexed address to, indexed uint256 tokenId)
+    - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
 
 - name: LiquityBorrowerOperations
   abi_file_path: abis/liquity/BorrowerOperations.json
@@ -818,23 +828,23 @@ File: `indexer-envio/config.multichain.mainnet.yaml`. Global `contracts:` block 
   events:
     - event: BaseRateUpdated(uint256 _baseRate)
     - event: LastFeeOpTimeUpdated(uint256 _lastFeeOpTime)
-    - event: LiquidityStrategyUpdated(indexed address _liquidityStrategy)
+    - event: LiquidityStrategyUpdated(address indexed _liquidityStrategy)
 
 - name: CDPLiquidityStrategy
   abi_file_path: abis/liquity/CDPLiquidityStrategy.json
   handler: src/EventHandlers.ts
   events:
-    - event: PoolAdded(indexed address pool, tuple params)
-    - event: PoolRemoved(indexed address pool)
-    - event: LiquidityMoved(indexed address pool, indexed uint8 direction, address tokenGivenToPool, uint256 amountGivenToPool, address tokenTakenFromPool, uint256 amountTakenFromPool)
-    - event: RebalanceCooldownSet(indexed address pool, uint32 cooldown)
-    - event: RedemptionShortfallSubsidized(indexed address pool, uint256 shortfall)
+    - event: PoolAdded(address indexed pool, (address pool, address debtToken, uint32 cooldown, address protocolFeeRecipient, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) params)
+    - event: PoolRemoved(address indexed pool)
+    - event: LiquidityMoved(address indexed pool, uint8 indexed direction, address tokenGivenToPool, uint256 amountGivenToPool, address tokenTakenFromPool, uint256 amountTakenFromPool)
+    - event: RebalanceCooldownSet(address indexed pool, uint32 cooldown)
+    - event: RedemptionShortfallSubsidized(address indexed pool, uint256 shortfall)
 
 - name: ReserveTroveFactory
   abi_file_path: abis/liquity/ReserveTroveFactory.json
   handler: src/EventHandlers.ts
   events:
-    - event: ReserveTroveCreated(indexed address addressesRegistry, indexed uint256 troveId, uint256 debtAmount, uint256 collateralAmount)
+    - event: ReserveTroveCreated(address indexed addressesRegistry, uint256 indexed troveId, uint256 debtAmount, uint256 collateralAmount)
 
 - name: LiquityActivePool
   abi_file_path: abis/liquity/ActivePool.json
@@ -954,9 +964,10 @@ import "./handlers/liquity/pools";
 2. For each market, optionally verify the mapping by reading its CollateralRegistry (`totalCollaterals()` + `getToken(i)` / `getTroveManager(i)`) and its AddressesRegistry pools (`stabilityPool()` / `troveNFT()` / `sortedTroves()` / `activePool()` / `defaultPool()` / `collSurplusPool()` / `borrowerOperations()`).
 3. **Do not read `systemParams()` from AddressesRegistry** unless the ABI proves that accessor exists. The verified plan table carries per-market SystemParams implementation addresses for ABI/source verification, but config must carry the active `SystemParamsProxy*` address used by live contracts.
 4. Read full `SystemParams` config (MCR/CCR/SCR/BCR/MIN_BOLD_IN_SP/MIN_DEBT/etc.) from the active per-market SystemParams proxy.
-5. Read debt token `symbol()` to derive `LiquityCollateral.symbol` (GBPm/CHFm/JPYm), with the shared-config slug as fallback.
-6. Register the current active CDP strategy with `context.chain.CDPLiquidityStrategy.add(...)` during bootstrap, either from the vendored current strategy address or from a verified registry/effect read. This covers strategy replacements that happened before the indexer's optimized start block; `LiquidityStrategyUpdated` handles future replacements.
-7. Write `LiquityCollateral` row with `systemParamsLoaded=true`.
+5. Read current redemption state from the matching CollateralRegistry (`baseRate()` and `lastFeeOperationTime()` / ABI-equivalent accessor) and seed `LiquityInstance.baseRate`, `lastFeeOpTime`, and `currentRedemptionRateBps`. This covers optimized starts that skip earlier `BaseRateUpdated` / `LastFeeOpTimeUpdated` logs and quiet markets with non-zero live redemption state.
+6. Read debt token `symbol()` to derive `LiquityCollateral.symbol` (GBPm/CHFm/JPYm), with the shared-config slug as fallback.
+7. Register the current active CDP strategy with `context.chain.CDPLiquidityStrategy.add(...)` during bootstrap, either from the vendored current strategy address or from a verified registry/effect read. This covers strategy replacements that happened before the indexer's optimized start block; `LiquidityStrategyUpdated` handles future replacements.
+8. Write `LiquityCollateral` row with `systemParamsLoaded=true`.
 
 Idempotent — re-run on `LiquidityStrategyUpdated` to refresh the strategy linkage and register the replacement strategy address for future CDP strategy events. Use the `experimental_createEffect` pattern from `selfHealRebalanceThresholds` (the existing implementation in `indexer-envio/src/rpc/effects.ts`); these are full-node RPC calls, not HyperRPC.
 
@@ -980,10 +991,10 @@ const OP = {
 Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph/src/TroveManager.mapping.ts`):
 
 - **Status transitions** — route every Trove status write through a helper (`setTroveStatus(prev, next, instance)`) that updates `LiquityInstance.activeTroveCount` exactly once when a Trove enters or leaves `active`. Opens and re-borrows increment only on non-active → active, closes/liquidations/full redemptions decrement only on active → non-active. The hourly rollup also recomputes the active count from active Troves and writes it back to `LiquityInstance` as a reconciliation guard.
-- **`TroveOperation`** — primary source of Trove operation/cumulative updates. Identify by `srcAddress → collateralId`. On `OPEN_TROVE` / `OPEN_TROVE_AND_JOIN_BATCH`: create or update a placeholder Trove with `status=active` and `openedAt=block.timestamp`; set `owner=ZERO_ADDRESS` and `previousOwner=ZERO_ADDRESS` only when the Trove does not already have a non-zero owner. If the TroveNFT mint event was processed first, preserve that owner and do not touch `BorrowerInfo` because the operation event does not include the borrower address. On `CLOSE_TROVE`: `status=closed`, `closedAt=block.timestamp`. On `LIQUIDATE`: `status=liquidated`, set `liquidatedColl=-_collChangeFromOperation`, `liquidatedDebt=-_debtChangeFromOperation`. On `REDEEM_COLLATERAL`: increment `redemptionCount`, accumulate `redeemedColl/redeemedDebt` (subtract the negative `_*ChangeFromOperation` values per upstream convention), and record a tx-scoped `pendingRedemption` marker; **do not set `status=redeemed` here** because Liquity v2 emits the operation for both partial and full redemptions. Accumulate `_debtIncreaseFromUpfrontFee` into `LiquityInstance.borrowingFeeCum` so revenue reporting can distinguish borrowing fees from redemption fees. On `APPLY_PENDING_DEBT`: no status change; just timestamps. Don't bump `lastUserActionAt` on `REDEEM_COLLATERAL` / `LIQUIDATE` / `APPLY_PENDING_DEBT` (forced ops, per upstream).
+- **`TroveOperation`** — primary source of Trove operation/cumulative updates. Identify by `srcAddress → collateralId`. On `OPEN_TROVE` / `OPEN_TROVE_AND_JOIN_BATCH`: create or update a placeholder Trove with `status=active` and `openedAt=block.timestamp`; set `owner=ZERO_ADDRESS` and `previousOwner=ZERO_ADDRESS` only when the Trove does not already have a non-zero owner. If the TroveNFT mint event was processed first, preserve that owner and do not touch `BorrowerInfo` because the operation event does not include the borrower address. On `CLOSE_TROVE`: `status=closed`, `closedAt=block.timestamp`. On `LIQUIDATE`: `status=liquidated`, set `liquidatedColl=-_collChangeFromOperation`, `liquidatedDebt=-_debtChangeFromOperation`, and increment `LiquityInstance.liqCountCum` plus both hourly/daily liquidation-count bucket counters once per liquidated trove. Liquity can emit one aggregate `Liquidation` totals event for multiple per-trove operations, so counts belong here, not on the aggregate event. On `REDEEM_COLLATERAL`: increment `redemptionCount`, accumulate `redeemedColl/redeemedDebt` (subtract the negative `_*ChangeFromOperation` values per upstream convention), and record a tx-scoped `pendingRedemption` marker; **do not set `status=redeemed` here** because Liquity v2 emits the operation for both partial and full redemptions. Accumulate `_debtIncreaseFromUpfrontFee` into `LiquityInstance.borrowingFeeCum` so revenue reporting can distinguish borrowing fees from redemption fees. On `APPLY_PENDING_DEBT`: no status change; just timestamps. Don't bump `lastUserActionAt` on `REDEEM_COLLATERAL` / `LIQUIDATE` / `APPLY_PENDING_DEBT` (forced ops, per upstream).
 - **`TroveUpdated`** — write authoritative `debt`, `coll`, `stake`, `snapshotOfTotalCollRedist`, `snapshotOfTotalDebtRedist`, and `interestRate` onto the Trove. Compute `icrBps` using the per-market collateral/debt price, not a single USDm/USD price (see TCR helper). If the trove is not closed or liquidated and the post-update `debt > 0`, set `status=active` even when no redemption marker exists; this handles a previously fully redeemed open trove borrowing again. If this update follows a `PendingRedemption` row from `REDEEM_COLLATERAL`, leave `status=active` when resulting `debt > 0`; set `status=redeemed` only when the post-update debt is zero, then delete the pending row. Use the shared status-transition helper so `activeTroveCount` stays synchronized. Update interest-rate bracket via `updateRateBracketDebt(prevRate, newRate, prevDebt, newDebt, ...)` per upstream pattern. Do not treat Trove deltas as the authoritative system totals; ActivePool + DefaultPool gauge handlers own `LiquityInstance.systemColl` and `systemDebt` so redistributed liquidation debt remains counted while it sits in DefaultPool.
 - **`BatchedTroveUpdated`** + **`BatchUpdated`** — Envio v3 processes events in log-index order within a tx; `BatchUpdated` arrives after one or more `BatchedTroveUpdated` logs. The first handler cannot read the future batch totals. Persist a short-lived `PendingBatchedTroveUpdate` record keyed by `{chainId}-{txHash}-{batchManager}-{troveId}` (or a JSON list on a tx-scoped pending entity), then have `BatchUpdated` replay every pending trove for that batch using `trove.debt = batchUpdated.totalDebtShares === 0 ? 0 : batchUpdated.debt * batchDebtShares / batchUpdated.totalDebtShares`, update collateral/stake, update brackets, and delete the pending records. The zero-share guard is required for empty-batch transitions such as `REMOVE_FROM_BATCH` for the last member; never divide before deleting the pending replay row. Persist each batched trove's `batchDebtShares` and each batch's `totalDebtShares` so later quiet-period rollups and batch-only updates can apportion current batch debt without needing a fresh `BatchedTroveUpdated` for every member. Accumulate `BatchUpdated._debtIncreaseFromUpfrontFee` into `LiquityInstance.borrowingFeeCum` alongside the TroveOperation upfront-fee path. Handle `SET_INTEREST_BATCH_MANAGER` and `REMOVE_FROM_BATCH` through the same batch-transition helper so `Trove.interestBatchId` is set/cleared when a trove joins, leaves, or changes batches after opening. System aggregate totals still come from ActivePool + DefaultPool gauge events.
-- **`Liquidation`** — append immutable `LiquidationEvent` row. Bump `LiquityInstance.liqCountCum`, `liqDebtOffsetCum`, `liqDebtRedistributedCum`, `liqCollSentToSpCum`, etc. Do not subtract redistributed debt/collateral from system totals here; the following ActivePool/DefaultPool gauge events materialize the correct aggregate.
+- **`Liquidation`** — append immutable `LiquidationEvent` row. Bump aggregate debt/collateral totals such as `liqDebtOffsetCum`, `liqDebtRedistributedCum`, `liqCollSentToSpCum`, etc. Do **not** bump `liqCountCum` here; one aggregate `Liquidation` event can cover multiple liquidated troves, and `TroveOperation(LIQUIDATE)` owns the per-trove count. Do not subtract redistributed debt/collateral from system totals here; the following ActivePool/DefaultPool gauge events materialize the correct aggregate.
 - **`Redemption`** — append immutable `RedemptionEvent` row. Bump `LiquityInstance.redemptionCountCum`, `redemptionDebtCum`, `redemptionFeeCum`.
 - **`RedemptionFeePaidToTrove`** — per-trove fee record only. Store the fee separately (`Trove.redemptionFeePaidCum` if per-trove fee display is needed, otherwise only the immutable event detail) and never add `_ETHFee` to `Trove.redeemedColl`; redeemed collateral remains sourced from the matching `TroveOperation`.
 
@@ -1048,7 +1059,7 @@ Per-event logic (mirrors the upstream subgraph mapping at `liquity/bold/subgraph
 
 > **Multi-handler-in-one-tx ordering**: a liquidation tx emits TroveOperation (op=LIQUIDATE) + TroveUpdated + Liquidation (from TroveManager) + DepositUpdated + StabilityPoolBoldBalanceUpdated + StabilityPoolCollBalanceUpdated (from StabilityPool) all in the same tx, plus TroveNFT.Transfer if the burn fires. Envio processes them in log-index order. **Critical**: every handler must use the "read-modify-write the full entity" pattern — no incremental updates that depend on ordering. The `pool.ts` upsert helper is the precedent; mirror it.
 >
-> **Hourly rollup trigger**: every event handler first checks whether `block.timestamp` has crossed an hour boundary since the LiquityInstance's `lastEventTimestamp`. If so, flush `rollLiquityInstanceSnapshot` for the prior hour bucket using the pre-event instance state and the `*Bucket` counters stored on `LiquityInstance`, then reset those bucket counters before processing the new event into the new bucket. Same per-tick pattern as `appendPoolSnapshot` in `pool.ts`, but the boundary flush must happen before the new event mutates state.
+> **Hourly/daily rollup trigger**: every event handler first checks whether `block.timestamp` has crossed an hour boundary since the LiquityInstance's `lastEventTimestamp`. If so, flush `rollLiquityInstanceSnapshot` for the prior hour bucket using the pre-event instance state and the hourly `*Bucket` counters stored on `LiquityInstance`, then reset only those hourly counters before processing the new event into the new bucket. On UTC-day boundaries, write `LiquityInstanceDailySnapshot` from the separate `*DayBucket` counters and reset only daily counters, or derive daily rows by aggregating the just-written hourly snapshots. Same per-tick pattern as `appendPoolSnapshot` in `pool.ts`, but the boundary flush must happen before the new event mutates state.
 
 #### A.5 — Unit tests
 
@@ -1061,6 +1072,7 @@ Test cases:
 - **InterestRateBracket update math**: applies prevRate=0/newRate=5% on a fresh trove → bracket created with `totalDebt=debt`, `sumDebtTimesRateD36` correct. Rate switch from 5% → 6% → debt moves between brackets with correct `pendingDebtTimesOneYearD36` accumulation per upstream formula (cross-check against the upstream reference at `liquity/bold/subgraph/src/TroveManager.mapping.ts:updateRateBracketDebt`).
 - **Cross-handler bracket race**: same-tx `TroveOperation` + `TroveUpdated` changes debt/rate, but bracket debt and pending interest move exactly once because `TroveOperation` skips bracket updates and `TroveUpdated` owns the transition.
 - **Batch math**: BatchedTroveUpdated with `batchDebtShares=100` persists pending state; later BatchUpdated with `totalDebtShares=400`, `debt=1000e18` replays pending state → per-trove debt = `1000e18 * 100 / 400 = 250e18`, persists `Trove.batchDebtShares=100`, persists `InterestBatch.totalDebtShares=400`, bracket state updates, pending row removed. A later quiet-hour rollup with no per-trove event must derive current batched-trove debt from `batchDebtShares / totalDebtShares` rather than stale `Trove.debt`. Include an empty-batch case (`totalDebtShares=0`) that records replayed debt as zero and still deletes pending rows. The test must assert system totals do **not** change here; ActivePool + DefaultPool gauge tests own aggregate totals.
+- **Liquidation counting**: tx with two `TroveOperation(LIQUIDATE)` logs plus one aggregate `Liquidation` event increments `liqCountCum` and both liquidation-count bucket counters by 2, while the aggregate `Liquidation` event contributes debt/collateral totals only.
 - **ICR computation**: coll=200e18 USDm, debt=100e18 GBPm, `collateralDebtPriceD18=0.75e18` (USDm/GBPm) → known expected bps. Include CHFm and JPYm cases so unit conversion cannot regress to USDm/USD-only math.
 - **Redistribution snapshot math**: a liquidation updates total redistribution accumulators while an untouched active trove has stale `debt/coll`; rollup/current-ICR helpers use the trove's redistribution snapshots to include pending DefaultPool gains before sorting percentiles or the riskiest table.
 - **TCR sentinel**: market-specific price null → tcrBps = -1; debt=0 → tcrBps = -1; happy path matches floor(coll·price/debt·10000).
@@ -1083,7 +1095,7 @@ Test cases:
 - **TroveNFT.Transfer**: from!=ZERO and to!=ZERO → previousOwner updates, owner updates.
 - **TroveNFT borrower counts**: secondary transfer decrements the previous owner's `BorrowerInfo` and increments the recipient's counts; burn decrements the current owner exactly once.
 - **System totals after redistribution**: liquidation with `_debtRedistributed > 0` leaves `systemDebt = activePoolDebt + defaultPoolDebt`, not just the sum of updated Trove rows.
-- **Hourly snapshot boundary**: first event after an hour boundary writes the prior-hour snapshot from pre-event state, then applies the new event to the new bucket.
+- **Hourly/daily snapshot boundary**: first event after an hour boundary writes the prior-hour snapshot from pre-event state and hourly bucket counters, then applies the new event to the new hourly bucket. First event after a UTC-day boundary writes the prior daily snapshot from daily bucket counters or hourly-snapshot aggregation; hourly resets must not zero the daily counts.
 - **Read-time redemption decay**: no-event interval after `BaseRateUpdated` still renders/computes a lower decayed redemption rate at `now`.
 - **Redemption-rate cap precision**: a quiet-period rate below 1% but above the fee floor is capped with `ONE_D18`, not `1`, before conversion to bps.
 - **Shutdown accrual cap**: for a shut-down market, current-debt helpers cap interest and batch-management-fee accrual at `shutDownAt`; post-shutdown dashboard/alert TCR must not keep drifting because quiet-period accrual logic used wall-clock `now`.
@@ -1153,10 +1165,10 @@ New files under `ui-dashboard/src/components/cdps/`:
 
 #### B.4 — Cross-links from existing pages
 
-- **Pool detail page for any FPMM pool with a non-removed `CdpPool` row** — currently uses `ui-dashboard/src/lib/strategy-detection.ts` to RPC-probe strategy type. **Replace** with `CdpPool(where: { poolId, removed: { _eq: false } })`. Pool detail then renders a "CDP Market" link tile (mirrors OLS panel cross-link) pointing to `/cdps/[symbol]` for the underlying market.
+- **Pool detail page for any FPMM pool with a non-removed `CdpPool` row** — currently uses `ui-dashboard/src/lib/strategy-detection.ts` to RPC-probe strategy type. Prefer `CdpPool(where: { poolId, removed: { _eq: false } })`; keep `strategy-detection.ts` as a Monad-scoped fallback until Monad `CDPLiquidityStrategy` events are subscribed and backfilled. Pool detail renders a "CDP Market" link tile (mirrors OLS panel cross-link) only when `CdpPool.collateralId` resolves to a Liquity market; strategy-only Monad rows can show the CDP badge without a market link.
 - **Global homepage `/`**: add a "CDPs" entry under the existing header nav.
 - **Revenue page `/revenue`**: wire CDP fees into the existing placeholder only after normalizing to a common reporting unit. `borrowingFeeCum` is denominated in each market's debt token (GBPm/CHFm/JPYm), while redemption fee counters are collateral-side (USDm in this fork); convert each component through the market FX price before summing, or render a per-token/per-market breakdown instead of one raw total. If borrowing-fee tracking or normalization is not implemented in the indexer/UI PR, keep the tile disabled/placeholder rather than displaying a mixed-currency or redemption-only revenue number under a borrowing-fee label.
-- **Global pools table**: the existing `CDP strategy badge` (PR #214 stopgap) gets re-pointed at the non-removed `CdpPool` query instead of the RPC probe. Delete `ui-dashboard/src/lib/strategy-detection.ts` once the indexer is verified live — keep the deletion in the same PR since the indexer side ships the entity that replaces it.
+- **Global pools table**: the existing `CDP strategy badge` (PR #214 stopgap) gets re-pointed at the non-removed `CdpPool` query instead of the RPC probe on indexed networks. Delete `ui-dashboard/src/lib/strategy-detection.ts` only after Monad strategy events are indexed/backfilled too; otherwise narrow the existing probe to the Monad fallback path and remove it in the follow-up that closes that gap.
 
 #### B.5 — Chart conventions to reuse
 
@@ -1227,7 +1239,7 @@ For completeness; do not implement now. Follow-up PR:
 | `shared-config/liquity.ts`                                                                                                                                                                                   | NEW — dashboard-facing symbol → collateralId map and slug helpers, generated from or manually mirrored with `indexer-envio/config/liquity.json`; not imported by indexer handlers                                                                                                                                                                               |
 | `ui-dashboard/src/lib/queries/liquity.ts`                                                                                                                                                                    | NEW — 11 GraphQL queries per B.1                                                                                                                                                                                                                                                                                                                                |
 | `ui-dashboard/src/lib/queries.ts`                                                                                                                                                                            | EDIT — re-export liquity queries                                                                                                                                                                                                                                                                                                                                |
-| `ui-dashboard/src/lib/strategy-detection.ts`                                                                                                                                                                 | DELETE — replaced by CdpPool query                                                                                                                                                                                                                                                                                                                              |
+| `ui-dashboard/src/lib/strategy-detection.ts`                                                                                                                                                                 | EDIT/DELETE — replace with CdpPool query on indexed networks; keep a Monad-scoped fallback unless Monad CDPLiquidityStrategy is subscribed and backfilled in this PR                                                                                                                                                                                            |
 | `ui-dashboard/src/app/cdps/page.tsx`                                                                                                                                                                         | NEW — CDPs landing                                                                                                                                                                                                                                                                                                                                              |
 | `ui-dashboard/src/app/cdps/_components/cdps-index-client.tsx`                                                                                                                                                | NEW — landing client                                                                                                                                                                                                                                                                                                                                            |
 | `ui-dashboard/src/app/cdps/[symbol]/page.tsx`                                                                                                                                                                | NEW — per-market entry                                                                                                                                                                                                                                                                                                                                          |
@@ -1290,7 +1302,7 @@ The bulk of the original risk list (event signature uncertainty, MCR view-call n
 1. **Envio v3 multi-address subscription**. The plan registers three TroveManager addresses under a single contract name. Confirm Envio v3 dispatches each event with `event.srcAddress` populated so handlers can route per instance. If it doesn't, fall back to separate contract definitions per instance (more YAML, same semantics).
 2. **`AddressesRegistry` / `SystemParams` discovery accessors**. The implementation must not assume `AddressesRegistry.systemParams()` exists. Verify the deployed ABIs before using discovery calls; otherwise use the static per-market contract table in `indexer-envio/config/liquity.json` for AddressesRegistry and the active `SystemParamsProxy*` addresses. Keep implementation addresses only for ABI/source verification.
 3. **`Trove.id` collision across CHFm/JPYm reusing the same troveId integer.** Liquity v2 emits `_troveId: uint256` per instance. Two instances can independently emit `_troveId=0`. The schema's `id` key uses `{chainId}-{troveManager}-{troveIdHex}` to disambiguate; verify the upstream subgraph's `troveFullId = collId + ":" + troveId.toHexString()` convention matches. Cross-instance NFT transfers are not possible (TroveNFT is per-instance) so the chain+troveManager+troveId triple is sound.
-4. **CDPLiquidityStrategy `params` tuple decoding**. The `PoolAdded(indexed address pool, tuple params)` event uses an inline-struct tuple and includes the debt token that identifies the CDP market. Envio codegen should handle this; if not, decode manually from `event.params.params` ABI. Verify shape by reading the contract source on Celoscan.
+4. **CDPLiquidityStrategy `params` tuple decoding**. The `PoolAdded(address indexed pool, (address pool, address debtToken, uint32 cooldown, address protocolFeeRecipient, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) params)` event uses an inline-struct tuple and includes the debt token that identifies the CDP market. Keep the tuple spelled out in human-readable ABI form so viem/Envio can parse it. Verify shape by reading the contract source on Celoscan.
 5. **`previousOwner` initial value on Trove**. ERC721 mints fire `Transfer(0x0, owner, tokenId)`. The plan defaults `previousOwner = ZERO_ADDRESS` until a real transfer; the upstream subgraph schema is non-null so make sure our schema marks it `String!` with the ZERO_ADDRESS default rather than nullable.
 6. **Interest-bracket rate flooring precision**. Upstream floors at 3 decimals (0.1%). Implementations use D18 floor. Cross-check with a unit test against a known mainnet TroveOperation rate value to confirm bracket assignment.
 7. **`SP_YIELD_SPLIT` interpretation**. SystemParams returns this as uint256 — bps or fraction? Read the deployed value (likely 7500 = 75% if bps) before using.
