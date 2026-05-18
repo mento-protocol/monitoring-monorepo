@@ -1,4 +1,4 @@
-import type { LiquityCollateral } from "envio";
+import type { LiquityCollateral, LiquityInstance, Trove } from "envio";
 import systemParamsAbi from "../../../abis/liquity/SystemParams.json" with { type: "json" };
 import {
   getFallbackRpcClient,
@@ -8,6 +8,7 @@ import {
 import type { LiquityMarketConfig } from "./config.js";
 import { makeCollateralId } from "./config.js";
 import { makeLiquityCollateral } from "./bootstrap.js";
+import { reclassifyTrovesForLoadedParams } from "./troves.js";
 
 const D18 = 10n ** 18n;
 
@@ -38,6 +39,18 @@ type SystemParamsContext = {
   LiquityCollateral: {
     get: (id: string) => Promise<LiquityCollateral | undefined>;
     set: (entity: LiquityCollateral) => void;
+  };
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
+    set: (entity: LiquityInstance) => void;
+  };
+  Trove: {
+    get: (id: string) => Promise<Trove | undefined>;
+    set: (entity: Trove) => void;
+    getWhere: (args: {
+      collateralId: { _eq: string };
+      status: { _eq: string };
+    }) => Promise<Trove[]>;
   };
 };
 
@@ -148,5 +161,6 @@ export async function getOrLoadSystemParams(
     systemParamsLoaded: true,
   };
   context.LiquityCollateral.set(next);
+  await reclassifyTrovesForLoadedParams(context, id, minDebt);
   return next;
 }

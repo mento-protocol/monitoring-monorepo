@@ -13,7 +13,9 @@ import {
 import {
   TROVE_STATUS,
   moveInterestRateBracketDebt,
+  reclassifyTrovesForLoadedParams,
   statusFromDebt,
+  tracksIndividualInterest,
   transitionTroveStatus,
 } from "../src/handlers/liquity/troves";
 import { makeLiquityInstance } from "../src/handlers/liquity/bootstrap";
@@ -144,6 +146,103 @@ describe("Liquity CDP helpers", () => {
       stillActive.instance,
     );
     assert.equal(zombie.instance.activeTroveCount, 0);
+  });
+
+  it("identifies only unbatched troves as individual interest-bracket rows", () => {
+    assert.equal(
+      tracksIndividualInterest({ interestBatchId: undefined }),
+      true,
+    );
+    assert.equal(
+      tracksIndividualInterest({ interestBatchId: "42220-0xbatch" }),
+      false,
+    );
+  });
+
+  it("reclassifies fail-closed troves after system params load", async () => {
+    const collateralId = "42220-0xabc";
+    const baseTrove = {
+      id: "t",
+      chainId: 42220,
+      collateralId,
+      troveId: "0x1",
+      owner: "0x0000000000000000000000000000000000000000",
+      previousOwner: "0x0000000000000000000000000000000000000000",
+      status: TROVE_STATUS.ZOMBIE,
+      debt: 150n,
+      coll: 0n,
+      stake: 0n,
+      snapshotOfTotalCollRedist: 0n,
+      snapshotOfTotalDebtRedist: 0n,
+      interestRate: 0n,
+      interestBatchId: undefined,
+      batchDebtShares: 0n,
+      icrBps: 0,
+      liquidatedColl: undefined,
+      liquidatedDebt: undefined,
+      collSurplus: undefined,
+      priceAtLiquidation: undefined,
+      redemptionCount: 0,
+      redeemedColl: 0n,
+      redeemedDebt: 0n,
+      redemptionFeePaidCum: 0n,
+      openedAt: 0n,
+      openedAtBlock: 0n,
+      openedTxHash: "",
+      closedAt: undefined,
+      closedAtBlock: undefined,
+      closedTxHash: undefined,
+      lastUserActionAt: 0n,
+      lastUpdatedAt: 0n,
+      lastUpdatedBlock: 0n,
+    };
+    const troves = new Map([
+      [baseTrove.id, baseTrove],
+      [
+        "low",
+        {
+          ...baseTrove,
+          id: "low",
+          troveId: "0x2",
+          status: TROVE_STATUS.ACTIVE,
+          debt: 50n,
+        },
+      ],
+    ]);
+    const instances = new Map([
+      [
+        collateralId,
+        {
+          ...makeLiquityInstance(collateralId, 42220, 0n),
+          activeTroveCount: 1,
+        },
+      ],
+    ]);
+    const context = {
+      LiquityInstance: {
+        get: async (id: string) => instances.get(id),
+        set: (entity: ReturnType<typeof makeLiquityInstance>) =>
+          instances.set(entity.id, entity),
+      },
+      Trove: {
+        set: (entity: typeof baseTrove) => troves.set(entity.id, entity),
+        getWhere: async (args: {
+          collateralId: { _eq: string };
+          status: { _eq: string };
+        }) =>
+          [...troves.values()].filter(
+            (trove) =>
+              trove.collateralId === args.collateralId._eq &&
+              trove.status === args.status._eq,
+          ),
+      },
+    };
+
+    await reclassifyTrovesForLoadedParams(context, collateralId, 100n);
+
+    assert.equal(troves.get("t")?.status, TROVE_STATUS.ACTIVE);
+    assert.equal(troves.get("low")?.status, TROVE_STATUS.ZOMBIE);
+    assert.equal(instances.get(collateralId)?.activeTroveCount, 1);
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {

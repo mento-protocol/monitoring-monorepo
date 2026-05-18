@@ -16,6 +16,7 @@ import {
   getOrCreateTrove,
   moveInterestRateBracketDebt,
   statusFromDebt,
+  tracksIndividualInterest,
   transitionTroveStatus,
 } from "./troves.js";
 
@@ -215,14 +216,16 @@ indexer.onEvent(
       blockTimestamp,
       txHash: event.transaction.hash,
     });
-    await moveInterestRateBracketDebt(context, {
-      collateralId,
-      prevRate: trove.interestRate,
-      nextRate: event.params._annualInterestRate,
-      prevDebt: trove.debt,
-      nextDebt: event.params._debt,
-      timestamp: blockTimestamp,
-    });
+    if (tracksIndividualInterest(trove)) {
+      await moveInterestRateBracketDebt(context, {
+        collateralId,
+        prevRate: trove.interestRate,
+        nextRate: event.params._annualInterestRate,
+        prevDebt: trove.debt,
+        nextDebt: event.params._debt,
+        timestamp: blockTimestamp,
+      });
+    }
 
     const pendingId = pendingTroveKey(
       event.chainId,
@@ -239,8 +242,6 @@ indexer.onEvent(
       snapshotOfTotalCollRedist: event.params._snapshotOfTotalCollRedist,
       snapshotOfTotalDebtRedist: event.params._snapshotOfTotalDebtRedist,
       interestRate: event.params._annualInterestRate,
-      interestBatchId: undefined,
-      batchDebtShares: 0n,
       icrBps: -1,
       lastUpdatedAt: blockTimestamp,
       lastUpdatedBlock: blockNumber,

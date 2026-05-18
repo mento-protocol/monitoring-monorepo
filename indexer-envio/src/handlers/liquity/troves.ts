@@ -67,6 +67,10 @@ export const statusFromDebt = (debt: bigint, minDebt: bigint): string => {
   return TROVE_STATUS.ACTIVE;
 };
 
+export const tracksIndividualInterest = (
+  trove: Pick<Trove, "interestBatchId">,
+): boolean => trove.interestBatchId === undefined;
+
 export const makePlaceholderTrove = ({
   id,
   chainId,
@@ -248,4 +252,45 @@ async function applyBracketDelta(
     pendingDebtTimesOneYearD36: pending,
     updatedAt: timestamp,
   });
+}
+
+type ReclassifyTrovesContext = {
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
+    set: (entity: LiquityInstance) => void;
+  };
+  Trove: {
+    set: (entity: Trove) => void;
+    getWhere: (args: {
+      collateralId: { _eq: string };
+      status: { _eq: string };
+    }) => Promise<Trove[]>;
+  };
+};
+
+export async function reclassifyTrovesForLoadedParams(
+  context: ReclassifyTrovesContext,
+  collateralId: string,
+  minDebt: bigint,
+): Promise<void> {
+  const instance = await context.LiquityInstance.get(collateralId);
+  if (instance === undefined) return;
+  let nextInstance = instance;
+  for (const status of [TROVE_STATUS.ACTIVE, TROVE_STATUS.ZOMBIE]) {
+    const troves = await context.Trove.getWhere({
+      collateralId: { _eq: collateralId },
+      status: { _eq: status },
+    });
+    for (const trove of troves) {
+      const nextStatus = statusFromDebt(trove.debt, minDebt);
+      const transitioned = transitionTroveStatus(
+        trove,
+        nextStatus,
+        nextInstance,
+      );
+      if (transitioned.trove !== trove) context.Trove.set(transitioned.trove);
+      nextInstance = transitioned.instance;
+    }
+  }
+  if (nextInstance !== instance) context.LiquityInstance.set(nextInstance);
 }
