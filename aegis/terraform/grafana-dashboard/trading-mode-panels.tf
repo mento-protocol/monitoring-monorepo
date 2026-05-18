@@ -45,7 +45,7 @@ locals {
                 mode = "absolute"
                 steps = [
                   { color = "green", value = null },
-                  { color = "red", value = 80 }
+                  { color = "red", value = 1 }
                 ]
               }
             })

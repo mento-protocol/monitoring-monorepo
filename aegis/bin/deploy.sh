@@ -36,6 +36,13 @@ const deployPackage = {
   pnpm: rootPackage.pnpm,
 };
 
+if (deployPackage.scripts) {
+  delete deployPackage.scripts.build;
+  delete deployPackage.scripts.prepare;
+  delete deployPackage.scripts.preinstall;
+  delete deployPackage.scripts.postinstall;
+}
+
 fs.writeFileSync(
   deployPackagePath,
   `${JSON.stringify(deployPackage, null, 2)}\n`,
