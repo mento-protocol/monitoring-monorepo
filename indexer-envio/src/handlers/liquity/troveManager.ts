@@ -3,7 +3,14 @@ import { asBigInt, eventId } from "../../helpers.js";
 import { getOrCreateLiquityInstance } from "./bootstrap.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
+import { pendingTroveKey } from "./keys.js";
 import { negativeToPositive } from "./math.js";
+import { OP, isBatchMembershipOperation } from "./operations.js";
+import {
+  setPendingBatchMembershipOperation,
+  setPendingRedemption,
+} from "./pendingOperations.js";
+import { getOrLoadSystemParams } from "./systemParams.js";
 import {
   TROVE_STATUS,
   getOrCreateTrove,
@@ -20,19 +27,6 @@ const statusFromCollateral = (
   if (collateral?.systemParamsLoaded !== true) return TROVE_STATUS.ZOMBIE;
   return statusFromDebt(debt, collateral.minDebt);
 };
-
-const OP = {
-  OPEN_TROVE: 0,
-  CLOSE_TROVE: 1,
-  ADJUST_TROVE: 2,
-  ADJUST_TROVE_INTEREST_RATE: 3,
-  APPLY_PENDING_DEBT: 4,
-  LIQUIDATE: 5,
-  REDEEM_COLLATERAL: 6,
-  OPEN_TROVE_AND_JOIN_BATCH: 7,
-  SET_INTEREST_BATCH_MANAGER: 8,
-  REMOVE_FROM_BATCH: 9,
-} as const;
 
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
@@ -152,11 +146,22 @@ indexer.onEvent(
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
       instance = transitioned.instance;
-      context.PendingRedemption.set({
-        id: `${event.chainId}-${event.transaction.hash}-${trove.troveId}`,
-        collateralId,
+      setPendingRedemption(context, {
+        chainId: event.chainId,
         txHash: event.transaction.hash,
+        collateralId,
         troveId: trove.troveId,
+        timestamp: blockTimestamp,
+        blockNumber,
+      });
+    } else if (isBatchMembershipOperation(op)) {
+      setPendingBatchMembershipOperation(context, {
+        chainId: event.chainId,
+        txHash: event.transaction.hash,
+        collateralId,
+        troveId: trove.troveId,
+        operation: op,
+        annualInterestRate: event.params._annualInterestRate,
         timestamp: blockTimestamp,
         blockNumber,
       });
@@ -219,7 +224,12 @@ indexer.onEvent(
       timestamp: blockTimestamp,
     });
 
-    const pendingId = `${event.chainId}-${event.transaction.hash}-${trove.troveId}`;
+    const pendingId = pendingTroveKey(
+      event.chainId,
+      event.transaction.hash,
+      collateralId,
+      trove.troveId,
+    );
     const pendingRedemption = await context.PendingRedemption.get(pendingId);
     trove = {
       ...trove,
@@ -239,7 +249,12 @@ indexer.onEvent(
       trove.status !== TROVE_STATUS.CLOSED &&
       trove.status !== TROVE_STATUS.LIQUIDATED
     ) {
-      const collateral = await context.LiquityCollateral.get(collateralId);
+      const collateral = await getOrLoadSystemParams(
+        context,
+        market,
+        blockNumber,
+        blockTimestamp,
+      );
       const nextStatus = statusFromCollateral(trove.debt, collateral);
       const transitioned = transitionTroveStatus(trove, nextStatus, instance);
       trove = transitioned.trove;
@@ -266,7 +281,12 @@ indexer.onEvent(
     const collateralId = makeCollateralId(market);
     const troveId = `0x${event.params._troveId.toString(16)}`;
     context.PendingBatchedTroveUpdate.set({
-      id: `${event.chainId}-${event.transaction.hash}-${event.params._interestBatchManager}-${troveId}`,
+      id: pendingTroveKey(
+        event.chainId,
+        event.transaction.hash,
+        collateralId,
+        troveId,
+      ),
       collateralId,
       txHash: event.transaction.hash,
       batchManager: event.params._interestBatchManager.toLowerCase(),
@@ -333,7 +353,12 @@ indexer.onEvent(
       txHash: { _eq: event.transaction.hash },
       batchManager: { _eq: batchManager },
     });
-    const collateral = await context.LiquityCollateral.get(collateralId);
+    const collateral = await getOrLoadSystemParams(
+      context,
+      market,
+      blockNumber,
+      blockTimestamp,
+    );
     for (const pending of pendingRows) {
       if (
         pending.collateralId !== collateralId ||
@@ -354,6 +379,38 @@ indexer.onEvent(
           ? 0n
           : (event.params._debt * pending.batchDebtShares) /
             event.params._totalDebtShares;
+      const op = await context.PendingBatchMembershipOperation.get(
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          pending.troveId,
+        ),
+      );
+      if (op !== undefined) {
+        context.PendingBatchMembershipOperation.deleteUnsafe(op.id);
+      }
+      const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
+      const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
+      if (entersBatch) {
+        await moveInterestRateBracketDebt(context, {
+          collateralId,
+          prevRate: trove.interestRate,
+          nextRate: 0n,
+          prevDebt: trove.debt,
+          nextDebt: 0n,
+          timestamp: blockTimestamp,
+        });
+      } else if (leavesBatch) {
+        await moveInterestRateBracketDebt(context, {
+          collateralId,
+          prevRate: 0n,
+          nextRate: op.annualInterestRate,
+          prevDebt: 0n,
+          nextDebt,
+          timestamp: blockTimestamp,
+        });
+      }
       const transitioned = transitionTroveStatus(
         {
           ...trove,
@@ -362,9 +419,11 @@ indexer.onEvent(
           stake: pending.stake,
           snapshotOfTotalCollRedist: pending.snapshotOfTotalCollRedist,
           snapshotOfTotalDebtRedist: pending.snapshotOfTotalDebtRedist,
-          interestRate: event.params._annualInterestRate,
-          interestBatchId: batchId,
-          batchDebtShares: pending.batchDebtShares,
+          interestRate: leavesBatch
+            ? (op?.annualInterestRate ?? trove.interestRate)
+            : event.params._annualInterestRate,
+          interestBatchId: leavesBatch ? undefined : batchId,
+          batchDebtShares: leavesBatch ? 0n : pending.batchDebtShares,
           icrBps: -1,
           lastUpdatedAt: blockTimestamp,
           lastUpdatedBlock: blockNumber,

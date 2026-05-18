@@ -17,6 +17,7 @@ import {
   transitionTroveStatus,
 } from "../src/handlers/liquity/troves";
 import { makeLiquityInstance } from "../src/handlers/liquity/bootstrap";
+import { pendingTroveKey } from "../src/handlers/liquity/keys";
 
 describe("Liquity CDP helpers", () => {
   it("routes every configured Celo market by all event source contracts", () => {
@@ -174,5 +175,13 @@ describe("Liquity CDP helpers", () => {
     const bracket = rows.get(`42220-0xabc-${rate}`);
     assert.equal(bracket?.totalDebt, 0n);
     assert.equal(bracket?.sumDebtTimesRateD36, 0n);
+  });
+
+  it("scopes pending trove rows by collateral as well as tx and trove id", () => {
+    const txHash = "0xabc";
+    assert.notEqual(
+      pendingTroveKey(42220, txHash, "42220-0x111", "0x1"),
+      pendingTroveKey(42220, txHash, "42220-0x222", "0x1"),
+    );
   });
 });

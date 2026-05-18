@@ -973,6 +973,18 @@ type PendingBatchedTroveUpdate @index(fields: ["collateralId", "txHash"]) {
   blockNumber: BigInt!
 }
 
+type PendingBatchMembershipOperation
+  @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  collateralId: String! @index
+  txHash: String! @index
+  troveId: String!
+  operation: Int!
+  annualInterestRate: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
 type PendingRedemption @index(fields: ["collateralId", "txHash"]) {
   id: ID!
   collateralId: String! @index

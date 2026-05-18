@@ -4,6 +4,7 @@ import { asAddress, asBigInt, eventId } from "../../helpers.js";
 import { getOrCreateLiquityInstance } from "./bootstrap.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
+import { getOrLoadSystemParams } from "./systemParams.js";
 
 const pendingDepositKey = (
   chainId: number,
@@ -109,8 +110,11 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
-    const collateral = await context.LiquityCollateral.get(
-      makeCollateralId(market),
+    const collateral = await getOrLoadSystemParams(
+      context,
+      market,
+      blockNumber,
+      blockTimestamp,
     );
     const next = touchLiquityInstance(
       flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),

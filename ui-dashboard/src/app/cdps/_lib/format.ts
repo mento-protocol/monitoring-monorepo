@@ -5,7 +5,7 @@ export function formatTokenAmount(
   symbol: string,
 ): string {
   if (value == null) return "—";
-  if (BigInt(value) < BigInt(0)) return "—";
+  if (BigInt(value) === BigInt(-1)) return "—";
   return `${formatWei(value, 18, 2)} ${symbol}`;
 }
 
