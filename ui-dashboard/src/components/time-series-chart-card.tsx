@@ -124,7 +124,11 @@ interface TimeSeriesChartCardProps {
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
 // builder + range picker are tightly coupled to Plotly layout state. Revisit
-// only with a focused chart-component split.
+// only with a focused chart-component split. Same rationale silences
+// `max-lines-per-function` on this function + its inner useMemo (the
+// merge-base baseline embeds line counts in its messages, which would
+// otherwise flag every size change as a new violation).
+/* eslint-disable max-lines-per-function */
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function TimeSeriesChartCard({
   title,
@@ -503,7 +507,24 @@ export function TimeSeriesChartCard({
                     position: "absolute",
                     inset: 0,
                     opacity: active ? 1 : 0,
-                    transition: "opacity 250ms ease-out",
+                    // Plotly attaches inline `pointer-events: all` to its
+                    // drag rect on every overlay, which overrides the
+                    // container's `pointer-events: none`. Without
+                    // `visibility: hidden`, the topmost overlay (the
+                    // all-traces-hidden combo) intercepts hover and its
+                    // empty Plotly draws no label. Delay the visibility
+                    // flip past the opacity fade so the cross-fade still
+                    // reads when leaving active.
+                    visibility: active ? "visible" : "hidden",
+                    // Lift the active overlay above fading-out siblings so
+                    // its Plotly drag rect is the topmost hit target during
+                    // the 250ms fade — without this, the previously-active
+                    // overlay (still `visibility: visible` until the delayed
+                    // flip) can intercept hover and draw a stale label.
+                    zIndex: active ? 1 : 0,
+                    transition: active
+                      ? "opacity 250ms ease-out"
+                      : "opacity 250ms ease-out, visibility 0s 250ms",
                     pointerEvents: active ? "auto" : "none",
                   }}
                 >
@@ -551,3 +572,4 @@ export function TimeSeriesChartCard({
     </section>
   );
 }
+/* eslint-enable max-lines-per-function */
