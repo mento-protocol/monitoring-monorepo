@@ -328,22 +328,27 @@ describe("openBreachPeakRatio math — ratio is always non-negative", () => {
     );
   });
 
-  it("peak = 0 always produces ratio = 0", () => {
+  it("pool with currentOpenBreachPeak='0' always produces openBreachPeakRatio=0 regardless of entryThreshold", () => {
+    // The actual eligibleForProbe expression: openBreachPeak > 0 ? peak/threshold : 0
+    // When peak == 0, the guard short-circuits and the ratio is 0 unconditionally.
     fc.assert(
       fc.property(
-        fc.float({
-          min: Math.fround(0.001),
-          max: Math.fround(100_000),
-          noNaN: true,
-        }),
-        (threshold) => {
-          const entryThreshold =
-            threshold > 0 ? threshold : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
-          const ratio = 0 > 0 ? 0 / entryThreshold : 0;
-          expect(ratio).toBe(0);
+        fc.integer({ min: 1, max: 1_800_000_000 }),
+        fc.integer({ min: 0, max: 50_000 }),
+        (breach, entryThreshold) => {
+          const pool = eligiblePool({
+            deviationBreachStartedAt: String(breach),
+            // ratio must be above tolerance but below critical so only the peak drives eligibility
+            lastDeviationRatio: "1.02",
+            currentOpenBreachPeak: "0",
+            currentOpenBreachEntryThreshold: entryThreshold,
+          });
+          // Pool must not be eligible — neither the ratio (1.02 < 1.05 critical)
+          // nor the peak (0) crosses the critical threshold.
+          expect(eligibleForProbe([pool])).toEqual([]);
         },
       ),
-      { numRuns: 50 },
+      { numRuns: 100 },
     );
   });
 });
