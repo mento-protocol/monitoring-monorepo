@@ -96,8 +96,17 @@ jobs:
           # produce previews and the only ones we trust with the bypass secret.
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
+          # Dependabot PRs are technically same-repo (head.repo.full_name
+          # matches), but GitHub treats them like forked runs: the token is
+          # read-only and `secrets.*` are unavailable. The bypass-secret +
+          # PR-comment steps would fail with missing secrets and leave the
+          # required check blocking routine dependency updates. Skip them.
+          PR_ACTOR: ${{ github.actor }}
         run: |
-          if [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+          if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from dependabot[bot] — GitHub blocks Actions secrets for Dependabot, skipping Lighthouse."
+          elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "PR from fork '$PR_HEAD_REPO' — Vercel does not build previews for forks, skipping Lighthouse."
           elif [[ "$FILTER_OUTCOME" != "success" ]]; then
@@ -183,28 +192,24 @@ jobs:
       - name: Run Lighthouse CI
         if: steps.decide.outputs.run == 'true'
         env:
-          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
-          # The bypass secret is read by the shell, baked into the lhci URL
-          # query string, then unset from the env before lhci spawns — so
-          # PR-controlled `.lighthouserc.cjs` (loaded by lhci as CJS) cannot
-          # read it from `process.env`. The fork guard in `decide` also
-          # ensures this step never runs for fork PRs, so the secret is only
-          # ever exposed to write-access holders. GitHub Actions auto-masks
-          # secret values in run logs.
+          # The bypass secret is passed via lhci's --collect.settings.extraHeaders
+          # rather than the URL query string so it does NOT end up in the
+          # public lhci report (temporary-public-storage reports render the
+          # requested URL verbatim including query params). The secret is
+          # also unset from env before lhci spawns to keep PR-controlled
+          # `.lighthouserc.cjs` from reading it. The fork + Dependabot guards
+          # in `decide` ensure this step only runs for trusted, secret-bearing
+          # contexts.
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -eo pipefail
           PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          # Vercel's bypass-via-query-param mechanism: each request gets
-          # ?x-vercel-protection-bypass=<secret>. The header form does not
-          # survive lhci's puppeteer-launched Chrome on cross-origin
-          # redirects, so we use the query-param form instead.
-          PREVIEW_HOME="${PREVIEW_URL}/?x-vercel-protection-bypass=${BYPASS_SECRET}"
-          PREVIEW_POOLS="${PREVIEW_URL}/pools?x-vercel-protection-bypass=${BYPASS_SECRET}"
+          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'"}'
           unset BYPASS_SECRET
           pnpm exec lhci autorun \
-            --collect.url="${PREVIEW_HOME}" \
-            --collect.url="${PREVIEW_POOLS}" \
+            --collect.url="${PREVIEW_URL}/" \
+            --collect.url="${PREVIEW_URL}/pools" \
+            --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
 
       - name: Post Lighthouse results as PR comment
