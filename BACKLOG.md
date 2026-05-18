@@ -39,6 +39,13 @@ the landed mechanism + severities.
 - [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** so it was deferred. Fix incrementally — start with `lib/**` (pure logic), then `hooks/**`, then `components/**`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check.
 - [ ] Enable `exactOptionalPropertyTypes: true` on `indexer-envio`, `metrics-bridge`, and `ui-dashboard`. The flag is already on for `shared-config` (PR #443). `indexer-envio` already has a dry-run file (`tsconfig.strict-dry-run.json`) with the flag — run `tsc -p tsconfig.strict-dry-run.json --noEmit` to see current error count before committing. Pattern: replace `{ key: val | undefined }` object literals with `...(val !== undefined && { key: val })` spread form; update optional-field types from `?: T` to `: T | undefined` where the value is always present but may be undefined. Start with `indexer-envio` (dry-run config already exists), then `metrics-bridge`, then `ui-dashboard`.
 
+### Lighthouse CI Follow-Ups
+
+The initial Lighthouse CI gate landed in PR #451 with desktop performance + accessibility budgets. Remaining work to graduate it from advisory to fully-trusted:
+
+- [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance.
+- [ ] Add INP (interaction-to-next-paint) coverage via lhci's user-flow mode with scripted interactions on the dashboard pages. Lighthouse's default navigation mode never produces an INP numeric value, so the budget was intentionally omitted in PR #451 to avoid silent-pass false confidence. User-flow mode would script the typical "open page, hover a chart, click a filter" interaction and run an INP audit on the scripted timespan.
+
 ### Package-Manager Supply-Chain Hardening Review
 
 Why: the TanStack npm compromise shows that provenance and trusted publishing are

@@ -5,7 +5,7 @@
 //   Performance:   not captured by CI tool; conservative desktop estimate used
 //   LCP:           ~1 200 ms  (SSR + CDN-served, desktop)
 //   CLS:           0.00       (measured directly via Lighthouse JSON)
-//   INP:           ~100 ms    (desktop analytics dashboard)
+//   INP:           not captured by Lighthouse navigation mode (needs user-flow)
 //
 // BUDGET RATIONALE:
 //   All performance budgets start as `warn` (not `error`) because CWV vary
@@ -17,7 +17,7 @@
 //     performance score:  baseline - 0.05  (warn at <0.75 → catches big regressions)
 //     LCP:                baseline + 500 ms (warn at >1 700 ms)
 //     CLS:                max(baseline + 0.05, 0.10) = 0.10
-//     INP:                baseline + 100 ms (warn at >200 ms)
+//     INP:                (not asserted; navigation mode doesn't produce a value)
 //     accessibility:      0.94 (error; matches current prod baseline 0.94 so
 //                         any regression is caught without blocking current PRs)
 //
@@ -73,9 +73,13 @@ module.exports = {
         // Production measured at 0.00. Using standard "good" threshold.
         "cumulative-layout-shift": ["warn", { maxNumericValue: 0.1 }],
 
-        // Interaction to Next Paint: warn above 200 ms
-        // Estimated ~100 ms desktop + 100 ms headroom.
-        "interaction-to-next-paint": ["warn", { maxNumericValue: 200 }],
+        // NOTE: INP (interaction-to-next-paint) is intentionally NOT asserted.
+        // Lighthouse's default navigation mode (cold page load, no user
+        // interactions) never produces an INP numeric value, so an assertion
+        // would silently pass on every run and give false confidence. Adding
+        // INP coverage requires switching to lhci's user-flow mode with
+        // scripted interactions. Tracked in BACKLOG under "Lighthouse CI —
+        // add INP coverage via user-flow mode".
       },
     },
     upload: {

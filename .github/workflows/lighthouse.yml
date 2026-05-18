@@ -71,33 +71,36 @@ jobs:
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
-            # Mirrors the filter in .github/workflows/size-limit.yml — any path
-            # that can affect the dashboard's rendered output should trigger
-            # Lighthouse. .lighthouserc.cjs itself is included so a budget change
-            # re-runs the audit against the current build.
+            # MUST match the paths Vercel actually builds previews for (see
+            # ui-dashboard/scripts/vercel-ignore-build.sh#dashboard_paths). When
+            # a PR only touches paths Vercel skips, no preview deployment is
+            # ever posted for the head SHA, so the Lighthouse wait step would
+            # time out and fail a required check. Keep these in sync with
+            # vercel-ignore-build.sh — both lists govern the same "is this a
+            # dashboard-affecting change" decision.
             dashboard:
-              - ui-dashboard/src/**
-              - ui-dashboard/*.ts
-              - ui-dashboard/*.mjs
-              - ui-dashboard/*.cjs
-              - ui-dashboard/*.js
-              - ui-dashboard/*.json
+              - ui-dashboard/**
               - shared-config/**
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
-              - .npmrc
-              - .node-version
-              - .lighthouserc.cjs
-              - .github/workflows/lighthouse.yml
 
       - name: Decide whether to run Lighthouse
         id: decide
         env:
           FILTER_OUTCOME: ${{ steps.filter.outcome }}
           DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+          # Fork PRs do not produce Vercel preview deployments (see
+          # docs/deployment.md), so the wait step would always time out.
+          # Skip Lighthouse for forks; same-repo PRs are the only ones that
+          # produce previews and the only ones we trust with the bypass secret.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
         run: |
-          if [[ "$FILTER_OUTCOME" != "success" ]]; then
+          if [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from fork '$PR_HEAD_REPO' — Vercel does not build previews for forks, skipping Lighthouse."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running Lighthouse."
           elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
@@ -181,17 +184,28 @@ jobs:
         if: steps.decide.outputs.run == 'true'
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # The bypass secret is read by the shell, baked into the lhci CLI
+          # URL args, then unset before lhci spawns — so PR-controlled
+          # .lighthouserc.cjs (loaded by lhci as CJS) cannot read it from
+          # process.env. The fork guard in `decide` also ensures this step
+          # never runs for fork PRs, so the secret is only ever exposed to
+          # write-access holders. GitHub Actions auto-masks secret values in
+          # logs, so the URL appears as `...?x-vercel-protection-bypass=***...`
+          # in the run output.
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -eo pipefail
           PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          # Pass the Vercel deployment-protection bypass token so Lighthouse
-          # audits the real dashboard pages rather than the SSO interstitial.
-          # The header is injected via --collect.settings.extraHeaders.
+          # Vercel's documented automation-bypass for crawlers uses the query
+          # param + cookie mechanism: the first request authenticates and
+          # Vercel sets a same-domain cookie that subsequent requests use.
+          # The `extraHeaders` approach does not survive the cross-origin
+          # redirect to vercel.com/login, so we use query params instead.
+          BYPASS_QS="x-vercel-protection-bypass=${BYPASS_SECRET}&x-vercel-set-bypass-cookie=true"
+          unset BYPASS_SECRET
           pnpm exec lhci autorun \
-            --collect.url="${PREVIEW_URL}/" \
-            --collect.url="${PREVIEW_URL}/pools" \
-            --collect.settings.extraHeaders="{\"x-vercel-protection-bypass\":\"${VERCEL_AUTOMATION_BYPASS_SECRET}\"}" \
+            --collect.url="${PREVIEW_URL}/?${BYPASS_QS}" \
+            --collect.url="${PREVIEW_URL}/pools?${BYPASS_QS}" \
             2>&1 | tee /tmp/lhci-output.txt
 
       - name: Post Lighthouse results as PR comment
