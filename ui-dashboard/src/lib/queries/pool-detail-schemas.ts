@@ -21,7 +21,7 @@ import { z } from "zod";
 // POOL_BREACH_ROLLUP
 // ---------------------------------------------------------------------------
 
-export const PoolBreachRollupRowSchema = z.object({
+const PoolBreachRollupRowSchema = z.object({
   id: z.string(),
   breachCount: z.number().optional(),
   healthBinarySeconds: z.string().optional(),
@@ -32,13 +32,11 @@ export const PoolBreachRollupSchema = z.object({
   Pool: z.array(PoolBreachRollupRowSchema),
 });
 
-export type PoolBreachRollupResponse = z.infer<typeof PoolBreachRollupSchema>;
-
 // ---------------------------------------------------------------------------
 // POOL_CONFIG_EXT
 // ---------------------------------------------------------------------------
 
-export const PoolConfigExtRowSchema = z.object({
+const PoolConfigExtRowSchema = z.object({
   id: z.string(),
   rebalanceReward: z.number().optional(),
 });
@@ -47,13 +45,11 @@ export const PoolConfigExtSchema = z.object({
   Pool: z.array(PoolConfigExtRowSchema),
 });
 
-export type PoolConfigExtResponse = z.infer<typeof PoolConfigExtSchema>;
-
 // ---------------------------------------------------------------------------
 // POOL_DETAIL_WITH_HEALTH  (primary pool-page query)
 // ---------------------------------------------------------------------------
 
-export const PoolDetailRowSchema = z.object({
+const PoolDetailRowSchema = z.object({
   id: z.string(),
   chainId: z.number(),
   token0: z.string().nullable(),
@@ -75,7 +71,13 @@ export const PoolDetailRowSchema = z.object({
   priceDifference: z.string().optional(),
   rebalanceThreshold: z.number().optional(),
   lastRebalancedAt: z.string().optional(),
-  deviationBreachStartedAt: z.string().nullable().optional(),
+  // Hasura can return null when no breach is open; coerce to undefined so the
+  // inferred type stays compatible with Pool.deviationBreachStartedAt?: string.
+  deviationBreachStartedAt: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
   lpFee: z.number().optional(),
   protocolFee: z.number().optional(),
   limitStatus: z.string().optional(),
@@ -93,7 +95,3 @@ export const PoolDetailRowSchema = z.object({
 export const PoolDetailWithHealthSchema = z.object({
   Pool: z.array(PoolDetailRowSchema),
 });
-
-export type PoolDetailWithHealthResponse = z.infer<
-  typeof PoolDetailWithHealthSchema
->;

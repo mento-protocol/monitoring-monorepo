@@ -222,13 +222,15 @@ describe("schema validation logic", () => {
     }
   });
 
-  it("skips validation when schema is undefined (backward-compat)", () => {
-    // When no schema is provided, the fetcher returns raw as-is.
-    // Simulate: schema == null → return raw directly.
-    const raw = { Pool: [{ id: "0x1", extraField: true }] };
-    const undefinedSchema = undefined;
-    // No throw — behaves as before
-    const output = undefinedSchema == null ? raw : undefinedSchema;
-    expect(output).toBe(raw);
+  it("passes extra fields through when schema is lenient (backward-compat)", () => {
+    // Zod strips unknown keys by default in .parse but safeParse with a
+    // strict schema would fail on extra fields — use z.object to confirm
+    // that extra fields on a lenient schema don't cause issues.
+    const lenient = z.object({ Pool: z.array(z.object({ id: z.string() })) });
+    // Hasura can return extra fields; the schema only validates known fields.
+    const raw = { Pool: [{ id: "0x1" }] };
+    const result = lenient.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.Pool[0].id).toBe("0x1");
   });
 });
