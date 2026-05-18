@@ -22,6 +22,40 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
   shift
 fi
 
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --limit)
+      if [[ "${2:-}" =~ ^[0-9]+$ && "$2" -gt 50 ]]; then
+        echo "⚠️  envio-cloud deployment logs caps --limit at 50; using 50 instead of $2" >&2
+        ARGS+=(--limit 50)
+        shift 2
+      else
+        ARGS+=("$1")
+        shift
+        if [[ $# -gt 0 ]]; then
+          ARGS+=("$1")
+          shift
+        fi
+      fi
+      ;;
+    --limit=*)
+      limit="${1#--limit=}"
+      if [[ "$limit" =~ ^[0-9]+$ && "$limit" -gt 50 ]]; then
+        echo "⚠️  envio-cloud deployment logs caps --limit at 50; using 50 instead of $limit" >&2
+        ARGS+=(--limit=50)
+      else
+        ARGS+=("$1")
+      fi
+      shift
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
 DEPLOYMENTS_JSON=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null)
 COMMIT=$(printf '%s' "$DEPLOYMENTS_JSON" | node -e "
     const target = process.argv[1];
@@ -42,5 +76,5 @@ fi
 echo "📋 Logs for deployment: $COMMIT"
 echo ""
 
-# Pass all flags through
-pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
+# Pass normalized flags through
+pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
