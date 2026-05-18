@@ -1,0 +1,102 @@
+name: Bundle Size Limit
+
+on:
+  pull_request:
+    branches: [main]
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The job uses an internal path-detection step that is continue-on-error,
+    # so a detector failure cannot fail the workflow (fail-closed: the
+    # size-limit step then runs anyway).
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-bundle-size:
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to invoke `pnpm dashboard:build` +
+    # `size-limit`:
+    #   - PR + filter succeeded + dashboard=true  → run
+    #   - PR + filter succeeded + dashboard=false → no-op skip
+    #   - PR + filter failed (any cause)           → run (fail-closed)
+    # When `size-limit` does run, a bundle over budget fails the job.
+    name: Dashboard bundle size
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Anything that can affect the bundle output of `pnpm dashboard:build`.
+            # ui-dashboard/src/** covers all application code; package.json and
+            # next.config.ts wire deps and bundler config; tsconfig.json feeds
+            # compiler transforms that can alter code output; .size-limit.cjs
+            # itself — a budget change must re-run to prove the new limit
+            # passes on the current build. shared-config/** is included because
+            # ui-dashboard imports @mento-protocol/monitoring-config at build
+            # time. Package-manager files (root + lockfile) capture dep updates
+            # that can widen the bundle. .node-version governs the Node runtime
+            # that runs the Next.js build. The workflow + install action are
+            # included so changes to the gate itself trigger a re-run.
+            dashboard:
+              - ui-dashboard/src/**
+              # All ui-dashboard root-level config files that feed the build:
+              # PostCSS/Tailwind (postcss.config.mjs), Sentry shared module
+              # imported into the client bundle via instrumentation-client
+              # (sentry.shared.ts), Next.js (next.config.ts), TS compiler
+              # (tsconfig.json), size budget itself (.size-limit.cjs),
+              # package manifest, etc. Codex P2 caught the original
+              # narrower list missing `postcss.config.mjs` + `sentry.shared.ts`.
+              - ui-dashboard/*.ts
+              - ui-dashboard/*.mjs
+              - ui-dashboard/*.cjs
+              - ui-dashboard/*.js
+              - ui-dashboard/*.json
+              - shared-config/**
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .node-version
+              - .github/workflows/size-limit.yml
+              - .github/actions/pnpm-install/**
+      - name: Decide whether to run size check
+        id: decide
+        env:
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+        run: |
+          if [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running size check."
+          elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Dashboard inputs changed — running size check."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Dashboard code + its size-limit inputs unchanged — skipping size check."
+          fi
+      - uses: ./.github/actions/pnpm-install
+        if: steps.decide.outputs.run == 'true'
+      - name: Build dashboard
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm dashboard:build
+      - name: Check bundle size
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm dashboard:size-limit
