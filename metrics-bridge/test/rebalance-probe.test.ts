@@ -163,6 +163,63 @@ describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
     });
     expect(eligibleForProbe([pool])).toEqual([]);
   });
+
+  // Threshold-divisor branches — these tests pin the `currentOpenBreachEntryThreshold > 0`
+  // selection between the recorded field value and `LEGACY_OPEN_BREACH_ENTRY_THRESHOLD`
+  // (10000). Without them, an "always use field" or "always use legacy" mutation
+  // survives because the eligibility outcome happens to match on the common-case
+  // fixtures used by the existing tests.
+  it("uses legacy floor (NOT zero) when currentOpenBreachEntryThreshold is 0 — peak below legacy excludes", () => {
+    // With original code: entryThreshold=LEGACY (10000) → peak/10000 = 0.9 < 1.05 → not critical.
+    // If the threshold mutated to "always use the field" (i.e. 0), then peak/0 = Infinity > 1.05
+    // and the pool would falsely become eligible. Locks the legacy-floor path.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "9000",
+      currentOpenBreachEntryThreshold: 0,
+    });
+    expect(eligibleForProbe([pool])).toEqual([]);
+  });
+
+  it("uses recorded field (NOT legacy floor) when currentOpenBreachEntryThreshold > 0 — peak below field excludes", () => {
+    // With original code: entryThreshold=field (15000) → peak/15000 = 1.0 ≤ 1.05 → not critical.
+    // If the threshold mutated to "always use legacy" (10000), peak/10000 = 1.5 > 1.05 and
+    // the pool would falsely become eligible. Locks the field-value path.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "15000",
+      currentOpenBreachEntryThreshold: 15000,
+    });
+    expect(eligibleForProbe([pool])).toEqual([]);
+  });
+
+  it("computes the open-breach peak ratio as peak / threshold (NOT multiplied)", () => {
+    // Original: peak/threshold = 0.5/10000 = 0.00005 → not critical → not eligible.
+    // If `/` were mutated to `*`: peak*threshold = 5000 → > 1.05 → falsely eligible.
+    // Locks the divide-not-multiply semantics that the ratio metric depends on.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "0.5",
+      currentOpenBreachEntryThreshold: 10000,
+    });
+    expect(eligibleForProbe([pool])).toEqual([]);
+  });
+
+  it("excludes when open-breach peak ratio == 1.05 exactly (boundary is strict >)", () => {
+    // peak/threshold = 10500/10000 = 1.05 — at the threshold but NOT above.
+    // If `> 1.05` were mutated to `>= 1.05`, this would become eligible.
+    // Mirrors the existing 1.05-boundary test for the direct-ratio path.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.03",
+      currentOpenBreachPeak: "10500",
+      currentOpenBreachEntryThreshold: 10000,
+    });
+    expect(eligibleForProbe([pool])).toEqual([]);
+  });
 });
 
 describe("runWithConcurrency — bounded fan-out", () => {

@@ -15,7 +15,8 @@ one of the current mutation targets.
   limitation. Add tests only for real gaps.
 - **`metrics-bridge/src/rebalance-probe.ts` mutation is PR-blocking** (since
   PR 436):
-  `metrics-bridge/stryker.config.mjs` sets `break: 80`, and
+  `metrics-bridge/stryker.config.mjs` sets `break: 86` (current baseline
+  88.32% with a 2-pt margin for measurement noise), and
   `.github/workflows/mutation-testing.yml` runs on every PR (required-status
   safe — no `paths:` filter). The bridge job's internal `filter` step is
   `continue-on-error: true` so a path-detection failure can't flip the
@@ -25,10 +26,11 @@ one of the current mutation targets.
   diff touched bridge inputs (`metrics-bridge/src/**`,
   `metrics-bridge/test/**`, `metrics-bridge/stryker.config.mjs`,
   `metrics-bridge/vitest.mutation.config.ts`,
-  `metrics-bridge/package.json`, `metrics-bridge/tsconfig.json`, or root
-  package-manager files `package.json` / `pnpm-lock.yaml` /
-  `pnpm-workspace.yaml` / `.npmrc`). When the mutation step does run and
-  the score is below 80%, the job fails. If your PR fails the gate, treat
+  `metrics-bridge/package.json`, `metrics-bridge/tsconfig.json`,
+  shared-config inputs, or root package-manager files `package.json` /
+  `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `.npmrc`). When the mutation
+  step does run and the score is below 86%, the job fails. If your PR
+  fails the gate, treat
   any new surviving mutant as a real test gap unless you can classify it
   against the existing taxonomy in `docs/mutation-testing.md` and update
   that doc in the same PR.

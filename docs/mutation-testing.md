@@ -47,11 +47,11 @@ Latest dashboard result after adding focused assertions:
 
 Latest metrics-bridge result after narrowing to the probe runner:
 
-- Runtime: 22s on the 2026-05-18 CI run / 9s locally
-- Mutation score: **83.94% total / covered** (regressed from the previous
-  90.27% baseline; the gate is now `break: 80` so this still passes, with a
-  4-pt margin; un-triaged survivors are tracked in `BACKLOG.md`).
-- Mutants: 111 killed, 4 timed out, 22 survived, 0 no coverage
+- Runtime: 22s on the 2026-05-18 CI run / 8-9s locally
+- Mutation score: **88.32% total / covered** after PR 436 added four
+  threshold-divisor + arithmetic boundary tests; the gate is `break: 86`
+  with a 2-pt margin for measurement noise.
+- Mutants: 117 killed, 4 timed out, 16 survived, 0 no coverage
 
 The first dashboard run was worth doing: it found real assertion gaps in the
 default `Date.now()` path, reversed weekend-overlap ranges, and the exact/future
@@ -93,17 +93,70 @@ Remaining dashboard survivors are accepted noise:
   `slice(1)`, the namespaced format leaves a single address segment, so
   `join("")` and `join("-")` return the same value.
 
-Remaining metrics-bridge survivors are accepted noise for this baseline:
+Remaining 16 metrics-bridge survivors after the PR 436 triage — all are
+classified as accepted noise or equivalent mutants. Counts in parentheses
+indicate how many mutation variants on the same line collapse to the same
+category.
 
-- `_resetProbeInProgressForTests()` and module-scope boolean initializer mutants
-  affect test scaffolding/static initialization more than production behavior.
-- Timeout abort-name and abort-branch mutants collapse to the same logged
-  `transport_error` because the fallback still returns the timeout message.
-- Empty-array and no-eligible-cycle mutants are equivalent with the current
-  runner: arrays expand by index assignment, and an empty eligible list still
-  reaches the same last-run timestamp without probes.
-- The loop-bound / missing-result guards are defensive against impossible
-  result-array holes under `runWithConcurrency()`.
+**Test scaffolding (3)** — affect test cleanup, not production behavior:
+
+- `_resetProbeInProgressForTests()` body emptied (line 53).
+- Module-scope `let probeInProgress = false` flipped to `true` (line 44);
+  `runRebalanceProbes()` re-sets it every cycle before reading.
+- Module-scope `let reentryWarnedThisWindow = false` flipped to `true`
+  (line 49); reset in the `finally` block.
+
+**`eligibleForProbe` optimization branches (5)** — equivalent mutants
+because NaN-comparison semantics naturally short-circuit downstream:
+
+- `if (!Number.isFinite(ratio)) return false` (line 72): removing the
+  early-return still excludes the pool — `NaN <= TOLERANCE` is false,
+  `NaN > 1.05` is false, so `crossedCritical` is false → excluded anyway.
+- `Number.isFinite(openBreachPeak) && openBreachPeak > 0` mutated to
+  `true` / `&&` → `||` / `> 0` → `>= 0` (lines 80, 80:42): when peak is 0
+  or NaN, every variant yields `openBreachPeakRatio = 0` (either via the
+  guard or via 0/threshold). The boundary tests added in PR 436 lock the
+  threshold-divisor selection, but these guard-removal mutants flatten
+  to the same ratio.
+
+**`probeOne` timeout-error branch (3)** — equivalent because the
+unexpected-error fallback returns the same `transport_error` message:
+
+- `timeoutErr.name = "AbortError"` mutated to `""` (line 124): with an
+  empty name, `isAbortError(err)` returns false and the catch falls to
+  the fallback path which builds `transport_error` from the same
+  `scrubUrls(timeoutErr.message)` — the message is the literal
+  `timeoutMessage` with no URLs to scrub, so the observable error string
+  is unchanged.
+- `if (isAbortError(err)) { ... }` mutated to `if (false)` / `{}`
+  (line 138): same fallback collapse — the body returned
+  `transport_error: timeoutMessage` and the fallback now returns
+  `transport_error: scrubUrls(timeoutMessage)`, which for our timeout
+  string is the same value.
+
+**`runWithConcurrency` array pre-sizing (1)** — equivalent:
+
+- `new Array(items.length)` mutated to `new Array()` (line 170):
+  JavaScript arrays grow dynamically on `arr[idx] = ...` assignment, and
+  the runner only reads results AFTER the workers finish. Final array
+  shape is identical.
+
+**`runRebalanceProbes` defensive guards (4)** — equivalent under the
+current callgraph:
+
+- `if (eligible.length === 0) { ...; return; }` mutated to
+  `if (false)` / `{}` (line 219): with an empty list,
+  `runWithConcurrency([], ..., ...)` returns `[]`, the for-loop runs
+  zero iterations, and the function still reaches the same final
+  `rebalanceProbeLastRun` gauge update at the end of the `try` block.
+- `for (let i = 0; i < eligible.length; i++)` mutated to `i <=` (line
+  230): accessing `eligible[eligible.length]` returns `undefined`,
+  `results[eligible.length]` returns `undefined`, and the next-line
+  `if (!result) continue` skips. No observable change.
+- `if (!result) continue` mutated to `if (false) continue` (line 233):
+  in current code, `results[i]` is always defined because
+  `runWithConcurrency` writes every slot. The guard is defensive
+  against future regressions but unreachable today.
 
 Remaining indexer survivors are accepted noise for this baseline:
 
