@@ -55,9 +55,17 @@ export async function poll(): Promise<void> {
 
 async function loop(): Promise<void> {
   await poll();
-  setTimeout(loop, POLL_INTERVAL_MS);
+  // `setTimeout` expects a void-returning callback; passing `loop` directly
+  // discards the returned Promise and any rejection bubbles up as
+  // `unhandledRejection`. Wrap in a `void`-discarding closure so the
+  // intentional fire-and-forget is explicit.
+  setTimeout(() => void loop(), POLL_INTERVAL_MS);
 }
 
 export function startPolling(): void {
-  loop();
+  // Same fire-and-forget pattern: `loop()` runs forever; if it ever rejects,
+  // each `poll()` call already swallows its own errors, so the only way out
+  // is a programmer error here. `void` makes the discard explicit for the
+  // `no-floating-promises` lint.
+  void loop();
 }

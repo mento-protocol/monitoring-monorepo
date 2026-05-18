@@ -33,7 +33,7 @@ function healthLabel(status: PoolOgData["health"]): string {
       return "critical";
     case "WEEKEND":
       return "markets closed";
-    default:
+    case "N/A":
       return "n/a";
   }
 }
