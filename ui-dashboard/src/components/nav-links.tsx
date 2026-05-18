@@ -33,6 +33,12 @@ export function NavLinks() {
         Leaderboard
       </Link>
       <Link
+        href="/cdps"
+        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+      >
+        CDPs
+      </Link>
+      <Link
         href="/revenue"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >

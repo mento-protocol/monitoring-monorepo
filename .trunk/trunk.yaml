@@ -40,6 +40,9 @@ lint:
         # this file holds only public proxy + token addresses generated from
         # @mento-protocol/contracts by scripts/generateNttAddresses.mjs.
         - indexer-envio/config/nttAddresses.json
+        # Liquity CDP contract config: public Celo contract + token addresses,
+        # no secrets.
+        - indexer-envio/config/liquity.json
         # Regression fixture — public pool + token addresses used to verify
         # `poolName(chainId, token0, token1)` matches the old hand-rolled
         # POOL_PAIR_LABELS list. No secrets.

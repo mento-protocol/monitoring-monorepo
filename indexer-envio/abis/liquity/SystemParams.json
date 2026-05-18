@@ -1,0 +1,476 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "disableInitializers",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "_debtParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.DebtParams",
+        "components": [
+          {
+            "name": "minDebt",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_liquidationParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.LiquidationParams",
+        "components": [
+          {
+            "name": "liquidationPenaltySP",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationPenaltyRedistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_gasCompParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.GasCompParams",
+        "components": [
+          {
+            "name": "collGasCompensationDivisor",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "collGasCompensationCap",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "ethGasCompensation",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_collateralParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.CollateralParams",
+        "components": [
+          {
+            "name": "ccr",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "scr",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "mcr",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bcr",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_interestParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.InterestParams",
+        "components": [
+          {
+            "name": "minAnnualInterestRate",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_redemptionParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.RedemptionParams",
+        "components": [
+          {
+            "name": "redemptionFeeFloor",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "initialBaseRate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redemptionMinuteDecayFactor",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redemptionBeta",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "_poolParams",
+        "type": "tuple",
+        "internalType": "struct ISystemParams.StabilityPoolParams",
+        "components": [
+          {
+            "name": "spYieldSplit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minBoldInSP",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minBoldAfterRebalance",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "BCR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "CCR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "COLL_GAS_COMPENSATION_CAP",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "COLL_GAS_COMPENSATION_DIVISOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ETH_GAS_COMPENSATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "INITIAL_BASE_RATE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "LIQUIDATION_PENALTY_REDISTRIBUTION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "LIQUIDATION_PENALTY_SP",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MCR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_ANNUAL_INTEREST_RATE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_BOLD_AFTER_REBALANCE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_BOLD_IN_SP",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_DEBT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "REDEMPTION_BETA",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "REDEMPTION_FEE_FLOOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "REDEMPTION_MINUTE_DECAY_FACTOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SCR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SP_YIELD_SPLIT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InvalidBCR",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidCCR",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidFeeValue",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidGasCompensation",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidInterestRateBounds",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMCR",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMinBoldInSP",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMinDebt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSCR",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidTimeValue",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MinInterestRateGtMax",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RedistPenaltyTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SPPenaltyGtRedist",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SPPenaltyTooLow",
+    "inputs": []
+  }
+]

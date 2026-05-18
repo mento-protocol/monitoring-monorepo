@@ -1,0 +1,289 @@
+name: Lighthouse CI
+
+# Core Web Vitals + accessibility regression detection for the ui-dashboard.
+# Runs against the Vercel preview deployment for every PR so regressions are
+# caught before merge rather than after production deploy.
+#
+# REQUIRED-STATUS SAFETY:
+#   No workflow-level `paths:` filter — required-status workflows must run on
+#   every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+#   The internal `filter` step uses dorny/paths-filter and is
+#   `continue-on-error: true`. The `decide` step then either runs Lighthouse
+#   (dashboard changed) or skips cleanly (no dashboard change). A filter
+#   failure falls closed → Lighthouse always runs when detection fails.
+#
+# VERCEL PREVIEW URL:
+#   The workflow polls the GitHub Deployments API (no Vercel token needed) to
+#   find the preview URL Vercel posts for the current SHA. It waits up to
+#   5 minutes for the deployment to become active. When the dashboard filter
+#   says "skip", the Vercel wait + Lighthouse steps are also skipped, keeping
+#   run time under 30 s for non-dashboard PRs.
+#
+# PR COMMENT:
+#   lhci autorun with `upload.target: temporary-public-storage` produces a
+#   public report URL. A subsequent step posts/updates a sticky PR comment
+#   via peter-evans/create-or-update-comment so the result is always
+#   visible on the PR without requiring an LHCI server.
+
+on:
+  pull_request:
+    branches: [main]
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The job uses an internal path-detection step that is continue-on-error,
+    # so a detector failure cannot fail the workflow (fail-closed: the
+    # Lighthouse step then runs anyway).
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to run Lighthouse:
+    #   - PR + filter succeeded + dashboard=true  → run
+    #   - PR + filter succeeded + dashboard=false → no-op skip
+    #   - PR + filter failed (any cause)           → run (fail-closed)
+    # When Lighthouse does run, a performance/accessibility assertion failure
+    # warns/errors per the budgets in .lighthouserc.cjs.
+    name: Core Web Vitals + accessibility (ui-dashboard)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      # `deployments: read` lets the job query the GitHub Deployments API to
+      # find the Vercel preview URL without needing a Vercel API token.
+      deployments: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # MUST match the paths Vercel actually builds previews for (see
+            # ui-dashboard/scripts/vercel-ignore-build.sh#dashboard_paths). When
+            # a PR only touches paths Vercel skips, no preview deployment is
+            # ever posted for the head SHA, so the Lighthouse wait step would
+            # time out and fail a required check. Keep these in sync with
+            # vercel-ignore-build.sh — both lists govern the same "is this a
+            # dashboard-affecting change" decision.
+            dashboard:
+              - ui-dashboard/**
+              - shared-config/**
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+
+      - name: Decide whether to run Lighthouse
+        id: decide
+        env:
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+          # Fork PRs do not produce Vercel preview deployments (see
+          # docs/deployment.md), so the wait step would always time out.
+          # Skip Lighthouse for forks; same-repo PRs are the only ones that
+          # produce previews and the only ones we trust with the bypass secret.
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          # Dependabot PRs are technically same-repo (head.repo.full_name
+          # matches), but GitHub treats them like forked runs: the token is
+          # read-only and `secrets.*` are unavailable. The bypass-secret +
+          # PR-comment steps would fail with missing secrets and leave the
+          # required check blocking routine dependency updates. Skip them.
+          PR_ACTOR: ${{ github.actor }}
+        run: |
+          if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from dependabot[bot] — GitHub blocks Actions secrets for Dependabot, skipping Lighthouse."
+          elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from fork '$PR_HEAD_REPO' — Vercel does not build previews for forks, skipping Lighthouse."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running Lighthouse."
+          elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Dashboard inputs changed — running Lighthouse."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Dashboard code + its Lighthouse inputs unchanged — skipping Lighthouse."
+          fi
+
+      - name: Wait for Vercel preview deployment
+        id: vercel-url
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            // For pull_request events, context.sha is the synthetic merge commit
+            // that GitHub creates — not the PR head commit that Vercel tracks.
+            // Use the PR head SHA so the deployment lookup matches what Vercel posted.
+            const sha = context.payload.pull_request?.head?.sha ?? context.sha;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const maxWaitMs = 5 * 60 * 1000; // 5 minutes
+            const pollIntervalMs = 10 * 1000; // 10 seconds
+            const start = Date.now();
+
+            core.info(`Waiting for Vercel preview deployment for SHA ${sha}...`);
+
+            while (Date.now() - start < maxWaitMs) {
+              const { data: deployments } = await github.rest.repos.listDeployments({
+                owner,
+                repo,
+                sha,
+                environment: "Preview",
+                per_page: 10,
+              });
+
+              for (const deployment of deployments) {
+                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                  owner,
+                  repo,
+                  deployment_id: deployment.id,
+                  per_page: 5,
+                });
+
+                const active = statuses.find(s => s.state === "success");
+                if (active && active.environment_url) {
+                  const previewUrl = active.environment_url;
+                  core.info(`Found active Vercel preview: ${previewUrl}`);
+                  core.setOutput("preview_url", previewUrl);
+                  return;
+                }
+              }
+
+              core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+              await new Promise(r => setTimeout(r, pollIntervalMs));
+            }
+
+            // Timed out: fail rather than audit a stale branch alias.
+            // A branch alias can still resolve to the previous successful
+            // deployment for that branch, so falling back would silently pass
+            // Lighthouse against stale code and miss the missing current preview.
+            core.setFailed(`Timed out waiting for a successful Vercel preview deployment for SHA ${sha}. Check the Vercel deployment logs.`);
+
+      - name: Install dependencies (includes @lhci/cli)
+        if: steps.decide.outputs.run == 'true'
+        uses: ./.github/actions/pnpm-install
+
+      - name: Install Chromium dependencies
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          # lhci autorun launches Chromium via puppeteer internally.
+          # The required system libraries are not present on the runner by default.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libnss3 libnspr4 libasound2t64 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2
+
+      - name: Run Lighthouse CI
+        if: steps.decide.outputs.run == 'true'
+        env:
+          # The bypass secret is passed via lhci's --collect.settings.extraHeaders
+          # rather than the URL query string so it does NOT end up in the
+          # public lhci report (temporary-public-storage reports render the
+          # requested URL verbatim including query params). The secret is
+          # also unset from env before lhci spawns to keep PR-controlled
+          # `.lighthouserc.cjs` from reading it. The fork + Dependabot guards
+          # in `decide` ensure this step only runs for trusted, secret-bearing
+          # contexts.
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -eo pipefail
+          PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
+          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'"}'
+          unset BYPASS_SECRET
+          pnpm exec lhci autorun \
+            --collect.url="${PREVIEW_URL}/" \
+            --collect.url="${PREVIEW_URL}/pools" \
+            --collect.settings.extraHeaders="${BYPASS_HEADER}" \
+            2>&1 | tee /tmp/lhci-output.txt
+
+      - name: Post Lighthouse results as PR comment
+        if: steps.decide.outputs.run == 'true' && always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require("fs");
+            const lhciOutput = fs.existsSync("/tmp/lhci-output.txt")
+              ? fs.readFileSync("/tmp/lhci-output.txt", "utf8")
+              : "(No lhci output captured)";
+
+            // Extract report URLs from lhci output (temporary-public-storage URLs)
+            const reportUrls = [...lhciOutput.matchAll(/https:\/\/storage\.googleapis\.com\/lighthouse-infrastructure\.appspot\.com\/reports\/\S+\.html/g)]
+              .map(m => m[0]);
+
+            const previewUrl = "${{ steps.vercel-url.outputs.preview_url }}";
+
+            let body = `## Lighthouse CI Results\n\n`;
+            body += `Audited: [${previewUrl}/](${previewUrl}/) and [${previewUrl}/pools](${previewUrl}/pools)\n\n`;
+
+            if (reportUrls.length > 0) {
+              body += `### Reports\n`;
+              reportUrls.forEach((url, i) => {
+                body += `- [Run ${i + 1}](${url})\n`;
+              });
+              body += "\n";
+            }
+
+            // Summarise assertion results. When lhci never ran (e.g. the
+            // Vercel wait timed out before the lhci step), the output file
+            // is missing — in that case explicitly mark the comment as
+            // "did not run" rather than defaulting to ✅ from zero matches.
+            const passed = (lhciOutput.match(/✅/g) || []).length;
+            const warned = (lhciOutput.match(/⚠️/g) || []).length;
+            const failed = (lhciOutput.match(/❌/g) || []).length;
+            const lhciRan = passed + warned + failed > 0;
+            const jobStatus = !lhciRan
+              ? "⚠️ did not run"
+              : failed > 0
+                ? "❌ failed"
+                : warned > 0
+                  ? "⚠️ warnings"
+                  : "✅ passed";
+
+            body += `**Status:** ${jobStatus}`;
+            if (lhciRan) {
+              body += ` (${passed} passed, ${warned} warned, ${failed} failed)`;
+            }
+            body += "\n\n";
+            body += `<details><summary>Raw lhci output</summary>\n\n\`\`\`\n${lhciOutput.slice(0, 8000)}\n\`\`\`\n</details>\n`;
+            body += `\n<!-- lighthouse-ci-comment -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(c => c.body.includes("<!-- lighthouse-ci-comment -->"));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

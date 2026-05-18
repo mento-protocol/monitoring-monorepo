@@ -874,6 +874,9 @@ while IFS= read -r path; do
         .github/workflows/aegis-app-engine.yml)
           add_aegis_quality_commands "Aegis App Engine workflow changed"
           ;;
+        .github/workflows/lighthouse.yml)
+          add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI workflow changed"
+          ;;
         .github/actions/pnpm-install/*)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"
@@ -900,6 +903,10 @@ while IFS= read -r path; do
       add_surface "cloudbuild"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Build ignore file changed"
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics bridge build context changed"
+      ;;
+    .lighthouserc.cjs)
+      add_surface "ui-dashboard"
+      add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI budget config changed"
       ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
