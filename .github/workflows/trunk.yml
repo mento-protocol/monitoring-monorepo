@@ -31,7 +31,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.trunk/setup-ci
-      - uses: trunk-io/trunk-action@75699af9e26881e564e9d832ef7dc3af25ec031b # v1.2.4
+      - uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
         with:
           arguments: --all
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
