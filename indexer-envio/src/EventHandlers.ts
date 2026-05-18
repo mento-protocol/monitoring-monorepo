@@ -30,6 +30,7 @@ import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/liquity/collateralRegistry.js";
+import "./handlers/liquity/bootstrapHandler.js";
 import "./handlers/liquity/troveManager.js";
 import "./handlers/liquity/stabilityPool.js";
 import "./handlers/liquity/troveNFT.js";

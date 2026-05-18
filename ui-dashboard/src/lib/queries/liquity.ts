@@ -48,7 +48,7 @@ export const CDP_MARKET_DETAIL = `
     }
     StabilityPoolDepositor(
       where: { collateralId: { _eq: $collateralId } }
-      order_by: { lastTouchedDeposit: desc }
+      order_by: { lastUpdatedAt: desc }
       limit: 25
     ) {
       id address lastTouchedDeposit stashedColl lastUpdatedAt
