@@ -184,28 +184,36 @@ jobs:
         if: steps.decide.outputs.run == 'true'
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
-          # The bypass secret is read by the shell, baked into the lhci CLI
-          # URL args, then unset before lhci spawns — so PR-controlled
-          # .lighthouserc.cjs (loaded by lhci as CJS) cannot read it from
-          # process.env. The fork guard in `decide` also ensures this step
-          # never runs for fork PRs, so the secret is only ever exposed to
-          # write-access holders. GitHub Actions auto-masks secret values in
-          # logs, so the URL appears as `...?x-vercel-protection-bypass=***...`
-          # in the run output.
+          # The bypass secret is read by the shell, baked into the lhci URL
+          # query string, then unset from the env before lhci spawns — so
+          # PR-controlled `.lighthouserc.cjs` (loaded by lhci as CJS) cannot
+          # read it from `process.env`. The fork guard in `decide` also
+          # ensures this step never runs for fork PRs, so the secret is only
+          # ever exposed to write-access holders. GitHub Actions auto-masks
+          # secret values in run logs.
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           set -eo pipefail
           PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          # Vercel's documented automation-bypass for crawlers uses the query
-          # param + cookie mechanism: the first request authenticates and
-          # Vercel sets a same-domain cookie that subsequent requests use.
-          # The `extraHeaders` approach does not survive the cross-origin
-          # redirect to vercel.com/login, so we use query params instead.
-          BYPASS_QS="x-vercel-protection-bypass=${BYPASS_SECRET}&x-vercel-set-bypass-cookie=true"
+          # Vercel's bypass-via-query-param mechanism: each request gets
+          # ?x-vercel-protection-bypass=<secret>. Verified with curl:
+          #   `curl "$PREVIEW_URL/?x-vercel-protection-bypass=$SECRET"` → 200
+          # The header form ALSO works for direct requests, but lhci passes
+          # extraHeaders via puppeteer/Chrome which strips custom headers on
+          # cross-origin redirects — and Vercel's auth flow does redirect
+          # to vercel.com/login when the bypass isn't accepted on the very
+          # first request. Putting the bypass in the URL itself avoids the
+          # cross-origin redirect entirely (verified manually in the lhci
+          # 35eb128b run, which audited the login page despite using
+          # extraHeaders). We deliberately omit `&x-vercel-set-bypass-cookie`
+          # because that triggers a 307 → 401 redirect chain in non-browser
+          # crawlers.
+          PREVIEW_HOME="${PREVIEW_URL}/?x-vercel-protection-bypass=${BYPASS_SECRET}"
+          PREVIEW_POOLS="${PREVIEW_URL}/pools?x-vercel-protection-bypass=${BYPASS_SECRET}"
           unset BYPASS_SECRET
           pnpm exec lhci autorun \
-            --collect.url="${PREVIEW_URL}/?${BYPASS_QS}" \
-            --collect.url="${PREVIEW_URL}/pools?${BYPASS_QS}" \
+            --collect.url="${PREVIEW_HOME}" \
+            --collect.url="${PREVIEW_POOLS}" \
             2>&1 | tee /tmp/lhci-output.txt
 
       - name: Post Lighthouse results as PR comment
