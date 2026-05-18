@@ -503,16 +503,14 @@ export function TimeSeriesChartCard({
                     position: "absolute",
                     inset: 0,
                     opacity: active ? 1 : 0,
-                    // `visibility: hidden` removes inactive overlays from hit
-                    // testing. Without it, every overlay's `rect.nsewdrag`
-                    // carries inline `pointer-events: all` (Plotly's own
-                    // drag handle), which overrides the container's
-                    // `pointer-events: none`. The topmost overlay in DOM
-                    // order is the "all hidden" combo, so its empty Plotly
-                    // instance intercepts hover events and the active
-                    // overlay's `x unified` label never renders. Delay
-                    // the `visibility` flip to the end of the opacity fade
-                    // when leaving active so the cross-fade still reads.
+                    // Plotly attaches inline `pointer-events: all` to its
+                    // drag rect on every overlay, which overrides the
+                    // container's `pointer-events: none`. Without
+                    // `visibility: hidden`, the topmost overlay (the
+                    // all-traces-hidden combo) intercepts hover and its
+                    // empty Plotly draws no label. Delay the visibility
+                    // flip past the opacity fade so the cross-fade still
+                    // reads when leaving active.
                     visibility: active ? "visible" : "hidden",
                     transition: active
                       ? "opacity 250ms ease-out"
