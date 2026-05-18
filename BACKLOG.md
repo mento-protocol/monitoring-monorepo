@@ -36,7 +36,6 @@ the code-health history report, and `indexer-envio` `no-unsafe-*`. See
 the landed mechanism + severities.
 
 - [ ] Reuse the targeted StrykerJS mutation-testing backlog item for the weak-test signal; only promote mutation checks to required CI after runtime/noise is proven sane.
-- [ ] **PR 1 follow-up**: Break the circular import between `indexer-envio/src/pool.ts` and `indexer-envio/src/deviationBreach.ts` (probably by extracting `recordBreachTransition`). Once clean, promote `no-circular` from `warn` → `error` in `.dependency-cruiser.cjs`.
 
 ### Package-Manager Supply-Chain Hardening Review
 
@@ -79,9 +78,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
-
-- [ ] Split `ui-dashboard/src/components/global-pools-table.tsx`'s `GlobalPoolsTable` component to remove the scoped `max-lines-per-function` disable added while fixing the Clawpatch health-badge a11y finding.
-- [ ] Extract the row renderer in `ui-dashboard/src/components/global-pools-table.tsx` to remove the scoped `max-lines-per-function` disable on `sortedEntries.map(...)`.
 
 ## Envio v3 Migration Follow-Ups
 
