@@ -8,6 +8,7 @@ import {
   POOL_HEALTH_7D_ANCHOR,
   POOL_HEALTH_CURSOR,
 } from "@/lib/queries";
+import { PoolBreachRollupSchema } from "@/lib/queries/pool-detail-schemas";
 import {
   computePoolUptimePct,
   computeWindowUptimePct,
@@ -71,10 +72,14 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // all-time line stays rendered.
   const { data: rollupData, error: rollupError } = useGQL<{
     Pool: RollupRow[];
-  }>(isVirtual ? null : POOL_BREACH_ROLLUP, {
-    id: pool.id,
-    chainId: pool.chainId,
-  });
+  }>(
+    isVirtual ? null : POOL_BREACH_ROLLUP,
+    { id: pool.id, chainId: pool.chainId },
+    undefined,
+    {
+      schema: PoolBreachRollupSchema,
+    },
+  );
   const {
     data: cursorData,
     error: cursorError,
