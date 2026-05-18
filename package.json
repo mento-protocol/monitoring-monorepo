@@ -40,7 +40,9 @@
     "infra:plan": "terraform -chdir=terraform plan",
     "alerts:init": "terraform -chdir=terraform/alerts init",
     "alerts:plan": "terraform -chdir=terraform/alerts plan",
-    "alerts:apply": "terraform -chdir=terraform/alerts apply"
+    "alerts:apply": "terraform -chdir=terraform/alerts apply",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
   },
   "pnpm": {
     "overrides": {

@@ -1,8 +1,19 @@
 name: Supply Chain
 
-# Block merges when a high/critical npm advisory exists against a package in
-# the lockfile. Catches the common case — a known-vulnerable transitive dep
-# that a PR pulls in via a version bump — before it ships to prod.
+# Two gates that protect the dependency supply chain:
+#
+# 1. npm advisory audit — blocks merges when a high/critical advisory exists
+#    against any package in the lockfile.
+#
+# 2. lockfile-lint — validates pnpm-lock.yaml structural integrity:
+#    a) Every package has a sha512 integrity hash (pnpm cannot verify a
+#       tarball without it).
+#    b) No custom registry is configured in .npmrc or pnpm-workspace.yaml.
+#       pnpm v9 no longer embeds resolved: URLs in the lockfile (unlike npm/
+#       yarn), so registry validation must be done via the registry config
+#       files instead. This catches the same class of "poisoned mirror" attacks
+#       that lockfile-lint(1) was designed for — a rogue `registry=` line that
+#       silently redirects all installs to an attacker-controlled server.
 #
 # What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
 # has no `audit signatures` equivalent, and `npm audit signatures` requires a
@@ -53,3 +64,27 @@ jobs:
       # blocks. A rare transient blip → re-run the job manually.
       - name: pnpm audit (high+ only)
         run: pnpm audit --audit-level=high
+
+  lockfile-lint:
+    name: lockfile integrity + registry check
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          # No pnpm install — the lint script is pure Node.js (zero deps).
+          # This makes the job sub-30s: checkout (~5s) + node setup (~5s) +
+          # script (~1s). pnpm/action-setup is not needed either.
+      - name: lockfile-lint self-tests
+        # Runs the fixture suite that exercises the parser logic against
+        # synthetic lockfiles. Zero external deps — same Node.js binary.
+        run: node scripts/lockfile-lint.test.mjs
+      - name: lockfile integrity + registry check
+        # scripts/lockfile-lint.mjs validates:
+        #   1. Every package in pnpm-lock.yaml packages: has a sha512 integrity
+        #      hash (prevents tampered-tarball installs).
+        #   2. No custom registry= in any .npmrc or registries: in
+        #      pnpm-workspace.yaml (prevents registry-redirect attacks).
+        run: node scripts/lockfile-lint.mjs
