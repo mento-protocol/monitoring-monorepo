@@ -26,8 +26,8 @@ resource "grafana_message_template" "trading_mode_alert_message" {
 {{ $chain := .Labels.chain | title -}}
 - **✅ Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}**
 {{ end -}}
-{{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
+{{ end -}}
 EOT
 }

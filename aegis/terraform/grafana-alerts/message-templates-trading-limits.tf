@@ -28,8 +28,8 @@ resource "grafana_message_template" "trading_limits_alert_message" {
 {{ $limitType := .Labels.limitType -}}
 - **✅ Trading Limit {{ $limitType }} resolved for {{ .Labels.limitId }} on {{ $chain }}**
 {{ end -}}
-{{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
+{{ end -}}
 EOT
 }
