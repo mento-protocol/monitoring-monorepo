@@ -12,19 +12,43 @@ set -euo pipefail
 ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
 
-COMMIT="${1:-}"
-if [[ -n "$COMMIT" && "$COMMIT" != -* ]]; then
+COMMIT=""
+if [[ $# -gt 0 && "$1" != -* ]]; then
+  COMMIT="$1"
   shift
-else
-  COMMIT=""
 fi
 
+ARGS=()
 JSON_OUTPUT=false
-for arg in "$@"; do
-  case "$arg" in
-    -o=json|--output=json) JSON_OUTPUT=true ;;
-    -o|--output) ;;
-    json) JSON_OUTPUT=true ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json|-j)
+      JSON_OUTPUT=true
+      ARGS+=(-o json)
+      shift
+      ;;
+    -o|--output)
+      ARGS+=("$1")
+      shift
+      if [[ $# -gt 0 ]]; then
+        if [[ "$1" == "json" ]]; then
+          JSON_OUTPUT=true
+        fi
+        ARGS+=("$1")
+        shift
+      fi
+      ;;
+    --output=*)
+      if [[ "${1#--output=}" == "json" ]]; then
+        JSON_OUTPUT=true
+      fi
+      ARGS+=("$1")
+      shift
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
   esac
 done
 
@@ -56,4 +80,4 @@ if [[ "$JSON_OUTPUT" != "true" ]]; then
   echo "Metrics for deployment: $COMMIT"
   echo ""
 fi
-pnpm exec envio-cloud deployment metrics "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
+pnpm exec envio-cloud deployment metrics "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
