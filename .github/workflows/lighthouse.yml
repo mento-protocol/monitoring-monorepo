@@ -196,18 +196,9 @@ jobs:
           set -eo pipefail
           PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
           # Vercel's bypass-via-query-param mechanism: each request gets
-          # ?x-vercel-protection-bypass=<secret>. Verified with curl:
-          #   `curl "$PREVIEW_URL/?x-vercel-protection-bypass=$SECRET"` → 200
-          # The header form ALSO works for direct requests, but lhci passes
-          # extraHeaders via puppeteer/Chrome which strips custom headers on
-          # cross-origin redirects — and Vercel's auth flow does redirect
-          # to vercel.com/login when the bypass isn't accepted on the very
-          # first request. Putting the bypass in the URL itself avoids the
-          # cross-origin redirect entirely (verified manually in the lhci
-          # 35eb128b run, which audited the login page despite using
-          # extraHeaders). We deliberately omit `&x-vercel-set-bypass-cookie`
-          # because that triggers a 307 → 401 redirect chain in non-browser
-          # crawlers.
+          # ?x-vercel-protection-bypass=<secret>. The header form does not
+          # survive lhci's puppeteer-launched Chrome on cross-origin
+          # redirects, so we use the query-param form instead.
           PREVIEW_HOME="${PREVIEW_URL}/?x-vercel-protection-bypass=${BYPASS_SECRET}"
           PREVIEW_POOLS="${PREVIEW_URL}/pools?x-vercel-protection-bypass=${BYPASS_SECRET}"
           unset BYPASS_SECRET
