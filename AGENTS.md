@@ -222,8 +222,9 @@ pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge r
 # Aegis
 pnpm aegis:dev                # Start the NestJS App Engine service locally
 pnpm aegis:build              # Build the Aegis service
+pnpm aegis:typecheck          # Typecheck the Aegis service
 pnpm aegis:test               # Jest tests
-pnpm aegis:lint               # Trunk checks for Aegis
+pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Deploy Aegis to App Engine in mento-prod
 pnpm aegis:logs               # Tail Aegis App Engine logs
 pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service

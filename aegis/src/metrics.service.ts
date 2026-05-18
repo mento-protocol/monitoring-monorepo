@@ -13,26 +13,37 @@ export class MetricsService {
   metrics: Record<UUID, Metric[]> = {};
   lastUpdatedAt: Gauge;
   chainIds: Array<string>;
-  data: Record<string, any> = {};
 
   constructor(
     configService: ConfigService,
     private queryService: QueryService,
   ) {
     const chains = configService.get<ChainConfig[]>('chains');
+    if (!chains) {
+      throw new Error('No chains configured');
+    }
     this.chainIds = chains.map((chain) => chain.id);
     const templates = configService.get<MetricTemplate[]>('metrics');
+    if (!templates) {
+      throw new Error('No metrics configured');
+    }
     templates.forEach((template) => {
       this.metrics[template.id] = template.variants
         .map((args) => {
           return (
             template.chains === 'all' ? this.chainIds : template.chains
           ).map((chain) => {
+            const chainConfig = chains.find((c) => c.id === chain);
+            if (!chainConfig) {
+              throw new Error(
+                `Unknown chain ${chain} in metric template ${template.source.raw}`,
+              );
+            }
             return new Metric(
               template.source,
               args,
               chain,
-              chains.find((c) => c.id == chain).label,
+              chainConfig.label,
               template.type,
               configService,
             );
@@ -59,6 +70,9 @@ export class MetricsService {
   refreshTemplate = async (templateID: UUID) => {
     const template = this.templates[templateID];
     const metrics = this.metrics[templateID];
+    if (!template || !metrics) {
+      throw new Error(`Unknown metric template ${templateID}`);
+    }
     this.logger.debug(
       `Refreshing ${metrics.length} metrics for ${template.source.raw}`,
     );

@@ -13,6 +13,9 @@ const SOLIDITY_TYPE_BOUNDS = {
   int48: { min: -140737488355328n, max: 140737488355327n },
 } as const;
 
+const inputName = (input: { name?: string }, index: number): string =>
+  input.name ?? `in${index}`;
+
 /**
  * Metric class manages Prometheus gauges for on-chain contract queries.
  *
@@ -45,7 +48,7 @@ export class Metric {
   id: UUID = randomUUID();
   gauge: Gauge | Gauge[];
 
-  private labels: Record<string, any> = {};
+  private labels: Record<string, string> = {};
 
   /**
    * Validates that a bigint value is within the specified Solidity type range and converts to number.
@@ -78,14 +81,31 @@ export class Metric {
     public type: string,
     configService: ConfigService,
   ) {
-    const chainConfig = configService
-      .get('chains')
-      .find((conf: ChainConfig) => conf.label === chainLabel);
-    this.labels = this.source.functionAbi.inputs.reduce((acc, input, idx) => {
-      acc[input.name] = args[idx];
-      acc[`${input.name}Value`] = chainConfig.vars[args[idx]];
-      return acc;
-    }, {});
+    const chains = configService.get<ChainConfig[]>('chains');
+    if (!chains) {
+      throw new Error('No chains configured');
+    }
+    const chainConfig = chains.find(
+      (conf: ChainConfig) => conf.label === chainLabel,
+    );
+    if (!chainConfig) {
+      throw new Error(`Unknown chain label ${chainLabel}`);
+    }
+    this.labels = this.source.functionAbi.inputs.reduce(
+      (acc, input, idx) => {
+        const arg = args[idx];
+        const name = inputName(input, idx);
+        if (arg === undefined) {
+          throw new Error(
+            `Missing argument ${idx} for ${source.contract}.${source.functionAbi.name}`,
+          );
+        }
+        acc[name] = arg;
+        acc[`${name}Value`] = chainConfig.vars[arg] ?? arg;
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
     this.labels.chain = chainLabel;
 
     // Support multiple return values by creating multiple gauges with suffixes
@@ -105,8 +125,10 @@ export class Metric {
             name: gaugeName,
             help: `Return value ${output.name} of ${source.raw}`,
             labelNames: ['chain'].concat(
-              source.functionAbi.inputs.map((input) => input.name),
-              source.functionAbi.inputs.map((input) => `${input.name}Value`),
+              source.functionAbi.inputs.map(inputName),
+              source.functionAbi.inputs.map(
+                (input, idx) => `${inputName(input, idx)}Value`,
+              ),
             ),
           });
         }
@@ -120,8 +142,10 @@ export class Metric {
           name: this.name,
           help: `Return value of ${source.raw}`,
           labelNames: ['chain'].concat(
-            source.functionAbi.inputs.map((input) => input.name),
-            source.functionAbi.inputs.map((input) => `${input.name}Value`),
+            source.functionAbi.inputs.map(inputName),
+            source.functionAbi.inputs.map(
+              (input, idx) => `${inputName(input, idx)}Value`,
+            ),
           ),
         });
       }
@@ -147,8 +171,13 @@ export class Metric {
           `Value array length mismatch: expected ${this.gauge.length} values, got ${value.length}`,
         );
       }
+      const gauges = this.gauge;
       value.forEach((val, idx) => {
-        (this.gauge as Gauge[])[idx].labels(this.labels).set(val);
+        const gauge = gauges[idx];
+        if (!gauge) {
+          throw new Error(`Missing gauge at index ${idx} for ${this.name}`);
+        }
+        gauge.labels(this.labels).set(val);
       });
     } else {
       if (Array.isArray(this.gauge)) {

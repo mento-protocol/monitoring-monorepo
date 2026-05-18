@@ -398,14 +398,27 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- aegis/eslint-baseline.json | grep -q .; then
+            git show origin/main:aegis/eslint-baseline.json > /tmp/main-baseline-aegis.json
+          else
+            : > /tmp/main-baseline-aegis.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-aegis.json" >> "$GITHUB_ENV"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/aegis typecheck
       - name: Build
         run: pnpm --filter @mento-protocol/aegis build
       - name: Lint
         run: pnpm --filter @mento-protocol/aegis lint
-      - name: Jest tests
-        run: pnpm --filter @mento-protocol/aegis test
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/aegis knip
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/aegis test:cov
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@82dee4ba654bd2146511f85f0d013af94670c4de # v1
         with:
@@ -413,6 +426,12 @@ jobs:
       - name: Forge tests
         working-directory: aegis
         run: forge test -vvv
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          fail_ci_if_error: false
+          flags: aegis
+          directory: aegis/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

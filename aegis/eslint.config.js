@@ -3,6 +3,8 @@ const tseslint = require('@typescript-eslint/eslint-plugin');
 const tsparser = require('@typescript-eslint/parser');
 const prettier = require('eslint-plugin-prettier');
 const prettierConfig = require('eslint-config-prettier');
+const sonarjs = require('eslint-plugin-sonarjs');
+const unusedImports = require('eslint-plugin-unused-imports');
 
 const recommendedConfig = tseslint.configs['flat/recommended'];
 
@@ -30,6 +32,8 @@ module.exports = [
     plugins: {
       '@typescript-eslint': tseslint,
       prettier: prettier,
+      sonarjs: sonarjs,
+      'unused-imports': unusedImports,
     },
     rules: {
       ...prettierConfig.rules,
@@ -46,7 +50,38 @@ module.exports = [
       '@typescript-eslint/interface-name-prefix': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      'unused-imports/no-unused-imports': 'error',
+      'max-lines': [
+        'error',
+        { max: 1000, skipBlankLines: true, skipComments: true },
+      ],
+      complexity: ['error', 10],
+      'max-lines-per-function': [
+        'error',
+        { max: 60, skipBlankLines: true, skipComments: true, IIFEs: true },
+      ],
+      'max-depth': ['error', 3],
+      'max-params': ['error', 4],
+      'sonarjs/cognitive-complexity': ['error', 15],
+      'sonarjs/no-identical-functions': 'error',
+      'sonarjs/no-collapsible-if': 'error',
+      'sonarjs/no-redundant-jump': 'error',
+      'sonarjs/no-small-switch': 'error',
+    },
+  },
+  {
+    files: ['src/**/*.spec.ts'],
+    rules: {
+      complexity: 'off',
+      'max-lines-per-function': 'off',
+      'max-depth': 'off',
+      'max-params': 'off',
+      'sonarjs/cognitive-complexity': 'off',
+      'sonarjs/no-identical-functions': 'off',
+      'sonarjs/no-collapsible-if': 'off',
     },
   },
   {
@@ -61,7 +96,6 @@ module.exports = [
       'commitlint.config.mjs',
       'dist/**',
       'node_modules/**',
-      '**/*.spec.ts',
       'coverage/**',
     ],
   },

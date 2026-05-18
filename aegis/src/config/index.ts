@@ -8,10 +8,9 @@ import { MetricSource } from './MetricSource';
 
 const YAML_CONFIG_FILENAME = 'config.yaml';
 
-export const GlobalConfig = z.object({
+const GlobalConfig = z.object({
   vars: z.record(z.string(), z.string()),
 });
-export type GlobalConfig = z.infer<typeof GlobalConfig>;
 
 export const ChainConfig = z
   .object({
@@ -53,12 +52,11 @@ const Config = z
     metrics: z.array(MetricTemplate),
   })
   .brand<'Config'>();
-export type Config = z.infer<typeof Config>;
 
 export default () => {
   const rawConfig = yaml.load(
     readFileSync(join(__dirname, '../../', YAML_CONFIG_FILENAME), 'utf8'),
-  ) as Record<string, any>;
+  ) as unknown;
 
   const config = Config.parse(rawConfig);
 
@@ -75,7 +73,13 @@ export default () => {
     const { contract } = metric.source;
     const chains = metric.chains === 'all' ? allChains : metric.chains;
     chains.forEach((chainId) => {
+      if (!chainId) {
+        throw new Error(`Empty chain id in metric ${contract}`);
+      }
       const chain = config.chains.find((chain) => chain.id === chainId);
+      if (!chain) {
+        throw new Error(`Unknown chain ${chainId} in metric ${contract}`);
+      }
       if (chain.contracts[contract] === undefined) {
         throw new Error(
           `Contract ${contract} isn't declared in network ${chain.id}`,

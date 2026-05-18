@@ -12,7 +12,10 @@ describe('Metric.parse', () => {
     } as unknown as jest.Mocked<ConfigService>;
     mockConfigService.get.mockImplementation((key: string) => {
       if (key === 'chains') {
-        return [{ label: 'celo', vars: { '0x123': 'mockValue' } }];
+        return [
+          { label: 'testChainLabel', vars: { '0x123': 'mockValue' } },
+          { label: 'celo', vars: { '0x123': 'mockValue' } },
+        ];
       }
       // Add other config keys as needed
       return undefined;
@@ -246,7 +249,7 @@ describe('Metric.parse', () => {
       );
 
       expect(Array.isArray(multiGaugeMetric.gauge)).toBe(true);
-      expect((multiGaugeMetric.gauge as any[]).length).toBe(5);
+      expect((multiGaugeMetric.gauge as unknown[]).length).toBe(5);
     });
 
     it('should create single gauge for functions with single return value', () => {
@@ -392,7 +395,7 @@ describe('Metric.parse', () => {
       );
 
       expect(Array.isArray(metricWithUnnamedOutputs.gauge)).toBe(true);
-      expect((metricWithUnnamedOutputs.gauge as any[]).length).toBe(2);
+      expect((metricWithUnnamedOutputs.gauge as unknown[]).length).toBe(2);
     });
   });
 

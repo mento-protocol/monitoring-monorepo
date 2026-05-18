@@ -455,7 +455,8 @@ add_aegis_quality_commands() {
   add_command "pnpm --filter @mento-protocol/aegis typecheck" "$reason"
   add_command "pnpm --filter @mento-protocol/aegis build" "$reason"
   add_command "pnpm --filter @mento-protocol/aegis lint" "$reason"
-  add_command "pnpm --filter @mento-protocol/aegis test" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis knip" "$reason (knip: unused files/deps/exports)"
+  add_command "pnpm --filter @mento-protocol/aegis test:cov" "$reason"
   add_command "cd aegis && forge test" "$reason"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
   add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
@@ -655,6 +656,9 @@ while IFS= read -r path; do
           ;;
         metrics-bridge/knip.json)
           add_command "pnpm --filter @mento-protocol/metrics-bridge knip" "knip config changed"
+          ;;
+        aegis/knip.json)
+          add_command "pnpm --filter @mento-protocol/aegis knip" "knip config changed"
           ;;
       esac
       ;;

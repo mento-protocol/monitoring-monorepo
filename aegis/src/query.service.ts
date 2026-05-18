@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Histogram } from 'prom-client';
-import { createPublicClient, http } from 'viem';
+import {
+  createPublicClient,
+  http,
+  type Address,
+  type PublicClient,
+} from 'viem';
 import * as chains from 'viem/chains';
 import { ChainConfig } from './config';
 import { Metric } from './metric';
@@ -24,16 +29,20 @@ const makeChain = (chain: ChainConfig): chains.Chain => ({
 export class QueryService {
   private readonly logger = new Logger(QueryService.name);
   chains: Record<string, ChainConfig> = {};
-  globalVars: Record<string, string>;
-  clients: Record<string, any> = {};
+  clients: Record<string, PublicClient> = {};
   queryTime: Histogram;
 
   constructor(configService: ConfigService) {
     const chainConfigs = configService.get<ChainConfig[]>('chains');
+    if (!chainConfigs) {
+      throw new Error('No chains configured');
+    }
     chainConfigs.forEach((chain) => {
       this.chains[chain.id] = chain;
       this.clients[chain.id] = createPublicClient({
-        chain: chains[chain.id] || makeChain(chain),
+        chain:
+          (chains as Record<string, chains.Chain>)[chain.id] ??
+          makeChain(chain),
         transport: http(chain.httpRpcUrl),
       });
     });
@@ -45,24 +54,37 @@ export class QueryService {
     });
   }
 
-  async query(metric: Metric): Promise<any> {
+  async query(metric: Metric): Promise<number | number[] | undefined> {
     if (this.chains[metric.chain] === undefined) {
       throw new Error(
         `Unknown chain ${metric.chain} in metric: ${metric.name}`,
       );
     }
 
-    const vars = this.chains[metric.chain].vars;
+    const chain = this.chains[metric.chain];
     const client = this.clients[metric.chain];
-    const address = this.chains[metric.chain].contracts[metric.source.contract];
+    if (!chain || !client) {
+      throw new Error(
+        `Unknown chain ${metric.chain} in metric: ${metric.name}`,
+      );
+    }
+
+    const vars = chain.vars;
+    const address = chain.contracts[metric.source.contract];
+    if (!address) {
+      throw new Error(
+        `Unknown contract ${metric.source.contract} on chain ${metric.chain}`,
+      );
+    }
     const contractName = metric.source.contract;
     const functionName = metric.source.functionAbi.name;
     const abi = metric.source.functionAbi;
     const args = metric.args.map((arg) => {
-      if (vars[arg] === undefined) {
+      const value = vars[arg];
+      if (value === undefined) {
         return arg;
       }
-      return vars[arg];
+      return value;
     });
 
     const timer = this.queryTime.startTimer({
@@ -72,12 +94,15 @@ export class QueryService {
     });
     try {
       const data: unknown = await client.readContract({
-        address,
+        address: address as Address,
         abi: [abi],
         functionName,
         args,
       });
       timer({ status: 'success' });
+      if (!functionName) {
+        throw new Error(`Missing function name for metric ${metric.name}`);
+      }
       return metric.parse(data, contractName, functionName);
     } catch (e) {
       // TODO: Add error handling

@@ -1,0 +1,37 @@
+[
+  {
+    "file": "src/config/MetricSource.ts",
+    "ruleId": "max-lines-per-function",
+    "message": "Arrow function has too many lines (65). Maximum allowed is 60.",
+    "line": 4,
+    "linePreview": " | export const MetricSource = z.string().transform((signature, ctx) => { | // Normalize the signature: remove newlines and extra whitespace"
+  },
+  {
+    "file": "src/metric.ts",
+    "ruleId": "complexity",
+    "message": "Method 'parse' has a complexity of 31. Maximum allowed is 10.",
+    "line": 190,
+    "linePreview": " | parse( | output: unknown,"
+  },
+  {
+    "file": "src/metric.ts",
+    "ruleId": "max-lines-per-function",
+    "message": "Constructor has too many lines (76). Maximum allowed is 60.",
+    "line": 76,
+    "linePreview": " | constructor( | public source: MetricSource,"
+  },
+  {
+    "file": "src/metric.ts",
+    "ruleId": "max-lines-per-function",
+    "message": "Method 'parse' has too many lines (96). Maximum allowed is 60.",
+    "line": 190,
+    "linePreview": " | parse( | output: unknown,"
+  },
+  {
+    "file": "src/metric.ts",
+    "ruleId": "max-params",
+    "message": "Constructor has too many parameters (6). Maximum allowed is 4.",
+    "line": 76,
+    "linePreview": " | constructor( | public source: MetricSource,"
+  }
+]

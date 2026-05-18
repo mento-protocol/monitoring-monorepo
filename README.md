@@ -99,6 +99,7 @@ pnpm dashboard:dev
 
 ```bash
 pnpm aegis:dev
+pnpm aegis:typecheck
 pnpm aegis:test
 ```
 
@@ -194,6 +195,7 @@ The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento)
 
 ```bash
 pnpm aegis:build
+pnpm aegis:typecheck
 pnpm aegis:deploy
 pnpm aegis:logs
 ```

@@ -15,7 +15,22 @@ export const MetricSource = z.string().transform((signature, ctx) => {
     return z.NEVER;
   }
 
-  const [contract, functionName, inputs, outputs] = match.slice(1);
+  const contract = match[1];
+  const functionName = match[2];
+  const inputs = match[3];
+  const outputs = match[4];
+  if (
+    !contract ||
+    !functionName ||
+    inputs === undefined ||
+    outputs === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Invalid contract and signature ${signature}`,
+    });
+    return z.NEVER;
+  }
   const functionAbi: AbiFunction = {
     type: 'function',
     name: functionName,

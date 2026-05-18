@@ -14,6 +14,7 @@
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "aegis:build": "pnpm --filter @mento-protocol/aegis build",
     "aegis:dev": "pnpm --filter @mento-protocol/aegis dev",
+    "aegis:typecheck": "pnpm --filter @mento-protocol/aegis typecheck",
     "aegis:test": "pnpm --filter @mento-protocol/aegis test",
     "aegis:lint": "pnpm --filter @mento-protocol/aegis lint",
     "aegis:deploy": "pnpm --filter @mento-protocol/aegis deploy",

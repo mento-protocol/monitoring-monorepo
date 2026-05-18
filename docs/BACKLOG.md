@@ -124,6 +124,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 ## Backlog — Infrastructure
 
 - [ ] **Grafana Agent → Grafana Alloy migration** — Grafana Agent reached EOL on 2025-11-01 and is already deprecated; Grafana Alloy is the OTel-collector-based successor. Today the Agent runs on App Engine in `mento-prod` (config at `aegis/grafana-agent/agent.yaml.tmpl`) scraping both Aegis `/metrics` and metrics-bridge `/metrics`. Path: run `alloy convert` against `agent.yaml.tmpl`, swap the App Engine service image, verify both scrape jobs still remote-write to Grafana Cloud, then delete the agent config. Refs: <https://grafana.com/blog/2024/04/09/grafana-agent-to-grafana-alloy-opentelemetry-collector-faq/>, <https://grafana.com/docs/alloy/latest/set-up/migrate/>
+- [ ] **Aegis stateless gcloud deploy script** — `aegis/bin/deploy.sh` still sets global `gcloud` project/quota-project before `gcloud app deploy`, preserving old repo behavior during the migration. Replace with command-scoped project flags after the migration PR lands so concurrent local deploys cannot mutate a developer's active gcloud config.
 
 ## Backlog — Future
 
@@ -133,6 +134,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 ## Tech Debt
 
 - [ ] **Aegis Monad reserve coverage** — the v3 critical deviation breach annotation reads `USDC_balanceOf` / `USDT_balanceOf` / `axlUSDC_balanceOf` from Aegis (see `terraform/alerts/main.tf` `local.deviation_critical_annotation_queries`), which only tracks the Celo reserve. Future Monad-reserve rebalance failures will fire the alert correctly (the underlying breach gauges are chain-agnostic) but won't get the live "Reserve Balance: X \<token\>" suffix on the _Rebalance Blocked_ line. When Mento ships a Monad reserve, add the same Treb sources to Aegis's config and add three more annotation queries (`MonadResUSDC` etc.) plus matching dispatch branches in `local.deviation_critical_rebalance_reason_annotation`, OR generalise the dispatch (e.g. label the Aegis series with `chain` and pick by `$labels.chain_name`). Prefer the latter once a second reserve exists.
+- [ ] **Aegis stable-token totalSupply parser** — `aegis/src/metric.ts` still carries one switch case per 18-decimal stable token to preserve migrated behavior. Move token decimal metadata into `aegis/config.yaml` or shared config before adding more supply metrics, then collapse the duplicated parser cases.
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
