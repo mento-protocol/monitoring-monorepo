@@ -119,20 +119,6 @@
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
-    "file": "src/leaderboardSnapshots.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'applyLeaderboardSnapshots' has a complexity of 108. Maximum allowed is 15.",
-    "line": 91,
-    "linePreview": "*/ | export async function applyLeaderboardSnapshots( | args: ApplyLeaderboardSnapshotsArgs,"
-  },
-  {
-    "file": "src/leaderboardSnapshots.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 51 to the 18 allowed.",
-    "line": 91,
-    "linePreview": "*/ | export async function applyLeaderboardSnapshots( | args: ApplyLeaderboardSnapshotsArgs,"
-  },
-  {
     "file": "src/leaderboardWindowSnapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",

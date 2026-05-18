@@ -79,7 +79,47 @@ function subtractWei(value: bigint, amount: bigint): bigint {
   return value > amount ? value - amount : 0n;
 }
 
-/* eslint-disable max-lines-per-function -- Existing large rollup writer; this PR only adds heartbeat calls for intentional early returns. */
+interface SnapContext {
+  chainId: number;
+  caller: string;
+  poolId: string;
+  pool: Pool;
+  txTo: string;
+  blockTimestamp: bigint;
+  blockNumber: bigint;
+  day: bigint;
+  dayKey: string;
+  traderDayId: string;
+  traderPoolDayId: string;
+  poolDayId: string;
+  aggregator: string;
+  aggDayId: string;
+  aggTraderDayMarkerId: string;
+  volumeUsdWei: bigint;
+  feesPaidUsdWei: bigint;
+  callerIsSystem: boolean;
+  inflowToken0: bigint;
+  outflowToken0: bigint;
+  inflowToken1: bigint;
+  outflowToken1: bigint;
+}
+
+interface ExistingEntries {
+  traderPoolMarker: TraderPoolDayMarker | undefined;
+  aggTraderMarker: AggregatorTraderDayMarker | undefined;
+  traderDay: TraderDailySnapshot | undefined;
+  traderPoolDay: TraderPoolDailySnapshot | undefined;
+  poolDay: PoolDailyVolumeSnapshot | undefined;
+  aggDay: AggregatorDailySnapshot | undefined;
+}
+
+interface TraderDaySnapshotState {
+  traderDayBecameSystem: boolean;
+  traderDayIsSystem: boolean;
+  aggregatorKeys: string[];
+  poolIds: string[];
+}
+
 /**
  * Update all leaderboard rollup entities for one swap. Idempotent at the (id)
  * level — re-running on the same event yields the same final state because:
@@ -91,8 +131,80 @@ function subtractWei(value: bigint, amount: bigint): bigint {
 export async function applyLeaderboardSnapshots(
   args: ApplyLeaderboardSnapshotsArgs,
 ): Promise<void> {
-  const {
+  const { context, chainId, blockTimestamp, blockNumber } = args;
+  const flushLeaderboardWindow = () =>
+    maybeHeartbeatFlushV3({ context, chainId, blockTimestamp, blockNumber });
+
+  // Skip swaps where caller is missing — Envio's transaction.from fallback
+  // to "" can produce these and a blank trader key would corrupt the
+  // leaderboard's primary axis. Better to drop than to bucket as "", but
+  // still run the chain heartbeat because the event proves time advanced.
+  if (!args.caller) {
+    await flushLeaderboardWindow();
+    return;
+  }
+
+  // Skip uncomputable USD swaps. `computeSwapUsdWei` returns 0n in two
+  // cases: (1) a degenerate zero-amount swap (impossible from a real
+  // SwapEvent) and (2) a pool whose USD value can't be derived from the
+  // pegged-side trick (neither leg is in USD_PEGGED_SYMBOLS — e.g. a
+  // hypothetical axlEUROC/EURm pool). Writing 0n into the rollups would
+  // collapse "uncomputable" with "real zero volume" and silently
+  // undercount those pools' traders.
+  if (args.volumeUsdWei === 0n) {
+    await flushLeaderboardWindow();
+    return;
+  }
+
+  const snap = buildSnapContext(args);
+  const existing = await loadExistingEntries(context, snap);
+
+  const traderPoolFirstTouch = existing.traderPoolMarker === undefined;
+  if (traderPoolFirstTouch) {
+    context.TraderPoolDayMarker.set({ id: snap.traderPoolDayId });
+  }
+  const aggTraderFirstTouch = existing.aggTraderMarker === undefined;
+
+  const traderDayState = upsertTraderDailySnapshot(
     context,
+    snap,
+    existing.traderDay,
+    traderPoolFirstTouch,
+  );
+
+  upsertTraderPoolDailySnapshot(context, snap, existing.traderPoolDay);
+
+  await upsertPoolDailyVolumeSnapshot(context, snap, {
+    existing: existing.poolDay,
+    existingTraderPoolDay: existing.traderPoolDay,
+    traderDayState,
+  });
+
+  await upsertAggregatorDailySnapshot(context, snap, {
+    existing: existing.aggDay,
+    existingAggTraderMarker: existing.aggTraderMarker,
+    traderDayState,
+    aggTraderFirstTouch,
+  });
+
+  upsertAggregatorTraderDayMarker(
+    context,
+    snap,
+    existing.aggTraderMarker,
+    traderDayState.traderDayIsSystem,
+  );
+
+  // Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC days
+  // since the last flush. Reads only TraderDailySnapshot (already-written
+  // including this swap's row), filters by [windowStartDay, snapshotDay]
+  // inclusive — today's row is excluded by the upper bound, so we never write
+  // a "today" snapshot. The dashboard adds today's partial from a small direct
+  // query.
+  await flushLeaderboardWindow();
+}
+
+function buildSnapContext(args: ApplyLeaderboardSnapshotsArgs): SnapContext {
+  const {
     chainId,
     poolId,
     pool,
@@ -104,367 +216,444 @@ export async function applyLeaderboardSnapshots(
     blockNumber,
   } = args;
 
-  const flushLeaderboardWindow = () =>
-    maybeHeartbeatFlushV3({
-      context,
-      chainId,
-      blockTimestamp,
-      blockNumber,
-    });
-
-  // Skip swaps where caller is missing — Envio's transaction.from fallback
-  // to "" can produce these and a blank trader key would corrupt the
-  // leaderboard's primary axis. Better to drop than to bucket as "", but
-  // still run the chain heartbeat because the event proves time advanced.
-  if (!caller) {
-    await flushLeaderboardWindow();
-    return;
-  }
-
-  // Skip uncomputable USD swaps. `computeSwapUsdWei` returns 0n in two
-  // cases: (1) a degenerate zero-amount swap (impossible from a real
-  // SwapEvent) and (2) a pool whose USD value can't be derived from the
-  // pegged-side trick (neither leg is in USD_PEGGED_SYMBOLS — e.g. a
-  // hypothetical axlEUROC/EURm pool). Writing 0n into the rollups would
-  // collapse "uncomputable" with "real zero volume" and silently
-  // undercount those pools' traders. The raw SwapEvent still records the
-  // unit token amounts and the original `volumeUsdWei = 0n` — a future
-  // PR can backfill the rollups via a recovery job once a proper rate
-  // map is wired up indexer-side.
-  if (volumeUsdWei === 0n) {
-    await flushLeaderboardWindow();
-    return;
-  }
-
   const day = dayBucket(blockTimestamp);
   const dayKey = day.toString();
-  const traderDayId = `${chainId}-${caller}-${dayKey}`;
-  const traderPoolDayId = `${chainId}-${caller}-${poolId}-${dayKey}`;
-  const poolDayId = `${chainId}-${poolId}-${dayKey}`;
-
   const aggregator = classifyAggregator(
     chainId,
     txTo,
     extractAddressFromPoolId(poolId),
   );
-  const aggDayId = `${chainId}-${aggregator}-${dayKey}`;
-  const aggTraderDayMarkerId = `${chainId}-${aggregator}-${caller}-${dayKey}`;
 
   // Total trader fee burden = LP fee + protocol fee. Pool entity carries both
   // as bps; `applyFeeBps` clamps the -1/-2 sentinels (RPC not yet read /
   // getter missing) to 0 so VirtualPools and freshly-deployed FPMMs don't
   // double-count fees.
   const feeBpsTotal = Math.max(0, pool.lpFee) + Math.max(0, pool.protocolFee);
-  const feesPaidUsdWei = applyFeeBps(volumeUsdWei, feeBpsTotal);
-  const callerIsSystem = isSystemAddress(chainId, caller, pool);
 
-  // Direction-split USD-wei. In standard Uniswap-V2 swaps exactly one of
-  // {In, Out} per side is non-zero; the other check is the "callback flow"
-  // safety net documented in src/usd.ts. Both sides contribute volumeUsdWei
-  // (one inflow + one outflow per swap); sum = 2 × volumeUsdWei.
-  const inflowToken0 = amounts.amount0Out > 0n ? volumeUsdWei : 0n;
-  const outflowToken0 = amounts.amount0In > 0n ? volumeUsdWei : 0n;
-  const inflowToken1 = amounts.amount1Out > 0n ? volumeUsdWei : 0n;
-  const outflowToken1 = amounts.amount1In > 0n ? volumeUsdWei : 0n;
+  return {
+    chainId,
+    caller,
+    poolId,
+    pool,
+    txTo,
+    blockTimestamp,
+    blockNumber,
+    day,
+    dayKey,
+    traderDayId: `${chainId}-${caller}-${dayKey}`,
+    traderPoolDayId: `${chainId}-${caller}-${poolId}-${dayKey}`,
+    poolDayId: `${chainId}-${poolId}-${dayKey}`,
+    aggregator,
+    aggDayId: `${chainId}-${aggregator}-${dayKey}`,
+    aggTraderDayMarkerId: `${chainId}-${aggregator}-${caller}-${dayKey}`,
+    volumeUsdWei,
+    feesPaidUsdWei: applyFeeBps(volumeUsdWei, feeBpsTotal),
+    callerIsSystem: isSystemAddress(chainId, caller, pool),
+    // Direction-split USD-wei. In standard Uniswap-V2 swaps exactly one of
+    // {In, Out} per side is non-zero; the other check is the "callback flow"
+    // safety net documented in src/usd.ts. Both sides contribute volumeUsdWei
+    // (one inflow + one outflow per swap); sum = 2 × volumeUsdWei.
+    inflowToken0: amounts.amount0Out > 0n ? volumeUsdWei : 0n,
+    outflowToken0: amounts.amount0In > 0n ? volumeUsdWei : 0n,
+    inflowToken1: amounts.amount1Out > 0n ? volumeUsdWei : 0n,
+    outflowToken1: amounts.amount1In > 0n ? volumeUsdWei : 0n,
+  };
+}
 
+async function loadExistingEntries(
+  context: LeaderboardContext,
+  snap: SnapContext,
+): Promise<ExistingEntries> {
   // Load independent rows concurrently so Envio's v3 preload phase can batch
   // all base leaderboard reads for this event into as few DB queries as
   // possible.
   const [
-    existingTraderPoolMarker,
-    existingAggTraderMarker,
-    existingTraderDay,
-    existingTraderPoolDay,
-    existingPoolDay,
-    existingAggDay,
+    traderPoolMarker,
+    aggTraderMarker,
+    traderDay,
+    traderPoolDay,
+    poolDay,
+    aggDay,
   ] = await Promise.all([
-    context.TraderPoolDayMarker.get(traderPoolDayId),
-    context.AggregatorTraderDayMarker.get(aggTraderDayMarkerId),
-    context.TraderDailySnapshot.get(traderDayId),
-    context.TraderPoolDailySnapshot.get(traderPoolDayId),
-    context.PoolDailyVolumeSnapshot.get(poolDayId),
-    context.AggregatorDailySnapshot.get(aggDayId),
+    context.TraderPoolDayMarker.get(snap.traderPoolDayId),
+    context.AggregatorTraderDayMarker.get(snap.aggTraderDayMarkerId),
+    context.TraderDailySnapshot.get(snap.traderDayId),
+    context.TraderPoolDailySnapshot.get(snap.traderPoolDayId),
+    context.PoolDailyVolumeSnapshot.get(snap.poolDayId),
+    context.AggregatorDailySnapshot.get(snap.aggDayId),
   ]);
+  return {
+    traderPoolMarker,
+    aggTraderMarker,
+    traderDay,
+    traderPoolDay,
+    poolDay,
+    aggDay,
+  };
+}
 
-  // 1. TraderPoolDayMarker → first-touch dedup for TraderDailySnapshot.uniquePools.
-  //    Marker key matches the parent snapshot key — same string, different
-  //    entity table.
-  const traderPoolFirstTouch = existingTraderPoolMarker === undefined;
-  if (traderPoolFirstTouch) {
-    context.TraderPoolDayMarker.set({ id: traderPoolDayId });
-  }
+const EMPTY_TRADER_DAY = {
+  swapCount: 0,
+  uniquePools: 0,
+  aggregatorKeys: [] as readonly string[],
+  poolIds: [] as readonly string[],
+  volumeUsdWei: 0n,
+  feesPaidUsdWei: 0n,
+  isSystemAddress: false,
+};
 
-  // 2. AggregatorTraderDayMarker → first-touch dedup for
-  //    AggregatorDailySnapshot.uniqueTraders plus per-trader counters used
-  //    if the day-sticky system flag flips after earlier same-day swaps.
-  const aggTraderFirstTouch = existingAggTraderMarker === undefined;
-
-  // 3. TraderDailySnapshot upsert.
-  const traderDayWasSystem = existingTraderDay?.isSystemAddress ?? false;
-  const traderDayIsSystem = traderDayWasSystem || callerIsSystem;
+function upsertTraderDailySnapshot(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  existing: TraderDailySnapshot | undefined,
+  traderPoolFirstTouch: boolean,
+): TraderDaySnapshotState {
+  const prev = existing ?? EMPTY_TRADER_DAY;
+  const traderDayIsSystem = prev.isSystemAddress || snap.callerIsSystem;
   const traderDayBecameSystem =
-    existingTraderDay !== undefined && !traderDayWasSystem && callerIsSystem;
-  const aggregatorKeys = appendUnique(
-    existingTraderDay?.aggregatorKeys ?? [],
-    aggregator,
-  );
-  const poolIds = appendUnique(existingTraderDay?.poolIds ?? [], poolId);
+    existing !== undefined && !prev.isSystemAddress && snap.callerIsSystem;
+  const aggregatorKeys = appendUnique(prev.aggregatorKeys, snap.aggregator);
+  const poolIds = appendUnique(prev.poolIds, snap.poolId);
+
   context.TraderDailySnapshot.set({
-    id: traderDayId,
-    chainId,
-    trader: caller,
-    timestamp: day,
-    swapCount: (existingTraderDay?.swapCount ?? 0) + 1,
-    uniquePools:
-      (existingTraderDay?.uniquePools ?? 0) + (traderPoolFirstTouch ? 1 : 0),
+    id: snap.traderDayId,
+    chainId: snap.chainId,
+    trader: snap.caller,
+    timestamp: snap.day,
+    swapCount: prev.swapCount + 1,
+    uniquePools: prev.uniquePools + (traderPoolFirstTouch ? 1 : 0),
     aggregatorKeys,
     poolIds,
-    volumeUsdWei: (existingTraderDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    feesPaidUsdWei: (existingTraderDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
+    volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
+    feesPaidUsdWei: prev.feesPaidUsdWei + snap.feesPaidUsdWei,
     // Sticky once true: a trader flagged as system at any point in a day
     // stays system for the full day's snapshot. Rebalancer EOAs that swap
     // once via a third-party router would otherwise toggle.
     isSystemAddress: traderDayIsSystem,
-    lastSeenTimestamp: blockTimestamp,
+    lastSeenTimestamp: snap.blockTimestamp,
   });
 
-  // 4. TraderPoolDailySnapshot upsert.
+  return { traderDayBecameSystem, traderDayIsSystem, aggregatorKeys, poolIds };
+}
+
+const EMPTY_TRADER_POOL_DAY = {
+  swapCount: 0,
+  volumeUsdWei: 0n,
+  inflowToken0UsdWei: 0n,
+  outflowToken0UsdWei: 0n,
+  inflowToken1UsdWei: 0n,
+  outflowToken1UsdWei: 0n,
+  feesPaidUsdWei: 0n,
+};
+
+function upsertTraderPoolDailySnapshot(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  existing: TraderPoolDailySnapshot | undefined,
+) {
+  const prev = existing ?? EMPTY_TRADER_POOL_DAY;
   context.TraderPoolDailySnapshot.set({
-    id: traderPoolDayId,
-    chainId,
-    trader: caller,
-    poolId,
-    timestamp: day,
-    swapCount: (existingTraderPoolDay?.swapCount ?? 0) + 1,
-    volumeUsdWei: (existingTraderPoolDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    inflowToken0UsdWei:
-      (existingTraderPoolDay?.inflowToken0UsdWei ?? 0n) + inflowToken0,
-    outflowToken0UsdWei:
-      (existingTraderPoolDay?.outflowToken0UsdWei ?? 0n) + outflowToken0,
-    inflowToken1UsdWei:
-      (existingTraderPoolDay?.inflowToken1UsdWei ?? 0n) + inflowToken1,
-    outflowToken1UsdWei:
-      (existingTraderPoolDay?.outflowToken1UsdWei ?? 0n) + outflowToken1,
-    feesPaidUsdWei:
-      (existingTraderPoolDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
+    id: snap.traderPoolDayId,
+    chainId: snap.chainId,
+    trader: snap.caller,
+    poolId: snap.poolId,
+    timestamp: snap.day,
+    swapCount: prev.swapCount + 1,
+    volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
+    inflowToken0UsdWei: prev.inflowToken0UsdWei + snap.inflowToken0,
+    outflowToken0UsdWei: prev.outflowToken0UsdWei + snap.outflowToken0,
+    inflowToken1UsdWei: prev.inflowToken1UsdWei + snap.inflowToken1,
+    outflowToken1UsdWei: prev.outflowToken1UsdWei + snap.outflowToken1,
+    feesPaidUsdWei: prev.feesPaidUsdWei + snap.feesPaidUsdWei,
   });
+}
 
-  // 5. PoolDailyVolumeSnapshot upsert. This is the chart-facing pool/day
-  //    rollup, so the dashboard no longer has to scan trader-pool rows and
-  //    then intersect them with the trader-day system-address allowlist. If
-  //    the trader flips into day-sticky system classification, remove their
-  //    earlier same-day pool contributions from the primary branch.
-  const primaryCorrectionsByPool = new Map<
+interface PoolDailyContext {
+  existing: PoolDailyVolumeSnapshot | undefined;
+  existingTraderPoolDay: TraderPoolDailySnapshot | undefined;
+  traderDayState: TraderDaySnapshotState;
+}
+
+const EMPTY_POOL_DAY = {
+  swapCount: 0,
+  swapCountIncludingSystem: 0,
+  volumeUsdWei: 0n,
+  volumeUsdWeiIncludingSystem: 0n,
+};
+
+async function upsertPoolDailyVolumeSnapshot(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  ctx: PoolDailyContext,
+) {
+  // The chart-facing pool/day rollup, so the dashboard no longer has to scan
+  // trader-pool rows and intersect with the trader-day system-address
+  // allowlist. If the trader flips into day-sticky system classification,
+  // remove their earlier same-day pool contributions from the primary branch.
+  const corrections = ctx.traderDayState.traderDayBecameSystem
+    ? await collectPoolPrimaryCorrections(context, snap, ctx)
+    : new Map<string, { swapCount: number; volumeUsdWei: bigint }>();
+
+  const prev = ctx.existing ?? EMPTY_POOL_DAY;
+  const currentCorrection = corrections.get(snap.poolId) ?? {
+    swapCount: 0,
+    volumeUsdWei: 0n,
+  };
+  const isSystem = ctx.traderDayState.traderDayIsSystem;
+  const primarySwapBase = subtractCount(
+    prev.swapCount,
+    currentCorrection.swapCount,
+  );
+  const primaryVolumeBase = subtractWei(
+    prev.volumeUsdWei,
+    currentCorrection.volumeUsdWei,
+  );
+
+  context.PoolDailyVolumeSnapshot.set({
+    id: snap.poolDayId,
+    chainId: snap.chainId,
+    poolId: snap.poolId,
+    timestamp: snap.day,
+    swapCount: primarySwapBase + (isSystem ? 0 : 1),
+    swapCountIncludingSystem: prev.swapCountIncludingSystem + 1,
+    volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
+    volumeUsdWeiIncludingSystem:
+      prev.volumeUsdWeiIncludingSystem + snap.volumeUsdWei,
+    blockNumber: snap.blockNumber,
+    updatedAtTimestamp: snap.blockTimestamp,
+  });
+}
+
+async function collectPoolPrimaryCorrections(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  ctx: PoolDailyContext,
+): Promise<Map<string, { swapCount: number; volumeUsdWei: bigint }>> {
+  const corrections = new Map<
     string,
     { swapCount: number; volumeUsdWei: bigint }
   >();
-  if (traderDayBecameSystem) {
-    const priorTraderPoolDays = await Promise.all(
-      poolIds.map(async (touchedPoolId) => {
-        const priorTraderPoolDay =
-          touchedPoolId === poolId
-            ? existingTraderPoolDay
-            : await context.TraderPoolDailySnapshot.get(
-                `${chainId}-${caller}-${touchedPoolId}-${dayKey}`,
-              );
-        return { touchedPoolId, priorTraderPoolDay };
-      }),
-    );
-    for (const { touchedPoolId, priorTraderPoolDay } of priorTraderPoolDays) {
-      if (!priorTraderPoolDay) continue;
-      primaryCorrectionsByPool.set(touchedPoolId, {
-        swapCount: priorTraderPoolDay.swapCount,
-        volumeUsdWei: priorTraderPoolDay.volumeUsdWei,
-      });
-    }
-    const touchedPoolDays = await Promise.all(
-      Array.from(primaryCorrectionsByPool, async ([touchedPoolId]) => {
-        if (touchedPoolId === poolId) return { touchedPoolId };
-        const touchedPoolDayId = `${chainId}-${touchedPoolId}-${dayKey}`;
-        const touchedPoolDay =
-          await context.PoolDailyVolumeSnapshot.get(touchedPoolDayId);
-        return { touchedPoolId, touchedPoolDay };
-      }),
-    );
-    for (const { touchedPoolId, touchedPoolDay } of touchedPoolDays) {
-      if (touchedPoolId === poolId) continue;
-      if (!touchedPoolDay) continue;
-      const correction = primaryCorrectionsByPool.get(touchedPoolId);
-      if (!correction) continue;
-      context.PoolDailyVolumeSnapshot.set({
-        ...touchedPoolDay,
-        swapCount: subtractCount(
-          touchedPoolDay.swapCount,
-          correction.swapCount,
-        ),
-        volumeUsdWei: subtractWei(
-          touchedPoolDay.volumeUsdWei,
-          correction.volumeUsdWei,
-        ),
-        blockNumber,
-        updatedAtTimestamp: blockTimestamp,
-      });
-    }
+  const priorTraderPoolDays = await Promise.all(
+    ctx.traderDayState.poolIds.map(async (touchedPoolId) => {
+      const priorTraderPoolDay =
+        touchedPoolId === snap.poolId
+          ? ctx.existingTraderPoolDay
+          : await context.TraderPoolDailySnapshot.get(
+              `${snap.chainId}-${snap.caller}-${touchedPoolId}-${snap.dayKey}`,
+            );
+      return { touchedPoolId, priorTraderPoolDay };
+    }),
+  );
+  for (const { touchedPoolId, priorTraderPoolDay } of priorTraderPoolDays) {
+    if (!priorTraderPoolDay) continue;
+    corrections.set(touchedPoolId, {
+      swapCount: priorTraderPoolDay.swapCount,
+      volumeUsdWei: priorTraderPoolDay.volumeUsdWei,
+    });
   }
-  const currentPoolCorrection = primaryCorrectionsByPool.get(poolId);
-  const poolPrimarySwapBase = subtractCount(
-    existingPoolDay?.swapCount ?? 0,
-    currentPoolCorrection?.swapCount ?? 0,
-  );
-  const poolPrimaryVolumeBase = subtractWei(
-    existingPoolDay?.volumeUsdWei ?? 0n,
-    currentPoolCorrection?.volumeUsdWei ?? 0n,
-  );
-  context.PoolDailyVolumeSnapshot.set({
-    id: poolDayId,
-    chainId,
-    poolId,
-    timestamp: day,
-    swapCount: poolPrimarySwapBase + (traderDayIsSystem ? 0 : 1),
-    swapCountIncludingSystem:
-      (existingPoolDay?.swapCountIncludingSystem ?? 0) + 1,
-    volumeUsdWei:
-      poolPrimaryVolumeBase + (traderDayIsSystem ? 0n : volumeUsdWei),
-    volumeUsdWeiIncludingSystem:
-      (existingPoolDay?.volumeUsdWeiIncludingSystem ?? 0n) + volumeUsdWei,
-    blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
 
-  // 6. AggregatorDailySnapshot upsert. Primary fields exclude system callers;
-  //    *IncludingSystem siblings preserve the toggle path. If this swap made
-  //    the trader-day sticky-system, subtract all earlier same-day aggregator
-  //    contributions from primary fields before applying the current event.
-  const primaryCorrectionsByAggregator = new Map<
-    string,
-    {
-      swapCount: number;
-      uniqueTraders: number;
-      volumeUsdWei: bigint;
-      feesPaidUsdWei: bigint;
-    }
-  >();
-  if (traderDayBecameSystem) {
-    const touchedAggMarkers = await Promise.all(
-      aggregatorKeys.map(async (touchedAggregator) => {
-        const marker =
-          touchedAggregator === aggregator
-            ? existingAggTraderMarker
-            : await context.AggregatorTraderDayMarker.get(
-                `${chainId}-${touchedAggregator}-${caller}-${dayKey}`,
-              );
-        return { touchedAggregator, marker };
-      }),
-    );
-    for (const { touchedAggregator, marker } of touchedAggMarkers) {
-      if (!marker || marker.isSystemAddress) continue;
-      primaryCorrectionsByAggregator.set(touchedAggregator, {
-        swapCount: marker.swapCount,
-        uniqueTraders: 1,
-        volumeUsdWei: marker.volumeUsdWei,
-        feesPaidUsdWei: marker.feesPaidUsdWei,
-      });
-    }
-
-    const touchedAggDays = await Promise.all(
-      Array.from(
-        primaryCorrectionsByAggregator,
-        async ([touchedAggregator]) => {
-          if (touchedAggregator === aggregator) return { touchedAggregator };
-          const touchedAggDayId = `${chainId}-${touchedAggregator}-${dayKey}`;
-          const touchedAggDay =
-            await context.AggregatorDailySnapshot.get(touchedAggDayId);
-          return { touchedAggregator, touchedAggDay };
-        },
+  const touchedPoolDays = await Promise.all(
+    Array.from(corrections, async ([touchedPoolId]) => {
+      if (touchedPoolId === snap.poolId) return { touchedPoolId };
+      const touchedPoolDayId = `${snap.chainId}-${touchedPoolId}-${snap.dayKey}`;
+      const touchedPoolDay =
+        await context.PoolDailyVolumeSnapshot.get(touchedPoolDayId);
+      return { touchedPoolId, touchedPoolDay };
+    }),
+  );
+  for (const { touchedPoolId, touchedPoolDay } of touchedPoolDays) {
+    if (touchedPoolId === snap.poolId) continue;
+    if (!touchedPoolDay) continue;
+    const correction = corrections.get(touchedPoolId);
+    if (!correction) continue;
+    context.PoolDailyVolumeSnapshot.set({
+      ...touchedPoolDay,
+      swapCount: subtractCount(touchedPoolDay.swapCount, correction.swapCount),
+      volumeUsdWei: subtractWei(
+        touchedPoolDay.volumeUsdWei,
+        correction.volumeUsdWei,
       ),
-    );
-    for (const { touchedAggregator, touchedAggDay } of touchedAggDays) {
-      if (touchedAggregator === aggregator) continue;
-      if (!touchedAggDay) continue;
-      const correction = primaryCorrectionsByAggregator.get(touchedAggregator);
-      if (!correction) continue;
-      context.AggregatorDailySnapshot.set({
-        ...touchedAggDay,
-        swapCount: subtractCount(touchedAggDay.swapCount, correction.swapCount),
-        uniqueTraders: subtractCount(
-          touchedAggDay.uniqueTraders,
-          correction.uniqueTraders,
-        ),
-        volumeUsdWei: subtractWei(
-          touchedAggDay.volumeUsdWei,
-          correction.volumeUsdWei,
-        ),
-        feesPaidUsdWei: subtractWei(
-          touchedAggDay.feesPaidUsdWei,
-          correction.feesPaidUsdWei,
-        ),
-      });
-    }
+      blockNumber: snap.blockNumber,
+      updatedAtTimestamp: snap.blockTimestamp,
+    });
   }
 
-  //    `lastSeenAggregatorAddress` is the raw txTo so the dashboard can
-  //    surface the actual router contract
-  //    (useful when an aggregator has multiple deployed addresses on a chain
-  //    and we want to know which one drove this row).
-  const currentAggCorrection = primaryCorrectionsByAggregator.get(aggregator);
-  const primarySwapBase = subtractCount(
-    existingAggDay?.swapCount ?? 0,
-    currentAggCorrection?.swapCount ?? 0,
-  );
+  return corrections;
+}
+
+interface AggregatorDailyContext {
+  existing: AggregatorDailySnapshot | undefined;
+  existingAggTraderMarker: AggregatorTraderDayMarker | undefined;
+  traderDayState: TraderDaySnapshotState;
+  aggTraderFirstTouch: boolean;
+}
+
+interface AggregatorCorrection {
+  swapCount: number;
+  uniqueTraders: number;
+  volumeUsdWei: bigint;
+  feesPaidUsdWei: bigint;
+}
+
+const EMPTY_AGG_DAY = {
+  swapCount: 0,
+  swapCountIncludingSystem: 0,
+  uniqueTraders: 0,
+  uniqueTradersIncludingSystem: 0,
+  volumeUsdWei: 0n,
+  volumeUsdWeiIncludingSystem: 0n,
+  feesPaidUsdWei: 0n,
+  feesPaidUsdWeiIncludingSystem: 0n,
+};
+
+const EMPTY_AGG_CORRECTION: AggregatorCorrection = {
+  swapCount: 0,
+  uniqueTraders: 0,
+  volumeUsdWei: 0n,
+  feesPaidUsdWei: 0n,
+};
+
+async function upsertAggregatorDailySnapshot(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  ctx: AggregatorDailyContext,
+) {
+  // Primary fields exclude system callers; *IncludingSystem siblings preserve
+  // the toggle path. If this swap made the trader-day sticky-system, subtract
+  // all earlier same-day aggregator contributions from primary fields before
+  // applying the current event.
+  const corrections = ctx.traderDayState.traderDayBecameSystem
+    ? await collectAggregatorPrimaryCorrections(context, snap, ctx)
+    : new Map<string, AggregatorCorrection>();
+
+  const prev = ctx.existing ?? EMPTY_AGG_DAY;
+  const correction = corrections.get(snap.aggregator) ?? EMPTY_AGG_CORRECTION;
+  const isSystem = ctx.traderDayState.traderDayIsSystem;
+  const firstTouch = ctx.aggTraderFirstTouch;
+
+  const primarySwapBase = subtractCount(prev.swapCount, correction.swapCount);
   const primaryUniqueBase = subtractCount(
-    existingAggDay?.uniqueTraders ?? 0,
-    currentAggCorrection?.uniqueTraders ?? 0,
+    prev.uniqueTraders,
+    correction.uniqueTraders,
   );
   const primaryVolumeBase = subtractWei(
-    existingAggDay?.volumeUsdWei ?? 0n,
-    currentAggCorrection?.volumeUsdWei ?? 0n,
+    prev.volumeUsdWei,
+    correction.volumeUsdWei,
   );
   const primaryFeesBase = subtractWei(
-    existingAggDay?.feesPaidUsdWei ?? 0n,
-    currentAggCorrection?.feesPaidUsdWei ?? 0n,
+    prev.feesPaidUsdWei,
+    correction.feesPaidUsdWei,
   );
+
+  // `lastSeenAggregatorAddress` is the raw txTo so the dashboard can surface
+  // the actual router contract (useful when an aggregator has multiple
+  // deployed addresses on a chain and we want to know which one drove this
+  // row).
   context.AggregatorDailySnapshot.set({
-    id: aggDayId,
-    chainId,
-    aggregator,
-    lastSeenAggregatorAddress: txTo,
-    timestamp: day,
-    swapCount: primarySwapBase + (traderDayIsSystem ? 0 : 1),
-    swapCountIncludingSystem:
-      (existingAggDay?.swapCountIncludingSystem ?? 0) + 1,
-    uniqueTraders:
-      primaryUniqueBase + (!traderDayIsSystem && aggTraderFirstTouch ? 1 : 0),
+    id: snap.aggDayId,
+    chainId: snap.chainId,
+    aggregator: snap.aggregator,
+    lastSeenAggregatorAddress: snap.txTo,
+    timestamp: snap.day,
+    swapCount: primarySwapBase + (isSystem ? 0 : 1),
+    swapCountIncludingSystem: prev.swapCountIncludingSystem + 1,
+    uniqueTraders: primaryUniqueBase + (!isSystem && firstTouch ? 1 : 0),
     uniqueTradersIncludingSystem:
-      (existingAggDay?.uniqueTradersIncludingSystem ?? 0) +
-      (aggTraderFirstTouch ? 1 : 0),
-    volumeUsdWei: primaryVolumeBase + (traderDayIsSystem ? 0n : volumeUsdWei),
+      prev.uniqueTradersIncludingSystem + (firstTouch ? 1 : 0),
+    volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
     volumeUsdWeiIncludingSystem:
-      (existingAggDay?.volumeUsdWeiIncludingSystem ?? 0n) + volumeUsdWei,
-    feesPaidUsdWei: primaryFeesBase + (traderDayIsSystem ? 0n : feesPaidUsdWei),
+      prev.volumeUsdWeiIncludingSystem + snap.volumeUsdWei,
+    feesPaidUsdWei: primaryFeesBase + (isSystem ? 0n : snap.feesPaidUsdWei),
     feesPaidUsdWeiIncludingSystem:
-      (existingAggDay?.feesPaidUsdWeiIncludingSystem ?? 0n) + feesPaidUsdWei,
+      prev.feesPaidUsdWeiIncludingSystem + snap.feesPaidUsdWei,
   });
-
-  context.AggregatorTraderDayMarker.set({
-    id: aggTraderDayMarkerId,
-    chainId,
-    aggregator,
-    trader: caller,
-    timestamp: day,
-    swapCount: (existingAggTraderMarker?.swapCount ?? 0) + 1,
-    volumeUsdWei: (existingAggTraderMarker?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    feesPaidUsdWei:
-      (existingAggTraderMarker?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
-    isSystemAddress:
-      (existingAggTraderMarker?.isSystemAddress ?? false) || traderDayIsSystem,
-  });
-
-  // 7. Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC
-  //    days since the last flush. Reads only TraderDailySnapshot
-  //    (already-written including this swap's row), filters by
-  //    [windowStartDay, snapshotDay] inclusive — today's row is excluded
-  //    by the upper bound, so we never write a "today" snapshot. The
-  //    dashboard adds today's partial from a small direct query.
-  await flushLeaderboardWindow();
 }
-/* eslint-enable max-lines-per-function */
+
+async function collectAggregatorPrimaryCorrections(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  ctx: AggregatorDailyContext,
+): Promise<Map<string, AggregatorCorrection>> {
+  const corrections = new Map<string, AggregatorCorrection>();
+  const touchedAggMarkers = await Promise.all(
+    ctx.traderDayState.aggregatorKeys.map(async (touchedAggregator) => {
+      const marker =
+        touchedAggregator === snap.aggregator
+          ? ctx.existingAggTraderMarker
+          : await context.AggregatorTraderDayMarker.get(
+              `${snap.chainId}-${touchedAggregator}-${snap.caller}-${snap.dayKey}`,
+            );
+      return { touchedAggregator, marker };
+    }),
+  );
+  for (const { touchedAggregator, marker } of touchedAggMarkers) {
+    if (!marker || marker.isSystemAddress) continue;
+    corrections.set(touchedAggregator, {
+      swapCount: marker.swapCount,
+      uniqueTraders: 1,
+      volumeUsdWei: marker.volumeUsdWei,
+      feesPaidUsdWei: marker.feesPaidUsdWei,
+    });
+  }
+
+  const touchedAggDays = await Promise.all(
+    Array.from(corrections, async ([touchedAggregator]) => {
+      if (touchedAggregator === snap.aggregator) return { touchedAggregator };
+      const touchedAggDayId = `${snap.chainId}-${touchedAggregator}-${snap.dayKey}`;
+      const touchedAggDay =
+        await context.AggregatorDailySnapshot.get(touchedAggDayId);
+      return { touchedAggregator, touchedAggDay };
+    }),
+  );
+  for (const { touchedAggregator, touchedAggDay } of touchedAggDays) {
+    if (touchedAggregator === snap.aggregator) continue;
+    if (!touchedAggDay) continue;
+    const correction = corrections.get(touchedAggregator);
+    if (!correction) continue;
+    context.AggregatorDailySnapshot.set({
+      ...touchedAggDay,
+      swapCount: subtractCount(touchedAggDay.swapCount, correction.swapCount),
+      uniqueTraders: subtractCount(
+        touchedAggDay.uniqueTraders,
+        correction.uniqueTraders,
+      ),
+      volumeUsdWei: subtractWei(
+        touchedAggDay.volumeUsdWei,
+        correction.volumeUsdWei,
+      ),
+      feesPaidUsdWei: subtractWei(
+        touchedAggDay.feesPaidUsdWei,
+        correction.feesPaidUsdWei,
+      ),
+    });
+  }
+
+  return corrections;
+}
+
+const EMPTY_AGG_TRADER_MARKER = {
+  swapCount: 0,
+  volumeUsdWei: 0n,
+  feesPaidUsdWei: 0n,
+  isSystemAddress: false,
+};
+
+function upsertAggregatorTraderDayMarker(
+  context: LeaderboardContext,
+  snap: SnapContext,
+  existing: AggregatorTraderDayMarker | undefined,
+  traderDayIsSystem: boolean,
+) {
+  const prev = existing ?? EMPTY_AGG_TRADER_MARKER;
+  context.AggregatorTraderDayMarker.set({
+    id: snap.aggTraderDayMarkerId,
+    chainId: snap.chainId,
+    aggregator: snap.aggregator,
+    trader: snap.caller,
+    timestamp: snap.day,
+    swapCount: prev.swapCount + 1,
+    volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
+    feesPaidUsdWei: prev.feesPaidUsdWei + snap.feesPaidUsdWei,
+    isSystemAddress: prev.isSystemAddress || traderDayIsSystem,
+  });
+}
