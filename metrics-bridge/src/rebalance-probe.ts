@@ -175,7 +175,11 @@ export async function runWithConcurrency<T, R>(
       while (true) {
         const idx = nextIdx++;
         if (idx >= items.length) return;
-        results[idx] = await fn(items[idx]);
+        // Bounds check above proves the index is in range; the `??` keeps
+        // `noUncheckedIndexedAccess` happy without losing the assertion.
+        const item = items[idx];
+        if (item === undefined) return;
+        results[idx] = await fn(item);
       }
     },
   );
@@ -230,35 +234,10 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
     for (let i = 0; i < eligible.length; i++) {
       const pool = eligible[i];
       const result = results[i];
-      if (!result) continue;
-
-      if (result.kind === "blocked") {
-        const labels = {
-          ...poolDisplayLabels(pool),
-          reason_code: result.reasonCode,
-          reason_message: result.reasonMessage,
-        };
-        gauges.rebalanceBlocked.set(labels, 1);
-        // Surface the unbounded diagnostic detail (raw revert string, panic
-        // code, unrecognised hex selector) to Cloud Run logs only — the
-        // metric label is intentionally bounded to the ERROR_MESSAGES enum
-        // for cardinality + Slack-injection-safety reasons (see
-        // `rebalance-check.ts:decodeBlockedRevert`).
-        if (result.diagnostic) {
-          console.warn(
-            `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
-          );
-        }
-      } else if (result.kind === "transport_error") {
-        console.warn(
-          `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
-        );
-      } else if (result.kind === "skip") {
-        console.warn(
-          `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
-        );
-      }
-      // `ok` — pool can rebalance, leave the metric absent for this label set.
+      // `pool` is always defined here (the loop bound matches `eligible.length`);
+      // `noUncheckedIndexedAccess` flags it anyway, so guard explicitly.
+      if (!pool || !result) continue;
+      applyProbeResult(pool, result);
     }
 
     gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
@@ -269,4 +248,39 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
     // silent forever.
     reentryWarnedThisWindow = false;
   }
+}
+
+/**
+ * Dispatch a single probe result to its gauge + log effect. Kept separate
+ * from the iteration in `runRebalanceProbes` so the outer function stays
+ * inside the complexity budget while still covering every result.kind branch.
+ */
+function applyProbeResult(pool: PoolRow, result: RebalanceProbeResult): void {
+  if (result.kind === "blocked") {
+    const labels = {
+      ...poolDisplayLabels(pool),
+      reason_code: result.reasonCode,
+      reason_message: result.reasonMessage,
+    };
+    gauges.rebalanceBlocked.set(labels, 1);
+    // Surface the unbounded diagnostic detail (raw revert string, panic
+    // code, unrecognised hex selector) to Cloud Run logs only — the
+    // metric label is intentionally bounded to the ERROR_MESSAGES enum
+    // for cardinality + Slack-injection-safety reasons (see
+    // `rebalance-check.ts:decodeBlockedRevert`).
+    if (result.diagnostic) {
+      console.warn(
+        `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
+      );
+    }
+  } else if (result.kind === "transport_error") {
+    console.warn(
+      `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
+    );
+  } else if (result.kind === "skip") {
+    console.warn(
+      `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
+    );
+  }
+  // `ok` — pool can rebalance, leave the metric absent for this label set.
 }

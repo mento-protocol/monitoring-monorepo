@@ -25,6 +25,26 @@ export default tseslint.config(
       parserOptions: { tsconfigRootDir: __dirname },
     },
   },
+  // Type-aware async-safety + exhaustiveness rules. `projectService: true`
+  // pulls TS type info; scoped to `src/**` so config files and tests don't
+  // trigger project-service file resolution. New violations fail
+  // `pnpm lint` via the diff-aware baseline; existing misused-promises
+  // entries (mostly React event handlers passing async callbacks) are
+  // baselined for incremental cleanup — see BACKLOG.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+    },
+  },
   {
     plugins: { "@next/next": nextPlugin },
     rules: {

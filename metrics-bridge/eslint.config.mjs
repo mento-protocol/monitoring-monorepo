@@ -17,6 +17,23 @@ export default tseslint.config(
       parserOptions: { tsconfigRootDir: __dirname },
     },
   },
+  // Type-aware async-safety + exhaustiveness rules. `projectService: true`
+  // pulls TS type info; scoped to `src/**/*.ts` so config files don't trip
+  // the project-service file resolution.
+  {
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+    },
+  },
   {
     plugins: { "unused-imports": unusedImports },
     rules: {
