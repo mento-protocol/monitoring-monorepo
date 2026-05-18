@@ -13,6 +13,7 @@ import {
 
 import { registerHttpTestRpcHandlers } from "./http-test-mock-bridge.js";
 import { CONTRACT_NAMESPACE_BY_CHAIN } from "../contractAddresses.js";
+import { env } from "../env.js";
 import {
   BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
   BREAKER_BOX_ABI,
@@ -80,8 +81,8 @@ let rpcServer: Server | undefined;
 let serverReady: Promise<void> | undefined;
 
 function testRpcPort(): number {
-  const explicit = Number(process.env.ENVIO_TEST_RPC_PORT);
-  if (Number.isInteger(explicit) && explicit > 0) return explicit;
+  const explicit = env.ENVIO_TEST_RPC_PORT;
+  if (explicit !== undefined && explicit > 0) return explicit;
   return 45_000 + (process.pid % 10_000);
 }
 

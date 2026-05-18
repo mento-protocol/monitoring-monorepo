@@ -17,9 +17,11 @@
 // - connect-src: Hasura (indexer.hyperindex.xyz) for GraphQL, plus the RPC
 //   endpoints the bridge-redeem flow polls for tx receipts.
 
+import { clientEnv } from "@/env";
+
 function browserTestConnectSrc(): string[] {
-  if (process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES !== "true") return [];
-  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL;
+  if (!clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES) return [];
+  const hasuraUrl = clientEnv.NEXT_PUBLIC_HASURA_URL;
   if (!hasuraUrl) return [];
   try {
     return [new URL(hasuraUrl).origin];
@@ -29,10 +31,9 @@ function browserTestConnectSrc(): string[] {
 }
 
 // Next.js dev HMR needs eval during fixture-mode browser tests.
-const browserTestScriptSrc =
-  process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES === "true"
-    ? ["'unsafe-eval'"]
-    : [];
+const browserTestScriptSrc = clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES
+  ? ["'unsafe-eval'"]
+  : [];
 
 const CSP_CONNECT_SRC = [
   "'self'",
