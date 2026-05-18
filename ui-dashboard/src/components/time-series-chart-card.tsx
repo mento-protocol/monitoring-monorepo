@@ -1,7 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -49,6 +56,26 @@ const Plot = dynamic(() => import("react-plotly.js"), {
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
 type BreakdownMode = "lines" | "stacked";
+
+// Plotly attaches inline `pointer-events: all` to its drag rect on every
+// overlay, overriding the wrapper's `pointer-events: none`. `visibility:
+// hidden` (delayed past the opacity fade so the cross-fade still reads)
+// pulls inactive overlays out of hit-testing; `zIndex` keeps the active
+// overlay topmost during the 250ms window so a fading sibling can't draw
+// a stale label.
+function crossFadeOverlayStyle(active: boolean): CSSProperties {
+  return {
+    position: "absolute",
+    inset: 0,
+    opacity: active ? 1 : 0,
+    visibility: active ? "visible" : "hidden",
+    zIndex: active ? 1 : 0,
+    transition: active
+      ? "opacity 250ms ease-out"
+      : "opacity 250ms ease-out, visibility 0s 250ms",
+    pointerEvents: active ? "auto" : "none",
+  };
+}
 
 interface TimeSeriesChartCardProps {
   title: string;
@@ -497,33 +524,7 @@ export function TimeSeriesChartCard({
             {crossFadeData.map(({ key, combo, traces, layout }) => {
               const active = setEquals(combo, hiddenIdx);
               return (
-                <div
-                  key={key}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    opacity: active ? 1 : 0,
-                    // Plotly attaches inline `pointer-events: all` to its
-                    // drag rect on every overlay, which overrides the
-                    // container's `pointer-events: none`. Without
-                    // `visibility: hidden`, the topmost overlay (the
-                    // all-traces-hidden combo) intercepts hover and its
-                    // empty Plotly draws no label. Delay the visibility
-                    // flip past the opacity fade so the cross-fade still
-                    // reads when leaving active.
-                    visibility: active ? "visible" : "hidden",
-                    // Lift the active overlay above fading-out siblings so
-                    // its Plotly drag rect is the topmost hit target during
-                    // the 250ms fade — without this, the previously-active
-                    // overlay (still `visibility: visible` until the delayed
-                    // flip) can intercept hover and draw a stale label.
-                    zIndex: active ? 1 : 0,
-                    transition: active
-                      ? "opacity 250ms ease-out"
-                      : "opacity 250ms ease-out, visibility 0s 250ms",
-                    pointerEvents: active ? "auto" : "none",
-                  }}
-                >
+                <div key={key} style={crossFadeOverlayStyle(active)}>
                   <Plot
                     data={traces}
                     layout={layout}
