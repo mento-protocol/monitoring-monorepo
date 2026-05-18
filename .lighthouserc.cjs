@@ -18,8 +18,8 @@
 //     LCP:                baseline + 500 ms (warn at >1 700 ms)
 //     CLS:                max(baseline + 0.05, 0.10) = 0.10
 //     INP:                baseline + 100 ms (warn at >200 ms)
-//     accessibility:      0.95 (error; one notch above current 0.94 to signal
-//                         "don't regress below the prod score")
+//     accessibility:      0.94 (error; matches current prod baseline 0.94 so
+//                         any regression is caught without blocking current PRs)
 //
 // WARN → ERROR PROMOTION:
 //   Once the CI infrastructure has collected 5+ stable runs and a representative
@@ -60,10 +60,10 @@ module.exports = {
         // Performance score: warn below 0.75 (desktop SSR, production baseline ~0.80)
         "categories:performance": ["warn", { minScore: 0.75 }],
 
-        // Accessibility score: error below 0.95
-        // Production measured at 0.94 on 2026-05-18. Threshold set one point
-        // above to ensure we don't regress. Deterministic — safe as `error`.
-        "categories:accessibility": ["error", { minScore: 0.95 }],
+        // Accessibility score: error below 0.94
+        // Production measured at 0.94 on 2026-05-18. Threshold matches
+        // baseline so any regression is caught without blocking current PRs.
+        "categories:accessibility": ["error", { minScore: 0.94 }],
 
         // Largest Contentful Paint: warn above 1 700 ms
         // Baseline ~1 200 ms desktop + 500 ms headroom.

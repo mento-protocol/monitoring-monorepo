@@ -114,7 +114,10 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const sha = context.sha;
+            // For pull_request events, context.sha is the synthetic merge commit
+            // that GitHub creates — not the PR head commit that Vercel tracks.
+            // Use the PR head SHA so the deployment lookup matches what Vercel posted.
+            const sha = context.payload.pull_request?.head?.sha ?? context.sha;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const maxWaitMs = 5 * 60 * 1000; // 5 minutes
@@ -153,34 +156,15 @@ jobs:
               await new Promise(r => setTimeout(r, pollIntervalMs));
             }
 
-            // Timed out: fall back to the PR's head ref preview URL pattern.
-            // Vercel deploys to <project>-git-<branch>-<team>.vercel.app for
-            // branch names that can be normalised. This is best-effort — if
-            // the deployment URL doesn't resolve, lhci will error on the
-            // collect step and the job will surface that clearly.
-            core.warning("Timed out waiting for Vercel preview deployment. Attempting branch-slug fallback.");
+            // Timed out: fail rather than audit a stale branch alias.
+            // A branch alias can still resolve to the previous successful
+            // deployment for that branch, so falling back would silently pass
+            // Lighthouse against stale code and miss the missing current preview.
+            core.setFailed(`Timed out waiting for a successful Vercel preview deployment for SHA ${sha}. Check the Vercel deployment logs.`);
 
-            const branchRef = context.payload.pull_request?.head?.ref ?? "";
-            const slug = branchRef
-              .toLowerCase()
-              .replace(/[^a-z0-9-]/g, "-")
-              .replace(/-+/g, "-")
-              .replace(/^-|-$/g, "")
-              .slice(0, 63);
-
-            if (slug) {
-              const fallbackUrl = `https://monitoring-dashboard-git-${slug}-mentolabs.vercel.app`;
-              core.info(`Fallback preview URL: ${fallbackUrl}`);
-              core.setOutput("preview_url", fallbackUrl);
-            } else {
-              core.setFailed("Could not determine Vercel preview URL.");
-            }
-
-      - name: Setup Node for lhci
+      - name: Install dependencies (includes @lhci/cli)
         if: steps.decide.outputs.run == 'true'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
+        uses: ./.github/actions/pnpm-install
 
       - name: Install Chromium dependencies
         if: steps.decide.outputs.run == 'true'
@@ -197,11 +181,17 @@ jobs:
         if: steps.decide.outputs.run == 'true'
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
+          set -eo pipefail
           PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          npx --yes @lhci/cli@0.15.x autorun \
+          # Pass the Vercel deployment-protection bypass token so Lighthouse
+          # audits the real dashboard pages rather than the SSO interstitial.
+          # The header is injected via --collect.settings.extraHeaders.
+          pnpm exec lhci autorun \
             --collect.url="${PREVIEW_URL}/" \
             --collect.url="${PREVIEW_URL}/pools" \
+            --collect.settings.extraHeaders="{\"x-vercel-protection-bypass\":\"${VERCEL_AUTOMATION_BYPASS_SECRET}\"}" \
             2>&1 | tee /tmp/lhci-output.txt
 
       - name: Post Lighthouse results as PR comment
@@ -217,9 +207,6 @@ jobs:
             // Extract report URLs from lhci output (temporary-public-storage URLs)
             const reportUrls = [...lhciOutput.matchAll(/https:\/\/storage\.googleapis\.com\/lighthouse-infrastructure\.appspot\.com\/reports\/\S+\.html/g)]
               .map(m => m[0]);
-
-            // Extract summary scores from lhci output
-            const scoreLine = [...lhciOutput.matchAll(/(\w+):\s+([\d.]+)\s*(\([^)]+\))?/g)].slice(0, 20);
 
             const previewUrl = "${{ steps.vercel-url.outputs.preview_url }}";
 
@@ -252,6 +239,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
 
             const existing = comments.find(c => c.body.includes("<!-- lighthouse-ci-comment -->"));
