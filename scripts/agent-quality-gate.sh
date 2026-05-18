@@ -445,6 +445,12 @@ add_ui_mutation_baseline() {
   add_command "pnpm dashboard:mutation" "$reason"
 }
 
+add_ui_size_limit() {
+  local reason="$1"
+  add_command "pnpm dashboard:build" "$reason"
+  add_command "pnpm dashboard:size-limit" "$reason"
+}
+
 add_bridge_mutation_baseline() {
   local reason="$1"
   add_command "pnpm bridge:mutation" "$reason"
@@ -675,6 +681,23 @@ while IFS= read -r path; do
       add_dashboard_quality_commands "ui-dashboard changed"
       add_ui_react_doctor_diff "ui-dashboard client code should keep React Doctor clean"
       add_ui_react_doctor_full_score "ui-dashboard React Doctor score should stay 100"
+      # Bundle size budget gate — mirrors `.github/workflows/size-limit.yml`.
+      # Any change under ui-dashboard/ that can affect the client build
+      # (src files, root config files like postcss/sentry-shared/next/tsconfig)
+      # re-runs the build + size-limit check locally before opening a PR.
+      # The narrower set (script files, playwright config, knip config, etc.)
+      # doesn't affect the bundle and is excluded.
+      case "$path" in
+        ui-dashboard/src/*|ui-dashboard/*.ts|ui-dashboard/*.mjs|ui-dashboard/*.cjs|ui-dashboard/*.js|ui-dashboard/*.json)
+          # But skip pure-test files and playwright config — they don't ship.
+          case "$path" in
+            ui-dashboard/playwright.config.ts|ui-dashboard/vitest.config.ts|ui-dashboard/vitest.mutation.config.ts|ui-dashboard/stryker.config.mjs|ui-dashboard/knip.json|ui-dashboard/react-doctor.config.json|ui-dashboard/eslint.config.mjs|ui-dashboard/eslint-baseline.json) ;;
+            *)
+              add_ui_size_limit "ui-dashboard bundle inputs changed"
+              ;;
+          esac
+          ;;
+      esac
       case "$path" in
         ui-dashboard/src/app/*|ui-dashboard/src/components/*|ui-dashboard/src/lib/graphql.ts|ui-dashboard/src/hooks/*|ui-dashboard/src/lib/queries.ts|ui-dashboard/src/lib/queries/*|ui-dashboard/src/lib/bridge-queries.ts|ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts|ui-dashboard/src/lib/gql-retry.ts|ui-dashboard/src/lib/fetch-all-networks.ts|ui-dashboard/src/lib/fetch-json.ts|ui-dashboard/src/lib/network-fetcher/*|ui-dashboard/src/lib/og-graphql-client.ts|ui-dashboard/src/lib/homepage-og.ts|ui-dashboard/src/lib/pool-og.ts|ui-dashboard/src/lib/bridge-flows-og.ts|ui-dashboard/src/lib/hasura-timeout.ts|ui-dashboard/src/lib/mento-address-discovery.ts)
           add_checklist "docs/pr-checklists/swr-polling-hasura.md" "Hasura/SWR/query path changed"

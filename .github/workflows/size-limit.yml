@@ -56,10 +56,18 @@ jobs:
             # included so changes to the gate itself trigger a re-run.
             dashboard:
               - ui-dashboard/src/**
-              - ui-dashboard/package.json
-              - ui-dashboard/next.config.ts
-              - ui-dashboard/.size-limit.cjs
-              - ui-dashboard/tsconfig.json
+              # All ui-dashboard root-level config files that feed the build:
+              # PostCSS/Tailwind (postcss.config.mjs), Sentry shared module
+              # imported into the client bundle via instrumentation-client
+              # (sentry.shared.ts), Next.js (next.config.ts), TS compiler
+              # (tsconfig.json), size budget itself (.size-limit.cjs),
+              # package manifest, etc. Codex P2 caught the original
+              # narrower list missing `postcss.config.mjs` + `sentry.shared.ts`.
+              - ui-dashboard/*.ts
+              - ui-dashboard/*.mjs
+              - ui-dashboard/*.cjs
+              - ui-dashboard/*.js
+              - ui-dashboard/*.json
               - shared-config/**
               - package.json
               - pnpm-lock.yaml
