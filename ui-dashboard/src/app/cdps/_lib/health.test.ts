@@ -121,9 +121,10 @@ describe("aggregatesForCollateral (list-page lookup)", () => {
   });
 
   it("propagates truncated=true when collateral missing and query hit the cap", () => {
-    // Regression for claude[bot] / cursor / codex finding (PR #470): when
-    // chain-wide trove query is capped, a collateral whose troves got sorted
-    // past the cutoff would otherwise render as Healthy / no-debt.
+    // Regression guard for the chain-wide cap path: when the trove query is
+    // capped, a collateral whose troves got sorted past the cutoff has no
+    // map entry and would otherwise fall back to plain EMPTY_AGGREGATES,
+    // rendering as Healthy / no-debt.
     const map = new Map([["42220-A", fullAgg]]);
     const result = aggregatesForCollateral("42220-Missing", map, true);
     expect(result.openTroveCount).toBe(0);
@@ -250,8 +251,9 @@ describe("deriveCdpHealth", () => {
   });
 
   it("returns critical even when truncated if SP is empty and any debt is visible", () => {
-    // Codex finding (PR #470): unseen debt past the cap can only keep SP
-    // coverage at 0%; refusing to render obscures a real alert.
+    // Unseen debt past the row cap can only keep SP coverage at 0% (it cannot
+    // make a 0-SP system suddenly look healthy), so refusing to render here
+    // would obscure a real alert. The truncation note still shows in reasons.
     const h = deriveCdpHealth(collateral(), instance({ spDeposits: "0" }), {
       openTroveCount: 500,
       totalDebt: BigInt("1000000000000000000000"),
