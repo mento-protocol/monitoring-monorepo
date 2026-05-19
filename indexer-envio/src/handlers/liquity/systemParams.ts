@@ -1,4 +1,9 @@
-import type { LiquityCollateral, LiquityInstance, Trove } from "envio";
+import type {
+  EffectContext,
+  LiquityCollateral,
+  LiquityInstance,
+  Trove,
+} from "envio";
 import { createEffect, S } from "envio";
 import systemParamsAbi from "../../../abis/liquity/SystemParams.json" with { type: "json" };
 import {
@@ -57,6 +62,50 @@ const systemParamsShape = S.schema({
   INITIAL_BASE_RATE: S.bigint,
 });
 
+// Process-lifetime dedup so the dead-contract diagnostic fires once per
+// (chainId, systemParams), not once per event. A long-broken indexer would
+// otherwise drown its log stream — alert rules just need one loud line to
+// match on.
+const diagnosedFailures = new Set<string>();
+
+async function logSystemParamsFailure(
+  context: EffectContext,
+  chainId: number,
+  systemParams: string,
+): Promise<void> {
+  const key = `${chainId}-${systemParams.toLowerCase()}`;
+  if (diagnosedFailures.has(key)) return;
+  diagnosedFailures.add(key);
+
+  try {
+    const client = getRpcClient(chainId);
+    const code = await client.getCode({
+      address: systemParams as `0x${string}`,
+    });
+    if (code === undefined || code === "0x") {
+      context.log.error(
+        `liquity.systemParams.deadContract chainId=${chainId} systemParams=${systemParams} — ` +
+          `address has zero bytecode. This indicates config drift: the indexer is pointed at an ` +
+          `address with no deployed contract. Fix indexer-envio/src/handlers/liquity/config.ts ` +
+          `(or bump @mento-protocol/contracts) and redeploy.`,
+      );
+    } else {
+      // viem's getCode returns "0x{hex}"; bytecode size is (chars - 2) / 2.
+      const bytecodeBytes = (code.length - 2) / 2;
+      context.log.warn(
+        `liquity.systemParams.loadFailed chainId=${chainId} systemParams=${systemParams} — ` +
+          `contract is live (bytecode ${bytecodeBytes} bytes) but parameter reads return undefined. ` +
+          `Likely an ABI mismatch, RPC archive depth, or a transient outage.`,
+      );
+    }
+  } catch (err) {
+    context.log.error(
+      `liquity.systemParams.diagnosticFailed chainId=${chainId} systemParams=${systemParams} — ` +
+        `getCode RPC threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 const liquitySystemParamsEffect = createEffect(
   {
     name: "liquitySystemParams",
@@ -70,6 +119,7 @@ const liquitySystemParamsEffect = createEffect(
       loadSystemParamValues(input.chainId, input.systemParams),
     );
     if (values === undefined) {
+      await logSystemParamsFailure(context, input.chainId, input.systemParams);
       context.cache = false;
       return null;
     }

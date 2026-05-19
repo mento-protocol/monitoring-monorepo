@@ -1,4 +1,5 @@
 import { strict as assert } from "assert";
+import contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
 import {
   LIQUITY_MARKETS,
   findLiquityMarketByAddressesRegistry,
@@ -23,6 +24,123 @@ import {
 } from "../src/handlers/liquity/troves";
 import { makeLiquityInstance } from "../src/handlers/liquity/bootstrap";
 import { pendingTroveKey } from "../src/handlers/liquity/keys";
+
+describe("Liquity market loader (contracts.json-backed)", () => {
+  // Type narrowing for the contracts.json subpath import. The package's
+  // declared type is too generic for direct access patterns.
+  const celoMainnet = (
+    contractsJson as Record<
+      string,
+      Record<string, Record<string, { address: string }>>
+    >
+  )["42220"]?.mainnet;
+
+  it("assembles 3 markets for Celo mainnet with contiguous collIndex", () => {
+    assert.equal(LIQUITY_MARKETS.length, 3);
+    const collIndices = LIQUITY_MARKETS.map((m) => m.collIndex).sort();
+    assert.deepEqual(collIndices, [0, 1, 2]);
+    for (const market of LIQUITY_MARKETS) {
+      assert.equal(market.chainId, 42220);
+      assert.equal(market.slug, market.symbol.toLowerCase());
+    }
+  });
+
+  it("derives every v300 protocol address from @mento-protocol/contracts", () => {
+    assert.ok(celoMainnet, "contracts.json missing 42220.mainnet namespace");
+    // If this assertion ever fails, the package shape changed; either the
+    // loader's naming convention or this test is now wrong.
+    const expectedRoleByField = {
+      collateralRegistry: "CollateralRegistry",
+      troveManager: "TroveManager",
+      stabilityPool: "StabilityPool",
+      borrowerOperations: "BorrowerOperations",
+      troveNFT: "TroveNFT",
+      sortedTroves: "SortedTroves",
+      activePool: "ActivePool",
+      defaultPool: "DefaultPool",
+      collSurplusPool: "CollSurplusPool",
+      addressesRegistry: "AddressesRegistry",
+      systemParams: "SystemParams",
+    } as const;
+    for (const market of LIQUITY_MARKETS) {
+      for (const [field, role] of Object.entries(expectedRoleByField) as Array<
+        [keyof typeof expectedRoleByField, string]
+      >) {
+        const key = `${role}v300${market.symbol}`;
+        const expected = celoMainnet[key]?.address?.toLowerCase();
+        assert.ok(
+          expected,
+          `${key} missing from @mento-protocol/contracts — bump package or fix naming convention`,
+        );
+        assert.equal(
+          market[field],
+          expected,
+          `market.${field} drift for ${market.symbol}`,
+        );
+      }
+      // CDPLiquidityStrategy is shared across all markets.
+      assert.equal(
+        market.cdpLiquidityStrategy,
+        celoMainnet.CDPLiquidityStrategy?.address?.toLowerCase(),
+      );
+    }
+  });
+
+  it("rejects zero / placeholder addresses across every market field", () => {
+    const ZERO = "0x0000000000000000000000000000000000000000";
+    const PLACEHOLDER_PREFIX = "0xdead";
+    const fieldsToCheck = [
+      "debtToken",
+      "collToken",
+      "collateralRegistry",
+      "troveManager",
+      "stabilityPool",
+      "borrowerOperations",
+      "troveNFT",
+      "sortedTroves",
+      "activePool",
+      "defaultPool",
+      "collSurplusPool",
+      "addressesRegistry",
+      "systemParams",
+      "cdpLiquidityStrategy",
+    ] as const;
+    for (const market of LIQUITY_MARKETS) {
+      for (const field of fieldsToCheck) {
+        const value = market[field];
+        assert.notEqual(
+          value,
+          ZERO,
+          `${market.symbol}.${field} is zero address`,
+        );
+        assert.ok(
+          !value.toLowerCase().startsWith(PLACEHOLDER_PREFIX),
+          `${market.symbol}.${field} looks like a placeholder: ${value}`,
+        );
+        assert.match(
+          value,
+          /^0x[0-9a-f]{40}$/,
+          `${market.symbol}.${field} not normalized: ${value}`,
+        );
+      }
+    }
+  });
+
+  it("pins GBPm SystemParams to the v300 deployment", () => {
+    // Regression test for the silent two-month bug: the indexer was pointed
+    // at a dead address (`0xddd2de…`, devnet leftover) and every event for
+    // every GBPm trove fell through to ZOMBIE because no parameter loaded.
+    // If a future agent regresses the systemParams source again, this fails
+    // at test time, not after a wasted deploy.
+    const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+    assert.ok(gbpm, "GBPm market missing");
+    assert.equal(
+      gbpm.systemParams,
+      "0x064d8bcc79711cf51df7ca0a7fe531a271cd74e9",
+      "GBPm systemParams drifted from SystemParamsv300GBPm",
+    );
+  });
+});
 
 describe("Liquity CDP helpers", () => {
   it("routes every configured Celo market by all event source contracts", () => {

@@ -153,7 +153,7 @@ The two failure modes the pattern guards against are sign errors (open↔not-ope
 
 ### Rebalance redemptions are conflated with user redemptions today
 
-PR #31 in `mento-protocol/bold` adds `CollateralRegistry.redeemCollateralRebalancing` — callable only by the `liquidityStrategy` address, runs through `TroveManager.redeemCollateral`, fires `Redemption` + `TroveOperation(REDEEM_COLLATERAL)` indistinguishable from user redemptions. Discriminator: `event.transaction.to == cdpLiquidityStrategy address` (single shared strategy `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` across all three Celo markets, in `config/liquity.json`).
+PR #31 in `mento-protocol/bold` adds `CollateralRegistry.redeemCollateralRebalancing` — callable only by the `liquidityStrategy` address, runs through `TroveManager.redeemCollateral`, fires `Redemption` + `TroveOperation(REDEEM_COLLATERAL)` indistinguishable from user redemptions. Discriminator: `event.transaction.to == cdpLiquidityStrategy address` (single shared strategy `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` across all three Celo markets, resolved from `@mento-protocol/contracts` under the `CDPLiquidityStrategy` key by `src/handlers/liquity/config.ts`).
 
 On-chain reality (2026-05-19): 368 GBPm redemptions, 13 JPYm redemptions, ALL rebalance-driven (sampled tx.to → matches strategy address). If you ship a "redemption volume" KPI without separating these out, it will be 100% noise on production data today.
 
