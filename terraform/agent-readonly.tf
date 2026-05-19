@@ -285,13 +285,19 @@ resource "google_project_iam_member" "agent_readonly_storage_object_viewer" {
 #     fi
 #   fi
 #
-#   # Step 4: verify the legacy user grant is gone. Empty output = success;
-#   # non-empty output means the cleanup did not take effect and the SA still
-#   # carries the legacy impersonator — investigate before continuing.
-#   gcloud iam service-accounts get-iam-policy "$SA" --project="$PROJECT" \
+#   # Step 4: fail closed if the legacy user grant is still present. Empty
+#   # output = success; any output means the cleanup did not take effect and
+#   # the SA still carries the legacy impersonator — abort adoption so the
+#   # operator investigates before continuing. Mirrors the org-level
+#   # `roles/viewer` and `roles/storage.objectViewer` post-checks below.
+#   remaining=$(gcloud iam service-accounts get-iam-policy "$SA" --project="$PROJECT" \
 #     --flatten='bindings[].members' \
 #     --filter="bindings.role:roles/iam.serviceAccountTokenCreator AND bindings.members:${LEGACY_MEMBER}" \
-#     --format='value(bindings.members)'
+#     --format='value(bindings.members)')
+#   if [ -n "$remaining" ]; then
+#     echo "legacy ${LEGACY_MEMBER} still holds roles/iam.serviceAccountTokenCreator on ${SA}: ${remaining}" >&2
+#     exit 1
+#   fi
 #
 #   # Adopt only org-role bindings that already exist in the live policy. New
 #   # roles added to `local.agent_readonly_org_roles` will be created normally
