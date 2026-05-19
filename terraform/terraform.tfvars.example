@@ -62,8 +62,11 @@ gcp_billing_account = "..."
 
 # ── Read-only AI agent investigator ──────────────────────────────────────────
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
-# (Token Creator). Defaults to `user:philip.paetz@mentolabs.xyz`; override
-# here to add incident responders or auditors.
+# (Token Creator). Defaults to `group:eng@mentolabs.xyz` so any engineer
+# inherits access; override here to add incident responders or external
+# auditors. See README → "Adopting the agent-readonly SA into Terraform
+# state" before the first apply if the SA already exists.
 # agent_readonly_impersonators = [
-#   "user:philip.paetz@mentolabs.xyz",
+#   "group:eng@mentolabs.xyz",
+#   "user:incident-responder@mentolabs.xyz",
 # ]
