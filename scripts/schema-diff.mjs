@@ -62,27 +62,48 @@ function loadSchema(path) {
  * lowering @config(precision: 78) to @config(precision: 38)) that the standard
  * findBreakingChanges/findDangerousChanges APIs don't compare.
  */
+function extractDirectiveArgs(directives) {
+  const map = {};
+  for (const dir of directives ?? []) {
+    if (!["config", "index"].includes(dir.name.value)) continue;
+    const args = {};
+    for (const arg of dir.arguments ?? []) {
+      args[arg.name.value] =
+        arg.value.kind === "ListValue"
+          ? arg.value.values.map((v) => v.value)
+          : arg.value.value;
+    }
+    map[dir.name.value] = args;
+  }
+  return map;
+}
+
+/**
+ * Extract a map of directive snapshots keyed by `TypeName` (object-level) or
+ * `TypeName.fieldName` (field-level).  This catches applied-directive-argument
+ * changes (e.g. lowering @config(precision: 78) to @config(precision: 38) or
+ * changing composite @index(fields: [...]) on the type itself) that the
+ * standard findBreakingChanges/findDangerousChanges APIs don't compare.
+ *
+ * @returns {Map<string, Record<string, Record<string, string>>>}
+ */
 function extractAppliedDirectives(sdl) {
   const ast = parse(sdl);
   /** @type {Map<string, Record<string, Record<string, string>>>} */
   const result = new Map();
   for (const def of ast.definitions) {
-    if (def.kind !== "ObjectTypeDefinition" || !def.fields) continue;
-    for (const field of def.fields) {
+    if (def.kind !== "ObjectTypeDefinition") continue;
+    // Object-level directives (e.g. `type Foo @index(fields: [...]) { ... }`)
+    const typeDirs = extractDirectiveArgs(def.directives);
+    if (Object.keys(typeDirs).length > 0) {
+      result.set(def.name.value, typeDirs);
+    }
+    // Field-level directives
+    for (const field of def.fields ?? []) {
       if (!field.directives?.length) continue;
-      for (const dir of field.directives) {
-        if (!["config", "index"].includes(dir.name.value)) continue;
-        const key = `${def.name.value}.${field.name.value}`;
-        const args = {};
-        for (const arg of dir.arguments ?? []) {
-          args[arg.name.value] =
-            arg.value.kind === "ListValue"
-              ? arg.value.values.map((v) => v.value)
-              : arg.value.value;
-        }
-        const existing = result.get(key) ?? {};
-        existing[dir.name.value] = args;
-        result.set(key, existing);
+      const fieldDirs = extractDirectiveArgs(field.directives);
+      if (Object.keys(fieldDirs).length > 0) {
+        result.set(`${def.name.value}.${field.name.value}`, fieldDirs);
       }
     }
   }
@@ -100,31 +121,29 @@ function findDirectiveArgChanges(baseSdl, headSdl) {
   for (const [key, baseDirs] of baseMap) {
     const headDirs = headMap.get(key);
     if (!headDirs) continue; // field removal already caught by findBreakingChanges
+    // Directive removed from the type/field (check first; skip per-arg loops below)
+    for (const dirName of Object.keys(baseDirs)) {
+      if (!(dirName in (headDirs ?? {}))) {
+        changes.push(`\`${key}\` — \`@${dirName}\` directive removed`);
+      }
+    }
     for (const [dirName, baseArgs] of Object.entries(baseDirs)) {
+      if (!(dirName in (headDirs ?? {}))) continue; // whole directive removed — already reported
       const headArgs = headDirs[dirName] ?? {};
       for (const [argName, baseVal] of Object.entries(baseArgs)) {
+        if (!(argName in headArgs)) {
+          // Arg removed entirely — report once here; skip the "changed" path
+          changes.push(
+            `\`${key}\` — \`@${dirName}(${argName})\` argument removed`,
+          );
+          continue;
+        }
         const headVal = headArgs[argName];
         if (JSON.stringify(headVal) !== JSON.stringify(baseVal)) {
           changes.push(
             `\`${key}\` — \`@${dirName}(${argName})\` changed from \`${JSON.stringify(baseVal)}\` to \`${JSON.stringify(headVal)}\``,
           );
         }
-      }
-      // Arg removed entirely
-      for (const argName of Object.keys(baseArgs)) {
-        if (!(argName in (headDirs[dirName] ?? {}))) {
-          changes.push(
-            `\`${key}\` — \`@${dirName}(${argName})\` argument removed`,
-          );
-        }
-      }
-    }
-    // Directive removed from field
-    for (const dirName of Object.keys(baseDirs)) {
-      if (!(dirName in (headDirs ?? {}))) {
-        changes.push(
-          `\`${key}\` — \`@${dirName}\` directive removed from field`,
-        );
       }
     }
   }
