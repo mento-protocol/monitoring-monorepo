@@ -33,6 +33,27 @@ function getClient(network: Network): GraphQLClient {
 // and hitting 429 "Tier Quota" errors mid-session.
 const DEFAULT_REFRESH_MS = 30_000;
 
+/** Options accepted by `useGQL` (also composable as the 3rd argument). */
+export type UseGQLOptions<T> = {
+  /** Override the default 30s polling interval. Can also be supplied as the
+   *  positional 3rd argument for backward compatibility. */
+  refreshInterval?: number;
+  /** Escape hatch for callers that need to override the defaults (e.g.
+   *  re-enable focus revalidation for a one-shot read). Focus/reconnect
+   *  revalidation is OFF by default for this hook — pool pages fan out
+   *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
+   *  that many requests at once on top of the 30s polling cycle. */
+  revalidateOnFocus?: boolean;
+  revalidateOnReconnect?: boolean;
+  /** Attaches an `AbortSignal.timeout(...)` to the request. Useful for
+   *  fail-open extension queries where a wedged Hasura connection would
+   *  otherwise stick the SWR poll until the socket times out (minutes). */
+  timeoutMs?: number;
+  /** Optional Zod schema to validate the response. When provided,
+   *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
+  schema?: ZodType<T>;
+};
+
 /**
  * Network-aware GraphQL hook.
  * Automatically switches Hasura endpoint based on the current network context.
@@ -46,39 +67,37 @@ const DEFAULT_REFRESH_MS = 30_000;
  * path). Adoption is opt-in — callers that omit `schema` behave exactly as
  * before. This turns silent Hasura schema-drift bugs into typed errors caught
  * at fetch time rather than at render time as mysterious `undefined` values.
+ *
+ * The 3rd argument accepts either a `number` (refreshInterval, legacy form)
+ * or a `UseGQLOptions` object (preferred form when only schema/timeoutMs are
+ * needed and the default 30s interval is fine).
  */
 export function useGQL<T>(
   query: string | null,
   variables?: Record<string, unknown>,
-  refreshInterval: number = DEFAULT_REFRESH_MS,
-  /** Escape hatch for callers that need to override the defaults (e.g.
-   *  re-enable focus revalidation for a one-shot read). Focus/reconnect
-   *  revalidation is OFF by default for this hook — pool pages fan out
-   *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
-   *  that many requests at once on top of the 30s polling cycle.
-   *
-   *  `timeoutMs` attaches an `AbortSignal.timeout(...)` to the request.
-   *  Useful for fail-open extension queries (trust flags, isolated
-   *  rollups) where a wedged Hasura connection would otherwise stick the
-   *  SWR poll until the underlying socket times out (minutes). Primary
-   *  page queries should leave it unset — users care about that data,
-   *  so SWR's retry/dedup is the right behavior, not auto-cancel. */
-  swrOptions?: {
-    revalidateOnFocus?: boolean;
-    revalidateOnReconnect?: boolean;
-    timeoutMs?: number;
-    /** Optional Zod schema to validate the response. When provided,
-     *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
-    schema?: ZodType<T>;
-  },
+  refreshIntervalOrOptions?: number | UseGQLOptions<T>,
+  legacyOptions?: Omit<UseGQLOptions<T>, "refreshInterval">,
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
 
-  // Split `timeoutMs` and `schema` (custom, fetcher-only) from genuine SWR
-  // options before spreading. SWR ignores unknown properties but the partition
-  // keeps the config object honest for any future config-validating SWR plugin.
-  const { timeoutMs, schema, ...swrConfigOverrides } = swrOptions ?? {};
+  // Normalise the two calling conventions:
+  //   (q, v, number, opts?)  — legacy positional refreshInterval
+  //   (q, v, opts)           — preferred object form (no undefined placeholder)
+  const opts: UseGQLOptions<T> =
+    typeof refreshIntervalOrOptions === "object" &&
+    refreshIntervalOrOptions !== null
+      ? refreshIntervalOrOptions
+      : {
+          refreshInterval: refreshIntervalOrOptions,
+          ...legacyOptions,
+        };
+  const {
+    refreshInterval = DEFAULT_REFRESH_MS,
+    timeoutMs,
+    schema,
+    ...swrConfigOverrides
+  } = opts;
 
   async function fetcher(): Promise<T> {
     const raw = await (timeoutMs == null
