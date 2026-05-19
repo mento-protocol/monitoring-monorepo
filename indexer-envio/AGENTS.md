@@ -130,7 +130,7 @@ PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how 
 
 ## Mento Liquity v2 (CDP) fork — what to know
 
-We index Mento's fork of Liquity v2 (a.k.a. Bold) at https://github.com/mento-protocol/bold. The fork has a few divergences from upstream that materially affect indexing. Glue contracts (`CDPLiquidityStrategy`, `ReserveTroveFactory`) live outside `mento-protocol/bold` — likely in `mento-protocol/mento`.
+We index Mento's fork of Liquity v2 (a.k.a. Bold) at <https://github.com/mento-protocol/bold>. The fork has a few divergences from upstream that materially affect indexing. Glue contracts live outside the `bold` repo: `CDPLiquidityStrategy.sol` is in `mento-protocol/mento-core` under `contracts/liquidityStrategies/`, and `ReserveTroveFactory.sol` is in `mento-protocol/deployments-v2` under `src/`.
 
 ### Don't trust `ActivePoolBoldDebtUpdated` / `DefaultPoolBoldDebtUpdated`
 
