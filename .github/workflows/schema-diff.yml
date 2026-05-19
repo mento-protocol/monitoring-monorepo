@@ -21,8 +21,11 @@ jobs:
     # Always runs (required-status safe — no `paths:` filter at workflow
     # level). The `filter` step is `continue-on-error: true`, and the
     # `decide` step computes whether to run the diff:
+    #   - fork / Dependabot PR               → no-op skip (read-only token
+    #                                          cannot post a comment; emit to
+    #                                          job summary instead)
     #   - PR + filter succeeded + schema=true  → run
-    #   - PR + filter succeeded + schema=false → no-op skip
+    #   - PR + filter succeeded + schema=false → no-op skip (clear stale comment)
     #   - PR + filter failed (any cause)        → run (fail-closed)
     # When the diff does run, it posts a sticky PR comment listing
     # breaking and dangerous changes. Advisory only — exit code is always 0.
@@ -31,6 +34,9 @@ jobs:
     timeout-minutes: 5
     # `pull-requests: write` is required to post the sticky PR comment.
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    # Fork PRs and Dependabot get a read-only token even when write is declared;
+    # the `decide` step detects those cases and sets run=false to avoid a
+    # permission failure in the sticky-comment step.
     permissions:
       contents: read
       pull-requests: write
@@ -56,8 +62,20 @@ jobs:
         env:
           FILTER_OUTCOME: ${{ steps.filter.outcome }}
           SCHEMA_CHANGED: ${{ steps.filter.outputs.schema }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_ACTOR: ${{ github.actor }}
         run: |
-          if [[ "$FILTER_OUTCOME" != "success" ]]; then
+          # Fork PRs get a read-only token; posting a PR comment would fail.
+          # Dependabot is treated like a fork by GitHub (no secrets, read-only
+          # token). In both cases skip the comment step and emit to job summary.
+          if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from dependabot[bot] — read-only token, skipping schema-diff PR comment."
+          elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "PR from fork '$PR_HEAD_REPO' — read-only token, skipping schema-diff PR comment."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running schema diff."
           elif [[ "$SCHEMA_CHANGED" == "true" ]]; then
@@ -78,9 +96,23 @@ jobs:
       - name: Run schema diff
         if: steps.decide.outputs.run == 'true'
         # Advisory: always exits 0. The diff output is the signal.
+        # If schema-diff.mjs fails (e.g. an unrecognised Envio directive makes
+        # the parser throw), capture the error into the output file so the
+        # sticky PR comment surfaces a diagnostic rather than posting an empty
+        # comment with no signal.
         run: |
-          node scripts/schema-diff.mjs /tmp/schema-base.graphql indexer-envio/schema.graphql \
-            > /tmp/schema-diff-output.md || true
+          if ! node scripts/schema-diff.mjs /tmp/schema-base.graphql indexer-envio/schema.graphql \
+              > /tmp/schema-diff-output.md 2>/tmp/schema-diff-stderr.txt; then
+            {
+              echo "## GraphQL Schema Diff"
+              echo ""
+              echo "> **Advisory:** schema-diff parser failed — the schema may use an unrecognised Envio directive or scalar. Manual review required."
+              echo ""
+              echo '```'
+              cat /tmp/schema-diff-stderr.txt
+              echo '```'
+            } > /tmp/schema-diff-output.md
+          fi
           cat /tmp/schema-diff-output.md
       - name: Post sticky PR comment
         if: steps.decide.outputs.run == 'true'
@@ -88,3 +120,12 @@ jobs:
         with:
           header: schema-diff
           path: /tmp/schema-diff-output.md
+      - name: Clear stale schema-diff comment
+        # When the schema is unchanged (or this is a fork/Dependabot PR),
+        # delete any previously-posted sticky comment so the PR feedback
+        # surface does not keep showing resolved breaking changes.
+        if: steps.decide.outputs.run == 'false'
+        uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
+        with:
+          header: schema-diff
+          delete: true
