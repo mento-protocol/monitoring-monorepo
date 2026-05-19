@@ -96,7 +96,7 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Infrastructure:**
 
-- Aegis NestJS app on GCP App Engine (`mento-prod`)
+- Aegis NestJS app on GCP App Engine (`mento-monitoring`)
 - Grafana Agent on GCP App Engine → pushes to Grafana Cloud (`clabsmento.grafana.net`)
 - 8 Discord webhook contact points + Splunk On-Call for on-call escalation
 - Weekend mute timings for FX rate feeds (Fri 22:00 — Sun 22:00 UTC)
@@ -107,7 +107,7 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
-- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-prod`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 - **Terraform module** `terraform/alerts/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`).
 - **Slack channels.** Severity-split: `#alerts-critical` (page-worthy) + `#alerts-warnings` (muted by default). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed.
 
@@ -170,6 +170,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ### Infrastructure Backlog
 
 - [x] **Merge Aegis into the monorepo** — top-level `aegis/` workspace package; App Engine deploy workflow, Grafana Agent, Discord/Splunk routing, and Terraform backend prefix preserved
+- [x] **Move Aegis runtime into `mento-monitoring`** — App Engine default service and Grafana Agent now live with the rest of the monitoring GCP resources
 - [ ] **Grafana Agent → Alloy migration** — Agent reached EOL 2025-11-01. Alloy is the OTel-collector successor. Run `alloy convert` against `aegis/grafana-agent/agent.yaml.tmpl`, swap the App Engine image, verify scrape jobs still remote-write.
 
 ### Future

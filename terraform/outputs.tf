@@ -38,6 +38,16 @@ output "metrics_bridge_url" {
   value       = google_cloud_run_v2_service.metrics_bridge.uri
 }
 
+output "aegis_app_engine_url" {
+  description = "Aegis App Engine URL in the monitoring project."
+  value       = "https://${google_project.monitoring.project_id}.uc.r.appspot.com"
+}
+
+output "aegis_grafana_agent_url" {
+  description = "Grafana Agent App Engine URL in the monitoring project."
+  value       = "https://grafana-agent-dot-${google_project.monitoring.project_id}.uc.r.appspot.com"
+}
+
 output "ci_wif_provider" {
   description = "Full resource name of the GitHub Actions WIF provider. Set as GH repo secret GCP_WORKLOAD_IDENTITY_PROVIDER."
   value       = google_iam_workload_identity_pool_provider.github.name

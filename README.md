@@ -103,7 +103,7 @@ pnpm aegis:typecheck
 pnpm aegis:test
 ```
 
-Aegis remains the NestJS App Engine service in `mento-prod`; the monorepo
+Aegis remains the NestJS App Engine service in `mento-monitoring`; the monorepo
 operator interface is the root `pnpm aegis:*` command family.
 
 ### Dashboard Browser Tests
@@ -199,8 +199,16 @@ babysitting a new deploy.
 ```bash
 pnpm aegis:build
 pnpm aegis:typecheck
-pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to mento-prod
+pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to mento-monitoring
 pnpm aegis:logs
+```
+
+Grafana Agent deploys from the same project. On a fresh project bootstrap,
+create the Secret Manager versions before the first deploy:
+
+```bash
+pnpm aegis:agent:seed-secrets
+pnpm aegis:agent:deploy
 ```
 
 Grafana dashboards and v2 alert rules live in `aegis/terraform` and keep the
