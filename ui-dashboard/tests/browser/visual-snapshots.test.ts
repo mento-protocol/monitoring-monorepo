@@ -154,7 +154,12 @@ test.describe("visual snapshots", () => {
     await freezeAnimations(page);
 
     await expect(page).toHaveScreenshot("pools-list.png", {
-      maxDiffPixels: 100,
+      // 3% tolerance accommodates cross-platform font-rendering differences
+      // (macOS vs Linux Chromium renders text sub-pixels differently; observed
+      // CI drift is ≤2%). Masks already remove volatile timestamp regions;
+      // this ratio covers the residual platform anti-aliasing variance while
+      // still catching genuine layout regressions (which are far larger).
+      maxDiffPixelRatio: 0.03,
       // Mask timestamps AND the entire Recent Swaps section: the fixture server
       // generates a fresh swap (with a new timestamp AND new amounts) on every
       // server startup, so every cell in that table is volatile.
@@ -182,7 +187,7 @@ test.describe("visual snapshots", () => {
     await freezeAnimations(page);
 
     await expect(page).toHaveScreenshot("pool-detail-lps.png", {
-      maxDiffPixels: 100,
+      maxDiffPixelRatio: 0.03, // cross-platform font anti-aliasing; see pools-list comment
       mask: timestampMasks(page),
       fullPage: false,
     });
@@ -205,7 +210,7 @@ test.describe("visual snapshots", () => {
     await freezeAnimations(page);
 
     await expect(page).toHaveScreenshot("pool-detail-swaps.png", {
-      maxDiffPixels: 100,
+      maxDiffPixelRatio: 0.03, // cross-platform font anti-aliasing; see pools-list comment
       mask: timestampMasks(page),
       fullPage: false,
     });
@@ -235,7 +240,7 @@ test.describe("visual snapshots", () => {
     await freezeAnimations(page);
 
     await expect(page).toHaveScreenshot("bridge-flows.png", {
-      maxDiffPixels: 100,
+      maxDiffPixelRatio: 0.03, // cross-platform font anti-aliasing; see pools-list comment
       mask: timestampMasks(page),
       fullPage: false,
     });
@@ -279,7 +284,7 @@ test.describe("visual snapshots", () => {
     await freezeAnimations(page);
 
     await expect(page).toHaveScreenshot("leaderboard.png", {
-      maxDiffPixels: 100,
+      maxDiffPixelRatio: 0.03, // cross-platform font anti-aliasing; see pools-list comment
       mask: timestampMasks(page),
       fullPage: false,
     });
