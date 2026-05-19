@@ -8,6 +8,7 @@ import type { createPublicClient, ReadContractParameters } from "viem";
 import {
   RATE_LIMIT_RETRY_DELAYS_MS,
   _resetRpcFailureCounts,
+  describeKnownRevert,
   fallbackLikelyHasBlock,
   isRateLimitError,
   logRpcFailure,
@@ -85,7 +86,6 @@ export type BlockFallbackResult = {
 const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
 
 type PublicClient = ReturnType<typeof createPublicClient>;
-
 /** @internal Test-only hooks for overriding the delay function and exposing
  *  internal helpers (rate-limit classifier, structured failure logger, and
  *  the burst-counter reset) so unit tests can pin their behaviour without
@@ -252,14 +252,14 @@ export async function readContractWithBlockFallback(
       ARCHIVE_DEPTH_RE.test(currentError.message)
     ) {
       if (fallbackClient) {
-        log.warn(
-          `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, using fallback RPC`,
-        );
         try {
           const result = await makeCall(fallbackClient, blockNumber);
           // Successful block-scoped read via the secondary —
           // usedLatestFallback stays false because the requested block
           // was honoured.
+          log.debug(
+            `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, used fallback RPC`,
+          );
           return { result, usedFallback: true, usedLatestFallback: false };
         } catch (fallbackErr) {
           // Secondary also failed (rate-limit, deeper-archive miss,
@@ -278,14 +278,13 @@ export async function readContractWithBlockFallback(
           // correctly — e.g. fetchRebalanceIncentiveAtBlock needs to see
           // "returned no data" to stamp the -2 sentinel for older pools
           // without the getter.
-          const secondaryMsg = sanitizeErrorMessage(
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr),
-          );
-          log.warn(
-            `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
-          );
+          logArchiveFallbackError({
+            log,
+            fn,
+            target,
+            blockNumber,
+            err: fallbackErr,
+          });
           throw fallbackErr;
         }
       }
@@ -366,4 +365,34 @@ export async function readContractWithBlockFallback(
     }
     throw currentError;
   }
+}
+
+function logArchiveFallbackError({
+  log,
+  fn,
+  target,
+  blockNumber,
+  err,
+}: {
+  log: RpcLogger;
+  fn: string;
+  target: string;
+  blockNumber: bigint;
+  err: unknown;
+}): void {
+  const secondaryMsg = sanitizeErrorMessage(
+    err instanceof Error ? err.message : String(err),
+  );
+  const knownRevert = describeKnownRevert(secondaryMsg);
+
+  if (knownRevert) {
+    log.debug(
+      `[CONTRACT_REVERT] fn=${fn} target=${target} requestedBlock=${blockNumber} via archive fallback — ${knownRevert}`,
+    );
+    return;
+  }
+
+  log.warn(
+    `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
+  );
 }

@@ -23,11 +23,27 @@ type MockReadContractArgs = Record<string, unknown> & {
   args?: unknown;
 };
 type ReadContractFn = (args: MockReadContractArgs) => Promise<unknown>;
+type CapturedLogs = { debug: string[]; warn: string[] };
 
 /** Build a minimal mock viem client whose readContract behaviour is controlled
  *  by the provided function. */
 function mockClient(readContract: ReadContractFn): PublicClient {
   return { readContract } as unknown as PublicClient;
+}
+
+function captureLogs(): CapturedLogs & {
+  logger: { debug: (msg: string) => void; warn: (msg: string) => void };
+} {
+  const captured: CapturedLogs = { debug: [], warn: [] };
+  return {
+    ...captured,
+    logger: {
+      debug: (msg: string) => captured.debug.push(msg),
+      info: () => {},
+      warn: (msg: string) => captured.warn.push(msg),
+      error: () => {},
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +436,28 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(fallbackCalls[0].blockNumber, 68202836n);
   });
 
+  it("archive-depth: successful secondary fallback logs debug, not warn", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Block requested not found. Request might be querying historical state that is not available.",
+      );
+    });
+    const fallback = mockClient(async () => "deep-archive-result");
+    const captured = captureLogs();
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      68202836n,
+      fallback,
+      captured.logger,
+    );
+    assert.equal(res.result, "deep-archive-result");
+    assert.equal(captured.warn.length, 0);
+    assert.equal(captured.debug.length, 1);
+    assert.match(captured.debug[0], /\[RPC_ARCHIVE_FALLBACK\]/);
+  });
+
   it("archive-depth: matches 'querying historical state' phrasing too", async () => {
     const primary = mockClient(async () => {
       throw new Error(
@@ -594,6 +632,33 @@ describe("readContractWithBlockFallback", () => {
     } finally {
       console.warn = origWarn;
     }
+  });
+
+  it("archive-depth: known secondary contract reverts log debug, not fallback-failed warn", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => {
+      throw new Error(
+        'The contract function "getRebalancingState" reverted with the following signature:\n0xa407143a',
+      );
+    });
+    const captured = captureLogs();
+    await assert.rejects(
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        { ...baseArgs, functionName: "getRebalancingState" },
+        100n,
+        fallback,
+        captured.logger,
+      ),
+      /0xa407143a/,
+    );
+    assert.equal(captured.warn.length, 0);
+    assert.equal(captured.debug.length, 1);
+    assert.match(captured.debug[0], /\[CONTRACT_REVERT\]/);
+    assert.match(captured.debug[0], /OracleStaleOrExpired/);
   });
 
   it("archive-depth regex: bare 'block requested not found' is treated as transient-lag, NOT archive-depth", async () => {

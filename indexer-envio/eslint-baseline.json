@@ -226,7 +226,7 @@
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "complexity",
-    "message": "Async function 'readContractWithBlockFallback' has a complexity of 41. Maximum allowed is 15.",
+    "message": "Async function 'readContractWithBlockFallback' has a complexity of 40. Maximum allowed is 15.",
     "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
@@ -282,7 +282,7 @@
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'readContractWithBlockFallback' has too many lines (156). Maximum allowed is 80.",
+    "message": "Async function 'readContractWithBlockFallback' has too many lines (155). Maximum allowed is 80.",
     "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
@@ -303,7 +303,7 @@
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 97 to the 18 allowed.",
+    "message": "Refactor this function to reduce its Cognitive Complexity from 92 to the 18 allowed.",
     "line": 122,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
