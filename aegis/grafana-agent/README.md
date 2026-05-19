@@ -14,9 +14,10 @@ The grafana agent pushes the prometheus metrics to grafana. This folder contains
 
 ### Deployment flow
 
-Requirements: `gcloud` is setup locally and pointing to the `mento-prod` project.
+Requirements: `gcloud` is authenticated with permissions to submit Cloud Build
+jobs and deploy App Engine services in the `mento-prod` project.
 
-1. Somebody executes `gcloud builds submit` in this folder, creating and running a cloud build job.
+1. Somebody executes `pnpm aegis:agent:deploy` from the monorepo root, creating and running a Cloud Build job in `mento-prod`.
 2. [CloudBuild Step 1] Runs `template-agent.sh` with values from google cloud secrets and prepares the `agent.yaml` file.
 3. [CloudBuild Step 2] Runs `gcloud app deploy grafana-agent.yaml` which starts the app engine deploy flow.
 4. [App engine deploy] Dockerfile is executed and image starts running.
