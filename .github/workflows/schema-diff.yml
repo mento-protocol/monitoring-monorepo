@@ -1,0 +1,155 @@
+name: Schema Diff — Advisory
+
+on:
+  pull_request:
+    branches: [main]
+    # Intentionally NO `paths:` filter — required-status workflows must run on
+    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
+    # The job uses an internal path-detection step that is continue-on-error,
+    # so a detector failure cannot fail the workflow (fail-closed: the diff
+    # step then runs anyway).
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  schema-diff:
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to run the diff.
+    #
+    # Decision matrix (`decide` outputs):
+    #   run=true,  read_only=false → same-repo PR + schema changed (or filter failed)
+    #                                → run diff + post sticky comment
+    #   run=false, read_only=false → same-repo PR + schema unchanged
+    #                                → skip diff + clear stale sticky comment
+    #   run=false, read_only=true  → fork or Dependabot PR
+    #                                → skip diff + skip sticky comment (token is
+    #                                  read-only; both posting AND deleting a PR
+    #                                  comment requires write permission)
+    #
+    # Advisory only — exit code is always 0.
+    name: GraphQL schema diff
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    # `pull-requests: write` is required to post the sticky PR comment.
+    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    # Fork PRs and Dependabot get a read-only token even when write is declared;
+    # the `decide` step sets read_only=true for those cases so both the post
+    # and the delete sticky-comment steps are skipped.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Need full history to `git show` the base-ref schema.
+          fetch-depth: 0
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # schema.graphql is the primary input for this job. The workflow
+            # file, the diff script, and the graphql package are also included
+            # so that changes to the checker itself trigger a self-test run
+            # (same pattern as the other required-status gates).
+            schema:
+              - indexer-envio/schema.graphql
+              - .github/workflows/schema-diff.yml
+              - scripts/schema-diff.mjs
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .node-version
+              - .github/actions/pnpm-install/**
+      - name: Decide whether to run schema diff
+        id: decide
+        env:
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          SCHEMA_CHANGED: ${{ steps.filter.outputs.schema }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_ACTOR: ${{ github.actor }}
+        run: |
+          # Fork PRs and Dependabot get a read-only token even when the job
+          # declares pull-requests: write.  Both posting AND deleting a sticky
+          # PR comment require write permission, so all comment steps must be
+          # skipped for these contexts.  Set read_only=true so the caller can
+          # distinguish "token unavailable" from "schema unchanged".
+          if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=true"  >> "$GITHUB_OUTPUT"
+            echo "PR from dependabot[bot] — read-only token, skipping schema-diff PR comment."
+          elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=true"  >> "$GITHUB_OUTPUT"
+            echo "PR from fork '$PR_HEAD_REPO' — read-only token, skipping schema-diff PR comment."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true"        >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running schema diff."
+          elif [[ "$SCHEMA_CHANGED" == "true" ]]; then
+            echo "run=true"        >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
+            echo "schema.graphql changed — running schema diff."
+          else
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
+            echo "schema.graphql unchanged — skipping schema diff."
+          fi
+      - uses: ./.github/actions/pnpm-install
+        if: steps.decide.outputs.run == 'true'
+      - name: Export base schema
+        if: steps.decide.outputs.run == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git show "origin/${BASE_REF}:indexer-envio/schema.graphql" > /tmp/schema-base.graphql
+      - name: Run schema diff
+        if: steps.decide.outputs.run == 'true'
+        # Advisory: always exits 0. The diff output is the signal.
+        # If schema-diff.mjs fails (e.g. an unrecognised Envio directive makes
+        # the parser throw), capture the error into the output file so the
+        # sticky PR comment surfaces a diagnostic rather than posting an empty
+        # comment with no signal.
+        run: |
+          if ! node scripts/schema-diff.mjs /tmp/schema-base.graphql indexer-envio/schema.graphql \
+              > /tmp/schema-diff-output.md 2>/tmp/schema-diff-stderr.txt; then
+            {
+              echo "## GraphQL Schema Diff"
+              echo ""
+              echo "> **Advisory:** schema-diff parser failed — the schema may use an unrecognised Envio directive or scalar. Manual review required."
+              echo ""
+              echo '```'
+              cat /tmp/schema-diff-stderr.txt
+              echo '```'
+            } > /tmp/schema-diff-output.md
+          fi
+          cat /tmp/schema-diff-output.md
+      - name: Post sticky PR comment
+        if: steps.decide.outputs.run == 'true'
+        uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
+        with:
+          header: schema-diff
+          path: /tmp/schema-diff-output.md
+      - name: Clear stale schema-diff comment
+        # Only runs for same-repo PRs where the schema is unchanged (run=false,
+        # read_only=false). Fork/Dependabot PRs also set run=false but have a
+        # read-only token — deleting a PR comment requires write permission, so
+        # they must not reach this step.
+        if: >-
+          steps.decide.outputs.run == 'false' &&
+          steps.decide.outputs.read_only == 'false'
+        uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
+        with:
+          header: schema-diff
+          delete: true

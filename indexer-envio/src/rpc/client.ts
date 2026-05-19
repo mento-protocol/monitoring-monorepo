@@ -172,6 +172,28 @@ const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
     }, // Monad Testnet (no public full-node RPC known)
   };
 
+/** True when viem's JSON-RPC batching is safe for this RPC URL.
+ *
+ * Monad's tokenized monadinfra primary currently serves historical
+ * `eth_call`s correctly when the request body is a single JSON-RPC object,
+ * but returns "Block requested not found" when the exact same call is wrapped
+ * in a JSON-RPC batch array. `latest` batch calls still work, which makes the
+ * failure look like an archive-depth miss during backfills. Disable batching
+ * only for that host so historical reads stay on the primary and don't spill
+ * into archive fallback unnecessarily.
+ */
+export function rpcBatchEnabledForUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname !== "rpc-mainnet.monadinfra.com";
+  } catch {
+    return true;
+  }
+}
+
+function rpcTransport(url: string): ReturnType<typeof http> {
+  return http(url, { batch: rpcBatchEnabledForUrl(url) });
+}
+
 /**
  * Appends the ENVIO_API_TOKEN to a HyperRPC base URL.
  * HyperRPC requires the token as a path segment: `https://143.rpc.hypersync.xyz/<token>`
@@ -259,7 +281,7 @@ export function getRpcClient(
     rpcClients.set(
       chainId,
       createPublicClient({
-        transport: http(rpcUrl, { batch: true }),
+        transport: rpcTransport(rpcUrl),
       }),
     );
   }
@@ -327,7 +349,7 @@ export function getFallbackRpcClient(
   }
 
   const client = createPublicClient({
-    transport: http(fallbackUrl, { batch: true }),
+    transport: rpcTransport(fallbackUrl),
   });
   fallbackRpcClients.set(chainId, client);
   return client;

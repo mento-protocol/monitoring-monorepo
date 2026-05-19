@@ -1,6 +1,9 @@
 import { strict as assert } from "assert";
 import { getRpcClient, _clearRpcClients, _testHooks } from "../src/rpc.js";
-import { getFallbackRpcClient } from "../src/rpc/client.js";
+import {
+  getFallbackRpcClient,
+  rpcBatchEnabledForUrl,
+} from "../src/rpc/client.js";
 
 // ---------------------------------------------------------------------------
 // Env helpers
@@ -124,6 +127,29 @@ describe("getRpcClient", () => {
       cap.warn.some((line) => line.includes("legacy ENVIO_RPC_URL fallback")),
       `expected legacy-fallback warn line; got: ${JSON.stringify(cap.warn)}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rpcBatchEnabledForUrl
+// ---------------------------------------------------------------------------
+
+describe("rpcBatchEnabledForUrl", () => {
+  it("disables batching for the Monad monadinfra primary", () => {
+    assert.equal(
+      rpcBatchEnabledForUrl(
+        "https://rpc-mainnet.monadinfra.com/rpc/token-value",
+      ),
+      false,
+    );
+  });
+
+  it("keeps batching enabled for rpc2.monad.xyz fallback", () => {
+    assert.equal(rpcBatchEnabledForUrl("https://rpc2.monad.xyz"), true);
+  });
+
+  it("keeps batching enabled for malformed URLs rather than failing client setup", () => {
+    assert.equal(rpcBatchEnabledForUrl("not a url"), true);
   });
 });
 
