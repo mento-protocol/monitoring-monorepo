@@ -72,10 +72,10 @@ const MONAD: Network = {
 // Same chainId as CELO, different `id` + `rpcUrl` — exercises the
 // networkId-scoped cache key that prevents cross-deployment leakage when
 // two configured networks share a chainId.
-const CELO_DEVNET: Network = {
+const CELO_LOCAL: Network = {
   ...CELO,
-  id: "devnet",
-  label: "Celo Devnet (local)",
+  id: "celo-mainnet-local",
+  label: "Celo (local)",
   local: true,
   rpcUrl: "http://localhost:8545",
 };
@@ -266,8 +266,8 @@ describe("detectProbedStrategies", () => {
     mockDetectStrategyType.mockResolvedValue("cdp");
 
     await detectProbedStrategies(CELO, [makePool(POOL_A, REB_SHARED)]);
-    await detectProbedStrategies(CELO_DEVNET, [
-      makePool(POOL_B, REB_SHARED, CELO_DEVNET.chainId),
+    await detectProbedStrategies(CELO_LOCAL, [
+      makePool(POOL_B, REB_SHARED, CELO_LOCAL.chainId),
     ]);
 
     expect(mockDetectStrategyType).toHaveBeenCalledTimes(2);

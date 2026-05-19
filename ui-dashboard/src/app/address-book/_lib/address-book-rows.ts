@@ -61,8 +61,8 @@ export function hasAmbiguousContractMatches(address: string): boolean {
 
 function collectContractMatches(address: string): Set<string> {
   // Filter to the same `isConfiguredNetworkId` set `buildContractRows`
-  // uses — devnet / local-only registries carry deployer addresses that
-  // are inappropriate to surface on the prod detail page.
+  // uses — local-only registries carry deployer addresses that are
+  // inappropriate to surface on the prod detail page.
   const lower = address.toLowerCase();
   const matchedNames = new Set<string>();
   for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {

@@ -114,7 +114,6 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 
 | ID                   | Chain         | Mode  |
 | -------------------- | ------------- | ----- |
-| `devnet`             | Celo devnet   | local |
 | `celo-sepolia-local` | Celo Sepolia  | local |
 | `celo-mainnet-local` | Celo Mainnet  | local |
 | `celo-mainnet`       | Celo Mainnet  | prod  |

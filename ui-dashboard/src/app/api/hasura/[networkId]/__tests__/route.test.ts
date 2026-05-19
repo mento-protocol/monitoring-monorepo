@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
-  return new NextRequest("http://localhost/api/hasura/devnet", {
+  return new NextRequest("http://localhost/api/hasura/celo-mainnet-local", {
     method: "POST",
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
@@ -20,13 +20,13 @@ describe("POST /api/hasura/[networkId]", () => {
     // would otherwise let unauthenticated callers run admin queries through
     // us. The route must 404 before touching config when NODE_ENV=production.
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("HASURA_SECRET_DEVNET", "testing");
+    vi.stubEnv("HASURA_SECRET_CELO_MAINNET_LOCAL", "testing");
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const { POST } = await import("../route");
 
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: Promise.resolve({ networkId: "devnet" }),
+      params: Promise.resolve({ networkId: "celo-mainnet-local" }),
     });
 
     expect(res.status).toBe(404);
@@ -44,8 +44,21 @@ describe("POST /api/hasura/[networkId]", () => {
     expect(await res.json()).toEqual({ error: "Unsupported network" });
   });
 
+  it("returns 404 for the retired devnet network", async () => {
+    // Regression: `devnet` was removed from the supported set when its
+    // address book was deleted. If it ever sneaks back in via env, this
+    // test fails loud.
+    const { POST } = await import("../route");
+    const req = makeRequest({ query: "{ __typename }" });
+    const res = await POST(req, {
+      params: Promise.resolve({ networkId: "devnet" }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Unsupported network" });
+  });
+
   it("adds x-hasura-admin-secret for local network when configured", async () => {
-    vi.stubEnv("HASURA_SECRET_DEVNET", "testing");
+    vi.stubEnv("HASURA_SECRET_CELO_MAINNET_LOCAL", "testing");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ data: { ok: true } }), {
         status: 200,
@@ -56,7 +69,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: Promise.resolve({ networkId: "devnet" }),
+      params: Promise.resolve({ networkId: "celo-mainnet-local" }),
     });
 
     expect(res.status).toBe(200);
@@ -67,7 +80,7 @@ describe("POST /api/hasura/[networkId]", () => {
   });
 
   it("omits x-hasura-admin-secret when local secret is unset", async () => {
-    vi.stubEnv("HASURA_SECRET_DEVNET", "");
+    vi.stubEnv("HASURA_SECRET_CELO_MAINNET_LOCAL", "");
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: {} })));
@@ -75,7 +88,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     await POST(req, {
-      params: Promise.resolve({ networkId: "devnet" }),
+      params: Promise.resolve({ networkId: "celo-mainnet-local" }),
     });
 
     const [, init] = fetchMock.mock.calls[0];
@@ -89,7 +102,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: Promise.resolve({ networkId: "devnet" }),
+      params: Promise.resolve({ networkId: "celo-mainnet-local" }),
     });
 
     expect(res.status).toBe(502);
