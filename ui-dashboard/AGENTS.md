@@ -22,6 +22,16 @@ This is mandatory for cross-layer/stateful UI work. The checklist exists because
 - `eslint.config.mjs` — ESLint flat config
 - `postcss.config.mjs` — PostCSS + Tailwind CSS 4
 
+## Browser target — ES2017, no polyfill
+
+`tsconfig.json` sets `"target": "ES2017"`. There's no `browserslist` override or polyfill installed. The TS `lib: ["dom", "dom.iterable", "esnext"]` provides type definitions for ES2023+ methods, so they compile cleanly — but at runtime they throw `TypeError: <fn> is not a function` on Safari ≤15 / Chrome ≤109 / Firefox ≤114.
+
+**Never use** in client-shipped code: `Array.prototype.toSorted`, `findLast`, `findLastIndex`, `with`, `Object.groupBy`, `String.prototype.isWellFormed`, etc. Use the ES2017-safe forms instead (`[...arr].sort(...)`, manual loops). PR #371 had codex P2 ×5 on `arr.toSorted()` sites; reverted to `[...arr].sort()` with inline `react-doctor-disable-next-line react-doctor/js-tosorted-immutable` disables.
+
+**Server-only paths where ES2023+ IS safe** (run on Node ≥20): `app/api/**/route.ts`, OG helpers (`lib/homepage-og.ts`, `lib/pool-og.ts`), `*.test.ts(x)`. Anything imported by a `"use client"` component, or by code that flows into one (e.g. `lib/tag-suggestions.ts` → `address-label-form.tsx`), ships to the browser.
+
+If we ever raise the TS target to ES2022+ or install a global polyfill (`core-js`), all existing `react-doctor/js-tosorted-immutable` inline disables become candidates for cleanup.
+
 ## Commands
 
 ```bash

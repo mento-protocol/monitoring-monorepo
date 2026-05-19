@@ -9,6 +9,39 @@
       "Bash(ESLINT_BASELINE_MAIN=* node *)",
       "Bash(until *)",
       "WebFetch(domain:monitoring.mento.org)"
+    ],
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(**/generated/**)",
+      "Read(**/.envio/**)",
+      "Read(**/.next/**)",
+      "Read(**/coverage/**)",
+      "Read(**/reports/**)",
+      "Read(**/.turbo/**)",
+      "Read(**/dist/**)",
+      "Read(**/build/**)",
+      "Read(**/playwright-report/**)",
+      "Read(**/test-results/**)",
+      "Read(**/.pnpm-store/**)",
+      "Read(**/.vercel/**)",
+      "Read(**/eslint-baseline.json)",
+      "Read(**/*.tsbuildinfo)",
+      "Read(**/.investigations/**)",
+      "Read(**/.redteam/**)",
+      "Read(**/.clawpatch/**)",
+      "Read(**/WORK.md)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/chapati/.claude/compound-nudge.sh"
+          }
+        ]
+      }
     ]
   }
 }

@@ -63,6 +63,7 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_URL_42220` — (optional) Celo Mainnet primary RPC override (default: `https://forno.celo.org`)
 - `ENVIO_RPC_URL_143` — (optional) Monad Mainnet primary RPC override (default: `https://rpc2.monad.xyz`)
 - `ENVIO_RPC_URL_10143` — (optional) Monad Testnet primary RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
+- `ENVIO_RPC_URL_11142220` — (optional) Celo Sepolia primary RPC override (default: `https://forno.celo-sepolia.celo-testnet.org`)
 - `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Used for **both** archive-depth and rate-limit failover, so the fallback must cover the full sync window. When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used. Empty-string values are treated as unset. **Caveat:** swapping in a shallow-archive secondary as the fallback (e.g. a tokenized QuickNode URL behind `rpc2.monad.xyz`) only works when the deep-archive primary rarely rate-limits at the indexer's load — otherwise rate-limit failover can leak into archive-depth misses during catch-up.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
