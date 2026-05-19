@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import {
   dailySnapshotId,
   dayBucket,
@@ -26,6 +27,50 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+function findMultiFieldGetWhereCalls(): string[] {
+  const offenders: string[] = [];
+  for (const file of sourceFiles(srcRoot)) {
+    const sourceText = readFileSync(file, "utf8");
+    const sourceFile = ts.createSourceFile(
+      file,
+      sourceText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "getWhere" &&
+        node.arguments.length > 0
+      ) {
+        const firstArg = node.arguments[0];
+        if (
+          firstArg !== undefined &&
+          ts.isObjectLiteralExpression(firstArg) &&
+          firstArg.properties.length > 1
+        ) {
+          const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+            firstArg.getStart(),
+          );
+          const fields = firstArg.properties.map((property) =>
+            ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+              ? property.name.text
+              : property.getText(sourceFile),
+          );
+          offenders.push(
+            `${path.relative(packageRoot, file)}:${line + 1}:${character + 1} ${fields.join(", ")}`,
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return offenders;
+}
+
 describe("indexer code quality invariants", () => {
   it("does not hardcode mainnet-only chain iteration in source", () => {
     const mainnetPairPattern = /\[\s*(?:42220\s*,\s*143|143\s*,\s*42220)\s*\]/;
@@ -34,6 +79,10 @@ describe("indexer code quality invariants", () => {
       .map((file) => path.relative(packageRoot, file));
 
     assert.deepEqual(offenders, []);
+  });
+
+  it("keeps Envio getWhere calls to one top-level filter field", () => {
+    assert.deepEqual(findMultiFieldGetWhereCalls(), []);
   });
 
   it("keeps event IDs collision-resistant within a same-block write batch", () => {

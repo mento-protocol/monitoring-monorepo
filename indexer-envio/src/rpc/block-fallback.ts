@@ -8,6 +8,7 @@ import type { createPublicClient, ReadContractParameters } from "viem";
 import {
   RATE_LIMIT_RETRY_DELAYS_MS,
   _resetRpcFailureCounts,
+  describeKnownRevert,
   fallbackLikelyHasBlock,
   isRateLimitError,
   logRpcFailure,
@@ -83,8 +84,23 @@ export type BlockFallbackResult = {
 /** Maximum number of retries with the original blockNumber before falling back
  * to reading "latest". Each retry uses an increasing delay. */
 const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
+const FALLBACK_RATE_LIMIT_COOLDOWN_MS = 10_000;
+const FALLBACK_SUMMARY_INTERVAL = 50;
 
 type PublicClient = ReturnType<typeof createPublicClient>;
+
+type FallbackStatKey =
+  | "archiveAttempts"
+  | "archiveSuccesses"
+  | "archiveFailures"
+  | "secondaryRateLimits"
+  | "cooldownSkips"
+  | "knownReverts";
+
+type FallbackStats = Record<FallbackStatKey, number>;
+
+const fallbackCooldownUntilByKey = new Map<string, number>();
+const fallbackStatsByKey = new Map<string, FallbackStats>();
 
 /** @internal Test-only hooks for overriding the delay function and exposing
  *  internal helpers (rate-limit classifier, structured failure logger, and
@@ -93,6 +109,7 @@ type PublicClient = ReturnType<typeof createPublicClient>;
 export const _testHooks = {
   delayFn: (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms)),
+  nowFn: (): number => Date.now(),
   isRateLimitError: (err: unknown): boolean => isRateLimitError(err),
   logRpcFailure: (
     chainId: number,
@@ -104,6 +121,24 @@ export const _testHooks = {
   resetRpcFailureCounts: (): void => {
     _resetRpcFailureCounts();
   },
+  resetFallbackRuntimeState: (): void => {
+    fallbackCooldownUntilByKey.clear();
+    fallbackStatsByKey.clear();
+  },
+};
+
+type MakeCall = (c: PublicClient, block?: bigint) => Promise<unknown>;
+
+type RecoveryDeps = {
+  chainId: number;
+  client: PublicClient;
+  fallbackClient: PublicClient | null | undefined;
+  makeCall: MakeCall;
+  callWithBlock: () => Promise<unknown>;
+  blockNumber: bigint | undefined;
+  fn: string;
+  target: string;
+  log: RpcLogger;
 };
 
 /**
@@ -127,12 +162,11 @@ export async function readContractWithBlockFallback(
   fallbackClient?: PublicClient | null,
   log: RpcLogger = consoleLogger,
 ): Promise<BlockFallbackResult> {
-  const makeCall = (c: PublicClient, block?: bigint) =>
+  const makeCall: MakeCall = (c, block) =>
     c.readContract({
       ...args,
       ...(block !== undefined && { blockNumber: block }),
     } as ReadContractParameters);
-
   const callWithBlock = () => makeCall(client, blockNumber);
   const fn = (args.functionName as string) ?? "unknown";
   const target = (args.address as string) ?? "unknown";
@@ -141,229 +175,386 @@ export async function readContractWithBlockFallback(
     const result = await callWithBlock();
     return { result, usedFallback: false, usedLatestFallback: false };
   } catch (initialErr) {
-    // `currentError` may be reassigned during the rate-limit retry loop if
-    // a retry surfaces a non-rate-limit error (e.g. archive-depth — primary
-    // recovered from rate-limit but the requested block isn't in its
-    // archive). Letting the retry-surfaced error fall through to the
-    // archive-depth / block-not-available branches below means we still
-    // get the same-block secondary fallback for those.
+    const deps: RecoveryDeps = {
+      chainId,
+      client,
+      fallbackClient,
+      makeCall,
+      callWithBlock,
+      blockNumber,
+      fn,
+      target,
+      log,
+    };
     let currentError: unknown = initialErr;
-
-    // --- Rate limit handling: retry then fall back to secondary RPC ---
     if (isRateLimitError(currentError)) {
-      let exitedWithRateLimit = true;
-      for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
-        const delay = RATE_LIMIT_RETRY_DELAYS_MS[i] ?? 0;
-        log.debug(
-          `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
-        );
-        await _testHooks.delayFn(delay);
-        try {
-          const result = await callWithBlock();
-          return { result, usedFallback: false, usedLatestFallback: false };
-        } catch (retryErr) {
-          if (!isRateLimitError(retryErr)) {
-            // Archive-depth error surfaced after the rate-limit cleared:
-            // route to the archive-depth branch below so the same-block
-            // secondary fallback IS consulted (otherwise the call would
-            // bubble straight to the caller with no recovery attempt).
-            //
-            // BLOCK_NOT_AVAILABLE-style errors from a retry are NOT
-            // routed through — they'd hit the retry-then-`latest` path,
-            // and several historical callers (fetchNumReporters,
-            // fetchReportExpiry, fetchTradingLimits) destructure `result`
-            // without checking `usedLatestFallback`, so silently swapping
-            // in current-block data after a 429-then-block-miss would
-            // corrupt their entity state. Throwing matches pre-PR
-            // behaviour for the same retry-surfaced shape.
-            if (
-              retryErr instanceof Error &&
-              ARCHIVE_DEPTH_RE.test(retryErr.message)
-            ) {
-              currentError = retryErr;
-              exitedWithRateLimit = false;
-              break;
-            }
-            throw retryErr;
-          }
-        }
-      }
-      if (exitedWithRateLimit) {
-        // Retries exhausted with rate-limit still in place — try fallback
-        // client at the same block IF the fallback's known archive horizon
-        // covers it. Otherwise, throw the rate-limit error directly: a call
-        // to a fallback we know lacks the block would just surface a
-        // confusing archive-miss error masking the underlying rate-limit
-        // cause, and waste a round trip we already know will fail.
-        if (fallbackClient && fallbackLikelyHasBlock(chainId, blockNumber)) {
-          log.warn(
-            `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
-          );
-          try {
-            const result = await makeCall(fallbackClient, blockNumber);
-            return { result, usedFallback: true, usedLatestFallback: false };
-          } catch (fallbackErr) {
-            // Fallback failed. If it's an archive-depth miss, record it so
-            // future rate-limit fallbacks for older blocks on this chain
-            // skip the secondary entirely.
-            if (
-              blockNumber !== undefined &&
-              fallbackErr instanceof Error &&
-              ARCHIVE_DEPTH_RE.test(fallbackErr.message)
-            ) {
-              recordFallbackArchiveMiss(chainId, blockNumber);
-            }
-            // Throw the fallback error (not the primary rate-limit error)
-            // so the caller can classify it — e.g.
-            // fetchRebalanceIncentiveAtBlock needs to see "returned no
-            // data" to stamp the -2 sentinel for older pools without the
-            // getter. The rate-limit context is already in the
-            // [RPC_RATE_LIMIT_FALLBACK] warning above.
-            throw fallbackErr;
-          }
-        }
-        throw currentError;
-      }
-      // Otherwise: a non-rate-limit error surfaced from the retry. Fall
-      // through to the archive-depth / block-not-available branches with
-      // currentError set to the retry-surfaced error.
+      const outcome = await attemptRateLimitRecovery(deps, currentError);
+      if (outcome.kind === "result") return outcome.value;
+      // fallthrough: archive-depth surfaced from a retry — try archive branch
+      currentError = outcome.error;
     }
-
-    // --- Archive-depth handling: try the secondary RPC at the SAME block,
-    // fail-closed otherwise.
-    //
-    // The primary's state is pruned past this block. The secondary may
-    // have deeper archive coverage — try it at the requested block.
-    // Observed in production: Monad mainnet's quiknode default has shallow
-    // archive that fails ~5M blocks behind head, while `rpc2.monad.xyz`
-    // (the hardcoded fallback) returns real data at the same blocks.
-    //
-    // If the secondary also fails (or no secondary is configured), THROW.
-    // We must NOT fall through to `latest` here: many call sites — e.g.
-    // fetchBreakerList, fetchReportExpiry, fetchTradingLimits in
-    // src/rpc/{breakers,pool-state}.ts — destructure `result` directly
-    // without checking `usedLatestFallback`, so silently swapping in
-    // current-block data would corrupt historical entity state. Throwing
-    // is the same behaviour those callers had before this PR (their
-    // try/catch returns null), so fail-closed is the safe default.
-    if (
-      blockNumber !== undefined &&
-      currentError instanceof Error &&
-      ARCHIVE_DEPTH_RE.test(currentError.message)
-    ) {
-      if (fallbackClient) {
-        log.warn(
-          `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, using fallback RPC`,
-        );
-        try {
-          const result = await makeCall(fallbackClient, blockNumber);
-          // Successful block-scoped read via the secondary —
-          // usedLatestFallback stays false because the requested block
-          // was honoured.
-          return { result, usedFallback: true, usedLatestFallback: false };
-        } catch (fallbackErr) {
-          // Secondary also failed (rate-limit, deeper-archive miss,
-          // contract-not-deployed-at-this-block, or some other transient).
-          // If it's an archive-depth miss, learn the secondary's horizon
-          // so future rate-limit fallbacks skip the secondary at deeper
-          // blocks instead of surfacing a confusing "Invalid parameters"
-          // error.
-          if (
-            fallbackErr instanceof Error &&
-            ARCHIVE_DEPTH_RE.test(fallbackErr.message)
-          ) {
-            recordFallbackArchiveMiss(chainId, blockNumber);
-          }
-          // Throw the secondary's error so callers can classify it
-          // correctly — e.g. fetchRebalanceIncentiveAtBlock needs to see
-          // "returned no data" to stamp the -2 sentinel for older pools
-          // without the getter.
-          const secondaryMsg = sanitizeErrorMessage(
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr),
-          );
-          log.warn(
-            `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
-          );
-          throw fallbackErr;
-        }
-      }
-      // No fallback configured — primary's archive depth is our only
-      // option, and it failed. Throw the original error so callers
-      // degrade to null cleanly (matches pre-PR behaviour for this path).
-      throw currentError;
+    if (isArchiveDepthErr(currentError, blockNumber)) {
+      return await attemptArchiveDepthSecondary(deps, currentError);
     }
-
-    // --- Block-not-available handling: retry then read "latest" ---
-    // The primary may simply be slightly behind HyperSync (race between
-    // chain head propagation and the RPC's view). Retries help here in a
-    // way they don't for archive-depth.
-    if (
-      blockNumber !== undefined &&
-      currentError instanceof Error &&
-      BLOCK_NOT_AVAILABLE_RE.test(currentError.message)
-    ) {
-      // Retry the original blockNumber a few times with increasing delays —
-      // the RPC node may just be slightly behind HyperSync.
-      for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
-        const delay = BLOCK_RETRY_DELAYS_MS[i] ?? 0;
-        log.warn(
-          `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
-        );
-        await _testHooks.delayFn(delay);
-        try {
-          const result = await callWithBlock();
-          return { result, usedFallback: false, usedLatestFallback: false };
-        } catch (retryErr) {
-          if (
-            !(retryErr instanceof Error) ||
-            !BLOCK_NOT_AVAILABLE_RE.test(retryErr.message)
-          ) {
-            throw retryErr;
-          }
-        }
-      }
-
-      // All retries exhausted. Before accepting an unscoped `latest`
-      // fallback, try the secondary RPC at the SAME block. This covers the
-      // HyperSync-ahead-of-primary race without sacrificing the event that
-      // triggered the read: callers that reject `usedLatestFallback` can
-      // still consume the secondary result because it is block-scoped.
-      if (fallbackClient && fallbackLikelyHasBlock(chainId, blockNumber)) {
-        log.warn(
-          `[RPC_BLOCK_SECONDARY_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary block retries exhausted, trying fallback RPC at same block`,
-        );
-        try {
-          const result = await makeCall(fallbackClient, blockNumber);
-          return { result, usedFallback: true, usedLatestFallback: false };
-        } catch (fallbackErr) {
-          if (
-            fallbackErr instanceof Error &&
-            ARCHIVE_DEPTH_RE.test(fallbackErr.message)
-          ) {
-            recordFallbackArchiveMiss(chainId, blockNumber);
-          }
-          const secondaryMsg = sanitizeErrorMessage(
-            fallbackErr instanceof Error
-              ? fallbackErr.message
-              : String(fallbackErr),
-          );
-          log.warn(
-            `[RPC_BLOCK_SECONDARY_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — falling back to latest`,
-          );
-        }
-      }
-
-      // Same-block recovery was unavailable or failed — fall back to reading
-      // latest, preserving the existing contract via usedLatestFallback=true
-      // so historical-accuracy callers can reject the result.
-      log.warn(
-        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
-      );
-      const result = await makeCall(client, undefined);
-      return { result, usedFallback: true, usedLatestFallback: true };
+    if (isBlockNotAvailableErr(currentError, blockNumber)) {
+      return await attemptBlockNotAvailableRecovery(deps);
     }
     throw currentError;
   }
+}
+
+function isArchiveDepthErr(
+  err: unknown,
+  blockNumber: bigint | undefined,
+): err is Error {
+  return (
+    blockNumber !== undefined &&
+    err instanceof Error &&
+    ARCHIVE_DEPTH_RE.test(err.message)
+  );
+}
+
+function isBlockNotAvailableErr(
+  err: unknown,
+  blockNumber: bigint | undefined,
+): err is Error {
+  return (
+    blockNumber !== undefined &&
+    err instanceof Error &&
+    BLOCK_NOT_AVAILABLE_RE.test(err.message)
+  );
+}
+
+/** Rate-limit retry can finish in three states: a recovered result, a non-rate-limit
+ *  archive-depth error that should re-enter the archive-depth branch, or a thrown
+ *  error (handled by caller). */
+type RateLimitOutcome =
+  | { kind: "result"; value: BlockFallbackResult }
+  | { kind: "fallthrough"; error: unknown };
+
+/** Retry the original call against the primary until rate-limit clears. If a
+ *  retry surfaces an archive-depth error (primary recovered from 429 but lacks
+ *  archive depth for the requested block), return `fallthrough` so the
+ *  dispatcher consults the archive-depth secondary path. BLOCK_NOT_AVAILABLE
+ *  errors surfaced from a retry are thrown instead — silently swapping in
+ *  `latest` after a 429-then-block-miss would corrupt historical entity state
+ *  for callers that destructure `result` without checking `usedLatestFallback`. */
+async function retryThroughRateLimit(
+  deps: RecoveryDeps,
+  initialError: unknown,
+): Promise<RateLimitOutcome | { kind: "exhausted"; error: unknown }> {
+  const { callWithBlock, fn, target, log } = deps;
+  let surfacedError: unknown = initialError;
+  for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
+    const delay = RATE_LIMIT_RETRY_DELAYS_MS[i] ?? 0;
+    log.debug(
+      `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
+    );
+    await _testHooks.delayFn(delay);
+    try {
+      const result = await callWithBlock();
+      return {
+        kind: "result",
+        value: { result, usedFallback: false, usedLatestFallback: false },
+      };
+    } catch (retryErr) {
+      if (isRateLimitError(retryErr)) {
+        surfacedError = retryErr;
+        continue;
+      }
+      if (
+        retryErr instanceof Error &&
+        ARCHIVE_DEPTH_RE.test(retryErr.message)
+      ) {
+        return { kind: "fallthrough", error: retryErr };
+      }
+      throw retryErr;
+    }
+  }
+  return { kind: "exhausted", error: surfacedError };
+}
+
+/** Rate-limit dispatcher: drive retries, then attempt the secondary RPC at the
+ *  same block when the fallback's known horizon covers it. Returns a result if
+ *  one of those succeeded, or `fallthrough` so the dispatcher reconsiders the
+ *  current error against the archive-depth branch. */
+async function attemptRateLimitRecovery(
+  deps: RecoveryDeps,
+  initialError: unknown,
+): Promise<RateLimitOutcome> {
+  const { chainId, makeCall, fallbackClient, blockNumber, fn, target, log } =
+    deps;
+  const retried = await retryThroughRateLimit(deps, initialError);
+  if (retried.kind === "result" || retried.kind === "fallthrough") {
+    return retried;
+  }
+  // Retries exhausted with rate-limit still in place — try the secondary IF
+  // its archive horizon covers the requested block. A call to a fallback we
+  // know lacks the block would just surface a confusing archive-miss error
+  // masking the rate-limit cause, and waste a round trip.
+  if (
+    fallbackClient &&
+    fallbackLikelyHasBlock(chainId, blockNumber) &&
+    fallbackCooldownAllows(deps)
+  ) {
+    log.warn(
+      `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
+    );
+    try {
+      const result = await makeCall(fallbackClient, blockNumber);
+      return {
+        kind: "result",
+        value: { result, usedFallback: true, usedLatestFallback: false },
+      };
+    } catch (fallbackErr) {
+      if (
+        blockNumber !== undefined &&
+        isArchiveDepthErr(fallbackErr, blockNumber)
+      ) {
+        recordFallbackArchiveMiss(chainId, blockNumber);
+      }
+      if (isRateLimitError(fallbackErr)) {
+        startFallbackCooldown(deps, fallbackErr);
+      }
+      // Throw the fallback error so the caller can classify it — e.g.
+      // fetchRebalanceIncentiveAtBlock needs to see "returned no data" to
+      // stamp the -2 sentinel for older pools without the getter.
+      throw fallbackErr;
+    }
+  }
+  throw retried.error;
+}
+
+/** Try the secondary RPC at the SAME block when the primary lacks archive
+ *  depth. Fail-closed: if the secondary also fails (or no secondary is
+ *  configured), throw. We never fall through to `latest` here — many callers
+ *  consume `result` directly without checking `usedLatestFallback`, so
+ *  silently swapping in current-block data would corrupt historical entity
+ *  state. */
+async function attemptArchiveDepthSecondary(
+  deps: RecoveryDeps,
+  currentError: unknown,
+): Promise<BlockFallbackResult> {
+  const { chainId, makeCall, fallbackClient, blockNumber, fn, target, log } =
+    deps;
+  if (blockNumber === undefined || !fallbackClient) {
+    throw currentError;
+  }
+  if (!fallbackCooldownAllows(deps)) {
+    throw currentError;
+  }
+  recordFallbackStat(deps, "archiveAttempts");
+  try {
+    const result = await makeCall(fallbackClient, blockNumber);
+    const primaryMsg = sanitizeErrorMessage(
+      currentError instanceof Error
+        ? currentError.message
+        : String(currentError),
+    );
+    recordFallbackStat(deps, "archiveSuccesses");
+    log.debug(
+      `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} primaryErr="${primaryMsg}" — primary lacks archive depth, used fallback RPC`,
+    );
+    return { result, usedFallback: true, usedLatestFallback: false };
+  } catch (fallbackErr) {
+    if (
+      fallbackErr instanceof Error &&
+      ARCHIVE_DEPTH_RE.test(fallbackErr.message)
+    ) {
+      recordFallbackArchiveMiss(chainId, blockNumber);
+    }
+    recordFallbackStat(deps, "archiveFailures");
+    if (isRateLimitError(fallbackErr)) {
+      recordFallbackStat(deps, "secondaryRateLimits");
+      startFallbackCooldown(deps, fallbackErr);
+    }
+    if (isKnownContractRevert(fallbackErr)) {
+      recordFallbackStat(deps, "knownReverts");
+    }
+    logArchiveFallbackError({
+      log,
+      fn,
+      target,
+      blockNumber,
+      primaryErr: currentError,
+      err: fallbackErr,
+    });
+    throw fallbackErr;
+  }
+}
+
+/** Retry the primary at the same block (covering chain-head-propagation lag),
+ *  then try the secondary at the same block, then fall back to reading
+ *  `latest`. usedLatestFallback=true is set on the final fallback so callers
+ *  that need historical accuracy can reject the result. */
+async function attemptBlockNotAvailableRecovery(
+  deps: RecoveryDeps,
+): Promise<BlockFallbackResult> {
+  const { client, callWithBlock, makeCall, blockNumber, fn, target, log } =
+    deps;
+  if (blockNumber === undefined) {
+    throw new Error("attemptBlockNotAvailableRecovery: blockNumber required");
+  }
+  for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
+    const delay = BLOCK_RETRY_DELAYS_MS[i] ?? 0;
+    log.warn(
+      `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
+    );
+    await _testHooks.delayFn(delay);
+    try {
+      const result = await callWithBlock();
+      return { result, usedFallback: false, usedLatestFallback: false };
+    } catch (retryErr) {
+      if (
+        !(retryErr instanceof Error) ||
+        !BLOCK_NOT_AVAILABLE_RE.test(retryErr.message)
+      ) {
+        throw retryErr;
+      }
+    }
+  }
+  const secondary = await attemptBlockSecondaryFallback(deps);
+  if (secondary) return secondary;
+
+  log.warn(
+    `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
+  );
+  const result = await makeCall(client, undefined);
+  return { result, usedFallback: true, usedLatestFallback: true };
+}
+
+async function attemptBlockSecondaryFallback(
+  deps: RecoveryDeps,
+): Promise<BlockFallbackResult | null> {
+  const { chainId, makeCall, fallbackClient, blockNumber, fn, target, log } =
+    deps;
+  if (
+    blockNumber === undefined ||
+    !fallbackClient ||
+    !fallbackLikelyHasBlock(chainId, blockNumber) ||
+    !fallbackCooldownAllows(deps)
+  ) {
+    return null;
+  }
+
+  log.warn(
+    `[RPC_BLOCK_SECONDARY_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary block retries exhausted, trying fallback RPC at same block`,
+  );
+  try {
+    const result = await makeCall(fallbackClient, blockNumber);
+    return { result, usedFallback: true, usedLatestFallback: false };
+  } catch (fallbackErr) {
+    if (isArchiveDepthErr(fallbackErr, blockNumber)) {
+      recordFallbackArchiveMiss(chainId, blockNumber);
+    }
+    if (isRateLimitError(fallbackErr)) {
+      startFallbackCooldown(deps, fallbackErr);
+    }
+    const secondaryMsg = sanitizeErrorMessage(
+      fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+    );
+    log.warn(
+      `[RPC_BLOCK_SECONDARY_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — falling back to latest`,
+    );
+    return null;
+  }
+}
+
+function logArchiveFallbackError({
+  log,
+  fn,
+  target,
+  blockNumber,
+  primaryErr,
+  err,
+}: {
+  log: RpcLogger;
+  fn: string;
+  target: string;
+  blockNumber: bigint;
+  primaryErr: unknown;
+  err: unknown;
+}): void {
+  const primaryMsg = sanitizeErrorMessage(
+    primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+  );
+  const secondaryMsg = sanitizeErrorMessage(
+    err instanceof Error ? err.message : String(err),
+  );
+  const knownRevert = describeKnownRevert(secondaryMsg);
+
+  if (knownRevert) {
+    // Expected contract-state reverts are useful diagnostics but not infra
+    // warnings. Count them separately so summary lines still show the shape.
+    // The caller owns the per-chain/function stats key.
+    log.debug(
+      `[CONTRACT_REVERT] fn=${fn} target=${target} requestedBlock=${blockNumber} primaryErr="${primaryMsg}" via archive fallback — ${knownRevert}`,
+    );
+    return;
+  }
+
+  log.warn(
+    `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} primaryErr="${primaryMsg}" secondaryErr="${secondaryMsg}" — propagating to caller`,
+  );
+}
+
+function isKnownContractRevert(err: unknown): boolean {
+  const msg = sanitizeErrorMessage(
+    err instanceof Error ? err.message : String(err),
+  );
+  return describeKnownRevert(msg) !== undefined;
+}
+
+function fallbackKey({ chainId, fn }: RecoveryDeps): string {
+  return `${chainId}:${fn}`;
+}
+
+function emptyFallbackStats(): FallbackStats {
+  return {
+    archiveAttempts: 0,
+    archiveSuccesses: 0,
+    archiveFailures: 0,
+    secondaryRateLimits: 0,
+    cooldownSkips: 0,
+    knownReverts: 0,
+  };
+}
+
+function recordFallbackStat(deps: RecoveryDeps, field: FallbackStatKey): void {
+  const key = fallbackKey(deps);
+  const stats = fallbackStatsByKey.get(key) ?? emptyFallbackStats();
+  stats[field] += 1;
+  fallbackStatsByKey.set(key, stats);
+
+  if (
+    field === "archiveAttempts" &&
+    stats.archiveAttempts % FALLBACK_SUMMARY_INTERVAL === 0
+  ) {
+    deps.log.info(
+      `[RPC_FALLBACK_SUMMARY] chainId=${deps.chainId} fn=${deps.fn} archiveAttempts=${stats.archiveAttempts} archiveSuccesses=${stats.archiveSuccesses} archiveFailures=${stats.archiveFailures} secondaryRateLimits=${stats.secondaryRateLimits} cooldownSkips=${stats.cooldownSkips} knownReverts=${stats.knownReverts}`,
+    );
+  }
+}
+
+function fallbackCooldownAllows(deps: RecoveryDeps): boolean {
+  const cooldownUntil = fallbackCooldownUntilByKey.get(fallbackKey(deps)) ?? 0;
+  const now = _testHooks.nowFn();
+  if (cooldownUntil <= now) return true;
+
+  recordFallbackStat(deps, "cooldownSkips");
+  deps.log.debug(
+    `[RPC_FALLBACK_COOLDOWN] chainId=${deps.chainId} fn=${deps.fn} target=${deps.target} requestedBlock=${deps.blockNumber ?? "latest"} remainingMs=${cooldownUntil - now} — skipping fallback RPC after recent rate limit`,
+  );
+  return false;
+}
+
+function startFallbackCooldown(deps: RecoveryDeps, err: unknown): void {
+  const secondaryMsg = sanitizeErrorMessage(
+    err instanceof Error ? err.message : String(err),
+  );
+  const cooldownUntil = _testHooks.nowFn() + FALLBACK_RATE_LIMIT_COOLDOWN_MS;
+  fallbackCooldownUntilByKey.set(fallbackKey(deps), cooldownUntil);
+  deps.log.warn(
+    `[RPC_FALLBACK_COOLDOWN_START] chainId=${deps.chainId} fn=${deps.fn} cooldownMs=${FALLBACK_RATE_LIMIT_COOLDOWN_MS} secondaryErr="${secondaryMsg}" — fallback RPC rate-limited`,
+  );
 }

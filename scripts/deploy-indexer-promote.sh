@@ -13,19 +13,29 @@ ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
 
 COMMIT="${1:-}"
-shift 2>/dev/null || true
+if [[ -n "$COMMIT" && "$COMMIT" != -* ]]; then
+  shift
+else
+  COMMIT=""
+fi
 
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
-  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
-    | node -e "
-      const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
-      console.log(deps[0]?.commit_hash ?? '');
-    ")
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
+    | node scripts/resolve-envio-deployment.mjs "")
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ No deployments found for $ENVIO_ORG/$ENVIO_INDEXER"
+    exit 1
+  fi
+else
+  TARGET_COMMIT="$COMMIT"
+  COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
+    | node scripts/resolve-envio-deployment.mjs "$TARGET_COMMIT")
+
+  if [[ -z "$COMMIT" ]]; then
+    echo "❌ Deployment $TARGET_COMMIT not found for $ENVIO_ORG/$ENVIO_INDEXER"
+    echo "   Wait for registration with: pnpm deploy:indexer:status $TARGET_COMMIT --watch"
     exit 1
   fi
 fi

@@ -88,9 +88,12 @@ pnpm indexer:dev                    # Start local multichain mainnet indexer
 pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
-pnpm deploy:indexer:status          # Show latest or specified hosted deployment sync state
-pnpm deploy:indexer:promote         # Promote a specified deployment to prod after sync
-pnpm deploy:indexer:logs            # Show latest hosted deployment logs
+pnpm deploy:indexer:status <commit> --watch  # Wait for registration, then watch sync state
+pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
+pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
+pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
+pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
+pnpm deploy:indexer:promote <commit>         # Promote a synced deployment to prod
 ```
 
 ### From `indexer-envio/` directory
@@ -189,10 +192,18 @@ Push to the `envio` branch to trigger a hosted reindex:
 COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:logs "$COMMIT" --build
+pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
-The `mento` project on Envio Cloud watches this branch. Promote the caught-up deployment before treating it as live. The static production endpoint never changes on redeploy:
+The `mento` project on Envio Cloud watches this branch. Envio registers
+deployments under the short commit hash, and the registration can lag the Git
+push by several minutes. Use the explicit commit form above while babysitting a
+new deploy; the no-commit logs/promote helpers intentionally operate on the
+latest deployment currently visible to Envio, which may still be the old prod
+deployment during registration lag. Promote the caught-up deployment before
+treating it as live. The static production endpoint never changes on redeploy:
 
 ```
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql

@@ -16,6 +16,12 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const troveId = `0x${event.params.troveId.toString(16)}`;
+    if (context.isPreload) {
+      await context.ReserveTrove.get(
+        `${event.chainId}-${addressesRegistry}-${troveId}`,
+      );
+      return;
+    }
     context.ReserveTrove.set({
       id: `${event.chainId}-${addressesRegistry}-${troveId}`,
       chainId: event.chainId,

@@ -180,3 +180,14 @@ export async function getOrCreateLiquityInstance(
 ): Promise<LiquityInstance> {
   return ensureMarketBootstrap(context, market, blockNumber, blockTimestamp);
 }
+
+export async function preloadLiquityMarket(
+  context: LiquityBootstrapContext,
+  market: LiquityMarketConfig,
+): Promise<void> {
+  const id = makeCollateralId(market);
+  await Promise.all([
+    context.LiquityCollateral.get(id),
+    context.LiquityInstance.get(id),
+  ]);
+}
