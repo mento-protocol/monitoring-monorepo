@@ -154,7 +154,6 @@ async function preloadTroveAndMarket(
   await Promise.all([
     preloadLiquityMarket(context, market),
     context.Trove.get(makeTroveId(collateralId, troveId)),
-    context.LiquityCollateral.get(collateralId),
   ]);
 }
 
