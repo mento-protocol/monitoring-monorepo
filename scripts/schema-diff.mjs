@@ -57,12 +57,15 @@ function loadSchema(path) {
 }
 
 /**
- * Extract a map of `TypeName.fieldName → { directiveName: { argName: value } }`
- * from the raw SDL AST.  This catches applied-directive-argument changes (e.g.
- * lowering @config(precision: 78) to @config(precision: 38)) that the standard
- * findBreakingChanges/findDangerousChanges APIs don't compare.
+ * Extract a map of `directiveName → Array<{ argName: value }>` from a directive
+ * list.  Instances are stored as arrays so that repeatable directives (e.g.
+ * multiple @index on the same type) are all preserved — a plain-object key
+ * would silently overwrite earlier occurrences.
+ *
+ * @returns {Record<string, Array<Record<string, unknown>>>}
  */
 function extractDirectiveArgs(directives) {
+  /** @type {Record<string, Array<Record<string, unknown>>>} */
   const map = {};
   for (const dir of directives ?? []) {
     if (!["config", "index"].includes(dir.name.value)) continue;
@@ -73,7 +76,8 @@ function extractDirectiveArgs(directives) {
           ? arg.value.values.map((v) => v.value)
           : arg.value.value;
     }
-    map[dir.name.value] = args;
+    if (!map[dir.name.value]) map[dir.name.value] = [];
+    map[dir.name.value].push(args);
   }
   return map;
 }
@@ -85,7 +89,7 @@ function extractDirectiveArgs(directives) {
  * changing composite @index(fields: [...]) on the type itself) that the
  * standard findBreakingChanges/findDangerousChanges APIs don't compare.
  *
- * @returns {Map<string, Record<string, Record<string, string>>>}
+ * @returns {Map<string, Record<string, Array<Record<string, unknown>>>>}
  */
 function extractAppliedDirectives(sdl) {
   const ast = parse(sdl);
@@ -113,6 +117,9 @@ function extractAppliedDirectives(sdl) {
 /**
  * Compare applied @config / @index directive arguments between base and head
  * schemas and return human-readable descriptions of any changes.
+ *
+ * Uses per-arg comparison for single-instance directives (readable output) and
+ * set-based instance comparison for repeatable directives like @index.
  */
 function findDirectiveArgChanges(baseSdl, headSdl) {
   const baseMap = extractAppliedDirectives(baseSdl);
@@ -120,30 +127,67 @@ function findDirectiveArgChanges(baseSdl, headSdl) {
   const changes = [];
   for (const [key, baseDirs] of baseMap) {
     const headDirs = headMap.get(key);
-    if (!headDirs) continue; // field removal already caught by findBreakingChanges
-    // Directive removed from the type/field (check first; skip per-arg loops below)
-    for (const dirName of Object.keys(baseDirs)) {
-      if (!(dirName in (headDirs ?? {}))) {
+    if (!headDirs) {
+      // All tracked directives removed from this type/field. Note: structural
+      // field/type removal is already caught by findBreakingChanges; this only
+      // fires when the field/type still exists but lost its @index/@config.
+      for (const dirName of Object.keys(baseDirs)) {
         changes.push(`\`${key}\` — \`@${dirName}\` directive removed`);
       }
+      continue;
     }
-    for (const [dirName, baseArgs] of Object.entries(baseDirs)) {
-      if (!(dirName in (headDirs ?? {}))) continue; // whole directive removed — already reported
-      const headArgs = headDirs[dirName] ?? {};
-      for (const [argName, baseVal] of Object.entries(baseArgs)) {
-        if (!(argName in headArgs)) {
-          // Arg removed entirely — report once here; skip the "changed" path
-          changes.push(
-            `\`${key}\` — \`@${dirName}(${argName})\` argument removed`,
-          );
-          continue;
+    for (const dirName of Object.keys(baseDirs)) {
+      if (!(dirName in headDirs)) {
+        changes.push(`\`${key}\` — \`@${dirName}\` directive removed`);
+        continue;
+      }
+      const baseInstances = baseDirs[dirName];
+      const headInstances = headDirs[dirName];
+      if (baseInstances.length === 1 && headInstances.length === 1) {
+        // Single-instance directive: per-arg comparison for readable output
+        const baseArgs = baseInstances[0];
+        const headArgs = headInstances[0];
+        for (const [argName, baseVal] of Object.entries(baseArgs)) {
+          if (!(argName in headArgs)) {
+            changes.push(
+              `\`${key}\` — \`@${dirName}(${argName})\` argument removed`,
+            );
+            continue;
+          }
+          const headVal = headArgs[argName];
+          if (JSON.stringify(headVal) !== JSON.stringify(baseVal)) {
+            changes.push(
+              `\`${key}\` — \`@${dirName}(${argName})\` changed from \`${JSON.stringify(baseVal)}\` to \`${JSON.stringify(headVal)}\``,
+            );
+          }
         }
-        const headVal = headArgs[argName];
-        if (JSON.stringify(headVal) !== JSON.stringify(baseVal)) {
-          changes.push(
-            `\`${key}\` — \`@${dirName}(${argName})\` changed from \`${JSON.stringify(baseVal)}\` to \`${JSON.stringify(headVal)}\``,
-          );
+        for (const argName of Object.keys(headArgs)) {
+          if (!(argName in baseArgs)) {
+            changes.push(
+              `\`${key}\` — \`@${dirName}(${argName})\` argument added`,
+            );
+          }
         }
+      } else {
+        // Repeatable directive: set-based comparison on whole instances
+        const baseSet = new Set(baseInstances.map((a) => JSON.stringify(a)));
+        const headSet = new Set(headInstances.map((a) => JSON.stringify(a)));
+        for (const s of baseSet) {
+          if (!headSet.has(s)) {
+            changes.push(`\`${key}\` — \`@${dirName}\` instance removed: ${s}`);
+          }
+        }
+        for (const s of headSet) {
+          if (!baseSet.has(s)) {
+            changes.push(`\`${key}\` — \`@${dirName}\` instance added: ${s}`);
+          }
+        }
+      }
+    }
+    // Directive kinds present in head but not in base
+    for (const dirName of Object.keys(headDirs)) {
+      if (!(dirName in baseDirs)) {
+        changes.push(`\`${key}\` — \`@${dirName}\` directive added`);
       }
     }
   }
