@@ -131,7 +131,7 @@ variable "terraform_service_account" {
 }
 
 variable "gcp_project_id" {
-  description = "GCP project ID for the monitoring project. Separate from mento-prod (Aegis)."
+  description = "GCP project ID for the monitoring project."
   type        = string
   default     = "mento-monitoring"
 }
@@ -151,6 +151,17 @@ variable "gcp_region" {
   description = "GCP region for Cloud Run deployment."
   type        = string
   default     = "europe-west1"
+}
+
+variable "aegis_app_engine_location_id" {
+  description = "App Engine location for Aegis and its Grafana Agent. App Engine location is immutable once created; use us-central to preserve uc.r.appspot.com URLs."
+  type        = string
+  default     = "us-central"
+
+  validation {
+    condition     = var.aegis_app_engine_location_id == "us-central"
+    error_message = "Aegis App Engine location must stay us-central unless the migration plan and all appspot URLs are updated."
+  }
 }
 
 variable "metrics_bridge_image" {

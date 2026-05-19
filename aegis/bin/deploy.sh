@@ -93,5 +93,5 @@ cat >"$deploy_dir/.gcloudignore" <<'EOF'
 node_modules/
 EOF
 
-# Deploy aegis to the mento-prod project
-gcloud app deploy "$deploy_dir/app.yaml" --project mento-prod --quiet
+# Deploy aegis to the monitoring project.
+gcloud app deploy "$deploy_dir/app.yaml" --project mento-monitoring --quiet

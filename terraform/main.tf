@@ -265,7 +265,7 @@ resource "local_file" "vercel_project_json" {
 }
 
 # ── GCP Project ──────────────────────────────────────────────────────────────
-# Dedicated project for monitoring infrastructure, separate from mento-prod.
+# Dedicated project for monitoring infrastructure.
 # One `terraform apply` bootstraps everything: project → APIs → AR → image → Cloud Run.
 
 resource "google_project" "monitoring" {
@@ -318,6 +318,33 @@ resource "google_project_service" "cloudbuild" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+resource "google_project_service" "appengine" {
+  project                    = google_project.monitoring.project_id
+  service                    = "appengine.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_project_service" "appengineflex" {
+  project                    = google_project.monitoring.project_id
+  service                    = "appengineflex.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_project_service" "secretmanager" {
+  project                    = google_project.monitoring.project_id
+  service                    = "secretmanager.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 # Needed for Workload Identity Federation (GitHub Actions OIDC → impersonation).
 resource "google_project_service" "iam" {
   project                    = google_project.monitoring.project_id
@@ -356,6 +383,64 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
   description   = "Container images for the metrics-bridge service"
 
   depends_on = [google_project_service.artifactregistry]
+}
+
+# ── Aegis App Engine ─────────────────────────────────────────────────────────
+# App Engine applications are project-scoped and their location is immutable.
+# `mento-monitoring` hosts both the Aegis default service and the grafana-agent
+# service so monitoring runtime resources no longer live in `mento-prod`.
+
+resource "google_app_engine_application" "aegis" {
+  project     = google_project.monitoring.project_id
+  location_id = var.aegis_app_engine_location_id
+
+  depends_on = [google_project_service.appengine]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+locals {
+  aegis_app_engine_default_service_account = "${google_project.monitoring.project_id}@appspot.gserviceaccount.com"
+
+  grafana_agent_secret_ids = toset([
+    "grafana-agent-endpoint",
+    "grafana-agent-username",
+    "grafana-agent-password",
+  ])
+}
+
+resource "google_secret_manager_secret" "grafana_agent" {
+  for_each  = local.grafana_agent_secret_ids
+  project   = google_project.monitoring.project_id
+  secret_id = each.value
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_accessor" {
+  for_each  = google_secret_manager_secret.grafana_agent
+  project   = google_project.monitoring.project_id
+  secret_id = each.value.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_project.monitoring.number}@cloudbuild.gserviceaccount.com"
+
+  depends_on = [google_project_service.cloudbuild]
+}
+
+resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_compute_accessor" {
+  for_each  = google_secret_manager_secret.grafana_agent
+  project   = google_project.monitoring.project_id
+  secret_id = each.value.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+
+  depends_on = [google_project_service.cloudbuild]
 }
 
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
@@ -491,6 +576,24 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+resource "google_project_iam_member" "dev_storage_admin" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/storage.admin"
+  member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_project_iam_member" "dev_appengine_admin" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/appengine.appAdmin"
+  member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 # cloudbuild.yaml pins `options.logging: CLOUD_LOGGING_ONLY` so both CI and
 # `scripts/deploy-bridge.sh` stream logs from Cloud Logging (not the default
 # GCS log bucket). Devs need `logging.viewer` to read those streams — without
@@ -603,6 +706,7 @@ locals {
     "roles/logging.viewer",
     "roles/artifactregistry.writer",
     "roles/run.admin",
+    "roles/appengine.appAdmin",
     "roles/iam.serviceAccountUser",
   ]
 }
@@ -614,4 +718,15 @@ resource "google_project_iam_member" "ci_deployer" {
   member   = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 
   depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_service_account_iam_member" "ci_appengine_default_service_account_user" {
+  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${local.aegis_app_engine_default_service_account}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+
+  depends_on = [
+    google_app_engine_application.aegis,
+    google_project_iam_member.ci_deployer,
+  ]
 }

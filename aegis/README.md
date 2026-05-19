@@ -90,7 +90,7 @@ pnpm aegis:deploy
 
 From inside `aegis/`, `pnpm deploy` is equivalent. The deploy script rebuilds
 `dist/`, creates a temporary App Engine app root with the root pnpm lockfile's
-Aegis importer, and uploads that staged service to `mento-prod`.
+Aegis importer, and uploads that staged service to `mento-monitoring`.
 
 To deploy the `grafana-agent` follow the instructions in [grafana-agent/README.md](./grafana-agent/README.md)
 

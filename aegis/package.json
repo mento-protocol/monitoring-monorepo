@@ -7,7 +7,7 @@
   "author": "Mento Labs <eng@mentolabs.xyz>",
   "scripts": {
     "build": "nest build",
-    "agent:deploy": "cd grafana-agent && gcloud builds submit --project mento-prod",
+    "agent:deploy": "cd grafana-agent && gcloud builds submit --project mento-monitoring",
     "deploy": "./bin/deploy.sh",
     "dev": "nest start --watch",
     "format": "trunk fmt",
