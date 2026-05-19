@@ -69,6 +69,11 @@ function extractRevertSignature(msg: string): string | undefined {
   return inline?.[1]?.toLowerCase();
 }
 
+export function describeKnownRevert(msg: string): string | undefined {
+  const revertSig = extractRevertSignature(msg);
+  return revertSig ? KNOWN_REVERT_SIGNATURES[revertSig] : undefined;
+}
+
 /**
  * Log a structured RPC failure. Known contract reverts are logged at debug
  * level with a human-readable explanation; unexpected failures are logged at
@@ -91,10 +96,7 @@ export function logRpcFailure(
         : "unknown error";
   const blockStr = block !== undefined ? ` block=${block}` : "";
 
-  const revertSig = extractRevertSignature(message);
-  const knownRevert = revertSig
-    ? KNOWN_REVERT_SIGNATURES[revertSig]
-    : undefined;
+  const knownRevert = describeKnownRevert(message);
 
   if (knownRevert) {
     log.debug(

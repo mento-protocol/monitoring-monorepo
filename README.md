@@ -186,10 +186,15 @@ Push to the `envio` branch to trigger a hosted reindex:
 COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:logs "$COMMIT" --build
+pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
-The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento) watches this branch.
+The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento)
+watches this branch. Envio registers deployments under short commit hashes and
+can lag the Git push by several minutes, so use the explicit commit form while
+babysitting a new deploy.
 
 ### Aegis → App Engine
 

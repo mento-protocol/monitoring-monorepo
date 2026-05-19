@@ -11,7 +11,10 @@ import {
   selectStaleTransfers,
   backfilledTokens,
 } from "../feeToken.js";
-import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot.js";
+import {
+  preloadPoolDailyFeeSnapshot,
+  upsertPoolDailyFeeSnapshot,
+} from "../protocolFeeSnapshot.js";
 import { feeTokenMetaEffect } from "../rpc/effects.js";
 
 indexer.onEvent(
@@ -27,7 +30,8 @@ indexer.onEvent(
     // FPMM pools. This prevents arbitrary third-party transfers to the yield
     // split address from inflating the protocol fee KPIs.
     const sender = asAddress(event.params.from);
-    const pool = await context.Pool.get(makePoolId(event.chainId, sender));
+    const poolId = makePoolId(event.chainId, sender);
+    const pool = await context.Pool.get(poolId);
     if (!pool || !pool.source.includes("fpmm")) {
       return; // Not from a known FPMM pool — skip
     }
@@ -51,6 +55,35 @@ indexer.onEvent(
     //   - otherwise → replay no-op for the snapshot; the raw transfer row
     //     still gets `set` below so the self-heal backfill still propagates.
     const existingTransfer = await context.ProtocolFeeTransfer.get(id);
+    if (context.isPreload) {
+      await preloadPoolDailyFeeSnapshot({
+        context,
+        pool,
+        blockTimestamp: BigInt(event.block.timestamp),
+      });
+      const backfillKey = `${chainId}:${normalizedToken}`;
+      if (symbol !== "UNKNOWN" && !backfilledTokens.has(backfillKey)) {
+        const unknownRecords = await context.ProtocolFeeTransfer.getWhere({
+          token: { _eq: normalizedToken },
+        });
+        const stale = selectStaleTransfers(unknownRecords, chainId);
+        await Promise.all(
+          stale.map(async (s) => {
+            const stalePool = await context.Pool.get(
+              makePoolId(chainId, s.from),
+            );
+            if (stalePool) {
+              await preloadPoolDailyFeeSnapshot({
+                context,
+                pool: stalePool,
+                blockTimestamp: BigInt(s.blockTimestamp),
+              });
+            }
+          }),
+        );
+      }
+      return;
+    }
 
     const transfer: ProtocolFeeTransfer = {
       id,

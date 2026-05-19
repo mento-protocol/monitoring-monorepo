@@ -42,6 +42,8 @@ Then wait for the deployment to catch up and promote it:
 
 ```bash
 pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:logs "$COMMIT" --build
+pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
@@ -57,15 +59,16 @@ git push origin main:envio
 
 ### After Redeployment Checklist
 
-1. Wait for the deployed commit to catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
-2. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
-3. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
-4. Verify monitoring.mento.org loads data.
+1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
+2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
+3. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
+4. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
+5. Verify monitoring.mento.org loads data.
 
 To check whether Envio's persistent effect cache is active for a deployment:
 
 ```bash
-pnpm exec envio-cloud deployment info mento <commit> mento-protocol -o json
+pnpm deploy:indexer:info <commit>
 ```
 
 `cacheEnabled: true` here means that specific deployment restored from an Envio

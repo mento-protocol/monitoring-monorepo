@@ -1,6 +1,9 @@
 import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt, eventId, makePoolId } from "../../helpers.js";
-import { getOrCreateLiquityInstance } from "./bootstrap.js";
+import {
+  getOrCreateLiquityInstance,
+  preloadLiquityMarket,
+} from "./bootstrap.js";
 import {
   findCollateralIdByPoolFallback,
   findLiquityMarketByDebtToken,
@@ -43,6 +46,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.params.pool);
     const existing = await context.CdpPool.get(poolId);
+    if (context.isPreload) return;
     if (existing === undefined) return;
     context.CdpPool.set({
       ...existing,
@@ -58,6 +62,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.params.pool);
     const existing = await context.CdpPool.get(poolId);
+    if (context.isPreload) return;
     if (existing === undefined) return;
     context.CdpPool.set({
       ...existing,
@@ -72,6 +77,10 @@ indexer.onEvent(
   { contract: "CDPLiquidityStrategy", event: "LiquidityMoved" },
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.params.pool);
+    if (context.isPreload) {
+      await context.CdpPool.get(poolId);
+      return;
+    }
     context.CdpLiquidityMove.set({
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
@@ -100,6 +109,10 @@ indexer.onEvent(
     if (collateralId === undefined) return;
     const market = marketByCollateralId.get(collateralId);
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
 
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);

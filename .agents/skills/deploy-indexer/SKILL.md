@@ -105,6 +105,25 @@ Preferred watcher:
 pnpm deploy:indexer:status <TARGET_COMMIT> --watch
 ```
 
+The Envio Cloud deployment id is the short Git commit hash (for example
+`b92ff93b`), and the deployment can take several minutes to appear after the
+`envio` branch push. The local status wrapper resolves a full SHA to the
+registered short deployment id and, when `--watch` is present, waits up to 30
+minutes for registration before watching sync. A 404 immediately after push is
+therefore not a sync failure by itself; it means the deployment record is not
+visible yet.
+
+Do **not** use `pnpm deploy:indexer:logs` without a commit while babysitting a
+new deployment that has not registered yet. The no-commit form reads the latest
+visible deployment from Envio, which can still be the old prod deployment during
+registration lag. Once the target is visible, inspect logs with the explicit
+target:
+
+```bash
+pnpm deploy:indexer:logs <TARGET_COMMIT> --build
+pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
+```
+
 Treat a successful caught-up exit as `READY_TO_PROMOTE`. If the command exits
 non-zero, the deployment never appears within 30 minutes, or full sync is not
 reached within 90 minutes, stop and surface the failure. **Never promote a
@@ -167,9 +186,10 @@ Then promote:
 pnpm deploy:indexer:promote <TARGET_COMMIT> -y
 ```
 
-The wrapper passes `"$@"` through to `npx envio-cloud deployment promote`
-(see `scripts/deploy-indexer-promote.sh`), so `-y` reaches the underlying
-CLI cleanly. Using the wrapper keeps org/indexer defaults centralized.
+The wrapper resolves a full SHA to Envio's registered short deployment id and
+passes remaining flags through to `envio-cloud deployment promote`, so `-y`
+reaches the underlying CLI cleanly. Using the wrapper keeps org/indexer
+defaults centralized.
 
 Confirm the response line `Deployment '<commit>' of indexer 'mento' promoted to production successfully.` Then verify with:
 

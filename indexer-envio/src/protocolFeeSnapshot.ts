@@ -356,3 +356,17 @@ export async function upsertPoolDailyFeeSnapshot({
   if (merged === null) return; // heal-mode no-op
   context.PoolDailyFeeSnapshot.set(merged);
 }
+
+export async function preloadPoolDailyFeeSnapshot({
+  context,
+  pool,
+  blockTimestamp,
+}: {
+  context: FeeSnapshotContext;
+  pool: Pool;
+  blockTimestamp: bigint;
+}): Promise<void> {
+  await context.PoolDailyFeeSnapshot.get(
+    dailySnapshotId(pool.id, dayBucket(blockTimestamp)),
+  );
+}

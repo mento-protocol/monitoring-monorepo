@@ -1,6 +1,9 @@
 import { indexer } from "../../indexer.js";
 import { asBigInt } from "../../helpers.js";
-import { getOrCreateLiquityInstance } from "./bootstrap.js";
+import {
+  getOrCreateLiquityInstance,
+  preloadLiquityMarket,
+} from "./bootstrap.js";
 import { findLiquityMarketByEventSource } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { toBpsFromD18 } from "./math.js";
@@ -13,6 +16,10 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     const instance = await getOrCreateLiquityInstance(

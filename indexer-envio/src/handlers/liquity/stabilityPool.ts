@@ -1,10 +1,13 @@
 import type { StabilityPoolDepositor } from "envio";
 import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt, eventId } from "../../helpers.js";
-import { getOrCreateLiquityInstance } from "./bootstrap.js";
+import {
+  getOrCreateLiquityInstance,
+  preloadLiquityMarket,
+} from "./bootstrap.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
-import { getOrLoadSystemParams } from "./systemParams.js";
+import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 
 const pendingDepositKey = (
   chainId: number,
@@ -54,14 +57,17 @@ indexer.onEvent(
     const depositor = asAddress(event.params._depositor);
     const id = `${collateralId}-${depositor}`;
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const existing = await context.StabilityPoolDepositor.get(id);
     const pendingKey = pendingDepositKey(
       event.chainId,
       event.transaction.hash,
       collateralId,
       depositor,
     );
-    const pending = await context.PendingDepositOperation.get(pendingKey);
+    const [existing, pending] = await Promise.all([
+      context.StabilityPoolDepositor.get(id),
+      context.PendingDepositOperation.get(pendingKey),
+    ]);
+    if (context.isPreload) return;
     if (pending !== undefined) {
       context.PendingDepositOperation.deleteUnsafe(pendingKey);
     }
@@ -102,6 +108,13 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadSystemParams(context, market),
+      ]);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     let instance = await getOrCreateLiquityInstance(
@@ -144,6 +157,10 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     const instance = await getOrCreateLiquityInstance(
@@ -171,6 +188,10 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    if (context.isPreload) {
+      await preloadLiquityMarket(context, market);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     const instance = await getOrCreateLiquityInstance(
