@@ -82,6 +82,20 @@ function extractDirectiveArgs(directives) {
   return map;
 }
 
+/** @returns {Set<string>} all `TypeName` and `TypeName.fieldName` keys in the SDL */
+function extractTypeFieldKeys(sdl) {
+  const ast = parse(sdl);
+  const keys = new Set();
+  for (const def of ast.definitions) {
+    if (def.kind !== "ObjectTypeDefinition") continue;
+    keys.add(def.name.value);
+    for (const field of def.fields ?? []) {
+      keys.add(`${def.name.value}.${field.name.value}`);
+    }
+  }
+  return keys;
+}
+
 /**
  * Extract a map of directive snapshots keyed by `TypeName` (object-level) or
  * `TypeName.fieldName` (field-level).  This catches applied-directive-argument
@@ -124,13 +138,15 @@ function extractAppliedDirectives(sdl) {
 function findDirectiveArgChanges(baseSdl, headSdl) {
   const baseMap = extractAppliedDirectives(baseSdl);
   const headMap = extractAppliedDirectives(headSdl);
+  const headKeys = extractTypeFieldKeys(headSdl);
   const changes = [];
   for (const [key, baseDirs] of baseMap) {
     const headDirs = headMap.get(key);
     if (!headDirs) {
-      // All tracked directives removed from this type/field. Note: structural
-      // field/type removal is already caught by findBreakingChanges; this only
-      // fires when the field/type still exists but lost its @index/@config.
+      // Skip if the type/field was itself deleted — findBreakingChanges already
+      // reports FIELD_REMOVED / TYPE_REMOVED for structural deletions. Only
+      // emit here when the type/field still exists but lost its tracked directives.
+      if (!headKeys.has(key)) continue;
       for (const dirName of Object.keys(baseDirs)) {
         changes.push(`\`${key}\` — \`@${dirName}\` directive removed`);
       }
@@ -187,6 +203,15 @@ function findDirectiveArgChanges(baseSdl, headSdl) {
     // Directive kinds present in head but not in base
     for (const dirName of Object.keys(headDirs)) {
       if (!(dirName in baseDirs)) {
+        changes.push(`\`${key}\` — \`@${dirName}\` directive added`);
+      }
+    }
+  }
+  // Second pass: keys only in headMap — tracked directives added to a
+  // type/field that previously had none (baseMap never visits these keys).
+  for (const [key, headDirs] of headMap) {
+    if (!baseMap.has(key)) {
+      for (const dirName of Object.keys(headDirs)) {
         changes.push(`\`${key}\` — \`@${dirName}\` directive added`);
       }
     }
