@@ -11,35 +11,48 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronAuth(req, "backup");
   if (authBail) return authBail;
 
-  // No Sentry cron monitor here: the team plan covers one cron slot, which
-  // goes to arkham-enrich (the more time-sensitive job). In-body failures
-  // still hit Sentry via captureException. Missed runs are NOT actively
-  // monitored — recovery is by spot-checking the Blob store for a missing
-  // date file.
+  // withMonitor reports an in_progress check-in on entry and an ok/error
+  // check-in on exit. Missed runs (vs. the declared schedule) fire a Sentry
+  // alert. Schedule mirrors vercel.json crons entry.
   try {
-    // Labels and forensic reports both live in the same Upstash instance
-    // (separate hashes — `labels` and `reports`). Snapshot both into the
-    // same daily JSON blob so a Redis flush restores both halves from one
-    // file. A separate cron would consume an additional team-plan slot
-    // and create the risk of one half restoring without the other.
-    const [labels, reports] = await Promise.all([getLabels(), getAllReports()]);
-    const now = new Date();
-    const snapshot: AddressLabelsSnapshot = {
-      exportedAt: now.toISOString(),
-      addresses: labels,
-      reports,
-    };
+    return await Sentry.withMonitor(
+      "address-labels-backup",
+      async () => {
+        // Labels and forensic reports both live in the same Upstash instance
+        // (separate hashes — `labels` and `reports`). Snapshot both into the
+        // same daily JSON blob so a Redis flush restores both halves from one
+        // file. Keeping them in one cron also avoids the risk of one half
+        // restoring without the other.
+        const [labels, reports] = await Promise.all([
+          getLabels(),
+          getAllReports(),
+        ]);
+        const now = new Date();
+        const snapshot: AddressLabelsSnapshot = {
+          exportedAt: now.toISOString(),
+          addresses: labels,
+          reports,
+        };
 
-    const date = now.toISOString().slice(0, 10);
-    const filename = `address-labels-backup-${date}.json`;
+        const date = now.toISOString().slice(0, 10);
+        const filename = `address-labels-backup-${date}.json`;
 
-    const blob = await put(filename, JSON.stringify(snapshot, null, 2), {
-      access: "private",
-      contentType: "application/json",
-      addRandomSuffix: false,
-    });
+        const blob = await put(filename, JSON.stringify(snapshot, null, 2), {
+          access: "private",
+          contentType: "application/json",
+          addRandomSuffix: false,
+        });
 
-    return NextResponse.json({ ok: true, pathname: blob.pathname, date });
+        return NextResponse.json({ ok: true, pathname: blob.pathname, date });
+      },
+      {
+        // Cron schedule mirrors vercel.json — keep them in sync.
+        schedule: { type: "crontab", value: "0 3 * * *" },
+        checkinMargin: 5,
+        maxRuntime: 10,
+        timezone: "Etc/UTC",
+      },
+    );
   } catch (err) {
     Sentry.captureException(err, { tags: { route: "address-labels/backup" } });
     console.error("[backup]", err);

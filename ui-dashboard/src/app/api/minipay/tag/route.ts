@@ -89,80 +89,88 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const maxAddresses = parseLimit(req.nextUrl.searchParams.get("limit"));
   const startedAt = Date.now();
 
-  // No `Sentry.withMonitor` wrapper here: the team plan only allots one cron
-  // monitor slot and that's already used by `arkham-enrich`. Errors still
-  // surface to Sentry via `captureException` in the catch block below — we
-  // just lose missed-run / heartbeat detection on this route.
   try {
-    // SCARD is a single Redis call; check it first before paying for the
-    // Hasura paginated walk + getAllLabels SCAN, which are only useful
-    // when the set is populated.
-    const minipaySetSize = await getMiniPaySetSize();
+    return await Sentry.withMonitor(
+      "minipay-tag",
+      async () => {
+        // SCARD is a single Redis call; check it first before paying for the
+        // Hasura paginated walk + getAllLabels SCAN, which are only useful
+        // when the set is populated.
+        const minipaySetSize = await getMiniPaySetSize();
 
-    if (minipaySetSize === 0) {
-      // Sync cron hasn't populated the set yet (or it was wiped). Return
-      // a clean no-op rather than throwing — recoverable state, next sync
-      // run repopulates.
-      const body: TagResponse = {
-        ok: true,
-        mode,
-        discovered: 0,
-        candidates: 0,
-        minipaySetSize: 0,
-        matched: 0,
-        written: 0,
-        durationMs: Date.now() - startedAt,
-      };
-      return NextResponse.json(body);
-    }
+        if (minipaySetSize === 0) {
+          // Sync cron hasn't populated the set yet (or it was wiped). Return
+          // a clean no-op so the cron still checks-in to Sentry; throwing
+          // would page on a recoverable state (next sync run repopulates).
+          const body: TagResponse = {
+            ok: true,
+            mode,
+            discovered: 0,
+            candidates: 0,
+            minipaySetSize: 0,
+            matched: 0,
+            written: 0,
+            durationMs: Date.now() - startedAt,
+          };
+          return NextResponse.json(body);
+        }
 
-    const [discovery, existing] = await Promise.all([
-      discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-      getLabels(),
-    ]);
+        const [discovery, existing] = await Promise.all([
+          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
+          getLabels(),
+        ]);
 
-    const { addresses, perEntity } = discovery;
+        const { addresses, perEntity } = discovery;
 
-    // Drop anything already labelled by any source. MiniPay writes only
-    // to fresh addresses to avoid stomping Arkham/manual labels.
-    const candidates = (addresses as string[]).flatMap((a) => {
-      const lower = a.toLowerCase();
-      return existing[lower] ? [] : [lower];
-    });
+        // Drop anything already labelled by any source. MiniPay writes only
+        // to fresh addresses to avoid stomping Arkham/manual labels.
+        const candidates = (addresses as string[]).flatMap((a) => {
+          const lower = a.toLowerCase();
+          return existing[lower] ? [] : [lower];
+        });
 
-    // Intersect before slicing: `discoverMentoAddresses` returns
-    // alphabetically-sorted addresses, so a `.slice(0, maxAddresses)`
-    // applied to candidates would silently hide MiniPay users with
-    // higher-prefix addresses if the universe ever exceeds the cap.
-    // SMISMEMBER is the cheap step (chunked, ~10 round-trips per 10k).
-    const allMatches = await intersectMiniPay(candidates);
-    const matches = allMatches.slice(0, maxAddresses);
+        // Intersect before slicing: `discoverMentoAddresses` returns
+        // alphabetically-sorted addresses, so a `.slice(0, maxAddresses)`
+        // applied to candidates would silently hide MiniPay users with
+        // higher-prefix addresses if the universe ever exceeds the cap.
+        // SMISMEMBER is the cheap step (chunked, ~10 round-trips per 10k).
+        const allMatches = await intersectMiniPay(candidates);
+        const matches = allMatches.slice(0, maxAddresses);
 
-    const toWrite: Record<string, AddressEntry> = {};
-    for (const addr of matches) {
-      toWrite[addr] = toMiniPayEntry();
-    }
+        const toWrite: Record<string, AddressEntry> = {};
+        for (const addr of matches) {
+          toWrite[addr] = toMiniPayEntry();
+        }
 
-    if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-      // Single labels hash — MiniPay attestations are issued on Celo but
-      // the EOA itself is chain-agnostic, which matches the global-only
-      // address-keyed model.
-      await importLabels(toWrite);
-    }
+        if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
+          // Single labels hash — MiniPay attestations are issued on Celo but
+          // the EOA itself is chain-agnostic, which matches the global-only
+          // address-keyed model.
+          await importLabels(toWrite);
+        }
 
-    const body: TagResponse = {
-      ok: true,
-      mode,
-      discovered: addresses.length,
-      candidates: candidates.length,
-      minipaySetSize,
-      matched: matches.length,
-      written: mode === "dryRun" ? 0 : Object.keys(toWrite).length,
-      ...(mode === "dryRun" ? { wouldWrite: matches } : {}),
-      durationMs: Date.now() - startedAt,
-      perEntity,
-    };
-    return NextResponse.json(body);
+        const body: TagResponse = {
+          ok: true,
+          mode,
+          discovered: addresses.length,
+          candidates: candidates.length,
+          minipaySetSize,
+          matched: matches.length,
+          written: mode === "dryRun" ? 0 : Object.keys(toWrite).length,
+          ...(mode === "dryRun" ? { wouldWrite: matches } : {}),
+          durationMs: Date.now() - startedAt,
+          perEntity,
+        };
+        return NextResponse.json(body);
+      },
+      {
+        // Cron schedule mirrors vercel.json — keep them in sync.
+        schedule: { type: "crontab", value: "0 5 * * *" },
+        checkinMargin: 5,
+        maxRuntime: 15,
+        timezone: "Etc/UTC",
+      },
+    );
   } catch (err) {
     Sentry.captureException(err, { tags: { route: "minipay/tag", mode } });
     console.error("[minipay/tag]", err);
