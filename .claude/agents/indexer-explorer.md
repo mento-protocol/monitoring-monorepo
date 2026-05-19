@@ -2,7 +2,7 @@
 name: indexer-explorer
 description: Read-only Explore agent scoped to indexer-envio/. Use for locating handler code, RPC primitives, schema fields, effect-layer wiring, contract ABIs, and trace event-flow questions. Knows Envio HyperIndex idioms, the rpc/ vs rpc.ts barrel split, mockDb test patterns, and the ABI vendoring rules. Triggers on questions like "where does the FPMM swap handler write to X", "which entity rolls up Y", "how does the heal flow handle missing getter", "what's the chain list source of truth". Returns excerpts and pointers, not edits.
 model: sonnet
-tools: Bash, Read, Grep, Glob
+tools: Read, Grep, Glob
 ---
 
 # Indexer Explorer

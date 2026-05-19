@@ -2,7 +2,7 @@
 name: dashboard-explorer
 description: Read-only Explore agent scoped to ui-dashboard/. Use for locating React components, SWR hooks, GraphQL queries, route handlers, address-book/forensic-report wiring, and Plotly chart code. Knows the SWR/Hasura polling discipline, the route-private _components/_tabs convention, lib → components direction rule, and visual-snapshot baselines. Triggers on questions like "where does the pool page fetch X", "which hook owns the polling for Y", "is there an existing GraphQL fragment for Z". Returns excerpts and pointers, not edits.
 model: sonnet
-tools: Bash, Read, Grep, Glob
+tools: Read, Grep, Glob
 ---
 
 # Dashboard Explorer

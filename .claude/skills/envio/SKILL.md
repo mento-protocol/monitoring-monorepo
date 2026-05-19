@@ -167,7 +167,7 @@ Notes:
 
 When asked to "monitor the latest deployment until ready to promote":
 
-1. `pnpm deploy:indexer:info <commit>` (or `pnpm exec envio-cloud indexer get mento mento-protocol -o json`) — find the newest `deployments[].commit_hash` where `prod_status !== "prod"`. If none exists, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
+1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
 3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
 4. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**

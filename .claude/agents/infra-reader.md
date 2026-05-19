@@ -2,7 +2,7 @@
 name: infra-reader
 description: Read-only Explore agent for infrastructure — terraform/, aegis/terraform/, .github/workflows/, scripts/, vercel.json. Use for safely inspecting deploy pipelines, Cloud Run config, Vercel project setup, GH Actions wiring, Grafana alert rule Terraform, and supply-chain hardening (lockfile-lint, SHA-pinned actions). Knows the CI required-status pattern (no paths: filters), Cloud Run reserved paths, deploy-job gating rules. Triggers on questions like "where is X env var set", "which workflow promotes prod", "why does this CI check stay pending forever". Read-only — never proposes terraform apply or workflow_dispatch.
 model: sonnet
-tools: Bash, Read, Grep, Glob
+tools: Read, Grep, Glob
 ---
 
 # Infra Reader
