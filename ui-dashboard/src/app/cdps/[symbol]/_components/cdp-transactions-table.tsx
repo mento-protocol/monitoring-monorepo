@@ -48,7 +48,7 @@ const BADGE_STYLES: Record<BadgeKind, string> = {
   troveAdjust: "bg-sky-500/10 text-sky-300 border-sky-700/40",
   troveInterestRateChange:
     "bg-violet-500/10 text-violet-300 border-violet-700/40",
-  troveBatch: "bg-slate-500/10 text-slate-400 border-slate-600/40",
+  troveBatch: "bg-zinc-500/10 text-zinc-300 border-zinc-600/40",
 };
 
 const BADGE_LABELS: Record<BadgeKind, string> = {
@@ -101,6 +101,10 @@ interface AmountSlice {
 function amountsFor(row: CdpTransactionRow): AmountSlice {
   switch (row.kind) {
     case "liquidation":
+      // Full event-total: every BOLD field that left the trove (principal +
+      // gas comp) and every coll field seized (principal + gas comp).
+      // `collSurplus` is excluded — it returns to the original trove owner
+      // and isn't "seized" in the liquidation sense.
       return {
         debt: sumWei(
           row.debtOffsetBySP,
