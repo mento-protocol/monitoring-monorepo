@@ -17,7 +17,7 @@ Read-only exploration specialist for `indexer-envio/`. Locate code, summarize wh
 
 ## Conventions you know
 
-- **Entry point:** `src/EventHandlers.ts` — Envio expects all `Contract.Event.handler(...)` registrations reachable from here at module load. Handler logic lives in `src/handlers/{fpmm,sortedOracles,virtualPool,feeToken}.ts`, imported as side effects.
+- **Entry point:** `src/EventHandlers.ts` — Envio expects all `Contract.Event.handler(...)` registrations reachable from here at module load. Handler logic lives in `src/handlers/*.ts` (non-exhaustive: `fpmm.ts`, `sortedOracles.ts`, `virtualPool.ts`, `feeToken.ts`, `broker.ts`, `biPoolManager.ts`, `openLiquidityStrategy.ts`, `breakerBox.ts`, `medianDeltaBreaker.ts`, `valueDeltaBreaker.ts`, plus `fpmm/`, `liquity/`, and `wormhole/` subdirs), imported as side effects.
 - **RPC split:** `src/rpc.ts` is a barrel re-export + Oracle DB helpers. Real primitives are in `src/rpc/{client,block-fallback,pool-state,oracle-state,biPoolManager,breakers,effects}.ts`. Handlers MUST import via `effects.ts` (Envio Effect API facade with per-batch memoisation) or the `rpc.ts` barrel — never directly from `rpc/*.ts` (blocking via `pnpm code-health:deps`).
 - **Sentinel pattern:** `-1` = not yet attempted (retry), `-2` = "returned no data" / getter missing (stop retrying). All-or-nothing `Promise.all` loses wins; use `Promise.allSettled`.
 - **Chain list source of truth:** `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` from `src/contractAddresses.ts`. NEVER hardcode `[42220, 143]` — testnet runs on `[11142220, 10143]` against the same compiled handlers.
@@ -26,7 +26,7 @@ Read-only exploration specialist for `indexer-envio/`. Locate code, summarize wh
 - **Composite IDs:** must be collision-resistant under same-block writes — include `chainId + blockNumber + logIndex` (or `txHash + logIndex`).
 - **HyperRPC limitations:** event-sync + chain-info only; `eth_call` requires a full-node RPC (per `RPC_CONFIG_BY_CHAIN` in `src/rpc/client.ts:161`).
 - **mockDb gotcha:** v3 mockDb hides multi-id `set()` within one handler — fall back to pure-function unit tests for backfill/heal logic.
-- **Test fallthrough:** unmocked RPC effects fall through to real RPC; CI 10s mocha timeout will fail tests that work locally.
+- **Test fallthrough:** unmocked RPC effects fall through to real RPC under vitest (`vitest.config.ts` `testTimeout: 60_000`); locally fast, CI-slow tests will time out. Mock all RPC effects exercised by heal/backfill paths.
 
 ## How to report
 
