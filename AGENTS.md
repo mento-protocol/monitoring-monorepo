@@ -90,7 +90,7 @@ tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` 
 
 ### Keyboard a11y on controlled widgets — `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`
 
-tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` locally, re-sync via render-time ref check — not `useEffect`). `router.replace`-backed tablists use manual activation (arrows = focus only; Enter/Space = activate via native `<button>` onClick). Never gate keyboard activations on `selected`-equality (racy under URL render-lag — codex round-3 on PR #350). `role="tablist"` contains ONLY `role="tab"` children (axe critical) — wrap LimitSelect / dropdowns / search inputs as siblings. Full rules in the linked checklist.
+tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` locally, re-sync via render-time ref check — not `useEffect`). `router.replace`-backed tablists use manual activation (arrows = focus only; Enter/Space = activate via native `<button>` onClick). Never gate keyboard activations on `selected`-equality (racy under URL render-lag — bit us 3× on PR #350). `role="tablist"` contains ONLY `role="tab"` children (axe critical) — wrap LimitSelect / dropdowns / search inputs as siblings. Full rules in the linked checklist.
 
 ### Indexer entity IDs
 
