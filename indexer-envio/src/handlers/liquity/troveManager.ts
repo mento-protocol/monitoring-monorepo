@@ -498,6 +498,32 @@ indexer.onEvent(
     context.LiquityInstance.set(
       touchLiquityInstance(instance, blockNumber, blockTimestamp),
     );
+    // Persist a TroveOperationEvent row for user-initiated ops so the UI
+    // can render opens / closes / adjusts / interest-rate changes /
+    // batch-membership moves alongside liquidations + redemptions in a
+    // unified transactions feed. LIQUIDATE and REDEEM_COLLATERAL are
+    // skipped because they already have dedicated event entities;
+    // APPLY_PENDING_DEBT is protocol-forced and isn't a user action.
+    if (
+      op !== OP.LIQUIDATE &&
+      op !== OP.REDEEM_COLLATERAL &&
+      op !== OP.APPLY_PENDING_DEBT
+    ) {
+      context.TroveOperationEvent.set({
+        id: eventId(event.chainId, event.block.number, event.logIndex),
+        chainId: event.chainId,
+        instanceId: instance.id,
+        troveId,
+        operation: op,
+        collChange: event.params._collChangeFromOperation,
+        debtChange: event.params._debtChangeFromOperation,
+        annualInterestRate: event.params._annualInterestRate,
+        debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
+        timestamp: blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+      });
+    }
   },
 );
 
