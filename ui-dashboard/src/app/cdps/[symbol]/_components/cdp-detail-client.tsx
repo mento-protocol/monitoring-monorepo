@@ -60,32 +60,25 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
     collateral == null ? undefined : { collateralId: collateral.id },
   );
 
-  return (
-    <CdpDetailState
-      chainId={network.chainId}
-      markets={markets}
-      detail={detail}
-      collateral={collateral}
-    />
-  );
-}
-
-function CdpDetailState({
-  chainId,
-  markets,
-  detail,
-  collateral,
-}: {
-  chainId: number;
-  markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
-  detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
-  collateral: CdpCollateral | undefined;
-}) {
-  if (chainId !== 42220) {
+  if (network.chainId !== 42220) {
     return (
       <EmptyBox message="CDP markets are only deployed on Celo mainnet." />
     );
   }
+  return (
+    <CdpDetailState markets={markets} detail={detail} collateral={collateral} />
+  );
+}
+
+function CdpDetailState({
+  markets,
+  detail,
+  collateral,
+}: {
+  markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
+  detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+  collateral: CdpCollateral | undefined;
+}) {
   if (markets.isLoading || (collateral != null && detail.isLoading)) {
     return <Skeleton rows={8} />;
   }
@@ -111,18 +104,10 @@ function CdpDetailState({
   const troves = detail.data?.Trove ?? [];
   const depositors = detail.data?.StabilityPoolDepositor ?? [];
   const cdpPools = detail.data?.CdpPool ?? [];
-
-  // For aggregates, use the chain-wide markets-list query (up to 500 troves)
-  // filtered to this collateral, NOT the 50-row detail query — that one
-  // exists only for the recent-activity table and would understate System
-  // Debt / Open Troves for any market with >50 open troves.
-  const allChainTroves = markets.data?.Trove ?? [];
-  const collateralTroves = allChainTroves.filter(
-    (t) => t.collateralId === collateral.id,
+  const aggregates = aggregatesFromChainTroves(
+    collateral.id,
+    markets.data?.Trove,
   );
-  const aggregates = aggregateTroves(collateralTroves, {
-    truncated: allChainTroves.length >= CDP_TROVES_LIST_LIMIT,
-  });
 
   return (
     <CdpDetailContent
@@ -133,6 +118,21 @@ function CdpDetailState({
       cdpPools={cdpPools}
       aggregates={aggregates}
     />
+  );
+}
+
+// For aggregates, use the chain-wide markets-list query (up to 500 troves)
+// filtered to this collateral, NOT the 50-row detail query — that one
+// exists only for the recent-activity table and would understate System
+// Debt / Open Troves for any market with >50 open troves.
+function aggregatesFromChainTroves(
+  collateralId: string,
+  allChainTroves: CdpTroveListRow[] | undefined,
+) {
+  const rows = allChainTroves ?? [];
+  return aggregateTroves(
+    rows.filter((t) => t.collateralId === collateralId),
+    { truncated: rows.length >= CDP_TROVES_LIST_LIMIT },
   );
 }
 
