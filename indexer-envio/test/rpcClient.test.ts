@@ -305,7 +305,7 @@ describe("logRpcFailure", () => {
     );
   });
 
-  it("uses the [CONTRACT_REVERT_BURST] tag when the burst is composed of known reverts", () => {
+  it("emits known [CONTRACT_REVERT_BURST] summaries at debug level", () => {
     const knownRevert =
       "execution reverted with the following signature: 0xa407143a";
     for (let i = 0; i < 10; i++) {
@@ -316,9 +316,50 @@ describe("logRpcFailure", () => {
         new Error(knownRevert),
       );
     }
-    assert.equal(cap.debug.length, 10);
+    assert.equal(cap.warn.length, 0);
+    assert.equal(cap.debug.length, 11);
+    assert.match(cap.debug[10], /\[CONTRACT_REVERT_BURST\]/);
+    assert.match(cap.debug[10], /expected=true/);
+  });
+
+  it("tracks known-revert and unexpected-RPC bursts independently", () => {
+    const knownRevert =
+      "execution reverted with the following signature: 0xa407143a";
+    for (let i = 0; i < 9; i++) {
+      _testHooks.logRpcFailure(
+        42220,
+        "getRebalancingState",
+        "0xPool",
+        new Error(knownRevert),
+      );
+    }
+
+    _testHooks.logRpcFailure(
+      42220,
+      "getRebalancingState",
+      "0xPool",
+      new Error("timeout"),
+    );
+
     assert.equal(cap.warn.length, 1);
-    assert.match(cap.warn[0], /\[CONTRACT_REVERT_BURST\]/);
+    assert.match(cap.warn[0], /\[RPC_FAILURE\]/);
+    assert.ok(!cap.warn[0].includes("[RPC_FAILURE_BURST]"));
+    assert.equal(
+      cap.debug.filter((line) => line.includes("[CONTRACT_REVERT_BURST]"))
+        .length,
+      0,
+    );
+
+    _testHooks.logRpcFailure(
+      42220,
+      "getRebalancingState",
+      "0xPool",
+      new Error(knownRevert),
+    );
+
+    assert.equal(cap.warn.length, 1);
+    assert.match(cap.debug[9], /\[CONTRACT_REVERT\]/);
+    assert.match(cap.debug[10], /\[CONTRACT_REVERT_BURST\]/);
   });
 
   it("redacts URLs in error messages (preserves origin only)", () => {

@@ -155,3 +155,8 @@ after skipping blanks and comments. Refresh before starting a split.
 
 - [ ] **Pin `envio` to stable `^3.0.0` once released.** The migration currently targets `3.0.0-rc.0`; after the stable release, bump the dependency, regenerate code, and rerun codegen/typecheck/tests to catch API drift.
 - [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.
+
+## Claude Code permissions hardening
+
+- [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
+- [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely.

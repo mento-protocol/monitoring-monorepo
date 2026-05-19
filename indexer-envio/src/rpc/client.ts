@@ -14,11 +14,12 @@ import { consoleLogger, type RpcLogger } from "./log.js";
 // ---------------------------------------------------------------------------
 
 /** How many failures of the same (chainId, fn) to accumulate before emitting
- * an additional [RPC_FAILURE_BURST] summary line. Individual failures are
- * always logged; the burst line is the "pattern detected" signal for monitoring. */
+ * an additional burst summary line. Individual failures are always logged;
+ * unexpected RPC bursts are warnings, while known contract-revert bursts stay
+ * at debug level because they are expected contract behavior. */
 const RPC_BURST_INTERVAL = 10;
 
-/** Monotonically increasing failure count per `chainId:fn` key. */
+/** Monotonically increasing failure count per chain, function, and severity class. */
 const _rpcFailureCounts = new Map<string, number>();
 
 /** @internal Test-only: reset the burst-counter map between tests. */
@@ -78,7 +79,7 @@ export function describeKnownRevert(msg: string): string | undefined {
  * Log a structured RPC failure. Known contract reverts are logged at debug
  * level with a human-readable explanation; unexpected failures are logged at
  * warn level. A burst-summary line is emitted every `RPC_BURST_INTERVAL`
- * failures for the same chain+function combination regardless of level.
+ * failures for the same chain+function combination at the same severity class.
  */
 export function logRpcFailure(
   chainId: number,
@@ -108,12 +109,20 @@ export function logRpcFailure(
     );
   }
 
-  const burstKey = `${chainId}:${fn}`;
+  const burstClass = knownRevert ? "contract-revert" : "rpc-failure";
+  const burstKey = `${chainId}:${fn}:${burstClass}`;
   const count = (_rpcFailureCounts.get(burstKey) ?? 0) + 1;
   _rpcFailureCounts.set(burstKey, count);
   if (count % RPC_BURST_INTERVAL === 0) {
-    const tag = knownRevert ? "CONTRACT_REVERT_BURST" : "RPC_FAILURE_BURST";
-    log.warn(`[${tag}] chainId=${chainId} fn=${fn} failureCount=${count}`);
+    if (knownRevert) {
+      log.debug(
+        `[CONTRACT_REVERT_BURST] chainId=${chainId} fn=${fn} failureCount=${count} expected=true`,
+      );
+    } else {
+      log.warn(
+        `[RPC_FAILURE_BURST] chainId=${chainId} fn=${fn} failureCount=${count}`,
+      );
+    }
   }
 }
 

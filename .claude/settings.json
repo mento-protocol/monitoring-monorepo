@@ -9,6 +9,29 @@
       "Bash(ESLINT_BASELINE_MAIN=* node *)",
       "Bash(until *)",
       "WebFetch(domain:monitoring.mento.org)"
+    ],
+    "deny": [
+      "Read(**/node_modules/**)",
+      "Read(**/generated/**)",
+      "Read(**/.envio/build/**)",
+      "Read(**/.envio/runtime/**)",
+      "Read(**/.next/**)",
+      "Read(**/coverage/**)",
+      "Read(**/reports/jscpd/**)",
+      "Read(**/.turbo/**)",
+      "Read(**/dist/**)",
+      "Read(**/build/**)",
+      "Read(**/playwright-report/**)",
+      "Read(**/test-results/**)",
+      "Read(**/.pnpm-store/**)",
+      "Read(**/.vercel/**)",
+      "Read(**/*.tsbuildinfo)",
+      "Read(**/.redteam/**)",
+      "Read(**/.clawpatch/runs/**)",
+      "Read(**/.clawpatch/patches/**)",
+      "Read(**/.clawpatch/reports/**)",
+      "Read(**/.clawpatch/locks/**)",
+      "Read(**/WORK.md)"
     ]
   }
 }
