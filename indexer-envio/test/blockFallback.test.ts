@@ -23,7 +23,7 @@ type MockReadContractArgs = Record<string, unknown> & {
   args?: unknown;
 };
 type ReadContractFn = (args: MockReadContractArgs) => Promise<unknown>;
-type CapturedLogs = { debug: string[]; warn: string[] };
+type CapturedLogs = { debug: string[]; info: string[]; warn: string[] };
 
 /** Build a minimal mock viem client whose readContract behaviour is controlled
  *  by the provided function. */
@@ -32,14 +32,19 @@ function mockClient(readContract: ReadContractFn): PublicClient {
 }
 
 function captureLogs(): CapturedLogs & {
-  logger: { debug: (msg: string) => void; warn: (msg: string) => void };
+  logger: {
+    debug: (msg: string) => void;
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+    error: (msg: string) => void;
+  };
 } {
-  const captured: CapturedLogs = { debug: [], warn: [] };
+  const captured: CapturedLogs = { debug: [], info: [], warn: [] };
   return {
     ...captured,
     logger: {
       debug: (msg: string) => captured.debug.push(msg),
-      info: () => {},
+      info: (msg: string) => captured.info.push(msg),
       warn: (msg: string) => captured.warn.push(msg),
       error: () => {},
     },
@@ -59,12 +64,21 @@ describe("readContractWithBlockFallback", () => {
 
   // Replace the delay function with an instant no-op for tests.
   let originalDelayFn: typeof _testHooks.delayFn;
+  let originalNowFn: typeof _testHooks.nowFn;
+  let nowMs = 0;
   beforeAll(() => {
     originalDelayFn = _testHooks.delayFn;
+    originalNowFn = _testHooks.nowFn;
     _testHooks.delayFn = async () => {};
+    _testHooks.nowFn = () => nowMs;
+  });
+  beforeEach(() => {
+    nowMs = 0;
+    _testHooks.resetFallbackRuntimeState();
   });
   afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
+    _testHooks.nowFn = originalNowFn;
   });
 
   // -------------------------------------------------------------------------
@@ -633,9 +647,100 @@ describe("readContractWithBlockFallback", () => {
         fallbackFailedLine.includes("<redacted>"),
         "sanitized URL replacement marker must appear",
       );
+      assert.ok(
+        fallbackFailedLine.includes('primaryErr="querying historical state"'),
+        "fallback failure line should preserve sanitized primary error",
+      );
     } finally {
       console.warn = origWarn;
     }
+  });
+
+  it("archive-depth: secondary rate limit starts a cooldown for that chain/function", async () => {
+    nowMs = 1_000;
+    const captured = captureLogs();
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    let fallbackCalls = 0;
+    const fallback = mockClient(async () => {
+      fallbackCalls++;
+      if (fallbackCalls === 1) {
+        throw new Error(
+          "Request exceeds defined limit. Details: rate-limit exceeded",
+        );
+      }
+      return "secondary-after-cooldown";
+    });
+
+    await assert.rejects(
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        100n,
+        fallback,
+        captured.logger,
+      ),
+      /rate-limit exceeded/,
+    );
+    assert.equal(fallbackCalls, 1);
+    assert.match(captured.warn.join("\n"), /RPC_FALLBACK_COOLDOWN_START/);
+
+    await assert.rejects(
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        101n,
+        fallback,
+        captured.logger,
+      ),
+      /querying historical state/,
+    );
+    assert.equal(
+      fallbackCalls,
+      1,
+      "cooldown skips the secondary instead of hammering the fallback",
+    );
+    assert.match(captured.debug.join("\n"), /RPC_FALLBACK_COOLDOWN/);
+
+    nowMs += 10_001;
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      102n,
+      fallback,
+      captured.logger,
+    );
+    assert.equal(res.result, "secondary-after-cooldown");
+    assert.equal(fallbackCalls, 2);
+  });
+
+  it("archive-depth: emits structured fallback summaries every 50 attempts", async () => {
+    const captured = captureLogs();
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => "secondary-block-scoped");
+    const args = { ...baseArgs, functionName: "summaryFn" };
+
+    for (let i = 0; i < 50; i++) {
+      await readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        args,
+        BigInt(1_000 + i),
+        fallback,
+        captured.logger,
+      );
+    }
+
+    assert.equal(captured.info.length, 1);
+    assert.match(captured.info[0], /\[RPC_FALLBACK_SUMMARY\]/);
+    assert.match(captured.info[0], /archiveAttempts=50/);
+    assert.match(captured.info[0], /archiveSuccesses=49/);
   });
 
   it("archive-depth: known secondary contract reverts log debug, not fallback-failed warn", async () => {
@@ -762,16 +867,21 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
   const HORIZON_CHAIN = 999_777;
 
   let originalDelayFn: typeof _testHooks.delayFn;
+  let originalNowFn: typeof _testHooks.nowFn;
   beforeAll(() => {
     originalDelayFn = _testHooks.delayFn;
+    originalNowFn = _testHooks.nowFn;
     _testHooks.delayFn = async () => {};
+    _testHooks.nowFn = () => 0;
   });
   afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
+    _testHooks.nowFn = originalNowFn;
   });
 
   beforeEach(() => {
     _resetFallbackArchiveDepth();
+    _testHooks.resetFallbackRuntimeState();
   });
 
   it("first archive-depth fallback failure records the horizon", async () => {
