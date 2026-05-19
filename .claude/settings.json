@@ -4,6 +4,10 @@
       "Bash(terraform -chdir=terraform output:*)",
       "Bash(terraform -chdir=terraform plan:*)",
       "Bash(terraform -chdir=terraform validate:*)",
+      "Bash(bash scripts/*)",
+      "Bash(bash ./scripts/*)",
+      "Bash(ESLINT_BASELINE_MAIN=* node *)",
+      "Bash(until *)",
       "WebFetch(domain:monitoring.mento.org)"
     ]
   }
