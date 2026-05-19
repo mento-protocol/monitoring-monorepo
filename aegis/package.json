@@ -8,6 +8,7 @@
   "scripts": {
     "build": "nest build",
     "agent:deploy": "cd grafana-agent && gcloud builds submit --project mento-monitoring",
+    "agent:seed-secrets": "cd grafana-agent && ./seed-secrets.sh",
     "deploy": "./bin/deploy.sh",
     "dev": "nest start --watch",
     "format": "trunk fmt",

@@ -17,7 +17,29 @@ The grafana agent pushes the prometheus metrics to grafana. This folder contains
 Requirements: `gcloud` is authenticated with permissions to submit Cloud Build
 jobs and deploy App Engine services in the `mento-monitoring` project.
 
-1. Somebody executes `pnpm aegis:agent:deploy` from the monorepo root, creating and running a Cloud Build job in `mento-monitoring`.
-2. [CloudBuild Step 1] Runs `template-agent.sh` with values from google cloud secrets and prepares the `agent.yaml` file.
-3. [CloudBuild Step 2] Runs `gcloud app deploy grafana-agent.yaml` which starts the app engine deploy flow.
-4. [App engine deploy] Dockerfile is executed and image starts running.
+The target project must already have enabled versions for these Secret Manager
+secrets:
+
+- `grafana-agent-endpoint`
+- `grafana-agent-username`
+- `grafana-agent-password`
+
+Terraform creates the secret containers and IAM bindings, but it does not manage
+secret values because that would put Grafana Cloud credentials in Terraform
+state. Seed the first versions after `pnpm infra:apply`:
+
+```sh
+GRAFANA_AGENT_ENDPOINT='https://...' \
+  GRAFANA_AGENT_USERNAME='...' \
+  GRAFANA_AGENT_PASSWORD='...' \
+  pnpm aegis:agent:seed-secrets
+```
+
+The seed script refuses to overwrite existing enabled versions. To rotate the
+values intentionally, run it with `FORCE=1`.
+
+1. Somebody executes `pnpm aegis:agent:seed-secrets` once per project bootstrap or `FORCE=1 pnpm aegis:agent:seed-secrets` during credential rotation.
+2. Somebody executes `pnpm aegis:agent:deploy` from the monorepo root, creating and running a Cloud Build job in `mento-monitoring`.
+3. [CloudBuild Step 1] Runs `template-agent.sh` with values from google cloud secrets and prepares the `agent.yaml` file.
+4. [CloudBuild Step 2] Runs `gcloud app deploy grafana-agent.yaml` which starts the app engine deploy flow.
+5. [App engine deploy] Dockerfile is executed and image starts running.

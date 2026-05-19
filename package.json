@@ -23,6 +23,7 @@
     "aegis:tf:init": "pnpm --filter @mento-protocol/aegis tf:init",
     "aegis:tf:plan": "pnpm --filter @mento-protocol/aegis tf:plan",
     "aegis:tf:apply": "pnpm --filter @mento-protocol/aegis tf:apply",
+    "aegis:agent:seed-secrets": "pnpm --filter @mento-protocol/aegis agent:seed-secrets",
     "aegis:agent:deploy": "pnpm --filter @mento-protocol/aegis agent:deploy",
     "deploy:indexer": "./scripts/deploy-indexer.sh",
     "deploy:indexer:status": "./scripts/deploy-indexer-status.sh",

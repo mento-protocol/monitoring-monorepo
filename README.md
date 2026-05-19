@@ -205,6 +205,14 @@ pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to me
 pnpm aegis:logs
 ```
 
+Grafana Agent deploys from the same project. On a fresh project bootstrap,
+create the Secret Manager versions before the first deploy:
+
+```bash
+pnpm aegis:agent:seed-secrets
+pnpm aegis:agent:deploy
+```
+
 Grafana dashboards and v2 alert rules live in `aegis/terraform` and keep the
 existing GCS backend prefix `aegis`:
 

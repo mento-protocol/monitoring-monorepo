@@ -10,9 +10,9 @@ steps:
     args: [app, deploy, --quiet, grafana-agent.yaml]
 availableSecrets:
   secretManager:
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-endpoint/versions/1
+    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-endpoint/versions/latest
       env: GRAFANA_AGENT_ENDPOINT
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-username/versions/1
+    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-username/versions/latest
       env: GRAFANA_AGENT_USERNAME
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-password/versions/1
+    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-password/versions/latest
       env: GRAFANA_AGENT_PASSWORD

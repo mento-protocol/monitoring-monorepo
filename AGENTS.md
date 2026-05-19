@@ -247,6 +247,7 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
+pnpm aegis:agent:seed-secrets # Seed/rotate Grafana Agent Secret Manager versions
 pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
 pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
 
@@ -274,7 +275,7 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - **Package:** `@mento-protocol/aegis`
 - **Runtime:** NestJS service deployed to GCP App Engine in `mento-monitoring` (`aegis/app.yaml`)
 - **Purpose:** Polls v2 on-chain contract state via RPC view calls and exposes Prometheus metrics at `/metrics`
-- **Grafana Agent:** `aegis/grafana-agent/` remains the App Engine service that scrapes Aegis and metrics-bridge, then remote-writes to Grafana Cloud
+- **Grafana Agent:** `aegis/grafana-agent/` remains the App Engine service that scrapes Aegis and metrics-bridge, then remote-writes to Grafana Cloud. Terraform creates the Secret Manager containers; run `pnpm aegis:agent:seed-secrets` before the first agent deploy in a fresh project.
 - **Terraform:** `aegis/terraform/` owns the Aegis Grafana dashboards, folders, alert rules, Discord contact points, and Splunk On-Call routing. The backend remains `gs://mento-terraform-tfstate-6ed6/aegis`.
 - **Contracts:** `aegis/contracts/` uses Foundry with submodules under `aegis/lib/`; run `forge test` from `aegis/` when Solidity helpers change.
 - **Commands:** Use the root `pnpm aegis:*` scripts for build/dev/test/lint/deploy/logs/Terraform/Grafana Agent deploy.

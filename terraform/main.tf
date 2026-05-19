@@ -336,6 +336,15 @@ resource "google_project_service" "appengineflex" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+resource "google_project_service" "compute" {
+  project                    = google_project.monitoring.project_id
+  service                    = "compute.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 resource "google_project_service" "secretmanager" {
   project                    = google_project.monitoring.project_id
   service                    = "secretmanager.googleapis.com"
@@ -409,6 +418,19 @@ locals {
     "grafana-agent-username",
     "grafana-agent-password",
   ])
+
+  grafana_agent_cloudbuild_service_accounts = {
+    legacy  = "${google_project.monitoring.number}@cloudbuild.gserviceaccount.com"
+    compute = "${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+  }
+
+  grafana_agent_cloudbuild_project_roles = toset([
+    "roles/appengine.appAdmin",
+    "roles/artifactregistry.writer",
+    "roles/cloudbuild.builds.editor",
+    "roles/logging.viewer",
+    "roles/storage.admin",
+  ])
 }
 
 resource "google_secret_manager_secret" "grafana_agent" {
@@ -441,6 +463,40 @@ resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_com
   member    = "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
 
   depends_on = [google_project_service.cloudbuild]
+}
+
+resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" {
+  for_each = {
+    for binding in setproduct(keys(local.grafana_agent_cloudbuild_service_accounts), local.grafana_agent_cloudbuild_project_roles) :
+    "${binding[0]}:${binding[1]}" => {
+      member = "serviceAccount:${local.grafana_agent_cloudbuild_service_accounts[binding[0]]}"
+      role   = binding[1]
+    }
+  }
+
+  project = google_project.monitoring.project_id
+  role    = each.value.role
+  member  = each.value.member
+
+  depends_on = [
+    google_project_iam_member.terraform_owner,
+    google_project_service.appengineflex,
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
+}
+
+resource "google_service_account_iam_member" "grafana_agent_cloudbuild_appengine_default_service_account_user" {
+  for_each = local.grafana_agent_cloudbuild_service_accounts
+
+  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${local.aegis_app_engine_default_service_account}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${each.value}"
+
+  depends_on = [
+    google_app_engine_application.aegis,
+    google_project_iam_member.grafana_agent_cloudbuild_deployer,
+  ]
 }
 
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
@@ -592,6 +648,19 @@ resource "google_project_iam_member" "dev_appengine_admin" {
   member   = each.value
 
   depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_service_account_iam_member" "dev_appengine_default_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${local.aegis_app_engine_default_service_account}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [
+    google_app_engine_application.aegis,
+    google_project_iam_member.dev_appengine_admin,
+  ]
 }
 
 # cloudbuild.yaml pins `options.logging: CLOUD_LOGGING_ONLY` so both CI and
