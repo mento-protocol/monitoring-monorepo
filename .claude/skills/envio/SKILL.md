@@ -57,7 +57,7 @@ Frontends should **always** reference the **static indexer URL** (e.g. `https://
 ## Checking sync status
 
 ```bash
-npx envio-cloud deployment status mento <commit> mento-protocol -o json
+pnpm exec envio-cloud deployment status mento <commit> mento-protocol -o json
 ```
 
 Per-chain fields that matter:
@@ -85,7 +85,7 @@ pnpm deploy:indexer:logs --build              # build logs (useful when a deploy
 pnpm deploy:indexer:logs --follow             # tail (polls every 10s)
 ```
 
-`--limit` maxes at 100. `--level` is comma-separated: `trace,debug,info,warn,error`. `--build` flips to build-time logs — check these first if a push never produces a deployment record.
+`--limit` is clamped to 50 by the wrapper script (`scripts/deploy-indexer-logs.sh`); higher values are silently lowered. `--level` is comma-separated: `trace,debug,info,warn,error`. `--build` flips to build-time logs — check these first if a push never produces a deployment record.
 
 ## envio-cloud CLI cheat sheet
 
@@ -167,7 +167,7 @@ Notes:
 
 When asked to "monitor the latest deployment until ready to promote":
 
-1. `npx envio-cloud indexer get mento mento-protocol -o json` — find the newest `deployments[].commit_hash` where `prod_status !== "prod"`. If none exists, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
+1. `pnpm deploy:indexer:info <commit>` (or `pnpm exec envio-cloud indexer get mento mento-protocol -o json`) — find the newest `deployments[].commit_hash` where `prod_status !== "prod"`. If none exists, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
 3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
 4. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
