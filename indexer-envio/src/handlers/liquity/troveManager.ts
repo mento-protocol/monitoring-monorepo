@@ -328,6 +328,32 @@ function transitionOpenedTrove(
   };
 }
 
+function transitionClosedTrove(
+  trove: Trove,
+  instance: LiquityInstance,
+  args: { blockTimestamp: bigint; blockNumber: bigint; txHash: string },
+): { trove: Trove; instance: LiquityInstance } {
+  const transitioned = transitionTroveStatus(
+    {
+      ...trove,
+      closedAt: args.blockTimestamp,
+      closedAtBlock: args.blockNumber,
+      closedTxHash: args.txHash,
+    },
+    TROVE_STATUS.CLOSED,
+    instance,
+  );
+  return {
+    trove: transitioned.trove,
+    instance: {
+      ...transitioned.instance,
+      troveClosedCountBucket: transitioned.instance.troveClosedCountBucket + 1,
+      troveClosedCountDayBucket:
+        transitioned.instance.troveClosedCountDayBucket + 1,
+    },
+  };
+}
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -387,24 +413,11 @@ indexer.onEvent(
         txHash: event.transaction.hash,
       }));
     } else if (op === OP.CLOSE_TROVE) {
-      const transitioned = transitionTroveStatus(
-        {
-          ...trove,
-          closedAt: blockTimestamp,
-          closedAtBlock: blockNumber,
-          closedTxHash: event.transaction.hash,
-        },
-        TROVE_STATUS.CLOSED,
-        instance,
-      );
-      trove = transitioned.trove;
-      instance = {
-        ...transitioned.instance,
-        troveClosedCountBucket:
-          transitioned.instance.troveClosedCountBucket + 1,
-        troveClosedCountDayBucket:
-          transitioned.instance.troveClosedCountDayBucket + 1,
-      };
+      ({ trove, instance } = transitionClosedTrove(trove, instance, {
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+      }));
     } else if (op === OP.LIQUIDATE) {
       const transitioned = transitionTroveStatus(
         {
@@ -472,9 +485,7 @@ indexer.onEvent(
       borrowingFeeCum:
         instance.borrowingFeeCum + event.params._debtIncreaseFromUpfrontFee,
     };
-    // TroveOperation handler doesn't mutate `trove.debt` — only status flips
-    // (debt changes arrive in the subsequent TroveUpdated). So delta here is
-    // driven purely by open↔not-open transitions on the unchanged debt.
+    // TroveOperation only flips status — debt arrives in TroveUpdated.
     instance = applySystemDebtDelta(instance, prevTroveState, {
       status: trove.status,
       debt: trove.debt,
