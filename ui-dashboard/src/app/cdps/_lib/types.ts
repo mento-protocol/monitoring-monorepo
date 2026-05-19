@@ -114,8 +114,12 @@ export type CdpInstanceDailySnapshot = {
   systemColl: string;
 };
 
+/** `instanceId` is selected only by the cross-CDP overview query; per-market
+ *  queries already filter to a single instance and don't bother projecting
+ *  it. Kept optional on every event row so both consumers share types. */
 export type CdpLiquidationEventRow = {
   id: string;
+  instanceId?: string;
   debtOffsetBySP: string;
   debtRedistributed: string;
   boldGasCompensation: string;
@@ -131,6 +135,7 @@ export type CdpLiquidationEventRow = {
 
 export type CdpRedemptionEventRow = {
   id: string;
+  instanceId?: string;
   attemptedBoldAmount: string;
   actualBoldAmount: string;
   ETHSent: string;
@@ -145,6 +150,7 @@ export type CdpRedemptionEventRow = {
 
 export type CdpSpRebalanceEventRow = {
   id: string;
+  instanceId?: string;
   amountCollIn: string;
   amountStableOut: string;
   timestamp: string;
@@ -154,6 +160,7 @@ export type CdpSpRebalanceEventRow = {
 
 export type CdpTroveOperationEventRow = {
   id: string;
+  instanceId?: string;
   troveId: string;
   /** Liquity v2 OP enum: 0=open, 1=close, 2=adjust, 3=adjustInterestRate,
    *  7=openAndJoinBatch, 8=setBatchManager, 9=removeFromBatch.

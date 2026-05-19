@@ -149,3 +149,46 @@ export const CDP_TRANSACTIONS = `
     }
   }
 `;
+
+// Cross-CDP transactions feed for the /cdps overview page. Same shape as
+// CDP_TRANSACTIONS but without the instanceId filter — the limit caps each
+// kind, and the UI merges client-side and shows the last N. `instanceId`
+// is projected so the UI can resolve which market each row belongs to.
+export const ALL_CDP_TRANSACTIONS = `
+  query AllCdpTransactions($limit: Int!) {
+    LiquidationEvent(
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      debtOffsetBySP debtRedistributed boldGasCompensation collGasCompensation
+      collSentToSP collRedistributed collSurplus priceAtLiquidation
+      timestamp blockNumber txHash
+    }
+    RedemptionEvent(
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      attemptedBoldAmount actualBoldAmount ETHSent ETHFee
+      price redemptionPrice isRebalance
+      timestamp blockNumber txHash
+    }
+    SpRebalanceEvent(
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      amountCollIn amountStableOut
+      timestamp blockNumber txHash
+    }
+    TroveOperationEvent(
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId troveId operation collChange debtChange
+      annualInterestRate debtIncreaseFromUpfrontFee
+      timestamp blockNumber txHash
+    }
+  }
+`;
