@@ -22,7 +22,6 @@ indexer.onEvent(
       event.chainId,
       params.debtToken,
     );
-    if (context.isPreload) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     context.CdpPool.set({

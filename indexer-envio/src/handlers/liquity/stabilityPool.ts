@@ -26,7 +26,6 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const depositor = asAddress(event.params._depositor);
-    if (context.isPreload) return;
     context.PendingDepositOperation.set({
       id: pendingDepositKey(
         event.chainId,
