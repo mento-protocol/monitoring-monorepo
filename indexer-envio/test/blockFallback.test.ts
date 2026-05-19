@@ -439,7 +439,7 @@ describe("readContractWithBlockFallback", () => {
   it("archive-depth: successful secondary fallback logs debug, not warn", async () => {
     const primary = mockClient(async () => {
       throw new Error(
-        "Block requested not found. Request might be querying historical state that is not available.",
+        "Block requested not found. Request might be querying historical state that is not available. URL: https://rpc.example/secret-token",
       );
     });
     const fallback = mockClient(async () => "deep-archive-result");
@@ -456,6 +456,10 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(captured.warn.length, 0);
     assert.equal(captured.debug.length, 1);
     assert.match(captured.debug[0], /\[RPC_ARCHIVE_FALLBACK\]/);
+    assert.match(captured.debug[0], /primaryErr=/);
+    assert.match(captured.debug[0], /querying historical state/);
+    assert.match(captured.debug[0], /https:\/\/rpc.example\/<redacted>/);
+    assert.doesNotMatch(captured.debug[0], /secret-token/);
   });
 
   it("archive-depth: matches 'querying historical state' phrasing too", async () => {
