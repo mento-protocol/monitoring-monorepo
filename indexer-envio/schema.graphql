@@ -1060,9 +1060,17 @@ type LiquityInstance {
   liqCollRedistributedCum: BigInt!
   latestTotalCollRedist: BigInt!
   latestTotalDebtRedist: BigInt!
+  # redemption*Cum counts all Redemption events. The rebalanceRedemption*
+  # subset (PR #31 in mento-protocol/bold) is the portion driven by
+  # CDPLiquidityStrategy via redeemCollateralRebalancing — discriminated by
+  # event.transaction.to == cdpLiquidityStrategy. User-driven = total minus
+  # rebalance subset.
   redemptionCountCum: Int!
   redemptionDebtCum: BigInt!
   redemptionFeeCum: BigInt!
+  rebalanceRedemptionCountCum: Int!
+  rebalanceRedemptionDebtCum: BigInt!
+  rebalanceRedemptionFeeCum: BigInt!
   borrowingFeeCum: BigInt!
   spRebalanceCount: Int!
   spRebalanceCollInCum: BigInt!
@@ -1074,6 +1082,8 @@ type LiquityInstance {
   liqDebtOffsetBucket: BigInt!
   redemptionCountBucket: Int!
   redemptionDebtBucket: BigInt!
+  rebalanceRedemptionCountBucket: Int!
+  rebalanceRedemptionDebtBucket: BigInt!
   spRebalanceCountBucket: Int!
   shortfallSubsidyBucket: BigInt!
   currentHourBucket: BigInt!
@@ -1083,6 +1093,8 @@ type LiquityInstance {
   liqDebtOffsetDayBucket: BigInt!
   redemptionCountDayBucket: Int!
   redemptionDebtDayBucket: BigInt!
+  rebalanceRedemptionCountDayBucket: Int!
+  rebalanceRedemptionDebtDayBucket: BigInt!
   spRebalanceCountDayBucket: Int!
   shortfallSubsidyDayBucket: BigInt!
   currentDayBucket: BigInt!
@@ -1117,10 +1129,13 @@ type LiquityInstanceSnapshot @index(fields: ["instanceId", "timestamp"]) {
   liqDebtOffsetBucket: BigInt!
   redemptionCount: Int!
   redemptionDebtBucket: BigInt!
+  rebalanceRedemptionCount: Int!
+  rebalanceRedemptionDebtBucket: BigInt!
   spRebalanceCount: Int!
   shortfallSubsidyBucket: BigInt!
   liqCountCum: Int!
   redemptionCountCum: Int!
+  rebalanceRedemptionCountCum: Int!
   blockNumber: BigInt!
 }
 
@@ -1148,10 +1163,13 @@ type LiquityInstanceDailySnapshot @index(fields: ["instanceId", "timestamp"]) {
   liqDebtOffsetBucket: BigInt!
   redemptionCount: Int!
   redemptionDebtBucket: BigInt!
+  rebalanceRedemptionCount: Int!
+  rebalanceRedemptionDebtBucket: BigInt!
   spRebalanceCount: Int!
   shortfallSubsidyBucket: BigInt!
   liqCountCum: Int!
   redemptionCountCum: Int!
+  rebalanceRedemptionCountCum: Int!
   blockNumber: BigInt!
 }
 
@@ -1184,6 +1202,9 @@ type RedemptionEvent @index(fields: ["instanceId", "timestamp"]) {
   ETHFee: BigInt!
   price: BigInt!
   redemptionPrice: BigInt!
+  # true when fired by CDPLiquidityStrategy.redeemCollateralRebalancing
+  # (discriminated by tx.to == cdpLiquidityStrategy); false for user redemptions.
+  isRebalance: Boolean!
   timestamp: BigInt! @index
   blockNumber: BigInt!
   txHash: String!

@@ -5,12 +5,23 @@ import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
 import { CDP_MARKETS } from "@/lib/queries";
-import type { CdpCollateral, CdpInstance } from "../_lib/types";
+import {
+  CDP_TROVES_LIST_LIMIT,
+  type CdpCollateral,
+  type CdpInstance,
+  type CdpTroveListRow,
+} from "../_lib/types";
+import {
+  aggregatesForCollateral,
+  isOpenTroveStatus,
+  type CdpAggregates,
+} from "../_lib/health";
 import { CdpMarketCard } from "./cdp-market-card";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
   LiquityInstance: CdpInstance[];
+  Trove: CdpTroveListRow[];
 };
 
 export function CdpsPageClient() {
@@ -20,13 +31,44 @@ export function CdpsPageClient() {
     { chainId: network.chainId },
   );
 
+  const liquityInstances = data?.LiquityInstance;
+  const troves = data?.Trove;
+
   const instances = useMemo(() => {
     const m = new Map<string, CdpInstance>();
-    for (const instance of data?.LiquityInstance ?? []) {
+    for (const instance of liquityInstances ?? []) {
       m.set(instance.collateralId, instance);
     }
     return m;
-  }, [data]);
+  }, [liquityInstances]);
+
+  // Chain-wide cap → if hit, EVERY collateral's aggregate is suspect
+  // because the `order_by lastUpdatedAt desc` slice can push an entire
+  // collateral's troves off-page; the per-collateral fallback below also
+  // carries this flag so a missing-entry collateral isn't shown as Healthy.
+  const queryTruncated = (troves?.length ?? 0) >= CDP_TROVES_LIST_LIMIT;
+
+  const aggregatesByCollateral = useMemo(() => {
+    // Single pass: accumulate directly per collateralId, skipping non-open
+    // statuses inline. Avoids the intermediate `grouped` map of trove arrays.
+    const out = new Map<string, CdpAggregates>();
+    for (const trove of troves ?? []) {
+      if (!isOpenTroveStatus(trove.status)) continue;
+      const agg = out.get(trove.collateralId) ?? {
+        openTroveCount: 0,
+        totalDebt: BigInt(0),
+        totalColl: BigInt(0),
+        truncated: queryTruncated,
+      };
+      out.set(trove.collateralId, {
+        ...agg,
+        openTroveCount: agg.openTroveCount + 1,
+        totalDebt: agg.totalDebt + BigInt(trove.debt),
+        totalColl: agg.totalColl + BigInt(trove.coll),
+      });
+    }
+    return out;
+  }, [troves, queryTruncated]);
 
   if (network.chainId !== 42220) {
     return (
@@ -60,6 +102,11 @@ export function CdpsPageClient() {
             key={collateral.id}
             collateral={collateral}
             instance={instances.get(collateral.id)}
+            aggregates={aggregatesForCollateral(
+              collateral.id,
+              aggregatesByCollateral,
+              queryTruncated,
+            )}
           />
         ))}
       </div>

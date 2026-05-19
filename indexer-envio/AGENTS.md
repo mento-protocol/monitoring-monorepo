@@ -127,3 +127,58 @@ PR #369 (vp-phase2 follow-up) hit 7 rounds of codex review chasing edges of how 
 
 - Run the queries the dashboard depends on against your local Hasura with a representative pool (one with hundreds of events) to catch silent truncation
 - Verify any new entity ID under the same-block-write scenario before merging
+
+## Mento Liquity v2 (CDP) fork — what to know
+
+We index Mento's fork of Liquity v2 (a.k.a. Bold) at <https://github.com/mento-protocol/bold>. The fork has a few divergences from upstream that materially affect indexing. Glue contracts live outside the `bold` repo: `CDPLiquidityStrategy.sol` is in `mento-protocol/mento-core` under `contracts/liquidityStrategies/`, and `ReserveTroveFactory.sol` is in `mento-protocol/deployments-v2` under `src/`.
+
+### Don't trust `ActivePoolBoldDebtUpdated` / `DefaultPoolBoldDebtUpdated`
+
+- The deployed `ActivePool` contracts **never emit** `ActivePoolBoldDebtUpdated`. Verified empirically on Celo: walking the GBPm ActivePool's full log history (`0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2` via Blockscout) returns 399 logs — 394 of them `ActivePoolCollBalanceUpdated`, the rest are one-time constructor events. Zero debt updates. This is upstream behavior (Liquity commit `2a695d42` "eliminate recordedDebtSum (G)"), not Mento-specific.
+- `DefaultPoolBoldDebtUpdated` exists in the source and IS wired up to emit, but is dormant on Celo today (no liquidations have caused debt redistribution yet — first redistribution will trigger it).
+- **Implication for `LiquityInstance.systemDebt`:** it is maintained by `applySystemDebtDelta` in `src/handlers/liquity/troves.ts` — running sum of open-trove debts (status ∈ {active, zombie}), updated in handlers via captured prev/next snapshots. Do NOT add `systemDebt = activePoolDebt + defaultPoolDebt` anywhere — that would clobber the delta-tracked value the first time DefaultPool fires.
+
+### Delta-tracking pattern for trove handlers
+
+When mutating trove status or debt:
+
+1. Capture `prev = { status: trove.status, debt: trove.debt }` **immediately after** `getOrCreateTrove` — before bracket-debt move, debt overwrite, or any reclassified re-read. Single capture point.
+2. Mutate the trove (status transition, debt assignment).
+3. At the end of the handler, call `applySystemDebtDelta(instance, prev, { status: trove.status, debt: trove.debt })`. The helper is idempotent on no-op transitions.
+4. For loop-based handlers (`BatchUpdated`, `reclassifyTrovesForLoadedParams`), capture prev **per row inside the loop** and apply per row — never aggregate-then-apply.
+
+The two failure modes the pattern guards against are sign errors (open↔not-open flips) and double-applies. The `isOpenStatus` helper (`active` or `zombie`) is the source of truth for "contributes to systemDebt".
+
+### Rebalance redemptions are conflated with user redemptions today
+
+PR #31 in `mento-protocol/bold` adds `CollateralRegistry.redeemCollateralRebalancing` — callable only by the `liquidityStrategy` address, runs through `TroveManager.redeemCollateral`, fires `Redemption` + `TroveOperation(REDEEM_COLLATERAL)` indistinguishable from user redemptions. Discriminator: `event.transaction.to == cdpLiquidityStrategy address` (single shared strategy `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` across all three Celo markets, in `config/liquity.json`).
+
+On-chain reality (2026-05-19): 368 GBPm redemptions, 13 JPYm redemptions, ALL rebalance-driven (sampled tx.to → matches strategy address). If you ship a "redemption volume" KPI without separating these out, it will be 100% noise on production data today.
+
+### Investigating "is this event actually being emitted?"
+
+When an indexer field looks consistently wrong on production data (always 0, never changes, etc.), don't assume our handler is buggy. The deployed contract may simply not emit the event. To check:
+
+```bash
+python3 << 'EOF'
+import json, urllib.request, collections
+addr = "0x<contract>"
+counts = collections.Counter()
+seen = {}
+params = ""
+for _ in range(10):
+    url = f"https://celo.blockscout.com/api/v2/addresses/{addr}/logs?items_count=50{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    d = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    for it in d.get('items', []):
+        topic = (it.get('topics') or [None])[0]
+        counts[topic] += 1
+        seen.setdefault(topic, (it.get('decoded') or {}).get('method_call', '???'))
+    n = d.get('next_page_params')
+    if not n: break
+    params = f"&block_number={n['block_number']}&index={n['index']}"
+for t, c in counts.most_common(): print(f'{c:>5}  {seen[t]}')
+EOF
+```
+
+If your event isn't in the topic histogram, the indexer can't see it no matter how correct the handler is. Switch to delta-tracking from a different signal or read state via `eth_call`.
