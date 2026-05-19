@@ -1,3 +1,17 @@
+import {
+  CDP_TROVE_OPEN_STATUSES,
+  CDP_TROVES_DETAIL_LIMIT,
+  CDP_TROVES_LIST_LIMIT,
+} from "@/app/cdps/_lib/types";
+
+const OPEN_STATUS_LIST = CDP_TROVE_OPEN_STATUSES.map((s) => `"${s}"`).join(
+  ", ",
+);
+
+// We pull every active+zombie trove here so the list page can compute its own
+// systemDebt and borrower count: the on-chain ActivePoolBoldDebtUpdated event
+// is never emitted by Mento's Liquity fork, so LiquityInstance.systemDebt /
+// activeTroveCount understate reality. See BACKLOG for indexer-side fix.
 export const CDP_MARKETS = `
   query CdpMarkets($chainId: Int!) {
     LiquityCollateral(
@@ -17,6 +31,16 @@ export const CDP_MARKETS = `
       icrP1Bps icrP5Bps icrP50Bps icrFracBelowMcrBps
       liqCountCum redemptionCountCum borrowingFeeCum redemptionFeeCum
       isShutDown shutDownAt shutDownTcrBps lastEventBlock lastEventTimestamp
+    }
+    Trove(
+      where: {
+        chainId: { _eq: $chainId }
+        status: { _in: [${OPEN_STATUS_LIST}] }
+      }
+      order_by: { lastUpdatedAt: desc }
+      limit: ${CDP_TROVES_LIST_LIMIT}
+    ) {
+      id collateralId status debt coll
     }
   }
 `;
@@ -38,10 +62,10 @@ export const CDP_MARKET_DETAIL = `
     Trove(
       where: {
         collateralId: { _eq: $collateralId }
-        status: { _in: ["active", "zombie"] }
+        status: { _in: [${OPEN_STATUS_LIST}] }
       }
       order_by: { lastUpdatedAt: desc }
-      limit: 50
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {
       id troveId owner status debt coll icrBps interestRate interestBatchId
       lastUpdatedAt redemptionCount redeemedDebt redeemedColl

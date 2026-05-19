@@ -194,6 +194,14 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Shared constants needed on both sides go in zero-dependency modules — e.g. `lib/hasura-timeout.ts` (single `export const HASURA_TIMEOUT_MS = 5000`). The client-side `lib/graphql.ts` re-exports for backwards compat, but new server-side imports MUST target the zero-dep module directly.
 - Caused codex P1 on PR #372 — `HASURA_TIMEOUT_MS` was added to `lib/graphql.ts` and three OG modules imported it; CI didn't catch it because the next build step isn't gated, but it would have leaked SWR into the server bundle.
 
+### CDP page — derived metrics until indexer is resynced
+
+The `/cdps` list page and detail page (`src/app/cdps/`) derive `systemDebt` and `openTroveCount` **client-side** from active+zombie `Trove` entities, because the indexer's `LiquityInstance.systemDebt` is permanently `0` until the indexer is resynced against the post-fix handlers. The derivation lives in `_lib/health.ts:aggregateTroves` and runs on data fetched by `CDP_MARKETS` (which intentionally pulls all open troves, max 500).
+
+Once the indexer is resynced (see `BACKLOG.md` "Indexer: deploy + resync"), delete the `Trove { ... }` selection from `CDP_MARKETS` in `src/lib/queries/liquity.ts`, remove `aggregateTroves` from the page wiring, and read `instance.systemDebt` directly again. Keep `aggregateTroves` for the borrower count if the indexer's `activeTroveCount` still excludes zombies — that's a separate indexer-side gap (`activeTroveCount` is only "active", but UX-meaningful is "active + zombie" = positions with outstanding debt).
+
+The CDP health badge state machine is in `_lib/health.ts:deriveCdpHealth`. Today's signals: shutdown flag (terminal), SP-empty + outstanding debt (critical), SP coverage tiers (<5% critical, <50% warning). ICR/TCR percentiles are stubbed to `-1` in the indexer (no live price feed yet); when those become real, add ratio-based signals to the state machine.
+
 ### Content-Security-Policy (nonce-based)
 
 - CSP is set **exclusively in middleware** (`src/middleware.ts`). There is no CSP in `next.config.ts`; a duplicate header would cause browsers to apply the intersection of both policies.

@@ -1,14 +1,23 @@
 import Link from "next/link";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
-import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
+import {
+  cdpSymbolSlug,
+  formatAggregateAmount,
+  formatTokenAmount,
+} from "../_lib/format";
+import { CdpHealthBadge } from "./cdp-health-badge";
 
 export function CdpMarketCard({
   collateral,
   instance,
+  aggregates,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
+  aggregates: CdpAggregates;
 }) {
+  const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <Link
       href={`/cdps/${cdpSymbolSlug(collateral.symbol)}`}
@@ -21,26 +30,32 @@ export function CdpMarketCard({
           </h2>
           <p className="text-sm text-slate-400">USDm-backed CDP market</p>
         </div>
-        <span className="text-xs rounded border border-slate-700 px-2 py-1 text-slate-300">
-          {instance?.isShutDown ? "Shutdown" : "Live"}
-        </span>
+        <CdpHealthBadge health={health} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Metric
           label="System Debt"
-          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
+          value={formatAggregateAmount(
+            aggregates.totalDebt,
+            collateral.symbol,
+            aggregates.truncated,
+          )}
         />
         <Metric
           label="System Collateral"
           value={formatTokenAmount(instance?.systemColl, "USDm")}
         />
         <Metric
-          label="SP Headroom"
-          value={formatTokenAmount(instance?.spHeadroom, collateral.symbol)}
+          label="Stability Pool"
+          value={formatTokenAmount(instance?.spDeposits, collateral.symbol)}
         />
         <Metric
-          label="Active Troves"
-          value={instance == null ? "—" : String(instance.activeTroveCount)}
+          label="Open Troves"
+          value={
+            instance == null
+              ? "—"
+              : `${aggregates.truncated ? "≥" : ""}${aggregates.openTroveCount}`
+          }
         />
       </div>
     </Link>
