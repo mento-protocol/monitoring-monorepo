@@ -31,17 +31,5 @@
       "Read(**/.clawpatch/**)",
       "Read(**/WORK.md)"
     ]
-  },
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /Users/chapati/.claude/compound-nudge.sh"
-          }
-        ]
-      }
-    ]
   }
 }

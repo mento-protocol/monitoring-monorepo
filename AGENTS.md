@@ -82,11 +82,11 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 ### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
 
-tldr: every Hasura-polling SWR hook needs `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`) and `AbortSignal.timeout(8_000)` paired with the 10s interval. Respect the 1000-row cap with pre-rolled snapshots or `fetchPaginatedSnapshotPages`. New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into the page's primary pool query — hosted Hasura rejects unknown columns during the deploy+resync window. Distinguish `isLoading` from "data resolved to zero". Full rules in the linked checklist.
+tldr: every Hasura-polling SWR hook MUST set `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`) and `AbortSignal.timeout(8_000)` paired with the 10s interval. Respect the 1000-row cap with pre-rolled snapshots or `fetchPaginatedSnapshotPages`. New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern) — NEVER mixed into the page's primary pool query (hosted Hasura rejects unknown columns during the deploy+resync window). Distinguish `isLoading` from "data resolved to zero" — NEVER render "100% / no breaches" while `data === undefined`. Full rules in the linked checklist.
 
 ### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
 
-tldr: FX-pool metrics use trading-seconds — call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), never `now - start` directly. Threshold-derived metrics use the per-event threshold, not the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
+tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), NEVER `now - start` directly. Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, NEVER from the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
 
 ### Keyboard a11y on controlled widgets — `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`
 
@@ -112,11 +112,11 @@ tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` local
 
 ### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
 
-tldr: rename/remove resources require a `moved` block (`deletion_protection = true` makes a missed `moved` block fatal). Cloud Run `--revision-suffix` must start with a lowercase letter (RFC 1035) AND be unique per run (`$GITHUB_RUN_ID`). Probe path is `/health`, never `/healthz` (Cloud Run v2 reserves `/healthz`). Bootstrap `image` must respond to the configured probe path. WIF requires `roles/iam.serviceAccountTokenCreator` on the runtime SA the deployer impersonates. Full rules in the linked checklist.
+tldr: rename/remove resources REQUIRE a `moved` block (`deletion_protection = true` makes a missed `moved` block fatal). Cloud Run `--revision-suffix` MUST start with a lowercase letter (RFC 1035) AND be unique per run (`$GITHUB_RUN_ID`). Probe path is `/health`, NEVER `/healthz` (Cloud Run v2 reserves `/healthz`). Bootstrap `image` MUST respond to the configured probe path. WIF requires `roles/iam.serviceAccountTokenCreator` on the runtime SA the deployer impersonates. Full rules in the linked checklist.
 
 ### CI workflow gates — `docs/pr-checklists/ci-workflow-gates.md`
 
-tldr: required-status workflows must NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever). Deploy jobs gate on `if: github.ref == 'refs/heads/main'`. Third-party actions SHA-pinned. Concurrency group with `cancel-in-progress: false`. Cache keys include every input that affects the cached output. Full rules in the linked checklist.
+tldr: required-status workflows MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
 
 ### File-size budget
 
@@ -129,7 +129,7 @@ tldr: required-status workflows must NOT use `paths:`/`paths-ignore:` (skipped r
 
 ### Security / CSP
 
-- CSP `connect-src` must include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/next.config.ts`'s `CSP_CONNECT_SRC`)
+- CSP `connect-src` MUST include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/src/lib/csp.ts`'s `CSP_CONNECT_SRC`)
 - Do NOT widen `script-src` with `unsafe-eval` without proof a library actually needs it — the current policy is deliberately tight and Plotly runs fine without it
 - Auth/allowlist constants must be centralized — don't repeat domain literals across files
 

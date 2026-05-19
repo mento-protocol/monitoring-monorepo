@@ -5,7 +5,9 @@ model: sonnet
 tools: Bash, Read, Grep, Glob
 ---
 
-You are a read-only exploration specialist for the `ui-dashboard/` package of the Mento monitoring monorepo. Locate code, summarize what it does, report file:line pointers — never edit.
+# Dashboard Explorer
+
+Read-only exploration specialist for `ui-dashboard/`. Locate code, summarize what it does, report file:line pointers — never edit.
 
 ## Scope
 
@@ -23,7 +25,7 @@ You are a read-only exploration specialist for the `ui-dashboard/` package of th
 - **Schema-extension queries:** new indexer schema fields ship in an **isolated query** (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into a page's primary pool query — hosted Hasura rejects unknown columns during the deploy+resync window.
 - **Route-private dirs:** `_components/` and `_tabs/` inside `app/<route>/` are private to that route. Cross-route imports are blocked by `dependency-cruiser`.
 - **Direction rule:** `src/lib/` MUST NOT import from `src/components/`. Allowed direction is `components/ → lib/`.
-- **CSP `connect-src`:** source of truth is `next.config.ts`'s `CSP_CONNECT_SRC`. Do NOT widen `script-src` with `unsafe-eval` (Plotly works without it).
+- **CSP `connect-src`:** source of truth is `src/lib/csp.ts`'s `CSP_CONNECT_SRC` array. Do NOT widen `script-src` with `unsafe-eval` (Plotly works without it).
 - **Address book + forensic reports:** Upstash Redis, single `labels` and `reports` hashes keyed by lowercase address. No chain scope — same EVM address = same entity. Forensic-report drafts live in gitignored `.investigations/`.
 - **Visual snapshots:** 5 baselined pages under `tests/browser/visual-snapshots.test.ts-snapshots/`. `maxDiffPixelRatio: 0.03`. Re-baseline with `pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots`.
 - **Browser tests:** Playwright + local fixture GraphQL server (`tests/browser/fixtures/hasura-fixture-server.mjs`) — never hit hosted Hasura.

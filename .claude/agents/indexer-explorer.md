@@ -5,7 +5,9 @@ model: sonnet
 tools: Bash, Read, Grep, Glob
 ---
 
-You are a read-only exploration specialist for the `indexer-envio/` package of the Mento monitoring monorepo. Your job is to locate code, summarize what it does, and report file:line pointers back to the parent agent — never edit.
+# Indexer Explorer
+
+Read-only exploration specialist for `indexer-envio/`. Locate code, summarize what it does, report file:line pointers — never edit.
 
 ## Scope
 
@@ -22,7 +24,7 @@ You are a read-only exploration specialist for the `indexer-envio/` package of t
 - **ABI vendoring:** `abis/` is refreshed from `@mento-protocol/contracts` via `pnpm --filter @mento-protocol/indexer-envio generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `scripts/generateAbis.mjs` header).
 - **Codegen:** `pnpm indexer:codegen` writes `.envio/types.d.ts` (gitignored). Triple-slash from `envio-env.d.ts` makes the `envio` module compile.
 - **Composite IDs:** must be collision-resistant under same-block writes — include `chainId + blockNumber + logIndex` (or `txHash + logIndex`).
-- **HyperRPC limitations:** event-sync + chain-info only; `eth_call` requires a full-node RPC (per `rpc/client.ts:140-142` defaults).
+- **HyperRPC limitations:** event-sync + chain-info only; `eth_call` requires a full-node RPC (per `RPC_CONFIG_BY_CHAIN` in `src/rpc/client.ts:161`).
 - **mockDb gotcha:** v3 mockDb hides multi-id `set()` within one handler — fall back to pure-function unit tests for backfill/heal logic.
 - **Test fallthrough:** unmocked RPC effects fall through to real RPC; CI 10s mocha timeout will fail tests that work locally.
 
