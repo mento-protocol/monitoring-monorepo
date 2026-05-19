@@ -1,4 +1,8 @@
-import { CDP_TROVE_OPEN_STATUSES } from "@/app/cdps/_lib/types";
+import {
+  CDP_TROVE_OPEN_STATUSES,
+  CDP_TROVES_DETAIL_LIMIT,
+  CDP_TROVES_LIST_LIMIT,
+} from "@/app/cdps/_lib/types";
 
 const OPEN_STATUS_LIST = CDP_TROVE_OPEN_STATUSES.map((s) => `"${s}"`).join(
   ", ",
@@ -34,7 +38,7 @@ export const CDP_MARKETS = `
         status: { _in: [${OPEN_STATUS_LIST}] }
       }
       order_by: { lastUpdatedAt: desc }
-      limit: 500
+      limit: ${CDP_TROVES_LIST_LIMIT}
     ) {
       id collateralId status debt coll
     }
@@ -61,7 +65,7 @@ export const CDP_MARKET_DETAIL = `
         status: { _in: [${OPEN_STATUS_LIST}] }
       }
       order_by: { lastUpdatedAt: desc }
-      limit: 50
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {
       id troveId owner status debt coll icrBps interestRate interestBatchId
       lastUpdatedAt redemptionCount redeemedDebt redeemedColl

@@ -23,6 +23,10 @@ export type CdpAggregates = {
   openTroveCount: number;
   totalDebt: bigint;
   totalColl: bigint;
+  /** true when the upstream trove query hit its row cap — totals/count are
+   * floors, not the real population. Renders refuse to compute SP coverage
+   * (health → "unknown") and tiles show `≥` prefixes. */
+  truncated: boolean;
 };
 
 const OPEN_STATUS_SET: ReadonlySet<string> = new Set<string>(
@@ -37,6 +41,7 @@ export function isOpenTroveStatus(
 
 export function aggregateTroves(
   troves: readonly Pick<CdpTroveListRow, "status" | "debt" | "coll">[],
+  options: { truncated?: boolean } = {},
 ): CdpAggregates {
   let openTroveCount = 0;
   let totalDebt = BigInt(0);
@@ -47,7 +52,12 @@ export function aggregateTroves(
     totalDebt += BigInt(trove.debt);
     totalColl += BigInt(trove.coll);
   }
-  return { openTroveCount, totalDebt, totalColl };
+  return {
+    openTroveCount,
+    totalDebt,
+    totalColl,
+    truncated: options.truncated ?? false,
+  };
 }
 
 /**
@@ -79,6 +89,15 @@ export function deriveCdpHealth(
       state: "unknown",
       label: "Unknown",
       reasons: ["No indexed state"],
+    };
+  }
+  if (aggregates.truncated) {
+    // We don't know real total debt → can't reason about SP coverage
+    // without misclassifying borderline-healthy markets as critical.
+    return {
+      state: "unknown",
+      label: "Unknown",
+      reasons: ["Trove list truncated at row cap — totals are floors"],
     };
   }
 

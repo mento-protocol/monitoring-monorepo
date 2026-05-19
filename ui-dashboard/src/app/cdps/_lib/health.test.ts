@@ -83,7 +83,16 @@ describe("aggregateTroves", () => {
       openTroveCount: 0,
       totalDebt: BigInt(0),
       totalColl: BigInt(0),
+      truncated: false,
     });
+  });
+
+  it("propagates truncated flag from options", () => {
+    const result = aggregateTroves(
+      [trove("active", "1000000000000000000000")],
+      { truncated: true },
+    );
+    expect(result.truncated).toBe(true);
   });
 });
 
@@ -92,11 +101,13 @@ describe("deriveCdpHealth", () => {
     openTroveCount: 1,
     totalDebt: debt,
     totalColl: BigInt(0),
+    truncated: false,
   });
   const emptyAgg = {
     openTroveCount: 0,
     totalDebt: BigInt(0),
     totalColl: BigInt(0),
+    truncated: false,
   };
 
   it("shutdown takes precedence over everything", () => {
@@ -181,5 +192,24 @@ describe("deriveCdpHealth", () => {
     const h = deriveCdpHealth(collateral(), instance(), emptyAgg);
     expect(h.state).toBe("healthy");
     expect(h.reasons).toContain("No outstanding debt");
+  });
+
+  it("returns unknown when aggregates are truncated (totals are floors)", () => {
+    // Workaround for capped trove queries: even if the partial-sum SP-coverage
+    // would compute as "warning", we can't trust it. Critical-on-empty-SP is
+    // a real signal; misclassifying a borderline-healthy market as critical
+    // because we under-counted debt is worse than refusing to render.
+    const h = deriveCdpHealth(
+      collateral(),
+      instance({ spDeposits: "200000000000000000000" }),
+      {
+        openTroveCount: 50,
+        totalDebt: BigInt("1000000000000000000000"),
+        totalColl: BigInt(0),
+        truncated: true,
+      },
+    );
+    expect(h.state).toBe("unknown");
+    expect(h.reasons[0]).toMatch(/truncated/i);
   });
 });

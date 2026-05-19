@@ -75,6 +75,13 @@ export type CdpTroveListRow = {
 export const CDP_TROVE_OPEN_STATUSES = ["active", "zombie"] as const;
 export type CdpTroveOpenStatus = (typeof CDP_TROVE_OPEN_STATUSES)[number];
 
+// Caps on the workaround GraphQL queries that pull open troves for client-side
+// aggregation. Single source of truth shared between the queries and the
+// completeness-check in the aggregator. When the indexer's `systemDebt` is
+// resynced and the workaround is removed (see BACKLOG), drop these too.
+export const CDP_TROVES_LIST_LIMIT = 500;
+export const CDP_TROVES_DETAIL_LIMIT = 50;
+
 export type CdpDepositor = {
   id: string;
   address: string;

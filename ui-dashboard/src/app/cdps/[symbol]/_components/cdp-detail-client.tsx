@@ -10,15 +10,20 @@ import { useGQL } from "@/lib/graphql";
 import { CDP_MARKET_DETAIL, CDP_MARKETS } from "@/lib/queries";
 import { buildPoolDetailHref } from "@/lib/routing";
 import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
-import type {
-  CdpCollateral,
-  CdpDepositor,
-  CdpInstance,
-  CdpPoolRow,
-  CdpTrove,
-  CdpTroveListRow,
+import {
+  CDP_TROVES_DETAIL_LIMIT,
+  type CdpCollateral,
+  type CdpDepositor,
+  type CdpInstance,
+  type CdpPoolRow,
+  type CdpTrove,
+  type CdpTroveListRow,
 } from "../../_lib/types";
-import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
+import {
+  cdpSymbolSlug,
+  formatAggregateAmount,
+  formatTokenAmount,
+} from "../../_lib/format";
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
 
@@ -131,7 +136,9 @@ function CdpDetailContent({
   depositors: CdpDepositor[];
   cdpPools: CdpPoolRow[];
 }) {
-  const aggregates = aggregateTroves(troves);
+  const aggregates = aggregateTroves(troves, {
+    truncated: troves.length >= CDP_TROVES_DETAIL_LIMIT,
+  });
   const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <div className="space-y-8">
@@ -161,10 +168,12 @@ function CdpDetailContent({
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile
           label="System Debt"
-          value={formatTokenAmount(
-            aggregates.totalDebt.toString(),
+          value={formatAggregateAmount(
+            aggregates.totalDebt,
             collateral.symbol,
+            aggregates.truncated,
           )}
+          subtitle={aggregates.truncated ? "Trove list truncated" : undefined}
         />
         <Tile
           label="System Collateral"
@@ -176,7 +185,11 @@ function CdpDetailContent({
         />
         <Tile
           label="Open Troves"
-          value={instance == null ? "—" : String(aggregates.openTroveCount)}
+          value={
+            instance == null
+              ? "—"
+              : `${aggregates.truncated ? "≥" : ""}${aggregates.openTroveCount}`
+          }
           subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
         />
       </section>

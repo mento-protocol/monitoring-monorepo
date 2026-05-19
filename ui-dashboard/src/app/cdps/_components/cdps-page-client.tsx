@@ -5,10 +5,11 @@ import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
 import { CDP_MARKETS } from "@/lib/queries";
-import type {
-  CdpCollateral,
-  CdpInstance,
-  CdpTroveListRow,
+import {
+  CDP_TROVES_LIST_LIMIT,
+  type CdpCollateral,
+  type CdpInstance,
+  type CdpTroveListRow,
 } from "../_lib/types";
 import { isOpenTroveStatus, type CdpAggregates } from "../_lib/health";
 import { CdpMarketCard } from "./cdp-market-card";
@@ -23,6 +24,7 @@ const EMPTY_AGGREGATES: CdpAggregates = {
   openTroveCount: 0,
   totalDebt: BigInt(0),
   totalColl: BigInt(0),
+  truncated: false,
 };
 
 export function CdpsPageClient() {
@@ -46,6 +48,9 @@ export function CdpsPageClient() {
   const aggregatesByCollateral = useMemo(() => {
     // Single pass: accumulate directly per collateralId, skipping non-open
     // statuses inline. Avoids the intermediate `grouped` map of trove arrays.
+    // Chain-wide cap → if hit, EVERY collateral's aggregate is suspect
+    // because we don't know which collateral lost rows past the cap.
+    const truncated = (troves?.length ?? 0) >= CDP_TROVES_LIST_LIMIT;
     const out = new Map<string, CdpAggregates>();
     for (const trove of troves ?? []) {
       if (!isOpenTroveStatus(trove.status)) continue;
@@ -53,8 +58,10 @@ export function CdpsPageClient() {
         openTroveCount: 0,
         totalDebt: BigInt(0),
         totalColl: BigInt(0),
+        truncated,
       };
       out.set(trove.collateralId, {
+        ...agg,
         openTroveCount: agg.openTroveCount + 1,
         totalDebt: agg.totalDebt + BigInt(trove.debt),
         totalColl: agg.totalColl + BigInt(trove.coll),

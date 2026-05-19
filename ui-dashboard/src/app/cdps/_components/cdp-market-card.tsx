@@ -1,7 +1,11 @@
 import Link from "next/link";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
-import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import {
+  cdpSymbolSlug,
+  formatAggregateAmount,
+  formatTokenAmount,
+} from "../_lib/format";
 import { CdpHealthBadge } from "./cdp-health-badge";
 
 export function CdpMarketCard({
@@ -31,9 +35,10 @@ export function CdpMarketCard({
       <div className="grid grid-cols-2 gap-3">
         <Metric
           label="System Debt"
-          value={formatTokenAmount(
-            aggregates.totalDebt.toString(),
+          value={formatAggregateAmount(
+            aggregates.totalDebt,
             collateral.symbol,
+            aggregates.truncated,
           )}
         />
         <Metric
@@ -46,7 +51,11 @@ export function CdpMarketCard({
         />
         <Metric
           label="Open Troves"
-          value={instance == null ? "—" : String(aggregates.openTroveCount)}
+          value={
+            instance == null
+              ? "—"
+              : `${aggregates.truncated ? "≥" : ""}${aggregates.openTroveCount}`
+          }
         />
       </div>
     </Link>
