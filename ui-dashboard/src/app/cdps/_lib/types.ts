@@ -103,3 +103,57 @@ export type CdpPoolRow = {
   addedAtTimestamp: string;
   updatedAtTimestamp: string;
 };
+
+export type CdpInstanceDailySnapshot = {
+  id: string;
+  timestamp: string;
+  spDeposits: string;
+  spColl: string;
+  spHeadroom: string;
+  systemDebt: string;
+  systemColl: string;
+};
+
+export type CdpLiquidationEventRow = {
+  id: string;
+  debtOffsetBySP: string;
+  debtRedistributed: string;
+  boldGasCompensation: string;
+  collGasCompensation: string;
+  collSentToSP: string;
+  collRedistributed: string;
+  collSurplus: string;
+  priceAtLiquidation: string;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
+export type CdpRedemptionEventRow = {
+  id: string;
+  attemptedBoldAmount: string;
+  actualBoldAmount: string;
+  ETHSent: string;
+  ETHFee: string;
+  price: string;
+  redemptionPrice: string;
+  isRebalance: boolean;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
+export type CdpSpRebalanceEventRow = {
+  id: string;
+  amountCollIn: string;
+  amountStableOut: string;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
+/** Discriminated union used by the unified CDP transactions table. */
+export type CdpTransactionRow =
+  | ({ kind: "liquidation" } & CdpLiquidationEventRow)
+  | ({ kind: "redemption" } & CdpRedemptionEventRow)
+  | ({ kind: "spRebalance" } & CdpSpRebalanceEventRow);
