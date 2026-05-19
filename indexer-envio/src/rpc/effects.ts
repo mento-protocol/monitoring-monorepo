@@ -611,6 +611,13 @@ const poolTradingLimitsShape = S.schema({
   token1: S.nullable(tradingLimitsShape),
 });
 
+// This hot path usually serves historical FPMM.Swap replay. On Monad, the
+// primary RPC lacks archive depth for the older blocks, so every read falls
+// through to the public fallback. Keep the Envio effect rate well below the
+// fallback's limit, and avoid a per-effect two-call burst by reading tokens
+// sequentially inside the effect.
+const POOL_TRADING_LIMITS_CALLS_PER_SECOND = 25;
+
 export const poolTradingLimitsEffect = createEffect(
   {
     name: "poolTradingLimits",
@@ -622,29 +629,24 @@ export const poolTradingLimitsEffect = createEffect(
       blockNumber: S.bigint,
     },
     output: S.nullable(poolTradingLimitsShape),
-    rateLimit: { calls: 200, per: "second" },
+    rateLimit: { calls: POOL_TRADING_LIMITS_CALLS_PER_SECOND, per: "second" },
     cache: false,
   },
   async ({ input, context }) => {
-    // Keep the two token reads under one Envio effect envelope. Viem can still
-    // batch the underlying `eth_call`s, while Envio schedules/rate-limits one
-    // effect per swap instead of one per token.
-    const [token0, token1] = await Promise.all([
-      fetchTradingLimits(
-        input.chainId,
-        input.poolAddress,
-        input.token0,
-        input.blockNumber,
-        context.log,
-      ),
-      fetchTradingLimits(
-        input.chainId,
-        input.poolAddress,
-        input.token1,
-        input.blockNumber,
-        context.log,
-      ),
-    ]);
+    const token0 = await fetchTradingLimits(
+      input.chainId,
+      input.poolAddress,
+      input.token0,
+      input.blockNumber,
+      context.log,
+    );
+    const token1 = await fetchTradingLimits(
+      input.chainId,
+      input.poolAddress,
+      input.token1,
+      input.blockNumber,
+      context.log,
+    );
     if (token0 === null && token1 === null) return null;
     return { token0, token1 };
   },
