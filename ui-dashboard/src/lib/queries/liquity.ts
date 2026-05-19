@@ -88,3 +88,55 @@ export const CDP_MARKET_DETAIL = `
     }
   }
 `;
+
+// Daily rollup of LiquityInstanceSnapshot — one row per CDP market per UTC day.
+// At ~365 rows per market per year the full history fits well under Hasura's
+// 1000-row cap. Fetching newest-first preserves recent history if the cap is
+// ever hit; the chart reverses to chronological client-side.
+export const CDP_INSTANCE_DAILY_SNAPSHOTS = `
+  query CdpInstanceDailySnapshots($instanceId: String!) {
+    LiquityInstanceDailySnapshot(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+    ) {
+      id timestamp spDeposits spColl spHeadroom systemDebt systemColl
+    }
+  }
+`;
+
+// Unified CDP transactions feed. The indexer has no single CDPOperation
+// entity, so we fetch the three event types in parallel and merge them
+// client-side. Each branch's history is well under ENVIO_MAX_ROWS, so a
+// single capped query per kind suffices — the merged result is paginated
+// client-side via array slice. If any per-kind array hits the cap, the
+// UI shows a footnote so older history isn't silently dropped.
+export const CDP_TRANSACTIONS = `
+  query CdpTransactions($instanceId: String!, $limit: Int!) {
+    LiquidationEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id debtOffsetBySP debtRedistributed boldGasCompensation collGasCompensation
+      collSentToSP collRedistributed collSurplus priceAtLiquidation
+      timestamp blockNumber txHash
+    }
+    RedemptionEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id attemptedBoldAmount actualBoldAmount ETHSent ETHFee
+      price redemptionPrice isRebalance
+      timestamp blockNumber txHash
+    }
+    SpRebalanceEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id amountCollIn amountStableOut
+      timestamp blockNumber txHash
+    }
+  }
+`;

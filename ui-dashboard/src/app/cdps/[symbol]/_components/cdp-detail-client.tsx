@@ -7,14 +7,21 @@ import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton, Tile } from "@/components/feedback";
 import { Table, Row, Th, Td } from "@/components/table";
 import { useGQL } from "@/lib/graphql";
-import { CDP_MARKET_DETAIL, CDP_MARKETS } from "@/lib/queries";
+import {
+  CDP_INSTANCE_DAILY_SNAPSHOTS,
+  CDP_MARKET_DETAIL,
+  CDP_MARKETS,
+} from "@/lib/queries";
 import { buildPoolDetailHref } from "@/lib/routing";
 import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
+import type { Network } from "@/lib/networks";
+import { explorerAddressUrl } from "@/lib/tokens";
 import {
   CDP_TROVES_LIST_LIMIT,
   type CdpCollateral,
   type CdpDepositor,
   type CdpInstance,
+  type CdpInstanceDailySnapshot,
   type CdpPoolRow,
   type CdpTrove,
   type CdpTroveListRow,
@@ -26,6 +33,8 @@ import {
 } from "../../_lib/format";
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
+import { CdpStabilityPoolTvlChart } from "./cdp-stability-pool-tvl-chart";
+import { CdpTransactionsTable } from "./cdp-transactions-table";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
@@ -39,6 +48,10 @@ type CdpDetailResponse = {
   Trove: CdpTrove[];
   StabilityPoolDepositor: CdpDepositor[];
   CdpPool: CdpPoolRow[];
+};
+
+type CdpDailySnapshotsResponse = {
+  LiquityInstanceDailySnapshot: CdpInstanceDailySnapshot[];
 };
 
 export function CdpDetailClient({ symbol }: { symbol: string }) {
@@ -59,6 +72,10 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
     collateral == null ? null : CDP_MARKET_DETAIL,
     collateral == null ? undefined : { collateralId: collateral.id },
   );
+  const snapshots = useGQL<CdpDailySnapshotsResponse>(
+    collateral == null ? null : CDP_INSTANCE_DAILY_SNAPSHOTS,
+    collateral == null ? undefined : { instanceId: collateral.id },
+  );
 
   if (network.chainId !== 42220) {
     return (
@@ -66,19 +83,39 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
     );
   }
   return (
-    <CdpDetailState markets={markets} detail={detail} collateral={collateral} />
+    <CdpDetailState
+      markets={markets}
+      detail={detail}
+      snapshots={snapshots}
+      collateral={collateral}
+      network={network}
+    />
   );
 }
 
 function CdpDetailState({
   markets,
   detail,
+  snapshots,
   collateral,
+  network,
 }: {
   markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+  snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral | undefined;
+  network: Network;
 }) {
+  // aggregateTroves runs a BigInt sum across up to 500 troves; memoize so
+  // the 30s SWR refresh doesn't recompute when neither input changed.
+  const aggregates = useMemo(
+    () =>
+      collateral == null
+        ? null
+        : aggregatesFromChainTroves(collateral.id, markets.data?.Trove),
+    [collateral, markets.data?.Trove],
+  );
+
   if (markets.isLoading || (collateral != null && detail.isLoading)) {
     return <Skeleton rows={8} />;
   }
@@ -89,7 +126,7 @@ function CdpDetailState({
       />
     );
   }
-  if (collateral == null) {
+  if (collateral == null || aggregates == null) {
     return <EmptyBox message="Unknown CDP market." />;
   }
   if (detail.error) {
@@ -99,26 +136,44 @@ function CdpDetailState({
       />
     );
   }
-
-  const instance = detail.data?.LiquityInstance[0];
-  const troves = detail.data?.Trove ?? [];
-  const depositors = detail.data?.StabilityPoolDepositor ?? [];
-  const cdpPools = detail.data?.CdpPool ?? [];
-  const aggregates = aggregatesFromChainTroves(
-    collateral.id,
-    markets.data?.Trove,
-  );
-
   return (
     <CdpDetailContent
-      collateral={collateral}
-      instance={instance}
-      troves={troves}
-      depositors={depositors}
-      cdpPools={cdpPools}
-      aggregates={aggregates}
+      {...buildContentProps({
+        detail,
+        snapshots,
+        collateral,
+        network,
+        aggregates,
+      })}
     />
   );
+}
+
+function buildContentProps({
+  detail,
+  snapshots,
+  collateral,
+  network,
+  aggregates,
+}: {
+  detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+  snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
+  collateral: CdpCollateral;
+  network: Network;
+  aggregates: ReturnType<typeof aggregateTroves>;
+}) {
+  return {
+    collateral,
+    instance: detail.data?.LiquityInstance[0],
+    troves: detail.data?.Trove ?? [],
+    depositors: detail.data?.StabilityPoolDepositor ?? [],
+    cdpPools: detail.data?.CdpPool ?? [],
+    aggregates,
+    snapshots: snapshots.data?.LiquityInstanceDailySnapshot ?? [],
+    snapshotsLoading: snapshots.isLoading,
+    snapshotsError: snapshots.error != null,
+    network,
+  };
 }
 
 // For aggregates, use the chain-wide markets-list query (up to 500 troves)
@@ -143,6 +198,10 @@ function CdpDetailContent({
   depositors,
   cdpPools,
   aggregates,
+  snapshots,
+  snapshotsLoading,
+  snapshotsError,
+  network,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
@@ -150,36 +209,22 @@ function CdpDetailContent({
   depositors: CdpDepositor[];
   cdpPools: CdpPoolRow[];
   aggregates: ReturnType<typeof aggregateTroves>;
+  snapshots: CdpInstanceDailySnapshot[];
+  snapshotsLoading: boolean;
+  snapshotsError: boolean;
+  network: Network;
 }) {
-  const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <div className="space-y-8">
-      <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <Link
-            href="/cdps"
-            className="text-sm text-indigo-400 hover:text-indigo-300"
-          >
-            CDPs
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold text-white">
-            {collateral.symbol} CDP Market
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            USDm collateral, debt denominated in {collateral.symbol}.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <CdpHealthBadge health={health} />
-          <span className="text-xs text-slate-500">
-            Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
-          </span>
-        </div>
-      </header>
+      <DetailHeader
+        collateral={collateral}
+        instance={instance}
+        aggregates={aggregates}
+      />
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile
-          label="System Debt"
+          label="Total Supply (System Debt)"
           value={formatAggregateAmount(
             aggregates.totalDebt,
             collateral.symbol,
@@ -194,6 +239,7 @@ function CdpDetailContent({
         <Tile
           label="Stability Pool"
           value={formatTokenAmount(instance?.spDeposits, collateral.symbol)}
+          href={explorerAddressUrl(network, collateral.stabilityPool)}
         />
         <Tile
           label="Open Troves"
@@ -205,6 +251,14 @@ function CdpDetailContent({
           subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
         />
       </section>
+
+      <CdpStabilityPoolTvlChart
+        snapshots={snapshots}
+        currentSpDeposits={instance?.spDeposits}
+        symbol={collateral.symbol}
+        isLoading={snapshotsLoading}
+        hasError={snapshotsError}
+      />
 
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TroveTable
@@ -220,7 +274,49 @@ function CdpDetailContent({
       </section>
 
       <CdpPoolsTable cdpPools={cdpPools} />
+
+      <CdpTransactionsTable
+        instanceId={collateral.id}
+        chainId={collateral.chainId}
+        symbol={collateral.symbol}
+      />
     </div>
+  );
+}
+
+function DetailHeader({
+  collateral,
+  instance,
+  aggregates,
+}: {
+  collateral: CdpCollateral;
+  instance: CdpInstance | undefined;
+  aggregates: ReturnType<typeof aggregateTroves>;
+}) {
+  const health = deriveCdpHealth(collateral, instance, aggregates);
+  return (
+    <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <Link
+          href="/cdps"
+          className="text-sm text-indigo-400 hover:text-indigo-300"
+        >
+          CDPs
+        </Link>
+        <h1 className="mt-1 text-2xl font-semibold text-white">
+          {collateral.symbol} CDP Market
+        </h1>
+        <p className="mt-1 text-sm text-slate-400">
+          USDm collateral, debt denominated in {collateral.symbol}.
+        </p>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        <CdpHealthBadge health={health} />
+        <span className="text-xs text-slate-500">
+          Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
+        </span>
+      </div>
+    </header>
   );
 }
 

@@ -69,3 +69,28 @@ export function filterSeriesByRange(
 export function rangeKeyToDays(range: RangeKey): number | null {
   return RANGE_DAYS[range];
 }
+
+// Stocks (TVL, total deposits) compare current to the value 7 days ago
+// (point-to-point), not a sum over two 7-day windows like flows. The
+// baseline must land inside [now - 14d, now - 7d]: sparse indexed histories
+// (low-activity markets, indexer backfill gaps) otherwise pick an
+// arbitrarily-old snapshot and silently attribute e.g. a 30-day delta to
+// the "week-over-week" caption.
+export function stockWoWChangePct(
+  series: readonly TimeSeriesPoint[],
+): number | null {
+  if (series.length < 2) return null;
+  const now = series[series.length - 1];
+  const upperCutoff = now.timestamp - 7 * SECONDS_PER_DAY;
+  const lowerCutoff = now.timestamp - 14 * SECONDS_PER_DAY;
+  let ago: TimeSeriesPoint | null = null;
+  for (let i = series.length - 2; i >= 0; i--) {
+    const ts = series[i].timestamp;
+    if (ts > upperCutoff) continue;
+    if (ts < lowerCutoff) break;
+    ago = series[i];
+    break;
+  }
+  if (!ago || ago.value <= 0) return null;
+  return ((now.value - ago.value) / ago.value) * 100;
+}
