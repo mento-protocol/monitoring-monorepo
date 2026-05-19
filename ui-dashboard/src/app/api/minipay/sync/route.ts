@@ -60,45 +60,53 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const startedAt = Date.now();
 
-  // No `Sentry.withMonitor` wrapper here: the team plan only allots one cron
-  // monitor slot and that's already used by `arkham-enrich`. Errors still
-  // surface to Sentry via `captureException` in the catch block below — we
-  // just lose missed-run / heartbeat detection on this route.
   try {
-    const fromBlock = await getLastSyncedBlock();
+    return await Sentry.withMonitor(
+      "minipay-sync",
+      async () => {
+        const fromBlock = await getLastSyncedBlock();
 
-    // Stream Dune pages → SADD per page → advance cursor on success.
-    // SADD is idempotent, so a mid-run failure leaves earlier pages
-    // persisted in Redis; the cursor only advances after every page
-    // is written, so the next run will re-pull from `fromBlock` and
-    // SADD-no-op the already-stored pages before catching up.
-    let fetched = 0;
-    let added = 0;
-    let maxBlock = fromBlock;
-    for await (const page of fetchMiniPayUsers({
-      apiKey,
-      lastBlock: fromBlock,
-    })) {
-      fetched += page.addresses.length;
-      added += await addToMiniPaySet(page.addresses);
-      if (page.maxBlock > maxBlock) maxBlock = page.maxBlock;
-    }
+        // Stream Dune pages → SADD per page → advance cursor on success.
+        // SADD is idempotent, so a mid-run failure leaves earlier pages
+        // persisted in Redis; the cursor only advances after every page
+        // is written, so the next run will re-pull from `fromBlock` and
+        // SADD-no-op the already-stored pages before catching up.
+        let fetched = 0;
+        let added = 0;
+        let maxBlock = fromBlock;
+        for await (const page of fetchMiniPayUsers({
+          apiKey,
+          lastBlock: fromBlock,
+        })) {
+          fetched += page.addresses.length;
+          added += await addToMiniPaySet(page.addresses);
+          if (page.maxBlock > maxBlock) maxBlock = page.maxBlock;
+        }
 
-    if (maxBlock > fromBlock) {
-      await setLastSyncedBlock(maxBlock);
-    }
+        if (maxBlock > fromBlock) {
+          await setLastSyncedBlock(maxBlock);
+        }
 
-    const total = await getMiniPaySetSize();
-    const body: SyncResponse = {
-      ok: true,
-      fetched,
-      added,
-      total,
-      maxBlock: maxBlock.toString(),
-      fromBlock: fromBlock.toString(),
-      durationMs: Date.now() - startedAt,
-    };
-    return NextResponse.json(body);
+        const total = await getMiniPaySetSize();
+        const body: SyncResponse = {
+          ok: true,
+          fetched,
+          added,
+          total,
+          maxBlock: maxBlock.toString(),
+          fromBlock: fromBlock.toString(),
+          durationMs: Date.now() - startedAt,
+        };
+        return NextResponse.json(body);
+      },
+      {
+        // Cron schedule mirrors vercel.json — keep them in sync.
+        schedule: { type: "crontab", value: "30 3 * * *" },
+        checkinMargin: 5,
+        maxRuntime: 15,
+        timezone: "Etc/UTC",
+      },
+    );
   } catch (err) {
     Sentry.captureException(err, { tags: { route: "minipay/sync" } });
     console.error("[minipay/sync]", err);
