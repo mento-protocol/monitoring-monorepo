@@ -20,23 +20,27 @@ jobs:
   schema-diff:
     # Always runs (required-status safe — no `paths:` filter at workflow
     # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to run the diff:
-    #   - fork / Dependabot PR               → no-op skip (read-only token
-    #                                          cannot post a comment; emit to
-    #                                          job summary instead)
-    #   - PR + filter succeeded + schema=true  → run
-    #   - PR + filter succeeded + schema=false → no-op skip (clear stale comment)
-    #   - PR + filter failed (any cause)        → run (fail-closed)
-    # When the diff does run, it posts a sticky PR comment listing
-    # breaking and dangerous changes. Advisory only — exit code is always 0.
+    # `decide` step computes whether to run the diff.
+    #
+    # Decision matrix (`decide` outputs):
+    #   run=true,  read_only=false → same-repo PR + schema changed (or filter failed)
+    #                                → run diff + post sticky comment
+    #   run=false, read_only=false → same-repo PR + schema unchanged
+    #                                → skip diff + clear stale sticky comment
+    #   run=false, read_only=true  → fork or Dependabot PR
+    #                                → skip diff + skip sticky comment (token is
+    #                                  read-only; both posting AND deleting a PR
+    #                                  comment requires write permission)
+    #
+    # Advisory only — exit code is always 0.
     name: GraphQL schema diff
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     # `pull-requests: write` is required to post the sticky PR comment.
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     # Fork PRs and Dependabot get a read-only token even when write is declared;
-    # the `decide` step detects those cases and sets run=false to avoid a
-    # permission failure in the sticky-comment step.
+    # the `decide` step sets read_only=true for those cases so both the post
+    # and the delete sticky-comment steps are skipped.
     permissions:
       contents: read
       pull-requests: write
@@ -53,10 +57,16 @@ jobs:
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
-            # The schema.graphql file is the only input for this job. A change
-            # here triggers the diff; everything else skips.
+            # schema.graphql is the primary input for this job. The workflow
+            # file, the diff script, and the graphql package are also included
+            # so that changes to the checker itself trigger a self-test run
+            # (same pattern as the other required-status gates).
             schema:
               - indexer-envio/schema.graphql
+              - .github/workflows/schema-diff.yml
+              - scripts/schema-diff.mjs
+              - package.json
+              - pnpm-lock.yaml
       - name: Decide whether to run schema diff
         id: decide
         env:
@@ -66,23 +76,30 @@ jobs:
           BASE_REPO: ${{ github.repository }}
           PR_ACTOR: ${{ github.actor }}
         run: |
-          # Fork PRs get a read-only token; posting a PR comment would fail.
-          # Dependabot is treated like a fork by GitHub (no secrets, read-only
-          # token). In both cases skip the comment step and emit to job summary.
+          # Fork PRs and Dependabot get a read-only token even when the job
+          # declares pull-requests: write.  Both posting AND deleting a sticky
+          # PR comment require write permission, so all comment steps must be
+          # skipped for these contexts.  Set read_only=true so the caller can
+          # distinguish "token unavailable" from "schema unchanged".
           if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=true"  >> "$GITHUB_OUTPUT"
             echo "PR from dependabot[bot] — read-only token, skipping schema-diff PR comment."
           elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=true"  >> "$GITHUB_OUTPUT"
             echo "PR from fork '$PR_HEAD_REPO' — read-only token, skipping schema-diff PR comment."
           elif [[ "$FILTER_OUTCOME" != "success" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "run=true"        >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
             echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running schema diff."
           elif [[ "$SCHEMA_CHANGED" == "true" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "run=true"        >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
             echo "schema.graphql changed — running schema diff."
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "run=false"       >> "$GITHUB_OUTPUT"
+            echo "read_only=false" >> "$GITHUB_OUTPUT"
             echo "schema.graphql unchanged — skipping schema diff."
           fi
       - uses: ./.github/actions/pnpm-install
@@ -121,10 +138,13 @@ jobs:
           header: schema-diff
           path: /tmp/schema-diff-output.md
       - name: Clear stale schema-diff comment
-        # When the schema is unchanged (or this is a fork/Dependabot PR),
-        # delete any previously-posted sticky comment so the PR feedback
-        # surface does not keep showing resolved breaking changes.
-        if: steps.decide.outputs.run == 'false'
+        # Only runs for same-repo PRs where the schema is unchanged (run=false,
+        # read_only=false). Fork/Dependabot PRs also set run=false but have a
+        # read-only token — deleting a PR comment requires write permission, so
+        # they must not reach this step.
+        if: >-
+          steps.decide.outputs.run == 'false' &&
+          steps.decide.outputs.read_only == 'false'
         uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
         with:
           header: schema-diff
