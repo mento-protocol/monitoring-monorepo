@@ -51,8 +51,8 @@ function badgeKindFor(row: CdpTransactionRow): BadgeKind {
   return row.isRebalance ? "rebalanceRedemption" : "userRedemption";
 }
 
-function sumWei(a: string, b: string): string {
-  return (BigInt(a) + BigInt(b)).toString();
+function sumWei(...parts: string[]): string {
+  return parts.reduce((acc, x) => acc + BigInt(x), BigInt(0)).toString();
 }
 
 interface AmountSlice {
@@ -63,11 +63,20 @@ interface AmountSlice {
 function amountsFor(row: CdpTransactionRow): AmountSlice {
   switch (row.kind) {
     case "liquidation":
+      // Full event-total: every BOLD field that left the trove (principal +
+      // gas comp) and every coll field seized (principal + gas comp).
+      // `collSurplus` is excluded — it returns to the original trove owner
+      // and isn't "seized" in the liquidation sense.
       return {
-        debt: sumWei(row.debtOffsetBySP, row.debtRedistributed),
+        debt: sumWei(
+          row.debtOffsetBySP,
+          row.debtRedistributed,
+          row.boldGasCompensation,
+        ),
         coll: sumWei(
-          sumWei(row.collSentToSP, row.collRedistributed),
-          row.collSurplus,
+          row.collSentToSP,
+          row.collRedistributed,
+          row.collGasCompensation,
         ),
       };
     case "redemption":
@@ -91,9 +100,14 @@ function mergeRows(data: CdpTransactionsResponse | undefined): {
   const rebalances: CdpTransactionRow[] = (data.SpRebalanceEvent ?? []).map(
     (r) => ({ kind: "spRebalance", ...r }),
   );
-  const rows = [...liquidations, ...redemptions, ...rebalances].sort(
-    (a, b) => Number(b.timestamp) - Number(a.timestamp),
-  );
+  // Tiebreak on id desc so same-timestamp events (common when multiple
+  // ops land in the same block) sort deterministically across event kinds
+  // instead of falling back to the array concat order.
+  const rows = [...liquidations, ...redemptions, ...rebalances].sort((a, b) => {
+    const ts = Number(b.timestamp) - Number(a.timestamp);
+    if (ts !== 0) return ts;
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+  });
   const capped =
     liquidations.length >= ENVIO_MAX_ROWS ||
     redemptions.length >= ENVIO_MAX_ROWS ||

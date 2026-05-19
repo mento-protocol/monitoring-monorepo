@@ -387,8 +387,8 @@ function computeTvlWoW(
   if (tvlNow <= 0 || daily.length === 0) return null;
   // Bound the baseline to [now-14d, now-7d] — sparse daily histories (inactive
   // pools, backfill gaps) otherwise pick an arbitrarily-old snapshot and
-  // mislabel e.g. a 30d delta as "7d". Matches tvlWoWChangePct in
-  // pool-tvl-over-time-chart.tsx.
+  // mislabel e.g. a 30d delta as "7d". Matches stockWoWChangePct in
+  // lib/time-series.ts.
   const now = Math.floor(Date.now() / 1000);
   const upperCutoff = now - SEVEN_DAYS;
   const lowerCutoff = now - 14 * SECONDS_PER_DAY;

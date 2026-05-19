@@ -114,7 +114,7 @@ export const CDP_TRANSACTIONS = `
   query CdpTransactions($instanceId: String!, $limit: Int!) {
     LiquidationEvent(
       where: { instanceId: { _eq: $instanceId } }
-      order_by: { timestamp: desc }
+      order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
       id debtOffsetBySP debtRedistributed boldGasCompensation collGasCompensation
@@ -123,7 +123,7 @@ export const CDP_TRANSACTIONS = `
     }
     RedemptionEvent(
       where: { instanceId: { _eq: $instanceId } }
-      order_by: { timestamp: desc }
+      order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
       id attemptedBoldAmount actualBoldAmount ETHSent ETHFee
@@ -132,7 +132,7 @@ export const CDP_TRANSACTIONS = `
     }
     SpRebalanceEvent(
       where: { instanceId: { _eq: $instanceId } }
-      order_by: { timestamp: desc }
+      order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
       id amountCollIn amountStableOut
