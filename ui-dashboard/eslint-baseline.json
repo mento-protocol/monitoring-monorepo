@@ -77,13 +77,6 @@
     "linePreview": " | export async function GET(request: NextRequest) { | const txHash = request.nextUrl.searchParams.get(\"txHash\")?.trim() ?? \"\";"
   },
   {
-    "file": "src/app/api/hasura/[networkId]/route.ts",
-    "ruleId": "complexity",
-    "message": "Function 'resolveLocalHasuraConfig' has a complexity of 16. Maximum allowed is 15.",
-    "line": 10,
-    "linePreview": " | function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null { | switch (networkId as LocalNetworkId) {"
-  },
-  {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'BridgeFlowsContent' has a complexity of 44. Maximum allowed is 15.",

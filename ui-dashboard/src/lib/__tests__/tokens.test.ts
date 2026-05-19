@@ -9,7 +9,6 @@ import { NETWORKS } from "../networks";
 
 const sepolia = NETWORKS["celo-sepolia-local"];
 const mainnet = NETWORKS["celo-mainnet"];
-const devnet = NETWORKS.devnet;
 
 // Mainnet token addresses (from @mento-protocol/contracts)
 const USDM_MAINNET = "0x765de816845861e75a25fca122bb6898b8b1282a";
@@ -79,10 +78,10 @@ describe("poolName", () => {
     ).toBe("KESm/USDm");
   });
 
-  it("works for DevNet", () => {
+  it("works for mainnet pools", () => {
     expect(
       poolName(
-        devnet,
+        mainnet,
         "0xfaea5f3404bba20d3cc2f8c4b0a888f55a3c7313", // GHSm
         "0x765de816845861e75a25fca122bb6898b8b1282a", // USDm
       ),

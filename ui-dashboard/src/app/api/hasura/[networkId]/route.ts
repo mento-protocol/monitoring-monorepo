@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-type LocalNetworkId = "devnet" | "celo-sepolia-local" | "celo-mainnet-local";
+type LocalNetworkId = "celo-sepolia-local" | "celo-mainnet-local";
 
 type LocalHasuraConfig = {
   upstreamUrl: string;
@@ -9,13 +9,6 @@ type LocalHasuraConfig = {
 
 function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null {
   switch (networkId as LocalNetworkId) {
-    case "devnet":
-      return {
-        upstreamUrl:
-          process.env.HASURA_UPSTREAM_URL_DEVNET?.trim() ||
-          "http://localhost:8080/v1/graphql",
-        adminSecret: process.env.HASURA_SECRET_DEVNET?.trim() ?? "",
-      };
     case "celo-sepolia-local":
       return {
         upstreamUrl:

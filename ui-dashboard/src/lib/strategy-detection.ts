@@ -62,9 +62,10 @@ const sentryLastCapturedAt = new Map<string, number>();
 
 // Cache key includes `network.id` (not just `chainId`) because multiple
 // configured networks can share a chainId with different RPC backends
-// (e.g. `devnet` and `celo-mainnet` both map to 42220). Without this,
-// enabling the local variant alongside prod would reuse classifications
-// from whichever probed first, silently crossing deployment boundaries.
+// (e.g. `celo-mainnet-local` and `celo-mainnet` both map to 42220).
+// Without this, enabling the local variant alongside prod would reuse
+// classifications from whichever probed first, silently crossing
+// deployment boundaries.
 const cacheKey = (networkId: string, rebalancer: string): string =>
   `${networkId}:${rebalancer.toLowerCase()}`;
 

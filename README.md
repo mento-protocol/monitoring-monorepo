@@ -164,10 +164,8 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo + Monad mainnet, filtered by chainId)                          |
-| `HASURA_SECRET_DEVNET`                   | Optional server-only admin secret for `/api/hasura/devnet` proxy                                           |
 | `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
 | `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
-| `HASURA_UPSTREAM_URL_DEVNET`             | Optional upstream URL override for local devnet Hasura proxy (default `http://localhost:8080/v1/graphql`)  |
 | `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL` | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |
 | `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL` | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
 | `UPSTASH_REDIS_REST_URL`                 | Address labels storage (Upstash Redis)                                                                     |

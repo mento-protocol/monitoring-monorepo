@@ -16,7 +16,7 @@
       "defaultPool": "0x95191e52d01ec060cea753cdadfeeb07b78d0047",
       "collSurplusPool": "0xfff48ee3bd2d534e35b54d538de30a9d7709d4b6",
       "addressesRegistry": "0xb3136dbadb14ab587ffa91545538126938fe0c6e",
-      "systemParams": "0xddd2de5db7e81e22553cc68ea6125b8a817ac8ea",
+      "systemParams": "0x064d8bcc79711cf51df7ca0a7fe531a271cd74e9",
       "cdpLiquidityStrategy": "0x4e78bd9565341eabe99cdc024acb044d9bdcb985",
       "slug": "gbpm"
     },

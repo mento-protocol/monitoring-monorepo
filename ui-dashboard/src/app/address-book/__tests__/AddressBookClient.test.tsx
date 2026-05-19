@@ -19,7 +19,7 @@
  * - Treat `NETWORKS` as configured in this environment so contract rows
  *   surface — `isConfiguredNetworkId` defaults to `false` without env vars.
  *   Clear every network's addressLabels and seed two synthetic contracts so
- *   real devnet/testnet labels can't bleed into search-count assertions.
+ *   real testnet/local labels can't bleed into search-count assertions.
  * - Tests rely on the ACTUAL `buildAddressBookRows` helper (used by
  *   `row-composition.test.ts`), so dedupe/order invariants stay shared.
  */
@@ -110,8 +110,8 @@ vi.mock("@/components/network-provider", async () => {
 vi.mock("@/lib/networks", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/networks")>("@/lib/networks");
-  // Hermetic test fixture: clear addressLabels on every network (devnet /
-  // local / testnets carry real labels in production config and would bleed
+  // Hermetic test fixture: clear addressLabels on every network (local
+  // and testnets carry real labels in production config and would bleed
   // into search-count assertions otherwise), then seed the two synthetic
   // contracts the suite asserts against. Mutation is safe because vitest
   // worker isolation keeps it scoped.

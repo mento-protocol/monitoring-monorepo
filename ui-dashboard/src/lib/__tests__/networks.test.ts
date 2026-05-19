@@ -132,25 +132,6 @@ describe("makeNetwork — tokenSymbols merge/override contract", () => {
   });
 });
 
-describe("NETWORKS.devnet — real-world override retention", () => {
-  const devnet = NETWORKS.devnet;
-
-  it("retains custom Deployer addressLabel from devnet config", () => {
-    expect(
-      devnet.addressLabels["0x287810f677516f10993ff63a520aad5509f35796"],
-    ).toBe("Deployer");
-  });
-
-  it("also inherits package-derived addressLabels alongside the override", () => {
-    expect(devnet.addressLabels[USDM_ADDR]).toBeDefined();
-  });
-
-  it("has tokenSymbols populated from package maps", () => {
-    expect(Object.keys(devnet.tokenSymbols).length).toBeGreaterThan(0);
-    expect(devnet.tokenSymbols[USDM_ADDR]).toBe("USDm");
-  });
-});
-
 describe("NETWORKS — general map composition", () => {
   it("celo-sepolia-local has tokenSymbols and addressLabels from Sepolia namespace", () => {
     const sepolia = NETWORKS["celo-sepolia-local"];
@@ -177,13 +158,11 @@ describe("NETWORKS — general map composition", () => {
 
 describe("NETWORKS — local development defaults", () => {
   it("does not expose local Hasura admin secrets in client network config", () => {
-    expect(NETWORKS.devnet.hasuraSecret).toBe("");
     expect(NETWORKS["celo-sepolia-local"].hasuraSecret).toBe("");
     expect(NETWORKS["celo-mainnet-local"].hasuraSecret).toBe("");
   });
 
   it("defaults local Hasura URLs to same-origin proxy routes", () => {
-    expect(NETWORKS.devnet.hasuraUrl).toBe("/api/hasura/devnet");
     expect(NETWORKS["celo-sepolia-local"].hasuraUrl).toBe(
       "/api/hasura/celo-sepolia-local",
     );
@@ -289,7 +268,6 @@ describe("NETWORKS — Monad networks", () => {
 
 describe("NETWORKS — virtual pool support", () => {
   it("enables virtual pools for all Celo networks, disables for Monad", () => {
-    expect(NETWORKS.devnet.hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-sepolia-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet"].hasVirtualPools).toBe(true);
@@ -309,7 +287,6 @@ describe("isCanonicalNetwork", () => {
 
   it("returns false for local variants sharing a chainId with a canonical prod one", () => {
     expect(isCanonicalNetwork("celo-mainnet-local")).toBe(false);
-    expect(isCanonicalNetwork("devnet")).toBe(false);
   });
 });
 

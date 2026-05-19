@@ -17,7 +17,6 @@ const NS = {
 } as const;
 
 export type IndexerNetworkId =
-  | "devnet"
   | "celo-sepolia-local"
   | "celo-mainnet-local"
   | "celo-mainnet"
@@ -93,25 +92,6 @@ export function makeNetwork(
 }
 
 export const NETWORKS: Record<IndexerNetworkId, Network> = {
-  devnet: makeNetwork({
-    id: "devnet",
-    label: "Celo Devnet (local)",
-    local: true,
-    hasVirtualPools: true,
-    chainId: 42220,
-    contractsNamespace: NS["celo-mainnet"],
-    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_DEVNET ?? "http://localhost:8545",
-    // Local networks always use the same-origin API proxy so admin secrets can
-    // stay server-only (`HASURA_SECRET_*`) and never enter browser bundles.
-    hasuraUrl: "/api/hasura/devnet",
-    hasuraSecret: "",
-    // Devnet has no hosted explorer; keep the local anvil URL unconditionally.
-    explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
-    addressLabels: {
-      "0x287810f677516f10993ff63a520aad5509f35796": "Deployer",
-    },
-  }),
   "celo-sepolia-local": makeNetwork({
     id: "celo-sepolia-local",
     label: "Celo Sepolia (local)",
