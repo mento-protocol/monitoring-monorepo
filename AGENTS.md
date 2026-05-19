@@ -8,6 +8,7 @@ pnpm monorepo with three packages:
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 - `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
+- `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Agent, dashboards, and alert-rule Terraform
 
 ## Operating Rule (read this before opening PRs)
 
@@ -177,7 +178,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
 ratchet in over PR 2-6 of the BACKLOG plan.
 
-- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard` and `metrics-bridge` may import only from `shared-config` + externals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
+- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard`, `metrics-bridge`, and `aegis` must not import each other's internals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
 - **No circular dependencies (blocking)**: `pnpm code-health:deps` fails on any cycle. The historical `indexer-envio/src/{pool,deviationBreach}.ts` cycle was broken by importing health predicates directly from `pool/health.js`; no baseline carve-out remains.
 - **Dashboard lib/ → components/ direction (blocking, `pnpm code-health:deps`)**: `ui-dashboard/src/lib/` must not import from `src/components/`. The allowed direction is `components/ → lib/` (components use utilities, never the reverse). Violations indicate lib has accidentally coupled pure logic to the render layer. Pre-inventory: zero violations; rule ships at `error`.
 - **Dashboard route-private directories (blocking, `pnpm code-health:deps`)**: `_components/` and `_tabs/` directories inside `app/<route>/` are private to that route. Code from `app/<route-A>/` must not import from `app/<route-B>/_components/` or `app/<route-B>/_tabs/`. Adding a new route with a `_components/` or `_tabs/` directory requires a matching `dashboard-route-private-<routename>` rule in `.dependency-cruiser.cjs`. Pre-inventory: zero violations; rules ship at `error`.
@@ -189,7 +190,7 @@ ratchet in over PR 2-6 of the BACKLOG plan.
 - **Per-package coverage floors (blocking, `pnpm --filter <pkg> test:coverage`)**: vitest `coverage.thresholds` in each `vitest.config.ts` enforces a floor so deleting tests can't silently lower coverage below the baseline. Floors are calibrated at `floor(measured) - 2` to absorb variance without ratcheting to 100%. Current floors (measured 2026-05-18): `shared-config` stmts 94 / branches 92 / funcs 98 / lines 98; `metrics-bridge` stmts 87 / branches 81 / funcs 84 / lines 91; `ui-dashboard` stmts 72 / branches 64 / funcs 68 / lines 73; `indexer-envio` stmts 44 / branches 37 / funcs 56 / lines 45 (low due to untested Envio runtime event handlers in `src/handlers/**`). CI calls `test:coverage` (not bare `test`) for all four packages — thresholds enforce without any extra CI step. When adding significant new code, re-measure and raise the floors accordingly.
 - **Bridge mutation score (blocking, `pnpm bridge:mutation`)**: `metrics-bridge/stryker.config.mjs` sets `break: 84` (current baseline 86.01% with a 2-pt margin for measurement noise). `.github/workflows/mutation-testing.yml` runs the bridge job on every PR (no `paths:` filter, so the check is required-status-safe per `AGENTS.md` rule above). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the mutation step runs when the trigger isn't `pull_request`, when the filter failed, or when the diff touched bridge inputs (probe source, test files, stryker + mutation vitest configs, `metrics-bridge/package.json`, `metrics-bridge/tsconfig.json`, shared-config inputs, root package-manager files, or the workflow). The job fails when the rebalance-probe mutation score drops below 84%. Dashboard + indexer mutation stay advisory (weekly cron + manual). See `docs/pr-checklists/mutation-testing.md`.
 - **Type-aware async safety + exhaustive switches (blocking, diff-aware baseline)**: `@typescript-eslint/no-floating-promises`, `no-misused-promises`, and `switch-exhaustiveness-check` are `error` on all four packages. Floating-promises catches missing `await`; misused-promises catches passing async callbacks where a void return is expected (use `void doSomething()` or wrap in a sync callback); switch-exhaustiveness forces every discriminated-union / enum switch to cover every variant. `ui-dashboard` configures `no-misused-promises` with `checksVoidReturn.attributes: false` so React event-handler attributes (`<button onClick={async () => ...}>`) are allowed — the synthetic event system swallows rejections correctly. Non-attribute void-return contexts (`setTimeout(async ...)`, function arguments, etc.) still fire and caught the `poller.ts` + `gql-retry.ts` bugs in this PR. Type-aware rules are scoped to `src/**/*.{ts,tsx}` minus `*.d.ts` + tests (the TS project service doesn't pick those up, and async tests are intentionally noisy).
-- **`noUncheckedIndexedAccess` (blocking via `pnpm <pkg> typecheck`)**: `shared-config`, `indexer-envio`, and `metrics-bridge` ship with the TS compiler flag on — `arr[i]` is typed as `T | undefined`, forcing explicit guards on every index access. `ui-dashboard` is deferred (355 typecheck errors) and tracked in BACKLOG for incremental burn-down.
+- **`noUncheckedIndexedAccess` (blocking via `pnpm <pkg> typecheck`)**: `shared-config`, `indexer-envio`, `metrics-bridge`, and `aegis` ship with the TS compiler flag on — `arr[i]` is typed as `T | undefined`, forcing explicit guards on every index access. `ui-dashboard` is deferred (355 typecheck errors) and tracked in BACKLOG for incremental burn-down.
 - **`exactOptionalPropertyTypes` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — `{ x?: T }` (absent key) is distinct from `{ x: T | undefined }` (present but undefined). Assigning `undefined` to an optional property is an error; omit the key instead (spread pattern: `...(val !== undefined && { key: val })`). `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
 - **`verbatimModuleSyntax` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — every type-only import must use `import type { ... }` syntax; value imports use plain `import`. Prevents accidental runtime imports of pure types, makes intent explicit, and plays well with `isolatedModules`. `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
 - **Bundle size gate (blocking, `pnpm dashboard:size-limit`)**: `.github/workflows/size-limit.yml` runs on every PR (no `paths:` filter, required-status-safe per the rule above). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the build + size check runs when the filter failed or when the diff touched dashboard inputs (`ui-dashboard/src/**`, `ui-dashboard/sentry.shared.ts`, `next.config.ts`, `postcss.config.mjs`, `tailwind.config.*`, `package.json`, `.size-limit.cjs`, `tsconfig.json`, `shared-config/**`, root package-manager files, or the workflow). Budgets live in `ui-dashboard/.size-limit.cjs` and are measured against brotli-compressed `.next/static/` output (all client JS chunks + CSS). Baseline: 1.62 MB JS + 10.0 KB CSS (brotli, 2026-05-18, Next.js 16.2.6 + Turbopack). Budget: baseline × 1.10. To tighten: run `pnpm dashboard:build && pnpm dashboard:size-limit --json`, update the limits in `.size-limit.cjs`, and commit the updated baseline comment.
@@ -229,6 +230,17 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser  # Fixture-driven browse
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
+# Aegis
+pnpm aegis:dev                # Start the NestJS App Engine service locally
+pnpm aegis:build              # Build the Aegis service
+pnpm aegis:typecheck          # Typecheck the Aegis service
+pnpm aegis:test               # Jest tests
+pnpm aegis:lint               # ESLint baseline gate for Aegis
+pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-prod
+pnpm aegis:logs               # Tail Aegis App Engine logs from mento-prod
+pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
+pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
+
 # Infrastructure (Terraform)
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
@@ -247,6 +259,16 @@ terraform plan  -var-file=/Users/chapati/code/mento/monitoring-monorepo/terrafor
 Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.
 
 ## Package Details
+
+### aegis
+
+- **Package:** `@mento-protocol/aegis`
+- **Runtime:** NestJS service deployed to GCP App Engine in `mento-prod` (`aegis/app.yaml`)
+- **Purpose:** Polls v2 on-chain contract state via RPC view calls and exposes Prometheus metrics at `/metrics`
+- **Grafana Agent:** `aegis/grafana-agent/` remains the App Engine service that scrapes Aegis and metrics-bridge, then remote-writes to Grafana Cloud
+- **Terraform:** `aegis/terraform/` owns the Aegis Grafana dashboards, folders, alert rules, Discord contact points, and Splunk On-Call routing. The backend remains `gs://mento-terraform-tfstate-6ed6/aegis`.
+- **Contracts:** `aegis/contracts/` uses Foundry with submodules under `aegis/lib/`; run `forge test` from `aegis/` when Solidity helpers change.
+- **Commands:** Use the root `pnpm aegis:*` scripts for build/dev/test/lint/deploy/logs/Terraform/Grafana Agent deploy.
 
 ### shared-config
 

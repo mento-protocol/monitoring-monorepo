@@ -3,7 +3,7 @@
  *
  * Tier 1 (this file, blocking):
  *   - no circular dependencies
- *   - no cross-package leakage between dashboard / indexer / metrics-bridge
+ *   - no cross-package leakage between dashboard / indexer / metrics-bridge / aegis
  *   - shared-config must stay a leaf (no imports of other workspace packages)
  *
  * Tier 3 intra-package layer rules (also in this file, blocking):
@@ -143,6 +143,30 @@ module.exports = {
       from: { path: "^shared-config/__tests__/" },
       to: { path: "^(ui-dashboard|metrics-bridge)/" },
     },
+    {
+      name: "aegis-no-dashboard-indexer-bridge",
+      severity: "error",
+      comment:
+        "Aegis is the App Engine v2 alerting service and must not import dashboard, indexer, or metrics-bridge internals. Shared monitoring metadata should be routed through shared-config.",
+      from: { path: "^aegis/" },
+      to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+    },
+    {
+      name: "dashboard-indexer-bridge-no-aegis",
+      severity: "error",
+      comment:
+        "Aegis is a separate App Engine service. Dashboard, indexer, and metrics-bridge must not import its service or Terraform internals.",
+      from: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+      to: { path: "^aegis/" },
+    },
+    {
+      name: "shared-config-no-aegis",
+      severity: "error",
+      comment:
+        "shared-config is the leaf in the dep graph and must not import from Aegis.",
+      from: { path: "^shared-config/" },
+      to: { path: "^aegis/" },
+    },
 
     // -------------------------------------------------------------------------
     // Intra-package layer rules (Tier 3)
@@ -280,6 +304,7 @@ module.exports = {
         "(^|/)coverage($|/)",
         "(^|/)reports($|/)",
         "(^|/)\\.claude/worktrees($|/)",
+        "^aegis/lib/",
       ],
     },
     exclude: {
@@ -293,10 +318,11 @@ module.exports = {
         "(^|/)reports($|/)",
         "(^|/)\\.claude/worktrees($|/)",
         "(^|/)\\.git($|/)",
+        "^aegis/lib/",
       ],
     },
     includeOnly: {
-      path: "^(shared-config|ui-dashboard|indexer-envio|metrics-bridge)/",
+      path: "^(shared-config|ui-dashboard|indexer-envio|metrics-bridge|aegis)/",
     },
     enhancedResolveOptions: {
       exportsFields: ["exports"],

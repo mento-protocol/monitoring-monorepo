@@ -6,11 +6,13 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 ## Packages
 
-| Package                             | Description                                                         |
-| ----------------------------------- | ------------------------------------------------------------------- |
-| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer — Celo + Monad multichain                  |
-| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js dashboard with multi-chain network switching |
-| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)       |
+| Package                               | Description                                                         |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| [`indexer-envio`](./indexer-envio/)   | Envio HyperIndex indexer — Celo + Monad multichain                  |
+| [`ui-dashboard`](./ui-dashboard/)     | Next.js 16 + Plotly.js dashboard with multi-chain network switching |
+| [`metrics-bridge`](./metrics-bridge/) | Hasura → Prometheus exporter for v3 alert rules                     |
+| [`shared-config`](./shared-config/)   | Shared deployment config (chain ID → treb namespace mappings)       |
+| [`aegis`](./aegis/)                   | App Engine v2 alerting service + Grafana dashboards/alerts          |
 
 ## Architecture
 
@@ -92,6 +94,17 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 ```bash
 pnpm dashboard:dev
 ```
+
+### Run Aegis
+
+```bash
+pnpm aegis:dev
+pnpm aegis:typecheck
+pnpm aegis:test
+```
+
+Aegis remains the NestJS App Engine service in `mento-prod`; the monorepo
+operator interface is the root `pnpm aegis:*` command family.
 
 ### Dashboard Browser Tests
 
@@ -177,6 +190,26 @@ pnpm deploy:indexer:promote "$COMMIT"
 ```
 
 The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento) watches this branch.
+
+### Aegis → App Engine
+
+```bash
+pnpm aegis:build
+pnpm aegis:typecheck
+pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to mento-prod
+pnpm aegis:logs
+```
+
+Grafana dashboards and v2 alert rules live in `aegis/terraform` and keep the
+existing GCS backend prefix `aegis`:
+
+```bash
+pnpm aegis:tf:init
+pnpm aegis:tf:plan
+pnpm aegis:tf:apply
+```
+
+Never run Terraform apply without reviewing the plan first.
 
 ### Dashboard → Vercel
 
