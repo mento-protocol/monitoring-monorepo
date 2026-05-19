@@ -39,6 +39,30 @@ export function isOpenTroveStatus(
   return OPEN_STATUS_SET.has(status);
 }
 
+export const EMPTY_AGGREGATES: CdpAggregates = {
+  openTroveCount: 0,
+  totalDebt: BigInt(0),
+  totalColl: BigInt(0),
+  truncated: false,
+};
+
+/** List-page lookup: returns the per-collateral aggregate, or an empty
+ * aggregate that preserves the chain-wide query's truncation flag. The
+ * truncated propagation is load-bearing — without it, a collateral whose
+ * troves were entirely pushed past the row cap renders as healthy/no-debt. */
+export function aggregatesForCollateral(
+  collateralId: string,
+  aggregatesByCollateral: ReadonlyMap<string, CdpAggregates>,
+  queryTruncated: boolean,
+): CdpAggregates {
+  return (
+    aggregatesByCollateral.get(collateralId) ??
+    (queryTruncated
+      ? { ...EMPTY_AGGREGATES, truncated: true }
+      : EMPTY_AGGREGATES)
+  );
+}
+
 export function aggregateTroves(
   troves: readonly Pick<CdpTroveListRow, "status" | "debt" | "coll">[],
   options: { truncated?: boolean } = {},

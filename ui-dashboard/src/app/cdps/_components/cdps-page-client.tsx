@@ -11,20 +11,17 @@ import {
   type CdpInstance,
   type CdpTroveListRow,
 } from "../_lib/types";
-import { isOpenTroveStatus, type CdpAggregates } from "../_lib/health";
+import {
+  aggregatesForCollateral,
+  isOpenTroveStatus,
+  type CdpAggregates,
+} from "../_lib/health";
 import { CdpMarketCard } from "./cdp-market-card";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
   LiquityInstance: CdpInstance[];
   Trove: CdpTroveListRow[];
-};
-
-const EMPTY_AGGREGATES: CdpAggregates = {
-  openTroveCount: 0,
-  totalDebt: BigInt(0),
-  totalColl: BigInt(0),
-  truncated: false,
 };
 
 export function CdpsPageClient() {
@@ -105,12 +102,11 @@ export function CdpsPageClient() {
             key={collateral.id}
             collateral={collateral}
             instance={instances.get(collateral.id)}
-            aggregates={
-              aggregatesByCollateral.get(collateral.id) ?? {
-                ...EMPTY_AGGREGATES,
-                truncated: queryTruncated,
-              }
-            }
+            aggregates={aggregatesForCollateral(
+              collateral.id,
+              aggregatesByCollateral,
+              queryTruncated,
+            )}
           />
         ))}
       </div>

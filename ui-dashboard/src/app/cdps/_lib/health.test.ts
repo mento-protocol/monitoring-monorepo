@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { aggregateTroves, deriveCdpHealth } from "./health";
+import {
+  aggregateTroves,
+  aggregatesForCollateral,
+  deriveCdpHealth,
+  type CdpAggregates,
+} from "./health";
 import type { CdpCollateral, CdpInstance, CdpTrove } from "./types";
 
 const collateral = (overrides: Partial<CdpCollateral> = {}): CdpCollateral => ({
@@ -92,6 +97,37 @@ describe("aggregateTroves", () => {
       [trove("active", "1000000000000000000000")],
       { truncated: true },
     );
+    expect(result.truncated).toBe(true);
+  });
+});
+
+describe("aggregatesForCollateral (list-page lookup)", () => {
+  const fullAgg: CdpAggregates = {
+    openTroveCount: 3,
+    totalDebt: BigInt("3000000000000000000000"),
+    totalColl: BigInt("6000000000000000000000"),
+    truncated: false,
+  };
+
+  it("returns the per-collateral aggregate when present", () => {
+    const map = new Map([["42220-A", fullAgg]]);
+    expect(aggregatesForCollateral("42220-A", map, false)).toBe(fullAgg);
+  });
+
+  it("returns plain EMPTY_AGGREGATES when collateral missing and query not truncated", () => {
+    const result = aggregatesForCollateral("42220-Missing", new Map(), false);
+    expect(result.openTroveCount).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("propagates truncated=true when collateral missing and query hit the cap", () => {
+    // Regression for claude[bot] / cursor / codex finding (PR #470): when
+    // chain-wide trove query is capped, a collateral whose troves got sorted
+    // past the cutoff would otherwise render as Healthy / no-debt.
+    const map = new Map([["42220-A", fullAgg]]);
+    const result = aggregatesForCollateral("42220-Missing", map, true);
+    expect(result.openTroveCount).toBe(0);
+    expect(result.totalDebt).toBe(BigInt(0));
     expect(result.truncated).toBe(true);
   });
 });
