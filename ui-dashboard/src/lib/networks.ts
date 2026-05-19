@@ -6,6 +6,7 @@ import {
   chainTokenSymbols,
   chainAddressLabels,
 } from "@mento-protocol/monitoring-config/tokens";
+import { clientEnv } from "@/env";
 
 // Semantic aliases over the shared chain ID → namespace map.
 // Defined once here so call sites stay readable; the actual namespace strings
@@ -100,13 +101,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
-      "https://forno.celo-sepolia.celo-testnet.org",
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA,
     hasuraUrl: "/api/hasura/celo-sepolia-local",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
       sharedExplorerBaseUrl(11142220) ??
       "https://celo-sepolia.blockscout.com",
   }),
@@ -117,11 +116,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
-    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_CELO,
     hasuraUrl: "/api/hasura/celo-mainnet-local",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
       sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
@@ -134,11 +133,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
-    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_CELO,
+    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
       sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
@@ -150,12 +149,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Monad",
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET,
+    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
       sharedExplorerBaseUrl(143) ??
       "https://monadscan.com",
   }),
@@ -226,13 +224,8 @@ export function isNetworkId(v: string): v is IndexerNetworkId {
  * Local networks are always considered unconfigured unless NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true.
  * Testnet networks are excluded in production unless NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true.
  */
-const showLocalNetworks =
-  typeof process !== "undefined" &&
-  process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
-
-const showTestnetNetworks =
-  typeof process !== "undefined" &&
-  process.env.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS === "true";
+const showLocalNetworks = clientEnv.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS;
+const showTestnetNetworks = clientEnv.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS;
 
 export function isConfiguredNetworkId(v: string): v is IndexerNetworkId {
   if (!isNetworkId(v)) return false;

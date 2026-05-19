@@ -1,3 +1,5 @@
+import { env } from "./env.js";
+
 type MaybePromise<T> = T | Promise<T>;
 type AnyHandler = (args: { context?: unknown }) => MaybePromise<unknown>;
 type AnyContext = Record<PropertyKey, unknown>;
@@ -28,15 +30,11 @@ type EntityStats = {
 };
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
-const DEFAULT_LOG_INTERVAL = 10_000;
 const MAX_TRACKED_STAT_KEYS = 256;
 const OVERFLOW_STAT_KEY = "__overflow__";
 
-const enabled = TRUE_VALUES.has((process.env.INDEXER_PERF ?? "").toLowerCase());
-const logInterval = Math.max(
-  1,
-  Number(process.env.INDEXER_PERF_LOG_INTERVAL_EVENTS ?? DEFAULT_LOG_INTERVAL),
-);
+const enabled = TRUE_VALUES.has((env.INDEXER_PERF ?? "").toLowerCase());
+const logInterval = Math.max(1, env.INDEXER_PERF_LOG_INTERVAL_EVENTS);
 
 const handlerStats = new Map<string, HandlerStats>();
 const effectStats = new Map<string, EffectStats>();

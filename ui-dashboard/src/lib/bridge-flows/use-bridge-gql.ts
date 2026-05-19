@@ -3,6 +3,7 @@
 import { GraphQLClient, type Variables } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { clientEnv } from "@/env";
 
 /**
  * Bridge queries run outside the per-network SWR context: cache key is network-
@@ -10,7 +11,7 @@ import { rateLimitAwareRetry } from "@/lib/gql-retry";
  * avoid fanning requests across tabs into Envio's rate limit (see below).
  */
 
-const BRIDGE_HASURA_URL = (process.env.NEXT_PUBLIC_HASURA_URL ?? "").trim();
+const BRIDGE_HASURA_URL = (clientEnv.NEXT_PUBLIC_HASURA_URL ?? "").trim();
 
 // Cap each GraphQL request well below the SWR refresh interval so a wedged
 // TCP connection can't compound into unbounded backpressure on the polling

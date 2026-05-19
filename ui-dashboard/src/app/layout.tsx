@@ -9,18 +9,18 @@ import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
 import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
+import { serverEnv, clientEnv } from "@/env";
 import "./globals.css";
 
 // This is server-only; local `next start` needs analytics development mode.
-const analyticsMode = process.env.VERCEL ? "auto" : "development";
+const analyticsMode = serverEnv.VERCEL ? "auto" : "development";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-const analyticsEnabled =
-  process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES !== "true";
+const analyticsEnabled = !clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES;
 
 // Static fallback for every route. The homepage overrides via its own
 // `generateMetadata` in `app/page.tsx` — keeping the dynamic fetch scoped

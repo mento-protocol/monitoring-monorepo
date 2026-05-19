@@ -1,3 +1,5 @@
+import { env } from "./env.js";
+
 /**
  * startupChecks.ts — Startup invariant validation
  *
@@ -41,7 +43,7 @@ export const START_BLOCK_ENV_NAME: Record<number, string> = {
  */
 export function assertStartBlocksValid(
   envOverrides: Record<number, string | undefined>,
-  strict = process.env.ENVIO_STRICT_START_BLOCK === "true",
+  strict = env.ENVIO_STRICT_START_BLOCK,
 ): void {
   for (const [chainIdStr, firstDeployBlock] of Object.entries(
     FPMM_FIRST_DEPLOY_BLOCK,
@@ -73,9 +75,9 @@ export function assertStartBlocksValid(
  */
 export function runStartupChecks(): void {
   // Skip in test mode — shell env vars must not interfere with test suites.
-  if (process.env.NODE_ENV === "test") return;
+  if (env.NODE_ENV === "test") return;
   assertStartBlocksValid({
-    42220: process.env.ENVIO_START_BLOCK_CELO,
-    143: process.env.ENVIO_START_BLOCK_MONAD,
+    42220: env.ENVIO_START_BLOCK_CELO,
+    143: env.ENVIO_START_BLOCK_MONAD,
   });
 }
