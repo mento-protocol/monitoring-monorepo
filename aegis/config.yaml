@@ -219,27 +219,29 @@ metrics:
       - [PHPUSD]
       - [XOFUSD]
       - [ZARUSD]
-  # Checks Celo Sepolia gas-payment rate feed trading modes.
-  # These feeds are not registered in the Celo mainnet BreakerBox.
+      # celo/stable feeds registered in both Celo mainnet and Celo Sepolia BreakerBox
+      - [CELOBRL]
+      - [CELOEUR]
+      - [CELOXOF]
+  # Checks Celo Sepolia-only gas-payment rate feed trading modes.
+  # These feeds are reported by Celo mainnet SortedOracles but are not registered
+  # in the Celo mainnet BreakerBox.
   - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
     schedule: 0/10 * * * * *
     type: gauge
     chains: [celoSepolia]
     variants:
       - [CELOAUD]
-      - [CELOBRL]
       - [CELOCAD]
       - [CELOCHF]
       - [CELOCOP]
       - [CELOETH]
-      - [CELOEUR]
       - [CELOGBP]
       - [CELOGHS]
       - [CELOJPY]
       - [CELOKES]
       - [CELONGN]
       - [CELOPHP]
-      - [CELOXOF]
       - [CELOZAR]
 
   # Trading limits state - tracks all three netflow limits
