@@ -100,5 +100,5 @@ after skipping blanks and comments. Refresh before starting a split.
 
 ## Claude Code permissions hardening
 
-- [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt. Flagged by codex P1 on PR #468 but deferred as pre-existing (predates the audit).
-- [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely. Flagged by codex P1 on PR #468 but deferred as pre-existing.
+- [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt. Flagged on PR #468 by an automated reviewer; deferred there as pre-existing (predates the audit).
+- [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely. Flagged on PR #468 by an automated reviewer; deferred there as pre-existing.
