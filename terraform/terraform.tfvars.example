@@ -59,3 +59,11 @@ gcp_billing_account = "..."
 
 # Caller must have roles/iam.serviceAccountTokenCreator on this SA.
 # terraform_service_account = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+
+# ── Read-only AI agent investigator ──────────────────────────────────────────
+# IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
+# (Token Creator). Defaults to `user:philip.paetz@mentolabs.xyz`; override
+# here to add incident responders or auditors.
+# agent_readonly_impersonators = [
+#   "user:philip.paetz@mentolabs.xyz",
+# ]
