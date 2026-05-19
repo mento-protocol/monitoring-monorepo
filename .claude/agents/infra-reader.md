@@ -27,7 +27,7 @@ Read-only infrastructure specialist. Inspect deploy/CI/infra config and report f
 - **WIF requirement:** deployer SAs need `roles/iam.serviceAccountTokenCreator` on the runtime SA they impersonate.
 - **Terraform `moved` blocks:** removing `count` / renaming a resource requires a `moved` block. `deletion_protection = true` makes a missed `moved` block fatal.
 - **Lockfile integrity:** `pnpm lockfile:lint` checks (1) every package has sha512 integrity hash, (2) every `.npmrc` / `pnpm-workspace.yaml registries:` is verified to NOT redirect to a lookalike host.
-- **Terraform from a worktree:** `terraform.tfvars` is gitignored and only lives in the main checkout. From a worktree, either run from `/Users/chapati/code/mento/monitoring-monorepo/` or `terraform init -reconfigure` + `terraform plan -var-file=<main-path>/terraform/terraform.tfvars`.
+- **Terraform from a worktree:** `terraform.tfvars` is gitignored and only lives in the main checkout. From a worktree, either run from `<main-checkout>/` or `terraform init -reconfigure` + `terraform plan -var-file=<main-checkout>/terraform/terraform.tfvars`.
 - **Mutation testing CI gate:** `metrics-bridge/stryker.config.mjs` `break: 84` (current baseline 86.01%). `.github/workflows/mutation-testing.yml` runs on every PR; bridge job's `filter` step decides whether to run based on diff scope.
 
 ## How to report

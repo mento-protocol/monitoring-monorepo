@@ -20,7 +20,7 @@ Read-only exploration specialist for `ui-dashboard/`. Locate code, summarize wha
 - **Framework:** Next.js 16 (App Router, React 19), Tailwind CSS 4, Plotly.js via react-plotly.js, graphql-request + SWR
 - **TS target:** `ES2017` (no polyfill — NEVER use `toSorted`, `findLast`, or any ES2023+ array method in client-shipped code)
 - **SWR + Hasura discipline:** every polling hook MUST set `revalidateOnFocus: false` + `revalidateOnReconnect: false`. Defaults live at `useGQL` (`src/lib/graphql.ts`). Pair `AbortSignal.timeout(8_000)` with the 10s refresh interval. Distinguish `isLoading` from "data resolved to zero."
-- **Hasura 1000-row cap:** silent. Any UI `limit:` >1000 or a query feeding a lifetime aggregate is a bug — use pre-rolled snapshot/rollup entities or the offset-pagination pattern (`fetchAllSnapshotPages`-family helpers in `src/lib/network-fetcher/fetch.ts`).
+- **Hasura 1000-row cap:** silent. Any UI `limit:` >1000 or a query feeding a lifetime aggregate is a bug — use pre-rolled snapshot/rollup entities or `fetchAllFeeSnapshotPages` (`src/lib/network-fetcher/fetch.ts:333`), the canonical offset-pagination helper.
 - **Hasura `order_by`** with ≥2 fields MUST use array syntax `[{a: desc}, {b: asc}]` (object syntax silently drops fields).
 - **Schema-extension queries:** new indexer schema fields ship in an **isolated query** (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into a page's primary pool query — hosted Hasura rejects unknown columns during the deploy+resync window.
 - **Route-private dirs:** `_components/` and `_tabs/` inside `app/<route>/` are private to that route. Cross-route imports are blocked by `dependency-cruiser`.
