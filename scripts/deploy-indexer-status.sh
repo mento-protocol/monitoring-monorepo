@@ -142,7 +142,8 @@ render_status_json() {
     const totalParts = rows.map(progressParts);
     const totalDenominator = Math.max(totalParts.reduce((sum, part) => sum + part.denominator, 0), 1);
     const totalNumerator = totalParts.reduce((sum, part) => sum + part.numerator, 0);
-    const allCaughtUp = rows.length > 0 && rows.every((row) => row.timestamp_caught_up_to_head_or_endblock);
+    const isCaughtUp = (row) => Number(row.latest_processed_block ?? 0) >= Number(row.block_height ?? 0);
+    const allCaughtUp = rows.length > 0 && rows.every(isCaughtUp);
     console.log('');
     console.log(`Overall catch-up: ${fmtPct((totalNumerator / totalDenominator) * 100)} (${fmtNum(totalNumerator)}/${fmtNum(totalDenominator)} blocks since start)`);
     console.log(`Status: ${allCaughtUp ? 'caught up' : 'syncing'}`);
