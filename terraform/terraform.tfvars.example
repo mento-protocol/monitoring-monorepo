@@ -64,9 +64,19 @@ gcp_billing_account = "..."
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
 # (Token Creator). Defaults to `group:eng@mentolabs.xyz` so any engineer
 # inherits access; override here to add incident responders or external
-# auditors. See README → "Adopting the agent-readonly SA into Terraform
-# state" before the first apply if the SA already exists.
+# auditors. If the SA already exists in the live IAM policy (it does, in
+# production), follow the one-time `terraform import` recipe at the bottom of
+# `terraform/agent-readonly.tf` (section "One-time state adoption (manual
+# `terraform import`)") BEFORE the first `terraform apply` that includes that
+# file. Fresh org / DR bootstraps can skip the import recipe entirely.
 # agent_readonly_impersonators = [
 #   "group:eng@mentolabs.xyz",
 #   "user:incident-responder@mentolabs.xyz",
 # ]
+
+# Project IDs in which the agent-readonly SA gets `roles/storage.objectViewer`
+# (object payload reads). Empty by default — org-level grants only cover
+# bucket/object *metadata* via `roles/cloudasset.viewer`. Add a project ID
+# here only when an investigation legitimately needs to read object contents
+# (log exports, public datasets, etc.).
+# agent_readonly_storage_object_projects = ["mento-monitoring"]

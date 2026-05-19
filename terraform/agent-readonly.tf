@@ -17,9 +17,12 @@
 #     curated set below combines `browser` + `cloudasset.viewer` +
 #     `iam.securityReviewer` for org-wide visibility, plus service-specific
 #     viewer roles for the surfaces agents actually investigate (Cloud Run,
-#     logging, monitoring, artifact registry, compute, storage). Cloud Asset
+#     logging, monitoring, artifact registry, compute). Cloud Asset
 #     Inventory does most of the metadata lifting; the service viewer roles
-#     are scoped to read-only verbs only.
+#     are scoped to read-only verbs only. GCS object *payload* reads are
+#     intentionally NOT granted at the org level — bucket/object metadata is
+#     covered by `roles/cloudasset.viewer`, and payload reads are opt-in per
+#     project via `var.agent_readonly_storage_object_projects`.
 #   - `serviceusage.serviceUsageConsumer` is required for the SA to *call*
 #     enabled-API endpoints it can see — without it, `gcloud asset
 #     search-all-resources` and similar return PERMISSION_DENIED at the
@@ -57,6 +60,29 @@ variable "agent_readonly_impersonators" {
   EOT
   type        = list(string)
   default     = ["group:eng@mentolabs.xyz"]
+}
+
+# Opt-in, project-scoped GCS object payload read access. Org-wide
+# `roles/storage.objectViewer` is deliberately NOT granted (see role audit in
+# `local.agent_readonly_org_roles`): it would let the agent read the contents
+# of every object in every bucket under the org, including any bucket that
+# happens to hold secrets, customer data, backups, or SA keys. Object metadata
+# (names, sizes, ACLs, bucket structure) is already covered by
+# `roles/cloudasset.viewer` at the org level, which is enough for most
+# investigations. When a specific investigation needs to read actual object
+# payloads (e.g. exported logs, public-data buckets), grant
+# `roles/storage.objectViewer` here on the project(s) that own those buckets.
+# Empty by default — fail closed.
+variable "agent_readonly_storage_object_projects" {
+  description = <<-EOT
+    Project IDs in which the agent-readonly SA is granted
+    `roles/storage.objectViewer` (object payload read). Use only for projects
+    whose buckets the agent legitimately needs to read object contents from
+    (log exports, public datasets). Leave empty to deny object payload access
+    everywhere; metadata visibility via `roles/cloudasset.viewer` is unaffected.
+  EOT
+  type        = list(string)
+  default     = []
 }
 
 # ── Required APIs ────────────────────────────────────────────────────────────
@@ -142,12 +168,19 @@ locals {
     # Service-specific read-only roles. These are the surfaces investigators
     # actually inspect — keeping them explicit (vs. basic viewer) means a new
     # GCP API does not auto-grant the agent read access without review.
-    "roles/run.viewer",               # Cloud Run services, revisions, traffic
-    "roles/logging.viewer",           # Cloud Logging entries + log-based metrics
-    "roles/monitoring.viewer",        # Cloud Monitoring dashboards + metrics
-    "roles/artifactregistry.reader",  # Artifact Registry repos + images
-    "roles/compute.viewer",           # Compute Engine read-only (VMs, networks)
-    "roles/storage.objectViewer",     # GCS object read (logs, exports)
+    "roles/run.viewer",              # Cloud Run services, revisions, traffic
+    "roles/logging.viewer",          # Cloud Logging entries + log-based metrics
+    "roles/monitoring.viewer",       # Cloud Monitoring dashboards + metrics
+    "roles/artifactregistry.reader", # Artifact Registry repos + images
+    "roles/compute.viewer",          # Compute Engine read-only (VMs, networks)
+    # NOTE: `roles/storage.objectViewer` is deliberately NOT granted at the org
+    # level — it would permit object payload reads across every bucket under
+    # the org (including any bucket holding secrets, customer data, backups, or
+    # SA keys). GCS bucket + object *metadata* is already covered by
+    # `roles/cloudasset.viewer` above. When a specific investigation needs
+    # object payload access, opt in per-project via
+    # `var.agent_readonly_storage_object_projects` (project-scoped binding
+    # below).
     "roles/cloudbuild.builds.viewer", # Cloud Build build history
     "roles/cloudscheduler.viewer",    # Scheduled jobs (cron triggers)
     "roles/secretmanager.viewer",     # Secret *metadata* only — NOT secretAccessor
@@ -159,6 +192,18 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
   for_each = toset(local.agent_readonly_org_roles)
   org_id   = var.gcp_org_id
   role     = each.value
+  member   = "serviceAccount:${google_service_account.agent_readonly.email}"
+}
+
+# ── Opt-in project-scoped GCS object payload read ────────────────────────────
+# Granted only on projects explicitly listed in
+# `var.agent_readonly_storage_object_projects`. Default empty list = no
+# object payload access anywhere; metadata-level visibility is still provided
+# org-wide by `roles/cloudasset.viewer`.
+resource "google_project_iam_member" "agent_readonly_storage_object_viewer" {
+  for_each = toset(var.agent_readonly_storage_object_projects)
+  project  = each.value
+  role     = "roles/storage.objectViewer"
   member   = "serviceAccount:${google_service_account.agent_readonly.email}"
 }
 
@@ -255,13 +300,45 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #               roles/serviceusage.serviceUsageConsumer roles/run.viewer \
 #               roles/logging.viewer roles/monitoring.viewer \
 #               roles/artifactregistry.reader roles/compute.viewer \
-#               roles/storage.objectViewer roles/cloudbuild.builds.viewer \
+#               roles/cloudbuild.builds.viewer \
 #               roles/cloudscheduler.viewer roles/secretmanager.viewer \
 #               roles/pubsub.viewer; do
 #     terraform import \
 #       "google_organization_iam_member.agent_readonly_org_roles[\"$role\"]" \
 #       "${ORG} $role serviceAccount:${SA}" || true
 #   done
+#
+#   # Strip any legacy org-level `roles/storage.objectViewer` grant on this SA.
+#   # Earlier revisions of this file (and any hand-bootstrapped policies) bound
+#   # object payload reads at the org level; the curated set in
+#   # `local.agent_readonly_org_roles` deliberately omits it because it would
+#   # let the SA read object payloads across every bucket under the org. Object
+#   # payload access is now opt-in per project via
+#   # `var.agent_readonly_storage_object_projects`. As with the legacy
+#   # `roles/viewer` cleanup below, the adoption loop only imports curated
+#   # roles, so a pre-existing org-level `roles/storage.objectViewer` binding
+#   # would persist invisible to Terraform unless removed explicitly here.
+#   # Member-scoped removal — other principals' bindings for the same role are
+#   # untouched.
+#   if ! err=$(gcloud organizations remove-iam-policy-binding "$ORG" \
+#         --member="serviceAccount:${SA}" \
+#         --role="roles/storage.objectViewer" 2>&1); then
+#     if ! echo "$err" | grep -q -E 'NOT_FOUND|Policy binding .* does not exist'; then
+#       echo "$err" >&2
+#       exit 1
+#     fi
+#   fi
+#
+#   # Mandatory post-check: fail closed if the legacy org-level
+#   # `roles/storage.objectViewer` binding still lists this SA.
+#   remaining=$(gcloud organizations get-iam-policy "$ORG" \
+#     --flatten='bindings[].members' \
+#     --filter="bindings.role:roles/storage.objectViewer AND bindings.members:serviceAccount:${SA}" \
+#     --format='value(bindings.members)')
+#   if [ -n "$remaining" ]; then
+#     echo "legacy org-level roles/storage.objectViewer binding for serviceAccount:${SA} still present on org ${ORG}: ${remaining}" >&2
+#     exit 1
+#   fi
 #
 #   # Strip the legacy org-level basic `roles/viewer` grant that the SA carried
 #   # under its original hand-created form. Earlier revisions of this file bound
@@ -306,9 +383,10 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #
 # For a fresh org / DR bootstrap with no live resources, skip the imports
 # above entirely — `terraform apply` will create everything from scratch. The
-# legacy `user:` Token Creator cleanup and the org-level `roles/viewer`
-# cleanup are also safe to run on a fresh bootstrap: each tolerates only the
-# specific "binding absent" / NOT_FOUND case and re-raises any other gcloud
-# failure, so they no-op cleanly when there is nothing to remove and surface
-# real errors otherwise. Both exist solely to clean up the previously
-# hand-created production identity.
+# legacy `user:` Token Creator cleanup, the org-level `roles/viewer` cleanup,
+# and the org-level `roles/storage.objectViewer` cleanup are also safe to run
+# on a fresh bootstrap: each tolerates only the specific "binding absent" /
+# NOT_FOUND case and re-raises any other gcloud failure, so they no-op
+# cleanly when there is nothing to remove and surface real errors otherwise.
+# They exist solely to clean up the previously hand-created production
+# identity (and any earlier revision of this file that bound those roles).
