@@ -47,3 +47,8 @@ output "ci_deployer_email" {
   description = "CI deployer SA email — impersonated by the GitHub workflow. Set as GH repo secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.metrics_bridge_deployer.email
 }
+
+output "agent_readonly_email" {
+  description = "Read-only AI agent SA — impersonate with `gcloud --impersonate-service-account=<this>` to drive MCP/Claude/Codex read paths."
+  value       = google_service_account.agent_readonly.email
+}
