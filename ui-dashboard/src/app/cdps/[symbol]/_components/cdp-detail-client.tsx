@@ -19,11 +19,8 @@ import type {
   CdpTroveListRow,
 } from "../../_lib/types";
 import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
-import {
-  aggregateTroves,
-  deriveCdpHealth,
-  healthBadgeClasses,
-} from "../../_lib/health";
+import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
+import { CdpHealthBadge } from "../../_components/cdp-health-badge";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
@@ -154,12 +151,7 @@ function CdpDetailContent({
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span
-            className={`text-xs rounded px-2 py-1 font-medium ${healthBadgeClasses(health.state)}`}
-            title={health.reasons.join(" · ") || health.label}
-          >
-            {health.label}
-          </span>
+          <CdpHealthBadge health={health} />
           <span className="text-xs text-slate-500">
             Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
           </span>

@@ -1,4 +1,10 @@
-import type { CdpCollateral, CdpInstance, CdpTroveListRow } from "./types";
+import { CDP_TROVE_OPEN_STATUSES } from "./types";
+import type {
+  CdpCollateral,
+  CdpInstance,
+  CdpTroveListRow,
+  CdpTroveOpenStatus,
+} from "./types";
 
 export type CdpHealthState =
   | "healthy"
@@ -19,6 +25,16 @@ export type CdpAggregates = {
   totalColl: bigint;
 };
 
+const OPEN_STATUS_SET: ReadonlySet<string> = new Set<string>(
+  CDP_TROVE_OPEN_STATUSES,
+);
+
+export function isOpenTroveStatus(
+  status: string,
+): status is CdpTroveOpenStatus {
+  return OPEN_STATUS_SET.has(status);
+}
+
 export function aggregateTroves(
   troves: readonly Pick<CdpTroveListRow, "status" | "debt" | "coll">[],
 ): CdpAggregates {
@@ -26,7 +42,7 @@ export function aggregateTroves(
   let totalDebt = BigInt(0);
   let totalColl = BigInt(0);
   for (const trove of troves) {
-    if (trove.status !== "active" && trove.status !== "zombie") continue;
+    if (!isOpenTroveStatus(trove.status)) continue;
     openTroveCount += 1;
     totalDebt += BigInt(trove.debt);
     totalColl += BigInt(trove.coll);
@@ -80,18 +96,12 @@ export function deriveCdpHealth(
     if (spDeposits === BigInt(0)) {
       escalate("critical", "Stability Pool is empty — no liquidation buffer");
     } else {
-      // pct in basis points: (spDeposits / debt) * 10000
       const pctBps = Number((spDeposits * BigInt(10_000)) / debt);
+      const coveragePct = `${(pctBps / 100).toFixed(1)}% of debt`;
       if (pctBps < 500) {
-        escalate(
-          "critical",
-          `Stability Pool covers ${(pctBps / 100).toFixed(1)}% of debt`,
-        );
+        escalate("critical", `Stability Pool covers ${coveragePct}`);
       } else if (pctBps < 5_000) {
-        escalate(
-          "warning",
-          `Stability Pool covers ${(pctBps / 100).toFixed(1)}% of debt`,
-        );
+        escalate("warning", `Stability Pool covers ${coveragePct}`);
       }
     }
   } else if (spDeposits === BigInt(0)) {
@@ -106,44 +116,49 @@ export function deriveCdpHealth(
   return { state: worst, label: stateLabel(worst), reasons };
 }
 
-const RANK: Record<CdpHealthState, number> = {
-  healthy: 0,
-  unknown: 1,
-  warning: 2,
-  critical: 3,
-  shutdown: 4,
+const STATES: Record<
+  CdpHealthState,
+  { rank: number; label: string; classes: string }
+> = {
+  healthy: {
+    rank: 0,
+    label: "Healthy",
+    classes:
+      "bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-700/40",
+  },
+  unknown: {
+    rank: 1,
+    label: "Unknown",
+    classes:
+      "bg-slate-500/15 text-slate-400 ring-1 ring-inset ring-slate-700/40",
+  },
+  warning: {
+    rank: 2,
+    label: "Warning",
+    classes:
+      "bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-700/40",
+  },
+  critical: {
+    rank: 3,
+    label: "Critical",
+    classes: "bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-700/40",
+  },
+  shutdown: {
+    rank: 4,
+    label: "Shutdown",
+    classes:
+      "bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-700/40",
+  },
 };
 
 function rank(state: CdpHealthState): number {
-  return RANK[state];
+  return STATES[state].rank;
 }
 
 function stateLabel(state: CdpHealthState): string {
-  switch (state) {
-    case "healthy":
-      return "Healthy";
-    case "warning":
-      return "Warning";
-    case "critical":
-      return "Critical";
-    case "shutdown":
-      return "Shutdown";
-    case "unknown":
-      return "Unknown";
-  }
+  return STATES[state].label;
 }
 
 export function healthBadgeClasses(state: CdpHealthState): string {
-  switch (state) {
-    case "healthy":
-      return "bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-700/40";
-    case "warning":
-      return "bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-700/40";
-    case "critical":
-      return "bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-700/40";
-    case "shutdown":
-      return "bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-700/40";
-    case "unknown":
-      return "bg-slate-500/15 text-slate-400 ring-1 ring-inset ring-slate-700/40";
-  }
+  return STATES[state].classes;
 }

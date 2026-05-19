@@ -1,3 +1,9 @@
+import { CDP_TROVE_OPEN_STATUSES } from "@/app/cdps/_lib/types";
+
+const OPEN_STATUS_LIST = CDP_TROVE_OPEN_STATUSES.map((s) => `"${s}"`).join(
+  ", ",
+);
+
 // We pull every active+zombie trove here so the list page can compute its own
 // systemDebt and borrower count: the on-chain ActivePoolBoldDebtUpdated event
 // is never emitted by Mento's Liquity fork, so LiquityInstance.systemDebt /
@@ -25,7 +31,7 @@ export const CDP_MARKETS = `
     Trove(
       where: {
         chainId: { _eq: $chainId }
-        status: { _in: ["active", "zombie"] }
+        status: { _in: [${OPEN_STATUS_LIST}] }
       }
       order_by: { lastUpdatedAt: desc }
       limit: 500
@@ -52,7 +58,7 @@ export const CDP_MARKET_DETAIL = `
     Trove(
       where: {
         collateralId: { _eq: $collateralId }
-        status: { _in: ["active", "zombie"] }
+        status: { _in: [${OPEN_STATUS_LIST}] }
       }
       order_by: { lastUpdatedAt: desc }
       limit: 50

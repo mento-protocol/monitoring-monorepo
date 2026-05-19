@@ -919,6 +919,9 @@ indexer.onEvent(
     // the existing redemptionCountCum semantic.
     const debt = event.params._actualBoldAmount;
     const fee = event.params._ETHFee;
+    const rCount = isRebalance ? 1 : 0;
+    const rDebt = isRebalance ? debt : 0n;
+    const rFee = isRebalance ? fee : 0n;
     context.LiquityInstance.set({
       ...next,
       redemptionCountCum: next.redemptionCountCum + 1,
@@ -928,20 +931,16 @@ indexer.onEvent(
       redemptionDebtBucket: next.redemptionDebtBucket + debt,
       redemptionCountDayBucket: next.redemptionCountDayBucket + 1,
       redemptionDebtDayBucket: next.redemptionDebtDayBucket + debt,
-      rebalanceRedemptionCountCum:
-        next.rebalanceRedemptionCountCum + (isRebalance ? 1 : 0),
-      rebalanceRedemptionDebtCum:
-        next.rebalanceRedemptionDebtCum + (isRebalance ? debt : 0n),
-      rebalanceRedemptionFeeCum:
-        next.rebalanceRedemptionFeeCum + (isRebalance ? fee : 0n),
+      rebalanceRedemptionCountCum: next.rebalanceRedemptionCountCum + rCount,
+      rebalanceRedemptionDebtCum: next.rebalanceRedemptionDebtCum + rDebt,
+      rebalanceRedemptionFeeCum: next.rebalanceRedemptionFeeCum + rFee,
       rebalanceRedemptionCountBucket:
-        next.rebalanceRedemptionCountBucket + (isRebalance ? 1 : 0),
-      rebalanceRedemptionDebtBucket:
-        next.rebalanceRedemptionDebtBucket + (isRebalance ? debt : 0n),
+        next.rebalanceRedemptionCountBucket + rCount,
+      rebalanceRedemptionDebtBucket: next.rebalanceRedemptionDebtBucket + rDebt,
       rebalanceRedemptionCountDayBucket:
-        next.rebalanceRedemptionCountDayBucket + (isRebalance ? 1 : 0),
+        next.rebalanceRedemptionCountDayBucket + rCount,
       rebalanceRedemptionDebtDayBucket:
-        next.rebalanceRedemptionDebtDayBucket + (isRebalance ? debt : 0n),
+        next.rebalanceRedemptionDebtDayBucket + rDebt,
     });
   },
 );

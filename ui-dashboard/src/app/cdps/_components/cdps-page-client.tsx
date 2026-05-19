@@ -10,7 +10,7 @@ import type {
   CdpInstance,
   CdpTroveListRow,
 } from "../_lib/types";
-import { aggregateTroves, type CdpAggregates } from "../_lib/health";
+import { isOpenTroveStatus, type CdpAggregates } from "../_lib/health";
 import { CdpMarketCard } from "./cdp-market-card";
 
 type CdpMarketsResponse = {
@@ -32,25 +32,36 @@ export function CdpsPageClient() {
     { chainId: network.chainId },
   );
 
+  const liquityInstances = data?.LiquityInstance;
+  const troves = data?.Trove;
+
   const instances = useMemo(() => {
     const m = new Map<string, CdpInstance>();
-    for (const instance of data?.LiquityInstance ?? []) {
+    for (const instance of liquityInstances ?? []) {
       m.set(instance.collateralId, instance);
     }
     return m;
-  }, [data]);
+  }, [liquityInstances]);
 
   const aggregatesByCollateral = useMemo(() => {
-    const grouped = new Map<string, CdpTroveListRow[]>();
-    for (const trove of data?.Trove ?? []) {
-      const bucket = grouped.get(trove.collateralId);
-      if (bucket) bucket.push(trove);
-      else grouped.set(trove.collateralId, [trove]);
-    }
+    // Single pass: accumulate directly per collateralId, skipping non-open
+    // statuses inline. Avoids the intermediate `grouped` map of trove arrays.
     const out = new Map<string, CdpAggregates>();
-    for (const [id, troves] of grouped) out.set(id, aggregateTroves(troves));
+    for (const trove of troves ?? []) {
+      if (!isOpenTroveStatus(trove.status)) continue;
+      const agg = out.get(trove.collateralId) ?? {
+        openTroveCount: 0,
+        totalDebt: BigInt(0),
+        totalColl: BigInt(0),
+      };
+      out.set(trove.collateralId, {
+        openTroveCount: agg.openTroveCount + 1,
+        totalDebt: agg.totalDebt + BigInt(trove.debt),
+        totalColl: agg.totalColl + BigInt(trove.coll),
+      });
+    }
     return out;
-  }, [data]);
+  }, [troves]);
 
   if (network.chainId !== 42220) {
     return (

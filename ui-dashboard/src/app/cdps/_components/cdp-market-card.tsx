@@ -1,12 +1,8 @@
 import Link from "next/link";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
-import {
-  type CdpAggregates,
-  type CdpHealth,
-  deriveCdpHealth,
-  healthBadgeClasses,
-} from "../_lib/health";
+import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
 import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import { CdpHealthBadge } from "./cdp-health-badge";
 
 export function CdpMarketCard({
   collateral,
@@ -30,7 +26,7 @@ export function CdpMarketCard({
           </h2>
           <p className="text-sm text-slate-400">USDm-backed CDP market</p>
         </div>
-        <HealthBadge health={health} />
+        <CdpHealthBadge health={health} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Metric
@@ -54,20 +50,6 @@ export function CdpMarketCard({
         />
       </div>
     </Link>
-  );
-}
-
-function HealthBadge({ health }: { health: CdpHealth }) {
-  const cls = healthBadgeClasses(health.state);
-  const title = health.reasons.join(" · ") || health.label;
-  return (
-    <span
-      className={`text-xs rounded px-2 py-1 font-medium ${cls}`}
-      title={title}
-      aria-label={`Health: ${health.label}. ${title}`}
-    >
-      {health.label}
-    </span>
   );
 }
 

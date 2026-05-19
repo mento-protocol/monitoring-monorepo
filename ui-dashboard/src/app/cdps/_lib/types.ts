@@ -68,6 +68,13 @@ export type CdpTroveListRow = {
   coll: string;
 };
 
+/** Trove status values from the indexer's `TROVE_STATUS` enum
+ * (`indexer-envio/src/handlers/liquity/troves.ts`) that represent a position
+ * with outstanding debt. Mirrored here intentionally — we can't import across
+ * the package boundary, so a rename on either side must update both. */
+export const CDP_TROVE_OPEN_STATUSES = ["active", "zombie"] as const;
+export type CdpTroveOpenStatus = (typeof CDP_TROVE_OPEN_STATUSES)[number];
+
 export type CdpDepositor = {
   id: string;
   address: string;
