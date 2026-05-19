@@ -23,16 +23,14 @@ export type LiquityMarketConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// v3 Liquity token addresses — hand-curated.
+// v3 Liquity token addresses
 //
-// The `@mento-protocol/contracts` package's `GBPm` / `CHFm` / `JPYm` / `USDm`
-// keys still hold v2 Mento stable-token addresses (USDm there is cUSD,
-// `0x765de8…`). The v3 fork (`mento-protocol/bold`) deploys fresh ERC20s for
-// debt + collateral, but those addresses haven't been republished in
-// `@mento-protocol/contracts` yet. Until that lands, these four addresses are
-// the only hand-typed inputs in this file. Every other address is derived from
-// the package by naming convention below. The dead-contract diagnostic in
-// `systemParams.ts` catches the case where any of these go dead.
+// Debt tokens (GBPm / CHFm / JPYm) live in `@mento-protocol/contracts` under
+// their bare symbol key and match `AddressesRegistry.boldToken()` on-chain.
+// `USDm` in the package still resolves to v2 cUSD (`0x765de8…`) because the
+// upstream entry hasn't been republished — kept hand-typed below until that
+// lands. The dead-contract diagnostic in `systemParams.ts` catches the case
+// where any of these go dead.
 //
 // Address-collision note: `CHFm` and `JPYm` here also appear in
 // `config.multichain.mainnet.yaml` under `WormholeNttManager` and in
@@ -41,11 +39,6 @@ export type LiquityMarketConfig = {
 // mode). Do not "consolidate" these.
 // ---------------------------------------------------------------------------
 type Sym = "GBPm" | "CHFm" | "JPYm";
-const V3_DEBT_TOKEN_BY_SYMBOL: Record<Sym, string> = {
-  GBPm: "0x191347f9d9a73ff9f41de39464c93d08254fe07e",
-  CHFm: "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
-  JPYm: "0x7431419fe761e7da37587245c55a35e5a356c91b",
-};
 const V3_COLL_TOKEN_USDM = "0x106cc9ff5a2c488780635be8afc07c68522b7ea5";
 
 // Liquity's CollateralRegistry assigns each market a fixed index at deployment
@@ -77,7 +70,20 @@ const requireSymbolAddress = (
   chainId: number,
   role: Role,
   symbol: Sym,
-): string => asAddress(requireContractAddress(chainId, `${role}v300${symbol}`));
+): string => {
+  // StabilityPool is the only role where `@mento-protocol/contracts`
+  // publishes the canonical address under `StabilityPool${symbol}` (no
+  // v300 suffix). The `StabilityPoolv300${symbol}` keys exist in the
+  // package but point at stale earlier deployments — the on-chain
+  // AddressesRegistry returns the no-suffix variant. Without this
+  // special case the indexer subscribes to a dead contract and silently
+  // never records any SP activity (deposits, withdrawals, rebalances,
+  // headroom). Confirmed against `AddressesRegistry.stabilityPool()`
+  // for all three markets (GBPm, CHFm, JPYm) on 2026-05-19.
+  const key =
+    role === "StabilityPool" ? `${role}${symbol}` : `${role}v300${symbol}`;
+  return asAddress(requireContractAddress(chainId, key));
+};
 
 const requireSharedAddress = (chainId: number, name: string): string =>
   asAddress(requireContractAddress(chainId, name));
@@ -89,7 +95,7 @@ const buildMarket = (symbol: Sym): LiquityMarketConfig => {
     collIndex: COLL_INDEX_BY_SYMBOL[symbol],
     symbol,
     slug: symbol.toLowerCase(),
-    debtToken: asAddress(V3_DEBT_TOKEN_BY_SYMBOL[symbol]),
+    debtToken: asAddress(requireContractAddress(chainId, symbol)),
     collToken: asAddress(V3_COLL_TOKEN_USDM),
     collateralRegistry: requireSymbolAddress(
       chainId,

@@ -45,14 +45,17 @@ describe("Liquity market loader (contracts.json-backed)", () => {
     }
   });
 
-  it("derives every v300 protocol address from @mento-protocol/contracts", () => {
+  it("derives every protocol address from @mento-protocol/contracts", () => {
     assert.ok(celoMainnet, "contracts.json missing 42220.mainnet namespace");
-    // If this assertion ever fails, the package shape changed; either the
-    // loader's naming convention or this test is now wrong.
-    const expectedRoleByField = {
+    // Most addresses live under the `${Role}v300${Symbol}` convention.
+    // StabilityPool is the exception — the v300-suffixed entries point at
+    // stale earlier deployments; the no-suffix `StabilityPool${Symbol}`
+    // entries match `AddressesRegistry.stabilityPool()` on-chain. Drift
+    // detected here means the package shape changed or a market's
+    // canonical address moved.
+    const v300RoleByField = {
       collateralRegistry: "CollateralRegistry",
       troveManager: "TroveManager",
-      stabilityPool: "StabilityPool",
       borrowerOperations: "BorrowerOperations",
       troveNFT: "TroveNFT",
       sortedTroves: "SortedTroves",
@@ -63,8 +66,8 @@ describe("Liquity market loader (contracts.json-backed)", () => {
       systemParams: "SystemParams",
     } as const;
     for (const market of LIQUITY_MARKETS) {
-      for (const [field, role] of Object.entries(expectedRoleByField) as Array<
-        [keyof typeof expectedRoleByField, string]
+      for (const [field, role] of Object.entries(v300RoleByField) as Array<
+        [keyof typeof v300RoleByField, string]
       >) {
         const key = `${role}v300${market.symbol}`;
         const expected = celoMainnet[key]?.address?.toLowerCase();
@@ -78,6 +81,29 @@ describe("Liquity market loader (contracts.json-backed)", () => {
           `market.${field} drift for ${market.symbol}`,
         );
       }
+      // StabilityPool uses the no-suffix package key.
+      const spKey = `StabilityPool${market.symbol}`;
+      const spExpected = celoMainnet[spKey]?.address?.toLowerCase();
+      assert.ok(
+        spExpected,
+        `${spKey} missing from @mento-protocol/contracts — bump package or fix naming convention`,
+      );
+      assert.equal(
+        market.stabilityPool,
+        spExpected,
+        `market.stabilityPool drift for ${market.symbol}`,
+      );
+      // Debt token lives under the bare symbol key.
+      const debtExpected = celoMainnet[market.symbol]?.address?.toLowerCase();
+      assert.ok(
+        debtExpected,
+        `${market.symbol} debt-token entry missing from @mento-protocol/contracts`,
+      );
+      assert.equal(
+        market.debtToken,
+        debtExpected,
+        `market.debtToken drift for ${market.symbol}`,
+      );
       // CDPLiquidityStrategy is shared across all markets.
       assert.equal(
         market.cdpLiquidityStrategy,
