@@ -226,7 +226,8 @@ pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 pnpm dashboard:dev            # Dev server
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
-pnpm --filter @mento-protocol/ui-dashboard test:browser  # Fixture-driven browser interaction tests
+pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
+pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
@@ -311,6 +312,7 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - **Forensic reports:** long-form markdown investigations attached to an address (separate from the 500-char `notes` field). Stored in Upstash under a single `reports` hash keyed by lowercase address. Reports are address-keyed only — no chain/global scope. Same EVM address means same entity (same private key derives the same address across every chain), so a single report applies wherever the address appears. Backed up daily inside the same Vercel Blob snapshot as labels (`reports` key in the snapshot JSON; restorable via `/api/address-labels/import`). Never write deep investigations into `notes` — use the address detail page's report editor or the `/forensic-report` skill. Body cap is 50KB; auth-gated, never public. Drafts live in the gitignored `.investigations/` folder at the repo root; the skill produces them and can push the finished draft directly to Upstash so the prose never round-trips through copy-paste
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 - **Browser tests:** `pnpm --filter @mento-protocol/ui-dashboard test:browser` runs Playwright against the real Next.js app with a local GraphQL fixture server (`ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs`). These tests must stay fixture-driven and must not hit hosted Hasura/Envio.
+  - **Visual snapshots:** 5 pages snapshotted (pools list, pool detail LPs, pool detail Swaps, bridge flows, leaderboard). Baselines live in `ui-dashboard/tests/browser/visual-snapshots.test.ts-snapshots/` and are committed. Re-baseline after a legitimate UI change: `pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots`. PRs touching styled components must verify baselines pass. Threshold: `maxDiffPixelRatio: 0.03` (3% ratio; accommodates macOS/Linux font anti-aliasing differences); relative timestamps are masked so they do not cause false-positive failures. To regenerate Linux-native baselines on CI: trigger `.github/workflows/update-snapshots.yml` via workflow_dispatch on the branch.
 
 ### PR Review Guidance (Dashboard Scale)
 

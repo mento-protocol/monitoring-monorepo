@@ -259,6 +259,13 @@ jobs:
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Browser interaction tests
         run: pnpm --filter @mento-protocol/ui-dashboard test:browser
+      - name: Upload snapshot diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: playwright-snapshot-diffs
+          path: ui-dashboard/test-results/
+          retention-days: 7
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           fail_ci_if_error: false

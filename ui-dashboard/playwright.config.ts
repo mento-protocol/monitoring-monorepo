@@ -53,6 +53,9 @@ export default defineConfig({
     timeout: 10_000,
   },
   reporter: [["list"]],
+  // Platform-neutral snapshot paths: drop the OS suffix so the same baselines
+  // work on macOS (dev) and Linux (CI) without per-platform commits.
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
   use: {
     ...devices["Desktop Chrome"],
     baseURL: nextUrl,
