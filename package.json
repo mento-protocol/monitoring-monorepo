@@ -55,7 +55,8 @@
     "alerts:plan": "terraform -chdir=terraform/alerts plan",
     "alerts:apply": "terraform -chdir=terraform/alerts apply",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql"
   },
   "pnpm": {
     "overrides": {
@@ -107,6 +108,7 @@
     "envio-cloud": "0.9.2",
     "eslint": "^10.0.2",
     "globals": "^17.4.0",
+    "graphql": "16.13.1",
     "jscpd": "4.0.9"
   }
 }
