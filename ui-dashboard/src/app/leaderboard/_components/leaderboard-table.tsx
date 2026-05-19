@@ -204,8 +204,7 @@ function TraderRow({
       trader: trader.trader,
       afterTimestamp: cutoff,
     },
-    60_000,
-    { schema: TraderPoolDailyForTraderSchema },
+    { refreshInterval: 60_000, schema: TraderPoolDailyForTraderSchema },
   );
   const breakdownRows: TraderPoolWindowRow[] = useMemo(() => {
     if (!breakdown.data?.TraderPoolDailySnapshot) return [];

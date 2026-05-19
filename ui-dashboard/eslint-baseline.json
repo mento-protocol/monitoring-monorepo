@@ -150,7 +150,7 @@
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'ExpandedBreakdown' has too many lines (115). Maximum allowed is 100.",
-    "line": 324,
+    "line": 323,
     "linePreview": " | function ExpandedBreakdown({ | rows,"
   },
   {
@@ -163,7 +163,7 @@
   {
     "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'TraderRow' has too many lines (134). Maximum allowed is 100.",
+    "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100.",
     "line": 180,
     "linePreview": " | function TraderRow({ | rank,"
   },
@@ -213,42 +213,42 @@
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "complexity",
     "message": "Function 'useHeroRollup' has a complexity of 40. Maximum allowed is 15.",
-    "line": 67,
+    "line": 70,
     "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'useHeroRollup' has too many lines (229). Maximum allowed is 100.",
-    "line": 67,
+    "message": "Function 'useHeroRollup' has too many lines (213). Maximum allowed is 100.",
+    "line": 70,
     "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
-    "line": 67,
+    "line": 70,
     "linePreview": "*/ | export function useHeroRollup({ | venue,"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'LeaderboardClient' has a complexity of 61. Maximum allowed is 15.",
-    "line": 71,
+    "line": 73,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LeaderboardClient' has too many lines (416). Maximum allowed is 100.",
-    "line": 71,
+    "message": "Function 'LeaderboardClient' has too many lines (406). Maximum allowed is 100.",
+    "line": 73,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
     "file": "src/app/leaderboard/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 46 to the 18 allowed.",
-    "line": 71,
+    "line": 73,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
   },
   {
@@ -787,7 +787,7 @@
     "file": "src/components/pool-header/uptime-value.tsx",
     "ruleId": "complexity",
     "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15.",
-    "line": 59,
+    "line": 60,
     "linePreview": " | export function UptimeValue({ pool }: { pool: Pool }) { | const isVirtual = isVirtualPool(pool);"
   },
   {

@@ -273,6 +273,9 @@ describe("TraderPoolDailyTopSchema smoke test", () => {
         .success,
     ).toBe(true);
   });
+  it("fails when root key is missing", () => {
+    expect(TraderPoolDailyTopSchema.safeParse({}).success).toBe(false);
+  });
 });
 
 describe("PoolsForLeaderboardSchema smoke test", () => {
@@ -350,6 +353,26 @@ describe("BrokerTraderDailyTopSchema smoke test", () => {
       ],
     });
     expect(result.success).toBe(true);
+  });
+  it("rejects rows missing the trader alias (e.g. raw caller field returned)", () => {
+    // If the GQL alias `caller → trader` is dropped, Hasura returns `caller`
+    // instead. Zod strips unknown keys, so `caller` is ignored — but the
+    // required `trader` field is absent, causing the parse to fail.
+    const result = BrokerTraderDailyTopSchema.safeParse({
+      BrokerTraderDailySnapshot: [
+        {
+          id: "42220-0xtrader-100",
+          chainId: 42220,
+          caller: "0xtrader", // raw field — trader alias missing
+          timestamp: "1700000000",
+          swapCount: 5,
+          volumeUsdWei: "1000",
+          isSystemAddress: false,
+          lastSeenTimestamp: "1700000000",
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 });
 

@@ -87,6 +87,9 @@ export const TraderDailyTopSchema = z.object({
   TraderDailySnapshot: z.array(TraderDailyRowSchema),
 });
 
+// Same row shape as TraderDailyTopSchema — both query TRADER_DAILY_TOP and
+// TRADER_DAILY_WINDOW_TOP select the identical field set from
+// TraderDailySnapshot. Two named exports let call sites document intent.
 export const TraderDailyWindowTopSchema = z.object({
   TraderDailySnapshot: z.array(TraderDailyRowSchema),
 });
@@ -190,6 +193,9 @@ const AggregatorDailyRowSchema = z.object({
   volumeUsdWeiIncludingSystem: z.string(),
 });
 
+// Used for both AGGREGATOR_DAILY_TOP and AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+// queries — they select the same fields from AggregatorDailySnapshot and differ
+// only in their WHERE/ORDER_BY clause, not the response shape.
 export const AggregatorDailyTopSchema = z.object({
   AggregatorDailySnapshot: z.array(AggregatorDailyRowSchema),
 });

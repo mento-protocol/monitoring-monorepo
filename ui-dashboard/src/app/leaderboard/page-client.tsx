@@ -52,6 +52,8 @@ import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useLeaderboardUrlState } from "./_lib/url-state";
 import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
 
+type V3AggregatorsData = { AggregatorDailySnapshot: AggregatorDailyRow[] };
+
 type PoolRow = {
   id: string;
   chainId: number;
@@ -95,7 +97,6 @@ export function LeaderboardClient() {
       isSystemAddressIn,
       limit: ENVIO_MAX_ROWS,
     },
-    undefined,
     { schema: TraderDailyTopSchema },
   );
   const poolsResult = useGQL<{ Pool: PoolRow[] }>(
@@ -112,12 +113,9 @@ export function LeaderboardClient() {
     enabled: showChart,
     afterTimestamp: cutoff,
   });
-  const v3AggregatorsResult = useGQL<{
-    AggregatorDailySnapshot: AggregatorDailyRow[];
-  }>(
+  const v3AggregatorsResult = useGQL<V3AggregatorsData>(
     venue === "v3" ? aggregatorDailyTopQuery(showSystem) : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
-    undefined,
     { timeoutMs: 8_000, schema: AggregatorDailyTopSchema },
   );
 
@@ -125,12 +123,7 @@ export function LeaderboardClient() {
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
   }>(
     venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
-    {
-      afterTimestamp: cutoff,
-      isSystemAddressIn,
-      limit: ENVIO_MAX_ROWS,
-    },
-    undefined,
+    { afterTimestamp: cutoff, isSystemAddressIn, limit: ENVIO_MAX_ROWS },
     { schema: BrokerTraderDailyTopSchema },
   );
   const v2AggregatorsResult = useGQL<{
@@ -138,7 +131,6 @@ export function LeaderboardClient() {
   }>(
     venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
-    undefined,
     { schema: BrokerAggregatorDailyTopSchema },
   );
 

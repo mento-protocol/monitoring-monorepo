@@ -40,6 +40,9 @@ import {
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import type { Venue } from "./url-state";
 
+type HeroW3Data = { LeaderboardWindowSnapshot: LeaderboardWindowRow[] };
+type HeroW2Data = { BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[] };
+
 /**
  * Hero-tile data slice for the leaderboard page (total volume, unique
  * traders, total swaps, top-10 concentration, plus the stale/degraded
@@ -101,22 +104,14 @@ export function useHeroRollup({
   // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
   // [windowStart, yesterday]; today's partial is fetched separately and
   // added client-side.
-  const heroV3Result = useGQL<{
-    LeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(
+  const heroV3Result = useGQL<HeroW3Data>(
     venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null,
     { windowKey: range },
-    undefined,
-    {
-      schema: LeaderboardWindowLatestSchema,
-    },
+    { schema: LeaderboardWindowLatestSchema },
   );
-  const heroV2Result = useGQL<{
-    BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[];
-  }>(
+  const heroV2Result = useGQL<HeroW2Data>(
     venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null,
     { windowKey: range },
-    undefined,
     { schema: BrokerLeaderboardWindowLatestSchema },
   );
 
@@ -133,7 +128,6 @@ export function useHeroRollup({
   }>(
     venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null,
     { todayMidnight, isSystemAddressIn },
-    undefined,
     { schema: LeaderboardTodayTradersSchema },
   );
   const todayV2Result = useGQL<{
@@ -141,7 +135,6 @@ export function useHeroRollup({
   }>(
     venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null,
     { todayMidnight, isSystemAddressIn },
-    undefined,
     { schema: BrokerLeaderboardTodayTradersSchema },
   );
 
@@ -164,7 +157,6 @@ export function useHeroRollup({
   }>(
     venue === "v3" ? LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null,
     { windowKey: range },
-    undefined,
     { schema: LeaderboardWindowFirstDayLatestSchema },
   );
   const heroFirstDayV2Result = useGQL<{
@@ -172,7 +164,6 @@ export function useHeroRollup({
   }>(
     venue === "v2" ? BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST : null,
     { windowKey: range },
-    undefined,
     { schema: BrokerLeaderboardWindowFirstDayLatestSchema },
   );
   const firstDayRows =
@@ -209,7 +200,6 @@ export function useHeroRollup({
       ? LEADERBOARD_YESTERDAY_TRADERS
       : null,
     { yesterdayMidnight, isSystemAddressIn, chainIdIn: degradedChainsForGate },
-    undefined,
     { schema: LeaderboardYesterdayTradersSchema },
   );
   const yesterdayV2Result = useGQL<{
@@ -219,7 +209,6 @@ export function useHeroRollup({
       ? BROKER_LEADERBOARD_YESTERDAY_TRADERS
       : null,
     { yesterdayMidnight, isSystemAddressIn, chainIdIn: degradedChainsForGate },
-    undefined,
     { schema: BrokerLeaderboardYesterdayTradersSchema },
   );
   const yesterdayPartialRows =
@@ -255,7 +244,6 @@ export function useHeroRollup({
       ? LEADERBOARD_PARTIAL_OVERLAP_TRADERS
       : null,
     partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
-    undefined,
     { timeoutMs: 8_000, schema: LeaderboardPartialOverlapTradersSchema },
   );
   const partialOverlapV2Result = useGQL<{
@@ -265,7 +253,6 @@ export function useHeroRollup({
       ? BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS
       : null,
     partialOverlapInput ?? { where: { _or: [] }, limit: 0 },
-    undefined,
     { timeoutMs: 8_000, schema: BrokerLeaderboardPartialOverlapTradersSchema },
   );
   const partialOverlapRows =
