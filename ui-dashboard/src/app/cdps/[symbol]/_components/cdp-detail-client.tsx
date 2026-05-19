@@ -16,12 +16,19 @@ import type {
   CdpInstance,
   CdpPoolRow,
   CdpTrove,
+  CdpTroveListRow,
 } from "../../_lib/types";
 import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
+import {
+  aggregateTroves,
+  deriveCdpHealth,
+  healthBadgeClasses,
+} from "../../_lib/health";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
   LiquityInstance: CdpInstance[];
+  Trove: CdpTroveListRow[];
 };
 
 type CdpDetailResponse = {
@@ -127,6 +134,8 @@ function CdpDetailContent({
   depositors: CdpDepositor[];
   cdpPools: CdpPoolRow[];
 }) {
+  const aggregates = aggregateTroves(troves);
+  const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -144,15 +153,26 @@ function CdpDetailContent({
             USDm collateral, debt denominated in {collateral.symbol}.
           </p>
         </div>
-        <span className="text-xs text-slate-500">
-          Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span
+            className={`text-xs rounded px-2 py-1 font-medium ${healthBadgeClasses(health.state)}`}
+            title={health.reasons.join(" · ") || health.label}
+          >
+            {health.label}
+          </span>
+          <span className="text-xs text-slate-500">
+            Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
+          </span>
+        </div>
       </header>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile
           label="System Debt"
-          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
+          value={formatTokenAmount(
+            aggregates.totalDebt.toString(),
+            collateral.symbol,
+          )}
         />
         <Tile
           label="System Collateral"
@@ -161,11 +181,10 @@ function CdpDetailContent({
         <Tile
           label="Stability Pool"
           value={formatTokenAmount(instance?.spDeposits, collateral.symbol)}
-          subtitle={`Headroom ${formatTokenAmount(instance?.spHeadroom, collateral.symbol)}`}
         />
         <Tile
-          label="Active Troves"
-          value={instance == null ? "—" : String(instance.activeTroveCount)}
+          label="Open Troves"
+          value={instance == null ? "—" : String(aggregates.openTroveCount)}
           subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
         />
       </section>

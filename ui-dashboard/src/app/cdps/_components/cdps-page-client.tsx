@@ -5,12 +5,24 @@ import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
 import { CDP_MARKETS } from "@/lib/queries";
-import type { CdpCollateral, CdpInstance } from "../_lib/types";
+import type {
+  CdpCollateral,
+  CdpInstance,
+  CdpTroveListRow,
+} from "../_lib/types";
+import { aggregateTroves, type CdpAggregates } from "../_lib/health";
 import { CdpMarketCard } from "./cdp-market-card";
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
   LiquityInstance: CdpInstance[];
+  Trove: CdpTroveListRow[];
+};
+
+const EMPTY_AGGREGATES: CdpAggregates = {
+  openTroveCount: 0,
+  totalDebt: BigInt(0),
+  totalColl: BigInt(0),
 };
 
 export function CdpsPageClient() {
@@ -26,6 +38,18 @@ export function CdpsPageClient() {
       m.set(instance.collateralId, instance);
     }
     return m;
+  }, [data]);
+
+  const aggregatesByCollateral = useMemo(() => {
+    const grouped = new Map<string, CdpTroveListRow[]>();
+    for (const trove of data?.Trove ?? []) {
+      const bucket = grouped.get(trove.collateralId);
+      if (bucket) bucket.push(trove);
+      else grouped.set(trove.collateralId, [trove]);
+    }
+    const out = new Map<string, CdpAggregates>();
+    for (const [id, troves] of grouped) out.set(id, aggregateTroves(troves));
+    return out;
   }, [data]);
 
   if (network.chainId !== 42220) {
@@ -60,6 +84,9 @@ export function CdpsPageClient() {
             key={collateral.id}
             collateral={collateral}
             instance={instances.get(collateral.id)}
+            aggregates={
+              aggregatesByCollateral.get(collateral.id) ?? EMPTY_AGGREGATES
+            }
           />
         ))}
       </div>

@@ -1,3 +1,7 @@
+// We pull every active+zombie trove here so the list page can compute its own
+// systemDebt and borrower count: the on-chain ActivePoolBoldDebtUpdated event
+// is never emitted by Mento's Liquity fork, so LiquityInstance.systemDebt /
+// activeTroveCount understate reality. See BACKLOG for indexer-side fix.
 export const CDP_MARKETS = `
   query CdpMarkets($chainId: Int!) {
     LiquityCollateral(
@@ -17,6 +21,16 @@ export const CDP_MARKETS = `
       icrP1Bps icrP5Bps icrP50Bps icrFracBelowMcrBps
       liqCountCum redemptionCountCum borrowingFeeCum redemptionFeeCum
       isShutDown shutDownAt shutDownTcrBps lastEventBlock lastEventTimestamp
+    }
+    Trove(
+      where: {
+        chainId: { _eq: $chainId }
+        status: { _in: ["active", "zombie"] }
+      }
+      order_by: { lastUpdatedAt: desc }
+      limit: 500
+    ) {
+      id collateralId status debt coll
     }
   }
 `;

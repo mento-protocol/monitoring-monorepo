@@ -13,7 +13,11 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
-import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
+import {
+  findLiquityMarketByEventSource,
+  isLiquidityStrategyAddress,
+  makeCollateralId,
+} from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
 import { negativeToPositive } from "./math.js";
@@ -25,6 +29,7 @@ import {
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
   TROVE_STATUS,
+  applySystemDebtDelta,
   getOrCreateTrove,
   isPlaceholderClosedTrove,
   makeInterestRateBracketId,
@@ -370,6 +375,7 @@ indexer.onEvent(
       blockTimestamp,
       txHash: event.transaction.hash,
     });
+    const prevTroveState = { status: trove.status, debt: trove.debt };
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
@@ -466,6 +472,13 @@ indexer.onEvent(
       borrowingFeeCum:
         instance.borrowingFeeCum + event.params._debtIncreaseFromUpfrontFee,
     };
+    // TroveOperation handler doesn't mutate `trove.debt` — only status flips
+    // (debt changes arrive in the subsequent TroveUpdated). So delta here is
+    // driven purely by open↔not-open transitions on the unchanged debt.
+    instance = applySystemDebtDelta(instance, prevTroveState, {
+      status: trove.status,
+      debt: trove.debt,
+    });
     context.Trove.set({
       ...trove,
       lastUpdatedAt: blockTimestamp,
@@ -531,6 +544,10 @@ indexer.onEvent(
       blockTimestamp,
       txHash: event.transaction.hash,
     });
+    // Capture prev contribution BEFORE any mutation (bracket-debt move,
+    // debt overwrite, reclassified re-read all happen below). Single
+    // capture point so the delta math at the end is unambiguous.
+    const prevTroveState = { status: trove.status, debt: trove.debt };
     if (tracksIndividualInterest(trove)) {
       await moveInterestRateBracketDebt(context, {
         collateralId,
@@ -576,6 +593,14 @@ indexer.onEvent(
       trove = transitioned.trove;
       instance = transitioned.instance;
     }
+    // Combined delta: handles both debt change and any status flip the
+    // transitionTroveStatus call above performed. Closed/liquidated branches
+    // skip the transition but still flow through here as a no-op (both prev
+    // and next are not-open ⇒ zero contribution delta).
+    instance = applySystemDebtDelta(instance, prevTroveState, {
+      status: trove.status,
+      debt: trove.debt,
+    });
     context.Trove.set(trove);
     if (pendingRedemption !== undefined) {
       context.PendingRedemption.deleteUnsafe(pendingId);
@@ -711,6 +736,9 @@ indexer.onEvent(
         blockTimestamp,
         txHash: event.transaction.hash,
       });
+      // Per-pending capture; the loop may process many troves per
+      // BatchUpdated event, each with its own status/debt flip.
+      const prevTroveState = { status: trove.status, debt: trove.debt };
       const nextDebt =
         event.params._totalDebtShares === 0n
           ? 0n
@@ -761,6 +789,10 @@ indexer.onEvent(
       );
       trove = transitioned.trove;
       instance = transitioned.instance;
+      instance = applySystemDebtDelta(instance, prevTroveState, {
+        status: trove.status,
+        debt: trove.debt,
+      });
       context.Trove.set(trove);
       context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
     }
@@ -854,6 +886,14 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    // PR #31 in mento-protocol/bold added CDPLiquidityStrategy-only path
+    // `redeemCollateralRebalancing` that routes through TroveManager.redeemCollateral
+    // and fires this same event. Discriminator: tx.to == liquidityStrategy.
+    // On Celo today (2026-05-19) ALL observed redemptions are rebalance-driven.
+    const isRebalance = isLiquidityStrategyAddress(
+      event.chainId,
+      event.transaction.to,
+    );
     context.RedemptionEvent.set({
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
@@ -864,6 +904,7 @@ indexer.onEvent(
       ETHFee: event.params._ETHFee,
       price: event.params._price,
       redemptionPrice: event.params._redemptionPrice,
+      isRebalance,
       timestamp: blockTimestamp,
       blockNumber,
       txHash: event.transaction.hash,
@@ -873,18 +914,34 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    // Totals always increment; rebalance subset increments in addition so
+    // consumers can compute user-driven = total − rebalance without breaking
+    // the existing redemptionCountCum semantic.
+    const debt = event.params._actualBoldAmount;
+    const fee = event.params._ETHFee;
     context.LiquityInstance.set({
       ...next,
       redemptionCountCum: next.redemptionCountCum + 1,
-      redemptionDebtCum:
-        next.redemptionDebtCum + event.params._actualBoldAmount,
-      redemptionFeeCum: next.redemptionFeeCum + event.params._ETHFee,
+      redemptionDebtCum: next.redemptionDebtCum + debt,
+      redemptionFeeCum: next.redemptionFeeCum + fee,
       redemptionCountBucket: next.redemptionCountBucket + 1,
-      redemptionDebtBucket:
-        next.redemptionDebtBucket + event.params._actualBoldAmount,
+      redemptionDebtBucket: next.redemptionDebtBucket + debt,
       redemptionCountDayBucket: next.redemptionCountDayBucket + 1,
-      redemptionDebtDayBucket:
-        next.redemptionDebtDayBucket + event.params._actualBoldAmount,
+      redemptionDebtDayBucket: next.redemptionDebtDayBucket + debt,
+      rebalanceRedemptionCountCum:
+        next.rebalanceRedemptionCountCum + (isRebalance ? 1 : 0),
+      rebalanceRedemptionDebtCum:
+        next.rebalanceRedemptionDebtCum + (isRebalance ? debt : 0n),
+      rebalanceRedemptionFeeCum:
+        next.rebalanceRedemptionFeeCum + (isRebalance ? fee : 0n),
+      rebalanceRedemptionCountBucket:
+        next.rebalanceRedemptionCountBucket + (isRebalance ? 1 : 0),
+      rebalanceRedemptionDebtBucket:
+        next.rebalanceRedemptionDebtBucket + (isRebalance ? debt : 0n),
+      rebalanceRedemptionCountDayBucket:
+        next.rebalanceRedemptionCountDayBucket + (isRebalance ? 1 : 0),
+      rebalanceRedemptionDebtDayBucket:
+        next.rebalanceRedemptionDebtDayBucket + (isRebalance ? debt : 0n),
     });
   },
 );

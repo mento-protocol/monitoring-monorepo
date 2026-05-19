@@ -4,6 +4,64 @@ Active work only. Remove items from this file once they ship or are closed.
 Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`,
 or tests.
 
+## CDP indexer: deploy + resync to land the schema/handler fixes
+
+Two indexer-side changes are in code waiting for a single resync to land:
+
+1. **`LiquityInstance.systemDebt` derivation** — `applySystemDebtDelta` in
+   `indexer-envio/src/handlers/liquity/troves.ts` runs in every trove handler
+   (`TroveOperation`, `TroveUpdated`, `BatchUpdated`, plus the loop in
+   `reclassifyTrovesForLoadedParams`). The pool-event summation in
+   `pools.ts:updatePoolGauge` no longer sets `systemDebt` (it would clobber
+   the delta-tracked value on the first DefaultPool event post-resync).
+2. **Rebalance-redemption split** — PR #31 in `mento-protocol/bold` added
+   `redeemCollateralRebalancing` which fires identical `Redemption` events
+   to user redemptions; on Celo today ALL 368 GBPm + 13 JPYm redemptions are
+   rebalance-driven. New schema fields on `LiquityInstance` /
+   `LiquityInstanceSnapshot` / `LiquityInstanceDailySnapshot`:
+   `rebalanceRedemption{Count,Debt,Fee}Cum` plus matching hour/day buckets,
+   and `RedemptionEvent.isRebalance: Boolean!`. Discriminator:
+   `event.transaction.to == cdpLiquidityStrategy` (single shared strategy
+   `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` on Celo). Totals
+   (`redemption*Cum`) still increment for every redemption — the rebalance
+   subset is added on top, so user-driven = total − rebalance.
+
+What's left:
+
+- [ ] **Deploy the indexer code** (`/deploy-indexer`). Schema added required
+      fields, so this requires a full resync — codegen + redeploy + sync
+      from genesis. No way to forward-only this.
+- [ ] **Promote to prod** after resync completes and Hasura schema reflects
+      the new fields.
+- [ ] **Delete the dashboard `systemDebt` workaround** in
+      `ui-dashboard/src/app/cdps/_lib/health.ts` / `cdps-page-client.tsx` /
+      `cdp-detail-client.tsx` / `lib/queries/liquity.ts`. Drop the `Trove {
+id collateralId status debt coll }` selection from `CDP_MARKETS`, stop
+      calling `aggregateTroves`, read `instance.systemDebt` directly. Keep
+      `aggregateTroves` for the borrower count — `activeTroveCount` still
+      excludes zombies (that's a separate indexer-side gap; consider adding
+      an `openTroveCount` field maintained alongside `activeTroveCount` in
+      the same delta path).
+- [ ] **Surface rebalance vs user redemption split** in the dashboard once
+      Hasura returns the new fields. Existing UI shows nothing about
+      redemptions, but Total / Rebalance / User KPI tiles or a stacked
+      time-series in the CDP detail page would be the natural next surface.
+
+## CDP glue contracts: state mutations without events (NICE TO KNOW)
+
+From the mento-core + deployments-v2 sweep on 2026-05-19:
+
+- `CDPLiquidityStrategy.setCDPConfig(pool, CDPConfig)` lets governance rotate
+  `stabilityPool` / `collateralRegistry` / `stabilityPoolPercentage` /
+  `maxIterations` post-add with no event. Our `CdpPool` row doesn't store
+  these fields today, so silent rotation is invisible. If we ever surface
+  any of them, re-read `getCDPConfig(pool)` via `eth_call` on
+  `PoolAdded`/`LiquidityMoved` or ask mento-core for a `CDPConfigSet` event.
+- `ReserveTroveFactory.withdraw(token, recipient)` is owner-only and silent.
+  Pulls accumulated debt/coll tokens (factory holds `ETH_GAS_COMPENSATION`
+  refunds from each `createReserveTrove`). Re-derivable from ERC20 Transfer
+  logs if we ever need it.
+
 ## Thoughtworks Technology Radar Follow-Ups
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.

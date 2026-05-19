@@ -119,3 +119,19 @@ export const findCollateralIdByPoolFallback = (
   const fallback = config.poolFallbacks[`${chainId}-${asAddress(poolAddress)}`];
   return fallback === undefined ? undefined : fallback;
 };
+
+const liquidityStrategyAddresses = new Set(
+  LIQUITY_MARKETS.map((m) => `${m.chainId}-${m.cdpLiquidityStrategy}`),
+);
+
+/** Used by the Redemption handler to split rebalance-driven redemptions
+ * (PR #31 in mento-protocol/bold — only the LiquidityStrategy can call
+ * `redeemCollateralRebalancing`) from user-driven ones. The two paths fire
+ * identical `Redemption` events on TroveManager; the discriminator is the
+ * transaction's outer `to` address. */
+export const isLiquidityStrategyAddress = (
+  chainId: number,
+  address: string | null | undefined,
+): boolean =>
+  address != null &&
+  liquidityStrategyAddresses.has(`${chainId}-${asAddress(address)}`);

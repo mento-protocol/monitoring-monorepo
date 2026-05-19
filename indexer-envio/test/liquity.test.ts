@@ -4,6 +4,7 @@ import {
   findLiquityMarketByAddressesRegistry,
   findLiquityMarketByDebtToken,
   findLiquityMarketByEventSource,
+  isLiquidityStrategyAddress,
   makeCollateralId,
 } from "../src/handlers/liquity/config";
 import {
@@ -12,6 +13,8 @@ import {
 } from "../src/handlers/liquity/math";
 import {
   TROVE_STATUS,
+  applySystemDebtDelta,
+  isOpenStatus,
   moveInterestRateBracketDebt,
   reclassifyTrovesForLoadedParams,
   statusFromDebt,
@@ -251,6 +254,137 @@ describe("Liquity CDP helpers", () => {
     });
     await reclassifyTrovesForLoadedParams(context, collateralId, 100n, 40n);
     assert.equal(instances.get(collateralId)?.spHeadroom, -40n);
+  });
+
+  describe("isLiquidityStrategyAddress", () => {
+    it("matches the strategy address from config.markets, case-insensitive", () => {
+      const market = LIQUITY_MARKETS[0]!;
+      // The discriminator is what we use to split rebalance-driven
+      // redemptions from user-driven ones in the Redemption handler.
+      assert.equal(
+        isLiquidityStrategyAddress(
+          market.chainId,
+          market.cdpLiquidityStrategy.toUpperCase(),
+        ),
+        true,
+      );
+      assert.equal(
+        isLiquidityStrategyAddress(market.chainId, market.cdpLiquidityStrategy),
+        true,
+      );
+    });
+
+    it("returns false for non-strategy addresses, undefined, or wrong chain", () => {
+      const market = LIQUITY_MARKETS[0]!;
+      assert.equal(
+        isLiquidityStrategyAddress(market.chainId, market.troveManager),
+        false,
+      );
+      assert.equal(
+        isLiquidityStrategyAddress(market.chainId, undefined),
+        false,
+      );
+      assert.equal(isLiquidityStrategyAddress(market.chainId, null), false);
+      assert.equal(
+        isLiquidityStrategyAddress(99999, market.cdpLiquidityStrategy),
+        false,
+      );
+    });
+  });
+
+  describe("applySystemDebtDelta", () => {
+    const baseInstance = () => ({
+      ...makeLiquityInstance("42220-0xabc", 42220, 0n),
+      systemDebt: 1000n,
+    });
+
+    it("flags active/zombie as open and closed/liquidated/redeemed as not", () => {
+      assert.equal(isOpenStatus(TROVE_STATUS.ACTIVE), true);
+      assert.equal(isOpenStatus(TROVE_STATUS.ZOMBIE), true);
+      assert.equal(isOpenStatus(TROVE_STATUS.CLOSED), false);
+      assert.equal(isOpenStatus(TROVE_STATUS.LIQUIDATED), false);
+      assert.equal(isOpenStatus(TROVE_STATUS.REDEEMED), false);
+    });
+
+    it("placeholder open: closed→active with debt 0→1000 adds 1000", () => {
+      // Two-step OPEN_TROVE flow: TroveOperation transitions status, then
+      // TroveUpdated arrives with the real debt. This test mimics the second
+      // call only — the first call's prev/next are both 0-contribution.
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 0n },
+        { status: TROVE_STATUS.ACTIVE, debt: 1000n },
+      );
+      assert.equal(next.systemDebt, 2000n);
+    });
+
+    it("close-trove: active→closed subtracts the trove's debt", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 700n },
+        { status: TROVE_STATUS.CLOSED, debt: 0n },
+      );
+      assert.equal(next.systemDebt, 300n);
+    });
+
+    it("liquidation: active→liquidated subtracts the trove's debt", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 400n },
+        { status: TROVE_STATUS.LIQUIDATED, debt: 400n },
+      );
+      assert.equal(next.systemDebt, 600n);
+    });
+
+    it("intra-open flip (active↔zombie) with identical debt is a no-op", () => {
+      // reclassifyTrovesForLoadedParams flips troves between active/zombie
+      // based on minDebt — both are open, so systemDebt must NOT change.
+      const before = baseInstance();
+      const after = applySystemDebtDelta(
+        before,
+        { status: TROVE_STATUS.ACTIVE, debt: 500n },
+        { status: TROVE_STATUS.ZOMBIE, debt: 500n },
+      );
+      assert.equal(after, before);
+    });
+
+    it("debt change on open trove (no status flip) applies the delta", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 500n },
+        { status: TROVE_STATUS.ACTIVE, debt: 700n },
+      );
+      assert.equal(next.systemDebt, 1200n);
+    });
+
+    it("zombie→active with debt going above minDebt applies the delta", () => {
+      // After a top-up that lifts a zombie back above minDebt.
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ZOMBIE, debt: 50n },
+        { status: TROVE_STATUS.ACTIVE, debt: 200n },
+      );
+      assert.equal(next.systemDebt, 1150n);
+    });
+
+    it("redeem-to-zero: active→redeemed at debt 0 subtracts the full prev debt", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 800n },
+        { status: TROVE_STATUS.REDEEMED, debt: 0n },
+      );
+      assert.equal(next.systemDebt, 200n);
+    });
+
+    it("returns the same instance reference when contributions are equal", () => {
+      const before = baseInstance();
+      const after = applySystemDebtDelta(
+        before,
+        { status: TROVE_STATUS.CLOSED, debt: 0n },
+        { status: TROVE_STATUS.LIQUIDATED, debt: 0n },
+      );
+      assert.equal(after, before);
+    });
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {

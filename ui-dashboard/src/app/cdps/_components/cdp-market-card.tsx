@@ -1,14 +1,23 @@
 import Link from "next/link";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
+import {
+  type CdpAggregates,
+  type CdpHealth,
+  deriveCdpHealth,
+  healthBadgeClasses,
+} from "../_lib/health";
 import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
 
 export function CdpMarketCard({
   collateral,
   instance,
+  aggregates,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
+  aggregates: CdpAggregates;
 }) {
+  const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <Link
       href={`/cdps/${cdpSymbolSlug(collateral.symbol)}`}
@@ -21,29 +30,44 @@ export function CdpMarketCard({
           </h2>
           <p className="text-sm text-slate-400">USDm-backed CDP market</p>
         </div>
-        <span className="text-xs rounded border border-slate-700 px-2 py-1 text-slate-300">
-          {instance?.isShutDown ? "Shutdown" : "Live"}
-        </span>
+        <HealthBadge health={health} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Metric
           label="System Debt"
-          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
+          value={formatTokenAmount(
+            aggregates.totalDebt.toString(),
+            collateral.symbol,
+          )}
         />
         <Metric
           label="System Collateral"
           value={formatTokenAmount(instance?.systemColl, "USDm")}
         />
         <Metric
-          label="SP Headroom"
-          value={formatTokenAmount(instance?.spHeadroom, collateral.symbol)}
+          label="Stability Pool"
+          value={formatTokenAmount(instance?.spDeposits, collateral.symbol)}
         />
         <Metric
-          label="Active Troves"
-          value={instance == null ? "—" : String(instance.activeTroveCount)}
+          label="Open Troves"
+          value={instance == null ? "—" : String(aggregates.openTroveCount)}
         />
       </div>
     </Link>
+  );
+}
+
+function HealthBadge({ health }: { health: CdpHealth }) {
+  const cls = healthBadgeClasses(health.state);
+  const title = health.reasons.join(" · ") || health.label;
+  return (
+    <span
+      className={`text-xs rounded px-2 py-1 font-medium ${cls}`}
+      title={title}
+      aria-label={`Health: ${health.label}. ${title}`}
+    >
+      {health.label}
+    </span>
   );
 }
 

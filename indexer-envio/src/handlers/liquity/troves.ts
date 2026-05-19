@@ -48,6 +48,12 @@ export const normalizeTroveTokenId = (troveId: bigint | string): string =>
 export const isActiveStatus = (status: string): boolean =>
   status === TROVE_STATUS.ACTIVE;
 
+/** A trove with `active` or `zombie` status holds outstanding debt that
+ * contributes to the system's `aggRecordedDebt`. `closed` / `liquidated` /
+ * `redeemed` do not. */
+export const isOpenStatus = (status: string): boolean =>
+  status === TROVE_STATUS.ACTIVE || status === TROVE_STATUS.ZOMBIE;
+
 export const transitionTroveStatus = (
   trove: Trove,
   nextStatus: string,
@@ -63,6 +69,33 @@ export const transitionTroveStatus = (
       activeTroveCount:
         instance.activeTroveCount + (isActive ? 1 : 0) - (wasActive ? 1 : 0),
     },
+  };
+};
+
+/**
+ * Maintain `LiquityInstance.systemDebt` as the running sum of open-trove
+ * debts. We can't trust `ActivePoolBoldDebtUpdated` because Mento's deployed
+ * Liquity v2 fork never emits it — only `ActivePoolCollBalanceUpdated` fires
+ * (verified against the GBPm ActivePool: 394 logs, all CollBalanceUpdated,
+ * zero debt updates).
+ *
+ * Call this at the END of any handler that mutated a trove's status or debt,
+ * after capturing `prev` immediately following the entity load. The two
+ * failure modes to guard against are sign errors (open↔closed flips) and
+ * double-applies (calling per loop iteration when state was aggregated, or
+ * vice versa).
+ */
+export const applySystemDebtDelta = (
+  instance: LiquityInstance,
+  prev: { status: string; debt: bigint },
+  next: { status: string; debt: bigint },
+): LiquityInstance => {
+  const oldContribution = isOpenStatus(prev.status) ? prev.debt : 0n;
+  const newContribution = isOpenStatus(next.status) ? next.debt : 0n;
+  if (oldContribution === newContribution) return instance;
+  return {
+    ...instance,
+    systemDebt: instance.systemDebt + newContribution - oldContribution,
   };
 };
 
@@ -296,6 +329,7 @@ export async function reclassifyTrovesForLoadedParams(
   for (const status of [TROVE_STATUS.ACTIVE, TROVE_STATUS.ZOMBIE]) {
     for (const trove of troves) {
       if (trove.status !== status) continue;
+      const prevTroveState = { status: trove.status, debt: trove.debt };
       const nextStatus = statusFromDebt(trove.debt, minDebt);
       const transitioned = transitionTroveStatus(
         trove,
@@ -303,7 +337,13 @@ export async function reclassifyTrovesForLoadedParams(
         nextInstance,
       );
       if (transitioned.trove !== trove) context.Trove.set(transitioned.trove);
-      nextInstance = transitioned.instance;
+      // Reclassification only flips active↔zombie (both open) on unchanged
+      // debt, so this call is a no-op in practice. Kept here so every
+      // status mutation funnels through the same helper.
+      nextInstance = applySystemDebtDelta(nextInstance, prevTroveState, {
+        status: transitioned.trove.status,
+        debt: transitioned.trove.debt,
+      });
     }
   }
   if (nextInstance !== instance) context.LiquityInstance.set(nextInstance);

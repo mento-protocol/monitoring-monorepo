@@ -58,6 +58,16 @@ export type CdpTrove = {
   redeemedColl: string;
 };
 
+/** Subset of {@link CdpTrove} fetched on the markets list page — enough to
+ * compute openTroveCount + totalDebt without paying for the full row. */
+export type CdpTroveListRow = {
+  id: string;
+  collateralId: string;
+  status: string;
+  debt: string;
+  coll: string;
+};
+
 export type CdpDepositor = {
   id: string;
   address: string;

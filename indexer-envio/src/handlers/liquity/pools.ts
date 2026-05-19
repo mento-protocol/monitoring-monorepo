@@ -64,13 +64,19 @@ async function updatePoolGauge({
   const activePoolColl = delta.activePoolColl ?? next.activePoolColl;
   const defaultPoolDebt = delta.defaultPoolDebt ?? next.defaultPoolDebt;
   const defaultPoolColl = delta.defaultPoolColl ?? next.defaultPoolColl;
+  // systemColl can still be summed — `ActivePoolCollBalanceUpdated` fires.
+  // systemDebt is owned by the trove handlers via `applySystemDebtDelta` —
+  // do NOT set it here. The fork never emits `ActivePoolBoldDebtUpdated`,
+  // so `activePoolDebt` stays 0 forever, and `DefaultPoolBoldDebtUpdated`
+  // only fires on the first liquidation-triggered debt redistribution.
+  // Setting `systemDebt = activePoolDebt + defaultPoolDebt` here would
+  // clobber the delta-tracked value the moment DefaultPool fires post-resync.
   context.LiquityInstance.set({
     ...next,
     activePoolDebt,
     activePoolColl,
     defaultPoolDebt,
     defaultPoolColl,
-    systemDebt: activePoolDebt + defaultPoolDebt,
     systemColl: activePoolColl + defaultPoolColl,
     tcrBps: -1,
   });
