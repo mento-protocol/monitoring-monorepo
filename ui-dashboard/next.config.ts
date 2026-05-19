@@ -1,76 +1,6 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
-// Build the Content-Security-Policy once so it's auditable in one place.
-// Notes:
-// - `'unsafe-inline'` on script-src/style-src is currently required by Next.js
-//   App Router for hydration + styled-jsx. Moving to nonces is a follow-up.
-// - Sentry tunnels through `/monitoring` (see `tunnelRoute` below), so we
-//   don't need to whitelist `*.sentry.io` in connect-src.
-// - `vercel.live` is whitelisted so Vercel Live (preview comments toolbar)
-//   works on preview deployments; prod is unaffected since the toolbar only
-//   loads on Vercel previews.
-// - `va.vercel-scripts.com` is the Vercel Analytics script host used by
-//   `@vercel/analytics/next`.
-// - connect-src hosts: Hasura (indexer.hyperindex.xyz) for GraphQL queries,
-//   plus the RPC endpoints the bridge-redeem flow polls for tx receipts.
-//   Keep this list tight — any new external fetch needs a CSP update, and
-//   that friction is the feature.
-function browserTestConnectSrc(): string[] {
-  if (process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES !== "true") return [];
-  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL;
-  if (!hasuraUrl) return [];
-  try {
-    return [new URL(hasuraUrl).origin];
-  } catch {
-    return [];
-  }
-}
-
-// Next.js dev HMR needs eval during fixture-mode browser tests; Playwright
-// browser instrumentation does not.
-const browserTestScriptSrc =
-  process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES === "true"
-    ? ["'unsafe-eval'"]
-    : [];
-
-const CSP_CONNECT_SRC = [
-  "'self'",
-  "https://vercel.live",
-  "wss://ws-us3.pusher.com",
-  "https://indexer.hyperindex.xyz",
-  "https://forno.celo.org",
-  "https://forno.celo-sepolia.celo-testnet.org",
-  "https://rpc2.monad.xyz",
-  ...browserTestConnectSrc(),
-].join(" ");
-
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  [
-    "script-src",
-    "'self'",
-    "'unsafe-inline'",
-    ...browserTestScriptSrc,
-    "https://vercel.live",
-    "https://va.vercel-scripts.com",
-  ].join(" "),
-  // Sentry's session-replay SDK spins up a Web Worker compiled from a
-  // blob: URL. Browsers fall back from missing worker-src to script-src,
-  // so without this directive the worker gets blocked. Narrower than
-  // adding `blob:` to script-src.
-  "worker-src 'self' blob:",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data: https://vercel.live https://assets.vercel.com",
-  `connect-src ${CSP_CONNECT_SRC}`,
-  "frame-src 'self' https://vercel.live",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join("; ");
-
 const nextConfig: NextConfig = {
   // Drop the `x-powered-by: Next.js` fingerprint header.
   poweredByHeader: false,
@@ -86,6 +16,10 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
+          // Static security headers — applied to every response including
+          // static assets. Content-Security-Policy is NOT set here; it is
+          // injected per-request by middleware (src/middleware.ts) so that
+          // a unique nonce can be embedded in each page's script-src.
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -93,7 +27,13 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
           },
-          { key: "Content-Security-Policy", value: CSP_DIRECTIVES },
+          // Dashboard is read-only monitoring — deny all device / sensor /
+          // payment APIs. `interest-cohort` opts out of FLoC/Topics.
+          {
+            key: "Permissions-Policy",
+            value:
+              "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()",
+          },
         ],
       },
     ];

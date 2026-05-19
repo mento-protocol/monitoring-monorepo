@@ -1,0 +1,622 @@
+global:
+  vars:
+    Reserve: '0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9'
+    # Relayer Signer Wallets
+    RelayerSignerAUDUSD: '0x6fa93B73F00f9c61f726bCE15f327686de05b696'
+    RelayerSignerBRLUSD: '0x7a82bfDeC85bF54B240065CdC20A811BF56528C8'
+    RelayerSignerCADUSD: '0x857ad1CeE80c3e72f2d8e558B773E63dAB8185fe'
+    RelayerSignerCELOAUD: '0x2821d073C30876187198f573Bf544200ff95bf7e'
+    RelayerSignerCELOCAD: '0x0faBAd32E6cb81CC20756E65b4df7B2553CFf4eE'
+    RelayerSignerCELOCHF: '0x658f09B516801Eb390d150EB601dD11428A03028'
+    RelayerSignerCELOETH: '0x55A93586a5535d1B8E10f2eB5C76b33E558F19e3'
+    RelayerSignerCELOCOP: '0xd8dfB551157B0B80D41787C08885e09F994B7cC5'
+    RelayerSignerCELOGBP: '0x7924EaC31d10682aa3049E957E3bB72bA3FF4730'
+    RelayerSignerCELOGHS: '0x43C9190F712C1f3c923f02073499A97cf8a9348b'
+    RelayerSignerCELOJPY: '0x9174bc946D0a4274ed221C75F66128174BdFB099'
+    RelayerSignerCELOKES: '0x34cD259E3e92B9FFEA38E8c84665A1Ca289bfB32'
+    RelayerSignerCELONGN: '0x5008F97b7713e2166041375a316990868F92B3d2'
+    RelayerSignerCELOPHP: '0xCCD3D48D6a5340156d85DC5A43743e65Bd4a6E51'
+    RelayerSignerCELOXOF: '0xB3B87B49De2C5012467505cAb551773023B89aEB'
+    RelayerSignerCELOZAR: '0x17C8c519CD32abDE464D4FA19c7461A399eE2c5a'
+    RelayerSignerCHFUSD: '0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d'
+    RelayerSignerCOPUSD: '0x95C365fBE39d9b8002f4683b0Bb6020680D9C4E0'
+    RelayerSignerEUROCEUR: '0xb0491394B775AE9BCf85Fb3835d232cEBe514Cf5'
+    RelayerSignerEURUSD: '0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20'
+    RelayerSignerEURXOF: '0xDE96A69fAba07A8dfF8Bd9309c245bDf4175d3E7'
+    RelayerSignerGBPUSD: '0x8103bE713aa149928D26c1b3873Ee240F8F7429E'
+    RelayerSignerGHSUSD: '0x36b103087c5c46b1515c32a2d91928181F8d39f8'
+    RelayerSignerJPYUSD: '0xF4615456f71157F758b7FaCaF62d57E339a664D7'
+    RelayerSignerKESUSD: '0x3c05004b74e0fa466B24ca19929ee662d5BbEc45'
+    RelayerSignerNGNUSD: '0xbfA9203552e9b02035034befDFE012aC5029B4F9'
+    RelayerSignerPHPUSD: '0xb2cE6fa691b58Ff4fadBd610a8e09427d2918025'
+    RelayerSignerUSDTUSD: '0x36a5C808e25AF0F5e406Eaa831d1749542378794'
+    RelayerSignerXOFUSD: '0x2C5dB0140b6B25CA6a37304198095B23E2604dF2'
+    RelayerSignerZARUSD: '0xc0342D31Cc875f3dC85E3Ab352e60698444197AE'
+
+chains:
+  - id: celo
+    label: celo
+    httpRpcUrl: https://forno.celo.org
+    contracts:
+      SortedOracles: '0xefb84935239dacdecf7c5ba76d8de40b077b7b33'
+      BreakerBox: '0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39'
+      Broker: '0x777A8255cA72412f0d706dc03C9D1987306B4CaD'
+      # trunk-ignore(checkov/CKV_SECRET_6)
+      CELOToken: '0x471ece3750da237f93b8e339c536989b8978a438'
+      USDT: '0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e' # https://tether.to/en/supported-protocols
+      USDC: '0xceba9300f2b948710d2653dd7b07f33a8b32118c' # https://www.circle.com/en/multi-chain-usdc/celo
+      axlUSDC: '0xeb466342c4d449bc9f53a865d5cb90586f405215'
+      # Stable tokens for totalSupply tracking
+      cUSD: '0x765DE816845861e75A25fCA122bb6898B8B1282a'
+      cEUR: '0xD8763CBa276a3738E6DE85b4b3bF5FDed6D6cA73'
+      cREAL: '0xe8537a3d056DA446677B9E9d6c5dB704EaAb4787'
+      eXOF: '0x73F93dcc49cB8A239e2032663e9475dd5ef29A08'
+      cKES: '0x456a3D042C0DbD3db53D5489e98dFb038553B0d0'
+      PUSO: '0x105d4A9306D2E55a71d2Eb95B81553AE1dC20d7B'
+      cCOP: '0x8A567e2aE79CA692Bd748aB832081C45de4041eA'
+      cGHS: '0xfAeA5F3404bbA20D3cc2f8C4B0A888F55a3c7313'
+      cGBP: '0xCCF663b1fF11028f0b19058d0f7B674004a40746'
+      cZAR: '0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6'
+      cCAD: '0xff4Ab19391af240c311c54200a492233052B6325'
+      cAUD: '0x7175504C455076F15c04A2F90a8e352281F492F9'
+      cCHF: '0xb55a79F398E759E43C95b979163f30eC87Ee131D'
+      cNGN: '0xE2702Bd97ee33c88c8f6f92DA3B733608aa76F71'
+      cJPY: '0xc45eCF20f3CD864B32D9794d6f76814aE8892e20'
+    vars:
+      # collateral/stable
+      EUROCEUR: '0x26076B9702885d475ac8c3dB3Bd9F250Dc5A318B' # keccak(EUROCEUR)
+      CELOUSD: '0x765de816845861e75a25fca122bb6898b8b1282a' # cUSD address
+      USDCUSD: '0xA1A8003936862E7a15092A91898D69fa8bCE290c' # keccack(USDCUSD)
+      USDTUSD: '0xE06C10C63377cD098b589c0b90314bFb55751558' # keccack(USDTUSD)
+      # stable/stable
+      AUDUSD: '0x646bD504C3864Ea5b8A6B6D25743721f61864A07' # keccak(relayed:AUDUSD)
+      BRLUSD: '0x9dB83bE97C82912cB342407dd7b880983052B9c1' # keccak(relayed:BRLUSD)
+      CADUSD: '0x20869cF54Ead821C45DFb2aB0C23d2e10Fbb65A4' # keccak(relayed:CADUSD)
+      CHFUSD: '0x0f61BA9c30ef7CaEE7E5CC1F96BFFCb0f52ccD64' # keccak(relayed:CHFUSD)
+      COPUSD: '0x0196D1F4FdA21fA442e53EaF18Bf31282F6139F1' # keccak(relayed:COPUSD)
+      EURUSD: '0xF4f9bBdA9CD6841fCB9b1510f9269E2dB42a6e3a' # keccak(relayed:EURUSD)
+      GBPUSD: '0xf590b62f9cfcc6409075b1ecAc8176fe25744B88' # keccak(relayed:GBPUSD)
+      GHSUSD: '0x44D99a013a0DAdbB4C06F9Cc9397BFd3AC12b017' # keccak(relayed:GHSUSD)
+      JPYUSD: '0xFDE35B45cBd2504FB5dC514F007bC2DE27034274' # keccak(relayed:JPYUSD)
+      KESUSD: '0xbAcEE37d31b9f022Ef5d232B9fD53F05a531c169' # keccak(relayed:KESUSD)
+      NGNUSD: '0xC13D42556f1baeab4a8600C735afcd5344048d3C' # keccak(relayed:NGNUSD)
+      PHPUSD: '0xab921d6ab1057601A9ae19879b111fC381a2a8E9' # keccak(relayed:PHPUSD)
+      XOFUSD: '0x43620310c2FEADbFEcFd71b5A93E6e28946d64a5' # keccak(relayed:XOFUSD)
+      ZARUSD: '0x17ef04Af0c52465694a841552fc2415169b1114c' # keccak(relayed:ZARUSD)
+      # dependencies
+      EURXOF: '0x40dC8528167557353fdcD98548AB2139A670Dd0b' # keccak(EURXOF)
+
+      # celo/stable (for gas)
+      CELOAUD: '0x1aA86eAd81936a1E9707c6B4A7AEfb2B4A538B58' # keccak(relayed:CELOAUD)
+      CELOBRL: '0xe8537a3d056DA446677B9E9d6c5dB704EaAb4787' # cBRL address
+      CELOCAD: '0x15339E57E761F006834893CD5134138339e7bfCb' # keccak(relayed:CELOCAD)
+      CELOCHF: '0xD808031cC050CFC81e7609156002361af6a579A6' # keccak(relayed:CELOCHF)
+      CELOCOP: '0x32ABF1cBdFdcD56790f427694be2658d4B1A83bC' # keccak(relayed:CELOCOP)
+      CELOETH: '0xF3CAaE71EAc2DA8D78372A62DDb3acdDaf3Df416' # keccack(relayed:CELOETH)
+      CELOEUR: '0xD8763CBa276a3738E6DE85b4b3bF5FDed6D6cA73' # cEUR address
+      CELOGBP: '0x6732fEF1b6EE8003A06a3D7eECFF1a36550CFDF5' # keccak(relayed:CELOGBP)
+      CELOGHS: '0x5AD3817fE11971c1fd79c7D88485af560eD5470C' # keccak(relayed:CELOGHS)
+      CELOJPY: '0xd5800BbeC4Fb58b549C8de50635654E919c3Cd5D' # keccak(relayed:CELOJPY)
+      CELOKES: '0x456a3d042c0dbd3db53d5489e98dfb038553b0d0' # cKES address
+      CELONGN: '0xd9D1A7FAA5deFe7E0301Ac5363E6ca18eB78c9D7' # keccak(relayed:CELONGN)
+      CELOPHP: '0xaFc02368A174Cd08e01c373de6D0B537CECF43C8' # keccak(relayed:CELOPHP)
+      CELOXOF: '0x73F93dcc49cB8A239e2032663e9475dd5ef29A08' # eXOF address
+      CELOZAR: '0xD064b6CcFF2AE8968bA6725e9A92f3F0431bf5D0' # keccak(relayed:CELOZAR)
+
+      # Trading Limit IDs (for Broker.tradingLimitsState)
+      # Format: [POOL]_POOL_[TOKEN]_LIMIT
+      CUSD_CGHS_POOL_CUSD_LIMIT: '0x3562f9d29eba092b857480a85d5edf4ebd9f33d331bb423287c1d0bca883a9ad'
+      CUSD_CGHS_POOL_CGHS_LIMIT: '0x3562f9d29eba092b857480a8d1e9686c3d7cf039575c465715d230d14a0ef294'
+      CUSD_CGBP_POOL_CUSD_LIMIT: '0x6c369bfb1598b2f7718671226d98ccdecc2cccf98d9ffe07339a8f38df93cae4'
+      CUSD_CGBP_POOL_CGBP_LIMIT: '0x6c369bfb1598b2f771867122d7334779b765af91dca3072b1e5a80e06386e588'
+      CUSD_CZAR_POOL_CUSD_LIMIT: '0x4206e101b13bf29e40b2bfed3aac8f31981906907ad712d9487ad7c6427029e1'
+      CUSD_CZAR_POOL_CZAR_LIMIT: '0x4206e101b13bf29e40b2bfed00c4e21d270f0308f2941aa60d4c73d116800a3d'
+      CUSD_CAUD_POOL_CUSD_LIMIT: '0xd580d237231109e6a96d67d8520d890ae552e1bd7c43f0310aa0b49468fbbded'
+      CUSD_CAUD_POOL_CAUD_LIMIT: '0xd580d237231109e6a96d67d855253150245af6ab7a62ae692295e92e51be073e'
+      CUSD_CELO_POOL_CUSD_LIMIT: '0x3135b662c38265d06551770969468c6dcbb730f659f590a04c469913fe222506'
+      AXLEUROC_CEUR_POOL_CEUR_LIMIT: '0xfca6d94b46122eb9a4b86cf90b97d4ecd9c29f1e3622a371094e239d2d79c53b'
+      AXLEUROC_CEUR_POOL_AXLEUROC_LIMIT: '0xfca6d94b46122eb9a4b86cf9d5fd2df436cb48e71bbc66c36fa8a75b58e37965'
+      CUSD_CCHF_POOL_CUSD_LIMIT: '0x3ddbc61433314a4b7d3cbb56d65c145a44a9b4ca3e167f97f74960a2e0bdccd6'
+      CUSD_CCHF_POOL_CCHF_LIMIT: '0x3ddbc61433314a4b7d3cbb56155b85bf58168cc958a63a4fc3cd38d6dfe2f7e1'
+      CUSD_CNGN_POOL_CUSD_LIMIT: '0x67a5122dab72931be57196e0dde7697f803992c0e6450739e8c587927d382ee6'
+      CUSD_CNGN_POOL_CNGN_LIMIT: '0x67a5122dab72931be57196e049caaab07a82cfaf749602b569c9dc6a4f2e69bd'
+      CUSD_CKES_POOL_CUSD_LIMIT: '0x89de88b8eb790de26f4649f5359680855d6e5420728979de2b9d80da43bc01a1'
+      CUSD_CKES_POOL_CKES_LIMIT: '0x89de88b8eb790de26f4649f506a15597f53b88fa9d91d1f6e0ab13417e5e995b'
+      CUSD_USDC_POOL_CUSD_LIMIT: '0xacc988382b66ee5456086643aaa0724a2065b91372d313837286e318ab0dd7fd'
+      CUSD_AXLUSDC_POOL_CUSD_LIMIT: '0x0d739efbfc30f303e8d1976c5766a85601557b135532b3e04b032e6e458c070a'
+      CUSD_USDT_POOL_CUSD_LIMIT: '0x773bcec109cee923b5e04706721231c0214a7afd3069f93d1446d6c33cec66b1'
+      CUSD_CCAD_POOL_CUSD_LIMIT: '0x517ccc3bcab9f35e2e24143a7a45e1100aa405782e2dba6e941aade88f84e9c4'
+      CUSD_CCAD_POOL_CCAD_LIMIT: '0x517ccc3bcab9f35e2e24143af352b8951f534093451412efbce8e743321ea2cb'
+      CUSD_CPHP_POOL_CUSD_LIMIT: '0x7952984d7278ca3417febf52f701da0f00f450a094f73c8a941b43937201ac39'
+      CUSD_CPHP_POOL_CPHP_LIMIT: '0x7952984d7278ca3417febf529101788a827ed41dbf002bbe0eb578a5d7728968'
+      CUSD_CJPY_POOL_CUSD_LIMIT: '0x7c3b41fbd140c6fb54ff9f8f0d26e483c25e09ca1ec8a2f792b367d8421e4d06'
+      CUSD_CJPY_POOL_CJPY_LIMIT: '0x7c3b41fbd140c6fb54ff9f8fbf25c3b5b5cbee667634271bdf7e8e0a12264b0c'
+      CUSD_CCOP_POOL_CUSD_LIMIT: '0x1c9378bd0973ff313a599d3e899bbcacf1c7ed2bfc7057cc4e5ed5a11aa3bc11'
+      CUSD_CCOP_POOL_CCOP_LIMIT: '0x1c9378bd0973ff313a599d3e75902a9092032a5e1b2121d55eeda17c7c52d5d1'
+      CUSD_CEUR_POOL_CUSD_LIMIT: '0x746455363e8f55d04e0a2cc0368c5b5e229850546c9f96578c2a39c4a1f801e2'
+      CUSD_CEUR_POOL_CEUR_LIMIT: '0x746455363e8f55d04e0a2cc098a78ff281aa068bd064ef421d2e0e82cf9fe3bb'
+      CUSD_CBRL_POOL_CUSD_LIMIT: '0xd11d52b973ddbb983cc2087add971587db9b75eba3bc960de4a6d1e9b5aaf62f'
+      CUSD_CBRL_POOL_CBRL_LIMIT: '0xd11d52b973ddbb983cc2087a439987ac5aaeb04a9ee2f431aa400e75e7b09982'
+      CUSD_EXOF_POOL_CUSD_LIMIT: '0xc9664df358594c5eaf2f410ac52c0ac83ced532d7c33d18ae1d6f12069c57e51'
+      CUSD_EXOF_POOL_EXOF_LIMIT: '0xc9664df358594c5eaf2f410ac088df12f17eb8e9b8361f4dfdf9ec658f86cc73'
+
+  - id: celoSepolia
+    label: celo-sepolia
+    httpRpcUrl: https://forno.celo-sepolia.celo-testnet.org
+    contracts:
+      SortedOracles: '0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20'
+      BreakerBox: '0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE'
+      Broker: '0xB9Ae2065142EB79b6c5EB1E8778F883fad6B07Ba'
+      # trunk-ignore(checkov/CKV_SECRET_6)
+      CELOToken: '0x471EcE3750Da237f93B8E339c536989b8978a438'
+    vars:
+      EUROCEUR: '0x26076B9702885d475ac8c3dB3Bd9F250Dc5A318B' # keccak(EUROCEUR)
+      CELOUSD: '0xC443D8C40D321B34f815eaC76a7620FB06F9E8a4' # keccak(CELOUSD)
+      USDCUSD: '0xA1A8003936862E7a15092A91898D69fa8bCE290c' # keccack(USDCUSD)
+      USDTUSD: '0xE06C10C63377cD098b589c0b90314bFb55751558' # keccack(USDTUSD)
+
+      # stable/stable
+      AUDUSD: '0x864Ea534d6992F3721000cdB6585b11E7046D5ec' # keccak(AUDUSD)
+      BRLUSD: '0xCE1213507c81576759181A2b795f3c9aE5ede6bd' # keccak(BRLUSD)
+      CADUSD: '0xc9dbD89FCe5710C91c35Ed9af1dc93fA090A28B0' # keccak(CADUSD)
+      CHFUSD: '0x4F2746E21A13Ea9A8A832D929CDBf32ffC113A2C' # keccak(CHFUSD)
+      COPUSD: '0x7149632514c5BAA315520Ab9d12556D9C67F15E0' # keccak(COPUSD)
+      EURUSD: '0x5D5a22116233BDb2a9C2977279cC348B8b8Ce917' # keccak(EURUSD)
+      GBPUSD: '0xAe5eEe6815b8529847955d19522858806Bca8217' # keccak(GBPUSD)
+      GHSUSD: '0xbB776CD80Bab1E658A6a8685580751166145121F' # keccak(GHSUSD)
+      JPYUSD: '0x403EA4186ce479fF162636c37fDf4086bD286F8c' # keccak(JPYUSD)
+      KESUSD: '0xbAcEE37d31b9f022Ef5d232B9fD53F05a531c169' # keccak(KESUSD)
+      NGNUSD: '0xe7cDDEDC3dCA1674b70c347c814c8A9fCf8F68C9' # keccak(NGNUSD)
+      PHPUSD: '0x341E2A8b5b52B54F1794DDbdD54e433746C65d60' # keccak(PHPUSD)
+      XOFUSD: '0xBBc9c6E41E2A402b12992875eDaa0162Ed990212' # keccak(XOFUSD)
+      ZARUSD: '0x53F7dC47aB9273C2d83c2Df557F3FcF1e6A9Ee10' # keccak(ZARUSD)
+
+      # dependencies
+      EURXOF: '0x40dC8528167557353fdcD98548AB2139A670Dd0b' # keccak(EURXOF)
+
+      # celo/stable (for gas)
+      CELOAUD: '0x13E0145cE3ec72b50b2F5B3E8FACED719941976d' # keccak(CELOAUD)
+      CELOBRL: '0x5C1EFDf739883E4B97D879ac149CC0B6FB6978d1' # keccak(CELOBRL)
+      CELOCAD: '0x0e51743ccED754f4e718945E524Faf21bb53902C' # keccak(CELOCAD)
+      CELOCHF: '0xb2c0010688BC18e10Bea9c68d83309AaB686515A' # keccak(CELOCHF)
+      CELOCOP: '0xbEa1FEDf828261cC79ea68f22f7A0A60107498DB' # keccak(CELOCOP)
+      CELOETH: '0x30290065b35ae3cA10DD4e1D2801823d47220128' # keccack(CELOETH)
+      CELOEUR: '0x6bAAd73587935d51B14EBB668AC61e562320cBbc' # keccak(CELOEUR)
+      CELOGBP: '0x57D8B6da3057Ce2a40f9501f9891BB7388048D98' # keccak(CELOGBP)
+      CELOGHS: '0x663F1D38e2c176Ae5A72677E7A36c983321a0595' # keccak(CELOGHS)
+      CELOJPY: '0xB6478F290a87661189C2716F55b04E7136873A0D' # keccak(CELOJPY)
+      CELOKES: '0xABa88cA0f7Ed50aD5f8881706b88749049DDfCB7' # keccak(CELOKES)
+      CELONGN: '0xAfD7EFA9660A7776A3DDA30127906cADFE21b0Fb' # keccak(CELONGN)
+      CELOPHP: '0x36f01750932120B53f613E9eAFB7857dB586A583' # keccak(CELOPHP)
+      CELOXOF: '0x84DC05912bC603c8810FaE64D4b72d347F057E79' # keccak(CELOXOF)
+      CELOZAR: '0xbCd7aA5683Ac7Fa0Cf2F5F4733aB47a8E7957b99' # keccak(CELOZAR)
+
+metrics:
+  # Checks rate feed trading modes
+  - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: all
+    variants:
+      # collateral/stable
+      - [EUROCEUR] # axlEUROC/cEUR
+      - [CELOUSD] # celo/cUSD
+      - [USDCUSD] # usdc/cUSD, axlUSDC/cUSD
+      - [USDTUSD] # usdt/cUSD
+      # stable/stable
+      - [AUDUSD]
+      - [BRLUSD]
+      - [CADUSD]
+      - [CHFUSD]
+      - [COPUSD]
+      - [EURUSD]
+      - [EURXOF]
+      - [GBPUSD]
+      - [GHSUSD]
+      - [JPYUSD]
+      - [KESUSD]
+      - [NGNUSD]
+      - [PHPUSD]
+      - [XOFUSD]
+      - [ZARUSD]
+      # celo/stable (for gas payments)
+      - [CELOAUD]
+      - [CELOBRL]
+      - [CELOCAD]
+      - [CELOCHF]
+      - [CELOCOP]
+      - [CELOETH]
+      - [CELOEUR]
+      - [CELOGBP]
+      - [CELOGHS]
+      - [CELOJPY]
+      - [CELOKES]
+      - [CELONGN]
+      - [CELOPHP]
+      - [CELOXOF]
+      - [CELOZAR]
+
+  # Trading limits state - tracks all three netflow limits
+  # Netflow represents the net amount traded in/out, used to prevent price manipulation
+  # netflow0: short-term L0 limit, netflow1: medium-term L1 limit, netflowGlobal: lifetime limit
+  - source: >-
+      Broker.tradingLimitsState(bytes32 limitId)(
+        uint32 lastUpdated0,
+        uint32 lastUpdated1,
+        int48 netflow0,
+        int48 netflow1,
+        int48 netflowGlobal
+      )
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      # cUSD limits
+      - [CUSD_CAUD_POOL_CUSD_LIMIT]
+      - [CUSD_CBRL_POOL_CUSD_LIMIT]
+      - [CUSD_CCAD_POOL_CUSD_LIMIT]
+      - [CUSD_CCHF_POOL_CUSD_LIMIT]
+      - [CUSD_CCOP_POOL_CUSD_LIMIT]
+      - [CUSD_CEUR_POOL_CUSD_LIMIT]
+      - [CUSD_CGBP_POOL_CUSD_LIMIT]
+      - [CUSD_CGHS_POOL_CUSD_LIMIT]
+      - [CUSD_CJPY_POOL_CUSD_LIMIT]
+      - [CUSD_CKES_POOL_CUSD_LIMIT]
+      - [CUSD_CNGN_POOL_CUSD_LIMIT]
+      - [CUSD_CPHP_POOL_CUSD_LIMIT]
+      - [CUSD_EXOF_POOL_CUSD_LIMIT]
+      - [CUSD_CZAR_POOL_CUSD_LIMIT]
+      - [CUSD_CELO_POOL_CUSD_LIMIT]
+      - [CUSD_USDC_POOL_CUSD_LIMIT]
+      - [CUSD_AXLUSDC_POOL_CUSD_LIMIT]
+      - [CUSD_USDT_POOL_CUSD_LIMIT]
+      # Non-cUSD limits
+      - [CUSD_CAUD_POOL_CAUD_LIMIT]
+      - [CUSD_CBRL_POOL_CBRL_LIMIT]
+      - [CUSD_CCAD_POOL_CCAD_LIMIT]
+      - [CUSD_CCHF_POOL_CCHF_LIMIT]
+      - [CUSD_CCOP_POOL_CCOP_LIMIT]
+      - [CUSD_CEUR_POOL_CEUR_LIMIT]
+      - [CUSD_CGBP_POOL_CGBP_LIMIT]
+      - [CUSD_CGHS_POOL_CGHS_LIMIT]
+      - [CUSD_CJPY_POOL_CJPY_LIMIT]
+      - [CUSD_CKES_POOL_CKES_LIMIT]
+      - [CUSD_CNGN_POOL_CNGN_LIMIT]
+      - [CUSD_CPHP_POOL_CPHP_LIMIT]
+      - [CUSD_EXOF_POOL_EXOF_LIMIT]
+      - [CUSD_CZAR_POOL_CZAR_LIMIT]
+      # axlEUROC/cEUR pool
+      - [AXLEUROC_CEUR_POOL_CEUR_LIMIT]
+      - [AXLEUROC_CEUR_POOL_AXLEUROC_LIMIT]
+
+  # Trading limits configuration - defines the trading limit thresholds
+  # The config changes rarely, so we poll hourly
+  # Returns: timestep0, timestep1 (time windows), limit0, limit1, limitGlobal (thresholds), flags (enabled status)
+  - source: >-
+      Broker.tradingLimitsConfig(bytes32 limitId)(
+        uint32 timestep0,
+        uint32 timestep1,
+        int48 limit0,
+        int48 limit1,
+        int48 limitGlobal,
+        uint8 flags
+      )
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      # cUSD limits
+      - [CUSD_CAUD_POOL_CUSD_LIMIT]
+      - [CUSD_CBRL_POOL_CUSD_LIMIT]
+      - [CUSD_CCAD_POOL_CUSD_LIMIT]
+      - [CUSD_CCHF_POOL_CUSD_LIMIT]
+      - [CUSD_CCOP_POOL_CUSD_LIMIT]
+      - [CUSD_CEUR_POOL_CUSD_LIMIT]
+      - [CUSD_CGBP_POOL_CUSD_LIMIT]
+      - [CUSD_CGHS_POOL_CUSD_LIMIT]
+      - [CUSD_CJPY_POOL_CUSD_LIMIT]
+      - [CUSD_CKES_POOL_CUSD_LIMIT]
+      - [CUSD_CNGN_POOL_CUSD_LIMIT]
+      - [CUSD_CPHP_POOL_CUSD_LIMIT]
+      - [CUSD_EXOF_POOL_CUSD_LIMIT]
+      - [CUSD_CZAR_POOL_CUSD_LIMIT]
+      - [CUSD_CELO_POOL_CUSD_LIMIT]
+      - [CUSD_USDC_POOL_CUSD_LIMIT]
+      - [CUSD_AXLUSDC_POOL_CUSD_LIMIT]
+      - [CUSD_USDT_POOL_CUSD_LIMIT]
+      # Non-cUSD limits
+      - [CUSD_CAUD_POOL_CAUD_LIMIT]
+      - [CUSD_CBRL_POOL_CBRL_LIMIT]
+      - [CUSD_CCAD_POOL_CCAD_LIMIT]
+      - [CUSD_CCHF_POOL_CCHF_LIMIT]
+      - [CUSD_CCOP_POOL_CCOP_LIMIT]
+      - [CUSD_CEUR_POOL_CEUR_LIMIT]
+      - [CUSD_CGBP_POOL_CGBP_LIMIT]
+      - [CUSD_CGHS_POOL_CGHS_LIMIT]
+      - [CUSD_CJPY_POOL_CJPY_LIMIT]
+      - [CUSD_CKES_POOL_CKES_LIMIT]
+      - [CUSD_CNGN_POOL_CNGN_LIMIT]
+      - [CUSD_CPHP_POOL_CPHP_LIMIT]
+      - [CUSD_EXOF_POOL_EXOF_LIMIT]
+      - [CUSD_CZAR_POOL_CZAR_LIMIT]
+      # axlEUROC/cEUR pool
+      - [AXLEUROC_CEUR_POOL_CEUR_LIMIT]
+      - [AXLEUROC_CEUR_POOL_AXLEUROC_LIMIT]
+
+  # Fetch actual median exchange rates from oracles
+  # Returns (rate, denominator) - rate is the exchange rate multiplied by denominator (usually 1e24)
+  - source: SortedOracles.medianRate(address token)(uint256 rate,uint256 denominator)
+    schedule: 0 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      # stable/stable rate feeds for USD conversion
+      - [AUDUSD]
+      - [BRLUSD]
+      - [CADUSD]
+      - [CHFUSD]
+      - [COPUSD]
+      - [EURUSD]
+      - [GBPUSD]
+      - [GHSUSD]
+      - [JPYUSD]
+      - [KESUSD]
+      - [NGNUSD]
+      - [PHPUSD]
+      - [XOFUSD]
+      - [ZARUSD]
+
+  # Checks for rate feed freshness
+  # Note: We only care about isExpired in Grafana, but must declare both for proper ABI decoding
+  - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: all
+    variants:
+      # collateral/stable
+      - [EUROCEUR] # axlEUROC/cEUR
+      - [CELOUSD] # celo/cUSD
+      - [USDCUSD] # usdc/cUSD, axlUSDC/cUSD
+      - [USDTUSD] # usdt/cUSD
+
+      # stable/stable
+      - [AUDUSD]
+      - [BRLUSD]
+      - [CADUSD]
+      - [CHFUSD]
+      - [COPUSD]
+      - [EURUSD]
+      - [EURXOF]
+      - [GBPUSD]
+      - [GHSUSD]
+      - [JPYUSD]
+      - [KESUSD]
+      - [NGNUSD]
+      - [PHPUSD]
+      - [XOFUSD]
+      - [ZARUSD]
+
+      # celo/stable (for gas payments)
+      - [CELOAUD]
+      - [CELOBRL]
+      - [CELOCAD]
+      - [CELOCHF]
+      - [CELOCOP]
+      - [CELOETH]
+      - [CELOEUR]
+      - [CELOGBP]
+      - [CELOGHS]
+      - [CELOJPY]
+      - [CELOKES]
+      - [CELONGN]
+      - [CELOPHP]
+      - [CELOXOF]
+      - [CELOZAR]
+
+  # Checks if wallets or contracts of interest have enough CELO to pay for transactions
+  - source: CELOToken.balanceOf(address owner)(uint256)
+    schedule: 0 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      # Do signer wallets have enough CELO to pay for relay() transactions?
+      # Does the reserve have enough CELO for swap operations?
+      - [RelayerSignerAUDUSD]
+      - [RelayerSignerBRLUSD]
+      - [RelayerSignerCADUSD]
+      - [RelayerSignerCELOAUD]
+      - [RelayerSignerCELOCAD]
+      - [RelayerSignerCELOCHF]
+      - [RelayerSignerCELOETH]
+      - [RelayerSignerCELOCOP]
+      - [RelayerSignerCELOGBP]
+      - [RelayerSignerCELOGHS]
+      - [RelayerSignerCELOJPY]
+      - [RelayerSignerCELOKES]
+      - [RelayerSignerCELONGN]
+      - [RelayerSignerCELOPHP]
+      - [RelayerSignerCELOXOF]
+      - [RelayerSignerCELOZAR]
+      - [RelayerSignerCHFUSD]
+      - [RelayerSignerCOPUSD]
+      - [RelayerSignerEUROCEUR]
+      - [RelayerSignerEURUSD]
+      - [RelayerSignerEURXOF]
+      - [RelayerSignerGBPUSD]
+      - [RelayerSignerGHSUSD]
+      - [RelayerSignerJPYUSD]
+      - [RelayerSignerKESUSD]
+      - [RelayerSignerNGNUSD]
+      - [RelayerSignerPHPUSD]
+      - [RelayerSignerUSDTUSD]
+      - [RelayerSignerXOFUSD]
+      - [RelayerSignerZARUSD]
+      - [Reserve]
+
+  - source: CELOToken.balanceOf(address owner)(uint256)
+    schedule: 0 * * * * *
+    type: gauge
+    chains: [celoSepolia]
+    variants:
+      - [RelayerSignerAUDUSD]
+      - [RelayerSignerBRLUSD]
+      - [RelayerSignerCADUSD]
+      - [RelayerSignerCELOAUD]
+      - [RelayerSignerCELOCAD]
+      - [RelayerSignerCELOCHF]
+      - [RelayerSignerCELOETH]
+      - [RelayerSignerCELOCOP]
+      - [RelayerSignerCELOGBP]
+      - [RelayerSignerCELOGHS]
+      - [RelayerSignerCELOJPY]
+      - [RelayerSignerCELOKES]
+      - [RelayerSignerCELONGN]
+      - [RelayerSignerCELOPHP]
+      - [RelayerSignerCELOXOF]
+      - [RelayerSignerCELOZAR]
+      - [RelayerSignerCHFUSD]
+      - [RelayerSignerCOPUSD]
+      - [RelayerSignerEUROCEUR]
+      - [RelayerSignerEURUSD]
+      - [RelayerSignerEURXOF]
+      - [RelayerSignerGBPUSD]
+      - [RelayerSignerGHSUSD]
+      - [RelayerSignerJPYUSD]
+      - [RelayerSignerKESUSD]
+      - [RelayerSignerNGNUSD]
+      - [RelayerSignerPHPUSD]
+      - [RelayerSignerUSDTUSD]
+      - [RelayerSignerXOFUSD]
+      - [RelayerSignerZARUSD]
+
+  # Does the reserve have enough USDC for swap operations?
+  - source: USDC.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - [Reserve]
+
+  # Does the reserve have enough USDT for swap operations?
+  - source: USDT.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - [Reserve]
+
+  # Does the reserve have enough axlUSDC for swap operations?
+  - source: axlUSDC.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - [Reserve]
+
+  ################################
+  # Stable token supply tracking #
+  ################################
+  - source: cUSD.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cEUR.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cREAL.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: eXOF.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cKES.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: PUSO.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cCOP.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cGHS.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cGBP.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cZAR.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cCAD.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cAUD.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cCHF.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cNGN.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []
+
+  - source: cJPY.totalSupply()(uint256)
+    schedule: 0 0 * * * *
+    type: gauge
+    chains: [celo]
+    variants:
+      - []

@@ -1,0 +1,6 @@
+[submodule "aegis/lib/forge-std"]
+	path = aegis/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "aegis/lib/prb-math"]
+	path = aegis/lib/prb-math
+	url = https://github.com/PaulRBerg/prb-math

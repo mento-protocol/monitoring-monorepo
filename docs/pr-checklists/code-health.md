@@ -50,6 +50,7 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | GraphQL schema diff (`.github/workflows/schema-diff.yml`) | advisory                               | field removal, type narrowing, required arg additions, enum value removal — any change that breaks existing Hasura queries or dashboard code | Review the sticky PR comment; update Hasura queries + dashboard Zod schemas before merging if the change is intentional. Runs only when `indexer-envio/schema.graphql` changed. Local: `pnpm code-health:schema-diff`.                         |
 | Code-health history report                                | advisory                               | hotspots, change coupling, ownership risk                                                                                                    | Use the report to plan refactors; never gates merges                                                                                                                                                                                           |
 
+
 ## Ratchet pipeline (where this is going)
 
 PR 1: blocking knip + dep-cruiser cross-pkg + advisory history report.

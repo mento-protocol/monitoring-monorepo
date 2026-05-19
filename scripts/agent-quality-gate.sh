@@ -456,6 +456,18 @@ add_bridge_mutation_baseline() {
   add_command "pnpm bridge:mutation" "$reason"
 }
 
+add_aegis_quality_commands() {
+  local reason="$1"
+  add_command "pnpm --filter @mento-protocol/aegis typecheck" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis build" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis lint" "$reason"
+  add_command "pnpm --filter @mento-protocol/aegis knip" "$reason (knip: unused files/deps/exports)"
+  add_command "pnpm --filter @mento-protocol/aegis test:cov" "$reason"
+  add_command "cd aegis && forge test" "$reason"
+  add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
+  add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
+}
+
 add_indexer_mutation_baseline() {
   local reason="$1"
   add_command "pnpm indexer:mutation" "$reason"
@@ -484,6 +496,7 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
+  add_aegis_quality_commands "$reason"
 }
 
 add_agent_quality_gate_package_script_checks() {
@@ -530,9 +543,10 @@ add_bridge_codegen_then_restore_mainnet() {
 add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
-  add_command "terraform -chdir=${module} fmt -check -recursive" "$reason"
-  add_command "terraform -chdir=${module} init -backend=false -input=false" "$reason"
-  add_command "terraform -chdir=${module} validate -no-color" "$reason"
+  local tf_data_dir="${module}/.terraform-agent-gate"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
 
 docs_targeted_trunk_command() {
@@ -656,6 +670,9 @@ while IFS= read -r path; do
           ;;
         metrics-bridge/knip.json)
           add_command "pnpm --filter @mento-protocol/metrics-bridge knip" "knip config changed"
+          ;;
+        aegis/knip.json)
+          add_command "pnpm --filter @mento-protocol/aegis knip" "knip config changed"
           ;;
       esac
       ;;
@@ -805,6 +822,25 @@ while IFS= read -r path; do
       esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
+    aegis/*)
+      add_surface "aegis"
+      case "$path" in
+        aegis/src/*|aegis/config.yaml|aegis/app.yaml|aegis/contracts/*|aegis/foundry.toml|aegis/foundry.lock|aegis/package.json|aegis/tsconfig*.json|aegis/nest-cli.json|aegis/eslint.config.js|aegis/eslint-baseline.json)
+          add_aegis_quality_commands "aegis changed"
+          ;;
+        aegis/terraform/*)
+          add_terraform_validate_commands "aegis/terraform" "Aegis Terraform changed"
+          add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Aegis Terraform/deploy-adjacent path changed"
+          ;;
+        aegis/grafana-agent/*|aegis/bin/*)
+          add_aegis_quality_commands "aegis runtime/deploy path changed"
+          add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Aegis deploy path changed"
+          ;;
+        aegis/lib/*)
+          add_command "cd aegis && forge test" "Aegis Foundry dependency changed"
+          ;;
+      esac
+      ;;
     shared-config/*)
       add_surface "shared-config"
       add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
@@ -834,6 +870,9 @@ while IFS= read -r path; do
           ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
+          ;;
+        .github/workflows/aegis-app-engine.yml)
+          add_aegis_quality_commands "Aegis App Engine workflow changed"
           ;;
         .github/workflows/lighthouse.yml)
           add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI workflow changed"

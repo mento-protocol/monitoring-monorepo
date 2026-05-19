@@ -1,0 +1,43 @@
+name: Update visual snapshots
+
+# Run on-demand to regenerate Playwright visual-regression baselines on the
+# CI runner (Linux/Ubuntu). Commits the updated PNGs back to the branch so
+# the next CI run compares against Linux-generated baselines.
+#
+# Usage: GitHub → Actions → "Update visual snapshots" → Run workflow → pick
+# the branch whose snapshots you want to regenerate.
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  update-snapshots:
+    name: Regenerate visual snapshot baselines (Linux)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Check out the branch the workflow was triggered on
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/pnpm-install
+      - name: Install Playwright Chromium
+        run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
+      - name: Regenerate snapshots
+        run: pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots
+      - name: Commit updated baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ui-dashboard/tests/browser/visual-snapshots.test.ts-snapshots/
+          if git diff --cached --quiet; then
+            echo "No snapshot changes to commit."
+          else
+            git commit -m "chore: regenerate visual snapshot baselines on Linux CI"
+            git push
+          fi

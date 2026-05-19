@@ -3,6 +3,7 @@ packages:
   - indexer-envio
   - ui-dashboard
   - metrics-bridge
+  - aegis
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
@@ -15,6 +16,7 @@ ignoredBuiltDependencies:
   - unrs-resolver
 
 onlyBuiltDependencies:
+  - "@nestjs/core"
   - envio-cloud
   - "@sentry/cli"
   - es5-ext

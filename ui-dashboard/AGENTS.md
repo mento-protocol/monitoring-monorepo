@@ -193,3 +193,11 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Modules that import `useSWR` / `useNetwork` / `next-auth` / any React-only API (e.g. `lib/graphql.ts` — exports `useGQL`) are **client-only**. They cannot be imported by server-side code: `lib/homepage-og.ts`, `lib/pool-og.ts`, `lib/bridge-flows-og.ts`, `app/.../opengraph-image.tsx`, `app/api/**` route handlers. Next.js RSC bundling pulls the full transitive graph into the server bundle and breaks `next build` (or worse, ships React/SWR to the OG image renderer).
 - Shared constants needed on both sides go in zero-dependency modules — e.g. `lib/hasura-timeout.ts` (single `export const HASURA_TIMEOUT_MS = 5000`). The client-side `lib/graphql.ts` re-exports for backwards compat, but new server-side imports MUST target the zero-dep module directly.
 - Caused codex P1 on PR #372 — `HASURA_TIMEOUT_MS` was added to `lib/graphql.ts` and three OG modules imported it; CI didn't catch it because the next build step isn't gated, but it would have leaked SWR into the server bundle.
+
+### Content-Security-Policy (nonce-based)
+
+- CSP is set **exclusively in middleware** (`src/middleware.ts`). There is no CSP in `next.config.ts`; a duplicate header would cause browsers to apply the intersection of both policies.
+- A fresh 16-byte nonce is generated per request via `crypto.getRandomValues`. `buildCspWithNonce` (`src/lib/csp.ts`) assembles the full policy string. The nonce is injected into request headers (so Next.js App Router attaches it to its inline `<script>` tags) and echoed on response headers (so the browser enforces it).
+- `script-src` does NOT contain `'unsafe-inline'`. Any inline script that isn't a Next.js RSC/hydration script needs to either use the nonce via `nonce={nonce}` (read from request headers in the layout) or be moved to an external file.
+- `style-src` KEEPS `'unsafe-inline'`. React `style={}` props compile to HTML `style="..."` attributes; nonces only apply to `<style>` tag elements, not attribute-level inline styles.
+- The `connect-src` allowlist in `src/lib/csp.ts` is **load-bearing** — changing it breaks live data fetching. Always update `csp.test.ts` alongside any allowlist edit.
