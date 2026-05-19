@@ -106,6 +106,16 @@ function CdpDetailState({
   collateral: CdpCollateral | undefined;
   network: Network;
 }) {
+  // aggregateTroves runs a BigInt sum across up to 500 troves; memoize so
+  // the 30s SWR refresh doesn't recompute when neither input changed.
+  const aggregates = useMemo(
+    () =>
+      collateral == null
+        ? null
+        : aggregatesFromChainTroves(collateral.id, markets.data?.Trove),
+    [collateral, markets.data?.Trove],
+  );
+
   if (markets.isLoading || (collateral != null && detail.isLoading)) {
     return <Skeleton rows={8} />;
   }
@@ -116,7 +126,7 @@ function CdpDetailState({
       />
     );
   }
-  if (collateral == null) {
+  if (collateral == null || aggregates == null) {
     return <EmptyBox message="Unknown CDP market." />;
   }
   if (detail.error) {
@@ -129,28 +139,28 @@ function CdpDetailState({
   return (
     <CdpDetailContent
       {...buildContentProps({
-        markets,
         detail,
         snapshots,
         collateral,
         network,
+        aggregates,
       })}
     />
   );
 }
 
 function buildContentProps({
-  markets,
   detail,
   snapshots,
   collateral,
   network,
+  aggregates,
 }: {
-  markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral;
   network: Network;
+  aggregates: ReturnType<typeof aggregateTroves>;
 }) {
   return {
     collateral,
@@ -158,7 +168,7 @@ function buildContentProps({
     troves: detail.data?.Trove ?? [],
     depositors: detail.data?.StabilityPoolDepositor ?? [],
     cdpPools: detail.data?.CdpPool ?? [],
-    aggregates: aggregatesFromChainTroves(collateral.id, markets.data?.Trove),
+    aggregates,
     snapshots: snapshots.data?.LiquityInstanceDailySnapshot ?? [],
     snapshotsLoading: snapshots.isLoading,
     snapshotsError: snapshots.error != null,

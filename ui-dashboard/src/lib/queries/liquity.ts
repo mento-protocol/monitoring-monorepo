@@ -109,7 +109,7 @@ export const CDP_INSTANCE_DAILY_SNAPSHOTS = `
 // client-side. Each branch's history is well under ENVIO_MAX_ROWS, so a
 // single capped query per kind suffices — the merged result is paginated
 // client-side via array slice. If any per-kind array hits the cap, the
-// UI shows a footnote (mirroring the pattern in swaps-tab.tsx).
+// UI shows a footnote so older history isn't silently dropped.
 export const CDP_TRANSACTIONS = `
   query CdpTransactions($instanceId: String!, $limit: Int!) {
     LiquidationEvent(

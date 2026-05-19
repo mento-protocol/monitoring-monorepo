@@ -77,10 +77,11 @@ function amountsFor(row: CdpTransactionRow): AmountSlice {
   }
 }
 
-function mergeRows(
-  data: CdpTransactionsResponse | undefined,
-): CdpTransactionRow[] {
-  if (!data) return [];
+function mergeRows(data: CdpTransactionsResponse | undefined): {
+  rows: CdpTransactionRow[];
+  capped: boolean;
+} {
+  if (!data) return { rows: [], capped: false };
   const liquidations: CdpTransactionRow[] = (data.LiquidationEvent ?? []).map(
     (r) => ({ kind: "liquidation", ...r }),
   );
@@ -90,18 +91,14 @@ function mergeRows(
   const rebalances: CdpTransactionRow[] = (data.SpRebalanceEvent ?? []).map(
     (r) => ({ kind: "spRebalance", ...r }),
   );
-  return [...liquidations, ...redemptions, ...rebalances].sort(
+  const rows = [...liquidations, ...redemptions, ...rebalances].sort(
     (a, b) => Number(b.timestamp) - Number(a.timestamp),
   );
-}
-
-function isAnyKindCapped(data: CdpTransactionsResponse | undefined): boolean {
-  if (!data) return false;
-  return (
-    (data.LiquidationEvent?.length ?? 0) >= ENVIO_MAX_ROWS ||
-    (data.RedemptionEvent?.length ?? 0) >= ENVIO_MAX_ROWS ||
-    (data.SpRebalanceEvent?.length ?? 0) >= ENVIO_MAX_ROWS
-  );
+  const capped =
+    liquidations.length >= ENVIO_MAX_ROWS ||
+    redemptions.length >= ENVIO_MAX_ROWS ||
+    rebalances.length >= ENVIO_MAX_ROWS;
+  return { rows, capped };
 }
 
 export function CdpTransactionsTable({
@@ -117,42 +114,30 @@ export function CdpTransactionsTable({
     CDP_TRANSACTIONS,
     { instanceId, limit: ENVIO_MAX_ROWS },
   );
-  const allRows = useMemo(() => mergeRows(data), [data]);
-  const anyKindCapped = isAnyKindCapped(data);
+  const { rows, capped } = useMemo(() => mergeRows(data), [data]);
 
-  if (error) {
-    return (
-      <Section>
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-white mb-3">
+        CDP Transactions
+      </h2>
+      {error ? (
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      </Section>
-    );
-  }
-  if (isLoading) {
-    return (
-      <Section>
+      ) : isLoading ? (
         <Skeleton rows={6} />
-      </Section>
-    );
-  }
-  if (allRows.length === 0) {
-    return (
-      <Section>
+      ) : rows.length === 0 ? (
         <EmptyBox message="No CDP transactions indexed yet." />
-      </Section>
-    );
-  }
-
-  return (
-    <Section>
-      <TransactionsBody
-        rows={allRows}
-        chainId={chainId}
-        symbol={symbol}
-        capped={anyKindCapped}
-      />
-    </Section>
+      ) : (
+        <TransactionsBody
+          rows={rows}
+          chainId={chainId}
+          symbol={symbol}
+          capped={capped}
+        />
+      )}
+    </section>
   );
 }
 
@@ -252,16 +237,5 @@ function TransactionRow({
         {relativeTime(row.timestamp)}
       </Td>
     </Row>
-  );
-}
-
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="text-lg font-semibold text-white mb-3">
-        CDP Transactions
-      </h2>
-      {children}
-    </section>
   );
 }

@@ -7,34 +7,11 @@ import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import {
-  SECONDS_PER_DAY,
   filterSeriesByRange,
+  stockWoWChangePct,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
-
-// TVL is a stock, not a flow — compare current value to the value 7 days
-// ago (point-to-point), not a sum over two 7-day windows like volume.
-// The baseline must land inside [now - 14d, now - 7d]: sparse indexed
-// histories (low-activity pools, indexer backfill gaps) otherwise pick an
-// arbitrarily-old snapshot and silently attribute e.g. a 30-day delta to
-// the "week-over-week" caption.
-function tvlWoWChangePct(series: TimeSeriesPoint[]): number | null {
-  if (series.length < 2) return null;
-  const now = series[series.length - 1];
-  const upperCutoff = now.timestamp - 7 * SECONDS_PER_DAY;
-  const lowerCutoff = now.timestamp - 14 * SECONDS_PER_DAY;
-  let ago: TimeSeriesPoint | null = null;
-  for (let i = series.length - 2; i >= 0; i--) {
-    const ts = series[i].timestamp;
-    if (ts > upperCutoff) continue;
-    if (ts < lowerCutoff) break;
-    ago = series[i];
-    break;
-  }
-  if (!ago || ago.value <= 0) return null;
-  return ((now.value - ago.value) / ago.value) * 100;
-}
 
 interface PoolTvlOverTimeChartProps {
   pool: Pool;
@@ -103,7 +80,7 @@ export function PoolTvlOverTimeChart({
   );
 
   const currentTvl = poolTvlUSD(pool, network, rates);
-  const change7d = useMemo(() => tvlWoWChangePct(fullSeries), [fullSeries]);
+  const change7d = useMemo(() => stockWoWChangePct(fullSeries), [fullSeries]);
   const priceable = canValueTvl(pool, network, rates ?? new Map());
 
   // Distinguish "unpriceable" (no USDm leg and no rate for either leg) AND
