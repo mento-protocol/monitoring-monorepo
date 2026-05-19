@@ -180,18 +180,24 @@ describe("aggregatePerWindow — commutativity", () => {
         arbDayTimestamp,
         fc
           .array(arbRow(0n), { minLength: 0, maxLength: 10 })
-          .chain((baseRows) => {
-            // Stamp each row with a valid timestamp within the snapshotDay's window.
-            return fc.constant(baseRows);
-          }),
-        (snapshotDay, rawRows) => {
+          .chain((baseRows) =>
+            // Pair the base rows with a fast-check-controlled permutation so
+            // that a failure is fully reproducible from the seed alone.
+            fc
+              .shuffledSubarray(baseRows, { minLength: baseRows.length })
+              .map((shuffledRows) => ({ baseRows, shuffledRows })),
+          ),
+        (snapshotDay, { baseRows, shuffledRows }) => {
           // Give all rows a timestamp = snapshotDay so they land in every
           // window except 24h (which is always empty by construction).
-          const rows: TraderDailyRow[] = rawRows.map((r) => ({
+          const rows: TraderDailyRow[] = baseRows.map((r) => ({
             ...r,
             timestamp: snapshotDay,
           }));
-          const shuffled = [...rows].sort(() => 0.5 - Math.random());
+          const shuffled: TraderDailyRow[] = shuffledRows.map((r) => ({
+            ...r,
+            timestamp: snapshotDay,
+          }));
 
           const original = aggregatePerWindow(rows, CHAIN, snapshotDay);
           const reordered = aggregatePerWindow(shuffled, CHAIN, snapshotDay);
@@ -589,8 +595,9 @@ describe("maybeHeartbeatFlushV3 — monotone lastFlushedDay", () => {
     await fc.assert(
       fc.asyncProperty(
         // Pick a gap of 0–4 days already flushed, then an event 1–3 days further.
+        // fc.nat only accepts {max}, so use fc.integer to enforce a lower bound.
         fc.nat({ max: 4 }),
-        fc.nat({ min: 1, max: 3 }),
+        fc.integer({ min: 1, max: 3 }),
         async (alreadyFlushedDays, newDaysGap) => {
           const BASE_DAY = 1700000000n - (1700000000n % SECONDS_PER_DAY); // deterministic day
           const lastFlushedDay =
