@@ -27,12 +27,20 @@
 #
 # Bootstrap (one-time, for maintainers):
 #   The SA + Token Creator grant + org-level bindings were originally created
-#   by hand. Existing infrastructure is adopted into Terraform state via the
-#   `import` blocks at the bottom of this file (Terraform ≥ 1.7 — required
-#   for `for_each` on `import`; required_version is pinned accordingly in
-#   main.tf). The blocks are idempotent: once state contains the resource,
-#   subsequent applies are no-ops. Manual `terraform import` fallbacks for
-#   each resource are documented inline next to the import blocks below.
+#   by hand in the production `mento-monitoring` project. On the first apply
+#   after this PR merges, adopt the existing live resources into Terraform
+#   state with the documented `terraform import` commands at the bottom of
+#   this file BEFORE running `terraform apply`. Once state contains them,
+#   subsequent applies are no-ops for the adopted bindings and create paths
+#   for any new bindings (e.g. additional impersonators, additional org roles)
+#   proceed normally.
+#
+#   `import` blocks are deliberately NOT used: a `for_each` import block over
+#   the desired binding set would attempt to import every member, including
+#   members not yet present in the live policy, and fail with "Cannot import
+#   non-existent remote object" before Terraform can create them. Manual
+#   `terraform import` keeps the adoption path strictly opt-in and lets the
+#   normal create path handle anything not already in the live policy.
 
 # Allow-list of principals permitted to mint short-lived tokens for the
 # read-only agent SA. Kept as a list so additional investigators (incident
@@ -154,33 +162,48 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
   member   = "serviceAccount:${google_service_account.agent_readonly.email}"
 }
 
-# ── State adoption (import blocks) ───────────────────────────────────────────
+# ── One-time state adoption (manual `terraform import`) ──────────────────────
 # The agent-readonly SA, its Token Creator grant, and the org-level bindings
-# were created manually before this file existed. The `import` blocks below
-# adopt the live resources into Terraform state on the next `terraform apply`
-# instead of trying to re-create them (which would fail with "already exists"
-# from Google IAM).
+# were created manually in production before this file existed. To adopt the
+# existing live resources into state without re-creation (which would fail
+# with "already exists" from Google IAM), run the commands below ONCE from
+# `terraform/` before the first `terraform apply` that includes this file.
 #
-# Behaviour:
-#   - On the first apply after this PR merges: each `import` block plans an
-#     adopt-into-state action; subsequent applies are no-ops.
-#   - If the live resource is already absent (fresh org bootstrap, DR), the
-#     plan falls through to a normal `create` — `import` blocks fail open.
-#   - The Token Creator binding is keyed by the default impersonator
-#     (`group:eng@mentolabs.xyz`). If the live grant was for a *different*
-#     principal (e.g. the original `user:philip.paetz@...`), import that
-#     principal manually with `terraform import` and let Terraform plan the
-#     swap to the eng group on the next apply.
+# Why manual import and not `import` blocks: a `for_each` `import` block over
+# the desired binding set forces Terraform to attempt an import for every
+# desired member — including new impersonators or new org roles that do not
+# yet exist in the live policy — and the plan fails with "Cannot import
+# non-existent remote object" before any create path runs. Manual imports
+# keep adoption strictly opt-in, and the normal create path handles any new
+# binding that is not already present in the live policy. This also avoids
+# baking the production `mento-monitoring` project ID into resource-level
+# `import` IDs, which would be incorrect when `gcp_project_id` is overridden
+# for a scratch / DR setup.
 #
-# Manual fallback (Terraform < 1.5 or scripted bootstrap):
+# Substitute `$PROJECT` / `$ORG` with the values from your `terraform.tfvars`
+# (`var.gcp_project_id`, `var.gcp_org_id`):
+#
+#   PROJECT=mento-monitoring  # var.gcp_project_id
+#   ORG=599540483579          # var.gcp_org_id
+#   SA="agent-readonly@${PROJECT}.iam.gserviceaccount.com"
+#
 #   terraform import \
 #     'google_service_account.agent_readonly' \
-#     projects/mento-monitoring/serviceAccounts/agent-readonly@mento-monitoring.iam.gserviceaccount.com
+#     "projects/${PROJECT}/serviceAccounts/${SA}"
 #
+#   # Repeat per impersonator currently present in the live policy. The
+#   # default `group:eng@mentolabs.xyz` is what production should look like
+#   # after this PR; if the live grant is on a different principal (e.g. the
+#   # original `user:philip.paetz@...`), import that principal here and let
+#   # Terraform plan the swap to the eng group on the next apply.
+#   MEMBER='group:eng@mentolabs.xyz'
 #   terraform import \
-#     'google_service_account_iam_member.agent_readonly_token_creators["group:eng@mentolabs.xyz"]' \
-#     'projects/mento-monitoring/serviceAccounts/agent-readonly@mento-monitoring.iam.gserviceaccount.com roles/iam.serviceAccountTokenCreator group:eng@mentolabs.xyz'
+#     "google_service_account_iam_member.agent_readonly_token_creators[\"${MEMBER}\"]" \
+#     "projects/${PROJECT}/serviceAccounts/${SA} roles/iam.serviceAccountTokenCreator ${MEMBER}"
 #
+#   # Adopt only org-role bindings that already exist in the live policy. New
+#   # roles added to `local.agent_readonly_org_roles` will be created normally
+#   # by the next `terraform apply` without an import step.
 #   for role in roles/browser roles/cloudasset.viewer roles/iam.securityReviewer \
 #               roles/serviceusage.serviceUsageConsumer roles/run.viewer \
 #               roles/logging.viewer roles/monitoring.viewer \
@@ -190,25 +213,8 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #               roles/pubsub.viewer; do
 #     terraform import \
 #       "google_organization_iam_member.agent_readonly_org_roles[\"$role\"]" \
-#       "599540483579 $role serviceAccount:agent-readonly@mento-monitoring.iam.gserviceaccount.com"
+#       "${ORG} $role serviceAccount:${SA}" || true
 #   done
-
-import {
-  to = google_service_account.agent_readonly
-  id = "projects/mento-monitoring/serviceAccounts/agent-readonly@mento-monitoring.iam.gserviceaccount.com"
-}
-
-# One import block per impersonator. Iteration over `var.agent_readonly_impersonators`
-# means that if the variable is overridden, only members that already exist
-# in the live policy are adopted; new members fall through to a normal create.
-import {
-  for_each = toset(var.agent_readonly_impersonators)
-  to       = google_service_account_iam_member.agent_readonly_token_creators[each.key]
-  id       = "projects/mento-monitoring/serviceAccounts/agent-readonly@mento-monitoring.iam.gserviceaccount.com roles/iam.serviceAccountTokenCreator ${each.key}"
-}
-
-import {
-  for_each = toset(local.agent_readonly_org_roles)
-  to       = google_organization_iam_member.agent_readonly_org_roles[each.key]
-  id       = "${var.gcp_org_id} ${each.key} serviceAccount:agent-readonly@mento-monitoring.iam.gserviceaccount.com"
-}
+#
+# For a fresh org / DR bootstrap with no live resources, skip the imports
+# above entirely — `terraform apply` will create everything from scratch.
