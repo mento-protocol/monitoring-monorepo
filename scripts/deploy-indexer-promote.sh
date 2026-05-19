@@ -22,11 +22,7 @@ fi
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
   COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-    | node -e "
-      const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      const deps = d.data.deployments.sort((a,b) => b.created_time.localeCompare(a.created_time));
-      console.log(deps[0]?.commit_hash ?? '');
-    ")
+    | node scripts/resolve-envio-deployment.mjs "")
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ No deployments found for $ENVIO_ORG/$ENVIO_INDEXER"
@@ -35,29 +31,7 @@ if [[ -z "$COMMIT" ]]; then
 else
   TARGET_COMMIT="$COMMIT"
   COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-    | node -e "
-      const target = process.argv[1];
-      const { execFileSync } = require('child_process');
-      const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      const deps = [...(d.data?.deployments ?? [])].sort((a,b) => b.created_time.localeCompare(a.created_time));
-      let verifiedTarget = '';
-      try {
-        verifiedTarget = execFileSync('git', ['rev-parse', '--verify', target + '^{commit}'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-      } catch {}
-      const matches = deps.filter((dep) =>
-        dep.commit_hash.startsWith(target) ||
-        (verifiedTarget && verifiedTarget.startsWith(dep.commit_hash))
-      );
-      if (matches.length > 1) {
-        console.error('Ambiguous deployment commit ' + target + ' matches: ' + matches.map((dep) => dep.commit_hash).join(', '));
-        process.exit(2);
-      }
-      const match = matches[0];
-      process.stdout.write(match?.commit_hash ?? '');
-    " "$TARGET_COMMIT")
+    | node scripts/resolve-envio-deployment.mjs "$TARGET_COMMIT")
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ Deployment $TARGET_COMMIT not found for $ENVIO_ORG/$ENVIO_INDEXER"

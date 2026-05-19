@@ -143,7 +143,7 @@ describe("isRateLimitError", () => {
     ["throttle: backoff and retry", true],
     ["Request exceeds defined limit.", true], // rpc2.monad.xyz
     ["Request exceeds defined limit", true],
-    ["Cannot read properties of undefined (reading 'error')", true],
+    ["Cannot read properties of undefined (reading 'error')", false],
     ["execution reverted: OracleStaleOrExpired", false],
     ["network unreachable", false],
     ["timeout while reading block", false],

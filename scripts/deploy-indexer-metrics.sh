@@ -53,33 +53,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-  | node -e "
-    const target = process.argv[1];
-    const { execFileSync } = require('child_process');
-    const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    const deps = [...(d.data?.deployments ?? [])].sort((a,b) => b.created_time.localeCompare(a.created_time));
-    if (!target) {
-      process.stdout.write(deps[0]?.commit_hash ?? '');
-      process.exit(0);
-    }
-    let verifiedTarget = '';
-    try {
-      verifiedTarget = execFileSync('git', ['rev-parse', '--verify', target + '^{commit}'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-    } catch {}
-    const matches = deps.filter((dep) =>
-      dep.commit_hash.startsWith(target) ||
-      (verifiedTarget && verifiedTarget.startsWith(dep.commit_hash))
-    );
-    if (matches.length > 1) {
-      console.error('Ambiguous deployment commit ' + target + ' matches: ' + matches.map((dep) => dep.commit_hash).join(', '));
-      process.exit(2);
-    }
-    const match = matches[0];
-    process.stdout.write(match?.commit_hash ?? '');
-  " "$COMMIT")
+  | node scripts/resolve-envio-deployment.mjs "$COMMIT")
 
 if [[ -z "$COMMIT" ]]; then
   echo "Deployment not found for $ENVIO_ORG/$ENVIO_INDEXER"
