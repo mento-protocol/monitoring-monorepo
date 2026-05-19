@@ -2,6 +2,10 @@ import type {
   BorrowerInfo,
   InterestRateBracket,
   PendingBatchMembershipOperation,
+  PendingBatchedTroveUpdate,
+  PendingRedemption,
+  LiquityInstance,
+  Trove,
 } from "envio";
 import { indexer } from "../../indexer.js";
 import { asBigInt, eventId } from "../../helpers.js";
@@ -64,6 +68,7 @@ const isForcedOperation = (op: number): boolean =>
 type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
   PendingBatchMembershipOperation: {
     get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
+    set: (entity: PendingBatchMembershipOperation) => void;
   };
   PendingBatchedTroveUpdate: {
     getWhere: (args: { txHash: { _eq: string } }) => Promise<
@@ -75,6 +80,7 @@ type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
         batchDebtShares: bigint;
       }>
     >;
+    set: (entity: PendingBatchedTroveUpdate) => void;
   };
   InterestRateBracket: {
     get: (id: string) => Promise<InterestRateBracket | undefined>;
@@ -83,6 +89,11 @@ type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
   BorrowerInfo: {
     get: (id: string) => Promise<BorrowerInfo | undefined>;
     set: (entity: BorrowerInfo) => void;
+  };
+};
+type TroveOperationPreloadContext = TroveManagerPreloadContext & {
+  PendingRedemption: {
+    set: (entity: PendingRedemption) => void;
   };
 };
 type PendingBatchedTroveUpdateRow = Awaited<
@@ -145,6 +156,40 @@ async function preloadTroveAndMarket(
     context.Trove.get(makeTroveId(collateralId, troveId)),
     context.LiquityCollateral.get(collateralId),
   ]);
+}
+
+async function preloadTroveOperation(
+  context: TroveOperationPreloadContext,
+  args: {
+    market: Parameters<typeof preloadSystemParams>[1];
+    chainId: number;
+    txHash: string;
+    collateralId: string;
+    troveId: string;
+    operation: number;
+    annualInterestRate: bigint;
+    blockNumber: bigint;
+    blockTimestamp: bigint;
+  },
+): Promise<void> {
+  await preloadTroveAndMarket(
+    context,
+    args.market,
+    args.collateralId,
+    args.troveId,
+  );
+  if (args.operation === OP.REDEEM_COLLATERAL) {
+    setPendingRedemption(context, {
+      ...args,
+      timestamp: args.blockTimestamp,
+    });
+  } else if (isBatchMembershipOperation(args.operation)) {
+    setPendingBatchMembershipOperation(context, {
+      ...args,
+      operation: args.operation,
+      timestamp: args.blockTimestamp,
+    });
+  }
 }
 
 async function preloadBatchReplay(args: {
@@ -252,6 +297,33 @@ async function moveBatchMembershipBracketDebt(
   }
 }
 
+function transitionOpenedTrove(
+  trove: Trove,
+  instance: LiquityInstance,
+  args: { blockTimestamp: bigint; blockNumber: bigint; txHash: string },
+): { trove: Trove; instance: LiquityInstance } {
+  const transitioned = transitionTroveStatus(
+    {
+      ...trove,
+      openedAt: trove.openedAt === 0n ? args.blockTimestamp : trove.openedAt,
+      openedAtBlock:
+        trove.openedAtBlock === 0n ? args.blockNumber : trove.openedAtBlock,
+      openedTxHash: trove.openedTxHash || args.txHash,
+    },
+    TROVE_STATUS.ACTIVE,
+    instance,
+  );
+  return {
+    trove: transitioned.trove,
+    instance: {
+      ...transitioned.instance,
+      troveOpenedCountBucket: transitioned.instance.troveOpenedCountBucket + 1,
+      troveOpenedCountDayBucket:
+        transitioned.instance.troveOpenedCountDayBucket + 1,
+    },
+  };
+}
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -263,7 +335,17 @@ indexer.onEvent(
     const collateralId = makeCollateralId(market);
     const troveId = normalizeTroveTokenId(event.params._troveId);
     if (context.isPreload) {
-      await preloadTroveAndMarket(context, market, collateralId, troveId);
+      await preloadTroveOperation(context, {
+        market,
+        chainId: event.chainId,
+        txHash: event.transaction.hash,
+        collateralId,
+        troveId,
+        operation: Number(event.params._operation),
+        annualInterestRate: event.params._annualInterestRate,
+        blockNumber: asBigInt(event.block.number),
+        blockTimestamp: asBigInt(event.block.timestamp),
+      });
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -294,25 +376,11 @@ indexer.onEvent(
     const forced = isForcedOperation(op);
 
     if (op === OP.OPEN_TROVE || op === OP.OPEN_TROVE_AND_JOIN_BATCH) {
-      const transitioned = transitionTroveStatus(
-        {
-          ...trove,
-          openedAt: trove.openedAt === 0n ? blockTimestamp : trove.openedAt,
-          openedAtBlock:
-            trove.openedAtBlock === 0n ? blockNumber : trove.openedAtBlock,
-          openedTxHash: trove.openedTxHash || event.transaction.hash,
-        },
-        TROVE_STATUS.ACTIVE,
-        instance,
-      );
-      trove = transitioned.trove;
-      instance = {
-        ...transitioned.instance,
-        troveOpenedCountBucket:
-          transitioned.instance.troveOpenedCountBucket + 1,
-        troveOpenedCountDayBucket:
-          transitioned.instance.troveOpenedCountDayBucket + 1,
-      };
+      ({ trove, instance } = transitionOpenedTrove(trove, instance, {
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+      }));
     } else if (op === OP.CLOSE_TROVE) {
       const transitioned = transitionTroveStatus(
         {
@@ -528,9 +596,8 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
-    if (context.isPreload) return;
     const troveId = normalizeTroveTokenId(event.params._troveId);
-    context.PendingBatchedTroveUpdate.set({
+    const pendingUpdate = {
       id: pendingTroveKey(
         event.chainId,
         event.transaction.hash,
@@ -549,7 +616,9 @@ indexer.onEvent(
       timestamp: asBigInt(event.block.timestamp),
       blockNumber: asBigInt(event.block.number),
       logIndex: event.logIndex,
-    });
+    };
+    context.PendingBatchedTroveUpdate.set(pendingUpdate);
+    if (context.isPreload) return;
   },
 );
 

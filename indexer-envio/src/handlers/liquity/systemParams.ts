@@ -143,7 +143,6 @@ export async function preloadSystemParams(
     chainId: market.chainId,
     systemParams: market.systemParams,
   });
-  if (values === null) return null;
 
   const id = makeCollateralId(market);
   const existing = await context.LiquityCollateral.get(id);
