@@ -19,7 +19,7 @@ import { consoleLogger, type RpcLogger } from "./log.js";
  * at debug level because they are expected contract behavior. */
 const RPC_BURST_INTERVAL = 10;
 
-/** Monotonically increasing failure count per `chainId:fn` key. */
+/** Monotonically increasing failure count per chain, function, and severity class. */
 const _rpcFailureCounts = new Map<string, number>();
 
 /** @internal Test-only: reset the burst-counter map between tests. */
@@ -109,7 +109,8 @@ export function logRpcFailure(
     );
   }
 
-  const burstKey = `${chainId}:${fn}`;
+  const burstClass = knownRevert ? "contract-revert" : "rpc-failure";
+  const burstKey = `${chainId}:${fn}:${burstClass}`;
   const count = (_rpcFailureCounts.get(burstKey) ?? 0) + 1;
   _rpcFailureCounts.set(burstKey, count);
   if (count % RPC_BURST_INTERVAL === 0) {
