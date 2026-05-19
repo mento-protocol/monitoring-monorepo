@@ -27,7 +27,10 @@
       "Read(**/.vercel/**)",
       "Read(**/*.tsbuildinfo)",
       "Read(**/.redteam/**)",
-      "Read(**/.clawpatch/**)",
+      "Read(**/.clawpatch/runs/**)",
+      "Read(**/.clawpatch/patches/**)",
+      "Read(**/.clawpatch/reports/**)",
+      "Read(**/.clawpatch/locks/**)",
       "Read(**/WORK.md)"
     ]
   }
