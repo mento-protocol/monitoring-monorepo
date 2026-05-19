@@ -90,9 +90,11 @@ async function logSystemParamsFailure(
           `(or bump @mento-protocol/contracts) and redeploy.`,
       );
     } else {
+      // viem's getCode returns "0x{hex}"; bytecode size is (chars - 2) / 2.
+      const bytecodeBytes = (code.length - 2) / 2;
       context.log.warn(
         `liquity.systemParams.loadFailed chainId=${chainId} systemParams=${systemParams} — ` +
-          `contract is live (bytecode ${code.length} bytes) but parameter reads return undefined. ` +
+          `contract is live (bytecode ${bytecodeBytes} bytes) but parameter reads return undefined. ` +
           `Likely an ABI mismatch, RPC archive depth, or a transient outage.`,
       );
     }

@@ -184,7 +184,8 @@ export const findLiquityMarketByAddressesRegistry = (
 // carried `poolFallbacks` to recover a collateralId for `CdpPool` events that
 // arrive before the pool is associated with a market. No entries have ever
 // been needed; keeping the lookup keeps callers stable if a future deployment
-// requires one.
+// requires one. To add an entry, populate this object directly with
+// `${chainId}-${address.toLowerCase()}` keys mapping to the collateralId.
 const POOL_FALLBACKS: Record<string, string> = {};
 
 export const findCollateralIdByPoolFallback = (
