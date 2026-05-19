@@ -1,8 +1,13 @@
 import { z } from "zod";
 
-// Stringly-typed boolean: `"true"` → true, anything else → false.
+// Stringly-typed boolean: `"true"` → true, anything else (including `"1"`,
+// `"yes"`, `"TRUE"`, operator typos, missing) → false. Matches the prior
+// `process.env.X === "true"` semantics exactly. Using a permissive
+// `z.string().optional()` instead of `z.enum(["true","false"])` so a typo
+// doesn't crash the dashboard at module load. See AGENTS.md "Env-var
+// validation".
 const envBool = z
-  .enum(["true", "false"])
+  .string()
   .optional()
   .transform((v) => v === "true");
 
@@ -32,9 +37,14 @@ const clientSchema = z.object({
   NEXT_PUBLIC_SHOW_TESTNET_NETWORKS: envBool,
   NEXT_PUBLIC_BROWSER_TEST_FIXTURES: envBool,
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+  // `next.config.ts` inlines `NEXT_PUBLIC_VERCEL_ENV=""` on localhost (mirror of
+  // `VERCEL_ENV`, which is unset off-Vercel). `.catch(undefined)` so that
+  // empty-string case — load-bearing for `shouldEnableSentry` — resolves to
+  // `undefined` instead of crashing the dashboard at module load.
   NEXT_PUBLIC_VERCEL_ENV: z
     .enum(["production", "preview", "development"])
-    .optional(),
+    .optional()
+    .catch(undefined),
 });
 
 // Server-side env vars consumed via `serverEnv.X`. Other server env vars
@@ -44,7 +54,9 @@ const clientSchema = z.object({
 // hook fires, so routing them through `serverEnv` would break those tests.
 const serverSchema = z.object({
   VERCEL: z.string().optional(),
-  NEXT_RUNTIME: z.enum(["nodejs", "edge"]).optional(),
+  // `.catch(undefined)` so an unexpected runtime value doesn't crash server
+  // startup before instrumentation.ts has a chance to skip the Sentry import.
+  NEXT_RUNTIME: z.enum(["nodejs", "edge"]).optional().catch(undefined),
 });
 
 export const clientEnv = clientSchema.parse({
