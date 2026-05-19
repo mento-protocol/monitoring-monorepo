@@ -49,7 +49,7 @@ describe("Liquity market loader (contracts.json-backed)", () => {
     assert.ok(celoMainnet, "contracts.json missing 42220.mainnet namespace");
     // If this assertion ever fails, the package shape changed; either the
     // loader's naming convention or this test is now wrong.
-    const expectedRoleByField: Record<string, string> = {
+    const expectedRoleByField = {
       collateralRegistry: "CollateralRegistry",
       troveManager: "TroveManager",
       stabilityPool: "StabilityPool",
@@ -61,9 +61,11 @@ describe("Liquity market loader (contracts.json-backed)", () => {
       collSurplusPool: "CollSurplusPool",
       addressesRegistry: "AddressesRegistry",
       systemParams: "SystemParams",
-    };
+    } as const;
     for (const market of LIQUITY_MARKETS) {
-      for (const [field, role] of Object.entries(expectedRoleByField)) {
+      for (const [field, role] of Object.entries(expectedRoleByField) as Array<
+        [keyof typeof expectedRoleByField, string]
+      >) {
         const key = `${role}v300${market.symbol}`;
         const expected = celoMainnet[key]?.address?.toLowerCase();
         assert.ok(
@@ -71,7 +73,7 @@ describe("Liquity market loader (contracts.json-backed)", () => {
           `${key} missing from @mento-protocol/contracts — bump package or fix naming convention`,
         );
         assert.equal(
-          (market as unknown as Record<string, string>)[field],
+          market[field],
           expected,
           `market.${field} drift for ${market.symbol}`,
         );

@@ -1,4 +1,9 @@
-import type { LiquityCollateral, LiquityInstance, Trove } from "envio";
+import type {
+  EffectContext,
+  LiquityCollateral,
+  LiquityInstance,
+  Trove,
+} from "envio";
 import { createEffect, S } from "envio";
 import systemParamsAbi from "../../../abis/liquity/SystemParams.json" with { type: "json" };
 import {
@@ -64,9 +69,7 @@ const systemParamsShape = S.schema({
 const diagnosedFailures = new Set<string>();
 
 async function logSystemParamsFailure(
-  context: {
-    log: { error: (msg: string) => void; warn: (msg: string) => void };
-  },
+  context: EffectContext,
   chainId: number,
   systemParams: string,
 ): Promise<void> {

@@ -31,8 +31,14 @@ export type LiquityMarketConfig = {
 // debt + collateral, but those addresses haven't been republished in
 // `@mento-protocol/contracts` yet. Until that lands, these four addresses are
 // the only hand-typed inputs in this file. Every other address is derived from
-// the package by naming convention below. The boot-time bytecode diagnostic in
+// the package by naming convention below. The dead-contract diagnostic in
 // `systemParams.ts` catches the case where any of these go dead.
+//
+// Address-collision note: `CHFm` and `JPYm` here also appear in
+// `config.multichain.mainnet.yaml` under `WormholeNttManager` and in
+// `nttAddresses.json` as `nttManagerProxy`. That is intentional — Mento's v3
+// stable tokens implement NttManager at the same proxy (single-contract NTT
+// mode). Do not "consolidate" these.
 // ---------------------------------------------------------------------------
 type Sym = "GBPm" | "CHFm" | "JPYm";
 const V3_DEBT_TOKEN_BY_SYMBOL: Record<Sym, string> = {
@@ -54,9 +60,22 @@ const COLL_INDEX_BY_SYMBOL: Record<Sym, number> = {
 const SYMBOLS: ReadonlyArray<Sym> = ["GBPm", "CHFm", "JPYm"];
 const LIQUITY_CHAIN_ID = 42220;
 
+type Role =
+  | "CollateralRegistry"
+  | "TroveManager"
+  | "StabilityPool"
+  | "BorrowerOperations"
+  | "TroveNFT"
+  | "SortedTroves"
+  | "ActivePool"
+  | "DefaultPool"
+  | "CollSurplusPool"
+  | "AddressesRegistry"
+  | "SystemParams";
+
 const requireSymbolAddress = (
   chainId: number,
-  role: string,
+  role: Role,
   symbol: Sym,
 ): string => asAddress(requireContractAddress(chainId, `${role}v300${symbol}`));
 
