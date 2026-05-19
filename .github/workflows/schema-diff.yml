@@ -67,6 +67,9 @@ jobs:
               - scripts/schema-diff.mjs
               - package.json
               - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .node-version
       - name: Decide whether to run schema diff
         id: decide
         env:
