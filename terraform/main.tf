@@ -462,7 +462,10 @@ resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_com
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
 
-  depends_on = [google_project_service.cloudbuild]
+  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.compute,
+  ]
 }
 
 resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" {
