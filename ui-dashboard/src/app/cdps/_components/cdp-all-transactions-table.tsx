@@ -33,14 +33,19 @@ interface CollateralSummary {
 
 export function CdpAllTransactionsTable({
   collaterals,
+  chainId,
 }: {
   collaterals: CollateralSummary[];
+  chainId: number;
 }) {
   const { data, error, isLoading } = useGQL<CdpTransactionsResponse>(
     ALL_CDP_TRANSACTIONS,
-    { limit: PER_KIND_FETCH_LIMIT },
+    { chainId, limit: PER_KIND_FETCH_LIMIT },
   );
-  const { rows } = useMemo(() => mergeTransactionRows(data), [data]);
+  const { rows, capped } = useMemo(
+    () => mergeTransactionRows(data, PER_KIND_FETCH_LIMIT),
+    [data],
+  );
   const visibleRows = rows.slice(0, MAX_ROWS);
 
   const symbolByInstance = useMemo(() => {
@@ -65,45 +70,69 @@ export function CdpAllTransactionsTable({
       ) : visibleRows.length === 0 ? (
         <EmptyBox message="No CDP transactions indexed yet." />
       ) : (
-        <>
-          <Table>
-            <thead>
-              <Row>
-                <Th>Type</Th>
-                <Th>Market</Th>
-                <Th align="right">Debt</Th>
-                <Th align="right">Collateral</Th>
-                <Th>Tx</Th>
-                <th
-                  scope="col"
-                  className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
-                >
-                  Block
-                </th>
-                <Th>Time</Th>
-              </Row>
-            </thead>
-            <tbody>
-              {visibleRows.map((row) => (
-                <OverviewRow
-                  key={`${row.kind}-${row.id}`}
-                  row={row}
-                  market={
-                    row.instanceId
-                      ? symbolByInstance.get(row.instanceId)
-                      : undefined
-                  }
-                />
-              ))}
-            </tbody>
-          </Table>
-          <p className="px-1 pt-2 text-xs text-slate-500">
-            Showing the most recent {visibleRows.length.toLocaleString()}{" "}
-            transactions across all CDP markets.
-          </p>
-        </>
+        <OverviewBody
+          rows={visibleRows}
+          symbolByInstance={symbolByInstance}
+          capped={capped}
+        />
       )}
     </section>
+  );
+}
+
+function OverviewBody({
+  rows,
+  symbolByInstance,
+  capped,
+}: {
+  rows: CdpTransactionRow[];
+  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
+  capped: boolean;
+}) {
+  return (
+    <>
+      <Table>
+        <thead>
+          <Row>
+            <Th>Type</Th>
+            <Th>Market</Th>
+            <Th align="right">Debt</Th>
+            <Th align="right">Collateral</Th>
+            <Th>Tx</Th>
+            <th
+              scope="col"
+              className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+            >
+              Block
+            </th>
+            <Th>Time</Th>
+          </Row>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <OverviewRow
+              key={`${row.kind}-${row.id}`}
+              row={row}
+              market={
+                row.instanceId
+                  ? symbolByInstance.get(row.instanceId)
+                  : undefined
+              }
+            />
+          ))}
+        </tbody>
+      </Table>
+      <p className="px-1 pt-2 text-xs text-slate-500">
+        Showing the most recent {rows.length.toLocaleString()} transactions
+        across all CDP markets.
+      </p>
+      {capped && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing the most recent {PER_KIND_FETCH_LIMIT.toLocaleString()}{" "}
+          entries per event type — older history may exist beyond this range.
+        </p>
+      )}
+    </>
   );
 }
 

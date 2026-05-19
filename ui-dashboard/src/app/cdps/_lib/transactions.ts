@@ -122,10 +122,13 @@ export type MergedTransactions = {
 
 /** Merge the 4 event arrays into a single timestamp-desc list with an
  *  id-desc tiebreak. `capped` is true when any per-kind array hit
- *  ENVIO_MAX_ROWS — surface as a footnote so older entries aren't
- *  silently dropped. */
+ *  `limit` — surface as a footnote so older entries aren't silently
+ *  dropped. `limit` defaults to ENVIO_MAX_ROWS for the per-market table
+ *  which fetches the full Hasura cap; the overview table passes its
+ *  smaller per-kind fetch limit so the cap is detected accurately. */
 export function mergeTransactionRows(
   data: CdpTransactionsResponse | undefined,
+  limit: number = ENVIO_MAX_ROWS,
 ): MergedTransactions {
   if (!data) return { rows: [], capped: false };
   const liquidations: CdpTransactionRow[] = (data.LiquidationEvent ?? []).map(
@@ -151,9 +154,9 @@ export function mergeTransactionRows(
     return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
   });
   const capped =
-    liquidations.length >= ENVIO_MAX_ROWS ||
-    redemptions.length >= ENVIO_MAX_ROWS ||
-    rebalances.length >= ENVIO_MAX_ROWS ||
-    troveOps.length >= ENVIO_MAX_ROWS;
+    liquidations.length >= limit ||
+    redemptions.length >= limit ||
+    rebalances.length >= limit ||
+    troveOps.length >= limit;
   return { rows, capped };
 }

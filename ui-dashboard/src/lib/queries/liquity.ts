@@ -151,12 +151,16 @@ export const CDP_TRANSACTIONS = `
 `;
 
 // Cross-CDP transactions feed for the /cdps overview page. Same shape as
-// CDP_TRANSACTIONS but without the instanceId filter — the limit caps each
-// kind, and the UI merges client-side and shows the last N. `instanceId`
-// is projected so the UI can resolve which market each row belongs to.
+// CDP_TRANSACTIONS but scoped by chain instead of instance — Liquity is
+// indexed on multiple chains (Celo + Monad), so without the chainId
+// predicate the overview would leak cross-chain rows into the per-chain
+// page. The limit caps each kind, the UI merges client-side and shows
+// the last N. `instanceId` is projected so the UI can resolve which
+// market each row belongs to.
 export const ALL_CDP_TRANSACTIONS = `
-  query AllCdpTransactions($limit: Int!) {
+  query AllCdpTransactions($chainId: Int!, $limit: Int!) {
     LiquidationEvent(
+      where: { chainId: { _eq: $chainId } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
@@ -166,6 +170,7 @@ export const ALL_CDP_TRANSACTIONS = `
       timestamp blockNumber txHash
     }
     RedemptionEvent(
+      where: { chainId: { _eq: $chainId } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
@@ -175,6 +180,7 @@ export const ALL_CDP_TRANSACTIONS = `
       timestamp blockNumber txHash
     }
     SpRebalanceEvent(
+      where: { chainId: { _eq: $chainId } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
@@ -183,6 +189,7 @@ export const ALL_CDP_TRANSACTIONS = `
       timestamp blockNumber txHash
     }
     TroveOperationEvent(
+      where: { chainId: { _eq: $chainId } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {

@@ -111,7 +111,10 @@ export function CdpsPageClient() {
           />
         ))}
       </div>
-      <CdpAllTransactionsTable collaterals={collaterals} />
+      <CdpAllTransactionsTable
+        collaterals={collaterals}
+        chainId={network.chainId}
+      />
     </div>
   );
 }
