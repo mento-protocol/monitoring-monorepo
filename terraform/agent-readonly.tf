@@ -191,15 +191,62 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #     'google_service_account.agent_readonly' \
 #     "projects/${PROJECT}/serviceAccounts/${SA}"
 #
-#   # Repeat per impersonator currently present in the live policy. The
-#   # default `group:eng@mentolabs.xyz` is what production should look like
-#   # after this PR; if the live grant is on a different principal (e.g. the
-#   # original `user:philip.paetz@...`), import that principal here and let
-#   # Terraform plan the swap to the eng group on the next apply.
+#   # Adopt the Token Creator grant. `google_service_account_iam_member` is
+#   # non-authoritative and `for_each` keys instances by member, so Terraform
+#   # only manages bindings for members listed in `var.agent_readonly_impersonators`.
+#   # Any *other* members carrying the Token Creator role on this SA in the live
+#   # policy are invisible to Terraform and will silently persist — handle them
+#   # explicitly below.
+#   #
+#   # Step 1: inspect the live policy to see who currently holds Token Creator
+#   # on the SA. On a fresh bootstrap with no live SA this returns empty and the
+#   # rest of this section is a no-op.
+#   gcloud iam service-accounts get-iam-policy "$SA" --project="$PROJECT" \
+#     --flatten='bindings[].members' \
+#     --filter='bindings.role:roles/iam.serviceAccountTokenCreator' \
+#     --format='value(bindings.members)'
+#
+#   # Step 2: for each member listed above that is ALSO in
+#   # `var.agent_readonly_impersonators` (e.g. the default `group:eng@mentolabs.xyz`
+#   # once it has been granted manually, or any new members added to the variable),
+#   # import the corresponding for_each instance. Re-run per member as needed:
 #   MEMBER='group:eng@mentolabs.xyz'
 #   terraform import \
 #     "google_service_account_iam_member.agent_readonly_token_creators[\"${MEMBER}\"]" \
 #     "projects/${PROJECT}/serviceAccounts/${SA} roles/iam.serviceAccountTokenCreator ${MEMBER}"
+#
+#   # Step 3: explicitly delete any legacy Token Creator members that are NOT in
+#   # `var.agent_readonly_impersonators` and therefore unmanaged by Terraform.
+#   # Production was originally bootstrapped with a single user grant
+#   # (`user:philip.paetz@mentolabs.xyz`); the default impersonator list is now
+#   # the eng group. Because `google_service_account_iam_member` is
+#   # non-authoritative, Terraform will NOT plan removal of that legacy user
+#   # grant on its own — leaving philip with permanent SA impersonation outside
+#   # of group membership. Run this AFTER confirming Terraform has applied
+#   # (or imported) the desired group binding, so impersonation continues to
+#   # work for the engineering org throughout the swap. On a fresh bootstrap
+#   # with no legacy user grant, gcloud exits non-zero with NOT_FOUND, which is
+#   # the expected absent state — the `grep -q NOT_FOUND` filter ignores only
+#   # that specific case and re-raises any other failure (permission denied,
+#   # wrong project, transient API error) instead of papering over it.
+#   LEGACY_MEMBER='user:philip.paetz@mentolabs.xyz'
+#   if ! err=$(gcloud iam service-accounts remove-iam-policy-binding "$SA" \
+#         --project="$PROJECT" \
+#         --member="$LEGACY_MEMBER" \
+#         --role="roles/iam.serviceAccountTokenCreator" 2>&1); then
+#     if ! echo "$err" | grep -q -E 'NOT_FOUND|Policy binding .* does not exist'; then
+#       echo "$err" >&2
+#       exit 1
+#     fi
+#   fi
+#
+#   # Step 4: verify the legacy user grant is gone. Empty output = success;
+#   # non-empty output means the cleanup did not take effect and the SA still
+#   # carries the legacy impersonator — investigate before continuing.
+#   gcloud iam service-accounts get-iam-policy "$SA" --project="$PROJECT" \
+#     --flatten='bindings[].members' \
+#     --filter="bindings.role:roles/iam.serviceAccountTokenCreator AND bindings.members:${LEGACY_MEMBER}" \
+#     --format='value(bindings.members)'
 #
 #   # Adopt only org-role bindings that already exist in the live policy. New
 #   # roles added to `local.agent_readonly_org_roles` will be created normally
@@ -232,17 +279,36 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #   #
 #   # `remove-iam-policy-binding` exits non-zero if the binding is absent, which
 #   # is the expected state on a fresh org / DR bootstrap or after this cleanup
-#   # has already been run — `|| true` makes the step idempotent and safe to
-#   # re-run. Verify with `gcloud organizations get-iam-policy "$ORG" \
-#   #   --flatten='bindings[].members' \
-#   #   --filter="bindings.role:roles/viewer AND bindings.members:serviceAccount:${SA}"`
-#   # afterward; an empty result confirms removal.
-#   gcloud organizations remove-iam-policy-binding "$ORG" \
-#     --member="serviceAccount:${SA}" \
-#     --role="roles/viewer" || true
+#   # has already been run. We only want to ignore that specific case — other
+#   # failures (permission denied, wrong org ID, transient API errors) MUST
+#   # surface so cleanup never silently no-ops while the legacy grant lingers.
+#   if ! err=$(gcloud organizations remove-iam-policy-binding "$ORG" \
+#         --member="serviceAccount:${SA}" \
+#         --role="roles/viewer" 2>&1); then
+#     if ! echo "$err" | grep -q -E 'NOT_FOUND|Policy binding .* does not exist'; then
+#       echo "$err" >&2
+#       exit 1
+#     fi
+#   fi
+#
+#   # Mandatory post-check: fail closed if the legacy org-level basic
+#   # `roles/viewer` binding still lists this SA. Empty output = success; any
+#   # output means cleanup did not take effect (and other principals' viewer
+#   # grants, if any, are untouched by member-scoped removal above).
+#   remaining=$(gcloud organizations get-iam-policy "$ORG" \
+#     --flatten='bindings[].members' \
+#     --filter="bindings.role:roles/viewer AND bindings.members:serviceAccount:${SA}" \
+#     --format='value(bindings.members)')
+#   if [ -n "$remaining" ]; then
+#     echo "legacy roles/viewer binding for serviceAccount:${SA} still present on org ${ORG}: ${remaining}" >&2
+#     exit 1
+#   fi
 #
 # For a fresh org / DR bootstrap with no live resources, skip the imports
 # above entirely — `terraform apply` will create everything from scratch. The
-# legacy `roles/viewer` cleanup is also safe to skip on a fresh bootstrap
-# (the `|| true` makes it a no-op when the binding is absent); it exists
-# solely to clean up the previously hand-created production identity.
+# legacy `user:` Token Creator cleanup and the org-level `roles/viewer`
+# cleanup are also safe to run on a fresh bootstrap: each tolerates only the
+# specific "binding absent" / NOT_FOUND case and re-raises any other gcloud
+# failure, so they no-op cleanly when there is nothing to remove and surface
+# real errors otherwise. Both exist solely to clean up the previously
+# hand-created production identity.
