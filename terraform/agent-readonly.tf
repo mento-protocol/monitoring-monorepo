@@ -216,5 +216,33 @@ resource "google_organization_iam_member" "agent_readonly_org_roles" {
 #       "${ORG} $role serviceAccount:${SA}" || true
 #   done
 #
+#   # Strip the legacy org-level basic `roles/viewer` grant that the SA carried
+#   # under its original hand-created form. Earlier revisions of this file bound
+#   # `roles/viewer` at the org; the current curated set in
+#   # `local.agent_readonly_org_roles` deliberately omits it (Checkov CKV_GCP_115
+#   # forbids basic roles at the org level and the predefined roles above cover
+#   # the read surface investigators need). Because the adoption loop above only
+#   # imports curated roles, a pre-existing `roles/viewer` binding would remain
+#   # in the live IAM policy with no Terraform-managed counterpart — Terraform
+#   # would never plan its removal and the SA would silently retain org-wide
+#   # basic read access. Remove it explicitly here, member-scoped so no other
+#   # principal's `roles/viewer` binding is touched. Authoritative resources
+#   # (`google_organization_iam_binding`) are intentionally avoided for the
+#   # same reason: they would overwrite the full member list for the role.
+#   #
+#   # `remove-iam-policy-binding` exits non-zero if the binding is absent, which
+#   # is the expected state on a fresh org / DR bootstrap or after this cleanup
+#   # has already been run — `|| true` makes the step idempotent and safe to
+#   # re-run. Verify with `gcloud organizations get-iam-policy "$ORG" \
+#   #   --flatten='bindings[].members' \
+#   #   --filter="bindings.role:roles/viewer AND bindings.members:serviceAccount:${SA}"`
+#   # afterward; an empty result confirms removal.
+#   gcloud organizations remove-iam-policy-binding "$ORG" \
+#     --member="serviceAccount:${SA}" \
+#     --role="roles/viewer" || true
+#
 # For a fresh org / DR bootstrap with no live resources, skip the imports
-# above entirely — `terraform apply` will create everything from scratch.
+# above entirely — `terraform apply` will create everything from scratch. The
+# legacy `roles/viewer` cleanup is also safe to skip on a fresh bootstrap
+# (the `|| true` makes it a no-op when the binding is absent); it exists
+# solely to clean up the previously hand-created production identity.
