@@ -256,6 +256,97 @@ describe("Liquity CDP helpers", () => {
     assert.equal(instances.get(collateralId)?.spHeadroom, -40n);
   });
 
+  it("decrements activeTroveCount when reclassify demotes all active troves to zombie", async () => {
+    // Regression: the previous implementation passed `nextInstance` (not
+    // `transitioned.instance`) into `applySystemDebtDelta`, so the
+    // activeTroveCount decrement from `transitionTroveStatus` was silently
+    // dropped. Two active troves both dropping below minDebt have no
+    // counterbalancing zombie→active flip, so the count must hit 0.
+    const collateralId = "42220-0xdef";
+    const baseTrove = {
+      id: "a",
+      chainId: 42220,
+      collateralId,
+      troveId: "0x1",
+      owner: "0x0000000000000000000000000000000000000000",
+      previousOwner: "0x0000000000000000000000000000000000000000",
+      status: TROVE_STATUS.ACTIVE,
+      debt: 50n,
+      coll: 0n,
+      stake: 0n,
+      snapshotOfTotalCollRedist: 0n,
+      snapshotOfTotalDebtRedist: 0n,
+      interestRate: 0n,
+      interestBatchId: undefined,
+      batchDebtShares: 0n,
+      icrBps: 0,
+      liquidatedColl: undefined,
+      liquidatedDebt: undefined,
+      collSurplus: undefined,
+      priceAtLiquidation: undefined,
+      redemptionCount: 0,
+      redeemedColl: 0n,
+      redeemedDebt: 0n,
+      redemptionFeePaidCum: 0n,
+      openedAt: 0n,
+      openedAtBlock: 0n,
+      openedTxHash: "",
+      closedAt: undefined,
+      closedAtBlock: undefined,
+      closedTxHash: undefined,
+      lastUserActionAt: 0n,
+      lastUpdatedAt: 0n,
+      lastUpdatedBlock: 0n,
+    };
+    const troves = new Map([
+      [baseTrove.id, baseTrove],
+      [
+        "b",
+        {
+          ...baseTrove,
+          id: "b",
+          troveId: "0x2",
+          status: TROVE_STATUS.ACTIVE,
+          debt: 70n,
+        },
+      ],
+    ]);
+    const instances = new Map([
+      [
+        collateralId,
+        {
+          ...makeLiquityInstance(collateralId, 42220, 0n),
+          activeTroveCount: 2,
+          systemDebt: 120n,
+          spDeposits: 0n,
+          spHeadroom: -1n,
+        },
+      ],
+    ]);
+    const context = {
+      LiquityInstance: {
+        get: async (id: string) => instances.get(id),
+        set: (entity: ReturnType<typeof makeLiquityInstance>) =>
+          instances.set(entity.id, entity),
+      },
+      Trove: {
+        set: (entity: typeof baseTrove) => troves.set(entity.id, entity),
+        getWhere: async (args: { collateralId: { _eq: string } }) =>
+          [...troves.values()].filter(
+            (trove) => trove.collateralId === args.collateralId._eq,
+          ),
+      },
+    };
+
+    await reclassifyTrovesForLoadedParams(context, collateralId, 100n, 40n);
+
+    assert.equal(troves.get("a")?.status, TROVE_STATUS.ZOMBIE);
+    assert.equal(troves.get("b")?.status, TROVE_STATUS.ZOMBIE);
+    assert.equal(instances.get(collateralId)?.activeTroveCount, 0);
+    // active↔zombie flips are open↔open, so systemDebt must NOT move.
+    assert.equal(instances.get(collateralId)?.systemDebt, 120n);
+  });
+
   describe("isLiquidityStrategyAddress", () => {
     it("matches the strategy address from config.markets, case-insensitive", () => {
       const market = LIQUITY_MARKETS[0]!;

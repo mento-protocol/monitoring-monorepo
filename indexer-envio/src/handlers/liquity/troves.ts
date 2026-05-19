@@ -337,13 +337,19 @@ export async function reclassifyTrovesForLoadedParams(
         nextInstance,
       );
       if (transitioned.trove !== trove) context.Trove.set(transitioned.trove);
-      // Reclassification only flips active↔zombie (both open) on unchanged
-      // debt, so this call is a no-op in practice. Kept here so every
-      // status mutation funnels through the same helper.
-      nextInstance = applySystemDebtDelta(nextInstance, prevTroveState, {
-        status: transitioned.trove.status,
-        debt: transitioned.trove.debt,
-      });
+      // Forward both effects of `transitionTroveStatus`: the activeTroveCount
+      // mutation (load-bearing on active↔zombie flips — both branches are
+      // open, so the debt delta below is a no-op, but the count change must
+      // persist) and the systemDebt delta funneled through the same helper
+      // every status mutation uses.
+      nextInstance = applySystemDebtDelta(
+        transitioned.instance,
+        prevTroveState,
+        {
+          status: transitioned.trove.status,
+          debt: transitioned.trove.debt,
+        },
+      );
     }
   }
   if (nextInstance !== instance) context.LiquityInstance.set(nextInstance);
