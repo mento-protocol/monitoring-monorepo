@@ -20,9 +20,9 @@ const authConfigured = !!(
 //    attaches `.auth` (session) to the request before calling the callback.
 export default auth((req) => {
   // 1. Nonce + CSP
-  const nonce = Buffer.from(
-    crypto.getRandomValues(new Uint8Array(16)),
-  ).toString("base64");
+  // Use Web Crypto + btoa (not Buffer) — Edge runtime lacks the Node.js Buffer global.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = btoa(String.fromCharCode(...bytes));
   const csp = buildCspWithNonce(nonce);
 
   // 2. Auth checks (protected paths only)
