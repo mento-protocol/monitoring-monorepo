@@ -45,12 +45,15 @@ export function CdpsPageClient() {
     return m;
   }, [liquityInstances]);
 
+  // Chain-wide cap → if hit, EVERY collateral's aggregate is suspect
+  // because the `order_by lastUpdatedAt desc` slice can push an entire
+  // collateral's troves off-page; the per-collateral fallback below also
+  // carries this flag so a missing-entry collateral isn't shown as Healthy.
+  const queryTruncated = (troves?.length ?? 0) >= CDP_TROVES_LIST_LIMIT;
+
   const aggregatesByCollateral = useMemo(() => {
     // Single pass: accumulate directly per collateralId, skipping non-open
     // statuses inline. Avoids the intermediate `grouped` map of trove arrays.
-    // Chain-wide cap → if hit, EVERY collateral's aggregate is suspect
-    // because we don't know which collateral lost rows past the cap.
-    const truncated = (troves?.length ?? 0) >= CDP_TROVES_LIST_LIMIT;
     const out = new Map<string, CdpAggregates>();
     for (const trove of troves ?? []) {
       if (!isOpenTroveStatus(trove.status)) continue;
@@ -58,7 +61,7 @@ export function CdpsPageClient() {
         openTroveCount: 0,
         totalDebt: BigInt(0),
         totalColl: BigInt(0),
-        truncated,
+        truncated: queryTruncated,
       };
       out.set(trove.collateralId, {
         ...agg,
@@ -68,7 +71,7 @@ export function CdpsPageClient() {
       });
     }
     return out;
-  }, [troves]);
+  }, [troves, queryTruncated]);
 
   if (network.chainId !== 42220) {
     return (
@@ -103,7 +106,10 @@ export function CdpsPageClient() {
             collateral={collateral}
             instance={instances.get(collateral.id)}
             aggregates={
-              aggregatesByCollateral.get(collateral.id) ?? EMPTY_AGGREGATES
+              aggregatesByCollateral.get(collateral.id) ?? {
+                ...EMPTY_AGGREGATES,
+                truncated: queryTruncated,
+              }
             }
           />
         ))}

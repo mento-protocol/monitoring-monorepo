@@ -64,13 +64,16 @@ async function updatePoolGauge({
   const activePoolColl = delta.activePoolColl ?? next.activePoolColl;
   const defaultPoolDebt = delta.defaultPoolDebt ?? next.defaultPoolDebt;
   const defaultPoolColl = delta.defaultPoolColl ?? next.defaultPoolColl;
-  // systemColl can still be summed — `ActivePoolCollBalanceUpdated` fires.
-  // systemDebt is owned by the trove handlers via `applySystemDebtDelta` —
-  // do NOT set it here. The fork never emits `ActivePoolBoldDebtUpdated`,
-  // so `activePoolDebt` stays 0 forever, and `DefaultPoolBoldDebtUpdated`
-  // only fires on the first liquidation-triggered debt redistribution.
-  // Setting `systemDebt = activePoolDebt + defaultPoolDebt` here would
-  // clobber the delta-tracked value the moment DefaultPool fires post-resync.
+  // Mento's deployed fork never emits `ActivePoolBoldDebtUpdated`, so the
+  // active-pool side of systemDebt is owned by the trove handlers (via
+  // `applySystemDebtDelta`). The DefaultPool side is different: when a
+  // liquidation redistributes debt, the closed trove's full debt is
+  // subtracted by `applySystemDebtDelta`, but the redistributed portion is
+  // still outstanding in the DefaultPool until other troves apply pending
+  // rewards. `DefaultPoolBoldDebtUpdated` does fire on the fork, so apply
+  // its delta back into systemDebt to keep the accounting whole:
+  //   systemDebt = Σ open-trove recorded debts (delta-tracked) + defaultPoolDebt
+  const defaultPoolDebtDelta = defaultPoolDebt - next.defaultPoolDebt;
   context.LiquityInstance.set({
     ...next,
     activePoolDebt,
@@ -78,6 +81,7 @@ async function updatePoolGauge({
     defaultPoolDebt,
     defaultPoolColl,
     systemColl: activePoolColl + defaultPoolColl,
+    systemDebt: next.systemDebt + defaultPoolDebtDelta,
     tcrBps: -1,
   });
 }

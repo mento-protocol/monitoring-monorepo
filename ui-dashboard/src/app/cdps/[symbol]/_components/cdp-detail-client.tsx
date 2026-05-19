@@ -11,7 +11,7 @@ import { CDP_MARKET_DETAIL, CDP_MARKETS } from "@/lib/queries";
 import { buildPoolDetailHref } from "@/lib/routing";
 import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
 import {
-  CDP_TROVES_DETAIL_LIMIT,
+  CDP_TROVES_LIST_LIMIT,
   type CdpCollateral,
   type CdpDepositor,
   type CdpInstance,
@@ -112,6 +112,18 @@ function CdpDetailState({
   const depositors = detail.data?.StabilityPoolDepositor ?? [];
   const cdpPools = detail.data?.CdpPool ?? [];
 
+  // For aggregates, use the chain-wide markets-list query (up to 500 troves)
+  // filtered to this collateral, NOT the 50-row detail query — that one
+  // exists only for the recent-activity table and would understate System
+  // Debt / Open Troves for any market with >50 open troves.
+  const allChainTroves = markets.data?.Trove ?? [];
+  const collateralTroves = allChainTroves.filter(
+    (t) => t.collateralId === collateral.id,
+  );
+  const aggregates = aggregateTroves(collateralTroves, {
+    truncated: allChainTroves.length >= CDP_TROVES_LIST_LIMIT,
+  });
+
   return (
     <CdpDetailContent
       collateral={collateral}
@@ -119,6 +131,7 @@ function CdpDetailState({
       troves={troves}
       depositors={depositors}
       cdpPools={cdpPools}
+      aggregates={aggregates}
     />
   );
 }
@@ -129,16 +142,15 @@ function CdpDetailContent({
   troves,
   depositors,
   cdpPools,
+  aggregates,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
   troves: CdpTrove[];
   depositors: CdpDepositor[];
   cdpPools: CdpPoolRow[];
+  aggregates: ReturnType<typeof aggregateTroves>;
 }) {
-  const aggregates = aggregateTroves(troves, {
-    truncated: troves.length >= CDP_TROVES_DETAIL_LIMIT,
-  });
   const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
     <div className="space-y-8">

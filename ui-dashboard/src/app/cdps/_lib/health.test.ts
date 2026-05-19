@@ -194,11 +194,11 @@ describe("deriveCdpHealth", () => {
     expect(h.reasons).toContain("No outstanding debt");
   });
 
-  it("returns unknown when aggregates are truncated (totals are floors)", () => {
-    // Workaround for capped trove queries: even if the partial-sum SP-coverage
-    // would compute as "warning", we can't trust it. Critical-on-empty-SP is
-    // a real signal; misclassifying a borderline-healthy market as critical
-    // because we under-counted debt is worse than refusing to render.
+  it("returns unknown when aggregates are truncated AND SP has some balance", () => {
+    // For non-zero SP, we can't reason about coverage ratios under truncation;
+    // misclassifying a borderline-healthy market as critical is worse than
+    // refusing to render. (When SP is empty, the verdict is critical regardless
+    // — see the separate test below.)
     const h = deriveCdpHealth(
       collateral(),
       instance({ spDeposits: "200000000000000000000" }),
@@ -211,5 +211,20 @@ describe("deriveCdpHealth", () => {
     );
     expect(h.state).toBe("unknown");
     expect(h.reasons[0]).toMatch(/truncated/i);
+  });
+
+  it("returns critical even when truncated if SP is empty and any debt is visible", () => {
+    // Codex finding (PR #470): unseen debt past the cap can only keep SP
+    // coverage at 0%; refusing to render obscures a real alert.
+    const h = deriveCdpHealth(collateral(), instance({ spDeposits: "0" }), {
+      openTroveCount: 500,
+      totalDebt: BigInt("1000000000000000000000"),
+      totalColl: BigInt(0),
+      truncated: true,
+    });
+    expect(h.state).toBe("critical");
+    expect(h.reasons[0]).toMatch(/Stability Pool is empty/i);
+    // Truncation is still noted so operators see why other ratios are missing.
+    expect(h.reasons.some((r) => /truncated/i.test(r))).toBe(true);
   });
 });

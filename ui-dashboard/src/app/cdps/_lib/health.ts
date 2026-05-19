@@ -71,6 +71,12 @@ export function aggregateTroves(
  * `systemParamsLoaded` is informational only — when it's false we just tag
  * the reasons list. SP-empty + outstanding debt is critical regardless of
  * whether MCR/CCR are loaded.
+ *
+ * Truncation: when `aggregates.truncated`, the trove query hit its row cap
+ * so `totalDebt` is a FLOOR. SP-empty + any visible debt is still
+ * definitively critical (unseen debt only keeps coverage at 0%). For
+ * non-zero SP we can't reason about ratios under truncation, so we fall
+ * through to `unknown`.
  */
 export function deriveCdpHealth(
   collateral: CdpCollateral,
@@ -91,9 +97,25 @@ export function deriveCdpHealth(
       reasons: ["No indexed state"],
     };
   }
+
+  const debt = aggregates.totalDebt;
+  const spDeposits = BigInt(instance.spDeposits);
+
+  // SP-empty + any visible debt: always critical. Runs before the
+  // truncation short-circuit because unseen debt can only make coverage
+  // worse, never better, so the verdict can't flip away from critical.
+  if (debt > BigInt(0) && spDeposits === BigInt(0)) {
+    const reasons = ["Stability Pool is empty — no liquidation buffer"];
+    if (aggregates.truncated) {
+      reasons.push("Trove list truncated at row cap — debt is a floor");
+    }
+    if (!collateral.systemParamsLoaded) {
+      reasons.push("System params not yet loaded");
+    }
+    return { state: "critical", label: "Critical", reasons };
+  }
+
   if (aggregates.truncated) {
-    // We don't know real total debt → can't reason about SP coverage
-    // without misclassifying borderline-healthy markets as critical.
     return {
       state: "unknown",
       label: "Unknown",
@@ -108,20 +130,13 @@ export function deriveCdpHealth(
     reasons.push(reason);
   };
 
-  const debt = aggregates.totalDebt;
-  const spDeposits = BigInt(instance.spDeposits);
-
   if (debt > BigInt(0)) {
-    if (spDeposits === BigInt(0)) {
-      escalate("critical", "Stability Pool is empty — no liquidation buffer");
-    } else {
-      const pctBps = Number((spDeposits * BigInt(10_000)) / debt);
-      const coveragePct = `${(pctBps / 100).toFixed(1)}% of debt`;
-      if (pctBps < 500) {
-        escalate("critical", `Stability Pool covers ${coveragePct}`);
-      } else if (pctBps < 5_000) {
-        escalate("warning", `Stability Pool covers ${coveragePct}`);
-      }
+    const pctBps = Number((spDeposits * BigInt(10_000)) / debt);
+    const coveragePct = `${(pctBps / 100).toFixed(1)}% of debt`;
+    if (pctBps < 500) {
+      escalate("critical", `Stability Pool covers ${coveragePct}`);
+    } else if (pctBps < 5_000) {
+      escalate("warning", `Stability Pool covers ${coveragePct}`);
     }
   } else if (spDeposits === BigInt(0)) {
     // No debt and no SP — informational, not unhealthy.
