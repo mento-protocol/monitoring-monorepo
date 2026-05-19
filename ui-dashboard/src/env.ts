@@ -29,14 +29,30 @@ const clientSchema = z.object({
     .string()
     .url()
     .catch("https://forno.celo-sepolia.celo-testnet.org"),
-  NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET: z.string().url().optional(),
-  NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET: z.string().url().optional(),
-  NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL: z.string().url().optional(),
-  NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL: z.string().url().optional(),
+  NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET: z
+    .string()
+    .url()
+    .optional()
+    .catch(undefined),
+  NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET: z
+    .string()
+    .url()
+    .optional()
+    .catch(undefined),
+  NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL: z
+    .string()
+    .url()
+    .optional()
+    .catch(undefined),
+  NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL: z
+    .string()
+    .url()
+    .optional()
+    .catch(undefined),
   NEXT_PUBLIC_SHOW_LOCAL_NETWORKS: envBool,
   NEXT_PUBLIC_SHOW_TESTNET_NETWORKS: envBool,
   NEXT_PUBLIC_BROWSER_TEST_FIXTURES: envBool,
-  NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+  NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional().catch(undefined),
   // `next.config.ts` inlines `NEXT_PUBLIC_VERCEL_ENV=""` on localhost (mirror of
   // `VERCEL_ENV`, which is unset off-Vercel). `.catch(undefined)` so that
   // empty-string case — load-bearing for `shouldEnableSentry` — resolves to

@@ -43,4 +43,6 @@ export const REBALANCE_PROBE_CONCURRENCY = Math.floor(
 // Per-RPC-call timeout. Forno + monad public RPCs respond in <1s on the
 // happy path; 8s gives transient slow paths room without blocking the
 // next cycle. Matches the existing 8s SWR timeout pattern in the dashboard.
-export const REBALANCE_PROBE_TIMEOUT_MS = env.REBALANCE_PROBE_TIMEOUT_MS;
+export const REBALANCE_PROBE_TIMEOUT_MS = Math.floor(
+  env.REBALANCE_PROBE_TIMEOUT_MS,
+);

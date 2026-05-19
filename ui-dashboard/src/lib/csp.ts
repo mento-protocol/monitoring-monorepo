@@ -23,11 +23,7 @@ function browserTestConnectSrc(): string[] {
   if (!clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES) return [];
   const hasuraUrl = clientEnv.NEXT_PUBLIC_HASURA_URL;
   if (!hasuraUrl) return [];
-  try {
-    return [new URL(hasuraUrl).origin];
-  } catch {
-    return [];
-  }
+  return [new URL(hasuraUrl).origin];
 }
 
 // Next.js dev HMR needs eval during fixture-mode browser tests.
