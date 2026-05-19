@@ -69,9 +69,16 @@ wait_for_deployment_registration() {
   local target="$1"
   local elapsed=0
   local resolved=""
+  local resolve_status=0
 
   while (( elapsed <= REGISTRATION_TIMEOUT_SECONDS )); do
+    set +e
     resolved=$(resolve_deployment_commit "$target")
+    resolve_status=$?
+    set -e
+    if [[ "$resolve_status" -ne 0 ]]; then
+      return "$resolve_status"
+    fi
     if [[ -n "$resolved" ]]; then
       echo "$resolved"
       return 0
@@ -209,8 +216,16 @@ if [[ -z "$COMMIT" ]]; then
 else
   TARGET_COMMIT="$COMMIT"
   if [[ "$WATCH" == "true" ]]; then
-    if ! COMMIT=$(wait_for_deployment_registration "$TARGET_COMMIT"); then
-      echo "❌ Deployment $TARGET_COMMIT did not register within $((REGISTRATION_TIMEOUT_SECONDS / 60)) minutes" >&2
+    set +e
+    COMMIT=$(wait_for_deployment_registration "$TARGET_COMMIT")
+    wait_status=$?
+    set -e
+    if [[ "$wait_status" -ne 0 ]]; then
+      if [[ "$wait_status" -eq 1 ]]; then
+        echo "❌ Deployment $TARGET_COMMIT did not register within $((REGISTRATION_TIMEOUT_SECONDS / 60)) minutes" >&2
+      else
+        echo "❌ Failed to resolve deployment $TARGET_COMMIT for $ENVIO_ORG/$ENVIO_INDEXER" >&2
+      fi
       exit 1
     fi
   else
