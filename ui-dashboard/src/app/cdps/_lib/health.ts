@@ -39,7 +39,7 @@ export function isOpenTroveStatus(
   return OPEN_STATUS_SET.has(status);
 }
 
-export const EMPTY_AGGREGATES: CdpAggregates = {
+const EMPTY_AGGREGATES: CdpAggregates = {
   openTroveCount: 0,
   totalDebt: BigInt(0),
   totalColl: BigInt(0),
