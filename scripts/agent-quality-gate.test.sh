@@ -6,8 +6,18 @@ cd "$repo_root"
 
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
+codex_hooks_backup="$(mktemp)"
+claude_settings_backup="$(mktemp)"
 untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
-trap 'rm -f "$paths_file" "$output_file" "$output_file.pnpm-args" "$untracked_skill_artifact"' EXIT
+cp .codex/hooks.json "$codex_hooks_backup"
+cp .claude/settings.json "$claude_settings_backup"
+
+restore_hook_configs() {
+  cp "$codex_hooks_backup" .codex/hooks.json
+  cp "$claude_settings_backup" .claude/settings.json
+}
+
+trap 'restore_hook_configs; rm -f "$paths_file" "$output_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -72,6 +82,16 @@ assert_not_contains() {
   if grep -Fq -- "$unexpected" "$output_file"; then
     fail "expected output not to contain: $unexpected"
   fi
+}
+
+run_context_check_expect_failure() {
+  set +e
+  node scripts/check-agent-context.mjs > "$output_file" 2>&1
+  local exit_code=$?
+  set -e
+
+  [[ "$exit_code" -ne 0 ]] ||
+    fail "expected agent context check to fail, but it exited 0"
 }
 
 line_number() {
@@ -1086,9 +1106,31 @@ run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
+node - <<'NODE'
+const fs = require("node:fs");
+const hooks = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
+hooks.hooks.SessionEnd[0].hooks[0].command =
+  "bash -lc 'echo git rev-parse --show-toplevel && echo scripts/agent-session-end-hook.sh'";
+fs.writeFileSync(".codex/hooks.json", `${JSON.stringify(hooks, null, 2)}\n`);
+NODE
+run_context_check_expect_failure
+assert_contains ".codex/hooks.json: expected SessionEnd command to execute scripts/agent-session-end-hook.sh via resolved repo root"
+restore_hook_configs
+
 run_gate ".claude/settings.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
+
+node - <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+settings.hooks.SessionEnd[0].hooks[0].command =
+  "echo ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh";
+fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
+NODE
+run_context_check_expect_failure
+assert_contains '.claude/settings.json: expected SessionEnd command to execute ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
+restore_hook_configs
 
 run_gate "docs/deleted.md"
 assert_contains "- docs"

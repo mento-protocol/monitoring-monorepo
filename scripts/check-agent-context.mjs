@@ -246,21 +246,31 @@ function sessionEndCommands(settings, filePath) {
   );
 }
 
+function isCodexSessionEndCommand(command) {
+  return (
+    /^bash\s+-lc\s+['"]/.test(command) &&
+    command.includes("repo=$(git rev-parse --show-toplevel") &&
+    /&&\s+exec\s+bash\s+["']?\$repo\/scripts\/agent-session-end-hook\.sh["']?/.test(
+      command,
+    )
+  );
+}
+
+function isClaudeSessionEndCommand(command) {
+  return /^bash\s+\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh(?:\s|$)/.test(
+    command,
+  );
+}
+
 const codexHooks = readJsonRequired(".codex/hooks.json");
 if (codexHooks) {
   const commands = sessionEndCommands(codexHooks, ".codex/hooks.json");
   if (commands.some((command) => command.includes("/Users/"))) {
     fail(".codex/hooks.json: Codex hook command must not use /Users paths");
   }
-  if (
-    !commands.some(
-      (command) =>
-        command.includes("git rev-parse --show-toplevel") &&
-        command.includes("scripts/agent-session-end-hook.sh"),
-    )
-  ) {
+  if (!commands.some(isCodexSessionEndCommand)) {
     fail(
-      ".codex/hooks.json: expected SessionEnd command to resolve the repo root and run scripts/agent-session-end-hook.sh",
+      ".codex/hooks.json: expected SessionEnd command to execute scripts/agent-session-end-hook.sh via resolved repo root",
     );
   }
 }
@@ -273,15 +283,9 @@ if (claudeSettings) {
       ".claude/settings.json: Claude hook command must not use /Users paths",
     );
   }
-  if (
-    !commands.some((command) =>
-      command.includes(
-        "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh",
-      ),
-    )
-  ) {
+  if (!commands.some(isClaudeSessionEndCommand)) {
     fail(
-      ".claude/settings.json: expected SessionEnd command to use ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh",
+      ".claude/settings.json: expected SessionEnd command to execute ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash",
     );
   }
 }
