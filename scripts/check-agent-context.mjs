@@ -171,16 +171,24 @@ for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"), {
 }
 
 const metricsWorkflow = readRequired(".github/workflows/metrics-bridge.yml");
-if (metricsWorkflow?.includes('revision-suffix="${GITHUB_SHA::7}-')) {
+if (
+  metricsWorkflow &&
+  !metricsWorkflow.includes(
+    '--revision-suffix="r-${GITHUB_SHA::7}-${GITHUB_RUN_ID}"',
+  )
+) {
   fail(
-    ".github/workflows/metrics-bridge.yml: revision suffix must be prefixed with a lowercase letter",
+    ".github/workflows/metrics-bridge.yml: expected Cloud Run revision suffix to use r-${GITHUB_SHA::7}-${GITHUB_RUN_ID}",
   );
 }
 
 const bridgeDeploy = readRequired("scripts/deploy-bridge.sh");
-if (bridgeDeploy?.includes('REVISION_SUFFIX="${TAG}-')) {
+if (
+  bridgeDeploy &&
+  !bridgeDeploy.includes('REVISION_SUFFIX="r-${TAG}-$(date +%s)"')
+) {
   fail(
-    "scripts/deploy-bridge.sh: revision suffix must be prefixed with a lowercase letter",
+    "scripts/deploy-bridge.sh: expected Cloud Run revision suffix to use r-${TAG}-$(date +%s)",
   );
 }
 
