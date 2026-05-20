@@ -8,7 +8,7 @@
     "./deployment-namespaces.json": "./deployment-namespaces.json",
     "./fx-calendar.json": "./fx-calendar.json",
     "./chain-metadata.json": "./chain-metadata.json",
-    "./aggregator-clusters.json": "./aggregator-clusters.json",
+    "./aggregators.json": "./aggregators.json",
     "./chains": {
       "types": "./dist/chains.d.ts",
       "default": "./dist/chains.js"

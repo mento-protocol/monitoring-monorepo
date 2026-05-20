@@ -1,7 +1,12 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import clustersJson from "../aggregator-clusters.json" with { type: "json" };
-import { clusterNames, getClusterMetadata } from "../src/aggregators";
+import aggregatorsJson from "../aggregators.json" with { type: "json" };
+import {
+  aggregatorsByChain,
+  clusterNames,
+  getAggregatorAddress,
+  getAggregatorName,
+  getClusterMetadata,
+} from "../src/aggregators";
 
 type RawClusterMetadata = {
   chainId: number;
@@ -10,21 +15,12 @@ type RawClusterMetadata = {
   $note?: string;
 };
 
-type IndexerAggregatorsConfig = {
-  $clusters?: Record<string, RawClusterMetadata | string | undefined>;
-  [chainId: string]:
-    | Record<string, { name?: unknown } | string | undefined>
-    | Record<string, RawClusterMetadata | string | undefined>
-    | string
-    | undefined;
+type RawAggregatorsJson = {
+  $clusters?: Record<string, RawClusterMetadata>;
+  [chainId: string]: unknown;
 };
 
-const INDEXER_CONFIG = JSON.parse(
-  readFileSync(
-    new URL("../../indexer-envio/config/aggregators.json", import.meta.url),
-    "utf8",
-  ),
-) as IndexerAggregatorsConfig;
+const ROOT = aggregatorsJson as RawAggregatorsJson;
 
 describe("aggregator cluster metadata", () => {
   it("exposes dashboard-friendly metadata for known clusters", () => {
@@ -34,7 +30,7 @@ describe("aggregator cluster metadata", () => {
       deployer: "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
       explorerUrl:
         "https://celoscan.io/address/0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
-      note: expect.stringContaining("deployer provenance"),
+      note: expect.stringContaining("CREATE3 factory"),
     });
   });
 
@@ -43,42 +39,89 @@ describe("aggregator cluster metadata", () => {
     expect(getClusterMetadata("unknown")).toBeUndefined();
   });
 
-  it("stays in sync with the indexer aggregator cluster config", () => {
-    const sharedClusters = clustersJson as Record<string, RawClusterMetadata>;
-    const indexerClusters = Object.fromEntries(
-      Object.entries(INDEXER_CONFIG.$clusters ?? {}).filter(
-        ([name, value]) => !name.startsWith("$") && typeof value === "object",
-      ),
-    ) as Record<string, RawClusterMetadata>;
-
-    expect(clusterNames()).toEqual(Object.keys(indexerClusters).sort());
-    for (const [name, sharedMeta] of Object.entries(sharedClusters)) {
-      expect(indexerClusters[name]).toMatchObject({
-        chainId: sharedMeta.chainId,
-        deployer: sharedMeta.deployer,
-        explorerUrl: sharedMeta.explorerUrl,
-      });
-    }
+  it("clusterNames matches the $clusters block (sans nested $-prefixed keys)", () => {
+    const jsonClusterNames = Object.keys(ROOT.$clusters ?? {})
+      .filter((k) => !k.startsWith("$"))
+      .sort();
+    expect(clusterNames()).toEqual(jsonClusterNames);
   });
 
-  it("covers every per-chain cluster reference used by the indexer", () => {
-    const sharedClusters = clustersJson as Record<string, RawClusterMetadata>;
-    for (const { chainId, address, name } of indexerClusterReferences()) {
+  it("every per-chain cluster reference resolves to a defined cluster", () => {
+    const known = new Set(clusterNames());
+    for (const { chainId, address, name } of clusterReferences()) {
       expect(
-        sharedClusters[name],
-        `${address} on chain ${chainId} references missing cluster metadata ${name}`,
-      ).toBeDefined();
+        known.has(name),
+        `${address} on chain ${chainId} references undefined cluster ${name}`,
+      ).toBe(true);
     }
   });
 });
 
-function indexerClusterReferences(): Array<{
+describe("aggregator address lookups", () => {
+  it("getAggregatorName matches names from the canonical JSON", () => {
+    expect(
+      getAggregatorName(42220, "0xce16f69375520ab01377ce7b88f5ba8c48f8d666"),
+    ).toBe("squid");
+    expect(
+      getAggregatorName(42220, "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae"),
+    ).toBe("lifi");
+  });
+
+  it("getAggregatorName is case-insensitive and returns null for unknowns", () => {
+    expect(
+      getAggregatorName(42220, "0xCE16F69375520AB01377CE7B88F5BA8C48F8D666"),
+    ).toBe("squid");
+    expect(
+      getAggregatorName(42220, "0x0000000000000000000000000000000000000000"),
+    ).toBeNull();
+  });
+
+  it("getAggregatorAddress round-trips known (chain, name) pairs", () => {
+    const squid = getAggregatorAddress(42220, "squid");
+    expect(squid).toBe("0xce16f69375520ab01377ce7b88f5ba8c48f8d666");
+    expect(squid && getAggregatorName(42220, squid)).toBe("squid");
+  });
+
+  it("getAggregatorAddress returns null for unknown name or chain", () => {
+    expect(getAggregatorAddress(42220, "not-a-real-aggregator")).toBeNull();
+    expect(getAggregatorAddress(99, "squid")).toBeNull();
+  });
+
+  it("aggregatorsByChain returns an empty map for unknown chains", () => {
+    const empty = aggregatorsByChain(99);
+    expect(empty.size).toBe(0);
+  });
+
+  it("getAggregatorName returns null for unknown chains", () => {
+    expect(
+      getAggregatorName(99, "0xce16f69375520ab01377ce7b88f5ba8c48f8d666"),
+    ).toBeNull();
+  });
+
+  it("aggregatorsByChain covers every entry in the JSON", () => {
+    for (const [chainKey, perChain] of Object.entries(ROOT)) {
+      if (chainKey.startsWith("$")) continue;
+      const chainId = Number(chainKey);
+      if (!Number.isFinite(chainId)) continue;
+      const live = aggregatorsByChain(chainId);
+      const jsonAddrs = Object.keys(perChain as Record<string, unknown>).filter(
+        (k) => !k.startsWith("$"),
+      );
+      expect(live.size).toBe(jsonAddrs.length);
+      for (const a of jsonAddrs) {
+        expect(live.get(a.toLowerCase())).toBeTruthy();
+      }
+    }
+  });
+});
+
+function clusterReferences(): Array<{
   chainId: string;
   address: string;
   name: string;
 }> {
   const refs: Array<{ chainId: string; address: string; name: string }> = [];
-  for (const [chainId, value] of Object.entries(INDEXER_CONFIG)) {
+  for (const [chainId, value] of Object.entries(ROOT)) {
     if (chainId.startsWith("$") || typeof value !== "object" || !value) {
       continue;
     }
