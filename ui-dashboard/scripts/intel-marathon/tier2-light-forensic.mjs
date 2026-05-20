@@ -659,7 +659,7 @@ async function main() {
           updatedAt: new Date().toISOString(),
         };
         await pipeline([
-          ["HSET", "labels", address, JSON.stringify(newEntry)],
+          ["HSET", "labels", address.toLowerCase(), JSON.stringify(newEntry)],
           ["HSET", "intel_deep", address.toLowerCase(), deepJson],
         ]);
         existingLabels[address] = newEntry;

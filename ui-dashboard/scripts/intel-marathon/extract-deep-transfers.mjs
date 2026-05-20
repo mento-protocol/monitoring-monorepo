@@ -14,7 +14,9 @@ const ARKHAM_BASE = "https://api.arkm.com";
 const OUT_DIR = ".intel-marathon";
 const HEAVY_SPACING_MS = 1100;
 const RATE_LIMIT_BACKOFF_MS = 2000;
-const TRANSFERS_LIMIT = 1000;
+// Arkham `/transfers?limit=N` caps at 100 per endpoints.md; requesting more
+// gets silently clamped, so 1000 was a no-op upgrade over the standard pass.
+const TRANSFERS_LIMIT = 100;
 
 const required = [
   "UPSTASH_REDIS_REST_URL",
