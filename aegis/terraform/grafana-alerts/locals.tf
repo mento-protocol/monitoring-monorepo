@@ -183,9 +183,8 @@ locals {
     EOT
   }
 
-  # VictorOps (Splunk On-Call) dispatcher — plain text variant. Referenced by
-  # grafana_contact_point.splunk_on_call once Splunk migrates off `alert_config`
-  # as part of the Discord retirement.
+  # VictorOps (Splunk On-Call) dispatcher — plain text variant.
+  # Referenced by `grafana_contact_point.splunk_on_call`.
   alert_config_victorops = {
     title = <<-EOT
     {{ $alertName := .CommonLabels.alertname }}
