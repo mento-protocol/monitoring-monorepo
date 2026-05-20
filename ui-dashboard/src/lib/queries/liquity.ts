@@ -149,3 +149,53 @@ export const CDP_TRANSACTIONS = `
     }
   }
 `;
+
+// Cross-CDP transactions feed for the /cdps overview page. Same shape as
+// CDP_TRANSACTIONS but scoped by chain instead of instance — Liquity is
+// indexed on multiple chains (Celo + Monad), so without the chainId
+// predicate the overview would leak cross-chain rows into the per-chain
+// page. The limit caps each kind, the UI merges client-side and shows
+// the last N. `instanceId` is projected so the UI can resolve which
+// market each row belongs to.
+export const ALL_CDP_TRANSACTIONS = `
+  query AllCdpTransactions($chainId: Int!, $limit: Int!) {
+    LiquidationEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      debtOffsetBySP debtRedistributed boldGasCompensation collGasCompensation
+      collSentToSP collRedistributed collSurplus priceAtLiquidation
+      timestamp blockNumber txHash
+    }
+    RedemptionEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      attemptedBoldAmount actualBoldAmount ETHSent ETHFee
+      price redemptionPrice isRebalance
+      timestamp blockNumber txHash
+    }
+    SpRebalanceEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId
+      amountCollIn amountStableOut
+      timestamp blockNumber txHash
+    }
+    TroveOperationEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id instanceId troveId operation collChange debtChange
+      annualInterestRate debtIncreaseFromUpfrontFee
+      timestamp blockNumber txHash
+    }
+  }
+`;

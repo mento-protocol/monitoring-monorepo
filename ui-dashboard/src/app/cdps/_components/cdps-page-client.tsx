@@ -16,6 +16,7 @@ import {
   isOpenTroveStatus,
   type CdpAggregates,
 } from "../_lib/health";
+import { CdpAllTransactionsTable } from "./cdp-all-transactions-table";
 import { CdpMarketCard } from "./cdp-market-card";
 
 type CdpMarketsResponse = {
@@ -110,6 +111,10 @@ export function CdpsPageClient() {
           />
         ))}
       </div>
+      <CdpAllTransactionsTable
+        collaterals={collaterals}
+        chainId={network.chainId}
+      />
     </div>
   );
 }

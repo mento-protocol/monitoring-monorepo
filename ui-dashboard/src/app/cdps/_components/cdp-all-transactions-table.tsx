@@ -1,15 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
-import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
-import { CDP_TRANSACTIONS } from "@/lib/queries";
-import { formatTokenAmount } from "../../_lib/format";
+import { ALL_CDP_TRANSACTIONS } from "@/lib/queries";
+import Link from "next/link";
+import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
@@ -17,30 +16,50 @@ import {
   badgeKindFor,
   mergeTransactionRows,
   type CdpTransactionsResponse,
-} from "../../_lib/transactions";
-import type { CdpTransactionRow } from "../../_lib/types";
+} from "../_lib/transactions";
+import type { CdpTransactionRow } from "../_lib/types";
 
-const PAGE_SIZE = 20;
+// 100 across all markets is the user-visible cap. We fetch a larger
+// per-kind cap and merge so the latest 100 across kinds is accurate even
+// when one kind dominates (e.g. trove ops far outnumber liquidations).
+const MAX_ROWS = 100;
+const PER_KIND_FETCH_LIMIT = 250;
 
-export function CdpTransactionsTable({
-  instanceId,
-  chainId,
-  symbol,
-}: {
-  instanceId: string;
-  chainId: number;
+interface CollateralSummary {
+  id: string;
   symbol: string;
+  chainId: number;
+}
+
+export function CdpAllTransactionsTable({
+  collaterals,
+  chainId,
+}: {
+  collaterals: CollateralSummary[];
+  chainId: number;
 }) {
   const { data, error, isLoading } = useGQL<CdpTransactionsResponse>(
-    CDP_TRANSACTIONS,
-    { instanceId, limit: ENVIO_MAX_ROWS },
+    ALL_CDP_TRANSACTIONS,
+    { chainId, limit: PER_KIND_FETCH_LIMIT },
   );
-  const { rows, capped } = useMemo(() => mergeTransactionRows(data), [data]);
+  const { rows, capped } = useMemo(
+    () => mergeTransactionRows(data, PER_KIND_FETCH_LIMIT),
+    [data],
+  );
+  const visibleRows = rows.slice(0, MAX_ROWS);
+
+  const symbolByInstance = useMemo(() => {
+    const m = new Map<string, { symbol: string; chainId: number }>();
+    for (const c of collaterals) {
+      m.set(c.id, { symbol: c.symbol, chainId: c.chainId });
+    }
+    return m;
+  }, [collaterals]);
 
   return (
     <section>
       <h2 className="text-lg font-semibold text-white mb-3">
-        CDP Transactions
+        Recent CDP Transactions
       </h2>
       {error ? (
         <ErrorBox
@@ -48,13 +67,12 @@ export function CdpTransactionsTable({
         />
       ) : isLoading ? (
         <Skeleton rows={6} />
-      ) : rows.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <EmptyBox message="No CDP transactions indexed yet." />
       ) : (
-        <TransactionsBody
-          rows={rows}
-          chainId={chainId}
-          symbol={symbol}
+        <OverviewBody
+          rows={visibleRows}
+          symbolByInstance={symbolByInstance}
           capped={capped}
         />
       )}
@@ -62,29 +80,22 @@ export function CdpTransactionsTable({
   );
 }
 
-function TransactionsBody({
+function OverviewBody({
   rows,
-  chainId,
-  symbol,
+  symbolByInstance,
   capped,
 }: {
   rows: CdpTransactionRow[];
-  chainId: number;
-  symbol: string;
+  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
   capped: boolean;
 }) {
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const clampedPage = Math.max(1, Math.min(page, totalPages));
-  const start = (clampedPage - 1) * PAGE_SIZE;
-  const visibleRows = rows.slice(start, start + PAGE_SIZE);
-
   return (
     <>
       <Table>
         <thead>
           <Row>
             <Th>Type</Th>
+            <Th>Market</Th>
             <Th align="right">Debt</Th>
             <Th align="right">Collateral</Th>
             <Th>Tx</Th>
@@ -98,43 +109,43 @@ function TransactionsBody({
           </Row>
         </thead>
         <tbody>
-          {visibleRows.map((row) => (
-            <TransactionRow
+          {rows.map((row) => (
+            <OverviewRow
               key={`${row.kind}-${row.id}`}
               row={row}
-              chainId={chainId}
-              symbol={symbol}
+              market={
+                row.instanceId
+                  ? symbolByInstance.get(row.instanceId)
+                  : undefined
+              }
             />
           ))}
         </tbody>
       </Table>
-      <Pagination
-        page={clampedPage}
-        pageSize={PAGE_SIZE}
-        total={rows.length}
-        onPageChange={setPage}
-      />
+      <p className="px-1 pt-2 text-xs text-slate-500">
+        Showing the most recent {rows.length.toLocaleString()} transactions
+        across all CDP markets.
+      </p>
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Showing the most recent {ENVIO_MAX_ROWS.toLocaleString()} entries per
-          event type — older history may exist beyond this range.
+          Showing the most recent {PER_KIND_FETCH_LIMIT.toLocaleString()}{" "}
+          entries per event type — older history may exist beyond this range.
         </p>
       )}
     </>
   );
 }
 
-function TransactionRow({
+function OverviewRow({
   row,
-  chainId,
-  symbol,
+  market,
 }: {
   row: CdpTransactionRow;
-  chainId: number;
-  symbol: string;
+  market: { symbol: string; chainId: number } | undefined;
 }) {
   const kind = badgeKindFor(row);
   const { debt, coll } = amountsFor(row);
+  const symbol = market?.symbol ?? "—";
   return (
     <Row>
       <Td>
@@ -144,13 +155,25 @@ function TransactionRow({
           {BADGE_LABELS[kind]}
         </span>
       </Td>
+      <Td>
+        {market ? (
+          <Link
+            href={`/cdps/${cdpSymbolSlug(market.symbol)}`}
+            className="text-indigo-400 hover:text-indigo-300"
+          >
+            {market.symbol}
+          </Link>
+        ) : (
+          <span className="text-slate-500">{symbol}</span>
+        )}
+      </Td>
       <Td mono small align="right">
         {formatTokenAmount(debt, symbol)}
       </Td>
       <Td mono small align="right">
         {formatTokenAmount(coll, "USDm")}
       </Td>
-      <TxHashCell txHash={row.txHash} chainId={chainId} />
+      <TxHashCell txHash={row.txHash} chainId={market?.chainId} />
       <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
         {formatBlock(row.blockNumber)}
       </td>
