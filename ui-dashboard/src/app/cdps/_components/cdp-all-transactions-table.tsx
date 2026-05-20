@@ -86,6 +86,42 @@ export function CdpAllTransactionsTable({
   );
 }
 
+/** Filter state for the overview transactions table. Validates
+ *  `marketFilter` against the current collateral list each render — if
+ *  the indexer ever drops/renames a market between revalidations, a
+ *  stale id would silently zero out the result set with no visibly
+ *  selected pill. Falls back to null in that case (no useEffect). */
+function useOverviewFilters(
+  rows: CdpTransactionRow[],
+  collaterals: CollateralSummary[],
+) {
+  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
+  const [marketFilter, setMarketFilter] = useState<string | null>(null);
+  const effectiveMarketFilter = useMemo(() => {
+    if (marketFilter == null) return null;
+    return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
+  }, [collaterals, marketFilter]);
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
+      if (
+        effectiveMarketFilter != null &&
+        row.instanceId !== effectiveMarketFilter
+      )
+        return false;
+      return true;
+    });
+  }, [rows, typeFilter, effectiveMarketFilter]);
+  return {
+    typeFilter,
+    setTypeFilter,
+    marketFilter: effectiveMarketFilter,
+    setMarketFilter,
+    filteredRows,
+    filtersActive: typeFilter != null || effectiveMarketFilter != null,
+  };
+}
+
 function OverviewBody({
   rows,
   collaterals,
@@ -97,19 +133,15 @@ function OverviewBody({
   symbolByInstance: Map<string, { symbol: string; chainId: number }>;
   capped: boolean;
 }) {
-  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
-  const [marketFilter, setMarketFilter] = useState<string | null>(null);
-
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
-      if (marketFilter != null && row.instanceId !== marketFilter) return false;
-      return true;
-    });
-  }, [rows, typeFilter, marketFilter]);
-
+  const {
+    typeFilter,
+    setTypeFilter,
+    marketFilter,
+    setMarketFilter,
+    filteredRows,
+    filtersActive,
+  } = useOverviewFilters(rows, collaterals);
   const visibleRows = filteredRows.slice(0, MAX_ROWS);
-  const filtersActive = typeFilter != null || marketFilter != null;
 
   return (
     <>
