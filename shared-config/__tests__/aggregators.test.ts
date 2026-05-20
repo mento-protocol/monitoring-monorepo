@@ -48,9 +48,9 @@ describe("aggregator cluster metadata", () => {
   });
 
   it("_buildClusterMap is defensive against missing or malformed $clusters", () => {
-    // Cursor Bugbot caught this: an upstream aggregators.json with no
-    // $clusters block (or a non-object value) would crash the module at
-    // import. Now both branches resolve to an empty map.
+    // An upstream aggregators.json with no $clusters block (or a non-object
+    // value) must not crash the module at import — both branches resolve
+    // to an empty map.
     expect(_buildClusterMap(undefined)).toEqual({});
     expect(_buildClusterMap(null)).toEqual({});
     expect(_buildClusterMap("not-an-object")).toEqual({});
