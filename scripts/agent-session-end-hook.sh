@@ -10,7 +10,9 @@
 #   { "session_id": "...", "cwd": "...", "hook_event_name": "SessionEnd", ... }
 set -euo pipefail
 
-REPO="/Users/chapati/code/mento/monitoring-monorepo"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+REPO="$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO" ] || exit 0
 
 input="$(cat 2>/dev/null || true)"
 cwd=""
@@ -19,16 +21,11 @@ if command -v jq >/dev/null 2>&1; then
 fi
 [ -z "$cwd" ] && cwd="$(pwd)"
 
-case "$cwd" in
-  "$REPO" | "$REPO"/*) ;;
-  *) exit 0 ;;
-esac
+cwd_repo="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+[ "$cwd_repo" = "$REPO" ] || exit 0
 
-cd "$cwd" 2>/dev/null || exit 0
-git rev-parse --git-dir >/dev/null 2>&1 || exit 0
-
-recent_commits="$(git log --oneline --since='2 hours ago' 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
-modified="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+recent_commits="$(git -C "$cwd" rev-list --count --since='2 hours ago' HEAD 2>/dev/null || echo 0)"
+modified="$(git -C "$cwd" status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
 
 if [ "$recent_commits" -gt 0 ] || [ "$modified" -gt 0 ]; then
   printf 'Session touched the tree (%s recent commit(s), %s unstaged file(s)). Consider /compound to capture any new learnings into memory or AGENTS.md.\n' \
