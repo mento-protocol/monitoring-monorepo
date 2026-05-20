@@ -1,5 +1,4 @@
 import { strict as assert } from "assert";
-import { readFileSync } from "node:fs";
 import {
   classifyAggregator,
   getClusterMetadata,
@@ -29,9 +28,6 @@ const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
 
 const NOT_LABELED = "0xab5801a7d398351b8be11c439e05c5b3259aec9b";
-const SHARED_CLUSTER_METADATA = JSON.parse(
-  readFileSync("../shared-config/aggregator-clusters.json", "utf8"),
-) as Record<string, { chainId: number; deployer: string; explorerUrl: string }>;
 
 describe("classifyAggregator", () => {
   it("Celo: matches known aggregators by address", () => {
@@ -190,31 +186,9 @@ describe("cluster classification", () => {
     }
   });
 
-  it("shared dashboard metadata covers every indexer cluster", () => {
-    const indexerClusterNames = _allClusterNames().toSorted();
-    assert.deepEqual(
-      Object.keys(SHARED_CLUSTER_METADATA).sort(),
-      indexerClusterNames,
-    );
-    for (const name of indexerClusterNames) {
-      const indexerMeta = getClusterMetadata(name);
-      assert.ok(indexerMeta, `${name} should have indexer cluster metadata`);
-      const sharedMeta = SHARED_CLUSTER_METADATA[name];
-      assert.ok(sharedMeta, `${name} should have shared cluster metadata`);
-      assert.deepEqual(
-        {
-          chainId: indexerMeta.chainId,
-          deployer: indexerMeta.deployer,
-          explorerUrl: indexerMeta.explorerUrl,
-        },
-        {
-          chainId: sharedMeta.chainId,
-          deployer: sharedMeta.deployer,
-          explorerUrl: sharedMeta.explorerUrl,
-        },
-      );
-    }
-  });
+  // (The shared-vs-vendored cluster metadata parity check now lives in
+  // `aggregators-parity.test.ts` — it covers the whole file deepEqual, not
+  // just the cluster slice.)
 
   it("every cluster-* name in per-chain entries has a matching $clusters block entry", () => {
     // Catches typos like `cluster-7dc08ec28f299c07` (off-by-one) in
