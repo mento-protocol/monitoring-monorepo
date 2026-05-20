@@ -32,7 +32,6 @@ export type AggregatorClusterMetadata = {
 // `$comment`. TypeScript can't express that heterogeneous shape cleanly, so
 // we go through `unknown` once and validate the slices we use at runtime.
 const ROOT = aggregatorsJson as unknown as Record<string, unknown>;
-const CLUSTERS_RAW = ROOT.$clusters as Record<string, unknown>;
 
 // Per-chain `Map<lowercaseAddress, aggregatorName>` derived from the JSON.
 // Built once at module load so consumers can do constant-time lookups.
@@ -56,15 +55,25 @@ const ADDRESSES_BY_CHAIN: Map<number, Map<string, string>> = (() => {
   return out;
 })();
 
-const CLUSTERS: Record<string, RawClusterMetadata> = (() => {
+// Exposed for unit tests so we can exercise the "missing/malformed
+// $clusters" branch without mocking the JSON import. The module's own
+// CLUSTERS map is built by calling this with `ROOT.$clusters`.
+export function _buildClusterMap(
+  raw: unknown,
+): Record<string, RawClusterMetadata> {
   const out: Record<string, RawClusterMetadata> = {};
-  for (const [name, value] of Object.entries(CLUSTERS_RAW)) {
+  if (raw == null || typeof raw !== "object") return out;
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
     if (name.startsWith("$")) continue;
     if (value == null || typeof value !== "object") continue;
     out[name] = value as RawClusterMetadata;
   }
   return out;
-})();
+}
+
+const CLUSTERS: Record<string, RawClusterMetadata> = _buildClusterMap(
+  ROOT.$clusters,
+);
 
 /** Aggregator name (e.g. "squid") for a given (chainId, address), or null
  *  when the address isn't a known aggregator on that chain. */

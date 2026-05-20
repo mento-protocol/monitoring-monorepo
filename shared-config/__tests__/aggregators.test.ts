@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import aggregatorsJson from "../aggregators.json" with { type: "json" };
 import {
+  _buildClusterMap,
   aggregatorsByChain,
   clusterNames,
   getAggregatorAddress,
@@ -44,6 +45,35 @@ describe("aggregator cluster metadata", () => {
       .filter((k) => !k.startsWith("$"))
       .sort();
     expect(clusterNames()).toEqual(jsonClusterNames);
+  });
+
+  it("_buildClusterMap is defensive against missing or malformed $clusters", () => {
+    // Cursor Bugbot caught this: an upstream aggregators.json with no
+    // $clusters block (or a non-object value) would crash the module at
+    // import. Now both branches resolve to an empty map.
+    expect(_buildClusterMap(undefined)).toEqual({});
+    expect(_buildClusterMap(null)).toEqual({});
+    expect(_buildClusterMap("not-an-object")).toEqual({});
+    expect(_buildClusterMap(42)).toEqual({});
+    // Valid input still parses; nested $-prefixed keys are skipped.
+    expect(
+      _buildClusterMap({
+        $comment: "ignored",
+        "cluster-abcdef0123456789": {
+          chainId: 42220,
+          deployer: "0xabcdef",
+          explorerUrl: "https://example.test",
+        },
+        bogus: null,
+        scalar: "also-ignored",
+      }),
+    ).toEqual({
+      "cluster-abcdef0123456789": {
+        chainId: 42220,
+        deployer: "0xabcdef",
+        explorerUrl: "https://example.test",
+      },
+    });
   });
 
   it("every per-chain cluster reference resolves to a defined cluster", () => {
