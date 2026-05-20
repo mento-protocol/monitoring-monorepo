@@ -173,9 +173,7 @@ after skipping blanks and comments. Refresh before starting a split.
 
 ## Intel marathon follow-ups (deferred from PR #488)
 
-Three items deferred from the May 2026 marathon PR review. Each is real
-but out of scope for the bug-fix PR cycle; pick up when re-running the
-marathon (post-API-key renewal) or as a focused refactor.
+One item deferred from the May 2026 marathon PR review.
 
 1. **URL-state for paginated UI surfaces** — `IntelTransfers` and
    `EntitySearch` keep `page` (and `EntitySearch`'s `query`) in
@@ -183,18 +181,6 @@ marathon (post-API-key renewal) or as a focused refactor.
    current view. Internal-only tool so low priority, but the existing
    stateful-data UI checklist (`docs/pr-checklists/stateful-data-ui.md`)
    already covers the URL-as-state idiom.
-2. **Marathon scripts: per-command pipeline error checks** — the
-   `extract-*.mjs` scripts consume Upstash REST pipeline responses as
-   `result ?? []` without checking each element's `.error`. Silent
-   failure swallowed by the `?? []` fallback. Acceptable in one-shot
-   mode (we'd notice empty output), but the next run should fail loud
-   on any pipeline command error.
-3. **`tier2-light-forensic.mjs` contract endpoint shape** — calls
-   `/intelligence/contract/${address}?chain=${chain}` instead of the
-   documented `/intelligence/contract/{chain}/{address}`. The
-   surrounding catch absorbs the 404 cleanly, so contract enrichment
-   silently dropped during the May marathon. Fix the call shape before
-   the next run.
 
 ## Discord → Slack alert migration: cutover + cleanup
 

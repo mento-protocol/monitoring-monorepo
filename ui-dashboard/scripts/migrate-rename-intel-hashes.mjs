@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 /**
- * One-shot migration: rename the 5 Arkham Redis hash keys to their new intel_*
- * names using Upstash REST RENAME (atomic). Must run BEFORE deploying the
- * renamed dashboard code.
+ * One-shot migration: move legacy Redis hash keys to their new intel_* names.
  *
- * Idempotent: skips any key that does not exist (already migrated or empty).
+ * Atomic per-pair via Lua EVAL:
+ *   - If dst does not exist: RENAME src → dst (fast path).
+ *   - If dst already exists (marathon writers may have populated it
+ *     post-deploy): HGETALL src, HSETNX every field into dst (dst wins on
+ *     collision since dst is the canonical post-deploy writer), DEL src.
+ *
+ * The merge variant exists because the intel-*.ts libs now read from both
+ * hashes (legacy fallback) — a re-run marathon between deploy and migration
+ * lands new data on intel_*, and a naive RENAME would overwrite that with
+ * the older arkham_* corpus.
+ *
+ * Idempotent: skips any src key that does not exist.
  *
  * Usage:
  *   UPSTASH_REDIS_REST_URL=<url> UPSTASH_REDIS_REST_TOKEN=<token> node scripts/migrate-rename-intel-hashes.mjs
@@ -31,7 +40,42 @@ const RENAMES = [
   ["arkham_entity_cps", "intel_entity_cps"],
 ];
 
-async function upstash(command, ...args) {
+const MIGRATE_LUA = `
+local src = KEYS[1]
+local dst = KEYS[2]
+if redis.call('EXISTS', src) == 0 then
+  return 'skip:src_missing'
+end
+if redis.call('EXISTS', dst) == 0 then
+  redis.call('RENAME', src, dst)
+  return 'renamed'
+end
+local entries = redis.call('HGETALL', src)
+local added = 0
+for i = 1, #entries, 2 do
+  if redis.call('HSETNX', dst, entries[i], entries[i+1]) == 1 then
+    added = added + 1
+  end
+end
+redis.call('DEL', src)
+return 'merged:' .. added
+`.trim();
+
+async function upstashPost(path, body) {
+  const res = await fetch(`${REST_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${REST_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(`Upstash error: ${json.error}`);
+  return json.result;
+}
+
+async function upstashGet(command, ...args) {
   const url = `${REST_URL}/${[command, ...args].map(encodeURIComponent).join("/")}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${REST_TOKEN}` },
@@ -42,31 +86,25 @@ async function upstash(command, ...args) {
 }
 
 async function hlen(key) {
-  return upstash("HLEN", key);
+  return upstashGet("HLEN", key);
 }
 
-async function rename(src, dst) {
-  return upstash("RENAME", src, dst);
-}
-
-async function exists(key) {
-  return upstash("EXISTS", key);
+async function migratePair(src, dst) {
+  // EVAL signature via Upstash REST: [script, [keys], [args]]
+  return upstashPost(`/eval`, [MIGRATE_LUA, [src, dst], []]);
 }
 
 async function main() {
   console.log("migrate-rename-intel-hashes: starting\n");
 
   for (const [src, dst] of RENAMES) {
-    const srcExists = await exists(src);
-    if (!srcExists) {
-      console.log(`  skip ${src} → ${dst}  (key does not exist)`);
-      continue;
-    }
-    const before = await hlen(src);
-    await rename(src, dst);
-    const after = await hlen(dst);
+    const srcBefore = await hlen(src);
+    const dstBefore = await hlen(dst);
+    const outcome = await migratePair(src, dst);
+    const dstAfter = await hlen(dst);
     console.log(
-      `  renamed ${src} → ${dst}  (before=${before} fields, after=${after} fields)`,
+      `  ${src} → ${dst}  outcome=${outcome}  ` +
+        `(src_before=${srcBefore} dst_before=${dstBefore} dst_after=${dstAfter})`,
     );
   }
 

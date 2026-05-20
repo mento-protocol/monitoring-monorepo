@@ -123,7 +123,18 @@ async function pipeline(commands) {
   });
   if (!res.ok)
     throw new Error(`Upstash pipeline → ${res.status}: ${await res.text()}`);
-  return res.json();
+  const json = await res.json();
+  // Upstash pipeline returns HTTP 200 even when individual commands fail; scan
+  // each entry for a per-command .error so a silent HSET/HVALS failure can't
+  // pass as empty success.
+  for (let i = 0; i < json.length; i++) {
+    if (json[i] && json[i].error) {
+      throw new Error(
+        `Upstash pipeline cmd[${i}] (${commands[i][0]}): ${json[i].error}`,
+      );
+    }
+  }
+  return json;
 }
 
 async function getLabels() {
@@ -298,7 +309,11 @@ async function fetchEntity(slug) {
 }
 
 async function fetchContract(address, chain) {
-  return arkhamGet(`/intelligence/contract/${address}?chain=${chain}`);
+  // Documented shape is /intelligence/contract/{chain}/{address}; the prior
+  // ?chain= variant 404'd silently because the surrounding catch absorbed it.
+  return arkhamGet(
+    `/intelligence/contract/${encodeURIComponent(chain)}/${encodeURIComponent(address)}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

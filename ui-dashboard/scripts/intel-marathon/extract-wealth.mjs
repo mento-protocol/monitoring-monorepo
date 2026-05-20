@@ -79,7 +79,18 @@ async function pipeline(commands) {
   });
   if (!res.ok)
     throw new Error(`Upstash pipeline → ${res.status}: ${await res.text()}`);
-  return res.json();
+  const json = await res.json();
+  // Upstash pipeline returns HTTP 200 even when individual commands fail; scan
+  // each entry for a per-command .error so a silent HSET/HVALS failure can't
+  // pass as empty success.
+  for (let i = 0; i < json.length; i++) {
+    if (json[i] && json[i].error) {
+      throw new Error(
+        `Upstash pipeline cmd[${i}] (${commands[i][0]}): ${json[i].error}`,
+      );
+    }
+  }
+  return json;
 }
 
 async function buildTargets() {
