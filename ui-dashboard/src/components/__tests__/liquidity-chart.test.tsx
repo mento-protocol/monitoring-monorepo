@@ -78,7 +78,7 @@ describe("LiquidityChart", () => {
         ]}
         pool={{
           ...BASE_POOL,
-          oraclePrice: "500000000000000000000000",
+          oraclePrice: "2000000000000000000000000",
         }}
         token0Symbol="USDm"
         token1Symbol="TESTm"

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { Pool, PoolSnapshot } from "@/lib/types";
-import { parseOraclePriceToNumber, parseWei } from "@/lib/format";
+import { parseWei } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -13,6 +13,7 @@ import {
 } from "@/lib/plot";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const SORTED_ORACLES_DECIMALS = 24;
 
 interface LiquidityChartProps {
   snapshots: PoolSnapshot[];
@@ -35,9 +36,8 @@ function buildLiquiditySeries({
   pool,
   token0Symbol,
 }: Required<LiquidityChartProps>): LiquiditySeries {
-  const nonUsdmUsdPrice = parseOraclePriceToNumber(
+  const nonUsdmUsdPrice = parseSortedOracleFeedUsdPrice(
     pool?.oraclePrice ?? "0",
-    token0Symbol,
   );
   const usdmIsToken0 = token0Symbol === "USDm";
   const useUsd = nonUsdmUsdPrice > 0;
@@ -64,6 +64,12 @@ function buildLiquiditySeries({
   };
 }
 
+function parseSortedOracleFeedUsdPrice(rawPrice: string): number {
+  if (!rawPrice || rawPrice === "0") return 0;
+  const feedValue = Number(rawPrice) / 10 ** SORTED_ORACLES_DECIMALS;
+  return Number.isFinite(feedValue) && feedValue > 0 ? feedValue : 0;
+}
+
 export function LiquidityChart({
   snapshots,
   pool,
@@ -76,8 +82,9 @@ export function LiquidityChart({
   // an approximation for all historical data points. This lets both series share
   // a single Y-axis so a balanced pool shows two overlapping lines.
   //
-  // Oracle prices must go through the canonical parser so USDm-base pools
-  // use the same inversion as the oracle chart.
+  // Liquidity conversion needs the feed-direction USD price for the non-USDm
+  // token. The oracle chart uses pool display direction, which intentionally
+  // inverts USDm-base pools and is not suitable for reserve USD conversion.
   const { useUsd, timestamps, reserves0Usd, reserves1Usd, raw0, raw1 } =
     buildLiquiditySeries({ snapshots, pool, token0Symbol, token1Symbol });
   const trace0 = makeReserveTrace({
