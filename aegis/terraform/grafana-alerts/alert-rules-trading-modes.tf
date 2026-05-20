@@ -18,8 +18,11 @@ resource "grafana_rule_group" "trading_modes" {
       }
 
       labels = {
-        service  = "exchanges"
-        severity = "warning"
+        service = "exchanges"
+        # Prod trading-mode engagement halts trading on a pair — pager-grade.
+        # Staging circuit-breakers fire often during testing and aren't
+        # operational fires; keep them as warning so they route to #alerts-testnet.
+        severity = rule.value == "celo" ? "page" : "warning"
       }
 
       data {

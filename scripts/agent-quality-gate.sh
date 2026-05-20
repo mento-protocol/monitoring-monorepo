@@ -112,7 +112,14 @@ cd "$repo_root"
 # the system default (which sandboxed shells often cannot write to).
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
-export TMPDIR="$scratch_dir"
+# Don't override TMPDIR under Claude Code's seatbelt — it blocks AF_UNIX
+# socket creation in repo paths, which breaks `terraform validate` (the
+# Grafana provider uses go-plugin grpc on a socket in TMPDIR). Trunk's
+# pre-push callback strips env vars, so fall back to the worktree-path
+# check when $CLAUDE_SANDBOX is gone.
+if [[ -z "${CLAUDE_SANDBOX:-}" && "$repo_root" != *"/.claude/worktrees/"* ]]; then
+  export TMPDIR="$scratch_dir"
+fi
 
 # Trunk's pre-push hook callback runs the gate without a TTY and strips most
 # env vars from the calling shell. Re-assert non-interactive markers so the

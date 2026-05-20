@@ -12,7 +12,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 1. **Operational awareness** — pool health, oracle liveness, trading limit pressure, rebalancer liveness
 2. **Trade analytics** — volume, TVL, fee revenue per pool over time
-3. **Alerting** — proactive alerts when KPIs breach thresholds (Aegis v2 live; v3 FPMM alerts next)
+3. **Alerting** — proactive alerts when KPIs breach thresholds (Aegis v2 + v3 FPMM alerts both live, both routed to Slack)
 4. **Data access** — Streamlit sandbox for quantitative team (backlog)
 
 ### Live Endpoints
@@ -64,19 +64,20 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
                              │
                        Notifications
                              │
-                ┌────────────┴──────────────────┐
-                │ Discord (Aegis v2)            │
-                │ Splunk On-Call                │
-                │ Slack #alerts-critical (v3)   │
-                │ Slack #alerts-warnings (v3)   │
-                └───────────────────────────────┘
+                ┌────────────┴──────────────────────┐
+                │ Splunk On-Call (page severity)    │
+                │ Slack #alerts-critical            │
+                │ Slack #alerts-oracles / -pools /  │
+                │       -infra / -reserve / -testnet│
+                │ Discord (Aegis v2, soak window)   │
+                └───────────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
-2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
-3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` + `#alerts-warnings` (rules in `terraform/alerts/`)
+2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Slack `#alerts-critical` + per-domain warning channels + Splunk On-Call (page severity); Discord dual-route stays live during the migration soak window
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`) — rules in `terraform/alerts/`
 
 ### Components
 
@@ -333,13 +334,15 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed in the aegis repo.
 
-| Group            | Rules                               | Notification Channels              |
-| ---------------- | ----------------------------------- | ---------------------------------- |
-| Oracle Relayers  | Stale price feeds, low CELO balance | Discord + Splunk On-Call (mainnet) |
-| Reserve Balances | Low USDC/USDT/axlUSDC               | Discord                            |
-| Trading Modes    | Circuit breakers tripped            | Discord                            |
-| Trading Limits   | L0/L1/LG utilization >90%           | Discord + Splunk On-Call (L1/LG)   |
-| Aegis Service    | RPC failures, data staleness        | Discord + Splunk On-Call           |
+Currently dual-routed to Slack alongside the legacy Discord channels during the migration soak window; the cutover PR removes the Discord side.
+
+| Group            | Rules                               | Notification Channels                                                      |
+| ---------------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low CELO balance | Slack #alerts-oracles + #alerts-critical/Splunk (page, celo)               |
+| Reserve Balances | Low USDC/USDT/axlUSDC               | Slack #alerts-reserve                                                      |
+| Trading Modes    | Circuit breakers tripped            | Slack #alerts-critical/Splunk (page, celo); #alerts-testnet (celo-sepolia) |
+| Trading Limits   | L0/L1/LG utilization >90%           | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)            |
+| Aegis Service    | RPC failures, data staleness        | Slack #alerts-infra; #alerts-critical/Splunk (page)                        |
 
 ### v3 FPMM Alerts (live)
 
@@ -347,14 +350,16 @@ Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metric
 
 **Terraform module** `terraform/alerts/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
 
-**Slack channels.** Severity-split, not domain-split:
+**Slack channels.** Domain-split warnings + cross-service critical channel:
 
 | Channel            | Use                                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
 | `#alerts-critical` | Page-worthy — deviation-critical, oracle-down, limit-tripped, rebalancer-stale, bridge-not-reporting |
-| `#alerts-warnings` | Muted by default; opened when investigating                                                          |
+| `#alerts-oracles`  | Oracle warnings — liveness, oracle jump above swap fee                                               |
+| `#alerts-pools`    | Pool-mechanics warnings — deviation, rebalancer effectiveness, trading-limit pressure                |
+| `#alerts-infra`    | Service-infra warnings — indexer, metrics-bridge, Aegis service health                               |
 
-Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is the axis operators actually toggle on. Per-domain splits can be layered later without relabelling series.
+Aegis v2 dual-route additionally lands in `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Initial rollout was severity-split (`#alerts-warnings` catch-all); refined to per-domain channels once operators wanted to mute/focus by service.
 
 **Rules shipped** (10 rules across 2 services — see `terraform/alerts/rules-*.tf`):
 
@@ -471,7 +476,7 @@ Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Graf
 - `lastOracleUpdateTxHash` on `Pool` — unblocks tx-link enrichment in Slack alerts
 - ChainStat / GlobalStat aggregate entities
 - Gap-fill logic for snapshot charts
-- Migrate Aegis v2 alerts onto the new Slack channel pair (currently Discord)
+- Cut over Aegis v2 alerts to Slack-only (dual-route soak in progress; cutover PR removes Discord side once parity is verified)
 - Merge Aegis into the monorepo — retire the sibling `../aegis/` repo, fold its Terraform into `terraform/`
 - Grafana Agent → Grafana Alloy — Agent reached EOL on 2025-11-01; Alloy is the OTel-collector successor
 - Streamlit sandbox
@@ -497,7 +502,7 @@ GitHub Actions (`.github/workflows/`):
 - `metrics-bridge.yml` — deploy-only (Cloud Run via Terraform) on `push` to `main` with paths filter. Quality is handled by `ci.yml`.
 - `infra.yml` — terraform validate, workflow-level path filter.
 - `trunk.yml` — repo-wide lint via Trunk; required separately as "Code Quality".
-- `notify-envio-deploy.yml` — Discord notification on `deploy/*` push.
+- Envio deploy notifications come from Envio's native Slack integration on the hosted indexer (the in-repo `notify-envio-deploy.yml` workflow was removed once the hosted integration shipped).
 - `claude.yml` — `@claude` mention automation.
 
 Branch protection: `CI / ci` + `Code Quality` (Trunk) + Vercel checks required on `main`.

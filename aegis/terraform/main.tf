@@ -43,4 +43,5 @@ module "grafana_alerts" {
   discord_alerts_webhook_url_trading_limits        = var.discord_alerts_webhook_url_trading_limits
   discord_alerts_webhook_url_catch_all             = var.discord_alerts_webhook_url_catch_all
   discord_alerts_webhook_url_aegis                 = var.discord_alerts_webhook_url_aegis
+  slack_bot_token                                  = var.slack_bot_token
 }

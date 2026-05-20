@@ -115,8 +115,9 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      # Set continue to false to prevent further processing of these specific alerts
-      continue = false
+      # continue=true so the parallel Slack routes also fire for
+      # weekend-muted FX feeds — they share the same mute_timing.
+      continue = true
     }
 
     # Oracle Relayer Alerts [Celo Mainnet]
@@ -172,8 +173,9 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      # Set continue to false to prevent further processing of these specific alerts
-      continue = false
+      # continue=true so the parallel Slack routes also fire for
+      # weekend-muted FX feeds — they share the same mute_timing.
+      continue = true
     }
 
     # Reserve Alerts
@@ -286,6 +288,353 @@ resource "grafana_notification_policy" "all" {
         label = "service"
         match = "="
         value = "trading-limits"
+      }
+
+      continue = true
+    }
+
+    # Slack policies fire alongside the Discord policies above via
+    # `continue = true`. Severity matchers split alerts between
+    # `#alerts-critical` and the per-service warning channel (a
+    # refinement over the Discord tree, which routes by service+chain
+    # only). Oracle-relayer policies preserve the `weekend_mute` timing
+    # on FX feeds — see `weekend_disabled_feeds` in locals.tf.
+
+    # Oracle Relayer page alerts → #alerts-critical (non-weekend FX)
+    # `chain = celo` guards against a future testnet-emitted page alert
+    # fanning out into both #alerts-critical and #alerts-testnet via the
+    # `continue = true` chain — matches the trading-modes prod policy.
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "!~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer page alerts → #alerts-critical (weekend FX, muted)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "=~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer warning alerts → #alerts-oracles (celo prod, non-weekend FX)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_oracles.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      matcher {
+        label = "severity"
+        match = "!="
+        value = "page"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "!~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer warning alerts → #alerts-oracles (celo prod, weekend FX, muted)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_oracles.name
+      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      matcher {
+        label = "severity"
+        match = "!="
+        value = "page"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "=~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer alerts → #alerts-testnet (celo-sepolia, non-weekend FX, any severity)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_testnet.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo-sepolia"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "!~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer alerts → #alerts-testnet (celo-sepolia, weekend FX, muted)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_testnet.name
+      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo-sepolia"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "=~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Reserve alerts → #alerts-reserve
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_reserve.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "reserve"
+      }
+
+      continue = true
+    }
+
+    # Trading-modes prod page alerts → Splunk On-Call.
+    # A prod circuit-breaker engagement is pager-grade — see the
+    # severity=page label in alert-rules-trading-modes.tf.
+    policy {
+      contact_point = grafana_contact_point.splunk_on_call.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "exchanges"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      continue = true
+    }
+
+    # Trading-modes prod page alerts → #alerts-critical
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "exchanges"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
+      }
+
+      continue = true
+    }
+
+    # Trading-modes alerts → #alerts-testnet (celo-sepolia, any severity)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_testnet.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "exchanges"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo-sepolia"
+      }
+
+      continue = true
+    }
+
+    # Aegis service page alerts → #alerts-critical (parallel to existing Splunk policy)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "aegis"
+      }
+
+      continue = true
+    }
+
+    # Aegis service warning alerts → #alerts-infra
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_infra.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "aegis"
+      }
+
+      matcher {
+        label = "severity"
+        match = "!="
+        value = "page"
+      }
+
+      continue = true
+    }
+
+    # Trading-limits page alerts → #alerts-critical (parallel to existing Splunk policy)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "trading-limits"
+      }
+
+      continue = true
+    }
+
+    # Trading-limits warning alerts → #alerts-pools
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_pools.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "trading-limits"
+      }
+
+      matcher {
+        label = "severity"
+        match = "!="
+        value = "page"
       }
 
       continue = true

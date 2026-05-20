@@ -90,11 +90,11 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_transition.contact_point
-      group_by        = local.notify_warning_transition.group_by
-      group_wait      = local.notify_warning_transition.group_wait
-      group_interval  = local.notify_warning_transition.group_interval
-      repeat_interval = local.notify_warning_transition.repeat_interval
+      contact_point   = local.notify_warning_pools_transition.contact_point
+      group_by        = local.notify_warning_pools_transition.group_by
+      group_wait      = local.notify_warning_pools_transition.group_wait
+      group_interval  = local.notify_warning_pools_transition.group_interval
+      repeat_interval = local.notify_warning_pools_transition.repeat_interval
     }
   }
 

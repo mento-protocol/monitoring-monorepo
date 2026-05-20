@@ -30,6 +30,24 @@ variable "slack_channel_critical" {
 
 variable "slack_channel_warnings" {
   type        = string
-  description = "Slack channel for lower-severity alerts."
+  description = "[DEPRECATED] Slack channel for lower-severity alerts. Retained for dual-route compatibility; remove after all v3 rules migrate to domain-specific channels."
   default     = "#alerts-warning"
+}
+
+variable "slack_channel_oracles" {
+  type        = string
+  description = "Slack channel for oracle health warnings (oracle liveness, oracle jump exceeds swap fee)."
+  default     = "#alerts-oracles"
+}
+
+variable "slack_channel_pools" {
+  type        = string
+  description = "Slack channel for FPMM pool-mechanics warnings (deviation, rebalancer, trading-limit pressure)."
+  default     = "#alerts-pools"
+}
+
+variable "slack_channel_infra" {
+  type        = string
+  description = "Slack channel for indexer and metrics-bridge warning alerts."
+  default     = "#alerts-infra"
 }

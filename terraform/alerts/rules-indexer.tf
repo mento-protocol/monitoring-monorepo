@@ -58,11 +58,11 @@ resource "grafana_rule_group" "indexer_effect_cache" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_infra.contact_point
+      group_by        = local.notify_warning_infra.group_by
+      group_wait      = local.notify_warning_infra.group_wait
+      group_interval  = local.notify_warning_infra.group_interval
+      repeat_interval = local.notify_warning_infra.repeat_interval
     }
   }
 }

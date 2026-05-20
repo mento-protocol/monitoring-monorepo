@@ -60,6 +60,56 @@ resource "grafana_contact_point" "slack_warnings_transition" {
   }
 }
 
+# Domain-split warning contact points. v3 warnings route to a domain-
+# specific channel based on which service rolls up the rule. The
+# `slack_warnings` / `_transition` contact points above are unused once
+# every rule has migrated and will be removed in a follow-up cleanup.
+
+resource "grafana_contact_point" "slack_oracles" {
+  name = "slack-alerts-oracles"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_oracles
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_pools" {
+  name = "slack-alerts-pools"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_pools
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_pools_transition" {
+  name = "slack-alerts-pools-transition"
+
+  slack {
+    token                   = var.slack_bot_token
+    recipient               = var.slack_channel_pools
+    disable_resolve_message = true
+    title                   = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text                    = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_infra" {
+  name = "slack-alerts-infra"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_infra
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
 locals {
   # Shared message body — both contact points (critical + warnings) render the
   # same structure so operators can't mistake fields between channels. Split
@@ -228,6 +278,45 @@ locals {
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
     group_wait      = "0s"
     group_interval  = "5m"
+    repeat_interval = "4h"
+  }
+
+  # Each v3 warning rule's `notification_settings` references the
+  # notifier matching its service rollup:
+  #   - Oracle health (oracle liveness, oracle jump)         → notify_warning_oracles_pool
+  #   - Pool mechanics (deviation, rebalancer, trading lim.) → notify_warning_pools_pool
+  #   - Pool transitions (deviation breach state changes)    → notify_warning_pools_transition
+  #   - Service infrastructure (indexer, metrics-bridge)     → notify_warning_infra
+
+  notify_warning_oracles_pool = {
+    contact_point   = grafana_contact_point.slack_oracles.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_pools_pool = {
+    contact_point   = grafana_contact_point.slack_pools.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_pools_transition = {
+    contact_point   = grafana_contact_point.slack_pools_transition.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "0s"
+    group_interval  = "5m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_infra = {
+    contact_point   = grafana_contact_point.slack_infra.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
     repeat_interval = "4h"
   }
 }
