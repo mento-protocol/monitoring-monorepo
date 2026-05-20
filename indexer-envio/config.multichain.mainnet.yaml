@@ -301,10 +301,17 @@ chains:
           - 0x4E105FEF015db26320C077427BD605AceAd9262E # CHFm
           - 0xD2E65Af47d927D5e84F384ae6bAC4F97C3dA65Df # JPYm
       - name: LiquityStabilityPool
+        # TransparentUpgradeableProxy addresses — events emit from the proxy,
+        # not the impl. The @mento-protocol/contracts package publishes the
+        # canonical proxies under StabilityPool<SYMBOL> (no v300 suffix); the
+        # StabilityPoolv300<SYMBOL> keys point at stale impls that never emit
+        # events. Cross-checked against AddressesRegistry.stabilityPool() for
+        # each market on 2026-05-20. config-contracts.test.ts pins these to
+        # the package values so a future drift to the impl fails at test time.
         address:
-          - 0x2d5d7E2767c5493610caE84E0AB7F9D2CCE8C1A5 # GBPm
-          - 0x8a68CBB2fFF99Ea400FF330DBD1a7904775B4b44 # CHFm
-          - 0x107eCcE37c1FE3C8154B67F9ddD3d5A1446f084B # JPYm
+          - 0x06346c0fAB682dBde9f245D2D84677592E8aaa15 # GBPm
+          - 0xc415cA43aB6Ab246E64559696b8DCAcdd08A39e8 # CHFm
+          - 0x62A519b4D0693E976b78b195E34a548BcF1D2355 # JPYm
       - name: LiquityTroveNFT
         address:
           - 0x46273A5792013973b64a42E760E6F81d0472C6b6 # GBPm
