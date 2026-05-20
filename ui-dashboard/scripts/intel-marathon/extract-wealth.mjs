@@ -215,7 +215,7 @@ async function main() {
           _truncated: true,
         });
       }
-      writes.push(["HSET", "intel_wealth", address, jsonStr]);
+      writes.push(["HSET", "intel_wealth", address.toLowerCase(), jsonStr]);
       success++;
       if (writes.length >= 5) await pipeline(writes.splice(0));
       appendFileSync(rawFile, JSON.stringify({ address, ts: now }) + "\n");

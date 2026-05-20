@@ -152,7 +152,7 @@ async function getLabels() {
 }
 
 async function hexistsArkhamDeep(addr) {
-  const { result } = await upstash(`/hexists/intel_deep/${addr}`);
+  const { result } = await upstash(`/hexists/intel_deep/${addr.toLowerCase()}`);
   return result === 1;
 }
 
@@ -660,17 +660,19 @@ async function main() {
         };
         await pipeline([
           ["HSET", "labels", address, JSON.stringify(newEntry)],
-          ["HSET", "intel_deep", address, deepJson],
+          ["HSET", "intel_deep", address.toLowerCase(), deepJson],
         ]);
         existingLabels[address] = newEntry;
         if (derived.name) attested++;
       } else {
         // Manual label — don't touch labels, but store deep data.
-        await pipeline([["HSET", "intel_deep", address, deepJson]]);
+        await pipeline([
+          ["HSET", "intel_deep", address.toLowerCase(), deepJson],
+        ]);
       }
     } else {
       // No derived attribution — still store deep for completeness.
-      await pipeline([["HSET", "intel_deep", address, deepJson]]);
+      await pipeline([["HSET", "intel_deep", address.toLowerCase(), deepJson]]);
       nullCount++;
     }
 

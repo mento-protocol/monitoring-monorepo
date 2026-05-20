@@ -144,7 +144,9 @@ async function main() {
             _truncatedFrom: count,
           });
         }
-        await pipeline([["HSET", "intel_transfers", address, jsonStr]]);
+        await pipeline([
+          ["HSET", "intel_transfers", address.toLowerCase(), jsonStr],
+        ]);
         success++;
         totalTransfers += count;
         console.log(

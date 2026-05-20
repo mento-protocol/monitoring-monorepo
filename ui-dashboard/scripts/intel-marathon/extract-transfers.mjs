@@ -253,7 +253,12 @@ async function main() {
             _truncated: true,
           });
         }
-        writes.push(["HSET", "intel_transfers", address, jsonStr]);
+        writes.push([
+          "HSET",
+          "intel_transfers",
+          address.toLowerCase(),
+          jsonStr,
+        ]);
         success++;
         totalTransfers += transferCount;
         if (writes.length >= 10) await pipeline(writes.splice(0));
