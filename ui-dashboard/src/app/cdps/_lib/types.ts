@@ -162,6 +162,9 @@ export type CdpTroveOperationEventRow = {
   id: string;
   instanceId?: string;
   troveId: string;
+  /** Trove NFT owner at the time of the operation, lowercased. Denormalized
+   *  off `Trove.owner` so the UI can filter by address without a join. */
+  owner: string;
   /** Liquity v2 OP enum: 0=open, 1=close, 2=adjust, 3=adjustInterestRate,
    *  7=openAndJoinBatch, 8=setBatchManager, 9=removeFromBatch.
    *  LIQUIDATE / REDEEM_COLLATERAL / APPLY_PENDING_DEBT are NOT persisted
@@ -171,6 +174,16 @@ export type CdpTroveOperationEventRow = {
   collChange: string;
   /** Signed delta: positive = debt borrowed, negative = repaid. */
   debtChange: string;
+  /** Trove debt immediately before this op (BigInt-as-string, debt-token wei). */
+  debtBefore: string;
+  /** Trove debt immediately after this op — computed from ABI deltas
+   *  (`debtChange + debtIncreaseFromUpfrontFee + debtIncreaseFromRedist`),
+   *  so it includes pending redistribution that materializes on this op. */
+  debtAfter: string;
+  /** Trove collateral immediately before this op (BigInt-as-string, coll-token wei). */
+  collBefore: string;
+  /** Trove collateral immediately after this op. */
+  collAfter: string;
   annualInterestRate: string;
   debtIncreaseFromUpfrontFee: string;
   timestamp: string;

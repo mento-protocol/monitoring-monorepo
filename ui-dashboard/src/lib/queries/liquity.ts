@@ -143,7 +143,8 @@ export const CDP_TRANSACTIONS = `
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
-      id troveId operation collChange debtChange
+      id troveId owner operation collChange debtChange
+      debtBefore debtAfter collBefore collAfter
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
     }
@@ -193,7 +194,8 @@ export const ALL_CDP_TRANSACTIONS = `
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
-      id instanceId troveId operation collChange debtChange
+      id instanceId troveId owner operation collChange debtChange
+      debtBefore debtAfter collBefore collAfter
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
     }

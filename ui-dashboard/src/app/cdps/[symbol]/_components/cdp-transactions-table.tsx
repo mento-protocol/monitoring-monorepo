@@ -9,20 +9,21 @@ import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { CDP_TRANSACTIONS } from "@/lib/queries";
-import { formatTokenAmount } from "../../_lib/format";
+import { CdpTxAmountCell } from "../../_components/cdp-tx-amount-cell";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
   type BadgeKind,
-  amountsFor,
   badgeKindFor,
   mergeTransactionRows,
   type CdpTransactionsResponse,
 } from "../../_lib/transactions";
 import type { CdpTransactionRow } from "../../_lib/types";
 import {
+  CdpTxAddressFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
+  normalizeAddressFilter,
 } from "../../_components/cdp-tx-filters";
 
 const PAGE_SIZE = 20;
@@ -80,11 +81,25 @@ function TransactionsBody({
 }) {
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
+  const [addressInput, setAddressInput] = useState("");
+
+  const normalizedAddress = normalizeAddressFilter(addressInput);
+  const addressActive = normalizedAddress.length > 0;
 
   const filteredRows = useMemo(() => {
-    if (typeFilter == null) return rows;
-    return rows.filter((row) => badgeKindFor(row) === typeFilter);
-  }, [rows, typeFilter]);
+    return rows.filter((row) => {
+      // Address filter narrows to trove-op rows whose owner matches. Other
+      // event kinds (liquidation / redemption / SP rebalance) don't carry a
+      // single-trove owner dimension, so they're hidden whenever the
+      // address filter is active.
+      if (addressActive) {
+        if (row.kind !== "troveOp") return false;
+        if (row.owner !== normalizedAddress) return false;
+      }
+      if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
+      return true;
+    });
+  }, [rows, typeFilter, addressActive, normalizedAddress]);
 
   // When a filter narrows the result set, clamp the requested page down
   // to the last valid page so users don't land on an empty page N. No
@@ -96,12 +111,13 @@ function TransactionsBody({
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 space-y-2">
         <CdpTxTypeFilter
           options={TX_FILTER_TYPE_ORDER}
           selected={typeFilter}
           onChange={setTypeFilter}
         />
+        <CdpTxAddressFilter value={addressInput} onChange={setAddressInput} />
       </div>
       <Table>
         <thead>
@@ -167,7 +183,6 @@ function TransactionRow({
   symbol: string;
 }) {
   const kind = badgeKindFor(row);
-  const { debt, coll } = amountsFor(row);
   return (
     <Row>
       <Td>
@@ -177,12 +192,8 @@ function TransactionRow({
           {BADGE_LABELS[kind]}
         </span>
       </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(debt, symbol)}
-      </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(coll, "USDm")}
-      </Td>
+      <CdpTxAmountCell row={row} symbol={symbol} leg="debt" />
+      <CdpTxAmountCell row={row} symbol="USDm" leg="coll" />
       <TxHashCell txHash={row.txHash} chainId={chainId} />
       <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
         {formatBlock(row.blockNumber)}

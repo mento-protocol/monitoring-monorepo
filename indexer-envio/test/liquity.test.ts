@@ -10,6 +10,7 @@ import {
 } from "../src/handlers/liquity/config";
 import {
   computeCollateralRatioBps,
+  computeTroveOperationSnapshot,
   floorInterestRateBracket,
 } from "../src/handlers/liquity/math";
 import {
@@ -230,6 +231,110 @@ describe("Liquity CDP helpers", () => {
       floorInterestRateBracket((5000n * d18) / 100000n),
       50n * 10n ** 15n,
     );
+  });
+
+  describe("computeTroveOperationSnapshot", () => {
+    const NO_REDIST = {
+      debtIncreaseFromRedist: 0n,
+      collIncreaseFromRedist: 0n,
+      debtIncreaseFromUpfrontFee: 0n,
+    };
+
+    it("OPEN_TROVE: from a zero starting position adds the borrowed debt and posted collateral", () => {
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 0n,
+        collBefore: 0n,
+        debtChange: 5_000n,
+        collChange: 10_000n,
+        ...NO_REDIST,
+      });
+      assert.equal(snap.debtAfter, 5_000n);
+      assert.equal(snap.collAfter, 10_000n);
+    });
+
+    it("ADJUST_TROVE repayment: signed-negative debt delta reduces debtAfter, leaves coll untouched", () => {
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 5_000n,
+        collBefore: 10_000n,
+        debtChange: -1_000n,
+        collChange: 0n,
+        ...NO_REDIST,
+      });
+      assert.equal(snap.debtAfter, 4_000n);
+      assert.equal(snap.collAfter, 10_000n);
+    });
+
+    it("ADJUST_TROVE withdrawal: signed-negative coll delta reduces collAfter, leaves debt untouched", () => {
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 5_000n,
+        collBefore: 10_000n,
+        debtChange: 0n,
+        collChange: -2_000n,
+        ...NO_REDIST,
+      });
+      assert.equal(snap.debtAfter, 5_000n);
+      assert.equal(snap.collAfter, 8_000n);
+    });
+
+    it("CLOSE_TROVE: a full repayment lands at debtAfter == 0", () => {
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 5_000n,
+        collBefore: 10_000n,
+        debtChange: -5_000n,
+        collChange: -10_000n,
+        ...NO_REDIST,
+      });
+      assert.equal(snap.debtAfter, 0n);
+      assert.equal(snap.collAfter, 0n);
+    });
+
+    it("upfront fee materializes into debtAfter on top of the change", () => {
+      // The ABI exposes the upfront fee separately so the UI can disambiguate
+      // borrowed-principal from fee-accrual. Both contribute to debtAfter.
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 5_000n,
+        collBefore: 10_000n,
+        debtChange: 1_000n,
+        collChange: 0n,
+        debtIncreaseFromRedist: 0n,
+        debtIncreaseFromUpfrontFee: 50n,
+        collIncreaseFromRedist: 0n,
+      });
+      assert.equal(snap.debtAfter, 6_050n);
+      assert.equal(snap.collAfter, 10_000n);
+    });
+
+    it("pending redistribution materializes when an operation touches the trove", () => {
+      // Critical correctness case: omitting these terms lets debtAfter drift
+      // from the value the subsequent TroveUpdated will write. Both debt and
+      // coll redist terms are unsigned (pending positive deltas).
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 5_000n,
+        collBefore: 10_000n,
+        debtChange: 0n,
+        collChange: 0n,
+        debtIncreaseFromUpfrontFee: 0n,
+        debtIncreaseFromRedist: 250n,
+        collIncreaseFromRedist: 500n,
+      });
+      assert.equal(snap.debtAfter, 5_250n);
+      assert.equal(snap.collAfter, 10_500n);
+    });
+
+    it("floors at zero if a future ABI revision overshoots the existing balance", () => {
+      // Defensive: TroveOperation deltas should never push the trove below
+      // zero, but if they ever do (forked contract / unexpected sequence) we
+      // saturate at 0 so the snapshot can't surface a negative magnitude.
+      const snap = computeTroveOperationSnapshot({
+        debtBefore: 100n,
+        collBefore: 100n,
+        debtChange: -200n,
+        collChange: -200n,
+        ...NO_REDIST,
+      });
+      assert.equal(snap.debtAfter, 0n);
+      assert.equal(snap.collAfter, 0n);
+    });
   });
 
   it("treats sub-minimum post-redemption debt as zombie, not active", () => {

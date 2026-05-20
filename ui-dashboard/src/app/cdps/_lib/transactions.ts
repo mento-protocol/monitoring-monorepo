@@ -120,6 +120,45 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
   }
 }
 
+/** Per-leg before/after/delta snapshot used by the trove-op row renderer.
+ *  `delta` is signed (positive = increase, negative = decrease) and is
+ *  derived as `after - before` so the rendered delta is internally
+ *  consistent even if the underlying ABI ever exposed extra redist terms
+ *  the indexer didn't fold in. */
+export interface TroveSnapshotLeg {
+  before: string;
+  after: string;
+  delta: string;
+}
+
+export interface TroveSnapshot {
+  debt: TroveSnapshotLeg;
+  coll: TroveSnapshotLeg;
+}
+
+/** Returns null for non-troveOp rows — keeps the discriminated-union
+ *  branching at the call site explicit rather than forcing every caller
+ *  to switch on `row.kind` twice. */
+export function troveSnapshotFor(row: CdpTransactionRow): TroveSnapshot | null {
+  if (row.kind !== "troveOp") return null;
+  const debtBefore = BigInt(row.debtBefore);
+  const debtAfter = BigInt(row.debtAfter);
+  const collBefore = BigInt(row.collBefore);
+  const collAfter = BigInt(row.collAfter);
+  return {
+    debt: {
+      before: row.debtBefore,
+      after: row.debtAfter,
+      delta: (debtAfter - debtBefore).toString(),
+    },
+    coll: {
+      before: row.collBefore,
+      after: row.collAfter,
+      delta: (collAfter - collBefore).toString(),
+    },
+  };
+}
+
 export type MergedTransactions = {
   rows: CdpTransactionRow[];
   capped: boolean;

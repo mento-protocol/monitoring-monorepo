@@ -9,7 +9,7 @@ import type {
   TroveOperationEvent,
 } from "envio";
 import { indexer } from "../../indexer.js";
-import { asBigInt, eventId } from "../../helpers.js";
+import { asAddress, asBigInt, eventId } from "../../helpers.js";
 import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
@@ -21,7 +21,7 @@ import {
 } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
-import { negativeToPositive } from "./math.js";
+import { computeTroveOperationSnapshot, negativeToPositive } from "./math.js";
 import { OP, isBatchMembershipOperation } from "./operations.js";
 import {
   setPendingBatchMembershipOperation,
@@ -403,6 +403,26 @@ indexer.onEvent(
       txHash: event.transaction.hash,
     });
     const prevTroveState = { status: trove.status, debt: trove.debt };
+    // Snapshot fields for TroveOperationEvent — captured before any branch
+    // mutates the trove. The 5 user-initiated ops we persist don't touch
+    // debt/coll in the TroveOperation handler (those land in TroveUpdated /
+    // BatchUpdated), so reading directly off the entity here yields the true
+    // pre-operation values.
+    //
+    // OPEN_TROVE owner race: on-chain log order is TroveNFT.Transfer (mint)
+    // → TroveOperation, so under normal Envio ordering `trove.owner` is
+    // already populated by the time we read it here. If the placeholder
+    // fallback in `getOrCreateTrove` ever fires for an OPEN_TROVE (i.e.
+    // TroveOperation observed before the matching Transfer mint), this row
+    // gets `owner: ZERO_ADDRESS` and a later Transfer update to
+    // `Trove.owner` does NOT propagate back to this TroveOperationEvent.
+    // Affects only the very first row of a freshly-opened trove; all
+    // subsequent ops on the same trove capture the real owner. Accepted as
+    // a soft degradation rather than patching from the Transfer handler
+    // (which would cost an extra getWhere on every mint).
+    const opPrevDebt = trove.debt;
+    const opPrevColl = trove.coll;
+    const opOwner = trove.owner;
 
     const op = Number(event.params._operation);
     const forced = isForcedOperation(op);
@@ -505,6 +525,9 @@ indexer.onEvent(
       event,
       instanceId: instance.id,
       troveId,
+      owner: opOwner,
+      prevDebt: opPrevDebt,
+      prevColl: opPrevColl,
       blockNumber,
       blockTimestamp,
     });
@@ -517,6 +540,12 @@ indexer.onEvent(
 // transactions feed. LIQUIDATE and REDEEM_COLLATERAL are skipped because
 // they already have dedicated event entities; APPLY_PENDING_DEBT is
 // protocol-forced and isn't a user action.
+//
+// `debtBefore` / `collBefore` come from the trove entity (captured before
+// any mutation in the parent handler); `debtAfter` / `collAfter` are
+// computed arithmetically from the ABI deltas via
+// `computeTroveOperationSnapshot`. The `owner` field is denormalized off
+// the trove so the UI can filter by owner without a join.
 function maybeRecordTroveOperation(args: {
   context: {
     TroveOperationEvent: { set: (entity: TroveOperationEvent) => void };
@@ -525,24 +554,42 @@ function maybeRecordTroveOperation(args: {
   event: TroveOperationLogEvent;
   instanceId: string;
   troveId: string;
+  owner: string;
+  prevDebt: bigint;
+  prevColl: bigint;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): void {
-  const { context, op, event, instanceId, troveId } = args;
+  const { context, op, event, instanceId, troveId, owner, prevDebt, prevColl } =
+    args;
   if (
     op === OP.LIQUIDATE ||
     op === OP.REDEEM_COLLATERAL ||
     op === OP.APPLY_PENDING_DEBT
   )
     return;
+  const { debtAfter, collAfter } = computeTroveOperationSnapshot({
+    debtBefore: prevDebt,
+    collBefore: prevColl,
+    debtChange: event.params._debtChangeFromOperation,
+    debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
+    debtIncreaseFromRedist: event.params._debtIncreaseFromRedist,
+    collChange: event.params._collChangeFromOperation,
+    collIncreaseFromRedist: event.params._collIncreaseFromRedist,
+  });
   context.TroveOperationEvent.set({
     id: eventId(event.chainId, event.block.number, event.logIndex),
     chainId: event.chainId,
     instanceId,
     troveId,
+    owner: asAddress(owner),
     operation: op,
     collChange: event.params._collChangeFromOperation,
     debtChange: event.params._debtChangeFromOperation,
+    debtBefore: prevDebt,
+    debtAfter,
+    collBefore: prevColl,
+    collAfter,
     annualInterestRate: event.params._annualInterestRate,
     debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
     timestamp: args.blockTimestamp,
@@ -561,6 +608,8 @@ type TroveOperationLogEvent = {
     _debtChangeFromOperation: bigint;
     _annualInterestRate: bigint;
     _debtIncreaseFromUpfrontFee: bigint;
+    _debtIncreaseFromRedist: bigint;
+    _collIncreaseFromRedist: bigint;
   };
 };
 

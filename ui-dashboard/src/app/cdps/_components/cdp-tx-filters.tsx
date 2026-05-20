@@ -168,3 +168,43 @@ function pillClasses(active: boolean, isAll: boolean): string {
     (isAll ? "bg-indigo-900/40 text-indigo-200" : "bg-slate-700 text-slate-200")
   );
 }
+
+/** Free-text address filter — when populated, the parent table narrows
+ *  to TroveOperationEvent rows whose `owner` matches (case-insensitive,
+ *  trimmed). Other event kinds don't have a single-trove owner dimension
+ *  so the parent hides them whenever this filter is active.
+ *
+ *  Trim + lowercase normalization is intentionally done at the
+ *  comparison site (in the table) rather than here so the user sees
+ *  whatever they typed; we keep this component a controlled text input
+ *  with no derived state. */
+export function CdpTxAddressFilter({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-slate-500">Owner:</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="0x… (filter by trove owner)"
+        spellCheck={false}
+        autoComplete="off"
+        aria-label="Filter CDP transactions by trove owner address"
+        className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      />
+    </label>
+  );
+}
+
+/** Normalize a user-entered address to the canonical form stored on
+ *  `TroveOperationEvent.owner` (lowercase, whitespace-trimmed). Returns
+ *  empty string for blank input, which the caller treats as "no filter". */
+export function normalizeAddressFilter(raw: string): string {
+  return raw.trim().toLowerCase();
+}

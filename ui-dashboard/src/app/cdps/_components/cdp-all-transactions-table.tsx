@@ -8,22 +8,24 @@ import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { ALL_CDP_TRANSACTIONS } from "@/lib/queries";
 import Link from "next/link";
-import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import { cdpSymbolSlug } from "../_lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
   CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
   type BadgeKind,
-  amountsFor,
   badgeKindFor,
   mergeTransactionRows,
   type CdpTransactionsResponse,
 } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
+import { CdpTxAmountCell } from "./cdp-tx-amount-cell";
 import {
+  CdpTxAddressFilter,
   CdpTxMarketFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
+  normalizeAddressFilter,
 } from "./cdp-tx-filters";
 
 // 100 across all markets is the user-visible cap. We fetch a larger
@@ -86,23 +88,36 @@ export function CdpAllTransactionsTable({
   );
 }
 
-/** Filter state for the overview transactions table. Validates
- *  `marketFilter` against the current collateral list each render — if
- *  the indexer ever drops/renames a market between revalidations, a
- *  stale id would silently zero out the result set with no visibly
- *  selected pill. Falls back to null in that case (no useEffect). */
+/** Filter state for the overview transactions table. Combines:
+ *  - validated `marketFilter` (falls back to null if the indexer drops or
+ *    renames a market between revalidations, so a stale id can't silently
+ *    zero out the result set without a visibly selected pill)
+ *  - free-text `addressInput` (normalized to lowercase + trimmed at the
+ *    comparison site so the input renders the raw typed value)
+ *  No useEffect — the derived `effectiveMarketFilter` / `addressActive`
+ *  values absorb stale inputs. */
 function useOverviewFilters(
   rows: CdpTransactionRow[],
   collaterals: CollateralSummary[],
 ) {
   const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
   const [marketFilter, setMarketFilter] = useState<string | null>(null);
+  const [addressInput, setAddressInput] = useState("");
   const effectiveMarketFilter = useMemo(() => {
     if (marketFilter == null) return null;
     return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
   }, [collaterals, marketFilter]);
+  const normalizedAddress = normalizeAddressFilter(addressInput);
+  const addressActive = normalizedAddress.length > 0;
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
+      if (addressActive) {
+        // Owner is only meaningful for trove-op rows; pool-level events
+        // (liquidation / redemption / SP rebalance) get hidden when the
+        // address filter is active so the visible set stays coherent.
+        if (row.kind !== "troveOp") return false;
+        if (row.owner !== normalizedAddress) return false;
+      }
       if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
       if (
         effectiveMarketFilter != null &&
@@ -111,15 +126,65 @@ function useOverviewFilters(
         return false;
       return true;
     });
-  }, [rows, typeFilter, effectiveMarketFilter]);
+  }, [
+    rows,
+    typeFilter,
+    effectiveMarketFilter,
+    addressActive,
+    normalizedAddress,
+  ]);
   return {
     typeFilter,
     setTypeFilter,
     marketFilter: effectiveMarketFilter,
     setMarketFilter,
+    addressInput,
+    setAddressInput,
     filteredRows,
-    filtersActive: typeFilter != null || effectiveMarketFilter != null,
+    filtersActive:
+      typeFilter != null || effectiveMarketFilter != null || addressActive,
   };
+}
+
+/** Filter bar for the overview transactions table — type-pill row,
+ *  market-pill row, and free-text owner input. Extracted from
+ *  `OverviewBody` to keep that component under the project's
+ *  `max-lines-per-function` budget. */
+function OverviewFilterBar({
+  collaterals,
+  typeFilter,
+  onTypeFilterChange,
+  marketFilter,
+  onMarketFilterChange,
+  addressInput,
+  onAddressInputChange,
+}: {
+  collaterals: CollateralSummary[];
+  typeFilter: BadgeKind | null;
+  onTypeFilterChange: (next: BadgeKind | null) => void;
+  marketFilter: string | null;
+  onMarketFilterChange: (next: string | null) => void;
+  addressInput: string;
+  onAddressInputChange: (next: string) => void;
+}) {
+  return (
+    <div className="mb-3 space-y-2">
+      <CdpTxTypeFilter
+        options={TX_FILTER_TYPE_ORDER}
+        selected={typeFilter}
+        onChange={onTypeFilterChange}
+      />
+      <CdpTxMarketFilter
+        options={collaterals}
+        selected={marketFilter}
+        onChange={onMarketFilterChange}
+      />
+      <CdpTxAddressFilter
+        value={addressInput}
+        onChange={onAddressInputChange}
+      />
+    </div>
+  );
 }
 
 function OverviewBody({
@@ -138,6 +203,8 @@ function OverviewBody({
     setTypeFilter,
     marketFilter,
     setMarketFilter,
+    addressInput,
+    setAddressInput,
     filteredRows,
     filtersActive,
   } = useOverviewFilters(rows, collaterals);
@@ -145,18 +212,15 @@ function OverviewBody({
 
   return (
     <>
-      <div className="mb-3 space-y-2">
-        <CdpTxTypeFilter
-          options={TX_FILTER_TYPE_ORDER}
-          selected={typeFilter}
-          onChange={setTypeFilter}
-        />
-        <CdpTxMarketFilter
-          options={collaterals}
-          selected={marketFilter}
-          onChange={setMarketFilter}
-        />
-      </div>
+      <OverviewFilterBar
+        collaterals={collaterals}
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        marketFilter={marketFilter}
+        onMarketFilterChange={setMarketFilter}
+        addressInput={addressInput}
+        onAddressInputChange={setAddressInput}
+      />
       <Table>
         <thead>
           <Row>
@@ -225,7 +289,6 @@ function OverviewRow({
   market: { symbol: string; chainId: number } | undefined;
 }) {
   const kind = badgeKindFor(row);
-  const { debt, coll } = amountsFor(row);
   const symbol = market?.symbol ?? "—";
   return (
     <Row>
@@ -248,12 +311,8 @@ function OverviewRow({
           <span className="text-slate-500">{symbol}</span>
         )}
       </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(debt, symbol)}
-      </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(coll, "USDm")}
-      </Td>
+      <CdpTxAmountCell row={row} symbol={symbol} leg="debt" />
+      <CdpTxAmountCell row={row} symbol="USDm" leg="coll" />
       <TxHashCell txHash={row.txHash} chainId={market?.chainId} />
       <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
         {formatBlock(row.blockNumber)}
