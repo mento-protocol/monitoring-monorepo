@@ -1,6 +1,11 @@
 ---
 name: arkham
 description: Use this skill when interacting with the Arkham Intelligence API to fetch address labels, entities, tags, counterparties, transfers, or balances. Triggers on requests to enrich Mento address data with Arkham metadata, label addresses interacting with our pools, run backfills, or write code against `api.arkm.com`. Apply whenever you see references to Arkham, ARKM, `intel.arkm.com`, `api.arkm.com`, an `API-Key` header to that host, or fields like `arkhamEntity`, `arkhamLabel`.
+title: Arkham Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
 ---
 
 # Arkham Intelligence API

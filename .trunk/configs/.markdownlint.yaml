@@ -2,6 +2,10 @@
 extends: markdownlint/style/prettier
 # MD036: bold-as-pseudo-heading is acceptable in planning/design docs
 MD036: false
+# MD025: frontmatter `title:` is metadata, not a rendered H1. Managed
+# context files still use one visible top-level heading in the body.
+MD025:
+  front_matter_title: ""
 # MD040: fenced code blocks without language tag (common in shell/pseudo-code)
 MD040: false
 # MD060: table column style is handled by prettier

@@ -114,7 +114,8 @@ validator_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "true",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   }
 }
 JSON
@@ -209,7 +210,8 @@ package_json_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   }
 }
 JSON
@@ -244,6 +246,7 @@ package_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -281,6 +284,7 @@ package_scripts_object_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -314,7 +318,8 @@ mixed_package_script_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   },
   "dependencies": {
     "left-pad": "1.3.0"

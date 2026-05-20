@@ -1,3 +1,11 @@
+---
+title: Monitoring Dashboard Instructions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
+---
+
 # AGENTS.md — Monitoring Dashboard
 
 ## What This Is

@@ -1,3 +1,11 @@
+---
+title: Envio Indexer Instructions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
+---
+
 # AGENTS.md — Envio Indexer
 
 ## What This Is

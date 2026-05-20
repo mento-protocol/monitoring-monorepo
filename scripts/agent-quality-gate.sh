@@ -372,7 +372,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:context-check)
         saw_agent_gate_script=true
         ;;
       /scripts)
@@ -917,6 +917,15 @@ while IFS= read -r path; do
       ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
+      case "$path" in
+        docs/context-standards.md|AGENTS.md|*/AGENTS.md)
+          add_command "pnpm agent:context-check" "agent context standards changed"
+          ;;
+      esac
+      ;;
+    .agents/skills/*|.agents/roles/*|.claude/skills/*)
+      add_surface "agent-context"
+      add_command "pnpm agent:context-check" "agent context files changed"
       ;;
     scripts/*.sh)
       add_surface "scripts"
@@ -928,8 +937,12 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
+        scripts/check-agent-context.mjs)
+          add_command "pnpm agent:context-check" "agent context checker changed"
+          ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
+          add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;
       esac
       ;;
@@ -940,6 +953,9 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
+        scripts/check-agent-context.mjs)
+          add_command "pnpm agent:context-check" "agent context checker changed"
+          ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
           # baseline drift. Re-run every package's lint to exercise the

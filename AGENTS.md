@@ -1,3 +1,11 @@
+---
+title: Monitoring Monorepo Instructions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
+---
+
 # AGENTS.md — Monitoring Monorepo
 
 ## Overview
@@ -11,6 +19,11 @@ pnpm monorepo with three packages:
 - `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Agent, dashboards, and alert-rule Terraform
 
 ## Operating Rule (read this before opening PRs)
+
+Context authority, placement, and metadata rules live in
+`docs/context-standards.md`. Treat canonical context as current operating truth
+and non-canonical notes/plans as historical input that must be verified before
+use.
 
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
@@ -76,110 +89,14 @@ Treat code review as a batch-boundary verifier, not as the inner edit loop. When
 
 For process or policy-router PRs, build a coverage matrix before implementation. Use `AGENTS.md`, `docs/pr-checklists/*`, CI path filters, package scripts, and existing command docs to map each changed-path class to its required commands, checklist prompts, refusal guards, and regression tests. Run cheap targeted checks while editing; reserve broad local reviews and external bot reviews for completed batches.
 
-## Recurring PR-review patterns — fix locally, not in review
+## Recurring PR-review patterns
 
-Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. **Subsections with a linked checklist (`— docs/pr-checklists/X.md`)** treat the checklist as canonical — the inline tldr is a routing hint, not the source of truth. Subsections without a link are inline-canonical (no upstream checklist yet — candidates for future extraction).
-
-### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
-
-tldr: every Hasura-polling SWR hook MUST set `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`) and `AbortSignal.timeout(8_000)` paired with the 10s interval. Respect the 1000-row cap with pre-rolled snapshots or the `fetchAllFeeSnapshotPages` offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts:333`). New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern) — NEVER mixed into the page's primary pool query (hosted Hasura rejects unknown columns during the deploy+resync window). Distinguish `isLoading` from "data resolved to zero" — NEVER render "100% / no breaches" while `data === undefined`. Full rules in the linked checklist.
-
-### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
-
-tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), NEVER `now - start` directly. Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, NEVER from the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
-
-### Keyboard a11y on controlled widgets — `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`
-
-tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` locally, re-sync via render-time ref check — not `useEffect`). `router.replace`-backed tablists use manual activation (arrows = focus only; Enter/Space = activate via native `<button>` onClick). Never gate keyboard activations on `selected`-equality (racy under URL render-lag — bit us 3× on PR #350). `role="tablist"` contains ONLY `role="tab"` children (axe critical) — wrap LimitSelect / dropdowns / search inputs as siblings. Full rules in the linked checklist.
-
-### Indexer entity IDs
-
-- Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
-- Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
-
-### Multi-chain coverage
-
-- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). Bit us on PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries) — flagged 4× across cursor + codex inline reviews
-
-### Config-name → metadata cross-reference tests
-
-- When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). Caught by cursor + claude[bot] on PR #316
-
-### Indexer RPC self-heal (`rpc.ts`)
-
-- Multi-getter RPC helpers (`fetchFees` etc.) use `Promise.allSettled` + distinct sentinels: `-1` = not yet attempted (retry), `-2` = viem "returned no data" signature = getter missing from bytecode (stop retrying). All-or-nothing `Promise.all` loses wins from fulfilled getters; a single sentinel creates forever-retry loops on older deployments lacking a getter (bit us on PR #222)
-- Every `rpc.ts` helper that calls `getRpcClient` wraps it in try/catch. `getRpcClient` throws synchronously on unknown chainIds + missing HyperRPC tokens; unwrapped throws escape into handlers and stall indexing. Regressed twice in PR #222 — if you touch fee/rebalancing RPC helpers, check the outer guard is still in place
-
-### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
-
-tldr: rename/remove resources REQUIRE a `moved` block (`deletion_protection = true` makes a missed `moved` block fatal). Cloud Run `--revision-suffix` MUST start with a lowercase letter (RFC 1035) AND be unique per run (`$GITHUB_RUN_ID`). Probe path is `/health`, NEVER `/healthz` (Cloud Run v2 reserves `/healthz`). Bootstrap `image` MUST respond to the configured probe path. WIF requires `roles/iam.serviceAccountTokenCreator` on the runtime SA the deployer impersonates. Full rules in the linked checklist.
-
-### CI workflow gates — `docs/pr-checklists/ci-workflow-gates.md`
-
-tldr: required-status workflows MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
-
-### File-size budget
-
-- Source files MUST stay under **600 lines** (soft cap, advisory). If your change would push a file over 600 lines, split it in the same PR — extract sub-components, helpers, or per-domain modules. Don't append "just one more thing" to a file that's already drifting up.
-- Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
-- Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness).
-- **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
-- A monthly drift detector runs on cron and opens a PR appending newly-over-budget files to `BACKLOG.md` so growth doesn't slip past unnoticed.
-- Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
-
-### Security / CSP
-
-- CSP `connect-src` MUST include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/src/lib/csp.ts`'s `CSP_CONNECT_SRC`)
-- Do NOT widen `script-src` with `unsafe-eval` without proof a library actually needs it — the current policy is deliberately tight and Plotly runs fine without it
-- Auth/allowlist constants must be centralized — don't repeat domain literals across files
-
-### Migration discipline
-
-- Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
-
-### Dynamic-route metadata + private data — `docs/pr-checklists/dynamic-route-metadata.md`
-
-tldr: `generateMetadata` reading access-controlled data must gate on `isPublic === true` before emitting tags (no session, tags visible to crawlers). `export const revalidate = 0` for access-controlled sources (ISR would serve stale post-revocation tags from the edge cache). Metadata-fetching body lives in a dedicated `_lib/og-metadata.ts` helper imported by the page — not directly in `layout.tsx` — to keep the RSC label-leak guard allowlist narrow (PR #345 commit `b476776`). Full rules in the linked checklist.
-
-### SWR optimistic-update + React-key remount races
-
-- When a child component is React-keyed by a field your optimistic update also writes to (e.g. `key={entry.updatedAt}` while `upsertEntry` bumps `updatedAt` synchronously in `mutate(...)`), you've created a self-remount race against your own writes. Mid-PUT the form unmounts and a fresh mount (with `saving=false`) re-enables the Save button, opening a double-submit window. Reach for the pending-ledger architecture shipped in PR #345 (`address-labels-provider.tsx` + `address-book/[address]/page.tsx`) before re-deriving these through 15 review rounds:
-  - **Per-mount instance ID via counter-backed ref** — NOT `useId`. `useId` is tree-position-stable, so a remount at the same key path returns the same id and stale-callback dedup falsely accepts old `(false)` calls.
-  - **Separate save / delete owner refs** — a single shared `mutationOwnerRef` breaks under cross-flow timing (Save→Remove fast-click); each flow needs its own owner.
-  - **Pending ledger lifted to provider state** — page-mount-scoped state dies on navigation; a user who saves → bounces to the index → re-enters the same address sees a fresh empty ledger and an enabled Save button. Survive page mounts by living in `AddressLabelsProvider`.
-  - **Synchronous `inFlightRef` guards** — React's `setSaving(true)` is async; a fast double-click slips past the disabled state. A `useRef({ saving: false, deleting: false })` flipped synchronously inside the handler before any state setter is the only thing that prevents two PUTs from leaving the form for the same Save click.
-  - **`<fieldset disabled>` cascade** — disabling Save/Remove without disabling the inputs lets users type into a "would-be-discarded" form; on the optimistic→settled `updatedAt` transition the remount drops their edits. Wrap inputs+buttons in a fieldset.
-  - **Content fingerprint always in keys** — not just when `updatedAt` is empty. Imports preserve a non-empty `updatedAt` even when content changed; `JSON.stringify([name, tags, notes, isPublic])` in the key catches that case.
-
-### Sibling-audit rule for multi-component flows
-
-- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
-
-### Code health budgets — `docs/pr-checklists/code-health.md`
-
-CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
-ratchet in over PR 2-6 of the BACKLOG plan.
-
-- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard`, `metrics-bridge`, and `aegis` must not import each other's internals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
-- **No circular dependencies (blocking)**: `pnpm code-health:deps` fails on any cycle. The historical `indexer-envio/src/{pool,deviationBreach}.ts` cycle was broken by importing health predicates directly from `pool/health.js`; no baseline carve-out remains.
-- **Dashboard lib/ → components/ direction (blocking, `pnpm code-health:deps`)**: `ui-dashboard/src/lib/` must not import from `src/components/`. The allowed direction is `components/ → lib/` (components use utilities, never the reverse). Violations indicate lib has accidentally coupled pure logic to the render layer. Pre-inventory: zero violations; rule ships at `error`.
-- **Dashboard route-private directories (blocking, `pnpm code-health:deps`)**: `_components/` and `_tabs/` directories inside `app/<route>/` are private to that route. Code from `app/<route-A>/` must not import from `app/<route-B>/_components/` or `app/<route-B>/_tabs/`. Adding a new route with a `_components/` or `_tabs/` directory requires a matching `dashboard-route-private-<routename>` rule in `.dependency-cruiser.cjs`. Pre-inventory: zero violations; rules ship at `error`.
-- **Indexer handlers must not bypass the RPC effect layer (blocking, `pnpm code-health:deps`)**: `indexer-envio/src/handlers/**` must not import directly from `rpc/` implementation files (`rpc/pool-state.ts`, `rpc/oracle-state.ts`, `rpc/biPoolManager.ts`, `rpc/breakers.ts`, etc.). Handlers must go through `rpc/effects.ts` (the Envio Effect API facade, which provides per-batch memoisation, deduplication, and rate-limiting) or the `rpc.ts` barrel (for DB helpers like `getPoolsByFeed`). Direct fetcher imports bypass effect deduplication and fire two RPC reads per event instead of one. Pre-inventory: zero violations; rule ships at `error`.
-- **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
-- **Complexity / size / cognitive-complexity budgets (blocking, diff-aware baseline)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Pre-existing violations live in each package's `eslint-baseline.json`; new violations fail `pnpm --filter <pkg> lint` via `scripts/eslint-baseline-diff.mjs`. See `docs/pr-checklists/code-health.md`.
-- **Duplication detection (advisory, `pnpm code-health:duplication`)**: `jscpd` scans `src/` across all packages on every PR (excluding tests, `indexer-envio/src/handlers/**`, route entry pages, and pure type modules — they're intentionally repetitive). The CI job is non-blocking — surfaces a comment-summary + an artifact in `reports/jscpd/`. Use the artifact to plan extract-helper refactors.
-- **Code-health history report (advisory, `pnpm code-health:history`)**: writes `reports/code-health-history.md` with hotspots, change-coupling, ownership concentration, weekly delta. Run before large refactors so the targets are picked from data, not vibes. Weekly cron + Slack delivery in a follow-up PR.
-- **Per-package coverage floors (blocking, `pnpm --filter <pkg> test:coverage`)**: vitest `coverage.thresholds` in each `vitest.config.ts` enforces a floor so deleting tests can't silently lower coverage below the baseline. Floors calibrated at `floor(measured) - 2` to absorb variance. Current per-package floors live in each `vitest.config.ts` (source of truth). CI calls `test:coverage` (not bare `test`) for all four packages. When adding significant new code, re-measure and raise the floors accordingly.
-- **Bridge mutation score (blocking, `pnpm bridge:mutation`)**: `metrics-bridge/stryker.config.mjs` sets `break: 84` (current baseline 86.01% with a 2-pt margin for measurement noise). `.github/workflows/mutation-testing.yml` runs the bridge job on every PR (no `paths:` filter, so the check is required-status-safe per `AGENTS.md` rule above). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the mutation step runs when the trigger isn't `pull_request`, when the filter failed, or when the diff touched bridge inputs (probe source, test files, stryker + mutation vitest configs, `metrics-bridge/package.json`, `metrics-bridge/tsconfig.json`, shared-config inputs, root package-manager files, or the workflow). The job fails when the rebalance-probe mutation score drops below 84%. Dashboard + indexer mutation stay advisory (weekly cron + manual). See `docs/pr-checklists/mutation-testing.md`.
-- **Type-aware async safety + exhaustive switches (blocking, diff-aware baseline)**: `@typescript-eslint/no-floating-promises`, `no-misused-promises`, and `switch-exhaustiveness-check` are `error` on all four packages. Floating-promises catches missing `await`; misused-promises catches passing async callbacks where a void return is expected (use `void doSomething()` or wrap in a sync callback); switch-exhaustiveness forces every discriminated-union / enum switch to cover every variant. `ui-dashboard` configures `no-misused-promises` with `checksVoidReturn.attributes: false` so React event-handler attributes (`<button onClick={async () => ...}>`) are allowed — the synthetic event system swallows rejections correctly. Non-attribute void-return contexts (`setTimeout(async ...)`, function arguments, etc.) still fire and caught the `poller.ts` + `gql-retry.ts` bugs in this PR. Type-aware rules are scoped to `src/**/*.{ts,tsx}` minus `*.d.ts` + tests (the TS project service doesn't pick those up, and async tests are intentionally noisy).
-- **`noUncheckedIndexedAccess` (blocking via `pnpm <pkg> typecheck`)**: `shared-config`, `indexer-envio`, `metrics-bridge`, and `aegis` ship with the TS compiler flag on — `arr[i]` is typed as `T | undefined`, forcing explicit guards on every index access. `ui-dashboard` is deferred (355 typecheck errors) and tracked in BACKLOG for incremental burn-down.
-- **`exactOptionalPropertyTypes` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — `{ x?: T }` (absent key) is distinct from `{ x: T | undefined }` (present but undefined). Assigning `undefined` to an optional property is an error; omit the key instead (spread pattern: `...(val !== undefined && { key: val })`). `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
-- **`verbatimModuleSyntax` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — every type-only import must use `import type { ... }` syntax; value imports use plain `import`. Prevents accidental runtime imports of pure types, makes intent explicit, and plays well with `isolatedModules`. `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
-- **Bundle size gate (blocking, `pnpm dashboard:size-limit`)**: `.github/workflows/size-limit.yml` runs on every PR (no `paths:` filter, required-status-safe). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the build + size check runs when the filter failed or when the diff touched dashboard inputs. Budgets and current baseline live in `ui-dashboard/.size-limit.cjs` (source of truth — brotli-compressed `.next/static/` output, budget = baseline × 1.10). To tighten: `pnpm dashboard:build && pnpm dashboard:size-limit --json`, update limits in `.size-limit.cjs`, commit the updated baseline comment.
-- **Lockfile integrity + registry check (blocking, `pnpm lockfile:lint`)**: `scripts/lockfile-lint.mjs` validates pnpm-lock.yaml on every PR via `.github/workflows/supply-chain.yml`. Two checks: (1) every package in the `packages:` section has a valid sha512 integrity hash — prevents tampered-tarball installs; (2) every `.npmrc` discovered by walking the repo (excluding `.git/` + `node_modules/`) and every `registries:` block in `pnpm-workspace.yaml` is verified to NOT redirect to a non-canonical host (exact-match host check, not prefix — lookalikes like `registry.npmjs.org.evil.com` are rejected). Note: pnpm v9 no longer embeds `resolved:` URLs in the lockfile (unlike npm/yarn), so the `lockfile-lint` npm package cannot parse it; the check is a custom Node.js script with zero additional deps. CI job is sub-30s (no `pnpm install`). Part of the "Package-Manager Supply-Chain Hardening" thread.
-- **Core Web Vitals + accessibility gate (`lhci autorun`, advisory only)**: `.github/workflows/lighthouse.yml` runs on every PR (no `paths:` filter, required-status-safe). Polls the Vercel preview URL via GitHub Deployments API (5-min timeout), then runs `@lhci/cli` against homepage + `/pools`. Skips fork PRs and Dependabot. Budgets and current baselines in `.lighthouserc.cjs`. Assertions are currently `warn` (non-blocking) pending a reliable Vercel deployment-protection bypass — see BACKLOG entry. Promote to `error` once 5+ stable runs are collected with bypass working. Pairs with `size-limit.yml` (bundle bytes) — different failure classes.
-- **GraphQL schema diff (advisory, `pnpm code-health:schema-diff`)**: `.github/workflows/schema-diff.yml` runs on every PR (no `paths:` filter, required-status-safe). Inline `filter` step + `decide` step run the diff only when `indexer-envio/schema.graphql` changed (fail-closed on path-detection error). Uses `graphql`'s `findBreakingChanges` + `findDangerousChanges` to compare `origin/<base>:indexer-envio/schema.graphql` against `HEAD`. Results posted as a sticky PR comment (header `schema-diff`); exit code always 0 (advisory). Breaking changes (removals, type narrowing, new required args) surfaced prominently; dangerous changes (default shifts, new optional fields) listed separately; safe additions skipped. Local run: `pnpm code-health:schema-diff`. Promotion to blocking is a follow-up once real-PR signal has been collected.
-- **Env-var validation (pattern — `src/env.ts` per package)**: each package owns a `src/env.ts` that parses `process.env` via Zod at module load and exports typed constants (`env` for indexer-envio + metrics-bridge; `clientEnv` / `serverEnv` for ui-dashboard). Use `.catch(default)` (not `.default()`) for numeric/enum fields that have a fallback so invalid values silently resolve instead of throwing. `ui-dashboard` splits `NEXT_PUBLIC_*` into `clientEnv` and server-only secrets into `serverEnv` — never import `serverEnv` from a client component. Files whose tests manipulate `process.env` at test time (via `vi.stubEnv`) keep direct `process.env` reads; the static parse runs before any test hook fires. Dynamic computed-key reads (`process.env[config.envVar]`) also stay as-is.
+Recurring automated-review hazards are canonicalized in
+`docs/pr-checklists/recurring-review-patterns.md`. Read that checklist when a
+change touches cross-layer state, CI/deploy behavior, code-health rules,
+dashboard interaction flows, security headers, package-manager behavior, or
+other review-prone surfaces. Keep root instructions as routing context; put the
+detailed rules in the checklist.
 
 ## Quick Commands
 

@@ -1,6 +1,11 @@
 ---
 name: forensic-report
 description: Use this skill when investigating a specific on-chain address (operator EOA, contract, attacker, MEV bot, suspicious counterparty, etc.) and producing a forensic report for the Mento address book. Triggers on requests like "investigate 0x...", "produce a forensic report on this address", "who is 0x...", "/forensic-report", "/onchain-sleuth", "/detective", or any time you're asked to identify an unknown address that interacts with Mento and the answer needs to land in the address-book report editor. Apply whenever the goal is a long-form attribution + activity write-up that gets stored in the `reports` Upstash hash.
+title: Forensic Report Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
 ---
 
 # Forensic Report
@@ -24,7 +29,7 @@ If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"),
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
+2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "Codex"` so the editor can distinguish skill-produced from hand-typed reports.
 
 ## Output template
 
@@ -141,6 +146,8 @@ Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 
 
 By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash via the SAME atomic Lua upsert the API route uses — never split-read-modify-write, which races the editor and any other skill invocation.
 
+Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. The MCP approval prompt is the production write guard for this path.
+
 **Derive the uploader's email at runtime, not from a hardcoded value.** The skill is committed and runs from any teammate's checkout; hardcoding one email would mis-attribute every other person's reports and leak PII into git. Pull from `git config user.email`:
 
 ```bash
@@ -178,7 +185,7 @@ const partial = {
   body,
   ...(title ? { title: title.slice(0, 200) } : {}),
   authorEmail: AUTHOR_EMAIL, // from git config user.email at runtime
-  source: "claude", // already in the AddressReport enum
+  source: "Codex", // already in the AddressReport enum
 };
 ```
 
@@ -250,12 +257,15 @@ The address-book index endpoint reads from the same hash on every request, so th
 
 - `body`: required, non-empty, ≤ 50,000 characters (50KB)
 - `title`: optional, ≤ 200 characters, dropped if empty after trim
-- `source`: `"manual" | "claude" | "import"` — always set `"claude"` from this skill
+- `source`: `"manual" | "Codex" | "import"` — always set `"Codex"` from this skill
 - `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
 
 These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.
 
 ## Reference: production database
+
+The database id is non-secret. If the address-book database is replaced or
+split, update this value from Terraform or the Upstash console before writing.
 
 ```
 database_id: c687bf0d-f61f-498e-879a-016de335b4ce

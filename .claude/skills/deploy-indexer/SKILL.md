@@ -1,8 +1,11 @@
 ---
 name: deploy-indexer
-description: End-to-end Envio indexer deploy orchestrator. Pushes the current branch HEAD (typically `main`, but any branch is supported for pre-merge deploys) to the `envio` branch, babysits the build + sync via `babysit-indexer-deploy`, optionally promotes to prod, waits for DNS switchover, and runs `verify-ui` against monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
-allowed-tools: Bash, Read, Skill
-argument-hint: [--no-promote] [--no-verify]
+description: Codex-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+title: Deploy Indexer Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
 ---
 
 # Deploy Indexer (end-to-end)
@@ -10,8 +13,8 @@ argument-hint: [--no-promote] [--no-verify]
 Push a commit to the `envio` branch, watch the build + re-index, promote to
 prod, wait for the static URL to flip, then verify the dashboard.
 
-Target commit: `HEAD` of the current working directory. `$ARGUMENTS` may contain
-the boolean flags `--no-promote` and/or `--no-verify` (see below); it does NOT
+Target commit: `HEAD` of the current working directory. The user's request may
+contain the boolean flags `--no-promote` and/or `--no-verify` (see below); it does NOT
 take a commit SHA — the underlying `pnpm deploy:indexer` script always pushes
 `HEAD`, so to deploy a different commit, check it out first.
 
@@ -48,7 +51,7 @@ In parallel:
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
 - (Branch-mode only) Verify the branch tracks an upstream: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` must succeed (and `git ls-remote --exit-code origin "$BRANCH"` must find the remote ref). A local-only branch with no upstream is not a valid deploy source — its `HEAD` was never pushed to `origin`, so the deploy would ship unreproducible code. Surface and stop; tell the user to `git push -u origin <branch>` first.
 - (Branch-mode only) `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
-- Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
+- Parse the user's arguments for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
 - If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
 
@@ -56,7 +59,7 @@ If preflight fails, surface the specific cause and stop. Do not push.
 
 ### Argument flags
 
-The `$ARGUMENTS` string MAY contain (in any order, space-separated):
+The request MAY contain these flags (in any order):
 
 - `--no-promote` — push + sync, but skip Phase 3 (promote) and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. Promote separately with `npx envio-cloud deployment promote mento <commit> mento-protocol -y` once the PR merges.
 - `--no-verify` — skip Phase 5. Use when you want the deploy + DNS wait to complete unattended.
@@ -97,27 +100,42 @@ or the deployment record list.
 
 ## Phase 2 — Babysit the build + sync
 
-Invoke `babysit-indexer-deploy` via the Skill tool with `args: "<TARGET_COMMIT>"`.
-That command runs a persistent `Monitor` (45s internal poll, 30-min build
-deadline, 90-min sync deadline) that emits stdout lines on state change and
-exits when:
+Codex does not have Claude's persistent `Monitor` / `Skill` tools. Watch sync
+in the main rollout and do not leave a background process running when you
+finish.
 
-- All chains' `timestamp_caught_up_to_head_or_endblock` is non-empty (success), OR
-- 30 min elapsed without the deployment registering (build failed; stop), OR
-- 90 min elapsed without full sync (stop and report last status), OR
-- The user cancels via `TaskStop`.
+Preferred watcher:
 
-Do NOT poll status yourself in parallel — the Monitor is the single source of
-truth for sync state. Wait for the terminal emit before continuing.
+```bash
+pnpm deploy:indexer:status <TARGET_COMMIT> --watch
+```
 
-Babysit's terminal emits map to:
+The Envio Cloud deployment id is the short Git commit hash (for example
+`b92ff93b`), and the deployment can take several minutes to appear after the
+`envio` branch push. The local status wrapper resolves a full SHA to the
+registered short deployment id and, when `--watch` is present, waits up to 30
+minutes for registration before watching sync. A 404 immediately after push is
+therefore not a sync failure by itself; it means the deployment record is not
+visible yet.
 
-- `READY_TO_PROMOTE` — the new deployment is synced; continue to Phase 3.
-- `ALREADY_PROMOTED` — `TARGET_COMMIT` is already `prod_status=prod` (re-run case); continue to Phase 3, which will be a no-op, then through DNS wait + verify per the idempotency contract.
-- `BUILD_FAILED` / `SYNC_DEADLINE` — stop and surface the failure. **Never promote a non-synced deployment.**
-- User-cancelled (`TaskStop`) — stop, do not promote.
+Do **not** use `pnpm deploy:indexer:logs` without a commit while babysitting a
+new deployment that has not registered yet. The no-commit form reads the latest
+visible deployment from Envio, which can still be the old prod deployment during
+registration lag. Once the target is visible, inspect logs with the explicit
+target:
 
-Note: `ERROR <kind>` lines (e.g. `ERROR auth_or_network`) are **transient**, not terminal — the Monitor keeps polling after them. Don't stop on `ERROR` emits; the wall-clock deadline checks ensure a stuck error eventually escalates to `BUILD_FAILED` or `SYNC_DEADLINE`.
+```bash
+pnpm deploy:indexer:logs <TARGET_COMMIT> --build
+pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
+```
+
+Treat a successful caught-up exit as `READY_TO_PROMOTE`. If the command exits
+non-zero, the deployment never appears within 30 minutes, or full sync is not
+reached within 90 minutes, stop and surface the failure. **Never promote a
+non-synced deployment.**
+
+If the target is already in `prod_status=prod`, treat it as `ALREADY_PROMOTED`
+and continue through the DNS wait + verify path for idempotency.
 
 **If `--no-promote` was passed, stop here.** Print a summary listing the
 synced commit and the paste-ready promote command for the user to run later
@@ -173,9 +191,10 @@ Then promote:
 pnpm deploy:indexer:promote <TARGET_COMMIT> -y
 ```
 
-The wrapper passes `"$@"` through to `npx envio-cloud deployment promote`
-(see `scripts/deploy-indexer-promote.sh`), so `-y` reaches the underlying
-CLI cleanly. Using the wrapper keeps org/indexer defaults centralized.
+The wrapper resolves a full SHA to Envio's registered short deployment id and
+passes remaining flags through to `envio-cloud deployment promote`, so `-y`
+reaches the underlying CLI cleanly. Using the wrapper keeps org/indexer
+defaults centralized.
 
 Confirm the response line `Deployment '<commit>' of indexer 'mento' promoted to production successfully.` Then verify with:
 
@@ -192,20 +211,16 @@ The static GraphQL endpoint (e.g. `https://indexer.hyperindex.xyz/60ff18c/v1/gra
 takes ~30 s – a few minutes to flip to the newly promoted deployment. During
 that window the dashboard may transiently query the old schema.
 
-Wait **5 minutes wall-clock**, then proceed. Start a one-shot sleep with
-`run_in_background: true` and **wait for the system completion notification
-before continuing to Phase 5**:
+Wait **5 minutes wall-clock**, then proceed. Run a one-shot sleep and wait for
+it to finish before continuing to Phase 5:
 
 ```bash
 sleep 300 && echo "dns-window-elapsed"
 ```
 
-The Bash tool returns immediately with a shell ID; the harness fires a
-notification when the sleep exits. Until that notification arrives, do NOT
-start `verify-ui`, do NOT check on the shell, and do NOT poll the static URL
-— just wait. A backgrounded sleep that you don't wait on silently skips the
-DNS-flip window and produces flaky verify results, which is exactly the
-failure mode the wait exists to prevent.
+Until the sleep exits, do NOT start UI verification and do NOT poll the static
+URL. Skipping the DNS-flip window produces flaky verify results, which is
+exactly the failure mode the wait exists to prevent.
 
 Don't poll the static URL with introspection — Envio's edge cache flips
 opaquely; absence of an introspectable schema change just means our PR didn't
@@ -217,7 +232,9 @@ you MAY query for it as a probe; otherwise just wait 5 min and move on.
 
 If `--no-verify` was passed, stop here and print the final summary.
 
-Otherwise invoke `verify-ui` via the Skill tool. Pass an `args` string that includes:
+Otherwise verify with chrome-devtools MCP directly, following the browser
+verification protocol in `AGENTS.md`. Use the target URL plus a focus hint for
+the data the new deployment touches:
 
 - The target URL: `https://monitoring.mento.org`
 - A focus hint pointing at the data the new deployment touches. Examples:
@@ -225,9 +242,8 @@ Otherwise invoke `verify-ui` via the Skill tool. Pass an `args` string that incl
   - For a schema/entity addition: "verify the new `<entity>` field renders on `/<page>`"
   - For a pure backfill (no schema change): "smoke-test homepage / pools / bridge-flows for regressions; no new fields to verify"
 
-The verify skill runs chrome-devtools MCP itself; do not arm a separate
-browser session. If chrome-devtools MCP is unavailable, surface that and
-stop — do not ask the user to verify manually.
+If chrome-devtools MCP is unavailable, surface that and stop — do not ask the
+user to verify manually.
 
 ## Final summary (always print)
 
@@ -276,6 +292,6 @@ short-circuit; the verification is the value on a re-run.
 - **Never auto-rollback.** Promote-to-prior is the user's call.
 - **Never bypass the babysit phase** — don't promote based on a single status snapshot.
 - **Always wait the full 5 min** for DNS switchover before verifying — bypassing produces flaky verify results.
-- **Pass the resolved short SHA explicitly** to `babysit-indexer-deploy` and `verify-ui` — don't rely on those skills auto-resolving "latest", since a concurrent deploy by someone else could shift it.
+- **Pass the resolved short SHA explicitly** to status and verification steps — don't rely on "latest", since a concurrent deploy by someone else could shift it.
 - **Don't open a PR** to verify the deploy. This skill is a plumbing chain, not a code-review path. The PR (if any) was merged before this skill ran; the deploy is a separate concern.
 - **Default to `--no-promote` when deploying from a non-`main` branch** unless the user explicitly asked to promote. Promoting a feature-branch schema before its dashboard code is live in production wastes a sync (you'd re-promote on merge) and creates an ambiguous rollback target.
