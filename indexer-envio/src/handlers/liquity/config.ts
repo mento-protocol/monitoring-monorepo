@@ -74,7 +74,7 @@ const requireSymbolAddress = (
   // StabilityPool is the only CDP role behind a TransparentUpgradeableProxy
   // (the rest are direct CREATE3 deployments). `@mento-protocol/contracts`
   // publishes the proxy address under `StabilityPool${symbol}` (no v300
-  // suffix) and the UUPS implementation singleton under
+  // suffix) and the implementation singleton under
   // `StabilityPoolv300${symbol}`. We want the proxy — that's what
   // `AddressesRegistry.stabilityPool()` returns and what emits the events
   // we subscribe to. Confirmed on-chain for GBPm, CHFm, JPYm on 2026-05-19.
