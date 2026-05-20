@@ -1056,6 +1056,26 @@ describe("handleSnapshot trusted restore mode", () => {
     );
   });
 
+  it("rejects intel-only payloads in merge mode with a 400 (no silent 200/zero-import)", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        // No addresses, no reports — only intel fields.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: { [ADDR_A]: { address: ADDR_A } as any } as any,
+      },
+      {
+        importerEmail: "user@mentolabs.xyz",
+        writeMode: "merge",
+      },
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/trusted replace mode/i);
+    expect(importSnapshotHashes).not.toHaveBeenCalled();
+    expect(replaceSnapshotHashes).not.toHaveBeenCalled();
+  });
+
   it("strips empty intel maps from replace mode (prevents disaster-recovery wipe)", async () => {
     const res = await handleSnapshot(
       {

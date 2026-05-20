@@ -202,6 +202,31 @@ export async function handleSnapshot(
       ? extractIntelFields(body)
       : { fields: {}, hasArkhamPayload: false };
 
+  // Surface intel-only payloads in merge mode as a 400 rather than the
+  // misleading 200/zero-import response: `isSnapshot` accepts intel/legacy
+  // fields so the trusted /restore route can re-upload a partial intel corpus,
+  // but the user-facing /import path is label-oriented and silently drops the
+  // intel payload. Operators uploading an intel-only blob to /import would
+  // otherwise see "ok: true" with zero rows written and assume success.
+  const hasIntelOnlyBody =
+    !hasLabelPayload &&
+    !hasReportPayload &&
+    (INTEL_SNAPSHOT_KEYS.some(
+      (k) => (body as Record<string, unknown>)[k] !== undefined,
+    ) ||
+      ARKHAM_LEGACY_SNAPSHOT_KEYS.some(
+        (k) => (body as Record<string, unknown>)[k] !== undefined,
+      ));
+  if (writeMode === "merge" && hasIntelOnlyBody) {
+    return NextResponse.json(
+      {
+        error:
+          "Intel hash fields are only accepted in trusted replace mode (cron restore); upload via /api/address-labels/restore or include `addresses` / `reports` in the snapshot.",
+      },
+      { status: 400 },
+    );
+  }
+
   // No-op short-circuit for merge mode with empty payload. Replace mode with
   // an explicit empty payload still goes through so callers can intentionally
   // clear a hash.
