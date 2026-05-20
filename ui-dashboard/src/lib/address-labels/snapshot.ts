@@ -208,16 +208,10 @@ export async function handleSnapshot(
   // but the user-facing /import path is label-oriented and silently drops the
   // intel payload. Operators uploading an intel-only blob to /import would
   // otherwise see "ok: true" with zero rows written and assume success.
-  const hasIntelOnlyBody =
-    !hasLabelPayload &&
-    !hasReportPayload &&
-    (INTEL_SNAPSHOT_KEYS.some(
-      (k) => (body as Record<string, unknown>)[k] !== undefined,
-    ) ||
-      ARKHAM_LEGACY_SNAPSHOT_KEYS.some(
-        (k) => (body as Record<string, unknown>)[k] !== undefined,
-      ));
-  if (writeMode === "merge" && hasIntelOnlyBody) {
+  if (
+    writeMode === "merge" &&
+    isIntelOnlyPayload(body, hasLabelPayload, hasReportPayload)
+  ) {
     return NextResponse.json(
       {
         error:
@@ -227,16 +221,15 @@ export async function handleSnapshot(
     );
   }
 
-  // No-op short-circuit for merge mode with empty payload. Replace mode with
-  // an explicit empty payload still goes through so callers can intentionally
-  // clear a hash.
   if (
-    Object.keys(merged).length === 0 &&
-    importedReports === 0 &&
-    !(
-      writeMode === "replace" &&
-      (hasLabelPayload || hasReportPayload || arkhamExtract.hasArkhamPayload)
-    )
+    isNoOpEmptyPayload({
+      merged,
+      importedReports,
+      writeMode,
+      hasLabelPayload,
+      hasReportPayload,
+      hasArkhamPayload: arkhamExtract.hasArkhamPayload,
+    })
   ) {
     return NextResponse.json({
       ok: true,
@@ -245,18 +238,16 @@ export async function handleSnapshot(
   }
 
   try {
-    const importedAddresses =
-      writeMode === "replace"
-        ? await applyReplace(merged, reportsToImport, arkhamExtract.fields, {
-            hasLabelPayload,
-            hasReportPayload,
-            hasArkhamPayload: arkhamExtract.hasArkhamPayload,
-          })
-        : await applyMerge(
-            merged,
-            reportsToImport,
-            options.labelProvenanceMode ?? "strip",
-          );
+    const importedAddresses = await dispatchWrite({
+      writeMode,
+      merged,
+      reportsToImport,
+      arkhamFields: arkhamExtract.fields,
+      hasLabelPayload,
+      hasReportPayload,
+      hasArkhamPayload: arkhamExtract.hasArkhamPayload,
+      labelProvenanceMode: options.labelProvenanceMode ?? "strip",
+    });
     return NextResponse.json({
       ok: true,
       imported: { addresses: importedAddresses, reports: importedReports },
@@ -264,6 +255,50 @@ export async function handleSnapshot(
   } catch (err) {
     return serverError(err, options.errorTag);
   }
+}
+
+function isNoOpEmptyPayload(args: {
+  merged: Record<string, AddressEntry>;
+  importedReports: number;
+  writeMode: SnapshotWriteMode;
+  hasLabelPayload: boolean;
+  hasReportPayload: boolean;
+  hasArkhamPayload: boolean;
+}): boolean {
+  // Replace mode with an explicit empty payload still goes through so callers
+  // can intentionally clear a hash.
+  const replaceWantsWrite =
+    args.writeMode === "replace" &&
+    (args.hasLabelPayload || args.hasReportPayload || args.hasArkhamPayload);
+  return (
+    Object.keys(args.merged).length === 0 &&
+    args.importedReports === 0 &&
+    !replaceWantsWrite
+  );
+}
+
+async function dispatchWrite(args: {
+  writeMode: SnapshotWriteMode;
+  merged: Record<string, AddressEntry>;
+  reportsToImport: Record<string, AddressReport>;
+  arkhamFields: IntelSnapshotFields;
+  hasLabelPayload: boolean;
+  hasReportPayload: boolean;
+  hasArkhamPayload: boolean;
+  labelProvenanceMode: SnapshotLabelProvenanceMode;
+}): Promise<number> {
+  if (args.writeMode === "replace") {
+    return applyReplace(args.merged, args.reportsToImport, args.arkhamFields, {
+      hasLabelPayload: args.hasLabelPayload,
+      hasReportPayload: args.hasReportPayload,
+      hasArkhamPayload: args.hasArkhamPayload,
+    });
+  }
+  return applyMerge(
+    args.merged,
+    args.reportsToImport,
+    args.labelProvenanceMode,
+  );
 }
 
 /**
@@ -364,6 +399,19 @@ export function validateSnapshotReports(
     };
   }
   return { reports: result };
+}
+
+function isIntelOnlyPayload(
+  body: AddressLabelsSnapshot,
+  hasLabelPayload: boolean,
+  hasReportPayload: boolean,
+): boolean {
+  if (hasLabelPayload || hasReportPayload) return false;
+  const obj = body as Record<string, unknown>;
+  return (
+    INTEL_SNAPSHOT_KEYS.some((k) => obj[k] !== undefined) ||
+    ARKHAM_LEGACY_SNAPSHOT_KEYS.some((k) => obj[k] !== undefined)
+  );
 }
 
 const INTEL_SNAPSHOT_KEYS = [
