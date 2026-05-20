@@ -1,12 +1,6 @@
-# VictorOps (Splunk On-Call) message templates for Aegis alerts.
-#
-# Mirrors the content of message-templates-*.tf (Discord) but emits plain
-# text — VictorOps renders raw text, so `**bold**` shows literal asterisks
-# and `[text](url)` shows literal brackets. We strip markdown and inline
-# URLs after the link text.
-#
-# The dispatcher in locals.tf (`alert_config_victorops`) selects the right
-# template by alertname, mirroring the existing `alert_config` dispatcher.
+# Plain-text message templates per Aegis alertname for Splunk On-Call.
+# VictorOps renders raw text — no markdown survives. Selected by the
+# `local.alert_config_victorops` dispatcher in locals.tf.
 
 resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
   name     = "VictorOps: Stale Price Alert Title"

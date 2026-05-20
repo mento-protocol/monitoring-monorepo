@@ -44,10 +44,4 @@ module "grafana_alerts" {
   discord_alerts_webhook_url_catch_all             = var.discord_alerts_webhook_url_catch_all
   discord_alerts_webhook_url_aegis                 = var.discord_alerts_webhook_url_aegis
   slack_bot_token                                  = var.slack_bot_token
-  slack_channel_critical                           = var.slack_channel_critical
-  slack_channel_oracles                            = var.slack_channel_oracles
-  slack_channel_pools                              = var.slack_channel_pools
-  slack_channel_reserve                            = var.slack_channel_reserve
-  slack_channel_infra                              = var.slack_channel_infra
-  slack_channel_testnet                            = var.slack_channel_testnet
 }

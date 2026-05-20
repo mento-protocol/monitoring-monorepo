@@ -115,8 +115,8 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      # continue=true so the parallel Slack routes (added 2026-05-20) also
-      # fire for weekend-muted FX feeds — they share the same mute_timing.
+      # continue=true so the parallel Slack routes also fire for
+      # weekend-muted FX feeds — they share the same mute_timing.
       continue = true
     }
 
@@ -173,8 +173,8 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      # continue=true so the parallel Slack routes (added 2026-05-20) also
-      # fire for weekend-muted FX feeds — they share the same mute_timing.
+      # continue=true so the parallel Slack routes also fire for
+      # weekend-muted FX feeds — they share the same mute_timing.
       continue = true
     }
 
@@ -293,24 +293,12 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # SLACK DUAL-ROUTE POLICIES (added 2026-05-20)
-    #
-    # These fire ALONGSIDE the Discord policies above via `continue = true`.
-    # Once the soak window confirms Slack parity, the cutover PR removes
-    # the Discord policy blocks above, leaving only these.
-    #
-    # Severity matchers within each service split alerts between the
-    # `#alerts-critical` page channel and the relevant domain warning
-    # channel. This is a refinement over the existing Discord tree, which
-    # routes by service+chain only (no severity branching).
-    #
-    # Weekend mute timing on FX feeds (PHPUSD, COPUSD, GHSUSD, CELOPHP,
-    # CELOCOP, CELOGHS, CELOXOF, EURXOF — see locals.tf) is preserved on
-    # every Slack policy that matches oracle-relayers, in parallel with
-    # the existing Discord weekend policies (continue=true on those was
-    # flipped above for this purpose).
-    # ═══════════════════════════════════════════════════════════════════════
+    # Slack policies fire alongside the Discord policies above via
+    # `continue = true`. Severity matchers split alerts between
+    # `#alerts-critical` and the per-service warning channel (a
+    # refinement over the Discord tree, which routes by service+chain
+    # only). Oracle-relayer policies preserve the `weekend_mute` timing
+    # on FX feeds — see `weekend_disabled_feeds` in locals.tf.
 
     # Oracle Relayer page alerts → #alerts-critical (non-weekend FX)
     policy {
@@ -490,10 +478,9 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Trading-modes prod page alerts → Splunk On-Call (NEW route, added
-    # alongside the severity=warning → severity=page escalation in
-    # alert-rules-trading-modes.tf — a prod circuit-breaker engagement is
-    # pager-grade).
+    # Trading-modes prod page alerts → Splunk On-Call.
+    # A prod circuit-breaker engagement is pager-grade — see the
+    # severity=page label in alert-rules-trading-modes.tf.
     policy {
       contact_point = grafana_contact_point.splunk_on_call.name
 

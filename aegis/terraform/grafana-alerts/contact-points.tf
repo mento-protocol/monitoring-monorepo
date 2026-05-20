@@ -88,12 +88,6 @@ resource "grafana_contact_point" "splunk_on_call" {
   }
 }
 
-# Slack contact points — added 2026-05-20 alongside the Discord ones during the
-# dual-route phase of the Discord→Slack migration. Routing is wired in
-# notification-policies.tf to fire BOTH a Discord and a Slack contact point
-# for each Aegis alert during the soak window; the Discord side is dropped
-# in the cutover PR.
-#
 # All six points share `local.alert_config_slack` which dispatches by
 # alertname to the `slack.*` message templates in message-templates-slack.tf.
 

@@ -1,12 +1,5 @@
-# Slack message templates for Aegis alerts.
-#
-# Mirrors the content of message-templates-*.tf (Discord) but emits Slack
-# mrkdwn instead of Discord markdown:
-#   *bold*       (Slack)        vs   **bold**           (Discord)
-#   <url|text>   (Slack)        vs   [text](url)        (Discord)
-#
-# The dispatcher in locals.tf (`alert_config_slack`) selects the right
-# template by alertname, mirroring the existing `alert_config` dispatcher.
+# Slack mrkdwn message templates per Aegis alertname.
+# Selected by the `local.alert_config_slack` dispatcher in locals.tf.
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_title" {
   name     = "Slack: Stale Price Alert Title"

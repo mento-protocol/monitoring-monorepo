@@ -60,11 +60,10 @@ resource "grafana_contact_point" "slack_warnings_transition" {
   }
 }
 
-# Domain-split warning contact points. Added 2026-05-20 as part of the
-# Discord→Slack migration; v3 warnings move from `#alerts-warnings` to a
-# domain-specific channel based on which service rolls up the rule. The
-# existing `slack_warnings` / `_transition` contact points are retired once
-# every v3 rule has migrated.
+# Domain-split warning contact points. v3 warnings route to a domain-
+# specific channel based on which service rolls up the rule. The
+# `slack_warnings` / `_transition` contact points above are unused once
+# every rule has migrated and will be removed in a follow-up cleanup.
 
 resource "grafana_contact_point" "slack_oracles" {
   name = "slack-alerts-oracles"
@@ -282,9 +281,8 @@ locals {
     repeat_interval = "4h"
   }
 
-  # Domain-split warning notifiers. Added 2026-05-20 alongside the Discord→
-  # Slack migration. Each v3 warning rule's `notification_settings` should
-  # point at the notifier matching its service rollup:
+  # Each v3 warning rule's `notification_settings` references the
+  # notifier matching its service rollup:
   #   - Oracle health (oracle liveness, oracle jump)         → notify_warning_oracles_pool
   #   - Pool mechanics (deviation, rebalancer, trading lim.) → notify_warning_pools_pool
   #   - Pool transitions (deviation breach state changes)    → notify_warning_pools_transition
