@@ -150,6 +150,26 @@ export const CDP_TRANSACTIONS = `
   }
 `;
 
+// Isolated trove-op snapshot fields. Same isolation pattern as
+// POOL_BREACH_ROLLUP / POOL_CONFIG_EXT: `owner` + before/after debt/coll
+// are brand-new indexer columns, and hosted Hasura rejects unknown fields
+// at parse time during the deploy+resync window. Keeping them in their
+// own query lets the transactions table keep rendering — only the
+// before/after presentation and the address filter degrade — while the
+// schema catches up. UI merges the snapshot rows into the transaction
+// rows client-side by event id.
+export const CDP_TROVE_OP_SNAPSHOTS = `
+  query CdpTroveOpSnapshots($instanceId: String!, $limit: Int!) {
+    TroveOperationEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id owner debtBefore debtAfter collBefore collAfter
+    }
+  }
+`;
+
 // Cross-CDP transactions feed for the /cdps overview page. Same shape as
 // CDP_TRANSACTIONS but scoped by chain instead of instance — Liquity is
 // indexed on multiple chains (Celo + Monad), so without the chainId
@@ -196,6 +216,21 @@ export const ALL_CDP_TRANSACTIONS = `
       id instanceId troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+// Cross-CDP equivalent of CDP_TROVE_OP_SNAPSHOTS — same isolation
+// rationale (see comment above CDP_TROVE_OP_SNAPSHOTS). Scoped by chain
+// to match ALL_CDP_TRANSACTIONS.
+export const ALL_CDP_TROVE_OP_SNAPSHOTS = `
+  query AllCdpTroveOpSnapshots($chainId: Int!, $limit: Int!) {
+    TroveOperationEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id owner debtBefore debtAfter collBefore collAfter
     }
   }
 `;
