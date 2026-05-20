@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-fcae7fdc38-cfe6_a0afc8ff41",
+  "featureId": "feat_library_fcae7fdc38",
+  "title": "RPC URL redaction is bypassed in server logs",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/rebalance-check/route.ts",
+      "startLine": 126,
+      "endLine": 136,
+      "symbol": "GET",
+      "quote": "Sentry.captureException(redactRpcUrl(err, rpcUrl), {\n      tags: { route: \"rebalance-check\", network },\n    });\n    console.error(\"[rebalance-check]\", network, pool, err);"
+    }
+  ],
+  "reasoning": "The handler explicitly redacts RPC provider URLs before sending upstream failures to Sentry because provider API keys can appear in the URL path. It then logs the original error object to console, which can still contain the unredacted RPC URL in err.message or err.cause. In production, platform logs are a separate sink from Sentry, so this leaks the same secret the redaction block is intended to protect.",
+  "reproduction": "Configure a network RPC URL containing a path token, make checkRebalanceStatus throw an Error whose message includes that URL, and call GET with valid network/pool/strategy parameters. Sentry receives a redacted error, but console.error receives the original err object.",
+  "recommendation": "Log the redacted error returned by redactRpcUrl, or omit the error object from console.error entirely and keep details only in redacted Sentry capture. Avoid logging pool/strategy details if they are not needed for operations.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise validation, auth, backup/import/export behavior, and other API routes, but none assert that rebalance-check console logging uses the redacted error object when upstream errors include the configured RPC URL.",
+  "suggestedRegressionTest": "Add a rebalance-check route test that mocks checkRebalanceStatus to reject with an Error containing the configured rpcUrl, spies on console.error, calls GET, and asserts no console.error argument stringifies to a value containing the raw rpcUrl.",
+  "minimumFixScope": "ui-dashboard/src/app/api/rebalance-check/route.ts error handler plus a focused rebalance-check route regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Rebalance-check server logging now logs the redacted error object instead of the raw RPC error; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:31.259Z"
+    }
+  ],
+  "signature": "sig_feat-library-fcae7fdc38_cfe63cb405",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:45:51.908Z",
+  "updatedAt": "2026-05-20T09:56:31.258Z"
+}

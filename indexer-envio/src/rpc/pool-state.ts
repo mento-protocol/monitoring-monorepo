@@ -33,11 +33,7 @@ export function _setMockRebalancingState(
   state: RebalancingState | null,
 ): void {
   const key = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (state === null) {
-    _testRebalancingStates.delete(key);
-  } else {
-    _testRebalancingStates.set(key, state);
-  }
+  _testRebalancingStates.set(key, state);
   registerMockRebalancingStateHttp(chainId, poolAddress, state);
 }
 

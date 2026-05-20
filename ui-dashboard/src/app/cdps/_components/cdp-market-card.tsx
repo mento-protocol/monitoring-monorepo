@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { relativeTime } from "@/lib/format";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
 import {
@@ -12,10 +13,18 @@ export function CdpMarketCard({
   collateral,
   instance,
   aggregates,
+  ops24h,
+  ops24hCapped,
+  ops24hLoading,
+  ops24hHasError,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
   aggregates: CdpAggregates;
+  ops24h: number;
+  ops24hCapped: boolean;
+  ops24hLoading: boolean;
+  ops24hHasError: boolean;
 }) {
   const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
@@ -28,7 +37,13 @@ export function CdpMarketCard({
           <h2 className="text-xl font-semibold text-white">
             {collateral.symbol}
           </h2>
-          <p className="text-sm text-slate-400">USDm-backed CDP market</p>
+          <CardActivitySubtitle
+            lastEventTimestamp={instance?.lastEventTimestamp}
+            ops24h={ops24h}
+            ops24hCapped={ops24hCapped}
+            ops24hLoading={ops24hLoading}
+            ops24hHasError={ops24hHasError}
+          />
         </div>
         <CdpHealthBadge health={health} />
       </div>
@@ -59,6 +74,36 @@ export function CdpMarketCard({
         />
       </div>
     </Link>
+  );
+}
+
+function CardActivitySubtitle({
+  lastEventTimestamp,
+  ops24h,
+  ops24hCapped,
+  ops24hLoading,
+  ops24hHasError,
+}: {
+  lastEventTimestamp: string | undefined;
+  ops24h: number;
+  ops24hCapped: boolean;
+  ops24hLoading: boolean;
+  ops24hHasError: boolean;
+}) {
+  const lastActivity = lastEventTimestamp
+    ? relativeTime(lastEventTimestamp)
+    : "—";
+  // Loading and error both render `—` so a failed fetch isn't masquerading
+  // as a "no activity in 24h" zero. The Recent CDP Transactions table below
+  // surfaces the actual error message; the card just stays out of the way.
+  const opsLabel =
+    ops24hLoading || ops24hHasError
+      ? "—"
+      : `${ops24hCapped ? "≥" : ""}${ops24h}`;
+  return (
+    <p className="text-sm text-slate-400">
+      Last activity {lastActivity} · {opsLabel} ops in 24h
+    </p>
   );
 }
 

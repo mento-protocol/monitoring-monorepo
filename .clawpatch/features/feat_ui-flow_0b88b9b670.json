@@ -102,11 +102,22 @@
     "network",
     "serialization"
   ],
-  "status": "pending",
+  "status": "fixed",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-0b88b9b670-4517_db7b5d0dad"
+  ],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T103320-3c6e33",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T10:35:04.448Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T10:40:29.783Z"
 }

@@ -8,7 +8,7 @@
 // detected separately via a Pool lookup on `event.params.trader` (which is
 // `msg.sender` to Broker, == VirtualPool address in this case).
 
-import type { BrokerSwapEvent } from "envio";
+import type { BrokerSwapEvent, EvmOnEventContext, Pool } from "envio";
 import { indexer } from "../indexer.js";
 import {
   eventId,
@@ -58,6 +58,86 @@ function classifyBrokerEntryPoint(chainId: number, txTo: string): string {
   return classifyAggregator(chainId, txTo);
 }
 
+async function maybeHealBrokerCallerPool(
+  context: EvmOnEventContext,
+  pool: Pool | undefined,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<Pool | undefined> {
+  if (!pool) return undefined;
+  return selfHealWrappedExchangeId(context, pool, blockNumber, blockTimestamp);
+}
+
+async function preloadBrokerSwapInputs(args: {
+  context: EvmOnEventContext;
+  exchangeSnapshotId: string;
+  brokerCallerPoolId: string;
+}): Promise<void> {
+  await Promise.all([
+    args.context.BrokerExchangeDailySnapshot.get(args.exchangeSnapshotId),
+    args.context.Pool.get(args.brokerCallerPoolId),
+  ]);
+}
+
+async function writeBrokerProducerRollups(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  caller: string;
+  txTo: string;
+  dayTs: bigint;
+  blockTimestamp: bigint;
+  volumeUsdWei: bigint;
+}) {
+  const {
+    context,
+    chainId,
+    caller,
+    txTo,
+    dayTs,
+    blockTimestamp,
+    volumeUsdWei,
+  } = args;
+  const callerIsSystem = isSystemAddress(chainId, caller);
+  const callerDayId = `${chainId}-${caller}-${dayTs}`;
+  const aggregator = classifyBrokerEntryPoint(chainId, txTo);
+  const aggDayId = `${chainId}-${aggregator}-${dayTs}`;
+  const aggCallerMarkerId = `${chainId}-${aggregator}-${caller}-${dayTs}`;
+  const [existingCallerDay, existingAggCallerMarker, existingAggDay] =
+    await Promise.all([
+      context.BrokerTraderDailySnapshot.get(callerDayId),
+      context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
+      context.BrokerAggregatorDailySnapshot.get(aggDayId),
+    ]);
+  context.BrokerTraderDailySnapshot.set({
+    id: callerDayId,
+    chainId,
+    caller,
+    timestamp: dayTs,
+    swapCount: (existingCallerDay?.swapCount ?? 0) + 1,
+    volumeUsdWei: (existingCallerDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    isSystemAddress: existingCallerDay
+      ? existingCallerDay.isSystemAddress || callerIsSystem
+      : callerIsSystem,
+    lastSeenTimestamp: blockTimestamp,
+  });
+
+  const aggCallerFirstTouch = existingAggCallerMarker === undefined;
+  if (aggCallerFirstTouch) {
+    context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
+  }
+  context.BrokerAggregatorDailySnapshot.set({
+    id: aggDayId,
+    chainId,
+    aggregator,
+    lastSeenAggregatorAddress: txTo,
+    timestamp: dayTs,
+    swapCount: (existingAggDay?.swapCount ?? 0) + 1,
+    uniqueTraders:
+      (existingAggDay?.uniqueTraders ?? 0) + (aggCallerFirstTouch ? 1 : 0),
+    volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+  });
+}
+
 indexer.onEvent(
   { contract: "Broker", event: "Swap" },
   async ({ event, context }) => {
@@ -94,6 +174,16 @@ indexer.onEvent(
     ]);
     const tokenInMeta = tokenInMetaResult ?? UNKNOWN_FEE_TOKEN_META;
     const tokenOutMeta = tokenOutMetaResult ?? UNKNOWN_FEE_TOKEN_META;
+    const dayTs = dayBucket(blockTimestamp);
+    const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
+    const brokerCallerPoolId = makePoolId(event.chainId, brokerCaller);
+
+    if (context.isPreload)
+      return preloadBrokerSwapInputs({
+        context,
+        exchangeSnapshotId,
+        brokerCallerPoolId,
+      });
 
     // computeSwapUsdWei is built around the FPMM `(token0, token1,
     // amount{0,1}{In,Out})` shape. Broker.Swap is single-direction (only
@@ -112,14 +202,11 @@ indexer.onEvent(
       amount1Out: event.params.amountOut,
     });
 
-    const dayTs = dayBucket(blockTimestamp);
-
-    const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
     let brokerCallerPool: Awaited<ReturnType<typeof context.Pool.get>>;
     const [existingExchangeSnapshot, initialBrokerCallerPool] =
       await Promise.all([
         context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId),
-        context.Pool.get(makePoolId(event.chainId, brokerCaller)),
+        context.Pool.get(brokerCallerPoolId),
       ]);
     brokerCallerPool = initialBrokerCallerPool;
     context.BrokerExchangeDailySnapshot.set({
@@ -161,14 +248,12 @@ indexer.onEvent(
     // Delegate fully to `selfHealWrappedExchangeId` — its internal gate
     // (round 7 codex #3) checks both token presence AND exchange-row
     // seed before short-circuiting.
-    if (brokerCallerPool) {
-      brokerCallerPool = await selfHealWrappedExchangeId(
-        context,
-        brokerCallerPool,
-        blockNumber,
-        blockTimestamp,
-      );
-    }
+    brokerCallerPool = await maybeHealBrokerCallerPool(
+      context,
+      brokerCallerPool,
+      blockNumber,
+      blockTimestamp,
+    );
     const brokerCallerIsVirtualPool = brokerCallerPool
       ? isVirtualPool(brokerCallerPool)
       : false;
@@ -265,53 +350,14 @@ indexer.onEvent(
     // register the Safe owner EOAs in system-addresses directly. For now
     // signer-EOA matching is the safer rule — codex flagged the OR-form
     // as a P1 false-positive on PR #363.
-    const callerIsSystem = isSystemAddress(event.chainId, caller);
-    const callerDayId = `${event.chainId}-${caller}-${dayTs}`;
-    // v2 entry-point analysis splits Mento direct routes by exact contract:
-    // direct Broker calls vs legacy Router calls. Third-party routers still
-    // fall through to the shared aggregator classifier.
-    const aggregator = classifyBrokerEntryPoint(event.chainId, txTo);
-    const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
-    // Marker is keyed on `caller` (signer EOA), not `brokerCaller`, so
-    // uniqueTraders counts distinct EOAs per day rather than distinct
-    // msg.sender contracts (a router shows up once but routes for many EOAs).
-    const aggCallerMarkerId = `${event.chainId}-${aggregator}-${caller}-${dayTs}`;
-    const [existingCallerDay, existingAggCallerMarker, existingAggDay] =
-      await Promise.all([
-        context.BrokerTraderDailySnapshot.get(callerDayId),
-        context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
-        context.BrokerAggregatorDailySnapshot.get(aggDayId),
-      ]);
-    context.BrokerTraderDailySnapshot.set({
-      id: callerDayId,
+    await writeBrokerProducerRollups({
+      context,
       chainId: event.chainId,
       caller,
-      timestamp: dayTs,
-      swapCount: (existingCallerDay?.swapCount ?? 0) + 1,
-      volumeUsdWei: (existingCallerDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-      // Sticky-true once seen: matches TraderDailySnapshot's behaviour so a
-      // sweep within a day where the address briefly didn't classify (shouldn't
-      // happen for Broker swaps but mirrors v3 invariant) doesn't toggle.
-      isSystemAddress: existingCallerDay
-        ? existingCallerDay.isSystemAddress || callerIsSystem
-        : callerIsSystem,
-      lastSeenTimestamp: blockTimestamp,
-    });
-
-    const aggCallerFirstTouch = existingAggCallerMarker === undefined;
-    if (aggCallerFirstTouch) {
-      context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
-    }
-    context.BrokerAggregatorDailySnapshot.set({
-      id: aggDayId,
-      chainId: event.chainId,
-      aggregator,
-      lastSeenAggregatorAddress: txTo,
-      timestamp: dayTs,
-      swapCount: (existingAggDay?.swapCount ?? 0) + 1,
-      uniqueTraders:
-        (existingAggDay?.uniqueTraders ?? 0) + (aggCallerFirstTouch ? 1 : 0),
-      volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+      txTo,
+      dayTs,
+      blockTimestamp,
+      volumeUsdWei,
     });
   },
 );

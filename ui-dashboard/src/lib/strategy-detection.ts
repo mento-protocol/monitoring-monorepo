@@ -144,13 +144,12 @@ export type ProbedStrategies = {
   reservePoolIds: Set<string>;
 };
 
-// Frozen shared singleton for early-exit paths. Mutating the inner Sets
-// would leak state across callers; `Object.freeze` forbids reassignment
-// of the wrapper and documents the intent at zero runtime cost.
-const EMPTY_STRATEGIES: Readonly<ProbedStrategies> = Object.freeze({
-  cdpPoolIds: new Set<string>(),
-  reservePoolIds: new Set<string>(),
-});
+function emptyStrategies(): ProbedStrategies {
+  return {
+    cdpPoolIds: new Set<string>(),
+    reservePoolIds: new Set<string>(),
+  };
+}
 
 /**
  * Probe every unique rebalancer contract referenced by `pools` and return
@@ -162,7 +161,7 @@ export async function detectProbedStrategies(
   network: Network,
   pools: Pool[],
 ): Promise<Readonly<ProbedStrategies>> {
-  if (!network.rpcUrl) return EMPTY_STRATEGIES;
+  if (!network.rpcUrl) return emptyStrategies();
 
   const poolsByRebalancer = new Map<string, Pool[]>();
   for (const pool of pools) {
@@ -178,9 +177,9 @@ export async function detectProbedStrategies(
     else poolsByRebalancer.set(key, [pool]);
   }
 
-  if (poolsByRebalancer.size === 0) return EMPTY_STRATEGIES;
+  if (poolsByRebalancer.size === 0) return emptyStrategies();
 
-  const client = getViemClient(network.rpcUrl);
+  const client = getViemClient(network.rpcUrl, { timeoutMs: PROBE_TIMEOUT_MS });
   const typeByRebalancer = new Map<string, StrategyType>();
 
   await Promise.all(

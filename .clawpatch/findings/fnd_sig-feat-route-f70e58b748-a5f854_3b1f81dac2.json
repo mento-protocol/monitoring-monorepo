@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f70e58b748-a5f854_3b1f81dac2",
+  "featureId": "feat_route_f70e58b748",
+  "title": "Route behavior is untested across user-input and upstream-response branches",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/bridge-redeem/route.ts",
+      "startLine": 20,
+      "endLine": 105,
+      "symbol": "GET",
+      "quote": "export async function GET(request: NextRequest) {"
+    },
+    {
+      "path": "ui-dashboard/package.json",
+      "startLine": 8,
+      "endLine": 10,
+      "symbol": null,
+      "quote": "\"typecheck\": \"tsc --noEmit\",\n    \"test\": \"vitest run\",\n    \"test:browser\": \"node scripts/run-browser-tests.mjs\","
+    }
+  ],
+  "reasoning": "This API route has several externally observable branches: input validation, unsupported chain/token handling, Wormholescan fetch failures, non-OK responses, invalid JSON, no VAA, multiple operations, missing raw VAA, and success serialization. The feature metadata lists no tests, and the package has a Vitest test command available. Without a focused test, regressions in status codes, error payload shape, fetch parameters, or successful payload serialization are easy to miss.",
+  "reproduction": null,
+  "recommendation": "Add Vitest coverage for the route's validation, upstream failure, ambiguous-operation, malformed-response, and success paths using a mocked `fetch`.",
+  "whyTestsDoNotAlreadyCoverThis": "The supplied feature declares an empty `tests` list, and no route-specific test file was included as evidence.",
+  "suggestedRegressionTest": "Create a `bridge-redeem` route test that constructs `NextRequest` instances and stubs `global.fetch` for success, timeout/rejection, non-OK, invalid JSON, zero operations, multiple operations, missing raw VAA, and malformed query params.",
+  "minimumFixScope": "A new focused test file under the dashboard test tree; no production code change is required for this finding alone.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by adding focused bridge redeem route tests for validation, upstream failures, malformed JSON, no/multiple VAA operations, invalid VAA encoding, and success.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:24:57.712Z"
+    }
+  ],
+  "signature": "sig_feat-route-f70e58b748_a5f854a01d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:11.358Z",
+  "updatedAt": "2026-05-20T10:24:57.712Z"
+}

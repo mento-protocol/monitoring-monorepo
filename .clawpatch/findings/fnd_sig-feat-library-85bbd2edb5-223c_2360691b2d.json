@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-85bbd2edb5-223c_2360691b2d",
+  "featureId": "feat_library_85bbd2edb5",
+  "title": "Route descending sort puts unknown routes first",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/bridge-flows/sort.ts",
+      "startLine": 48,
+      "endLine": 57,
+      "symbol": "compareRoute",
+      "quote": "const as = a.sourceChainId ?? Number.POSITIVE_INFINITY;\n  const bs = b.sourceChainId ?? Number.POSITIVE_INFINITY;\n  if (as !== bs) return dir === \"asc\" ? as - bs : bs - as;"
+    },
+    {
+      "path": "ui-dashboard/src/lib/bridge-flows/__tests__/sort.test.ts",
+      "startLine": 81,
+      "endLine": 87,
+      "symbol": "sortTransfers — route branch",
+      "quote": "it(\"sinks unknown chain IDs on ascending (null → Infinity)\", () => {\n    const known = mk({ id: \"k\", sourceChainId: 42220, destChainId: 143 });\n    const unknown = mk({ id: \"u\", sourceChainId: null, destChainId: null });\n    const asc = sortTransfers([unknown, known], \"route\", \"asc\", noRates);\n    expect(asc[0].id).toBe(\"k\");\n  });"
+    }
+  ],
+  "reasoning": "The route comparator maps null chain IDs to Infinity, which sinks unknown routes for ascending order. The descending branch reverses the subtraction, so a null sourceChainId compares as Infinity and sorts ahead of known routes. This contradicts the module's no-data-sinks UX pattern used by nullable columns and specifically creates a descending route sort where unknown route rows occupy the top of the table.",
+  "reproduction": "Create one transfer with sourceChainId/destChainId null and one with known chain IDs, then call sortTransfers([known, unknown], \"route\", \"desc\", rates). The unknown transfer sorts first.",
+  "recommendation": "Handle missing route parts explicitly before applying direction, or reuse compareNullable over a tuple-like route value so null routes sink for both asc and desc.",
+  "whyTestsDoNotAlreadyCoverThis": "The route tests only assert null sinking for ascending order; there is no descending route test with null sourceChainId or destChainId.",
+  "suggestedRegressionTest": "Add a sortTransfers route test asserting unknown chain IDs sink on descending as well as ascending.",
+  "minimumFixScope": "Update compareRoute in ui-dashboard/src/lib/bridge-flows/sort.ts and add the missing descending null-route regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed route sort so unknown chain IDs sink for both directions and added descending null-route coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:55.698Z"
+    }
+  ],
+  "signature": "sig_feat-library-85bbd2edb5_223c290bfb",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:16:18.647Z",
+  "updatedAt": "2026-05-20T09:24:55.698Z"
+}

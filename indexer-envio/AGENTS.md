@@ -29,16 +29,18 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `scripts/run-envio-with-env.mjs` — Wrapper that loads .env before running envio CLI
+- `scripts/checkYamlAddresses.mjs` — Drift gate; asserts every hex address in `config*.yaml` resolves to `@mento-protocol/contracts`, `config/nttAddresses.json`, or the inline allowlist (testnet pool instances). Runs in CI before codegen; invoke locally with `pnpm check:yaml-addresses`. When bumping the contracts package, run this first — a renamed entry shows up here in <1s.
 - `abis/` — Vendored ABIs, refreshed from `@mento-protocol/contracts` via `pnpm generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `scripts/generateAbis.mjs` header).
 
 ## Commands
 
 ```bash
-pnpm codegen   # Generate types from schema + config
-pnpm dev       # Start indexer in dev mode (Docker: Postgres + Hasura)
-pnpm start     # Start in production mode
-pnpm stop      # Stop Docker containers
-pnpm test      # Run tests (vitest)
+pnpm codegen                # Generate types from schema + config
+pnpm dev                    # Start indexer in dev mode (Docker: Postgres + Hasura)
+pnpm start                  # Start in production mode
+pnpm stop                   # Stop Docker containers
+pnpm test                   # Run tests (vitest)
+pnpm check:yaml-addresses   # Verify every address in config*.yaml resolves to a known source
 ```
 
 ## How It Works

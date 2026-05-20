@@ -1228,14 +1228,32 @@ type SpRebalanceEvent @index(fields: ["instanceId", "timestamp"]) {
 # user actions; rendering them here too would double-count in the UI.
 # `collChange` / `debtChange` preserve the ABI's int256 sign so the UI can
 # distinguish deposits from withdrawals and borrows from repayments.
-type TroveOperationEvent @index(fields: ["instanceId", "timestamp"]) {
+# `debtBefore` / `debtAfter` / `collBefore` / `collAfter` snapshot the
+# trove's debt and collateral immediately before and after this operation.
+# `debtAfter` / `collAfter` are computed arithmetically from the ABI deltas
+# (including `_debtIncreaseFromRedist` / `_collIncreaseFromRedist` so the
+# snapshot reflects pending redistribution that this op materializes).
+# `owner` is denormalized from the Trove entity so the UI can filter by
+# trove owner without joining; lowercased to match `Trove.owner`. The
+# (chainId, owner) composite index is reserved for future server-side
+# narrowing of the address filter — today the UI filters client-side on
+# the already-fetched row set, but pre-creating the index lets that
+# switch happen without a re-sync.
+type TroveOperationEvent
+  @index(fields: ["instanceId", "timestamp"])
+  @index(fields: ["chainId", "owner"]) {
   id: ID!
   chainId: Int!
   instanceId: String! @index
   troveId: String! @index
+  owner: String! @index
   operation: Int!
   collChange: BigInt!
   debtChange: BigInt!
+  debtBefore: BigInt!
+  debtAfter: BigInt!
+  collBefore: BigInt!
+  collAfter: BigInt!
   annualInterestRate: BigInt!
   debtIncreaseFromUpfrontFee: BigInt!
   timestamp: BigInt! @index

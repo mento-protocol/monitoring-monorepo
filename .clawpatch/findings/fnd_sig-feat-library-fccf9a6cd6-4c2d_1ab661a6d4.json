@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-fccf9a6cd6-4c2d_1ab661a6d4",
+  "featureId": "feat_library_fccf9a6cd6",
+  "title": "Wormhole chain-id conversion is hardcoded to mainnet EVM IDs",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/wormhole/chainIds.ts",
+      "startLine": 5,
+      "endLine": 9,
+      "symbol": "WORMHOLE_TO_EVM_CHAIN_ID",
+      "quote": "export const WORMHOLE_TO_EVM_CHAIN_ID: Record<number, number> = {\n  14: 42220, // Celo\n  48: 143, // Monad\n  // 5: 137, // Polygon (future)\n};"
+    },
+    {
+      "path": "indexer-envio/package.json",
+      "startLine": 13,
+      "endLine": 18,
+      "symbol": "scripts",
+      "quote": "\"indexer:multichain:testnet:codegen\": \"node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.testnet.yaml\",\n\"indexer:multichain:testnet:dev\": \"node ./scripts/run-envio-with-env.mjs dev --config config.multichain.testnet.yaml\""
+    }
+  ],
+  "reasoning": "The indexer package explicitly supports a multichain testnet config, but wormholeToEvmChainId always maps Wormhole Celo and Monad IDs to the mainnet EVM IDs 42220 and 143. In a testnet run, any handler using this helper to normalize Wormhole chain IDs will persist or look up mainnet chain IDs instead of the configured testnet chain IDs, which can mis-associate transfers, fail address-manifest lookups, or write bridge metadata under the wrong chain. The repository guidance also calls out hardcoded mainnet chain lists as a recurring multi-chain failure mode.",
+  "reproduction": null,
+  "recommendation": "Make the mapping environment/config aware instead of a single global Wormhole-to-mainnet table. Derive the allowed EVM chain IDs from the active chain configuration or the NTT address manifest entries, and resolve Wormhole IDs within that active set so mainnet and testnet runs do not collide.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were included for the wormhole source group, and the package manifest exposes testnet commands without any linked test asserting wormholeToEvmChainId behavior under testnet configuration.",
+  "suggestedRegressionTest": "Add a unit test or handler-level test that runs the Wormhole chain-id conversion against testnet config/manifest data and asserts Celo Sepolia and Monad testnet are resolved to their testnet EVM chain IDs, not 42220 or 143.",
+  "minimumFixScope": "indexer-envio/src/wormhole/chainIds.ts plus the call sites that can pass active config or manifest context, with a focused regression test for mainnet and testnet resolution.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Wormhole chain-id resolution now uses active Envio chain IDs with mainnet/testnet regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:31.581Z"
+    }
+  ],
+  "signature": "sig_feat-library-fccf9a6cd6_4c2d67e151",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:45:37.971Z",
+  "updatedAt": "2026-05-20T09:56:31.581Z"
+}

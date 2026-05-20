@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ed610b501e-f96e_bad96d4b5d",
+  "featureId": "feat_library_ed610b501e",
+  "title": "Near-boundary unhealthy samples are accumulated as healthy",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/healthScore.ts",
+      "startLine": 147,
+      "endLine": 158,
+      "symbol": "computeHealthSnapshotFields",
+      "quote": "const scaledRatio = (priceDifference * SCALE) / thr;"
+    },
+    {
+      "path": "indexer-envio/src/healthScore.ts",
+      "startLine": 243,
+      "endLine": 248,
+      "symbol": "updateHealthAccumulators",
+      "quote": "parseFloat(prevRatio) <= 1.01"
+    },
+    {
+      "path": "indexer-envio/test/healthScore.test.ts",
+      "startLine": 72,
+      "endLine": 80,
+      "symbol": "computeHealthSnapshotFields tests",
+      "quote": null
+    }
+  ],
+  "reasoning": "Snapshot health is classified with exact integer math, but the ratio persisted for the next interval is truncated to 6 decimals. updateHealthAccumulators then re-classifies the previous interval by parsing that truncated string and checking <= 1.01. Any exact ratio in (1.01, 1.010001) is correctly emitted as healthBinaryValue 0.000000, but its deviationRatio can truncate to 1.010000 and later be counted as healthy carry time, overstating uptime.",
+  "reproduction": "A sample with priceDifference=10100001n and effectiveThresholdBps=10000000 produces exact ratio 1.0100001, so computeHealthSnapshotFields marks it unhealthy, but deviationRatio is stored as \"1.010000\". If that becomes pool.lastDeviationRatio, updateHealthAccumulators treats the following interval as healthy.",
+  "recommendation": "Do not derive accumulator health from the rounded display ratio. Persist/use the exact binary health decision for the previous sample, or store an integer numerator/threshold decision field and carry that into updateHealthAccumulators.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests cover exactly 1.01 and a much larger just-above case (1.012), but not a value just above 1.01 that truncates back to 1.010000 at 6 decimals before the accumulator re-reads it.",
+  "suggestedRegressionTest": "Add a recordHealthSample/updateHealthAccumulators test for priceDifference=10100001n, threshold=10000000, then assert the next interval adds zero healthBinarySeconds while still adding healthTotalSeconds.",
+  "minimumFixScope": "indexer-envio/src/healthScore.ts plus healthScore regression coverage.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Health snapshots now preserve exact unhealthy decisions near the 1.01 boundary for accumulator updates; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:30.349Z"
+    }
+  ],
+  "signature": "sig_feat-library-ed610b501e_f96e7ef6c4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:46:34.367Z",
+  "updatedAt": "2026-05-20T09:56:30.348Z"
+}

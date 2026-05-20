@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-f5f2ed3fed-67e4_e53c324276",
+  "featureId": "feat_library_f5f2ed3fed",
+  "title": "Pool LP ownership query silently truncates after Hasura's row cap",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/queries/lp.ts",
+      "startLine": 7,
+      "endLine": 15,
+      "symbol": "POOL_LP_POSITIONS",
+      "quote": "LiquidityPosition( where: { poolId: { _eq: $poolId } } order_by: { netLiquidity: desc } )"
+    },
+    {
+      "path": "ui-dashboard/src/lib/queries/lp.ts",
+      "startLine": 22,
+      "endLine": 25,
+      "symbol": "UNIQUE_LP_ADDRESSES",
+      "quote": "hosted Hasura silently caps every UI query at 1 000 rows"
+    }
+  ],
+  "reasoning": "The per-pool LP ownership query has no pagination inputs and relies on a single LiquidityPosition request. The same module documents that hosted Hasura silently caps UI queries at 1000 rows, so any pool with more than 1000 active LP positions will render an incomplete LP list without an error or truncation indicator. Because the query orders by netLiquidity desc, the omitted rows are lower-liquidity providers, which is still incorrect for an ownership table.",
+  "reproduction": "Create or mock 1001 LiquidityPosition rows for one pool and request POOL_LP_POSITIONS. The dashboard receives at most the hosted cap and has no way to know that the provider list was truncated.",
+  "recommendation": "Add limit/offset pagination for POOL_LP_POSITIONS, or switch the pool LP tab to a paginated table backed by POOL_LP_POSITIONS_PAGE plus an id-only count/truncation query. If full pagination is deferred, surface an explicit cap-hit state instead of rendering the partial list as complete.",
+  "whyTestsDoNotAlreadyCoverThis": "The included OLS and leaderboard tests do not exercise POOL_LP_POSITIONS. The query characterization tests only assert ordering/filter shape and do not model Hasura's silent cap or a >1000-row pool.",
+  "suggestedRegressionTest": "Add a test around the LP tab/query fetch path that mocks two pages of LiquidityPosition rows for one pool and asserts all rows are fetched or that a truncation warning is rendered when the cap is hit.",
+  "minimumFixScope": "ui-dashboard/src/lib/queries/lp.ts and the pool LP tab data-fetching path that consumes POOL_LP_POSITIONS.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Pool LP query now has an explicit 1000-row cap and the LP tab surfaces a cap-hit notice instead of implying completeness.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:30.637Z"
+    }
+  ],
+  "signature": "sig_feat-library-f5f2ed3fed_67e44df31d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:47:23.578Z",
+  "updatedAt": "2026-05-20T09:56:30.637Z"
+}

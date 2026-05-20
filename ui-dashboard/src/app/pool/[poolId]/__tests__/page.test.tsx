@@ -8,6 +8,7 @@ const mockReplace = vi.fn();
 const mockSearchParams = new URLSearchParams("tab=providers");
 
 vi.mock("@/lib/graphql", () => ({
+  HASURA_TIMEOUT_MS: 5000,
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
 
@@ -37,6 +38,14 @@ vi.mock("@/components/network-provider", () => ({
 }));
 
 let mockPoolId = "0xpool";
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    Suspense: ({ children }: { children: ReactNode }) => <>{children}</>,
+  };
+});
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ poolId: encodeURIComponent(mockPoolId) }),

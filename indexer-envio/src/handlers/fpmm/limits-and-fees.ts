@@ -309,6 +309,7 @@ indexer.onEvent(
         blockNumber,
         blockTimestamp,
         txHash: event.transaction.hash,
+        logIndex: event.logIndex,
         oracleDelta: {
           rebalanceThreshold: 0,
           rebalanceThresholdAbove: 0,
@@ -326,6 +327,7 @@ indexer.onEvent(
         blockNumber,
         blockTimestamp,
         txHash: event.transaction.hash,
+        logIndex: event.logIndex,
         oracleDelta: {
           rebalanceThresholdAbove: above,
           rebalanceThresholdBelow: below,

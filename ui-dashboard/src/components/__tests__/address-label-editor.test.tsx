@@ -273,6 +273,20 @@ describe("AddressLabelEditor — tab panels", () => {
       container.querySelector('[data-testid="report-editor-stub"]'),
     ).not.toBeNull();
   });
+
+  it("refreshes the report panel address when an already-mounted editor switches targets", () => {
+    const firstAddress = "0x" + "d".repeat(40);
+    const secondAddress = "0x" + "e".repeat(40);
+    render({ address: firstAddress, onClose: () => undefined });
+    clickTab("Forensic Report");
+
+    let stub = container.querySelector('[data-testid="report-editor-stub"]');
+    expect(stub?.getAttribute("data-address")).toBe(firstAddress);
+
+    rerender({ address: secondAddress, onClose: () => undefined });
+    stub = container.querySelector('[data-testid="report-editor-stub"]');
+    expect(stub?.getAttribute("data-address")).toBe(secondAddress);
+  });
 });
 
 describe("AddressLabelEditor — new-address draft sharing", () => {

@@ -23,6 +23,10 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
+        # Raw Arkham extraction output (gitignored locally; JSONLs of API
+        # responses that contain harmless misspellings + are not formatted
+        # for human review).
+        - "**/.arkham-marathon/**"
     - linters: [prettier]
       paths:
         # Clawpatch owns these generated state artifacts; formatting them

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-9dde7ade03-3b31_a5d2470603",
+  "featureId": "feat_library_9dde7ade03",
+  "title": "Linked test file does not exercise the global pools table helpers",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/bridge-flows/__tests__/sort.test.ts",
+      "startLine": 1,
+      "endLine": 3,
+      "symbol": null,
+      "quote": "import { sortTransfers, compareNullable } from \"../sort\";"
+    },
+    {
+      "path": "ui-dashboard/src/components/global-pools-table/sort.ts",
+      "startLine": 54,
+      "endLine": 184,
+      "symbol": "sortGlobalPools",
+      "quote": "export function sortGlobalPools("
+    },
+    {
+      "path": "ui-dashboard/src/components/global-pools-table/formatting.ts",
+      "startLine": 19,
+      "endLine": 29,
+      "symbol": "hasFeeData",
+      "quote": "export function hasFeeData(pool: Pool): boolean {"
+    }
+  ],
+  "reasoning": "The only linked test is for bridge-flow transfer sorting, importing ../sort from ui-dashboard/src/lib/bridge-flows, while this feature's main behavior is in ui-dashboard/src/components/global-pools-table/sort.ts and formatting.ts. That leaves the explicit UX contracts encoded in these helpers, such as null rows sinking for every sort direction and fee sentinel handling, unprotected by the included test evidence.",
+  "reproduction": null,
+  "recommendation": "Add focused unit tests for global-pools-table sorting and fee formatting, especially null/missing values sinking in asc and desc, cross-chain key uniqueness, fee sentinel handling, and health ordering.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test suite targets sortTransfers and compareNullable in the bridge-flows module, not sortGlobalPools, globalPoolKey, hasFeeData, or formatFee.",
+  "suggestedRegressionTest": "Create ui-dashboard/src/components/global-pools-table/__tests__/sort.test.ts covering each GlobalSortKey's missing-data behavior in both directions and ui-dashboard/src/components/global-pools-table/__tests__/formatting.test.ts for virtual pools, null fees, negative sentinels, and valid fee totals.",
+  "minimumFixScope": "Add tests only; no production code change is required unless the new tests expose inconsistent behavior.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Added focused global pools sorting/fee formatting coverage for null sinking, cross-chain keys, fee sentinels, and health ordering.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:49.778Z"
+    }
+  ],
+  "signature": "sig_feat-library-9dde7ade03_3b31102531",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:29:22.053Z",
+  "updatedAt": "2026-05-20T09:43:49.778Z"
+}

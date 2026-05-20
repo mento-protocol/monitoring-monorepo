@@ -5,7 +5,32 @@ import type {
   CdpSpRebalanceEventRow,
   CdpTransactionRow,
   CdpTroveOperationEventRow,
+  CdpTroveOpSnapshotRow,
 } from "./types";
+
+/** Response shape for `CDP_TROVE_OP_SNAPSHOTS` / `ALL_CDP_TROVE_OP_SNAPSHOTS`. */
+export type CdpTroveOpSnapshotResponse = {
+  TroveOperationEvent: CdpTroveOpSnapshotRow[];
+};
+
+/** Index snapshot rows by event id so the table can look them up in
+ *  O(1) when merging into the trove-op rows. Returns an empty map when
+ *  the isolated query is loading or returned an error — the caller
+ *  treats any missing snapshot as "render flat amount, hide owner". */
+export function indexSnapshotsById(
+  data: CdpTroveOpSnapshotResponse | undefined,
+): Map<string, CdpTroveOpSnapshotRow> {
+  const m = new Map<string, CdpTroveOpSnapshotRow>();
+  for (const row of data?.TroveOperationEvent ?? []) {
+    m.set(row.id, row);
+  }
+  return m;
+}
+
+/** Per-kind fetch cap for the cross-CDP transactions query. Shared between
+ *  the overview table and the page-level fetch that derives per-market
+ *  24h activity counts for the market cards. */
+export const CDP_OVERVIEW_PER_KIND_FETCH_LIMIT = 250;
 
 export type CdpTransactionsResponse = {
   LiquidationEvent: CdpLiquidationEventRow[];
@@ -42,7 +67,7 @@ export const BADGE_LABELS: Record<BadgeKind, string> = {
   liquidation: "Liquidation",
   userRedemption: "Redemption",
   rebalanceRedemption: "Rebalance Redemption",
-  spRebalance: "SP Rebalance",
+  spRebalance: "Rebalance",
   troveOpen: "Open Trove",
   troveClose: "Close Trove",
   troveAdjust: "Adjust Trove",
@@ -113,6 +138,59 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
       // removed. Rendered with leading minus for withdrawals/repayments.
       return { debt: row.debtChange, coll: row.collChange };
   }
+}
+
+/** Per-leg before/after/delta snapshot used by the trove-op row renderer.
+ *  `delta` is signed (positive = increase, negative = decrease) and is
+ *  derived as `after - before` so the rendered delta is internally
+ *  consistent even if the underlying ABI ever exposed extra redist terms
+ *  the indexer didn't fold in. */
+interface TroveSnapshotLeg {
+  before: string;
+  after: string;
+  delta: string;
+}
+
+export interface TroveSnapshot {
+  debt: TroveSnapshotLeg;
+  coll: TroveSnapshotLeg;
+}
+
+/** Returns null when there is no usable snapshot for this row — either
+ *  the row is not a trove-op, or the isolated `CDP_TROVE_OP_SNAPSHOTS`
+ *  query hasn't resolved a matching entry (deploy+resync window, backfill
+ *  not yet caught up, or a missing/null column on the indexer side).
+ *  Callers fall back to the flat-amount rendering (`amountsFor`) in
+ *  that case so the table keeps working while the schema catches up. */
+export function troveSnapshotFor(
+  row: CdpTransactionRow,
+  snapshot: CdpTroveOpSnapshotRow | undefined,
+): TroveSnapshot | null {
+  if (row.kind !== "troveOp" || snapshot == null) return null;
+  if (
+    snapshot.debtBefore == null ||
+    snapshot.debtAfter == null ||
+    snapshot.collBefore == null ||
+    snapshot.collAfter == null
+  ) {
+    return null;
+  }
+  const debtBefore = BigInt(snapshot.debtBefore);
+  const debtAfter = BigInt(snapshot.debtAfter);
+  const collBefore = BigInt(snapshot.collBefore);
+  const collAfter = BigInt(snapshot.collAfter);
+  return {
+    debt: {
+      before: snapshot.debtBefore,
+      after: snapshot.debtAfter,
+      delta: (debtAfter - debtBefore).toString(),
+    },
+    coll: {
+      before: snapshot.collBefore,
+      after: snapshot.collAfter,
+      delta: (collAfter - collBefore).toString(),
+    },
+  };
 }
 
 export type MergedTransactions = {

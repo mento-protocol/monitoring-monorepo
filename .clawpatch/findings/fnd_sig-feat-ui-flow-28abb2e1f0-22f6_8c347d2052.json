@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-28abb2e1f0-22f6_8c347d2052",
+  "featureId": "feat_ui-flow_28abb2e1f0",
+  "title": "Open breach grace math can count weekend time against the 1h grace window",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/breach-history-chart.tsx",
+      "startLine": 65,
+      "endLine": 87,
+      "symbol": "BreachHistoryChart",
+      "quote": "const duration = isOpen\n      ? tradingSecondsInRange(startedAt, nowSeconds)\n      : Number(b.durationSeconds ?? \"0\");\n...\nconst critical = isOpen\n      ? peakAboveCritical && nowSeconds > startedAt + grace\n        ? tradingSecondsInRange(startedAt + grace, nowSeconds)\n        : 0"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "startLine": 71,
+      "endLine": 76,
+      "symbol": null,
+      "quote": "vi.mock(\"@/components/breach-history-chart\", () => ({\n  BreachHistoryChart: (props: { breaches: DeviationThresholdBreach[] }) => {\n    capturedChartBreaches = props.breaches;\n    return <div data-testid=\"breach-chart\" />;\n  },\n}));"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx",
+      "startLine": 977,
+      "endLine": 1010,
+      "symbol": null,
+      "quote": "it(\"open breach spanning the weekend renders trading-seconds, not wall-clock\", () => {\n...\nexpect(html).toContain(\"2h 0m\");\n// Wall-clock would be \"2d 4h\" (187200s) — must NOT appear\nexpect(html).not.toContain(\"2d 4h\");"
+    }
+  ],
+  "reasoning": "The chart correctly computes open-breach duration with tradingSecondsInRange, but the open critical/past-grace branch still gates on wall-clock nowSeconds > startedAt + grace and then starts counting from startedAt + grace, which is also a wall-clock offset. If a breach starts shortly before or during the FX weekend, the 1h grace can expire while markets are closed. Example: start Friday 20:30 UTC, now Sunday 23:15 UTC, critical peak. Only 45 trading minutes have elapsed, so past-grace should be 0, but this code sees now > Friday 21:30 and reports tradingSecondsInRange(Friday 21:30, Sunday 23:15) = 15 minutes past grace. That makes the chart hover and severity boundary disagree with trading-second grace semantics used elsewhere.",
+  "reproduction": "Freeze Date.now to Sunday 2024-01-07 23:15 UTC, pass one open breach started Friday 2024-01-05 20:30 UTC with peakPriceDifference / entryRebalanceThreshold above DEVIATION_CRITICAL_RATIO, and inspect the Plot trace customdata: it reports nonzero Past grace even though total trading duration is still under 1h.",
+  "recommendation": "For open rows, derive past-grace from trading seconds directly: compute openTradingDuration = tradingSecondsInRange(startedAt, nowSeconds), set critical to peakAboveCritical ? Math.max(0, openTradingDuration - grace) : 0, and use the same value for chart hover/classification. Avoid using startedAt + grace as a wall-clock timestamp when the interval can cross FX weekend closure.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing weekend regression test covers BreachRow rendered HTML, but the chart component is mocked in breach-history-panel.test.tsx, so none of the Plot data/customdata produced by BreachHistoryChart is asserted.",
+  "suggestedRegressionTest": "Add a focused BreachHistoryChart test that stubs react-plotly.js, freezes time across a weekend, renders an open critical breach with less than 1 trading hour elapsed, and asserts the emitted trace customdata Past grace value is zero. Also cover the just-over-1-trading-hour case to ensure it starts counting after trading-time grace, not wall-clock grace.",
+  "minimumFixScope": "ui-dashboard/src/components/breach-history-chart.tsx open-row critical-duration calculation plus a focused component regression test",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Open critical past-grace now subtracts grace from tradingSecondsInRange duration, with weekend-spanning BreachHistoryChart regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:53:51.006Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-28abb2e1f0_22f6d40036",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T104043-436ff7",
+  "createdAt": "2026-05-20T10:42:17.345Z",
+  "updatedAt": "2026-05-20T10:53:51.005Z"
+}

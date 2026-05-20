@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-8ff47ca9e6-b9eb_bd0ff44475",
+  "featureId": "feat_library_8ff47ca9e6",
+  "title": "Filter-change count errors can keep the previous filter's pagination total",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
+      "startLine": 118,
+      "endLine": 134,
+      "symbol": "BridgeFlowsContent",
+      "quote": "const lastKnownTotalRef = useRef(0); ... useEffect(() => { lastKnownTotalRef.current = 0; }, [statusKey]); ... const total = countResult.error ? lastKnownTotalRef.current : rawTotal;"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
+      "startLine": 142,
+      "endLine": 148,
+      "symbol": "BridgeFlowsContent",
+      "quote": "offset: (page - 1) * PAGE_LIMIT, statusIn"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "startLine": 1098,
+      "endLine": 1142,
+      "symbol": "BridgeFlowsPage — pagination and count state",
+      "quote": "falls back to last-known total on count error (preserves the denominator)"
+    },
+    {
+      "path": "ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+      "startLine": 1150,
+      "endLine": 1269,
+      "symbol": "BridgeFlowsPage — status filter",
+      "quote": "status filter tests cover valid/invalid status and click routing, but not a count error on the first render after the filter changes."
+    }
+  ],
+  "reasoning": "The code tries to clear the preserved count when selectedStatus changes, but it does so in an effect. Effects run after the render that consumes countResult.error, and mutating the ref does not trigger another render. If a user previously saw All with a successful count, then changes to a narrower status while the count query transiently errors, the new filtered view can render with the old All denominator and page count indefinitely until some unrelated render occurs. That stale page value also feeds the transfer query offset clamp, so pagination controls can expose pages that do not exist for the selected filter.",
+  "reproduction": "Render once with status=All and BRIDGE_TRANSFERS_COUNT returning 50 IDs. Then render with status=PENDING and BRIDGE_TRANSFERS_COUNT returning an error while BRIDGE_TRANSFERS_WINDOW returns the filtered rows. The UI still uses the previous lastKnownTotalRef value for total, so it can show 50 total / multiple pages for the PENDING filter.",
+  "recommendation": "Reset the preserved count synchronously when the filter key changes. For example, store the key alongside the value in the ref and only reuse lastKnownTotalRef.current when its key matches the current statusKey; otherwise treat the preserved count as 0/null on count errors. Alternatively keep the last-known total in state keyed by status and update it during successful count results.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing count-error regression only re-renders the same filter after a successful count, so preserving the denominator is correct there. The status-filter tests cover the statusIn variables and URL updates, but they do not combine a status change with a first-render count failure.",
+  "suggestedRegressionTest": "Add a bridge-flows page test that renders with All + successful count, re-renders with mockSearchParams set to status=PENDING and count failed, and asserts the old All total is not displayed for the filtered view.",
+  "minimumFixScope": "ui-dashboard/src/app/bridge-flows/_components/bridge-flows-page-client.tsx plus a focused regression in ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Bridge-flow count fallback is keyed to the current status filter synchronously, preventing previous-filter totals on count errors; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:51.662Z"
+    }
+  ],
+  "signature": "sig_feat-library-8ff47ca9e6_b9eb9547b6",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:31:07.549Z",
+  "updatedAt": "2026-05-20T09:43:51.662Z"
+}

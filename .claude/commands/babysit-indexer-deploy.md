@@ -13,9 +13,10 @@ If you find yourself reaching for `CronCreate` or `/loop` here, stop — Monitor
 ## Preflight (run once, before arming the Monitor)
 
 1. **Resolve the target commit.**
-   - If `$1` is set, use it verbatim (short SHA, 7–8 chars). Capture as `TARGET_COMMIT`.
-   - Otherwise: `git fetch origin envio && git rev-parse --short origin/envio`.
+   - If `$1` is set, use it verbatim. Capture as `TARGET_COMMIT`.
+   - Otherwise: `git fetch origin envio && git rev-parse --short=7 origin/envio`.
    - Print the resolved commit so the user can sanity-check it.
+   - **Envio's API stores `commit_hash` truncated to exactly 7 chars** — the script body below clips `TARGET` to `${TARGET:0:7}` defensively so an 8-char short SHA (which is what `git rev-parse --short` returns once a repo's `core.abbrev` ticks up past 7) doesn't break `startswith` matching and silently flunk the build-deadline check. Don't trim here in preflight; leave it to the script's first line so the contract is one-place.
 
 2. **No cycle counter needed.** Wall-clock budgets are enforced inside the Monitor script — see "Emit policy" below.
 
@@ -30,6 +31,13 @@ Arm a single Monitor with `persistent: true` and a `description` like `envio syn
 # -o pipefail catches a real upstream failure that gets masked by jq exiting 0.
 set -uo pipefail
 TARGET="<TARGET_COMMIT>"               # interpolate the resolved short SHA
+# Envio's API returns `commit_hash` clipped to exactly 7 chars; an 8-char
+# short SHA passed in (which is what `git push origin envio` prints, and what
+# bare `git rev-parse --short HEAD` returns once `core.abbrev` ticks up past
+# 7) would cause `startswith($t)` below to match zero rows on every poll.
+# The build deadline then fires after 30 min with `BUILD_FAILED elapsed=30m`
+# even though the deployment registered fine. Clip to 7 chars defensively.
+TARGET="${TARGET:0:7}"
 ORG="mento-protocol"
 INDEXER="mento"
 START=$(date +%s)

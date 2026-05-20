@@ -78,6 +78,15 @@ describe("computeHealthSnapshotFields", () => {
     const result = computeHealthSnapshotFields(5060n, 5000);
     assert.equal(result.healthBinaryValue, "0.000000");
   });
+
+  it("serializes exact-unhealthy near-boundary ratios as unhealthy for later accumulation", () => {
+    // Exact ratio is 1.0100001, strictly above the 1.01 healthy line. A raw
+    // 6dp truncation would persist "1.010000", which the next accumulator
+    // pass would read back as healthy.
+    const result = computeHealthSnapshotFields(10_100_001n, 10_000_000);
+    assert.equal(result.healthBinaryValue, "0.000000");
+    assert.equal(result.deviationRatio, "1.010001");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -121,6 +130,25 @@ describe("updateHealthAccumulators", () => {
     const result = updateHealthAccumulators(pool, 1100n, "0.500000");
     assert.equal(result.healthTotalSeconds, 100n);
     assert.equal(result.healthBinarySeconds, 0n); // previous was unhealthy
+  });
+
+  it("does not accumulate near-boundary exact-unhealthy previous samples as healthy", () => {
+    const first = recordHealthSample(
+      makePool({ oracleExpiry: 300n }),
+      10_100_001n,
+      10_000_000,
+      1000n,
+    );
+    assert.equal(first.snapshotFields.healthBinaryValue, "0.000000");
+    assert.equal(first.poolUpdate.lastDeviationRatio, "1.010001");
+
+    const pool = makePool({
+      ...first.poolUpdate,
+      oracleExpiry: 300n,
+    });
+    const second = recordHealthSample(pool, 5_000_000n, 10_000_000, 1100n);
+    assert.equal(second.poolUpdate.healthTotalSeconds, 100n);
+    assert.equal(second.poolUpdate.healthBinarySeconds, 0n);
   });
 
   it("gap exceeding freshness limit: splits carry + stale", () => {

@@ -1,29 +1,43 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
-import { ALL_CDP_TRANSACTIONS } from "@/lib/queries";
+import {
+  ALL_CDP_TRANSACTIONS,
+  ALL_CDP_TROVE_OP_SNAPSHOTS,
+} from "@/lib/queries";
 import Link from "next/link";
-import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import { cdpSymbolSlug } from "../_lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
-  amountsFor,
+  CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  type BadgeKind,
   badgeKindFor,
+  indexSnapshotsById,
   mergeTransactionRows,
+  troveSnapshotFor,
   type CdpTransactionsResponse,
+  type CdpTroveOpSnapshotResponse,
 } from "../_lib/transactions";
-import type { CdpTransactionRow } from "../_lib/types";
+import type { CdpTransactionRow, CdpTroveOpSnapshotRow } from "../_lib/types";
+import { CdpTxAmountCell } from "./cdp-tx-amount-cell";
+import {
+  CdpTxAddressFilter,
+  CdpTxMarketFilter,
+  CdpTxTypeFilter,
+  TX_FILTER_TYPE_ORDER,
+  normalizeAddressFilter,
+} from "./cdp-tx-filters";
 
 // 100 across all markets is the user-visible cap. We fetch a larger
 // per-kind cap and merge so the latest 100 across kinds is accurate even
 // when one kind dominates (e.g. trove ops far outnumber liquidations).
 const MAX_ROWS = 100;
-const PER_KIND_FETCH_LIMIT = 250;
 
 interface CollateralSummary {
   id: string;
@@ -40,13 +54,25 @@ export function CdpAllTransactionsTable({
 }) {
   const { data, error, isLoading } = useGQL<CdpTransactionsResponse>(
     ALL_CDP_TRANSACTIONS,
-    { chainId, limit: PER_KIND_FETCH_LIMIT },
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
+  );
+  // Isolated query for the schema-lag-fragile fields (owner + before/after).
+  // Errors and loading states are tracked independently so the table keeps
+  // rendering with flat amounts and a disabled address filter when this
+  // query fails during a deploy+resync window.
+  const snapshots = useGQL<CdpTroveOpSnapshotResponse>(
+    ALL_CDP_TROVE_OP_SNAPSHOTS,
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
   const { rows, capped } = useMemo(
-    () => mergeTransactionRows(data, PER_KIND_FETCH_LIMIT),
+    () => mergeTransactionRows(data, CDP_OVERVIEW_PER_KIND_FETCH_LIMIT),
     [data],
   );
-  const visibleRows = rows.slice(0, MAX_ROWS);
+  const snapshotById = useMemo(
+    () => indexSnapshotsById(snapshots.data),
+    [snapshots.data],
+  );
+  const snapshotsReady = snapshots.data != null && snapshots.error == null;
 
   const symbolByInstance = useMemo(() => {
     const m = new Map<string, { symbol: string; chainId: number }>();
@@ -67,30 +93,174 @@ export function CdpAllTransactionsTable({
         />
       ) : isLoading ? (
         <Skeleton rows={6} />
-      ) : visibleRows.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyBox message="No CDP transactions indexed yet." />
       ) : (
         <OverviewBody
-          rows={visibleRows}
+          rows={rows}
+          collaterals={collaterals}
           symbolByInstance={symbolByInstance}
           capped={capped}
+          snapshotById={snapshotById}
+          snapshotsReady={snapshotsReady}
         />
       )}
     </section>
   );
 }
 
-function OverviewBody({
-  rows,
-  symbolByInstance,
-  capped,
+/** Filter state for the overview transactions table. Combines:
+ *  - validated `marketFilter` (falls back to null if the indexer drops or
+ *    renames a market between revalidations, so a stale id can't silently
+ *    zero out the result set without a visibly selected pill)
+ *  - free-text `addressInput` (normalized to lowercase + trimmed at the
+ *    comparison site so the input renders the raw typed value)
+ *  No useEffect — the derived `effectiveMarketFilter` / `addressActive`
+ *  values absorb stale inputs. */
+function useOverviewFilters(
+  rows: CdpTransactionRow[],
+  collaterals: CollateralSummary[],
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>,
+  snapshotsReady: boolean,
+) {
+  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
+  const [marketFilter, setMarketFilter] = useState<string | null>(null);
+  const [addressInput, setAddressInput] = useState("");
+  const effectiveMarketFilter = useMemo(() => {
+    if (marketFilter == null) return null;
+    return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
+  }, [collaterals, marketFilter]);
+  const normalizedAddress = normalizeAddressFilter(addressInput);
+  // Address filter is only active when the snapshot query has resolved —
+  // owner data lives there. While the isolated query is loading or has
+  // errored, the input is rendered disabled and the predicate is a no-op
+  // so the table doesn't pretend to match against missing owner data.
+  const addressActive = normalizedAddress.length > 0 && snapshotsReady;
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (addressActive) {
+        // Owner is only meaningful for trove-op rows; pool-level events
+        // (liquidation / redemption / SP rebalance) get hidden when the
+        // address filter is active so the visible set stays coherent.
+        if (row.kind !== "troveOp") return false;
+        const snap = snapshotById.get(row.id);
+        if (snap == null || snap.owner !== normalizedAddress) return false;
+      }
+      if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
+      if (
+        effectiveMarketFilter != null &&
+        row.instanceId !== effectiveMarketFilter
+      )
+        return false;
+      return true;
+    });
+  }, [
+    rows,
+    typeFilter,
+    effectiveMarketFilter,
+    addressActive,
+    normalizedAddress,
+    snapshotById,
+  ]);
+  return {
+    typeFilter,
+    setTypeFilter,
+    marketFilter: effectiveMarketFilter,
+    setMarketFilter,
+    addressInput,
+    setAddressInput,
+    filteredRows,
+    filtersActive:
+      typeFilter != null || effectiveMarketFilter != null || addressActive,
+  };
+}
+
+/** Filter bar for the overview transactions table — type-pill row,
+ *  market-pill row, and free-text owner input. Extracted from
+ *  `OverviewBody` to keep that component under the project's
+ *  `max-lines-per-function` budget. */
+function OverviewFilterBar({
+  collaterals,
+  typeFilter,
+  onTypeFilterChange,
+  marketFilter,
+  onMarketFilterChange,
+  addressInput,
+  onAddressInputChange,
+  addressDisabled,
 }: {
-  rows: CdpTransactionRow[];
-  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
-  capped: boolean;
+  collaterals: CollateralSummary[];
+  typeFilter: BadgeKind | null;
+  onTypeFilterChange: (next: BadgeKind | null) => void;
+  marketFilter: string | null;
+  onMarketFilterChange: (next: string | null) => void;
+  addressInput: string;
+  onAddressInputChange: (next: string) => void;
+  addressDisabled: boolean;
 }) {
   return (
+    <div className="mb-3 space-y-2">
+      <CdpTxTypeFilter
+        options={TX_FILTER_TYPE_ORDER}
+        selected={typeFilter}
+        onChange={onTypeFilterChange}
+      />
+      <CdpTxMarketFilter
+        options={collaterals}
+        selected={marketFilter}
+        onChange={onMarketFilterChange}
+      />
+      <CdpTxAddressFilter
+        value={addressInput}
+        onChange={onAddressInputChange}
+        disabled={addressDisabled}
+        disabledHint={
+          addressDisabled ? "(unavailable while indexer syncs)" : undefined
+        }
+      />
+    </div>
+  );
+}
+
+function OverviewBody({
+  rows,
+  collaterals,
+  symbolByInstance,
+  capped,
+  snapshotById,
+  snapshotsReady,
+}: {
+  rows: CdpTransactionRow[];
+  collaterals: CollateralSummary[];
+  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
+  capped: boolean;
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>;
+  snapshotsReady: boolean;
+}) {
+  const {
+    typeFilter,
+    setTypeFilter,
+    marketFilter,
+    setMarketFilter,
+    addressInput,
+    setAddressInput,
+    filteredRows,
+    filtersActive,
+  } = useOverviewFilters(rows, collaterals, snapshotById, snapshotsReady);
+  const visibleRows = filteredRows.slice(0, MAX_ROWS);
+
+  return (
     <>
+      <OverviewFilterBar
+        collaterals={collaterals}
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        marketFilter={marketFilter}
+        onMarketFilterChange={setMarketFilter}
+        addressInput={addressInput}
+        onAddressInputChange={setAddressInput}
+        addressDisabled={!snapshotsReady}
+      />
       <Table>
         <thead>
           <Row>
@@ -109,27 +279,45 @@ function OverviewBody({
           </Row>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <OverviewRow
-              key={`${row.kind}-${row.id}`}
-              row={row}
-              market={
-                row.instanceId
-                  ? symbolByInstance.get(row.instanceId)
-                  : undefined
-              }
-            />
-          ))}
+          {visibleRows.length === 0 ? (
+            <Row>
+              <td
+                colSpan={7}
+                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+              >
+                No transactions match the active filters.
+              </td>
+            </Row>
+          ) : (
+            visibleRows.map((row) => (
+              <OverviewRow
+                key={`${row.kind}-${row.id}`}
+                row={row}
+                market={
+                  row.instanceId
+                    ? symbolByInstance.get(row.instanceId)
+                    : undefined
+                }
+                snapshot={
+                  row.kind === "troveOp" ? snapshotById.get(row.id) : undefined
+                }
+              />
+            ))
+          )}
         </tbody>
       </Table>
-      <p className="px-1 pt-2 text-xs text-slate-500">
-        Showing the most recent {rows.length.toLocaleString()} transactions
-        across all CDP markets.
-      </p>
+      {visibleRows.length > 0 && (
+        <p className="px-1 pt-2 text-xs text-slate-500">
+          {filtersActive
+            ? `Showing ${visibleRows.length.toLocaleString()} of ${filteredRows.length.toLocaleString()} matching transactions.`
+            : `Showing the most recent ${visibleRows.length.toLocaleString()} transactions across all CDP markets.`}
+        </p>
+      )}
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Showing the most recent {PER_KIND_FETCH_LIMIT.toLocaleString()}{" "}
-          entries per event type — older history may exist beyond this range.
+          Showing the most recent{" "}
+          {CDP_OVERVIEW_PER_KIND_FETCH_LIMIT.toLocaleString()} entries per event
+          type — older history may exist beyond this range.
         </p>
       )}
     </>
@@ -139,13 +327,15 @@ function OverviewBody({
 function OverviewRow({
   row,
   market,
+  snapshot,
 }: {
   row: CdpTransactionRow;
   market: { symbol: string; chainId: number } | undefined;
+  snapshot: CdpTroveOpSnapshotRow | undefined;
 }) {
   const kind = badgeKindFor(row);
-  const { debt, coll } = amountsFor(row);
   const symbol = market?.symbol ?? "—";
+  const resolvedSnapshot = troveSnapshotFor(row, snapshot);
   return (
     <Row>
       <Td>
@@ -167,12 +357,18 @@ function OverviewRow({
           <span className="text-slate-500">{symbol}</span>
         )}
       </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(debt, symbol)}
-      </Td>
-      <Td mono small align="right">
-        {formatTokenAmount(coll, "USDm")}
-      </Td>
+      <CdpTxAmountCell
+        row={row}
+        symbol={symbol}
+        leg="debt"
+        snapshot={resolvedSnapshot}
+      />
+      <CdpTxAmountCell
+        row={row}
+        symbol="USDm"
+        leg="coll"
+        snapshot={resolvedSnapshot}
+      />
       <TxHashCell txHash={row.txHash} chainId={market?.chainId} />
       <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
         {formatBlock(row.blockNumber)}

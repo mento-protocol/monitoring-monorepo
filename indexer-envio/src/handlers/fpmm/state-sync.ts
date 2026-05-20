@@ -27,7 +27,12 @@
 // freely; OracleSnapshot → only writes data we believe in.
 // ---------------------------------------------------------------------------
 
-import type { OracleSnapshot, RebalanceEvent, ReserveUpdate } from "envio";
+import type {
+  OracleSnapshot,
+  Pool,
+  RebalanceEvent,
+  ReserveUpdate,
+} from "envio";
 import { indexer } from "../../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers.js";
 import {
@@ -100,6 +105,13 @@ indexer.onEvent(
         )
       : undefined;
 
+    captureExistingTxPreRebalanceReserves(
+      event.chainId,
+      poolId,
+      event.transaction.hash,
+      blockNumber,
+      existing,
+    );
     // Override reserves: `getRebalancingState` reads post-event state on
     // chain, but `existing.reserves0/1` still hold the prior block's value
     // until `upsertPool` runs below.
@@ -159,6 +171,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       reservesDelta: {
         reserve0: event.params.reserve0,
         reserve1: event.params.reserve1,
@@ -254,6 +267,7 @@ indexer.onEvent(
 
 indexer.onEvent(
   { contract: "FPMM", event: "Rebalanced" },
+  // eslint-disable-next-line max-lines-per-function -- Existing handler keeps same-event reserve, breach, and rebalance writes together for ordering parity.
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
@@ -302,10 +316,23 @@ indexer.onEvent(
       ? tryDeriveRebalanceState(existing, { eventTimestamp: blockTimestamp })
       : null;
 
-    // `preReserves` is sampled at `blockNumber - 1` so subtracting from the
-    // post-rebalance reserves on `pool` (after `upsertPool` below) gives the
-    // rebalance's swap notional. Sibling Swap events are not emitted by
-    // FPMM.rebalance() (separate code path).
+    // Prefer the in-batch Pool state captured before the first UpdateReserves
+    // in this transaction. Sampling `blockNumber - 1` here is only an explicit
+    // unknown fallback: same-block unrelated reserve changes may already have
+    // legitimately advanced the Pool before this rebalance tx begins.
+    const txScopedPreReserves = consumeTxPreRebalanceReserves({
+      chainId: event.chainId,
+      poolId,
+      txHash: event.transaction.hash,
+      blockNumber,
+    });
+    const preReservesPromise = preReservesOrFallback(txScopedPreReserves, () =>
+      context.effect(reservesEffect, {
+        chainId: event.chainId,
+        poolAddress: asAddress(event.srcAddress),
+        blockNumber: blockNumber - 1n,
+      }),
+    );
     const [rebalancingStateRpc, preReserves, blockScopedIncentive] =
       await Promise.all([
         derivedRebalanceState
@@ -315,11 +342,7 @@ indexer.onEvent(
               poolAddress: asAddress(event.srcAddress),
               blockNumber,
             }),
-        context.effect(reservesEffect, {
-          chainId: event.chainId,
-          poolAddress: asAddress(event.srcAddress),
-          blockNumber: blockNumber - 1n,
-        }),
+        preReservesPromise,
         // Read at the event block — `Pool.rebalanceReward` may carry today's
         // value during full resync (fetchFees self-heals from `latest`), and
         // we want the bps that was actually in force when this rebalance
@@ -398,6 +421,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       strategy: rebalancerAddress,
       rebalanceDelta: true,
       oracleDelta,
@@ -468,37 +492,12 @@ indexer.onEvent(
       rebalanceDelta: true,
     });
 
-    // Reserve deltas (post − pre). On RPC failure of `fetchReserves` at
-    // `blockNumber - 1`, both deltas stay 0, which `computeRebalanceUsd`
-    // recognizes as the uncomputable case → "" sentinel for both USD fields.
-    const amount0Delta = preReserves
-      ? pool.reserves0 - preReserves.reserve0
-      : 0n;
-    const amount1Delta = preReserves
-      ? pool.reserves1 - preReserves.reserve1
-      : 0n;
-    // No fallback to `pool.rebalanceReward` here: that field can be `latest`-
-    // seeded by upsertPool's self-heal (`fetchFees` is not block-scoped),
-    // which would re-introduce the historical-drift bug the block-scoped read
-    // was added to prevent. When the block-scoped read fails (RPC failure or
-    // `latest`-block fallback), `rewardBps` falls to 0 for arithmetic, but
-    // `rewardUsd` is forced to "" below so a real zero-incentive rebalance
-    // ("$0.00") stays distinguishable from "incentive unknown" ("—").
-    // Effect output is `number | null`; null captures the RPC-failure path.
-    const incentiveUnknown = blockScopedIncentive === null;
-    const rewardBps = normalizeRewardBps(blockScopedIncentive ?? 0);
-    const { notionalUsd, rewardUsd: computedRewardUsd } = computeRebalanceUsd({
-      chainId: event.chainId,
-      token0: pool.token0,
-      token1: pool.token1,
-      token0Decimals: pool.token0Decimals,
-      token1Decimals: pool.token1Decimals,
-      tokenDecimalsKnown: pool.tokenDecimalsKnown,
-      amount0Delta,
-      amount1Delta,
-      rewardBps,
-    });
-    const rewardUsd = incentiveUnknown ? "" : computedRewardUsd;
+    const { amount0Delta, amount1Delta, rewardBps, notionalUsd, rewardUsd } =
+      buildRebalanceValueFields({
+        pool,
+        preReserves,
+        blockScopedIncentive,
+      });
 
     const rebalanced: RebalanceEvent = {
       id,
@@ -524,3 +523,144 @@ indexer.onEvent(
     context.RebalanceEvent.set(rebalanced);
   },
 );
+
+type ReservePair = {
+  reserve0: bigint;
+  reserve1: bigint;
+};
+
+type TxPreRebalanceReserves = ReservePair & {
+  blockNumber: bigint;
+};
+
+type PoolReserveSnapshot = {
+  reserves0: bigint;
+  reserves1: bigint;
+};
+
+const txPreRebalanceReserves = new Map<string, TxPreRebalanceReserves>();
+
+function txReserveScratchKey(
+  chainId: number,
+  poolId: string,
+  txHash: string,
+): string {
+  return `${chainId}:${poolId}:${txHash.toLowerCase()}`;
+}
+
+function pruneOldTxPreRebalanceReserves(blockNumber: bigint): void {
+  for (const [key, snapshot] of txPreRebalanceReserves) {
+    if (snapshot.blockNumber < blockNumber) {
+      txPreRebalanceReserves.delete(key);
+    }
+  }
+}
+
+function captureExistingTxPreRebalanceReserves(
+  chainId: number,
+  poolId: string,
+  txHash: string,
+  blockNumber: bigint,
+  existing: PoolReserveSnapshot | undefined,
+): void {
+  if (!existing) return;
+  captureTxPreRebalanceReserves({
+    chainId,
+    poolId,
+    txHash,
+    blockNumber,
+    reserves: {
+      reserve0: existing.reserves0,
+      reserve1: existing.reserves1,
+    },
+  });
+}
+
+function captureTxPreRebalanceReserves(args: {
+  chainId: number;
+  poolId: string;
+  txHash: string;
+  blockNumber: bigint;
+  reserves: ReservePair;
+}): void {
+  pruneOldTxPreRebalanceReserves(args.blockNumber);
+  const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
+  if (txPreRebalanceReserves.has(key)) return;
+  txPreRebalanceReserves.set(key, {
+    ...args.reserves,
+    blockNumber: args.blockNumber,
+  });
+}
+
+function consumeTxPreRebalanceReserves(args: {
+  chainId: number;
+  poolId: string;
+  txHash: string;
+  blockNumber: bigint;
+}): ReservePair | null {
+  pruneOldTxPreRebalanceReserves(args.blockNumber);
+  const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
+  const snapshot = txPreRebalanceReserves.get(key);
+  if (!snapshot) return null;
+  txPreRebalanceReserves.delete(key);
+  return snapshot.blockNumber === args.blockNumber
+    ? { reserve0: snapshot.reserve0, reserve1: snapshot.reserve1 }
+    : null;
+}
+
+function preReservesOrFallback(
+  txScopedPreReserves: ReservePair | null,
+  fallback: () => Promise<ReservePair | null>,
+): Promise<ReservePair | null> {
+  return txScopedPreReserves
+    ? Promise.resolve(txScopedPreReserves)
+    : fallback();
+}
+
+function reserveDeltas(
+  pool: Pool,
+  preReserves: ReservePair | null,
+): ReservePair {
+  if (!preReserves) return { reserve0: 0n, reserve1: 0n };
+  return {
+    reserve0: pool.reserves0 - preReserves.reserve0,
+    reserve1: pool.reserves1 - preReserves.reserve1,
+  };
+}
+
+function buildRebalanceValueFields({
+  pool,
+  preReserves,
+  blockScopedIncentive,
+}: {
+  pool: Pool;
+  preReserves: ReservePair | null;
+  blockScopedIncentive: number | null;
+}): {
+  amount0Delta: bigint;
+  amount1Delta: bigint;
+  rewardBps: number;
+  notionalUsd: string;
+  rewardUsd: string;
+} {
+  const deltas = reserveDeltas(pool, preReserves);
+  const rewardBps = normalizeRewardBps(blockScopedIncentive ?? 0);
+  const { notionalUsd, rewardUsd } = computeRebalanceUsd({
+    chainId: pool.chainId,
+    token0: pool.token0,
+    token1: pool.token1,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
+    tokenDecimalsKnown: pool.tokenDecimalsKnown,
+    amount0Delta: deltas.reserve0,
+    amount1Delta: deltas.reserve1,
+    rewardBps,
+  });
+  return {
+    amount0Delta: deltas.reserve0,
+    amount1Delta: deltas.reserve1,
+    rewardBps,
+    notionalUsd,
+    rewardUsd: blockScopedIncentive === null ? "" : rewardUsd,
+  };
+}

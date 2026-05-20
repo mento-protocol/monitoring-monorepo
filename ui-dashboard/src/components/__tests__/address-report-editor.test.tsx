@@ -150,6 +150,19 @@ function setTextarea(id: string, value: string): void {
   });
 }
 
+function setInput(id: string, value: string): void {
+  const input = container.querySelector(`#${id}`) as HTMLInputElement | null;
+  if (!input) throw new Error(`input #${id} not found`);
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(input, value);
+  act(() => {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 // ---- Tests -----------------------------------------------------------------
 
 describe("AddressReportEditor — invalid address", () => {
@@ -202,6 +215,41 @@ describe("AddressReportEditor — loaded state", () => {
     expect(findButton("Preview")).not.toBeNull();
     expect(findButton("Save changes")).not.toBeNull();
   });
+
+  it("rehydrates existing-report fields when the address changes but updatedAt and version collide", () => {
+    mockSwrData = {
+      body: "# Report A",
+      title: "Report A",
+      authorEmail: "alice@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render({ address: VALID_ADDR });
+    act(() => {
+      findButton("Edit")?.click();
+    });
+    setInput("ar-title", "Draft title for address A");
+    setTextarea("ar-body", "draft body for address A");
+
+    mockSwrData = {
+      body: "# Report B",
+      title: "Report B",
+      authorEmail: "bob@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render({ address: SECOND_VALID_ADDR });
+    act(() => {
+      findButton("Edit")?.click();
+    });
+
+    const titleInput = container.querySelector("#ar-title") as HTMLInputElement;
+    const textarea = container.querySelector("#ar-body") as HTMLTextAreaElement;
+    expect(titleInput.value).toBe("Report B");
+    expect(textarea.value).toBe("# Report B");
+  });
 });
 
 describe("AddressReportEditor — load error", () => {
@@ -241,7 +289,7 @@ describe("AddressReportEditor — save", () => {
     expect(findButton("Save report")?.disabled).toBe(true);
   });
 
-  it("sends only address + body + title (no scope) on save", async () => {
+  it("sends only address + body + title (no scope or version precondition) on new-report save", async () => {
     mockSwrData = null;
     render();
     setTextarea("ar-body", "first draft");
@@ -257,6 +305,39 @@ describe("AddressReportEditor — save", () => {
     expect(body.body).toBe("first draft");
     // Reports are address-keyed only — no scope in the request body.
     expect(body.scope).toBeUndefined();
+    expect(body.baseVersion).toBeUndefined();
+    expect((init as RequestInit).headers).toEqual({
+      "Content-Type": "application/json",
+    });
+  });
+
+  it("sends the current report version header as the save precondition when editing", async () => {
+    mockSwrData = {
+      body: "# Hi",
+      title: "T",
+      authorEmail: "alice@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render();
+    act(() => {
+      findButton("Edit")?.click();
+    });
+    setTextarea("ar-body", "# Updated");
+
+    await act(async () => {
+      findButton("Save changes")?.click();
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.baseVersion).toBeUndefined();
+    expect((init as RequestInit).headers).toEqual({
+      "Content-Type": "application/json",
+      "If-Match": '"3"',
+    });
   });
 
   it("save fetch uses AbortSignal.timeout (defense against wedged TCP)", async () => {

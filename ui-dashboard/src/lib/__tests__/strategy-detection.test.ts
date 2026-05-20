@@ -124,6 +124,22 @@ describe("detectProbedStrategies", () => {
     expect(mockDetectStrategyType).not.toHaveBeenCalled();
   });
 
+  it("does not share mutable empty sets between no-rpc calls", async () => {
+    const noRpc = { ...CELO, rpcUrl: undefined };
+    const first = await detectProbedStrategies(noRpc, [
+      makePool(POOL_A, REB_CDP),
+    ]);
+
+    (first.cdpPoolIds as Set<string>).add(`${CELO.chainId}-${POOL_A}`);
+
+    const second = await detectProbedStrategies(noRpc, [
+      makePool(POOL_A, REB_CDP),
+    ]);
+
+    expect(second.cdpPoolIds).toEqual(new Set());
+    expect(second.reservePoolIds).toEqual(new Set());
+  });
+
   it("skips pools without a rebalancer address", async () => {
     const result = await detectProbedStrategies(CELO, [
       makePool(POOL_A, ""),
@@ -172,6 +188,16 @@ describe("detectProbedStrategies", () => {
       new Set([`${CELO.chainId}-${POOL_B}`]),
     );
     expect(mockDetectStrategyType).toHaveBeenCalledTimes(4);
+  });
+
+  it("configures the viem transport with the probe timeout budget", async () => {
+    mockDetectStrategyType.mockResolvedValueOnce("cdp");
+
+    await detectProbedStrategies(CELO, [makePool(POOL_A, REB_CDP)]);
+
+    expect(mockGetViemClient).toHaveBeenCalledWith(CELO.rpcUrl, {
+      timeoutMs: 3000,
+    });
   });
 
   it("leaves pools OUT of both sets when the probe fails (detection unavailable)", async () => {

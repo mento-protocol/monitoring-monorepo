@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-344009ceff-b21c_432a75737b",
+  "featureId": "feat_library_344009ceff",
+  "title": "Shared empty strategy result exposes mutable Set instances",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/strategy-detection.ts",
+      "startLine": 142,
+      "endLine": 145,
+      "symbol": "ProbedStrategies",
+      "quote": "cdpPoolIds: Set<string>;"
+    },
+    {
+      "path": "ui-dashboard/src/lib/strategy-detection.ts",
+      "startLine": 147,
+      "endLine": 153,
+      "symbol": "EMPTY_STRATEGIES",
+      "quote": "const EMPTY_STRATEGIES: Readonly<ProbedStrategies> = Object.freeze({"
+    },
+    {
+      "path": "ui-dashboard/src/lib/strategy-detection.ts",
+      "startLine": 165,
+      "endLine": 181,
+      "symbol": "detectProbedStrategies",
+      "quote": "if (!network.rpcUrl) return EMPTY_STRATEGIES;"
+    }
+  ],
+  "reasoning": "The early-exit result is a module-level singleton and the comment correctly notes that mutating its inner Sets would leak state across callers. However Object.freeze only freezes the wrapper object, while ProbedStrategies exposes mutable Set<string> values; even with Readonly<ProbedStrategies>, TypeScript still permits result.cdpPoolIds.add(...). Any caller that mutates an empty result from a no-RPC or no-rebalancer network can pollute all future empty results from this module.",
+  "reproduction": null,
+  "recommendation": "Do not return a shared object containing mutable Sets. Either allocate fresh empty Sets on each early exit, or change the public type to ReadonlySet<string> and enforce immutability with fresh results or a genuinely immutable wrapper.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests do not exercise detectProbedStrategies. Tests that only assert empty set sizes would also miss this unless they mutate one returned result and then call an early-exit path again.",
+  "suggestedRegressionTest": "Call detectProbedStrategies with a network missing rpcUrl, mutate result.cdpPoolIds, call it again with the same no-RPC network, and assert the second result is still empty.",
+  "minimumFixScope": "ui-dashboard/src/lib/strategy-detection.ts and a focused regression test for early-exit result isolation.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by returning fresh empty strategy result sets for early exits; added a mutation-isolation regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T08:57:58.866Z"
+    }
+  ],
+  "signature": "sig_feat-library-344009ceff_b21cd9606c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T085318-5544ae",
+  "createdAt": "2026-05-20T08:54:42.244Z",
+  "updatedAt": "2026-05-20T08:57:58.866Z"
+}

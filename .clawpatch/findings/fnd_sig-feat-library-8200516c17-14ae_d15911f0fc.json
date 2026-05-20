@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-8200516c17-14ae_d15911f0fc",
+  "featureId": "feat_library_8200516c17",
+  "title": "Address book index renders writable label flows before labels have actually loaded",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/address-book/AddressBookClient.tsx",
+      "startLine": 35,
+      "endLine": 45,
+      "symbol": "AddressBookPage",
+      "quote": "const { customEntries, getEntry, revalidate, isLoading, error, markPendingMutation, isMutationPending, markPendingReportMutation, isReportMutationPending, } = useAddressLabels();"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/AddressBookClient.tsx",
+      "startLine": 254,
+      "endLine": 281,
+      "symbol": "AddressBookPage",
+      "quote": "{isLoading && <p className=\"text-sm text-slate-500\">Loading labels…</p>} ... {!isLoading && allRows.length === 0 && ( ... )}"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/AddressBookClient.tsx",
+      "startLine": 408,
+      "endLine": 438,
+      "symbol": "AddressBookPage",
+      "quote": "{userCanEdit && editTarget && ( <AddressLabelEditor ... initial={ getEntry(editTarget.address)?.entry ?? findContractInitial(editTarget.address) } ... /> )}"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.test.tsx",
+      "startLine": 191,
+      "endLine": 218,
+      "symbol": "AddressDetailPage — labels loading state",
+      "quote": "during session-loading the provider doesn't fire SWR yet, so `isLoading` is false but `data` is still undefined → `hasLoaded` false. Without the gate, the form would render as blank-new and a fast save would PUT empty fields over an existing entry."
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/__tests__/AddressBookClient.test.tsx",
+      "startLine": 58,
+      "endLine": 70,
+      "symbol": "mockUseAddressLabels",
+      "quote": "const mockUseAddressLabels = vi.fn(() => ({ customEntries: mockCustomEntries, getEntry: mockGetEntry, revalidate: mockRevalidate, isLoading: false as boolean, error: undefined as Error | undefined, ... }))"
+    }
+  ],
+  "reasoning": "The index page only gates on `isLoading` and never reads the provider's `hasLoaded` flag. The included detail-page tests document the provider contract: during session hydration or a first-read failure, `isLoading` can be false while labels have not resolved, and `getEntry()` returning undefined is ambiguous. In that state the index can show static contract rows and open `AddressLabelEditor` with `findContractInitial` or empty initial values, allowing a user to save over an existing custom label before the private labels read has completed. The AddressBookClient tests mock no `hasLoaded` field, so they cannot catch this first-load ambiguity.",
+  "reproduction": "Navigate to `/address-book` while the session is still hydrating or force the first `/api/address-labels` read to fail before any successful load. Click `+ Tag` on a contract row or `+ Add label` for an address that already has a custom label, then save before labels resolve; the form is seeded as if no custom entry exists.",
+  "recommendation": "Destructure `hasLoaded` from `useAddressLabels()` in `AddressBookClient` and block writable label modals/actions until it is true. Mirror the detail page behavior: show a loading placeholder while `!hasLoaded && !error`, show a blocking first-load error when `error && !hasLoaded`, and only preserve editable UI for background refresh errors after a successful load.",
+  "whyTestsDoNotAlreadyCoverThis": "`AddressBookClient.test.tsx` only tests `isLoading: true` and `error` branches; its default provider mock omits `hasLoaded`, so the session-hydration state described by the detail-page tests is never exercised on the index page.",
+  "suggestedRegressionTest": "Add an AddressBookClient test where `useAddressLabels()` returns `isLoading: false`, `hasLoaded: false`, `getEntry: undefined`, and seeded contract rows. Assert the page does not render writable `+ Tag`/edit flows or an `AddressLabelEditor`, and add a first-load-error case that blocks the form instead of showing a blank-new editor.",
+  "minimumFixScope": "`ui-dashboard/src/app/address-book/AddressBookClient.tsx` plus `ui-dashboard/src/app/address-book/__tests__/AddressBookClient.test.tsx`.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed AddressBookClient to gate writable flows on hasLoaded and added a pre-load no-writable-controls regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:25:02.618Z"
+    }
+  ],
+  "signature": "sig_feat-library-8200516c17_14ae7ca196",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:17:20.165Z",
+  "updatedAt": "2026-05-20T09:25:02.617Z"
+}

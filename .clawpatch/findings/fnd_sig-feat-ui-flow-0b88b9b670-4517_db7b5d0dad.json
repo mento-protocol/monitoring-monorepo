@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-0b88b9b670-4517_db7b5d0dad",
+  "featureId": "feat_ui-flow_0b88b9b670",
+  "title": "Pool config extension query has no timeout or response schema",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/pool-config-panel.tsx",
+      "startLine": 39,
+      "endLine": 42,
+      "symbol": "PoolConfigPanel",
+      "quote": "const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(\n    isVirtual ? null : POOL_CONFIG_EXT,\n    { id: pool.id, chainId: pool.chainId },\n  );"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/pool-config-panel.test.tsx",
+      "startLine": 12,
+      "endLine": 14,
+      "symbol": null,
+      "quote": "vi.mock(\"@/lib/graphql\", () => ({\n  useGQL: () => mockUseGQL(),\n}));"
+    }
+  ],
+  "reasoning": "POOL_CONFIG_EXT is an isolated network query used specifically to survive schema rollout/resync windows, but this component calls useGQL without the available timeout/schema options. If Hasura stalls, the request can remain wedged instead of failing open on the reward tile; if the response shape drifts, the component silently treats it as missing data and renders an em dash rather than surfacing a typed query error. The linked test mock discards all useGQL arguments, so it would not catch either missing option or a future regression in the query variables/options contract.",
+  "reproduction": null,
+  "recommendation": "Import the shared Hasura timeout and POOL_CONFIG_EXT response schema, then call useGQL with an options object such as { timeoutMs: HASURA_TIMEOUT_MS, schema: PoolConfigExtSchema }. Update the test mock to forward and assert the query, variables, and options for the reward query.",
+  "whyTestsDoNotAlreadyCoverThis": "The pool-config-panel tests only return canned data from a zero-argument useGQL mock, so they verify rendered output but not the actual query contract or resilience options.",
+  "suggestedRegressionTest": "In pool-config-panel.test.tsx, make the useGQL mock capture its arguments and assert PoolConfigPanel calls useGQL with POOL_CONFIG_EXT, { id, chainId }, and options containing a timeout plus the config extension schema.",
+  "minimumFixScope": "ui-dashboard/src/components/pool-config-panel.tsx and ui-dashboard/src/components/__tests__/pool-config-panel.test.tsx",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "PoolConfigPanel now passes HASURA_TIMEOUT_MS and PoolConfigExtSchema to the isolated POOL_CONFIG_EXT useGQL call, with focused assertion coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:40:29.743Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-0b88b9b670_4517bb3d3c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T103320-3c6e33",
+  "createdAt": "2026-05-20T10:35:04.447Z",
+  "updatedAt": "2026-05-20T10:40:29.742Z"
+}

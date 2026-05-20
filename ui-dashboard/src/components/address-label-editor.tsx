@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
   AddressLabelForm,
   resolveIsContractRow,
@@ -18,6 +18,15 @@ export {
 } from "@/components/address-label-form";
 
 type EditorTab = "label" | "report";
+
+type AddressDraftState = {
+  sourceAddress: string;
+  draftAddress: string;
+};
+
+type AddressDraftAction =
+  | { type: "source-changed"; address: string }
+  | { type: "draft-changed"; address: string };
 
 type Props = {
   /** Pass empty string to allow the user to type a new address */
@@ -77,6 +86,38 @@ type Props = {
   onDraftAddressChange?: (next: string) => void;
 };
 
+function addressDraftReducer(
+  state: AddressDraftState,
+  action: AddressDraftAction,
+): AddressDraftState {
+  if (action.type === "draft-changed") {
+    return { ...state, draftAddress: action.address };
+  }
+
+  if (state.sourceAddress === action.address) return state;
+  return { sourceAddress: action.address, draftAddress: action.address };
+}
+
+function createAddressDraftState(address: string): AddressDraftState {
+  return { sourceAddress: address, draftAddress: address };
+}
+
+function useAddressDraft(address: string): [string, (next: string) => void] {
+  const [state, dispatch] = useReducer(
+    addressDraftReducer,
+    address,
+    createAddressDraftState,
+  );
+  useEffect(() => {
+    dispatch({ type: "source-changed", address });
+  }, [address]);
+  return [
+    state.draftAddress,
+    (next: string) => dispatch({ type: "draft-changed", address: next }),
+  ];
+}
+
+// eslint-disable-next-line max-lines-per-function -- Modal owns label/report tab wiring so pending-mutation ownership stays in one surface.
 export function AddressLabelEditor({
   address,
   initial,
@@ -95,10 +136,11 @@ export function AddressLabelEditor({
   const [activeTab, setActiveTab] = useState<EditorTab>("label");
   // Mirror the form's typed address so the Forensic Report tab can read
   // the draft — `onAddressChange` bubbles every keystroke from
-  // `AddressLabelForm` up here. `address` seeds the local draft once;
-  // re-syncing on prop change would clobber typed-but-unsaved input.
-  // react-doctor-disable-next-line react-doctor/no-derived-useState
-  const [draftAddress, setDraftAddress] = useState(address);
+  // `AddressLabelForm` up here. `address` seeds the local draft and is
+  // re-applied only when the parent switches this already-mounted editor
+  // to a different address; normal add-new typing keeps `address === ""`
+  // and stays owned by the draft state.
+  const [draftAddress, setDraftAddress] = useAddressDraft(address);
   const { isCustom } = useAddressLabels();
 
   // Mount-only effect — every caller passes an inline `() => setX(false)`

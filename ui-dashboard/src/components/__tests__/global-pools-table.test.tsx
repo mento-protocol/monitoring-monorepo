@@ -51,6 +51,10 @@ import {
   type GlobalPoolEntry,
   type GlobalSortContext,
 } from "@/components/global-pools-table";
+import {
+  formatFee,
+  hasFeeData,
+} from "@/components/global-pools-table/formatting";
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
@@ -458,6 +462,116 @@ describe("sortGlobalPools — TVL descending (default)", () => {
     expect(desc.map((e) => e.pool.id)).toEqual(["small", "zero", "unknown"]);
     const asc = sortGlobalPools([zero, small, unknown], "tvl", "asc", ctx);
     expect(asc.map((e) => e.pool.id)).toEqual(["zero", "small", "unknown"]);
+  });
+});
+
+describe("sortGlobalPools — fee, health, and volume edge cases", () => {
+  it("sinks missing fee rows in both directions while sorting known fees", () => {
+    const low = makeEntry({ id: "low", lpFee: 10, protocolFee: 5 });
+    const high = makeEntry({ id: "high", lpFee: 100, protocolFee: 25 });
+    const sentinel = makeEntry({ id: "sentinel", lpFee: -1, protocolFee: 0 });
+    const missing = makeEntry({ id: "missing" });
+
+    const desc = sortGlobalPools(
+      [sentinel, low, missing, high],
+      "fee",
+      "desc",
+      BASE_SORT_CTX,
+    );
+    expect(desc.map((e) => e.pool.id).slice(0, 2)).toEqual(["high", "low"]);
+    expect(
+      desc
+        .map((e) => e.pool.id)
+        .slice(2)
+        .sort(),
+    ).toEqual(["missing", "sentinel"]);
+
+    const asc = sortGlobalPools(
+      [sentinel, low, missing, high],
+      "fee",
+      "asc",
+      BASE_SORT_CTX,
+    );
+    expect(asc.map((e) => e.pool.id).slice(0, 2)).toEqual(["low", "high"]);
+    expect(
+      asc
+        .map((e) => e.pool.id)
+        .slice(2)
+        .sort(),
+    ).toEqual(["missing", "sentinel"]);
+  });
+
+  it("orders health by severity for both directions", () => {
+    const freshTs = String(Math.floor(Date.now() / 1000) + 60);
+    const ok = makeEntry({
+      id: "ok",
+      oracleTimestamp: freshTs,
+      priceDifference: "0",
+    });
+    const warn = makeEntry({
+      id: "warn",
+      oracleTimestamp: freshTs,
+      priceDifference: "600000000000000000",
+      rebalanceThreshold: 500_000,
+      rebalanceThresholdsKnown: true,
+    });
+    const critical = makeEntry({
+      id: "critical",
+      oracleTimestamp: freshTs,
+      oracleOk: false,
+    });
+
+    expect(
+      sortGlobalPools(
+        [warn, critical, ok],
+        "health",
+        "desc",
+        BASE_SORT_CTX,
+      ).map((e) => e.pool.id),
+    ).toEqual(["critical", "warn", "ok"]);
+    expect(
+      sortGlobalPools([warn, critical, ok], "health", "asc", BASE_SORT_CTX).map(
+        (e) => e.pool.id,
+      ),
+    ).toEqual(["ok", "warn", "critical"]);
+  });
+
+  it("keeps same-id pools from different chains separate in metric maps", () => {
+    const celo = makeEntry({ id: "shared" }, CELO_NETWORK);
+    const monad = makeEntry({ id: "shared" }, MONAD_NETWORK);
+    const ctx: GlobalSortContext = {
+      ...BASE_SORT_CTX,
+      totalVolumeByKey: new Map([
+        [globalPoolKey(celo), 1],
+        [globalPoolKey(monad), 100],
+      ]),
+    };
+
+    expect(
+      sortGlobalPools([celo, monad], "totalVolume", "desc", ctx).map(
+        (e) => e.network.id,
+      ),
+    ).toEqual(["monad-mainnet", "celo-mainnet"]);
+  });
+});
+
+describe("global pool fee formatting", () => {
+  it("treats virtual, missing, and sentinel fees as unavailable", () => {
+    expect(hasFeeData(makeEntry({ lpFee: 1, protocolFee: 2 }).pool)).toBe(true);
+    expect(
+      hasFeeData(makeEntry({ source: "virtual_pool", lpFee: 1 }).pool),
+    ).toBe(false);
+    expect(hasFeeData(makeEntry({ lpFee: -1, protocolFee: 0 }).pool)).toBe(
+      false,
+    );
+    expect(hasFeeData(makeEntry().pool)).toBe(false);
+  });
+
+  it("formats known fees and renders an em dash for unavailable fees", () => {
+    expect(formatFee(makeEntry({ lpFee: 12, protocolFee: 3 }).pool)).toBe(
+      "0.15%",
+    );
+    expect(formatFee(makeEntry({ lpFee: -1, protocolFee: 0 }).pool)).toBe("—");
   });
 });
 

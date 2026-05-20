@@ -12,9 +12,24 @@ import _namespaces from "../config/deployment-namespaces.json" with { type: "jso
 /**
  * Address that receives all protocol fees across all chains.
  * Only Transfer events where `to` matches this address are stored.
+ * Same address on every chain by Mento's deterministic-deploy convention;
+ * derived from `@mento-protocol/contracts` (published as `YieldSplitAddress`
+ * on Celo mainnet — that's the canonical source).
  */
+const _yieldSplitEntry = (
+  _contractsJson as unknown as Record<
+    string,
+    Record<string, Record<string, { address: string }>>
+  >
+)["42220"]?.mainnet?.YieldSplitAddress;
+if (!_yieldSplitEntry) {
+  throw new Error(
+    "YieldSplitAddress missing from @mento-protocol/contracts at 42220/mainnet — " +
+      "package contract may have been renamed; update indexer-envio/src/feeToken.ts",
+  );
+}
 export const YIELD_SPLIT_ADDRESS =
-  "0x0dd57f6f181d0469143fe9380762d8a112e96e4a" as const;
+  _yieldSplitEntry.address.toLowerCase() as `0x${string}`;
 
 export const UNKNOWN_FEE_TOKEN_META = {
   symbol: "UNKNOWN",

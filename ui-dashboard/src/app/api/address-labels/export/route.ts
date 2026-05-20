@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getAuthSession } from "@/auth";
+import { ALLOWED_DOMAIN, auth } from "@/auth";
 import { getLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
 import { getAllReports } from "@/lib/address-reports";
 
 export async function GET(): Promise<NextResponse> {
-  const session = await getAuthSession();
+  const session = await auth();
   if (!session) {
     return NextResponse.json(
       { error: "Authentication required" },
       { status: 401 },
     );
+  }
+
+  const email = session.user?.email?.toLowerCase();
+  if (!email?.endsWith(ALLOWED_DOMAIN)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {

@@ -67,7 +67,7 @@ export function BridgeVolumeChart({
       change={wow}
       isLoading={isLoading}
       hasError={hasError}
-      hasSnapshotError={isCapped}
+      hasSnapshotError={isCapped && range === "all"}
       emptyMessage="No bridge volume in the selected window."
     />
   );

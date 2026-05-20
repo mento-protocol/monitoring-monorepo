@@ -24,6 +24,8 @@ const MAX_CARRY_SECONDS = 3600n;
 
 /** Fixed decimal precision for ratio strings */
 const PRECISION = 6;
+const SCALE = BigInt(10 ** PRECISION);
+const HEALTHY_BOUNDARY_SCALED = 101n * (SCALE / 100n);
 
 // ---------------------------------------------------------------------------
 // Trading-second arithmetic: subtract FX weekend overlap from durations so
@@ -151,8 +153,14 @@ export function computeHealthSnapshotFields(
   // Compute deviationRatio using bigint arithmetic to avoid Number() precision
   // loss for large priceDifference values (>2^53 would corrupt float conversion).
   // Scale numerator by 10^PRECISION before dividing, then format as fixed decimal.
-  const SCALE = BigInt(10 ** PRECISION);
-  const scaledRatio = (priceDifference * SCALE) / thr;
+  let scaledRatio = (priceDifference * SCALE) / thr;
+  // `lastDeviationRatio` is the persisted previous-sample field used by the
+  // accumulator. Preserve the exact binary decision in that serialized value:
+  // a sample that is strictly above the 1.01 line can otherwise truncate to
+  // "1.010000" and be accumulated as healthy on the next event.
+  if (!isHealthy && scaledRatio <= HEALTHY_BOUNDARY_SCALED) {
+    scaledRatio = HEALTHY_BOUNDARY_SCALED + 1n;
+  }
   const intPart = scaledRatio / SCALE;
   const fracPart = scaledRatio % SCALE;
   const deviationRatio = `${intPart}.${fracPart.toString().padStart(PRECISION, "0")}`;

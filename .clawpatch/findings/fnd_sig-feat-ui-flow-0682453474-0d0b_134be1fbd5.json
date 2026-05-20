@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-0682453474-0d0b_134be1fbd5",
+  "featureId": "feat_ui-flow_0682453474",
+  "title": "Keyboard contract is implemented without a regression test",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/breach-history/bucket-filter.tsx",
+      "startLine": 8,
+      "endLine": 13,
+      "symbol": "BucketFilter",
+      "quote": "Implements the WAI-ARIA radio button keyboard contract: one radio is in the tab order, arrow keys/Home/End move focus + selection, and Tab leaves the group."
+    },
+    {
+      "path": "ui-dashboard/package.json",
+      "startLine": 8,
+      "endLine": 15,
+      "symbol": null,
+      "quote": "\"test:browser\": \"node scripts/run-browser-tests.mjs\""
+    }
+  ],
+  "reasoning": "BucketFilter has non-trivial accessibility behavior through roving tabindex and automatic keyboard activation, but the feature metadata lists no linked tests. A regression in arrow-key, Home/End, or tab-order behavior would be easy to miss in code review because the visible click path would still work.",
+  "reproduction": null,
+  "recommendation": "Add a focused component or browser test that renders BucketFilter, verifies exactly one radio is tabbable, checks arrow/Home/End activation updates selection, and confirms clicking a selected bucket does not produce an unnecessary duplicate change.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature declares no tests, and the package only shows available test scripts rather than any test exercising this component.",
+  "suggestedRegressionTest": "Add a vitest/jsdom or Playwright-backed test for BucketFilter keyboard behavior and aria-checked/tabIndex state transitions.",
+  "minimumFixScope": "A single focused test file for ui-dashboard/src/components/breach-history/bucket-filter.tsx or the owning breach-history interaction test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Existing a11y suite already covers BucketFilter single-tab-stop, Arrow/Home/End activation, stale controlled selection roving tabindex, and axe; reran focused suite.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:40:29.519Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-0682453474_0d0b164e33",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T103320-3c6e33",
+  "createdAt": "2026-05-20T10:33:52.790Z",
+  "updatedAt": "2026-05-20T10:40:29.519Z"
+}

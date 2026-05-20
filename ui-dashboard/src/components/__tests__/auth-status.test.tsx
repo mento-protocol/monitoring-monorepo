@@ -199,3 +199,36 @@ describe("AuthStatus sign-in href", () => {
     );
   });
 });
+
+describe("AuthStatus sign-out", () => {
+  it("clears the private address-labels SWR key before signing out", async () => {
+    setup("/address-book");
+    mockUseSession.mockReturnValue({
+      data: { user: { email: "agent@mentolabs.xyz" } },
+      status: "authenticated",
+    });
+
+    act(() => {
+      root?.render(<AuthStatus />);
+    });
+
+    const button = container?.querySelector("button");
+    expect(button?.textContent).toBe("Sign out");
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(mockMutate).toHaveBeenCalledWith(expect.any(Function), undefined, {
+      revalidate: false,
+    });
+    const predicate = mockMutate.mock.calls[0]?.[0] as (
+      key: unknown,
+    ) => boolean;
+    expect(predicate("address-labels:all")).toBe(true);
+    expect(predicate(["address-labels", "future-namespace"])).toBe(true);
+    expect(predicate("other-cache-key")).toBe(false);
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
+});

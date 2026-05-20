@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-512ba0e916-4f5a_a2d100d1dc",
+  "featureId": "feat_ui-flow_512ba0e916",
+  "title": "RPC receipt poll can hang forever on a wedged request",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/bridge-redeem-cta.tsx",
+      "startLine": 154,
+      "endLine": 166,
+      "symbol": "waitForTransaction",
+      "quote": "const response = await fetch(rpcUrl, { method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"eth_getTransactionReceipt\", params: [txHash], }), signal, });"
+    },
+    {
+      "path": "ui-dashboard/src/components/bridge-redeem-cta.tsx",
+      "startLine": 244,
+      "endLine": 246,
+      "symbol": "BridgeRedeemPill.handleClick",
+      "quote": "const receipt = await waitForTransaction(txHash, body.rpcUrl, ac.signal);"
+    }
+  ],
+  "reasoning": "The code intends to stop waiting after roughly 90 seconds, but each eth_getTransactionReceipt fetch is guarded only by the component AbortController. If the RPC endpoint accepts the request but never responds, the first await can remain pending indefinitely, so the loop never reaches the 30-attempt limit and the UI stays in mining forever.",
+  "reproduction": "Mock global fetch for eth_getTransactionReceipt to return a never-settling promise after sendRedeemTransaction resolves. The pill remains in pending state past the intended 90s ceiling.",
+  "recommendation": "Wrap each receipt poll fetch in a timeout signal, such as AbortSignal.any([signal, AbortSignal.timeout(8_000)]), and continue or fail according to the existing retry semantics. Also make the 3s sleep abort-aware so unmount cancellation does not wait for the timer.",
+  "whyTestsDoNotAlreadyCoverThis": "No included test imports bridge-redeem-cta or exercises transaction polling. The nearby AddressReportEditor tests explicitly cover AbortSignal.timeout for saves, but this component has no analogous coverage.",
+  "suggestedRegressionTest": "Add a waitForTransaction or BridgeRedeemPill test using fake timers and a fetch promise that never resolves; assert the function/UI reaches the timeout outcome instead of staying pending forever.",
+  "minimumFixScope": "Add bounded per-request timeout handling inside waitForTransaction and cover the timeout path.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Receipt polling now wraps each RPC fetch in an 8s timeout signal and uses abort-aware sleep; test covers timeout retry to eventual receipt.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:59:52.562Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-512ba0e916_4f5a0e50a5",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T105407-4a8def",
+  "createdAt": "2026-05-20T10:54:54.097Z",
+  "updatedAt": "2026-05-20T10:59:52.562Z"
+}

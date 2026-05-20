@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-512ba0e916-e7b9_b01c1dc215",
+  "featureId": "feat_ui-flow_512ba0e916",
+  "title": "VAA fetch timeout leaves redeem pill stuck in loading state",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/bridge-redeem-cta.tsx",
+      "startLine": 211,
+      "endLine": 214,
+      "symbol": "BridgeRedeemPill.handleClick",
+      "quote": "signal: AbortSignal.any([ac.signal, AbortSignal.timeout(15_000)]),"
+    },
+    {
+      "path": "ui-dashboard/src/components/bridge-redeem-cta.tsx",
+      "startLine": 258,
+      "endLine": 260,
+      "symbol": "BridgeRedeemPill.handleClick",
+      "quote": "if (err instanceof DOMException && err.name === \"AbortError\") return;"
+    }
+  ],
+  "reasoning": "The VAA fetch uses a 15s timeout signal. When that timeout fires while the component is still mounted, fetch rejects with a DOMException named AbortError. The catch block treats all AbortErrors as silent cancellation and returns without resetting phase or showing an error, so the pill remains in the fetching/sending/mining branch indefinitely and the user cannot retry.",
+  "reproduction": "Stub /api/bridge-redeem or fetch to reject with DOMException('','AbortError') from the AbortSignal.timeout path after clicking redeem. The component remains on the fetching label instead of returning to the redeem button or showing a timeout toast.",
+  "recommendation": "Distinguish component-initiated aborts from timeout aborts. For example, only silently return when ac.signal.aborted, and otherwise reset phase to idle and show a timeout/error toast. Alternatively use a named timeout controller and handle it explicitly.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise unrelated address-label, auth, breach, and breaker components. There is no test for BridgeRedeemPill timeout or AbortError handling.",
+  "suggestedRegressionTest": "Add a jsdom test for BridgeRedeemPill that mocks fetch to reject with an AbortError while the local AbortController is not aborted, then asserts the redeem button returns and addToast receives an error.",
+  "minimumFixScope": "Update BridgeRedeemPill.handleClick catch handling and add a focused component test for timeout AbortError behavior.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "VAA fetch timeout AbortError now resets the pill to idle and emits an error toast unless component abort signal fired; added focused pill test.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:59:52.442Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-512ba0e916_e7b9ace7de",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T105407-4a8def",
+  "createdAt": "2026-05-20T10:54:54.097Z",
+  "updatedAt": "2026-05-20T10:59:52.442Z"
+}

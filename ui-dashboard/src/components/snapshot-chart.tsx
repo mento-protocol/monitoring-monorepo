@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { PoolSnapshot } from "@/lib/types";
+import type { Pool, PoolSnapshot } from "@/lib/types";
 import { parseWei } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
@@ -18,16 +18,35 @@ interface SnapshotChartProps {
   snapshots: PoolSnapshot[];
   token0Symbol?: string;
   token1Symbol?: string;
+  pool?: Pool | null;
   rebalanceTimestamps?: string[];
+}
+
+function makeRebalanceShapes(
+  rebalanceTimestamps: string[] | undefined,
+): Plotly.Layout["shapes"] {
+  return (rebalanceTimestamps ?? []).map((ts) => ({
+    type: "line" as const,
+    xref: "x" as const,
+    yref: "paper" as const,
+    x0: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
+    x1: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
+    y0: 0,
+    y1: 1,
+    line: { color: "#f59e0b", width: 1, dash: "dot" as const },
+    layer: "above" as const,
+  }));
 }
 
 export function SnapshotChart({
   snapshots,
   token0Symbol = "Token 0",
   token1Symbol = "Token 1",
+  pool,
   rebalanceTimestamps,
 }: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
+  if (pool?.tokenDecimalsKnown !== true) return null;
 
   // Query returns desc (newest-first) to preserve recent rows when the 1000-row
   // cap truncates old history. Reverse here so Plotly receives chronological order.
@@ -35,8 +54,12 @@ export function SnapshotChart({
   const days = sorted.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString().slice(0, 10),
   );
-  const vol0 = sorted.map((s) => parseWei(s.swapVolume0));
-  const vol1 = sorted.map((s) => parseWei(s.swapVolume1));
+  const vol0 = sorted.map((s) =>
+    parseWei(s.swapVolume0, pool.token0Decimals ?? 18),
+  );
+  const vol1 = sorted.map((s) =>
+    parseWei(s.swapVolume1, pool.token1Decimals ?? 18),
+  );
   const cumSwaps = sorted.map((s) => s.cumulativeSwapCount);
 
   const volumeTrace0 = {
@@ -68,23 +91,9 @@ export function SnapshotChart({
     yaxis: "y2" as const,
   };
 
-  const rebalanceShapes: Plotly.Layout["shapes"] = (
-    rebalanceTimestamps ?? []
-  ).map((ts) => ({
-    type: "line" as const,
-    xref: "x" as const,
-    yref: "paper" as const,
-    x0: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
-    x1: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
-    y0: 0,
-    y1: 1,
-    line: { color: "#f59e0b", width: 1, dash: "dot" as const },
-    layer: "above" as const,
-  }));
-
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
-    shapes: rebalanceShapes,
+    shapes: makeRebalanceShapes(rebalanceTimestamps),
     font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     barmode: "stack" as const,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),

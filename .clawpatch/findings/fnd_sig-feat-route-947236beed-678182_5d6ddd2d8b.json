@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-947236beed-678182_5d6ddd2d8b",
+  "featureId": "feat_route_947236beed",
+  "title": "Restore reads an unbounded Blob stream before enforcing the byte cap when metadata size is unavailable",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/restore/route.ts",
+      "startLine": 58,
+      "endLine": 66,
+      "symbol": "POST",
+      "quote": "if (\n      result.blob.size !== null &&\n      result.blob.size > MAX_RESTORE_BLOB_BYTES\n    )"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/restore/route.ts",
+      "startLine": 72,
+      "endLine": 78,
+      "symbol": "POST",
+      "quote": "const text = await new Response(result.stream).text();\n    if (Buffer.byteLength(text, \"utf8\") > MAX_RESTORE_BLOB_BYTES) {"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/restore/__tests__/route.test.ts",
+      "startLine": 144,
+      "endLine": 159,
+      "symbol": null,
+      "quote": "it(\"rejects an oversized Blob after reading when metadata size is unavailable\", async () => {"
+    }
+  ],
+  "reasoning": "The route only rejects by Blob metadata size before reading. If `result.blob.size` is `null`, the fallback uses `new Response(result.stream).text()`, which buffers the entire stream in memory before checking `MAX_RESTORE_BLOB_BYTES`. The included test explicitly models unavailable metadata, but it only spies on `Buffer.byteLength`; it does not assert that stream consumption is bounded. Because `pathname` is user-controlled within the allowlist and the Blob read is a network boundary, a large matching private Blob can consume memory and function time before the 413 response is produced.",
+  "reproduction": "Create or mock a private Blob stream matching `address-labels-backup-YYYY-MM-DD.json` with `blob.size === null` and a body larger than `MAX_REDIS_HASH_REPLACE_BYTES`; POST with valid auth. The handler buffers the whole response body before returning 413.",
+  "recommendation": "Replace `new Response(result.stream).text()` with a bounded stream reader that accumulates chunks up to `MAX_RESTORE_BLOB_BYTES + 1`, cancels the reader once the limit is exceeded, and returns 413 without buffering the rest. Apply a read timeout or abort controller to stream consumption as well as the initial Blob `get`.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing oversized-null-metadata test proves the fallback returns 413 after reading, but it mocks `Buffer.byteLength` and does not use a large or streaming body, so it cannot catch unbounded buffering or lack of cancellation.",
+  "suggestedRegressionTest": "Add a test with a custom `ReadableStream` whose `blob.size` is `null`, records how many chunks are pulled, and exceeds `MAX_REDIS_HASH_REPLACE_BYTES`; assert the handler returns 413 and cancels/stops reading immediately after the limit is crossed.",
+  "minimumFixScope": "`ui-dashboard/src/app/api/address-labels/restore/route.ts` stream-reading logic plus the restore route test for null-size oversized streams.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by replacing Response(stream).text() with bounded stream reading that cancels once the restore cap is exceeded; added null-size stream regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:25:06.799Z"
+    }
+  ],
+  "signature": "sig_feat-route-947236beed_6781828468",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:16.949Z",
+  "updatedAt": "2026-05-20T10:25:06.799Z"
+}

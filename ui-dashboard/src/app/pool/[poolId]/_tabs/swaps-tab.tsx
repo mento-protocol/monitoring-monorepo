@@ -36,7 +36,9 @@ import type { Pool, PoolSnapshot, SwapEvent } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
+import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps swap filters, pagination, and fallback counters in one query surface.
 export function SwapsTab({
   poolId,
   limit,
@@ -66,10 +68,8 @@ export function SwapsTab({
   const { data: countData, error: countError } = useGQL<{
     SwapEvent: { id: string }[];
   }>(POOL_SWAPS_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
-  const lastKnownTotalRef = React.useRef(0);
   const rawTotal = countData?.SwapEvent?.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
@@ -88,7 +88,6 @@ export function SwapsTab({
   const swaps = data?.SwapEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
-  // Passing null as the query key skips the request — VirtualPools have no snapshots.
   // Daily rollup: one row per pool per UTC day, returned in chronological (asc)
   // order. Server-side aggregation avoids the 1000-row cap that hourly hit.
   // `snapshotError` is surfaced inline below so a rollout lag or transient
@@ -101,7 +100,6 @@ export function SwapsTab({
     SNAPSHOT_REFRESH_MS,
   );
   const snapshots = snapshotData?.PoolDailySnapshot ?? [];
-  // snapshots are desc (newest-first) from the query
   const lastSnapshot = snapshots[0];
 
   const { data: rebalanceData } = useGQL<{
@@ -152,31 +150,16 @@ export function SwapsTab({
             snapshots={snapshots}
             token0Symbol={sym0}
             token1Symbol={sym1}
+            pool={pool}
             rebalanceTimestamps={rebalanceTimestamps}
           />
-          {lastSnapshot && (
-            <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
-              <span>
-                Cumulative:{" "}
-                <span className="font-mono text-slate-300">
-                  {formatWei(lastSnapshot.cumulativeVolume0, dec0)}
-                </span>{" "}
-                {sym0} sold
-              </span>
-              <span>
-                <span className="font-mono text-slate-300">
-                  {formatWei(lastSnapshot.cumulativeVolume1, dec1)}
-                </span>{" "}
-                {sym1} sold
-              </span>
-              <span>
-                <span className="font-mono text-slate-300">
-                  {lastSnapshot.cumulativeSwapCount.toLocaleString()}
-                </span>{" "}
-                total swaps
-              </span>
-            </div>
-          )}
+          <SnapshotSummary
+            snapshot={lastSnapshot}
+            dec0={dec0}
+            dec1={dec1}
+            sym0={sym0}
+            sym1={sym1}
+          />
         </>
       )}
       {swaps.length > 0 && (
@@ -298,5 +281,44 @@ export function SwapsTab({
         </p>
       )}
     </>
+  );
+}
+
+function SnapshotSummary({
+  snapshot,
+  dec0,
+  dec1,
+  sym0,
+  sym1,
+}: {
+  snapshot: PoolSnapshot | undefined;
+  dec0: number;
+  dec1: number;
+  sym0: string;
+  sym1: string;
+}) {
+  if (!snapshot) return null;
+  return (
+    <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
+      <span>
+        Cumulative:{" "}
+        <span className="font-mono text-slate-300">
+          {formatWei(snapshot.cumulativeVolume0, dec0)}
+        </span>{" "}
+        {sym0} sold
+      </span>
+      <span>
+        <span className="font-mono text-slate-300">
+          {formatWei(snapshot.cumulativeVolume1, dec1)}
+        </span>{" "}
+        {sym1} sold
+      </span>
+      <span>
+        <span className="font-mono text-slate-300">
+          {snapshot.cumulativeSwapCount.toLocaleString()}
+        </span>{" "}
+        total swaps
+      </span>
+    </div>
   );
 }

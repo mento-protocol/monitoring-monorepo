@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET } from "../route";
 
 vi.mock("@/auth", () => ({
-  getAuthSession: vi.fn().mockResolvedValue({
+  ALLOWED_DOMAIN: "@mentolabs.xyz",
+  auth: vi.fn().mockResolvedValue({
     user: { email: "test@mentolabs.xyz" },
   }),
 }));
@@ -15,13 +16,13 @@ vi.mock("@/lib/address-reports", () => ({
   getAllReports: vi.fn().mockResolvedValue({}),
 }));
 
-import { getAuthSession } from "@/auth";
+import { auth } from "@/auth";
 import { getLabels } from "@/lib/address-labels";
 import { getAllReports } from "@/lib/address-reports";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+  (auth as ReturnType<typeof vi.fn>).mockResolvedValue({
     user: { email: "test@mentolabs.xyz" },
   });
   (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({});
@@ -29,11 +30,38 @@ beforeEach(() => {
 
 describe("GET /api/address-labels/export", () => {
   it("returns 401 when unauthenticated", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const res = await GET();
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("Authentication required");
+    expect(getLabels).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when authenticated outside the maintainer Workspace", async () => {
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "intruder@example.com" },
+    });
+
+    const res = await GET();
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("Forbidden");
+    expect(getLabels).not.toHaveBeenCalled();
+    expect(getAllReports).not.toHaveBeenCalled();
+  });
+
+  it("allows an authenticated maintainer Workspace session", async () => {
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "Test@MentoLabs.xyz" },
+    });
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    expect(getLabels).toHaveBeenCalledOnce();
   });
 
   it("exports a single flat snapshot under the `addresses` key", async () => {

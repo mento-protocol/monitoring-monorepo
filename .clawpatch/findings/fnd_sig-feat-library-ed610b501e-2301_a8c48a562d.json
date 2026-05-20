@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-ed610b501e-2301_a8c48a562d",
+  "featureId": "feat_library_ed610b501e",
+  "title": "Deviation breach history IDs collide for repeated breaches in the same block timestamp",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/deviationBreach.ts",
+      "startLine": 84,
+      "endLine": 89,
+      "symbol": "openBreachId",
+      "quote": "return `${poolId}-${startedAt}`;"
+    },
+    {
+      "path": "indexer-envio/src/deviationBreach.ts",
+      "startLine": 127,
+      "endLine": 168,
+      "symbol": "recordBreachTransition",
+      "quote": "id: openBreachId(poolId, trigger.blockTimestamp)"
+    },
+    {
+      "path": "indexer-envio/test/deviationBreach.test.ts",
+      "startLine": 61,
+      "endLine": 64,
+      "symbol": "openBreachId tests",
+      "quote": null
+    }
+  ],
+  "reasoning": "Breach rows are described as per-breach history, but their primary key only includes poolId and startedAt/block timestamp. Multiple transactions in one block share the same timestamp; if a pool closes and re-enters breach later in that same block, the second rising edge writes the same DeviationThresholdBreach id and overwrites the prior closed row. The event trigger already carries blockNumber and txHash, but neither participates in the id.",
+  "reproduction": "Within one pool and one block timestamp, process a falling edge that closes an existing breach, then process a new rising edge with the same trigger.blockTimestamp. The second row uses the same openBreachId as any prior breach anchored to that timestamp for that pool.",
+  "recommendation": "Include collision-resistant event entropy in the breach id and active-breach pointer, such as chainId/poolId/startedAtBlock/txHash/logIndex, or store the active breach id explicitly on Pool so close lookups do not depend on timestamp-only reconstruction.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test asserts only that the timestamp-only id is deterministic; it does not simulate close and reopen sequences sharing a block timestamp.",
+  "suggestedRegressionTest": "Add a recordBreachTransition test that closes one breach and opens another for the same pool with identical blockTimestamp but different txHash/block/log metadata, asserting both history rows remain distinct.",
+  "minimumFixScope": "indexer-envio/src/deviationBreach.ts, the trigger shape if logIndex is needed, and affected handler call sites/tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Deviation breach IDs now include event entropy and open lookup uses pool/start index; regressions added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:29.745Z"
+    }
+  ],
+  "signature": "sig_feat-library-ed610b501e_2301db012d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:46:34.367Z",
+  "updatedAt": "2026-05-20T09:56:29.745Z"
+}

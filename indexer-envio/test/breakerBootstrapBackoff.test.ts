@@ -3,7 +3,7 @@ import {
   _clearBootstrapCaches,
   bootstrapFeedBreakerConfigs,
 } from "../src/breakers.js";
-import { breakerListEffect } from "../src/rpc/effects.js";
+import { breakerKindEffect, breakerListEffect } from "../src/rpc/effects.js";
 
 // Tests the negative-cache state machine added in PR #331:
 //   1. Failure → set TTL, calls within TTL window skip the RPC.
@@ -166,5 +166,50 @@ describe("bootstrapFeedBreakerConfigs — negative-cache TTL", () => {
       t0 + 60n,
     );
     assert.equal(callCount(), 2, "in-TTL calls for both feeds are no-ops");
+  });
+
+  it("partial per-breaker hydration failure sets TTL instead of retrying every event", async () => {
+    let listCalls = 0;
+    const ctx = {
+      Breaker: {
+        get: async () => undefined,
+      },
+      effect: async (eff: unknown) => {
+        if (eff === breakerListEffect) {
+          listCalls += 1;
+          return ["0x1111111111111111111111111111111111111111"];
+        }
+        if (eff === breakerKindEffect) {
+          return undefined;
+        }
+        throw new Error("test stub: unexpected effect invoked");
+      },
+    };
+    const t0 = 5_000n;
+
+    await bootstrapFeedBreakerConfigs(ctx as never, CHAIN, FEED, 500n, t0);
+    assert.equal(listCalls, 1);
+
+    await bootstrapFeedBreakerConfigs(
+      ctx as never,
+      CHAIN,
+      FEED,
+      501n,
+      t0 + 60n,
+    );
+    assert.equal(
+      listCalls,
+      1,
+      "in-TTL call after fan-out failure should not refetch the breaker list",
+    );
+
+    await bootstrapFeedBreakerConfigs(
+      ctx as never,
+      CHAIN,
+      FEED,
+      502n,
+      t0 + BACKOFF_SECONDS + 1n,
+    );
+    assert.equal(listCalls, 2, "post-TTL call should retry fan-out bootstrap");
   });
 });

@@ -4,7 +4,6 @@ import {
   handleGnosisSafe,
   handleSnapshot,
   handleSimpleFormat,
-  handleCsvImport,
   handleCsvText,
   isGnosisSafeFormat,
   isSnapshot,
@@ -18,6 +17,84 @@ import {
 // use `/api/address-labels/restore?pathname=...`, which pulls the private Blob
 // snapshot server-side instead of uploading the JSON body through this route.
 const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;
+
+const invalidJsonResponse = () =>
+  NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+
+const tooLargeResponse = () =>
+  NextResponse.json(
+    { error: "Request body too large (max 4MB)" },
+    { status: 413 },
+  );
+
+async function readLimitedText(
+  req: NextRequest,
+): Promise<string | NextResponse> {
+  let text: string;
+  try {
+    text = await req.text();
+  } catch {
+    return invalidJsonResponse();
+  }
+  if (Buffer.byteLength(text, "utf8") > MAX_IMPORT_BODY_BYTES) {
+    return tooLargeResponse();
+  }
+  return text;
+}
+
+async function dispatchImportPayload(
+  req: NextRequest,
+  contentType: string,
+  importerEmail: string,
+): Promise<NextResponse> {
+  if (contentType.startsWith("text/csv")) {
+    const text = await readLimitedText(req);
+    return text instanceof NextResponse ? text : handleCsvText(text);
+  }
+
+  const parsed = await parseSniffedPayload(req, contentType);
+  if (parsed instanceof NextResponse) return parsed;
+  if (parsed.kind === "csv") return handleCsvText(parsed.text);
+  return dispatchJsonImport(parsed.body, importerEmail);
+}
+
+async function parseSniffedPayload(
+  req: NextRequest,
+  contentType: string,
+): Promise<
+  NextResponse | { kind: "csv"; text: string } | { kind: "json"; body: unknown }
+> {
+  const text = await readLimitedText(req);
+  if (text instanceof NextResponse) return text;
+
+  const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  const trimmed = normalized.trimStart();
+  const isJsonContentType = contentType.startsWith("application/json");
+  if (
+    !isJsonContentType &&
+    trimmed &&
+    !trimmed.startsWith("{") &&
+    !trimmed.startsWith("[")
+  ) {
+    return { kind: "csv", text: normalized };
+  }
+  if (!trimmed) return invalidJsonResponse();
+
+  try {
+    return { kind: "json", body: JSON.parse(normalized) };
+  } catch {
+    return invalidJsonResponse();
+  }
+}
+
+function dispatchJsonImport(
+  body: unknown,
+  importerEmail: string,
+): Promise<NextResponse> | NextResponse {
+  if (isGnosisSafeFormat(body)) return handleGnosisSafe(body);
+  if (isSnapshot(body)) return handleSnapshot(body, { importerEmail });
+  return handleSimpleFormat(body);
+}
 
 /**
  * Thin HTTP wrapper for address-labels import. The actual parsing,
@@ -44,10 +121,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     contentLengthHeader !== null &&
     Number(contentLengthHeader) > MAX_IMPORT_BODY_BYTES
   ) {
-    return NextResponse.json(
-      { error: "Request body too large (max 4MB)" },
-      { status: 413 },
-    );
+    return tooLargeResponse();
   }
 
   const contentType = req.headers.get("content-type") ?? "";
@@ -56,63 +130,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // text/plain is NOT routed here directly — some environments send text/plain
   // for JSON files too. Instead, text/plain falls through to content sniffing
   // below, which checks whether the body starts with { or [.
-  if (contentType.startsWith("text/csv")) {
-    return handleCsvImport(req);
-  }
-
-  let body: unknown;
-  try {
-    const text = await req.text();
-    // Post-read size check for requests without Content-Length header
-    if (Buffer.byteLength(text, "utf8") > MAX_IMPORT_BODY_BYTES) {
-      return NextResponse.json(
-        { error: "Request body too large (max 4MB)" },
-        { status: 413 },
-      );
-    }
-    // Strip UTF-8 BOM so BOM-prefixed JSON payloads keep working.
-    const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
-    const trimmed = normalized.trimStart();
-    // CSV sniffing: only attempt if the caller did NOT send application/json.
-    // An empty body or non-JSON body with application/json should return 400,
-    // not silently succeed as a CSV no-op. For other content-types (text/plain,
-    // no content-type, etc.) we sniff: if the body doesn't start with { or [
-    // it's likely CSV.
-    const isJsonContentType = contentType.startsWith("application/json");
-    if (
-      !isJsonContentType &&
-      trimmed &&
-      !trimmed.startsWith("{") &&
-      !trimmed.startsWith("[")
-    ) {
-      return handleCsvText(normalized);
-    }
-    if (!trimmed) {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-    }
-    body = JSON.parse(normalized);
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  // Accept four formats:
-  // 1. Snapshot format:    { exportedAt, global?: {...}, chains: { chainId: {...} } }
-  // 2. Simple format:      { chainId, labels: { address: entry } }
-  // 3. Gnosis Safe format: [{ address, chainId, name }]
-  // 4. CSV format:         handled above via Content-Type or content sniffing
-  if (isGnosisSafeFormat(body)) {
-    return handleGnosisSafe(body);
-  }
-
-  if (isSnapshot(body)) {
-    // Importer's email is server-controlled provenance for any forensic
-    // reports in the snapshot. Falls back to "import@unknown" only if the
-    // session somehow lacks an email (the auth gate above guarantees a
-    // session, but session.user.email can technically be null per the
-    // NextAuth type — should not happen with our Google-only flow).
-    const importerEmail = session.user?.email ?? "import@unknown";
-    return handleSnapshot(body, { importerEmail });
-  }
-
-  return handleSimpleFormat(body);
+  // Importer's email is server-controlled provenance for snapshot reports. The
+  // fallback should not happen with our Google-only flow, but NextAuth's type
+  // allows session.user.email to be null.
+  return dispatchImportPayload(
+    req,
+    contentType,
+    session.user?.email ?? "import@unknown",
+  );
 }

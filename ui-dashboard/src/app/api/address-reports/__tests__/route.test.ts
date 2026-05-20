@@ -14,6 +14,15 @@ vi.mock("@/lib/address-reports", async () => {
     typeof import("@/lib/address-reports-shared")
   >("@/lib/address-reports-shared");
   return {
+    AddressReportVersionConflictError: class AddressReportVersionConflictError extends Error {
+      readonly existingVersion: number | null;
+
+      constructor(existingVersion: number | null) {
+        super("Address report version conflict");
+        this.name = "AddressReportVersionConflictError";
+        this.existingVersion = existingVersion;
+      }
+    },
     findReport: vi.fn(),
     getReportsIndex: vi.fn().mockResolvedValue({ addresses: [] }),
     upsertReport: vi.fn(),
@@ -25,6 +34,7 @@ vi.mock("@/lib/address-reports", async () => {
 
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
   upsertReport,
@@ -178,6 +188,122 @@ describe("PUT /api/address-reports", () => {
     const args = (upsertReport as ReturnType<typeof vi.fn>).mock.calls[0]!;
     // upsertReport(address, payload) — payload is the second arg.
     expect(args[1]).toMatchObject({ authorEmail: "alice@mentolabs.xyz" });
+  });
+
+  it("allows create semantics without a base version", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (upsertReport as ReturnType<typeof vi.fn>).mockResolvedValue({
+      body: "x",
+      version: 1,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    });
+
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify({ address: VALID_ADDR, body: "x" }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsertReport).toHaveBeenCalledWith(
+      VALID_ADDR,
+      expect.not.objectContaining({ baseVersion: expect.anything() }),
+    );
+  });
+
+  it("passes a client-supplied baseVersion precondition to storage", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (upsertReport as ReturnType<typeof vi.fn>).mockResolvedValue({
+      body: "x",
+      version: 4,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    });
+
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify({
+          address: VALID_ADDR,
+          body: "x",
+          baseVersion: 3,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsertReport).toHaveBeenCalledWith(
+      VALID_ADDR,
+      expect.objectContaining({ baseVersion: 3 }),
+    );
+  });
+
+  it("accepts an If-Match version precondition", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (upsertReport as ReturnType<typeof vi.fn>).mockResolvedValue({
+      body: "x",
+      version: 4,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    });
+
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        headers: { "If-Match": '"3"' },
+        body: JSON.stringify({ address: VALID_ADDR, body: "x" }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsertReport).toHaveBeenCalledWith(
+      VALID_ADDR,
+      expect.objectContaining({ baseVersion: 3 }),
+    );
+  });
+
+  it("returns 400 for an invalid baseVersion", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify({
+          address: VALID_ADDR,
+          body: "x",
+          baseVersion: 0,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(upsertReport).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when storage detects a stale base version", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new AddressReportVersionConflictError(7),
+    );
+
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify({
+          address: VALID_ADDR,
+          body: "x",
+          baseVersion: 6,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "Report version conflict",
+      existingVersion: 7,
+    });
   });
 });
 

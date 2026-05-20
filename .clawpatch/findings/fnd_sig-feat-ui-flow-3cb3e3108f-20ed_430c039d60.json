@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-3cb3e3108f-20ed_430c039d60",
+  "featureId": "feat_ui-flow_3cb3e3108f",
+  "title": "Unknown chain IDs silently link transactions to the currently selected network",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/tx-hash-cell.tsx",
+      "startLine": 13,
+      "endLine": 18,
+      "symbol": "TxHashCell",
+      "quote": "const { network: contextNetwork } = useNetwork();\n  const network = (() => {\n    if (chainId == null) return contextNetwork;\n    const id = networkIdForChainId(chainId);\n    return id ? NETWORKS[id] : contextNetwork;\n  })();"
+    },
+    {
+      "path": "ui-dashboard/src/components/tx-hash-cell.tsx",
+      "startLine": 22,
+      "endLine": 27,
+      "symbol": "TxHashCell",
+      "quote": "<a\n        href={explorerTxUrl(network, txHash)}\n        target=\"_blank\"\n        rel=\"noopener noreferrer\"\n        title={txHash}\n        className=\"font-mono text-slate-300 hover:text-indigo-300 transition-colors\""
+    }
+  ],
+  "reasoning": "When a row provides a chainId, the transaction hash is row-scoped data and should not be resolved through the user's current network selection. The current fallback makes an unrecognized chainId use contextNetwork, so the same txHash can link to Celo, Monad, or another selected explorer depending on ambient UI state rather than the row's chain. That creates a misleading external transaction link for newly added or temporarily unsupported chains instead of failing closed or rendering non-link text.",
+  "reproduction": null,
+  "recommendation": "If chainId is provided but networkIdForChainId returns no network, do not fall back to contextNetwork. Render the shortened hash without an href, or render an explicit unavailable-explorer state. Keep contextNetwork only for the intentionally omitted chainId case.",
+  "whyTestsDoNotAlreadyCoverThis": "The included component tests cover address labels, address links, auth status, breach history, and breaker panels, but none exercise TxHashCell or the provided-chainId branch.",
+  "suggestedRegressionTest": "Add a TxHashCell test that mocks useNetwork to Celo, passes an unsupported chainId with a txHash, and asserts the rendered output does not link to the Celo explorer. Also assert a known chainId uses that chain's explorer even when the context network differs.",
+  "minimumFixScope": "Update TxHashCell's network resolution and add a focused component test for known, omitted, and unknown chainId behavior.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "TxHashCell now fails closed for unknown provided chainId instead of using the context explorer; added known/unknown/omitted chain tests.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:59:52.351Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-3cb3e3108f_20ed341200",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T105407-4a8def",
+  "createdAt": "2026-05-20T10:55:00.175Z",
+  "updatedAt": "2026-05-20T10:59:52.350Z"
+}

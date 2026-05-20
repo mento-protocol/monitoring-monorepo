@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-40a7bf99ec-8b3a_4da31b1a9f",
+  "featureId": "feat_library_40a7bf99ec",
+  "title": "CSV imports bypass the route-level body-size guard when Content-Length is absent",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/route.ts",
+      "startLine": 12,
+      "endLine": 18,
+      "symbol": "MAX_IMPORT_BODY_BYTES",
+      "quote": "const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/route.ts",
+      "startLine": 57,
+      "endLine": 62,
+      "symbol": "POST",
+      "quote": "if (contentType.startsWith(\"text/csv\")) {\n    return handleCsvImport(req);\n  }"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/route.ts",
+      "startLine": 66,
+      "endLine": 72,
+      "symbol": "POST",
+      "quote": "// Post-read size check for requests without Content-Length header\n    if (Buffer.byteLength(text, \"utf8\") > MAX_IMPORT_BODY_BYTES) {"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/import/__tests__/route.test.ts",
+      "startLine": 438,
+      "endLine": 477,
+      "symbol": "POST /api/address-labels/import — CSV",
+      "quote": "describe(\"POST /api/address-labels/import — CSV\", () => {"
+    }
+  ],
+  "reasoning": "The route documents and implements a 4MB body cap, including a post-read check for requests without Content-Length. However, explicit text/csv requests are dispatched to handleCsvImport before the route reads the body and before the post-read byte check. If a chunked CSV upload omits Content-Length, this wrapper no longer enforces its advertised cap, unlike the JSON/text sniffing path.",
+  "reproduction": "Send an authenticated text/csv request larger than 4MB without a Content-Length header. The route takes the early handleCsvImport branch instead of the MAX_IMPORT_BODY_BYTES post-read check in this file.",
+  "recommendation": "Apply the same read-and-byte-check path to CSV requests before parsing, or make handleCsvImport accept a pre-read string/limit and enforce MAX_IMPORT_BODY_BYTES consistently for CSV content.",
+  "whyTestsDoNotAlreadyCoverThis": "CSV tests cover valid and malformed CSV parsing, but there is no oversized CSV test with absent Content-Length. The oversized checks are only implied by the JSON/text path comments in this file.",
+  "suggestedRegressionTest": "Add a text/csv request with Content-Length removed and a body larger than MAX_IMPORT_BODY_BYTES, then assert 413 and no importLabels/importSnapshotHashes writes.",
+  "minimumFixScope": "ui-dashboard/src/app/api/address-labels/import/route.ts and its CSV route tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by routing text/csv through the same read + 4MB byte guard before CSV parsing; added oversized no-Content-Length CSV regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:15:13.378Z"
+    }
+  ],
+  "signature": "sig_feat-library-40a7bf99ec_8b3af386c1",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T090450-644cb6",
+  "createdAt": "2026-05-20T09:05:34.071Z",
+  "updatedAt": "2026-05-20T09:15:13.377Z"
+}

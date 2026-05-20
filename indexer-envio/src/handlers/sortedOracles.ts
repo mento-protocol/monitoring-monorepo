@@ -190,6 +190,7 @@ indexer.onEvent(
             blockTimestamp,
             blockNumber,
             txHash: event.transaction.hash,
+            logIndex: event.logIndex,
             source: "oracle_reported",
           },
         );
@@ -273,6 +274,7 @@ indexer.onEvent(
 
 indexer.onEvent(
   { contract: "SortedOracles", event: "MedianUpdated" },
+  // eslint-disable-next-line max-lines-per-function -- Existing median handler coordinates pool fan-out and breaker mirrors.
   async ({ event, context }) => {
     const rateFeedID = asAddress(event.params.token);
     const oraclePrice = event.params.value;
@@ -303,14 +305,11 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
-    // ----- Pool fan-out (existing logic, unchanged) -----------------------
-    // See OracleReported handler — parallel fan-out across distinct pools.
     await Promise.all(
+      // eslint-disable-next-line max-lines-per-function -- Existing per-pool fan-out preserves oracle, breach, health, and snapshot updates together.
       poolIds.map(async (poolId) => {
         const initial = await context.Pool.get(poolId);
         if (!initial) return;
-        // Self-heal invertRateFeed before computePriceDifference — same
-        // rationale as the OracleReported handler above.
         const existing = await selfHealTokenDecimals(
           context,
           await selfHealInvertRateFeed(context, initial),
@@ -488,14 +487,12 @@ indexer.onEvent(
             blockTimestamp,
             blockNumber,
             txHash: event.transaction.hash,
+            logIndex: event.logIndex,
             source: "median_updated",
           },
         );
 
         // Health score: compute snapshot fields + update pool accumulators.
-        // (The decimals-unknown short-circuit fired above before the
-        // breach pipeline ran.) See OracleReported handler for the
-        // `effectiveThreshold` + `isNeverRebalance` rationale.
         const effectiveBps = Number(effectiveThreshold(finalPool));
         const { snapshotFields, poolUpdate } = recordHealthSample(
           finalPool,

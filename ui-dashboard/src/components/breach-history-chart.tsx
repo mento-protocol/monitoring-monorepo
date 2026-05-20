@@ -82,8 +82,8 @@ export function BreachHistoryChart({ breaches }: Props) {
     // tolerance, below critical magnitude), which the rest of the app
     // does not score as critical seconds.
     const critical = isOpen
-      ? peakAboveCritical && nowSeconds > startedAt + grace
-        ? tradingSecondsInRange(startedAt + grace, nowSeconds)
+      ? peakAboveCritical
+        ? tradingSecondsPastGrace(startedAt, nowSeconds, grace)
         : 0
       : Number(b.criticalDurationSeconds ?? "0");
     const peakPct = (Number(b.peakPriceDifference) / entryThreshold) * 100;
@@ -191,6 +191,25 @@ export function BreachHistoryChart({ breaches }: Props) {
       />
     </div>
   );
+}
+
+function tradingSecondsPastGrace(
+  startedAt: number,
+  nowSeconds: number,
+  graceSeconds: number,
+): number {
+  const duration = tradingSecondsInRange(startedAt, nowSeconds);
+  if (duration <= graceSeconds) return 0;
+
+  let low = startedAt;
+  let high = nowSeconds;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (tradingSecondsInRange(startedAt, mid) >= graceSeconds) high = mid;
+    else low = mid + 1;
+  }
+
+  return tradingSecondsInRange(low, nowSeconds);
 }
 
 type Marker = {
