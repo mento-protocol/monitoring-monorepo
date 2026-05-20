@@ -32,6 +32,27 @@ type CdpMarketsResponse = {
   Trove: CdpTroveListRow[];
 };
 
+/** Returns true when this per-kind array hit the fetch cap AND its
+ *  oldest row is still inside the 24h cutoff — i.e. the cap could
+ *  have chopped off additional rows within the same window. Each
+ *  kind's array is `timestamp DESC LIMIT N`, so `rows.at(-1)` is the
+ *  oldest fetched row of that kind. Truncation is per-kind (each event
+ *  type runs its own LIMIT query), so we have to check each kind
+ *  independently — using the merged tail row would miss cases where
+ *  one kind's 30-day-old trove ops dominate the merged oldest position
+ *  while a different kind's capped 24h-spanning slice is silently
+ *  undercounting. */
+function isKindAtCapInWindow(
+  rows: { timestamp: string }[] | undefined,
+  cutoff: number,
+): boolean {
+  if (rows == null || rows.length < CDP_OVERVIEW_PER_KIND_FETCH_LIMIT) {
+    return false;
+  }
+  const oldest = rows[rows.length - 1];
+  return oldest != null && Number(oldest.timestamp) >= cutoff;
+}
+
 /** Per-market 24h ops count + cap flag, derived from the chain-scoped
  *  overview transactions fetch. Shares the SWR cache with the table
  *  mounted below so we don't double-fetch. */
@@ -41,6 +62,8 @@ function useOps24hByInstance(chainId: number) {
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
   const txData = transactions.data;
+  const isLoading = transactions.isLoading;
+  const hasError = transactions.error != null;
   return useMemo(() => {
     const merged = mergeTransactionRows(
       txData,
@@ -53,22 +76,19 @@ function useOps24hByInstance(chainId: number) {
       if (Number(row.timestamp) < cutoff) continue;
       counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
     }
-    // The 24h count is only at risk when the per-kind cap was hit AND the
-    // oldest fetched row is still inside the 24h window — that's when the
-    // cap could have chopped off additional rows within the same window.
-    // If the oldest fetched row is older than the cutoff, every 24h row
-    // is already in `merged.rows` and the counts are exact.
-    const oldestRow = merged.rows.at(-1);
-    const undercountPossible =
-      merged.capped &&
-      oldestRow != null &&
-      Number(oldestRow.timestamp) >= cutoff;
+    const undercountPossible = [
+      txData?.LiquidationEvent,
+      txData?.RedemptionEvent,
+      txData?.SpRebalanceEvent,
+      txData?.TroveOperationEvent,
+    ].some((rows) => isKindAtCapInWindow(rows, cutoff));
     return {
       ops24hByInstance: counts,
       txCapped: undercountPossible,
-      isLoading: transactions.isLoading,
+      isLoading,
+      hasError,
     };
-  }, [txData, transactions.isLoading]);
+  }, [txData, isLoading, hasError]);
 }
 
 export function CdpsPageClient() {
@@ -81,6 +101,7 @@ export function CdpsPageClient() {
     ops24hByInstance,
     txCapped,
     isLoading: txLoading,
+    hasError: txHasError,
   } = useOps24hByInstance(network.chainId);
 
   const liquityInstances = data?.LiquityInstance;
@@ -162,6 +183,7 @@ export function CdpsPageClient() {
             ops24h={ops24hByInstance.get(collateral.id) ?? 0}
             ops24hCapped={txCapped}
             ops24hLoading={txLoading}
+            ops24hHasError={txHasError}
           />
         ))}
       </div>

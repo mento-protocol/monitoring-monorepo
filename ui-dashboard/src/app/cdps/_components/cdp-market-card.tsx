@@ -16,6 +16,7 @@ export function CdpMarketCard({
   ops24h,
   ops24hCapped,
   ops24hLoading,
+  ops24hHasError,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
@@ -23,6 +24,7 @@ export function CdpMarketCard({
   ops24h: number;
   ops24hCapped: boolean;
   ops24hLoading: boolean;
+  ops24hHasError: boolean;
 }) {
   const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
@@ -40,6 +42,7 @@ export function CdpMarketCard({
             ops24h={ops24h}
             ops24hCapped={ops24hCapped}
             ops24hLoading={ops24hLoading}
+            ops24hHasError={ops24hHasError}
           />
         </div>
         <CdpHealthBadge health={health} />
@@ -79,16 +82,24 @@ function CardActivitySubtitle({
   ops24h,
   ops24hCapped,
   ops24hLoading,
+  ops24hHasError,
 }: {
   lastEventTimestamp: string | undefined;
   ops24h: number;
   ops24hCapped: boolean;
   ops24hLoading: boolean;
+  ops24hHasError: boolean;
 }) {
   const lastActivity = lastEventTimestamp
     ? relativeTime(lastEventTimestamp)
     : "—";
-  const opsLabel = ops24hLoading ? "—" : `${ops24hCapped ? "≥" : ""}${ops24h}`;
+  // Loading and error both render `—` so a failed fetch isn't masquerading
+  // as a "no activity in 24h" zero. The Recent CDP Transactions table below
+  // surfaces the actual error message; the card just stays out of the way.
+  const opsLabel =
+    ops24hLoading || ops24hHasError
+      ? "—"
+      : `${ops24hCapped ? "≥" : ""}${ops24h}`;
   return (
     <p className="text-sm text-slate-400">
       Last activity {lastActivity} · {opsLabel} ops in 24h
