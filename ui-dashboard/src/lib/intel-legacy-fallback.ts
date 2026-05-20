@@ -4,6 +4,12 @@ import { getRedis } from "./redis";
  * Read a single hash field, preferring the intel hash and falling back to the
  * legacy arkham hash if the field is missing. Covers the deploy → migrate
  * window where prod data may still live under the legacy hash name.
+ *
+ * The field name is lower-cased before each lookup: address callers already
+ * pass `address.toLowerCase()`, but legacy arkham_* hashes may have been
+ * written with checksum/mixed-case keys before the round-5 marathon fix
+ * normalized writes. Entity slugs are spec-lowercase (`INTEL_ENTITY_SLUG_RE`),
+ * so this is a no-op for them.
  */
 export async function hgetWithLegacy<T>(
   intelKey: string,
@@ -11,9 +17,10 @@ export async function hgetWithLegacy<T>(
   field: string,
 ): Promise<T | null> {
   const redis = getRedis();
-  const fromIntel = await redis.hget<T>(intelKey, field);
+  const lower = field.toLowerCase();
+  const fromIntel = await redis.hget<T>(intelKey, lower);
   if (fromIntel !== null && fromIntel !== undefined) return fromIntel;
-  return redis.hget<T>(legacyKey, field);
+  return redis.hget<T>(legacyKey, lower);
 }
 
 /**
