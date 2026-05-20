@@ -113,11 +113,11 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pool.contact_point
-      group_by        = local.notify_warning_pool.group_by
-      group_wait      = local.notify_warning_pool.group_wait
-      group_interval  = local.notify_warning_pool.group_interval
-      repeat_interval = local.notify_warning_pool.repeat_interval
+      contact_point   = local.notify_warning_oracles_pool.contact_point
+      group_by        = local.notify_warning_oracles_pool.group_by
+      group_wait      = local.notify_warning_oracles_pool.group_wait
+      group_interval  = local.notify_warning_oracles_pool.group_interval
+      repeat_interval = local.notify_warning_oracles_pool.repeat_interval
     }
   }
 
@@ -425,11 +425,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pool.contact_point
-      group_by        = local.notify_warning_pool.group_by
-      group_wait      = local.notify_warning_pool.group_wait
-      group_interval  = local.notify_warning_pool.group_interval
-      repeat_interval = local.notify_warning_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_pool.contact_point
+      group_by        = local.notify_warning_pools_pool.group_by
+      group_wait      = local.notify_warning_pools_pool.group_wait
+      group_interval  = local.notify_warning_pools_pool.group_interval
+      repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
 
@@ -508,11 +508,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pool.contact_point
-      group_by        = local.notify_warning_pool.group_by
-      group_wait      = local.notify_warning_pool.group_wait
-      group_interval  = local.notify_warning_pool.group_interval
-      repeat_interval = local.notify_warning_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_pool.contact_point
+      group_by        = local.notify_warning_pools_pool.group_by
+      group_wait      = local.notify_warning_pools_pool.group_wait
+      group_interval  = local.notify_warning_pools_pool.group_interval
+      repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
 
@@ -867,11 +867,11 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pool.contact_point
-      group_by        = local.notify_warning_pool.group_by
-      group_wait      = local.notify_warning_pool.group_wait
-      group_interval  = local.notify_warning_pool.group_interval
-      repeat_interval = local.notify_warning_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_pool.contact_point
+      group_by        = local.notify_warning_pools_pool.group_by
+      group_wait      = local.notify_warning_pools_pool.group_wait
+      group_interval  = local.notify_warning_pools_pool.group_interval
+      repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
 
@@ -1224,11 +1224,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pool.contact_point
-      group_by        = local.notify_warning_pool.group_by
-      group_wait      = local.notify_warning_pool.group_wait
-      group_interval  = local.notify_warning_pool.group_interval
-      repeat_interval = local.notify_warning_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_pool.contact_point
+      group_by        = local.notify_warning_pools_pool.group_by
+      group_wait      = local.notify_warning_pools_pool.group_wait
+      group_interval  = local.notify_warning_pools_pool.group_interval
+      repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
 }
@@ -1378,11 +1378,11 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_oracles_pool.contact_point
+      group_by        = local.notify_warning_oracles_pool.group_by
+      group_wait      = local.notify_warning_oracles_pool.group_wait
+      group_interval  = local.notify_warning_oracles_pool.group_interval
+      repeat_interval = local.notify_warning_oracles_pool.repeat_interval
     }
   }
 

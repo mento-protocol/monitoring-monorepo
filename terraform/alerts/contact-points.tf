@@ -60,6 +60,57 @@ resource "grafana_contact_point" "slack_warnings_transition" {
   }
 }
 
+# Domain-split warning contact points. Added 2026-05-20 as part of the
+# Discord→Slack migration; v3 warnings move from `#alerts-warnings` to a
+# domain-specific channel based on which service rolls up the rule. The
+# existing `slack_warnings` / `_transition` contact points are retired once
+# every v3 rule has migrated.
+
+resource "grafana_contact_point" "slack_oracles" {
+  name = "slack-alerts-oracles"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_oracles
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_pools" {
+  name = "slack-alerts-pools"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_pools
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_pools_transition" {
+  name = "slack-alerts-pools-transition"
+
+  slack {
+    token                   = var.slack_bot_token
+    recipient               = var.slack_channel_pools
+    disable_resolve_message = true
+    title                   = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text                    = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_infra" {
+  name = "slack-alerts-infra"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_infra
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
 locals {
   # Shared message body — both contact points (critical + warnings) render the
   # same structure so operators can't mistake fields between channels. Split
@@ -228,6 +279,46 @@ locals {
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
     group_wait      = "0s"
     group_interval  = "5m"
+    repeat_interval = "4h"
+  }
+
+  # Domain-split warning notifiers. Added 2026-05-20 alongside the Discord→
+  # Slack migration. Each v3 warning rule's `notification_settings` should
+  # point at the notifier matching its service rollup:
+  #   - Oracle health (oracle liveness, oracle jump)         → notify_warning_oracles_pool
+  #   - Pool mechanics (deviation, rebalancer, trading lim.) → notify_warning_pools_pool
+  #   - Pool transitions (deviation breach state changes)    → notify_warning_pools_transition
+  #   - Service infrastructure (indexer, metrics-bridge)     → notify_warning_infra
+
+  notify_warning_oracles_pool = {
+    contact_point   = grafana_contact_point.slack_oracles.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_pools_pool = {
+    contact_point   = grafana_contact_point.slack_pools.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_pools_transition = {
+    contact_point   = grafana_contact_point.slack_pools_transition.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "0s"
+    group_interval  = "5m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_infra = {
+    contact_point   = grafana_contact_point.slack_infra.name
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
     repeat_interval = "4h"
   }
 }
