@@ -65,4 +65,26 @@ describe("multichain mainnet config", () => {
       }
     }
   });
+
+  it("keeps LiquityStabilityPool addresses pinned to the bare-symbol proxies", () => {
+    // `@mento-protocol/contracts` publishes two SP entries per market:
+    // `StabilityPool${symbol}` = TransparentUpgradeableProxy (emits events),
+    // `StabilityPoolv300${symbol}` = impl (no events, only delegatecall target).
+    // The YAML hardcoded the impl addresses for months, which silently broke
+    // every SP-derived metric (deposits, depositors, rebalances, headroom).
+    // Pin the YAML to the proxies so a future drift fails here, not in prod.
+    const expected = ["GBPm", "CHFm", "JPYm"].map((symbol) => {
+      const addr = getContractAddress(42220, `StabilityPool${symbol}`);
+      assert.ok(
+        addr,
+        `missing StabilityPool${symbol} in @mento-protocol/contracts`,
+      );
+      return addr.toLowerCase();
+    });
+    assert.deepEqual(
+      configuredContractAddresses(42220, "LiquityStabilityPool"),
+      expected,
+      "YAML LiquityStabilityPool must match StabilityPool${symbol} (proxy) keys, not StabilityPoolv300${symbol} (impl)",
+    );
+  });
 });
