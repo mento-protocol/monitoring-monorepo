@@ -1032,6 +1032,10 @@ run_gate "docs/pr-checklists/recurring-review-patterns.md"
 assert_contains "- docs"
 assert_contains "- pnpm agent:context-check (agent context standards changed)"
 
+run_gate ".codex/hooks.json"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-check (agent context files changed)"
+
 run_gate "docs/deleted.md"
 assert_contains "- docs"
 assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"

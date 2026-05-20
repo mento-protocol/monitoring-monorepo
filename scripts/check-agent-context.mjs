@@ -219,6 +219,32 @@ if (
   );
 }
 
+const codexHooks = readRequired(".codex/hooks.json");
+if (codexHooks) {
+  if (codexHooks.includes("/Users/")) {
+    fail(
+      ".codex/hooks.json: Codex hook commands must use repository-relative paths",
+    );
+  }
+  if (!codexHooks.includes("git rev-parse --show-toplevel")) {
+    fail(
+      ".codex/hooks.json: expected Codex hook command to resolve the repository root",
+    );
+  }
+  if (!codexHooks.includes("scripts/agent-session-end-hook.sh")) {
+    fail(
+      ".codex/hooks.json: expected SessionEnd hook to run scripts/agent-session-end-hook.sh",
+    );
+  }
+}
+
+const sessionEndHook = readRequired("scripts/agent-session-end-hook.sh");
+if (sessionEndHook?.includes("/Users/")) {
+  fail(
+    "scripts/agent-session-end-hook.sh: hook must derive the repository root instead of hardcoding a local path",
+  );
+}
+
 if (failures.length > 0) {
   console.error("Agent context check failed:");
   for (const failure of failures) console.error(`- ${failure}`);

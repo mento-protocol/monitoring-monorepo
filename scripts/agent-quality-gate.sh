@@ -936,7 +936,7 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    .agents/skills/*|.agents/roles/*|.claude/skills/*)
+    .agents/skills/*|.agents/roles/*|.claude/skills/*|.codex/hooks.json)
       add_surface "agent-context"
       add_command "pnpm agent:context-check" "agent context files changed"
       ;;
