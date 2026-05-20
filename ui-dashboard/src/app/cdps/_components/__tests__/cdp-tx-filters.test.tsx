@@ -333,6 +333,40 @@ describe("CdpTxAddressFilter", () => {
     });
     expect(getInput().value).toBe("  0xAbCd  ");
   });
+
+  it("renders disabled with a hint when the snapshot query isn't ready", () => {
+    act(() => {
+      root.render(
+        <CdpTxAddressFilter
+          value=""
+          onChange={vi.fn()}
+          disabled
+          disabledHint="(unavailable while indexer syncs)"
+        />,
+      );
+    });
+    const input = getInput();
+    expect(input.disabled).toBe(true);
+    // Hint sits as a sibling span — assert it shows up in the rendered DOM
+    // so users see *why* the input is greyed out instead of guessing.
+    expect(container.textContent).toContain(
+      "(unavailable while indexer syncs)",
+    );
+  });
+
+  it("omits the disabled hint when disabled is false", () => {
+    act(() => {
+      root.render(
+        <CdpTxAddressFilter
+          value=""
+          onChange={vi.fn()}
+          disabledHint="(should not render)"
+        />,
+      );
+    });
+    expect(getInput().disabled).toBe(false);
+    expect(container.textContent).not.toContain("(should not render)");
+  });
 });
 
 describe("normalizeAddressFilter", () => {
