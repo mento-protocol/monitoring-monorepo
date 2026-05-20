@@ -4,11 +4,14 @@
 
 // Preferred LP ownership query. Environments without LiquidityPosition should
 // show a migration message rather than attempt a correctness-risky fallback.
+const POOL_LP_POSITIONS_LIMIT = 1000;
+
 export const POOL_LP_POSITIONS = `
   query PoolLpPositions($poolId: String!) {
     LiquidityPosition(
       where: { poolId: { _eq: $poolId } }
       order_by: { netLiquidity: desc }
+      limit: ${POOL_LP_POSITIONS_LIMIT}
     ) {
       id address netLiquidity lastUpdatedBlock lastUpdatedTimestamp
     }

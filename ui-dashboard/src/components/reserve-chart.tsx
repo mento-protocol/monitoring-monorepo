@@ -31,7 +31,7 @@ export function ReserveChart({
   pool,
 }: ReserveChartProps) {
   const { network } = useNetwork();
-  if (rows.length === 0) return null;
+  if (rows.length === 0 || pool?.tokenDecimalsKnown !== true) return null;
 
   const sym0 = tokenSymbol(network, token0);
   const sym1 = tokenSymbol(network, token1);
@@ -46,8 +46,8 @@ export function ReserveChart({
   const useUsd = feedVal > 0;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
 
-  const dec0 = pool?.token0Decimals ?? 18;
-  const dec1 = pool?.token1Decimals ?? 18;
+  const dec0 = pool.token0Decimals ?? 18;
+  const dec1 = pool.token1Decimals ?? 18;
 
   const toUsd0 = (raw: string) => {
     const amount = parseWei(raw, dec0);

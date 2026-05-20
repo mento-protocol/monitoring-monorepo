@@ -56,10 +56,17 @@ export function deriveBridgeStatus(
     status === "ATTESTED" ||
     status === "QUEUED_INBOUND";
   if (!inFlight) return status;
-  const raw = transfer.sentTimestamp ?? transfer.firstSeenAt ?? null;
-  const ts = raw == null ? null : Number(raw);
+  const sent = parseBridgeTimestamp(transfer.sentTimestamp);
+  const firstSeen = parseBridgeTimestamp(transfer.firstSeenAt);
+  const ts = sent ?? firstSeen;
   if (ts === null || !Number.isFinite(ts)) return status;
   return nowSeconds - ts > STUCK_THRESHOLD_SECONDS ? "STUCK" : status;
+}
+
+function parseBridgeTimestamp(raw: string | null | undefined): number | null {
+  if (raw == null) return null;
+  const timestamp = Number(raw);
+  return Number.isFinite(timestamp) && timestamp !== 0 ? timestamp : null;
 }
 
 const STATUS_CLASSES: Record<BridgeStatusOverlay, string> = {

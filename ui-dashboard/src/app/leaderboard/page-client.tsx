@@ -97,13 +97,13 @@ export function LeaderboardClient() {
       isSystemAddressIn,
       limit: ENVIO_MAX_ROWS,
     },
-    { schema: TraderDailyTopSchema },
+    { timeoutMs: 8_000, schema: TraderDailyTopSchema },
   );
   const poolsResult = useGQL<{ Pool: PoolRow[] }>(
     venue === "v3" ? POOLS_FOR_LEADERBOARD : null,
     undefined,
     300_000, // pool metadata barely changes; refresh every 5 min
-    { schema: PoolsForLeaderboardSchema },
+    { timeoutMs: 8_000, schema: PoolsForLeaderboardSchema },
   );
 
   // Per-pool stacked chart data (v3-only). Separate from `TRADER_DAILY_TOP`
@@ -124,14 +124,14 @@ export function LeaderboardClient() {
   }>(
     venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
     { afterTimestamp: cutoff, isSystemAddressIn, limit: ENVIO_MAX_ROWS },
-    { schema: BrokerTraderDailyTopSchema },
+    { timeoutMs: 8_000, schema: BrokerTraderDailyTopSchema },
   );
   const v2AggregatorsResult = useGQL<{
     BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];
   }>(
     venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
-    { schema: BrokerAggregatorDailyTopSchema },
+    { timeoutMs: 8_000, schema: BrokerAggregatorDailyTopSchema },
   );
 
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];

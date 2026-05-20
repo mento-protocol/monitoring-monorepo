@@ -7,7 +7,7 @@ import type { NextRequest } from "next/server";
 type AuthReq = NextRequest & { auth: { user: { email: string } } | null };
 type MiddlewareCallback = (req: AuthReq) => Response | undefined;
 
-let authCallback: MiddlewareCallback;
+let authCallback: MiddlewareCallback | undefined;
 
 vi.mock("@/auth", () => ({
   ALLOWED_DOMAIN: "@mentolabs.xyz",
@@ -23,15 +23,36 @@ vi.mock("@/lib/csp", () => ({
   buildCspWithNonce: vi.fn(() => "default-src 'self'"),
 }));
 
-// Auth env vars must be set before module load so authConfigured = true
-vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
-vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
-
-// Import after mocks and env are set up
-await import("@/middleware");
-
-beforeEach(() => {
+async function importMiddlewareWithEnv(
+  env: { authGoogleId?: string; authGoogleSecret?: string } = {
+    authGoogleId: "test-id",
+    authGoogleSecret: "test-secret",
+  },
+): Promise<MiddlewareCallback> {
+  vi.resetModules();
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
+  authCallback = undefined;
+
+  if (env.authGoogleId !== undefined) {
+    vi.stubEnv("AUTH_GOOGLE_ID", env.authGoogleId);
+  }
+  if (env.authGoogleSecret !== undefined) {
+    vi.stubEnv("AUTH_GOOGLE_SECRET", env.authGoogleSecret);
+  }
+
+  // Import after mocks and env are set up because authConfigured is evaluated
+  // at module load.
+  await import("@/middleware");
+  const callback = authCallback as unknown;
+  if (typeof callback !== "function") {
+    throw new Error("middleware did not register auth callback");
+  }
+  return callback as MiddlewareCallback;
+}
+
+beforeEach(async () => {
+  authCallback = await importMiddlewareWithEnv();
 });
 
 function makeReq(
@@ -56,7 +77,7 @@ function makeReq(
 // 200 NextResponse, not undefined, because the callback now owns CSP injection.
 describe("middleware auth routing", () => {
   it("redirects unauthenticated /address-book to /sign-in", () => {
-    const res = authCallback(makeReq("/address-book"));
+    const res = authCallback!(makeReq("/address-book"));
     expect(res).toBeDefined();
     // NextResponse.redirect(url, 302) — must be explicit since default is 307
     expect(res!.status).toBe(302);
@@ -66,13 +87,13 @@ describe("middleware auth routing", () => {
   });
 
   it("redirects unauthenticated /address-book/sub-path to /sign-in", () => {
-    const res = authCallback(makeReq("/address-book/some/page"));
+    const res = authCallback!(makeReq("/address-book/some/page"));
     expect(res).toBeDefined();
     expect(res!.status).toBe(302);
   });
 
   it("preserves query params in callbackUrl on redirect", () => {
-    const res = authCallback(makeReq("/address-book?filter=custom&sort=name"));
+    const res = authCallback!(makeReq("/address-book?filter=custom&sort=name"));
     expect(res).toBeDefined();
     const location = res!.headers.get("location") ?? "";
     expect(location).toContain(
@@ -81,7 +102,9 @@ describe("middleware auth routing", () => {
   });
 
   it("allows authenticated /address-book through (returns 200 with CSP)", () => {
-    const res = authCallback(makeReq("/address-book", { authenticated: true }));
+    const res = authCallback!(
+      makeReq("/address-book", { authenticated: true }),
+    );
     // Callback returns NextResponse.next() with CSP, never undefined
     expect(res).toBeDefined();
     expect(res!.status).toBe(200);
@@ -89,13 +112,15 @@ describe("middleware auth routing", () => {
   });
 
   it("returns 401 for unauthenticated PUT /api/address-labels", () => {
-    const res = authCallback(makeReq("/api/address-labels", { method: "PUT" }));
+    const res = authCallback!(
+      makeReq("/api/address-labels", { method: "PUT" }),
+    );
     expect(res).toBeDefined();
     expect(res!.status).toBe(401);
   });
 
   it("returns 401 for unauthenticated DELETE /api/address-labels", () => {
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels", { method: "DELETE" }),
     );
     expect(res!.status).toBe(401);
@@ -104,18 +129,18 @@ describe("middleware auth routing", () => {
   it("returns 401 for unauthenticated GET /api/address-labels", () => {
     // GET is no longer public — the unauth public-label path was retired in
     // the CSP PR, so middleware now gates every method.
-    const res = authCallback(makeReq("/api/address-labels"));
+    const res = authCallback!(makeReq("/api/address-labels"));
     expect(res).toBeDefined();
     expect(res!.status).toBe(401);
   });
 
   it("returns 401 for unauthenticated /api/address-labels/export", () => {
-    const res = authCallback(makeReq("/api/address-labels/export"));
+    const res = authCallback!(makeReq("/api/address-labels/export"));
     expect(res!.status).toBe(401);
   });
 
   it("allows unauthenticated /api/address-labels/backup through (returns 200 with CSP)", () => {
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels/backup", { method: "POST" }),
     );
     expect(res).toBeDefined();
@@ -123,7 +148,7 @@ describe("middleware auth routing", () => {
   });
 
   it("allows unauthenticated /api/address-labels/restore through to route auth (returns 200 with CSP)", () => {
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels/restore", { method: "POST" }),
     );
     expect(res).toBeDefined();
@@ -131,7 +156,7 @@ describe("middleware auth routing", () => {
   });
 
   it("allows authenticated PUT /api/address-labels through (returns 200 with CSP)", () => {
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels", { method: "PUT", authenticated: true }),
     );
     expect(res).toBeDefined();
@@ -142,7 +167,7 @@ describe("middleware auth routing", () => {
     // Defense-in-depth: the sign-in callback rejects non-Workspace users, but
     // a forged JWT (e.g. AUTH_SECRET leaked) carrying an attacker-controlled
     // email must still be blocked at the edge.
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels", {
         method: "PUT",
         email: "attacker@gmail.com",
@@ -153,7 +178,7 @@ describe("middleware auth routing", () => {
   });
 
   it("redirects a session with a non-mentolabs email on /address-book", () => {
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/address-book", { email: "attacker@gmail.com" }),
     );
     expect(res).toBeDefined();
@@ -166,7 +191,7 @@ describe("middleware auth routing", () => {
     // the literal domain. The email local-part contains the `@`, so a crafted
     // address like `foo@mentolabs.xyz.evil.com` can't end with `@mentolabs.xyz`
     // — but pin the behavior so nobody loosens the check to `.endsWith("mentolabs.xyz")`.
-    const res = authCallback(
+    const res = authCallback!(
       makeReq("/api/address-labels", {
         method: "PUT",
         email: "foo@mentolabs.xyz.evil.com",
@@ -174,5 +199,31 @@ describe("middleware auth routing", () => {
     );
     expect(res).toBeDefined();
     expect(res!.status).toBe(401);
+  });
+
+  it("fails closed for protected pages when OAuth env vars are missing at module load", async () => {
+    const callback = await importMiddlewareWithEnv({
+      authGoogleId: undefined,
+      authGoogleSecret: "test-secret",
+    });
+
+    const res = callback(makeReq("/address-book"));
+
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(503);
+    expect(res!.headers.get("x-middleware-next")).not.toBe("1");
+  });
+
+  it("fails closed for protected APIs when OAuth env vars are missing at module load", async () => {
+    const callback = await importMiddlewareWithEnv({
+      authGoogleId: "test-id",
+      authGoogleSecret: undefined,
+    });
+
+    const res = callback(makeReq("/api/address-labels", { method: "PUT" }));
+
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(503);
+    expect(res!.headers.get("x-middleware-next")).not.toBe("1");
   });
 });

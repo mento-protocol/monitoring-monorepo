@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-4b9a1702a8-ddbf_db00f8385d",
+  "featureId": "feat_library_4b9a1702a8",
+  "title": "Auth middleware fails open when OAuth env vars are missing",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/middleware.ts",
+      "startLine": 5,
+      "endLine": 7,
+      "symbol": "authConfigured",
+      "quote": "const authConfigured = !!(\n  process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET\n);"
+    },
+    {
+      "path": "ui-dashboard/src/middleware.ts",
+      "startLine": 28,
+      "endLine": 64,
+      "symbol": null,
+      "quote": "if (authConfigured) {"
+    },
+    {
+      "path": "ui-dashboard/src/__tests__/middleware.test.ts",
+      "startLine": 26,
+      "endLine": 31,
+      "symbol": null,
+      "quote": "vi.stubEnv(\"AUTH_GOOGLE_ID\", \"test-id\");\nvi.stubEnv(\"AUTH_GOOGLE_SECRET\", \"test-secret\");\n\n// Import after mocks and env are set up\nawait import(\"@/middleware\");"
+    }
+  ],
+  "reasoning": "The middleware's stated responsibility is to protect /address-book and /api/address-labels, but all enforcement is inside `if (authConfigured)`. If either Google OAuth env var is absent at module load, protected requests skip the redirect/401 branches and fall through to `NextResponse.next()`. That is a fail-open posture for a security boundary; a deployment or preview env misconfiguration would silently remove edge protection instead of failing closed. The included middleware tests always stub both env vars before importing the module, so they only exercise the configured path and cannot catch this.",
+  "reproduction": "Unset AUTH_GOOGLE_ID or AUTH_GOOGLE_SECRET before importing `ui-dashboard/src/middleware.ts`, call the captured middleware callback with an unauthenticated request for `/address-book` or `/api/address-labels`, and observe a 200 NextResponse.next() instead of redirect/401.",
+  "recommendation": "Compute whether the path is protected independently of OAuth configuration, and fail closed when auth is required but the provider config is missing. For example, return a 503/401 JSON response for protected APIs and redirect or render a controlled sign-in/config-error path for protected pages. If local unauthenticated development is required, gate that behavior behind an explicit development-only flag rather than missing secrets.",
+  "whyTestsDoNotAlreadyCoverThis": "`ui-dashboard/src/__tests__/middleware.test.ts` stubs AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET before module import, so `authConfigured` is always true in the test process. There is no test that imports middleware with either variable absent and asserts protected paths fail closed.",
+  "suggestedRegressionTest": "Add a middleware test that resets modules, unsets AUTH_GOOGLE_ID or AUTH_GOOGLE_SECRET before importing `@/middleware`, then asserts unauthenticated `/address-book` and `/api/address-labels` do not return `NextResponse.next()`/status 200.",
+  "minimumFixScope": "`ui-dashboard/src/middleware.ts` plus `ui-dashboard/src/__tests__/middleware.test.ts`.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed middleware to detect protected paths independent of OAuth config and return 503 fail-closed when auth env vars are missing; added missing-env regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:15:14.708Z"
+    }
+  ],
+  "signature": "sig_feat-library-4b9a1702a8_ddbf08ac09",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T090450-644cb6",
+  "createdAt": "2026-05-20T09:06:54.398Z",
+  "updatedAt": "2026-05-20T09:15:14.707Z"
+}

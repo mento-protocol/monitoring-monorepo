@@ -11,7 +11,12 @@ import type {
 } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
-import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool.js";
+import {
+  preloadPoolCache,
+  upsertPool,
+  upsertSnapshot,
+  DEFAULT_ORACLE_FIELDS,
+} from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
 import { tokenDecimalsScalingEffect } from "../rpc/effects.js";
@@ -83,6 +88,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       tokenDecimals,
       oracleDelta: {
         ...DEFAULT_ORACLE_FIELDS,
@@ -125,6 +131,7 @@ indexer.onEvent(
       blockNumber: asBigInt(event.block.number),
       blockTimestamp: asBigInt(event.block.timestamp),
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
 
     const lifecycle: VirtualPoolLifecycle = {
@@ -156,6 +163,11 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    if (context.isPreload) {
+      await preloadPoolCache(context, poolId);
+      return;
+    }
+
     const volume0 =
       event.params.amount0In > event.params.amount0Out
         ? event.params.amount0In
@@ -175,6 +187,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       swapDelta: { volume0, volume1 },
     });
 
@@ -245,6 +258,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
 
     await upsertSnapshot({
@@ -294,6 +308,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
 
     await upsertSnapshot({
@@ -343,6 +358,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       reservesDelta: {
         reserve0: event.params.reserve0,
         reserve1: event.params.reserve1,
@@ -410,6 +426,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       rebalanceDelta: true,
       // `lastRebalancedAt` is inert today (metrics-bridge filters to fpmm
       // sources) but kept symmetric with FPMM.Rebalanced so future VirtualPool

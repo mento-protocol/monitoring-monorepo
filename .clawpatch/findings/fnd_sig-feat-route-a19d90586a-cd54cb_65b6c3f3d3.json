@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-a19d90586a-cd54cb_65b6c3f3d3",
+  "featureId": "feat_route_a19d90586a",
+  "title": "Arkham enrichment route has no regression coverage",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/arkham/enrich/route.ts",
+      "startLine": 77,
+      "endLine": 206,
+      "symbol": "GET",
+      "quote": "export async function GET(req: NextRequest): Promise<NextResponse> {"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/enrich/route.ts",
+      "startLine": 143,
+      "endLine": 164,
+      "symbol": "GET",
+      "quote": "const results = await enrichBatch(candidates, { apiKey });"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/enrich/route.ts",
+      "startLine": 166,
+      "endLine": 170,
+      "symbol": "GET",
+      "quote": "if (mode !== \"dryRun\" && Object.keys(toWrite).length > 0) {"
+    }
+  ],
+  "reasoning": "This route performs authenticated, expensive network work and conditionally writes imported labels, but the feature lists no linked tests. The untested behavior includes cron auth failure, missing env handling, mode parsing, refresh merge preservation, dryRun write suppression, and partial Arkham failure accounting. A regression in any of these paths could either block the scheduled enrichment job or write incorrect address labels without a local test catching it.",
+  "reproduction": null,
+  "recommendation": "Add focused route tests that mock cron auth, Arkham helpers, address discovery, and label storage, then assert response bodies and that importLabels is or is not called for new, refresh, dryRun, auth failure, missing env, and partial-error cases.",
+  "whyTestsDoNotAlreadyCoverThis": "The feature declares no tests, and no included test file exercises this route or its side-effect boundaries.",
+  "suggestedRegressionTest": "Add a Vitest suite for ui-dashboard/src/app/api/arkham/enrich/route.ts that mocks @/lib/arkham, @/lib/address-labels, @/lib/mento-address-discovery, and @/lib/cron-auth; verify dryRun skips importLabels, refresh calls mergeRefreshEntry behavior, and ArkhamAuthError returns 502.",
+  "minimumFixScope": "Route-level unit tests with mocked dependencies; no production code change is required unless testability gaps appear.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by adding Arkham enrich route regression coverage for auth bailouts, env/config, mode parsing, refresh preservation, dry-run suppression, and partial-error accounting.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:25:02.848Z"
+    }
+  ],
+  "signature": "sig_feat-route-a19d90586a_cd54cb7e4b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:15.883Z",
+  "updatedAt": "2026-05-20T10:25:02.848Z"
+}

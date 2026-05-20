@@ -52,12 +52,14 @@ function compareRoute(
   b: BridgeTransfer,
   dir: SortDir,
 ): number {
-  const as = a.sourceChainId ?? Number.POSITIVE_INFINITY;
-  const bs = b.sourceChainId ?? Number.POSITIVE_INFINITY;
-  if (as !== bs) return dir === "asc" ? as - bs : bs - as;
-  const ad = a.destChainId ?? Number.POSITIVE_INFINITY;
-  const bd = b.destChainId ?? Number.POSITIVE_INFINITY;
-  return dir === "asc" ? ad - bd : bd - ad;
+  const source = compareNullable(
+    a.sourceChainId,
+    b.sourceChainId,
+    (x, y) => x - y,
+    dir,
+  );
+  if (source !== 0) return source;
+  return compareNullable(a.destChainId, b.destChainId, (x, y) => x - y, dir);
 }
 
 function timestampSortValue(

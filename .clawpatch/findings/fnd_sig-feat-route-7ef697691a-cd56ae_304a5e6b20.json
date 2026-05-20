@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7ef697691a-cd56ae_304a5e6b20",
+  "featureId": "feat_route_7ef697691a",
+  "title": "Null JSON bodies crash PUT/DELETE instead of returning a 400",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/route.ts",
+      "startLine": 49,
+      "endLine": 59,
+      "symbol": "PUT",
+      "quote": "body = await req.json();"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/route.ts",
+      "startLine": 56,
+      "endLine": 59,
+      "symbol": "PUT",
+      "quote": "const { address, name, tags, notes, isPublic } = body as Record<\n    string,\n    unknown\n  >;"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/route.ts",
+      "startLine": 144,
+      "endLine": 154,
+      "symbol": "DELETE",
+      "quote": "body = await req.json();"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/route.ts",
+      "startLine": 151,
+      "endLine": 151,
+      "symbol": "DELETE",
+      "quote": "const { address } = body as Record<string, unknown>;"
+    }
+  ],
+  "reasoning": "`req.json()` can successfully parse JSON `null`. The subsequent object destructuring throws `TypeError: Cannot destructure property ... of 'body' as it is null`, bypassing the route's validation and error response. Invalid structured payloads should consistently return 400 like invalid addresses and malformed JSON, not an uncaught 500.",
+  "reproduction": "Send authenticated `PUT /api/address-labels` or `DELETE /api/address-labels` with body `null` and `Content-Type: application/json`; the JSON parse succeeds, then destructuring throws before the address validation branch.",
+  "recommendation": "After parsing, verify `body` is a non-null, non-array object before destructuring, and return a 400 error for any other JSON type. Apply the same guard in PUT and DELETE, or extract a small helper for object-body validation.",
+  "whyTestsDoNotAlreadyCoverThis": "The included route tests cover malformed JSON strings and invalid object fields, but they do not cover valid JSON values that are not objects, especially `null`.",
+  "suggestedRegressionTest": "Add PUT and DELETE tests with authenticated requests whose JSON body is `null`, asserting status 400 and no calls to `getLabel`, `upsertEntry`, or `deleteLabel`.",
+  "minimumFixScope": "ui-dashboard/src/app/api/address-labels/route.ts plus the route test file for PUT/DELETE non-object JSON bodies.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by validating parsed JSON is a non-null object before PUT/DELETE destructuring; added null and array body regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:20:17.814Z"
+    }
+  ],
+  "signature": "sig_feat-route-7ef697691a_cd56ae642c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T101016-ad2735",
+  "createdAt": "2026-05-20T10:10:51.936Z",
+  "updatedAt": "2026-05-20T10:20:17.813Z"
+}

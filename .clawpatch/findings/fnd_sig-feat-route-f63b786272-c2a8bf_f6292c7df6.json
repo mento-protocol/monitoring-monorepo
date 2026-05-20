@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f63b786272-c2a8bf_f6292c7df6",
+  "featureId": "feat_route_f63b786272",
+  "title": "Raw-address pool filters are never normalized on direct loads",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/pools/_components/pools-page-client.tsx",
+      "startLine": 54,
+      "endLine": 56,
+      "symbol": "PoolsContent",
+      "quote": "const poolFilter = searchParams.get(\"pool\") ?? \"\";"
+    },
+    {
+      "path": "ui-dashboard/src/app/pools/_components/pools-page-client.tsx",
+      "startLine": 93,
+      "endLine": 99,
+      "symbol": "PoolsContent",
+      "quote": "const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };"
+    },
+    {
+      "path": "ui-dashboard/src/app/pools/_components/pools-page-client.tsx",
+      "startLine": 120,
+      "endLine": 143,
+      "symbol": "resolvePoolFilter/applyFilter",
+      "quote": "const resolved = resolvePoolFilter(v);"
+    },
+    {
+      "path": "ui-dashboard/src/app/pools/__tests__/page.test.tsx",
+      "startLine": 209,
+      "endLine": 230,
+      "symbol": "PoolsPage multichain rendering",
+      "quote": "pool=143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115"
+    }
+  ],
+  "reasoning": "The input placeholder and resolver support raw 0x pool addresses, but normalization only runs when the user clicks Apply. A direct visit to /pools?pool=0x... or an Apply before all network pools have loaded leaves poolFilter as the raw address, and the page sends POOL_SWAPS with that raw value. The indexer pool IDs used by this route are namespaced chainId-address IDs, so the query returns no swaps even after the pool list later contains the matching namespaced ID.",
+  "reproduction": "Open /pools?pool=0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115 for a pool whose stored id is 143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115. The page issues PoolSwaps with poolId set to the raw address and renders the empty state instead of the pool's swaps.",
+  "recommendation": "Derive a normalized activePoolFilter from poolFilter plus poolsByNamespacedId and use that for the swaps heading/query. If a raw address cannot yet be resolved because pools are still loading, defer the pool-specific swaps query until resolution completes or re-run normalization once entries arrive.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test only covers an already-namespaced Monad filter. It never seeds mockSearchParams with a raw 0x address, so it cannot catch that direct URL state bypasses resolvePoolFilter.",
+  "suggestedRegressionTest": "Add a /pools test with mockSearchParams = new URLSearchParams(\"pool=0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115\") and mocked networkData containing the 143-namespaced pool; assert PoolSwaps receives { poolId: \"143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115\", limit: 25 }.",
+  "minimumFixScope": "ui-dashboard/src/app/pools/_components/pools-page-client.tsx plus the nearby page test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by deriving an active pool filter from the URL raw address plus loaded pool metadata before querying swaps; added direct-load raw address regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:25:10.684Z"
+    }
+  ],
+  "signature": "sig_feat-route-f63b786272_c2a8bf5211",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:46.003Z",
+  "updatedAt": "2026-05-20T10:25:10.684Z"
+}

@@ -25,7 +25,7 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
   // transient outage collapses to `rows = []` and the whole lifecycle
   // section disappears as if the pool had no records — operators can't
   // tell "no data yet" from "fetch failed."
-  if (error !== undefined) {
+  if (error) {
     return (
       <p className="text-sm text-slate-500">
         Lifecycle unavailable: {error.message}

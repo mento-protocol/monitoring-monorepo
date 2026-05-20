@@ -25,7 +25,7 @@ import {
 import { computeWormholeStatus } from "../src/wormhole/status.js";
 import {
   wormholeToEvmChainId,
-  WORMHOLE_TO_EVM_CHAIN_ID,
+  WORMHOLE_TO_EVM_CHAIN_IDS,
 } from "../src/wormhole/chainIds.js";
 import { findAndDrainPendingScratch } from "../src/wormhole/pairing.js";
 import { findByNttManager } from "../src/wormhole/nttAddresses.js";
@@ -355,14 +355,41 @@ describe("computeWormholeStatus — status machine", () => {
 });
 
 describe("wormhole/chainIds — EVM ↔ Wormhole mapping", () => {
-  it("maps Celo (14) → 42220 and Monad (48) → 143", () => {
-    assert.equal(WORMHOLE_TO_EVM_CHAIN_ID[14], 42220);
-    assert.equal(WORMHOLE_TO_EVM_CHAIN_ID[48], 143);
+  it("tracks mainnet and testnet candidates for Celo and Monad", () => {
+    assert.deepEqual(WORMHOLE_TO_EVM_CHAIN_IDS[14], [42220, 11142220]);
+    assert.deepEqual(WORMHOLE_TO_EVM_CHAIN_IDS[48], [143, 10143]);
+  });
+
+  it("resolves Wormhole ids within the active mainnet config", () => {
+    const mainnetChainIds = [42220, 143];
+
+    assert.equal(wormholeToEvmChainId(14, mainnetChainIds), 42220);
+    assert.equal(wormholeToEvmChainId(48, mainnetChainIds), 143);
+  });
+
+  it("resolves Wormhole ids within the active testnet config", () => {
+    const testnetChainIds = [11142220, 10143];
+
+    assert.equal(wormholeToEvmChainId(14, testnetChainIds), 11142220);
+    assert.equal(wormholeToEvmChainId(48, testnetChainIds), 10143);
   });
 
   it("wormholeToEvmChainId returns null for unknown ids (e.g. Solana = 1)", () => {
-    assert.equal(wormholeToEvmChainId(1), null);
-    assert.equal(wormholeToEvmChainId(999), null);
+    const activeChainIds = [42220, 143];
+
+    assert.equal(wormholeToEvmChainId(1, activeChainIds), null);
+    assert.equal(wormholeToEvmChainId(999, activeChainIds), null);
+  });
+
+  it("returns null when the Wormhole id is known but inactive", () => {
+    assert.equal(wormholeToEvmChainId(14, [143]), null);
+  });
+
+  it("throws when a config activates colliding mainnet and testnet candidates", () => {
+    assert.throws(
+      () => wormholeToEvmChainId(14, [42220, 11142220]),
+      /matches multiple active EVM chains/,
+    );
   });
 });
 

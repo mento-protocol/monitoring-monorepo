@@ -86,6 +86,18 @@ describe("sortTransfers — route branch", () => {
     const asc = sortTransfers([unknown, known], "route", "asc", noRates);
     expect(asc[0].id).toBe("k");
   });
+
+  it("sinks unknown chain IDs on descending too", () => {
+    const high = mk({ id: "high", sourceChainId: 42220, destChainId: 143 });
+    const low = mk({ id: "low", sourceChainId: 143, destChainId: 42220 });
+    const unknown = mk({
+      id: "unknown",
+      sourceChainId: null,
+      destChainId: null,
+    });
+    const desc = sortTransfers([unknown, low, high], "route", "desc", noRates);
+    expect(desc.map((t) => t.id)).toEqual(["high", "low", "unknown"]);
+  });
 });
 
 describe("sortTransfers — amount branches", () => {

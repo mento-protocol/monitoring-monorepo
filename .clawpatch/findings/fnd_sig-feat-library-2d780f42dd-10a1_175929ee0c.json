@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2d780f42dd-10a1_175929ee0c",
+  "featureId": "feat_library_2d780f42dd",
+  "title": "Historical raw-token charts scale 6-decimal tokens as 18 decimals",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/snapshot-chart.tsx",
+      "startLine": 17,
+      "endLine": 21,
+      "symbol": "SnapshotChartProps",
+      "quote": "interface SnapshotChartProps {\n  snapshots: PoolSnapshot[];\n  token0Symbol?: string;\n  token1Symbol?: string;\n  rebalanceTimestamps?: string[];\n}"
+    },
+    {
+      "path": "ui-dashboard/src/components/snapshot-chart.tsx",
+      "startLine": 38,
+      "endLine": 39,
+      "symbol": "SnapshotChart",
+      "quote": "const vol0 = sorted.map((s) => parseWei(s.swapVolume0));\nconst vol1 = sorted.map((s) => parseWei(s.swapVolume1));"
+    },
+    {
+      "path": "ui-dashboard/src/components/reserve-chart.tsx",
+      "startLine": 49,
+      "endLine": 61,
+      "symbol": "ReserveChart",
+      "quote": "const dec0 = pool?.token0Decimals ?? 18;\nconst dec1 = pool?.token1Decimals ?? 18;\n\nconst toUsd0 = (raw: string) => {\n  const amount = parseWei(raw, dec0);\n  if (!useUsd) return amount;\n  return usdmIsToken0 ? amount : amount * feedVal;\n};\n\nconst toUsd1 = (raw: string) => {\n  const amount = parseWei(raw, dec1);\n  if (!useUsd) return amount;\n  return usdmIsToken0 ? amount * feedVal : amount;\n};"
+    }
+  ],
+  "reasoning": "Both charts consume raw indexed token amounts. SnapshotChart has no decimal props and calls parseWei with its default 18 decimals, so any 6-decimal pool leg such as USDC is displayed 1e12 too small in daily volume. ReserveChart accepts the pool but still falls back to 18 decimals and does not fail closed when tokenDecimalsKnown is not true, so reserve history can render fabricated balances/USD values during the same decimal-metadata gap that ReservesPanel otherwise guards against. This is user-visible financial data, not just formatting.",
+  "reproduction": null,
+  "recommendation": "Pass token decimals and a decimal-trust flag into SnapshotChart, use those decimals for swapVolume0/1, and render no chart or an explicit unavailable state until decimals are trusted. In ReserveChart, require pool.tokenDecimalsKnown === true before parsing reserves, or return null/unavailable until trusted decimals are present rather than using 18 as a fallback.",
+  "whyTestsDoNotAlreadyCoverThis": "The linked component tests focus on address labels, auth status, breach history, and breaker behavior; they do not render SnapshotChart or ReserveChart with a 6-decimal leg or an untrusted decimal state.",
+  "suggestedRegressionTest": "Add chart tests with token0Decimals=18 and token1Decimals=6 where swapVolume1/reserve1='2000000' renders as 2.00 rather than 0.000000000002, plus an untrusted-decimals case that asserts the reserve chart does not render parsed values.",
+  "minimumFixScope": "ui-dashboard/src/components/snapshot-chart.tsx, ui-dashboard/src/components/reserve-chart.tsx, their call sites that can supply decimals/trust state, and focused component tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by gating raw-token charts on trusted decimals and parsing each leg with its token decimals; added raw-token chart regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T08:57:57.299Z"
+    }
+  ],
+  "signature": "sig_feat-library-2d780f42dd_10a1661e88",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T085318-5544ae",
+  "createdAt": "2026-05-20T08:54:56.911Z",
+  "updatedAt": "2026-05-20T08:57:57.298Z"
+}

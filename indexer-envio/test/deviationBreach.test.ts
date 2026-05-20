@@ -19,12 +19,26 @@ function makeMockContext() {
     context: {
       DeviationThresholdBreach: {
         get: async (id: string) => store.get(id),
+        getWhere: async (where: { poolId: { _eq: string } }) =>
+          Array.from(store.values()).filter(
+            (row) => row.poolId === where.poolId._eq,
+          ),
         set: (row: DeviationThresholdBreach) => {
           store.set(row.id, row);
         },
       },
     },
   };
+}
+
+function getOnlyOpenBreach(
+  store: Map<string, DeviationThresholdBreach>,
+): DeviationThresholdBreach {
+  const rows = Array.from(store.values()).filter(
+    (row) => row.endedAt === undefined,
+  );
+  assert.equal(rows.length, 1);
+  return rows[0]!;
 }
 
 // Pick an "out-of-weekend" epoch second so tradingSecondsInRange == wall-clock
@@ -62,6 +76,17 @@ describe("openBreachId", () => {
   it("is deterministic on (poolId, startedAt)", () => {
     assert.equal(openBreachId("42220-0xpool", 1000n), "42220-0xpool-1000");
   });
+
+  it("adds block, tx, and log-index entropy when provided", () => {
+    assert.equal(
+      openBreachId("42220-0xpool", 1000n, {
+        blockNumber: 123n,
+        txHash: "0xABC",
+        logIndex: 7,
+      }),
+      "42220-0xpool-1000-123-0xabc-7",
+    );
+  });
 });
 
 describe("recordBreachTransition — rising edge", () => {
@@ -86,7 +111,7 @@ describe("recordBreachTransition — rising edge", () => {
 
     assert.deepStrictEqual(poolUpdate, {}); // no cumulative change on rising edge
     assert.equal(store.size, 1);
-    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    const row = getOnlyOpenBreach(store);
     assert.equal(row.startedAt, MON_NOON);
     assert.equal(row.endedAt, undefined);
     assert.equal(row.entryPriceDifference, 7500n);
@@ -117,7 +142,7 @@ describe("recordBreachTransition — rising edge", () => {
       source: "fpmm_rebalanced",
       strategy: "0xstrategy",
     });
-    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    const row = getOnlyOpenBreach(store);
     assert.equal(row.rebalanceCountDuring, 1);
     assert.equal(row.startedByEvent, "rebalance");
   });
@@ -136,8 +161,65 @@ describe("recordBreachTransition — rising edge", () => {
       source: "oracle_reported",
     });
     assert.equal(store.size, 1);
-    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    const row = getOnlyOpenBreach(store);
     assert.equal(row.startedByEvent, "oracle_update");
+  });
+
+  it("keeps repeated same-timestamp breaches as distinct rows and updates the active one", async () => {
+    const { store, context } = makeMockContext();
+    const healthy = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const breached = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+
+    await recordBreachTransition(context, healthy, breached, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xfirst",
+      source: "fpmm_swap",
+    });
+    await recordBreachTransition(
+      context,
+      breached,
+      { ...healthy, breachCount: 0 },
+      {
+        blockTimestamp: MON_NOON,
+        blockNumber: 100n,
+        txHash: "0xclose",
+        source: "fpmm_rebalanced",
+      },
+    );
+    await recordBreachTransition(context, healthy, breached, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xsecond",
+      source: "oracle_reported",
+    });
+
+    assert.equal(store.size, 2);
+    const ids = Array.from(store.keys());
+    assert.equal(new Set(ids).size, 2);
+    assert.ok(ids.every((id) => id.includes(`${MON_NOON}-100-0x`)));
+
+    await recordBreachTransition(
+      context,
+      breached,
+      { ...breached, priceDifference: 9000n },
+      {
+        blockTimestamp: MON_NOON,
+        blockNumber: 100n,
+        txHash: "0xcontinue",
+        source: "fpmm_swap",
+      },
+    );
+
+    const open = getOnlyOpenBreach(store);
+    assert.equal(open.startedByTxHash, "0xsecond");
+    assert.equal(open.peakPriceDifference, 9000n);
   });
 });
 
@@ -642,7 +724,7 @@ describe("recordBreachTransition — falling edge", () => {
       txHash: "0xheal-continue",
       source: "oracle_reported",
     });
-    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    const row = getOnlyOpenBreach(store);
     assert.ok(row);
     assert.equal(row.startedAt, MON_NOON);
     assert.equal(row.startedByEvent, "oracle_update");
@@ -912,7 +994,7 @@ describe("recordBreachTransition — asymmetric pool entry threshold (PR 1.6)", 
       txHash: "0xrise-asym",
       source: "fpmm_swap",
     });
-    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    const row = getOnlyOpenBreach(store);
     assert.equal(row.entryRebalanceThreshold, 10000);
   });
 

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-2a35d40e2e-1bef_c3cbefee59",
+  "featureId": "feat_ui-flow_2a35d40e2e",
+  "title": "Existing-report form state can carry across addresses when record keys collide",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/address-report-editor.tsx",
+      "startLine": 99,
+      "endLine": 102,
+      "symbol": "AddressReportEditor",
+      "quote": "const recordKey = data\n    ? `${data.updatedAt}:${data.version}`\n    : `empty:${normalizedAddress}`;"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-report-editor.tsx",
+      "startLine": 125,
+      "endLine": 132,
+      "symbol": "AddressReportEditor",
+      "quote": "if (recordKey !== seenRecordKeyRef.current) {\n    seenRecordKeyRef.current = recordKey;\n    setTitle(data?.title ?? \"\");\n    setBody(data?.body ?? \"\");\n    setPreviewMode(Boolean(data));\n    setError(null);\n  }"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-report-editor.test.tsx",
+      "startLine": 180,
+      "endLine": 188,
+      "symbol": null,
+      "quote": "it(\"resets the draft when the address changes and both addresses are empty-state reports\", () => {\n    mockSwrData = null;\n    render({ address: VALID_ADDR });\n    setTextarea(\"ar-body\", \"draft for the first address\");\n\n    render({ address: SECOND_VALID_ADDR });\n\n    const textarea = container.querySelector(\"#ar-body\") as HTMLTextAreaElement;\n    expect(textarea.value).toBe(\"\");"
+    }
+  ],
+  "reasoning": "The hydration key includes the normalized address only for empty reports. For existing reports it is just updatedAt plus version, so switching the mounted editor from address A to address B will not reset title/body if both records share the same version and updatedAt. That is plausible for imported/backfilled records or two freshly-created v1 reports with identical timestamp precision. The UI would then compare address A's retained draft against address B's data, mark it dirty, and a save would PUT the wrong body/title to address B.",
+  "reproduction": "Mount AddressReportEditor with report A {version:1, updatedAt:'2026-05-07T00:00:00Z', body:'A'}, switch to edit and change body, then rerender the same component for address B whose fetched report is {version:1, updatedAt:'2026-05-07T00:00:00Z', body:'B'}. The textarea remains the A draft instead of hydrating to B.",
+  "recommendation": "Include the normalized address, and preferably a content fingerprint, in the existing-report record key, for example `${normalizedAddress}:${data.updatedAt}:${data.version}:${data.title ?? ''}:${data.body}` or a small stable fingerprint. This matches the repo's documented pending-ledger guidance that content fingerprints belong in remount/hydration keys when updatedAt can be preserved.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing test only covers address changes where both reports are empty-state records. There is no test for changing address while both SWR results are existing reports with colliding updatedAt/version values.",
+  "suggestedRegressionTest": "Add a jsdom test that renders an existing report for VALID_ADDR, edits the textarea, rerenders the same mounted editor for SECOND_VALID_ADDR with mockSwrData changed to an existing report that has the same updatedAt/version but different body/title, and asserts the fields hydrate to the second report.",
+  "minimumFixScope": "Update AddressReportEditor's recordKey construction and extend address-report-editor.test.tsx with the existing-report address-switch regression.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "AddressReportEditor existing-report hydration keys include address plus content fingerprint, with same-version/updatedAt address-switch regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:53:51.125Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-2a35d40e2e_1bef3c33b5",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T104043-436ff7",
+  "createdAt": "2026-05-20T10:41:34.612Z",
+  "updatedAt": "2026-05-20T10:53:51.124Z"
+}

@@ -144,11 +144,22 @@
     "project-root:ui-dashboard"
   ],
   "trustBoundaries": [],
-  "status": "pending",
+  "status": "fixed",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-b4d65318ca-8136_f3194a2662"
+  ],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T092843-0eb58e",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T09:29:42.522Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T09:43:50.082Z"
 }

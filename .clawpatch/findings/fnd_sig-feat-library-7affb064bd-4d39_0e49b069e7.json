@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-7affb064bd-4d39_0e49b069e7",
+  "featureId": "feat_library_7affb064bd",
+  "title": "Limit status rendering has no direct regression coverage",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/pool-header/limit-status-value.tsx",
+      "startLine": 13,
+      "endLine": 34,
+      "symbol": "summarizeWindow",
+      "quote": "Picks the highest-pressure token in the window so the mini-bar surfaces the tightest constraint."
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/limit-status-value.tsx",
+      "startLine": 56,
+      "endLine": 78,
+      "symbol": "MiniBar",
+      "quote": "aria-valuenow must stay within [valuemin, valuemax] to be a valid ARIA progressbar"
+    },
+    {
+      "path": "ui-dashboard/src/components/pool-header/limit-status-value.tsx",
+      "startLine": 84,
+      "endLine": 102,
+      "symbol": "LimitStatusValue",
+      "quote": "Surface the failure explicitly to match what the Limits tab already shows."
+    }
+  ],
+  "reasoning": "The pool-header group has focused tests for deviation, oracle price, rebalance status, and uptime, but no direct test for LimitStatusValue. That leaves several user-visible contracts unprotected: selecting the highest-pressure L0/L1 token, formatting netflow/limit pairs, capping breached progress bars while preserving over-limit aria text, rendering virtual pools as neutral, and rendering query failures as an explicit amber state. These are the same kinds of formatting and degraded-mode behaviors the sibling files test, so a small regression in this cell could ship without any targeted failure.",
+  "reproduction": null,
+  "recommendation": "Add a `limit-status-value.test.tsx` beside the sibling tests covering at least normal L0/L1 rendering, over-limit capped aria state, virtual pool dash, empty trading limits dash, and `hasError` rendering.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test set contains `deviation-cell.test.tsx`, `oracle-price-value.test.tsx`, `rebalance-status-value.test.tsx`, and `uptime-value.test.tsx`; there is no corresponding LimitStatusValue test despite this file owning independent formatting and degraded-mode logic.",
+  "suggestedRegressionTest": "Render `LimitStatusValue` with two trading-limit rows where one row has higher pressure, assert the displayed pair comes from that row and the progressbar width/aria text are correct; separately assert `hasError` returns `Query failed` and virtual/empty inputs return the neutral dash.",
+  "minimumFixScope": "Add targeted Vitest coverage for `ui-dashboard/src/components/pool-header/limit-status-value.tsx`; no production code change is required unless the new tests expose behavior drift.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by adding direct LimitStatusValue regressions for highest-pressure display, over-limit aria state, error, virtual, and empty states.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:54.990Z"
+    }
+  ],
+  "signature": "sig_feat-library-7affb064bd_4d39ecf4f5",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:16:49.815Z",
+  "updatedAt": "2026-05-20T09:24:54.989Z"
+}

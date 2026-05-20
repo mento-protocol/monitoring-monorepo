@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-cf9622764b-642d_afbe6683bd",
+  "featureId": "feat_library_cf9622764b",
+  "title": "Duration inputs do not reflect committed value changes from props",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/breach-history/duration-filter.tsx",
+      "startLine": 83,
+      "endLine": 85,
+      "symbol": "DurationField",
+      "quote": "const [draft, setDraft] = useState(() =>\n    committedSeconds != null ? formatDurationShort(committedSeconds) : \"\",\n  );"
+    },
+    {
+      "path": "ui-dashboard/src/components/breach-history/duration-filter.tsx",
+      "startLine": 112,
+      "endLine": 119,
+      "symbol": "DurationField",
+      "quote": "value={draft}\n      onChange={(e) => {\n        setDraft(e.target.value);\n        // Clear the error as soon as they start fixing it — no point\n        // yelling while they type.\n        if (invalid) setInvalid(false);\n      }}\n      onBlur={commit}"
+    }
+  ],
+  "reasoning": "DurationField receives committedSeconds as a prop, but only uses it for the initial useState value. If the parent resets or changes minSeconds/maxSeconds without remounting this component, the visible input remains stale and a later blur/Enter can commit the stale draft back over the parent state. This violates the component's own controlled/committed-value contract and makes external clears, URL hydration, or future reset controls unreliable.",
+  "reproduction": null,
+  "recommendation": "Sync draft from committedSeconds when committedSeconds changes and the field is not actively being edited, or key each DurationField by the committed value if remounting on external changes is acceptable. Preserve the local draft behavior while the user is typing.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing duration tests exercise typing, blur, Enter, invalid input, and clearing through the same input, but they do not rerender DurationRangeInputs with changed committedSeconds props from outside the field.",
+  "suggestedRegressionTest": "Render DurationRangeInputs with minSeconds={3600}, assert the min input shows the formatted value, rerender with minSeconds={null}, assert the input is empty, then blur and assert onMinCommit is not called with 3600.",
+  "minimumFixScope": "ui-dashboard/src/components/breach-history/duration-filter.tsx",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Duration fields now sync draft text from committed props when not focused while preserving active edits; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:29.448Z"
+    }
+  ],
+  "signature": "sig_feat-library-cf9622764b_642d36d295",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:46:06.953Z",
+  "updatedAt": "2026-05-20T09:56:29.447Z"
+}

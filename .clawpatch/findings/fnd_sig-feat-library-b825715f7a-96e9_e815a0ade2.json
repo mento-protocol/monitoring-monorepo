@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b825715f7a-96e9_e815a0ade2",
+  "featureId": "feat_library_b825715f7a",
+  "title": "Additive handlers run during Envio preload",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/handlers/broker.ts",
+      "startLine": 61,
+      "endLine": 79,
+      "symbol": "Broker.Swap handler",
+      "quote": "indexer.onEvent(\n  { contract: \"Broker\", event: \"Swap\" },\n  async ({ event, context }) => {"
+    },
+    {
+      "path": "indexer-envio/src/handlers/broker.ts",
+      "startLine": 117,
+      "endLine": 135,
+      "symbol": "Broker.Swap handler",
+      "quote": "context.BrokerExchangeDailySnapshot.set({\n      id: exchangeSnapshotId,\n      chainId: event.chainId,"
+    },
+    {
+      "path": "indexer-envio/src/handlers/broker.ts",
+      "startLine": 215,
+      "endLine": 228,
+      "symbol": "Broker.Swap handler",
+      "quote": "if (!brokerCallerIsVirtualPool) {\n      const snapshotId = `${event.chainId}-${exchangeProvider}-direct-${dayTs}`;"
+    },
+    {
+      "path": "indexer-envio/src/handlers/virtualPool.ts",
+      "startLine": 108,
+      "endLine": 157,
+      "symbol": "VirtualPoolFactory.VirtualPoolDeployed handler",
+      "quote": "indexer.onEvent(\n  { contract: \"VirtualPoolFactory\", event: \"VirtualPoolDeployed\" },\n  async ({ event, context }) => {"
+    },
+    {
+      "path": "indexer-envio/src/handlers/virtualPool.ts",
+      "startLine": 184,
+      "endLine": 248,
+      "symbol": "VirtualPool.Swap handler",
+      "quote": "indexer.onEvent(\n  { contract: \"VirtualPool\", event: \"Swap\" },\n  async ({ event, context }) => {"
+    },
+    {
+      "path": "indexer-envio/src/handlers/biPoolManager.ts",
+      "startLine": 301,
+      "endLine": 309,
+      "symbol": "BiPoolManager.ExchangeCreated handler",
+      "quote": "With v3 preload optimization,\n    // the same event runs twice (preload + processing); without this guard\n    // the non-cached `poolExchangeEffect` would fire on both passes,"
+    }
+  ],
+  "reasoning": "The reviewed handler group contains several handlers with additive writes and side effects but no `context.isPreload` early return. Other handlers in the same group explicitly document that Envio v3 invokes the same event twice for preload plus processing and guard the preload pass before RPC/effect work and writes. Broker.Swap increments daily snapshots and aggregator/trader rollups, while VirtualPool handlers call `upsertSnapshot` and leaderboard rollups. If these handlers run in the preload pass like the guarded handlers, the event-row writes may overwrite by id, but the additive snapshot counters and volumes can be incremented twice or RPC/effect work can run twice.",
+  "reproduction": null,
+  "recommendation": "Add explicit preload branches to additive handlers. In preload, warm only the entity reads/effects needed by the processing pass and return before any `set`, upsert, heartbeat, or leaderboard/snapshot mutation. Apply this at least to Broker.Swap and VirtualPool event handlers that update snapshots/rollups, then audit OpenLiquidityStrategy for the same pattern.",
+  "whyTestsDoNotAlreadyCoverThis": "The included broker and biPoolManager tests call `processEvent` in the normal processing path only; there is no test that invokes Broker.Swap or VirtualPool handlers with `context.isPreload === true` and then verifies no additive rollup rows are written or double counted.",
+  "suggestedRegressionTest": "Add harness coverage that processes a Broker.Swap and a VirtualPool.Swap once with a preload context and once with a processing context, then asserts BrokerDailySnapshot/BrokerExchangeDailySnapshot/leaderboard snapshot counts equal one processing event, not preload plus processing.",
+  "minimumFixScope": "Broker.Swap and VirtualPool handlers that perform additive rollup/snapshot writes; include a quick sibling audit of OpenLiquidityStrategy additive counters.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Broker and VirtualPool preload paths now warm reads/effects then return before additive writes; OLS preload mutation paths audited.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:51.122Z"
+    }
+  ],
+  "signature": "sig_feat-library-b825715f7a_96e96e1379",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:30:30.572Z",
+  "updatedAt": "2026-05-20T09:43:51.122Z"
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-6f093cf506-f619_cdd82a97b1",
+  "featureId": "feat_library_6f093cf506",
+  "title": "Revenue route has no direct coverage for its fee error and approximation states",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/revenue/_components/revenue-page-client.tsx",
+      "startLine": 26,
+      "endLine": 38,
+      "symbol": "RevenueContent",
+      "quote": "const anyNetworkError = networkData.some((n) => n.error !== null);"
+    },
+    {
+      "path": "ui-dashboard/src/app/revenue/_components/revenue-page-client.tsx",
+      "startLine": 40,
+      "endLine": 80,
+      "symbol": "RevenueContent",
+      "quote": "const aggregated = useMemo(() => {"
+    },
+    {
+      "path": "ui-dashboard/src/app/revenue/_components/revenue-page-client.tsx",
+      "startLine": 93,
+      "endLine": 163,
+      "symbol": "RevenueContent",
+      "quote": "<BreakdownTile"
+    }
+  ],
+  "reasoning": "The revenue page owns non-trivial user-visible behavior: it blanks totals on network/rates/snapshot errors, marks truncated or unpriced data as approximate, and forwards those degraded states to the tile, chart, and pool leaderboard. The included associated tests cover the global overview, address-book, bridge-flows, pool, and pools pages, but none import or render `RevenuePageClient` or `RevenuePage`. Component-level tests for hooks/table helpers do not pin this route's wiring, so a route-local regression such as passing only `anyNetworkError` to the table, omitting `feeSnapshotsError` from `anyFeesError`, or losing the approximation subtitle would not be caught by the listed route tests.",
+  "reproduction": null,
+  "recommendation": "Add a focused `ui-dashboard/src/app/revenue/__tests__/page.test.tsx` or `_components/revenue-page-client.test.tsx` that mocks `useProtocolFees` and asserts all-success, network failure, rates/fee snapshot failure, truncated snapshot, and unpriced/unresolved states across the tile, chart props/markup, and leaderboard shell.",
+  "whyTestsDoNotAlreadyCoverThis": "The searched included tests do not reference `RevenuePage`, `RevenuePageClient`, `/revenue`, or the `Protocol Revenue` heading. Existing global overview tests exercise similar aggregation logic in `ui-dashboard/src/app/page-client.tsx`, but this route duplicates its own wiring and uses the slim `useProtocolFees` hook, so those tests do not fail if the revenue route regresses.",
+  "suggestedRegressionTest": "Mock `@/hooks/use-protocol-fees` to return one healthy network and one network with `feeSnapshotsError`, render `RevenuePageClient`, and assert the swap-fee headline is `N/A`, the chart shows partial data, and `RevenueByPoolTable` receives/prints the degraded per-pool state. Add separate cases for `feeSnapshotsTruncated` and unpriced symbols to assert the `≈` prefix and approximation subtitle.",
+  "minimumFixScope": "Add route-level tests for `ui-dashboard/src/app/revenue/_components/revenue-page-client.tsx`; no production code change is required for this finding.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by adding direct RevenuePageClient degraded-state tests for fee errors and approximate/truncated data.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:15:14.867Z"
+    }
+  ],
+  "signature": "sig_feat-library-6f093cf506_f61963f846",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T090450-644cb6",
+  "createdAt": "2026-05-20T09:05:51.543Z",
+  "updatedAt": "2026-05-20T09:15:14.867Z"
+}

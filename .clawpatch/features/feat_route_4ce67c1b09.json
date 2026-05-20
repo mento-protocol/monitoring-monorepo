@@ -67,11 +67,28 @@
     "network",
     "serialization"
   ],
-  "status": "pending",
+  "status": "reviewed",
   "lock": null,
   "findingIds": [],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T101005-91050a",
+      "kind": "review-error",
+      "summary": "codex provider failed: WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T10:10:05.367Z"
+    },
+    {
+      "runId": "20260520T101016-ad2735",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T10:11:21.012Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T10:11:21.012Z"
 }

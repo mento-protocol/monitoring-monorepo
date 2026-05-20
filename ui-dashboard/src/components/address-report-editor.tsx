@@ -58,6 +58,16 @@ async function fetchSingleReport(
   return (await res.json()) as AddressReport;
 }
 
+function fingerprintReportContent(report: AddressReport): string {
+  const content = JSON.stringify([report.title ?? "", report.body]);
+  let hash = 2166136261;
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 // 6 useState calls — independent fields plus orthogonal flow flags;
 // a reducer would just rename the setters. The component is intentionally kept
 // together because save/delete ownership and preview state share one form.
@@ -86,11 +96,11 @@ export function AddressReportEditor(props: Props) {
   // Hydrate form state when the fetched report changes (or arrives for the
   // first time). `recordKey` changes only on identity moves of the underlying
   // record — SWR background refetches that return identical data don't reset
-  // user edits. The empty-state key includes the normalized address so a
-  // user typing in the new-address flow doesn't carry a draft from one
-  // address into the next when both happen to be empty.
+  // user edits. Include the normalized address and editable-content fingerprint
+  // so a same-mounted editor never carries one address's draft into another
+  // address whose existing report happens to share updatedAt/version.
   const recordKey = data
-    ? `${data.updatedAt}:${data.version}`
+    ? `existing:${normalizedAddress}:${data.updatedAt}:${data.version}:${fingerprintReportContent(data)}`
     : `empty:${normalizedAddress}`;
   const [title, setTitle] = useState(data?.title ?? "");
   const [body, setBody] = useState(data?.body ?? "");
@@ -164,7 +174,7 @@ export function AddressReportEditor(props: Props) {
     try {
       const res = await fetch("/api/address-reports", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: reportSaveHeaders(data),
         signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({
           address: trimmed,
@@ -193,9 +203,8 @@ export function AddressReportEditor(props: Props) {
       inFlightRef.current.saving = false;
     }
 
-    // Post-save bookkeeping. Failures here do NOT undo the save — Redis
-    // persisted the report, the local cache already shows it, and a
-    // transient SWR mutate failure shouldn't be surfaced as "Save failed".
+    // Failures here do NOT undo the save; transient SWR mutate failures
+    // shouldn't be surfaced as "Save failed".
     if (saved) {
       try {
         // Refresh the index so the address-book 📄 indicator picks up the
@@ -212,6 +221,7 @@ export function AddressReportEditor(props: Props) {
     body,
     title,
     trimmed,
+    data,
     isAddressValid,
     isLookupPending,
     overLimit,
@@ -435,7 +445,6 @@ export function AddressReportEditor(props: Props) {
         )}
       </div>
 
-      {/* Footer actions */}
       <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
         <div>
           {hasExisting && (
@@ -466,4 +475,12 @@ export function AddressReportEditor(props: Props) {
       </div>
     </fieldset>
   );
+}
+
+function reportSaveHeaders(
+  report: AddressReport | null | undefined,
+): Record<string, string> {
+  return report === undefined || report === null
+    ? { "Content-Type": "application/json" }
+    : { "Content-Type": "application/json", "If-Match": `"${report.version}"` };
 }

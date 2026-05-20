@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-344009ceff-9784_d902d35f89",
+  "featureId": "feat_library_344009ceff",
+  "title": "Strategy probe timeout does not cancel the underlying viem request",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/strategy-detection.ts",
+      "startLine": 183,
+      "endLine": 183,
+      "symbol": "detectProbedStrategies",
+      "quote": "const client = getViemClient(network.rpcUrl);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/strategy-detection.ts",
+      "startLine": 203,
+      "endLine": 214,
+      "symbol": "detectProbedStrategies",
+      "quote": "const type = await Promise.race(["
+    },
+    {
+      "path": "ui-dashboard/src/lib/rpc-client.ts",
+      "startLine": 19,
+      "endLine": 28,
+      "symbol": "getViemClient",
+      "quote": "transport: http(rpcUrl, { timeout: opts.timeoutMs }),"
+    }
+  ],
+  "reasoning": "The strategy detector documents a 3s per-rebalancer RPC budget and races detectStrategyType against a 3s timer, but it constructs the viem client without passing the timeout option that rpc-client explicitly supports. Promise.race lets detectProbedStrategies return after 3s, but it does not abort or shorten the in-flight viem HTTP calls inside detectStrategyType; those can continue until viem's default transport timeout or the network stack completes. Under a slow RPC and several unique rebalancers, each dashboard poll can accumulate orphaned outstanding requests and still burn sockets/RPC capacity after the UI has already degraded open.",
+  "reproduction": null,
+  "recommendation": "Create the strategy-detection client with the same probe budget, e.g. getViemClient(network.rpcUrl, { timeoutMs: PROBE_TIMEOUT_MS }), and prefer an abortable path as well if detectStrategyType can accept a signal. Keep the Promise.race only as an outer guard if needed.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise address/report/bridge/table behavior, not strategy detection. The existing strategy timeout behavior is also easy to test with mocked detectStrategyType, which proves the wrapper promise resolves after 3s but cannot observe whether the real viem transport was configured to stop the HTTP request.",
+  "suggestedRegressionTest": "Add a strategy-detection unit test that mocks getViemClient and asserts detectProbedStrategies calls it with { timeoutMs: 3000 } for RPC-backed networks.",
+  "minimumFixScope": "ui-dashboard/src/lib/strategy-detection.ts plus a focused strategy-detection test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by configuring getViemClient with the 3000ms probe timeout; added a strategy-detection regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T08:57:58.306Z"
+    }
+  ],
+  "signature": "sig_feat-library-344009ceff_9784a9e4c9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T085318-5544ae",
+  "createdAt": "2026-05-20T08:54:42.244Z",
+  "updatedAt": "2026-05-20T08:57:58.305Z"
+}

@@ -130,10 +130,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // with a placeholder so the key can't leak via err.message. Return a
     // stable public string so the endpoint's contract doesn't drift with
     // provider error phrasing and nothing sensitive leaks to the browser.
-    Sentry.captureException(redactRpcUrl(err, rpcUrl), {
+    const redactedError = redactRpcUrl(err, rpcUrl);
+    Sentry.captureException(redactedError, {
       tags: { route: "rebalance-check", network },
     });
-    console.error("[rebalance-check]", network, pool, err);
+    console.error("[rebalance-check]", network, redactedError);
     return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }
 }

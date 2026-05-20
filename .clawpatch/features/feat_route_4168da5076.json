@@ -59,11 +59,20 @@
     "network",
     "serialization"
   ],
-  "status": "pending",
+  "status": "reviewed",
   "lock": null,
   "findingIds": [],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T100108-bf54ab",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T10:01:37.154Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T10:01:37.154Z"
 }

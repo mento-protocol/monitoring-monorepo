@@ -19,6 +19,7 @@ import { Redis } from "@upstash/redis";
 import {
   addToMiniPaySet,
   fetchMiniPayUsers,
+  advanceLastSyncedBlock,
   getLastSyncedBlock,
   getMiniPaySetSize,
   intersectMiniPay,
@@ -160,6 +161,19 @@ describe("cursor helpers", () => {
     setMock.mockResolvedValue("OK");
     await setLastSyncedBlock(BigInt(99999));
     expect(setMock).toHaveBeenCalledWith("minipay:lastBlock", "99999");
+  });
+
+  it("advanceLastSyncedBlock writes only when the stored cursor is lower", async () => {
+    getMock.mockResolvedValueOnce("100");
+    setMock.mockResolvedValue("OK");
+    await expect(advanceLastSyncedBlock(BigInt(200))).resolves.toBe(true);
+    expect(setMock).toHaveBeenCalledWith("minipay:lastBlock", "200");
+  });
+
+  it("advanceLastSyncedBlock skips stale candidates", async () => {
+    getMock.mockResolvedValueOnce("300");
+    await expect(advanceLastSyncedBlock(BigInt(200))).resolves.toBe(false);
+    expect(setMock).not.toHaveBeenCalled();
   });
 });
 

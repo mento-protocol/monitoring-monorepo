@@ -55,14 +55,14 @@ describe("route-level loading UIs", () => {
     expect(countLiveRegions()).toBe(1);
   });
 
-  it("AddressBookLoading skeleton matches the real table shape (8 cols)", () => {
+  it("AddressBookLoading skeleton matches the real table shape (10 cols)", () => {
     render(<AddressBookLoading />);
     const table = container.querySelector<HTMLElement>(
       '[role="status"][aria-label="Loading table"]',
     );
     expect(table).not.toBeNull();
     const [header] = Array.from(table!.children) as HTMLElement[];
-    expect(header.children).toHaveLength(8);
+    expect(header.children).toHaveLength(10);
   });
 
   it("PoolDetailLoading skeleton matches the real page shape (7 tabs, 6-col table)", () => {

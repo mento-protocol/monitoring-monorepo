@@ -1141,6 +1141,46 @@ describe("BridgeFlowsPage — pagination and count state", () => {
     expect(container.textContent).toContain("50 total");
     expect(container.textContent).toContain("Total count degraded");
   });
+
+  it("does not reuse the previous status filter's total when the new filter count errors", () => {
+    const delivered = makeBulkTransfers(50).map((t) => ({
+      ...t,
+      status: "DELIVERED" as const,
+    }));
+    const pending = makeBulkTransfers(3).map((t) => ({
+      ...t,
+      status: "PENDING" as const,
+    }));
+
+    mockSearchParams = new URLSearchParams("status=DELIVERED");
+    mockUseBridgeGQL.mockImplementation(
+      bridgeImpl({
+        transfers: ok({ BridgeTransfer: delivered.slice(0, 25) }),
+        count: ok({ BridgeTransfer: delivered.map((t) => ({ id: t.id })) }),
+      }),
+    );
+    renderJsdom();
+    expect(container.textContent).toContain("50 total");
+
+    mockSearchParams = new URLSearchParams("status=PENDING");
+    mockUseBridgeGQL.mockImplementation(
+      bridgeImpl({
+        transfers: ok({ BridgeTransfer: pending }),
+        count: failed<{ BridgeTransfer: Array<{ id: string }> }>(
+          "pending count error",
+        ),
+      }),
+    );
+    act(() => {
+      root.render(<BridgeFlowsPage />);
+    });
+
+    expect(container.textContent).not.toContain("50 total");
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Next page"]'),
+    ).toBeNull();
+    expect(container.textContent).toContain("Total count degraded");
+  });
 });
 
 // ---------------------------------------------------------------------------

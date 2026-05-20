@@ -62,6 +62,7 @@ const mockUseAddressLabels = vi.fn(() => ({
   getEntry: mockGetEntry,
   revalidate: mockRevalidate,
   isLoading: false as boolean,
+  hasLoaded: true as boolean,
   error: undefined as Error | undefined,
   markPendingMutation: () => () => undefined,
   isMutationPending: () => false,
@@ -208,6 +209,7 @@ beforeEach(() => {
     getEntry: mockGetEntry,
     revalidate: mockRevalidate,
     isLoading: false as boolean,
+    hasLoaded: true as boolean,
     error: undefined as Error | undefined,
     markPendingMutation: () => () => undefined,
     isMutationPending: () => false,
@@ -446,6 +448,7 @@ describe("AddressBookClient — initial render", () => {
       getEntry: mockGetEntry,
       revalidate: mockRevalidate,
       isLoading: true,
+      hasLoaded: false,
       error: undefined,
       markPendingMutation: () => () => undefined,
       isMutationPending: () => false,
@@ -465,6 +468,7 @@ describe("AddressBookClient — initial render", () => {
       getEntry: mockGetEntry,
       revalidate: mockRevalidate,
       isLoading: false,
+      hasLoaded: false,
       error: new Error("hasura is down"),
       markPendingMutation: () => () => undefined,
       isMutationPending: () => false,
@@ -476,6 +480,28 @@ describe("AddressBookClient — initial render", () => {
     expect(alert?.textContent).toContain("Error loading custom labels");
     expect(alert?.textContent).toContain("hasura is down");
     expect(container.textContent).not.toContain("Loading labels…");
+  });
+
+  it("does not render writable controls before labels have loaded", () => {
+    mockUseAddressLabels.mockReturnValueOnce({
+      customEntries: [],
+      getEntry: mockGetEntry,
+      revalidate: mockRevalidate,
+      isLoading: false,
+      hasLoaded: false,
+      error: undefined,
+      markPendingMutation: () => () => undefined,
+      isMutationPending: () => false,
+      markPendingReportMutation: () => () => undefined,
+      isReportMutationPending: () => false,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("Loading labels…");
+    expect(container.textContent).not.toContain("+ Add label");
+    expect(container.textContent).not.toContain("+ Tag");
+    expect(container.textContent).not.toContain("Export JSON");
   });
 });
 

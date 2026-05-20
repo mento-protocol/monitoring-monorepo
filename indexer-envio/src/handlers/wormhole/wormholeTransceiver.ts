@@ -32,7 +32,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const p = event.params;
     const emitterChainId = Number(p.emitterChainId);
-    const sourceEvm = wormholeToEvmChainId(emitterChainId);
+    const sourceEvm = wormholeToEvmChainId(emitterChainId, indexer.chainIds);
     // If we can't map the Wormhole chain id to an EVM chain we index, the
     // scratch would never be drained by a MessageAttestedTo we emit (different
     // peer). Skip — leaves no state behind.

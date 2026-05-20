@@ -14,11 +14,19 @@ type WormholeOperationResponse = {
   operations?: WormholeOperation[];
 };
 
+type RedeemRequest = {
+  txHash: string;
+  chainConfig: NonNullable<ReturnType<typeof getChainRedeemConfig>>;
+  transceiver: NonNullable<ReturnType<typeof getTransceiverForToken>>;
+};
+
 function badRequest(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET(request: NextRequest) {
+function parseRedeemRequest(
+  request: NextRequest,
+): { ok: true; value: RedeemRequest } | { ok: false; response: NextResponse } {
   const txHash = request.nextUrl.searchParams.get("txHash")?.trim() ?? "";
   const destChainId = Number(
     request.nextUrl.searchParams.get("destChainId") ?? "",
@@ -27,19 +35,38 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get("tokenSymbol")?.trim() ?? "";
 
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
-    return badRequest("Expected a 32-byte hex txHash.");
+    return {
+      ok: false,
+      response: badRequest("Expected a 32-byte hex txHash."),
+    };
   }
   if (!Number.isFinite(destChainId) || destChainId === 0) {
-    return badRequest("Expected a numeric destChainId.");
+    return {
+      ok: false,
+      response: badRequest("Expected a numeric destChainId."),
+    };
   }
   const chainConfig = getChainRedeemConfig(destChainId);
   if (!chainConfig) {
-    return badRequest(`Unsupported destination chain: ${destChainId}.`);
+    return {
+      ok: false,
+      response: badRequest(`Unsupported destination chain: ${destChainId}.`),
+    };
   }
   const transceiver = getTransceiverForToken(destChainId, tokenSymbol);
   if (!transceiver) {
-    return badRequest(`Unknown token symbol: ${tokenSymbol}.`);
+    return {
+      ok: false,
+      response: badRequest(`Unknown token symbol: ${tokenSymbol}.`),
+    };
   }
+  return { ok: true, value: { txHash, chainConfig, transceiver } };
+}
+
+export async function GET(request: NextRequest) {
+  const parsed = parseRedeemRequest(request);
+  if (!parsed.ok) return parsed.response;
+  const { txHash, chainConfig, transceiver } = parsed.value;
 
   const url = new URL("https://api.wormholescan.io/api/v1/operations");
   url.searchParams.set("page", "0");
@@ -73,28 +100,14 @@ export async function GET(request: NextRequest) {
   }
   const operations = body.operations ?? [];
 
-  if (operations.length === 0) {
-    return badRequest(
-      "No Wormhole VAA found for this source transaction.",
-      404,
-    );
-  }
-  if (operations.length > 1) {
-    return badRequest(
-      "Multiple Wormhole messages found for this transaction; manual redemption is not supported for batch transfers.",
-      400,
-    );
+  const vaaSelection = getSingleVaaRaw(operations);
+  if (!vaaSelection.ok) return vaaSelection.response;
+
+  const vaaHex = decodeVaaHex(vaaSelection.vaaRaw);
+  if (!vaaHex) {
+    return badRequest("Wormholescan returned an invalid VAA.", 502);
   }
 
-  const vaaRaw = operations[0].vaa?.raw;
-  if (!vaaRaw || vaaRaw.length === 0) {
-    return badRequest(
-      "No Wormhole VAA found for this source transaction.",
-      404,
-    );
-  }
-
-  const vaaHex = vaaBase64ToHex(vaaRaw);
   const payload: BridgeRedeemPayload = {
     chainId: chainConfig.chainId,
     chainIdHex: chainConfig.chainIdHex,
@@ -109,4 +122,56 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(payload, {
     headers: { "cache-control": "no-store" },
   });
+}
+
+function isValidBase64(value: string): boolean {
+  return (
+    value.length % 4 !== 1 &&
+    /^[A-Za-z0-9+/]*={0,2}$/.test(value) &&
+    !/=.+[^=]/.test(value)
+  );
+}
+
+function decodeVaaHex(vaaRaw: string): `0x${string}` | null {
+  if (!isValidBase64(vaaRaw)) return null;
+  try {
+    return vaaBase64ToHex(vaaRaw);
+  } catch {
+    return null;
+  }
+}
+
+function getSingleVaaRaw(
+  operations: WormholeOperation[],
+): { ok: true; vaaRaw: string } | { ok: false; response: NextResponse } {
+  if (operations.length === 0) {
+    return {
+      ok: false,
+      response: badRequest(
+        "No Wormhole VAA found for this source transaction.",
+        404,
+      ),
+    };
+  }
+  if (operations.length > 1) {
+    return {
+      ok: false,
+      response: badRequest(
+        "Multiple Wormhole messages found for this transaction; manual redemption is not supported for batch transfers.",
+        400,
+      ),
+    };
+  }
+
+  const vaaRaw = operations[0].vaa?.raw;
+  if (!vaaRaw || vaaRaw.length === 0) {
+    return {
+      ok: false,
+      response: badRequest(
+        "No Wormhole VAA found for this source transaction.",
+        404,
+      ),
+    };
+  }
+  return { ok: true, vaaRaw };
 }

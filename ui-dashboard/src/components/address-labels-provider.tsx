@@ -20,6 +20,7 @@ import {
   upgradeEntries,
   type AddressEntry,
 } from "@/lib/address-labels-shared";
+import { ADDRESS_LABELS_SWR_KEY } from "@/components/address-labels-cache";
 
 /** A custom address entry with the address attached (no scope — labels are
  * address-keyed only since the global-only refactor). */
@@ -118,8 +119,6 @@ const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
   null,
 );
 
-const SWR_KEY = "address-labels:all";
-
 async function fetchAllLabels(): Promise<EntriesState> {
   const res = await fetch("/api/address-labels");
   if (!res.ok) throw new Error(`Failed to fetch address labels: ${res.status}`);
@@ -181,7 +180,7 @@ function useAddressLabelsValue(): AddressLabelsContextValue {
   const statusRef = useRef(status);
   statusRef.current = status;
   const { data, error, isLoading } = useSWR<EntriesState>(
-    status === "authenticated" ? SWR_KEY : null,
+    status === "authenticated" ? ADDRESS_LABELS_SWR_KEY : null,
     fetchAllLabels,
     {
       refreshInterval: 30_000,
@@ -313,7 +312,7 @@ function useAddressLabelsValue(): AddressLabelsContextValue {
       };
 
       await mutate(
-        SWR_KEY,
+        ADDRESS_LABELS_SWR_KEY,
         async (current: EntriesState = emptyState()) => {
           const res = await fetch("/api/address-labels", {
             method: "PUT",
@@ -347,7 +346,7 @@ function useAddressLabelsValue(): AddressLabelsContextValue {
       const lower = address.toLowerCase();
 
       await mutate(
-        SWR_KEY,
+        ADDRESS_LABELS_SWR_KEY,
         async (current: EntriesState = emptyState()) => {
           const res = await fetch("/api/address-labels", {
             method: "DELETE",
@@ -371,7 +370,7 @@ function useAddressLabelsValue(): AddressLabelsContextValue {
   );
 
   const revalidate = useCallback(async (): Promise<void> => {
-    await mutate(SWR_KEY);
+    await mutate(ADDRESS_LABELS_SWR_KEY);
   }, [mutate]);
 
   // Pending-mutations ledgers. Tracks address → in-flight count so

@@ -6,6 +6,7 @@ import { useSWRConfig } from "swr";
 import Link from "next/link";
 import * as Sentry from "@sentry/nextjs";
 import { useLiveLocation } from "@/lib/use-live-location";
+import { isAddressLabelsSWRKey } from "@/components/address-labels-cache";
 
 const SIGN_IN_PATH = "/sign-in";
 
@@ -65,11 +66,9 @@ export function AuthStatus() {
   }
 
   const handleSignOut = async () => {
-    await mutate(
-      (key: unknown) => Array.isArray(key) && key[0] === "address-labels",
-      undefined,
-      { revalidate: false },
-    );
+    await mutate((key: unknown) => isAddressLabelsSWRKey(key), undefined, {
+      revalidate: false,
+    });
     await signOut();
   };
 

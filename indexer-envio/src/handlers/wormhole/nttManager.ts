@@ -258,6 +258,7 @@ indexer.onEvent(
     if (pending) {
       const destChainId = wormholeToEvmChainId(
         pending.recipientWormholeChainId,
+        indexer.chainIds,
       );
       if (destChainId !== null) transferDelta.destChainId = destChainId;
       transferDelta.sender = pending.sender;
@@ -288,6 +289,7 @@ indexer.onEvent(
       // to backfill rollups.
       const destChainId = wormholeToEvmChainId(
         pending.recipientWormholeChainId,
+        indexer.chainIds,
       );
       if (mgr && destChainId !== null && pending.amount) {
         // Replay-idempotent: only apply the SENT rollup on the first-time

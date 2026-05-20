@@ -271,6 +271,8 @@ export async function bootstrapFeedBreakerConfigs(
   if (allSucceeded) {
     markBootstrapAttempted(cacheKey);
     _bootstrapBackoffUntilTs.delete(cacheKey);
+  } else {
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
   }
 }
 

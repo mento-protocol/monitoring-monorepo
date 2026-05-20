@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-79804c71b3-33e1_59ee7a8195",
+  "featureId": "feat_library_79804c71b3",
+  "title": "Null rebalancing-state mock is cleared instead of installed",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/rpc/pool-state.ts",
+      "startLine": 29,
+      "endLine": 42,
+      "symbol": "_setMockRebalancingState",
+      "quote": "if (state === null) {\n    _testRebalancingStates.delete(key);\n  } else {\n    _testRebalancingStates.set(key, state);\n  }"
+    },
+    {
+      "path": "indexer-envio/src/rpc/pool-state.ts",
+      "startLine": 220,
+      "endLine": 223,
+      "symbol": "fetchRebalancingState",
+      "quote": "if (_testRebalancingStates.has(testKey)) {\n    return _testRebalancingStates.get(testKey) ?? null;\n  }"
+    }
+  ],
+  "reasoning": "The helper is documented as pre-setting a mock rebalancing state, and other RPC helpers preserve null with a sentinel or a map entry so fetchers return null for simulated RPC failure. Here, passing null deletes the in-memory mock, so direct unit tests using fetchRebalancingState fall through to the configured RPC client instead of exercising the failure path. That can make a test accidentally pass or hit live/test HTTP behavior rather than the intended null branch.",
+  "reproduction": "Call _setMockRebalancingState(chainId, pool, null), install a test RPC client whose readContract returns a valid getRebalancingState tuple, then call fetchRebalancingState(chainId, pool, block). It returns the valid tuple instead of null because the null mock was deleted.",
+  "recommendation": "Store a null sentinel in _testRebalancingStates, matching the reserves helper pattern, or store null directly and keep has() as the discriminator. Clear the map only in _clearMockRebalancingStates.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise BiPoolManager, breaker probing, and invertRateFeed effect decoding, but none call _setMockRebalancingState with null and then fetchRebalancingState directly.",
+  "suggestedRegressionTest": "Add a pool-state RPC test that sets _setMockRebalancingState(CHAIN_ID, pool, null), installs a readContract client that would otherwise return a valid tuple, and asserts fetchRebalancingState returns null without consuming the fallback value.",
+  "minimumFixScope": "indexer-envio/src/rpc/pool-state.ts plus one focused unit test for the null mock contract",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by storing null as an installed rebalancing-state mock and adding a no-RPC-fallthrough regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:53.641Z"
+    }
+  ],
+  "signature": "sig_feat-library-79804c71b3_33e11a4cf4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:17:11.688Z",
+  "updatedAt": "2026-05-20T09:24:53.640Z"
+}

@@ -28,6 +28,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
 
     await upsertSnapshot({
@@ -78,6 +79,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
 
     await upsertSnapshot({

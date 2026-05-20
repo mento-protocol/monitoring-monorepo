@@ -679,6 +679,34 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
+  it("renders `— v3` while preserving v2 volume when v3 snapshots failed but broker data loaded", () => {
+    const today = dayAlignedNow();
+    const html = renderChart({
+      networkData: [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          snapshotWindows: buildSnapshotWindows(Date.now()),
+          brokerSnapshotsAllDaily: [
+            {
+              id: `42220-bipool-direct-${today}`,
+              timestamp: String(today),
+              volumeUsdWei: "7000000000000000000",
+              swapCount: 1,
+            },
+          ],
+        }),
+      ],
+      hasSnapshotError: true,
+    });
+
+    expect(html).toMatch(/—.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$7\.00.*?<[^>]*>v2</);
+    expect(html).toContain('aria-label="— v3 · $7.00 v2"');
+    expect(html).toContain("· partial data");
+    expect(html).not.toMatch(/\$0\.00.*?<[^>]*>v3</);
+    expect(html).not.toContain("N/A");
+  });
+
   it("ships an explicit y-range derived from the visible v3+v2 stack so the cross-fade renderer has a fixed range per visibility combo", () => {
     // Stacked mode in the chart card now pre-renders a Plot per
     // visibility combo (v3+v2 / v3-only / v2-only) and CSS-cross-fades

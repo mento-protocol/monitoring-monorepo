@@ -4,14 +4,15 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import {
   DuneAuthError,
   addToMiniPaySet,
+  advanceLastSyncedBlock,
   fetchMiniPayUsers,
   getLastSyncedBlock,
   getMiniPaySetSize,
-  setLastSyncedBlock,
 } from "@/lib/minipay";
 
 // `nodejs` runtime needed for fetch + setTimeout pacing in the Dune client.
-// 800s budget covers the first-run full backfill; incremental runs are seconds.
+// The hosted route is for incremental cron syncs only. First-run/backfill
+// seeding is intentionally local so Vercel does not repeat an oversized job.
 export const runtime = "nodejs";
 export const maxDuration = 800;
 
@@ -65,6 +66,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       "minipay-sync",
       async () => {
         const fromBlock = await getLastSyncedBlock();
+        if (fromBlock === BigInt(0)) {
+          return NextResponse.json(
+            {
+              error:
+                "MiniPay cursor is empty; run the bulk seed before enabling cron sync",
+            },
+            { status: 409 },
+          );
+        }
 
         // Stream Dune pages → SADD per page → advance cursor on success.
         // SADD is idempotent, so a mid-run failure leaves earlier pages
@@ -84,7 +94,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         if (maxBlock > fromBlock) {
-          await setLastSyncedBlock(maxBlock);
+          await advanceLastSyncedBlock(maxBlock);
         }
 
         const total = await getMiniPaySetSize();

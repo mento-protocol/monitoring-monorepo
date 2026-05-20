@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b4d65318ca-8136_f3194a2662",
+  "featureId": "feat_library_b4d65318ca",
+  "title": "Sign-out does not clear the private address-labels SWR cache",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/auth-status.tsx",
+      "startLine": 67,
+      "endLine": 72,
+      "symbol": "AuthStatus.handleSignOut",
+      "quote": "Array.isArray(key) && key[0] === \"address-labels\""
+    },
+    {
+      "path": "ui-dashboard/src/components/address-labels-provider.tsx",
+      "startLine": 121,
+      "endLine": 121,
+      "symbol": "SWR_KEY",
+      "quote": "const SWR_KEY = \"address-labels:all\";"
+    },
+    {
+      "path": "ui-dashboard/src/components/address-labels-provider.tsx",
+      "startLine": 183,
+      "endLine": 188,
+      "symbol": "useAddressLabelsValue",
+      "quote": "status === \"authenticated\" ? SWR_KEY : null"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/auth-status.test.tsx",
+      "startLine": 109,
+      "endLine": 200,
+      "symbol": "AuthStatus sign-in href tests",
+      "quote": null
+    }
+  ],
+  "reasoning": "Address labels are explicitly treated as private data, but sign-out tries to clear only array-shaped SWR keys whose first element is \"address-labels\". The actual labels cache key is the string \"address-labels:all\", so this mutate predicate never matches it. In a shared-browser or account-switch flow, SWR can keep the previous user's labels under that key and expose them immediately when the next authenticated session mounts before the fresh /api/address-labels response replaces the cache.",
+  "reproduction": null,
+  "recommendation": "Clear the exact string key on sign-out, or change the predicate to match both the string key and any future address-label key namespace, for example `key === \"address-labels:all\" || (Array.isArray(key) && key[0] === \"address-labels\")`. Prefer exporting the key/helper from the provider or a shared module so sign-out and provider cannot drift again.",
+  "whyTestsDoNotAlreadyCoverThis": "The included AuthStatus tests cover sign-in callback URL behavior only. They never render an authenticated session, click Sign out, or assert that the mutate predicate matches the provider's actual SWR key.",
+  "suggestedRegressionTest": "Add an AuthStatus sign-out test that renders an authenticated session, clicks Sign out, captures the predicate passed to `mutate`, and asserts it returns true for `\"address-labels:all\"`. A provider-level account-switch test with seeded SWR cache would be even stronger.",
+  "minimumFixScope": "Update AuthStatus cache invalidation and add a focused sign-out regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Sign-out now clears the exact address-labels SWR string key and namespace array keys via shared predicate; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:50.058Z"
+    }
+  ],
+  "signature": "sig_feat-library-b4d65318ca_813646f778",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:29:42.521Z",
+  "updatedAt": "2026-05-20T09:43:50.057Z"
+}

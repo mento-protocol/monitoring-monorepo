@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-916e785260-727b0f_3011b2694d",
+  "featureId": "feat_route_916e785260",
+  "title": "Percent-encoded valid address test never encodes the address",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts",
+      "startLine": 93,
+      "endLine": 103,
+      "symbol": null,
+      "quote": "const encoded = encodeURIComponent(VALID_ADDR);"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/[address]/page.tsx",
+      "startLine": 31,
+      "endLine": 36,
+      "symbol": "decodeAddressParam",
+      "quote": null
+    }
+  ],
+  "reasoning": "The test claims to verify that a percent-encoded valid address is decoded before validation, but `VALID_ADDR` contains only unreserved URL characters (`0`, `x`, and hex letters), so `encodeURIComponent(VALID_ADDR)` returns the exact same string. This means the regression test would still pass if the valid-address decode path were removed or broken; only the malformed-encoding catch path is currently exercised.",
+  "reproduction": "In a JS REPL, `encodeURIComponent('0x' + 'a'.repeat(40)) === '0x' + 'a'.repeat(40)` evaluates to true.",
+  "recommendation": "Use an actually encoded-but-valid address parameter, for example `0%78${'a'.repeat(40)}` or another fixture where at least one character is percent-encoded and decoding is required to pass `isValidAddress`.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing test name and comments describe the intended behavior, but the fixture is unchanged by `encodeURIComponent`, so it only covers the same no-op path as a plain address.",
+  "suggestedRegressionTest": "Change the encoded fixture to a string such as `0%78${'a'.repeat(40)}` and assert the client receives `0x${'a'.repeat(40)}`.",
+  "minimumFixScope": "Update the single server-shell test fixture in `ui-dashboard/src/app/address-book/[address]/__tests__/page.server.test.ts`.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by using an actually percent-encoded valid address fixture (0%78...) so the server-shell test requires decoding.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:20:22.201Z"
+    }
+  ],
+  "signature": "sig_feat-route-916e785260_727b0f0d6b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T101016-ad2735",
+  "createdAt": "2026-05-20T10:11:35.391Z",
+  "updatedAt": "2026-05-20T10:20:22.200Z"
+}

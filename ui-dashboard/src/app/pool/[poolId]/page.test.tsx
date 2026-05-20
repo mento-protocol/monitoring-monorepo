@@ -59,6 +59,14 @@ const getNameMock = vi.fn((address: string | null | undefined) => {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getTagsMock = vi.fn((_address: string | null) => [] as string[]);
 
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    Suspense: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
+
 vi.mock("next/navigation", () => ({
   redirect: (href: string) => redirectMock(href),
   useParams: () => ({ poolId: encodeURIComponent("pool-1") }),
@@ -112,6 +120,7 @@ vi.mock("@/components/address-labels-provider", () => ({
 }));
 
 vi.mock("@/lib/graphql", () => ({
+  HASURA_TIMEOUT_MS: 5000,
   useGQL: (...args: unknown[]) => useGQLMock(...args),
 }));
 

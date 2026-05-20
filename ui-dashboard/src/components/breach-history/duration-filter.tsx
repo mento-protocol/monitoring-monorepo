@@ -10,7 +10,7 @@
  * / `onMinCommit` / `onMaxCommit`.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { formatDurationShort, parseDurationSeconds } from "@/lib/bridge-status";
 
 // ---------------------------------------------------------------------------
@@ -80,10 +80,19 @@ function DurationField({
   committedSeconds: number | null;
   onCommit: (seconds: number | null) => void;
 }) {
-  const [draft, setDraft] = useState(() =>
-    committedSeconds != null ? formatDurationShort(committedSeconds) : "",
-  );
+  const committedDraft =
+    committedSeconds != null ? formatDurationShort(committedSeconds) : "";
+  const [draft, setDraft] = useState(() => committedDraft);
   const [invalid, setInvalid] = useState(false);
+  const editingRef = useRef(false);
+  const committedSecondsRef = useRef(committedSeconds);
+  if (committedSecondsRef.current !== committedSeconds) {
+    committedSecondsRef.current = committedSeconds;
+    if (!editingRef.current) {
+      if (draft !== committedDraft) setDraft(committedDraft);
+      if (invalid) setInvalid(false);
+    }
+  }
   const commit = useCallback(() => {
     const trimmed = draft.trim();
     if (!trimmed) {
@@ -110,13 +119,19 @@ function DurationField({
       aria-describedby={DURATION_FORMAT_HINT_ID}
       aria-invalid={invalid || undefined}
       value={draft}
+      onFocus={() => {
+        editingRef.current = true;
+      }}
       onChange={(e) => {
         setDraft(e.target.value);
         // Clear the error as soon as they start fixing it — no point
         // yelling while they type.
         if (invalid) setInvalid(false);
       }}
-      onBlur={commit}
+      onBlur={() => {
+        editingRef.current = false;
+        commit();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();

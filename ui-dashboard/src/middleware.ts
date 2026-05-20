@@ -6,6 +6,46 @@ const authConfigured = !!(
   process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
 );
 
+function isAddressBookPath(path: string) {
+  return path === "/address-book" || path.startsWith("/address-book/");
+}
+
+function isProtectedAddressLabelsApi(path: string) {
+  // /backup and /restore authenticate via CRON_SECRET (or session) in
+  // the route handler itself, so middleware exempts them — otherwise the
+  // bearer-token path would 401 here before reaching the route auth guard.
+  // GET /api/address-labels is no longer a public endpoint — middleware
+  // enforces auth on every method now.
+  return (
+    path === "/api/address-labels" ||
+    (path.startsWith("/api/address-labels/") &&
+      !path.startsWith("/api/address-labels/backup") &&
+      !path.startsWith("/api/address-labels/restore"))
+  );
+}
+
+function authMisconfiguredResponse(csp: string, isApi: boolean) {
+  if (isApi) {
+    return new Response(
+      JSON.stringify({ error: "Authentication unavailable" }),
+      {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json",
+          "content-security-policy": csp,
+        },
+      },
+    );
+  }
+
+  return new Response("Authentication unavailable", {
+    status: 503,
+    headers: {
+      "content-security-policy": csp,
+    },
+  });
+}
+
 // Middleware runs on every non-static route (see `config.matcher` below).
 // Two responsibilities:
 //
@@ -26,12 +66,19 @@ export default auth((req) => {
   const csp = buildCspWithNonce(nonce);
 
   // 2. Auth checks (protected paths only)
-  if (authConfigured) {
+  const path = req.nextUrl.pathname;
+  const isProtectedPage = isAddressBookPath(path);
+  const isProtectedApi = isProtectedAddressLabelsApi(path);
+
+  if (isProtectedPage || isProtectedApi) {
+    if (!authConfigured) {
+      return authMisconfiguredResponse(csp, isProtectedApi);
+    }
+
     const email = req.auth?.user?.email?.toLowerCase();
     const isAuthorized = !!email?.endsWith(ALLOWED_DOMAIN);
-    const path = req.nextUrl.pathname;
 
-    if (!isAuthorized && path.startsWith("/address-book")) {
+    if (!isAuthorized && isProtectedPage) {
       const signInUrl = new URL("/sign-in", req.nextUrl.origin);
       signInUrl.searchParams.set("callbackUrl", `${path}${req.nextUrl.search}`);
       const redirectRes = NextResponse.redirect(signInUrl, 302);
@@ -39,17 +86,7 @@ export default auth((req) => {
       return redirectRes;
     }
 
-    // /backup and /restore authenticate via CRON_SECRET (or session) in
-    // the route handler itself, so middleware exempts them — otherwise the
-    // bearer-token path would 401 here before reaching the route auth guard.
-    // GET /api/address-labels is no longer a public endpoint — middleware
-    // enforces auth on every method now.
-    const isProtectedApi =
-      path.startsWith("/api/address-labels/") &&
-      !path.startsWith("/api/address-labels/backup") &&
-      !path.startsWith("/api/address-labels/restore");
-    const isLabelsRoot = path === "/api/address-labels";
-    if (!isAuthorized && (isProtectedApi || isLabelsRoot)) {
+    if (!isAuthorized && isProtectedApi) {
       return new Response(
         JSON.stringify({ error: "Authentication required" }),
         {

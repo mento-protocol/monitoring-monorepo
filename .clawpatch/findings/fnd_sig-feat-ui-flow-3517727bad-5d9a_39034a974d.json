@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-3517727bad-5d9a_39034a974d",
+  "featureId": "feat_ui-flow_3517727bad",
+  "title": "v3 outage is rendered as $0 when v2 data exists",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/volume-over-time-chart.tsx",
+      "startLine": 349,
+      "endLine": 364,
+      "symbol": "computeHeadline",
+      "quote": "if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)\n    return \"N/A\";\n  const v3Display =\n    v3Partial === null\n      ? \"—\"\n      : v3Partial\n        ? `≈ ${formatUSD(v3Total)}`\n        : formatUSD(v3Total);"
+    },
+    {
+      "path": "ui-dashboard/src/components/volume-over-time-chart.tsx",
+      "startLine": 425,
+      "endLine": 436,
+      "symbol": "VolumeOverTimeChartProps",
+      "quote": "hasSnapshotError: boolean;\n  /**\n   * True when the Broker rollup query failed or its pagination truncated\n   * before reaching the visible window. Renders \"— v2\" so a Broker outage\n   * doesn't masquerade as a confident `$0 v2` when v3 loaded normally.\n   */\n  hasBrokerSnapshotError: boolean;"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/volume-over-time-chart.test.tsx",
+      "startLine": 518,
+      "endLine": 521,
+      "symbol": null,
+      "quote": "it(\"renders N/A when snapshots partially failed and no data survived\", () => {\n    const html = renderChart({ hasSnapshotError: true });\n    expect(html).toContain(\"N/A\");\n    expect(html).toContain(\"· partial data\");"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/volume-over-time-chart.test.tsx",
+      "startLine": 657,
+      "endLine": 680,
+      "symbol": null,
+      "quote": "it(\"renders `— v2` (not $0.00 v2) when the broker rollup errored\", () => {\n    // hasBrokerSnapshotError must be a distinct unavailable state from the\n    // legitimate \"$0 swaps today\" case"
+    }
+  ],
+  "reasoning": "`hasSnapshotError` represents the v3 PoolDailySnapshot rollup being unavailable or truncated, while `hasBrokerSnapshotError` covers the independent v2 Broker rollup. The headline only returns `N/A` for a v3 snapshot error when both v3 and v2 point arrays are empty. If the v3 snapshot query fails with no surviving v3 points but the v2 Broker query succeeds, `v3Partial` remains false and the headline renders `$0.00 v3 · $X v2`, which misrepresents unknown v3 volume as a confirmed zero. The component already treats the symmetric v2 failure as unavailable (`— v2`), so v3 should get the same unavailable treatment when its own data source failed and no v3 data survived.",
+  "reproduction": null,
+  "recommendation": "Split v3 availability from total chart availability. When `hasSnapshotError && v3Points.length === 0`, render the v3 cell as `—` unless both version series are empty and the intended full-card state is `N/A`. Keep the partial-data marker so users still see the degraded state.",
+  "whyTestsDoNotAlreadyCoverThis": "The current snapshot-error test only covers the case where no data survived at all, and the broker-error test only covers the v2 outage path. There is no test for `hasSnapshotError: true` with surviving v2 Broker rows and empty v3 rows.",
+  "suggestedRegressionTest": "Add a render test with `hasSnapshotError: true`, `networkData` containing only `brokerSnapshotsAllDaily`, and no v3 snapshots. Assert the headline contains `—` next to the v3 badge, the v2 dollar total is still shown, and `$0.00` is not rendered next to the v3 badge.",
+  "minimumFixScope": "Update `computeHeadline` to represent v3 unavailability separately from v3 zero volume, and add the focused render regression test in `volume-over-time-chart.test.tsx`.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "VolumeOverTimeChart now renders v3 unavailable when v3 snapshots fail but v2 broker data survives, with focused headline regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:53:51.253Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-3517727bad_5d9aef5190",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T104043-436ff7",
+  "createdAt": "2026-05-20T10:42:31.105Z",
+  "updatedAt": "2026-05-20T10:53:51.252Z"
+}

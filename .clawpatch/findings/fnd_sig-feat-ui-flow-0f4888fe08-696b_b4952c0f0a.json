@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-0f4888fe08-696b_b4952c0f0a",
+  "featureId": "feat_ui-flow_0f4888fe08",
+  "title": "Report tab keeps the first address after an in-place prop change",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/address-label-editor.tsx",
+      "startLine": 96,
+      "endLine": 101,
+      "symbol": "AddressLabelEditor",
+      "quote": "`address` seeds the local draft once; re-syncing on prop change would clobber typed-but-unsaved input."
+    },
+    {
+      "path": "ui-dashboard/src/components/address-label-editor.tsx",
+      "startLine": 250,
+      "endLine": 252,
+      "symbol": "AddressLabelEditor",
+      "quote": "<AddressReportEditor address={draftAddress}"
+    },
+    {
+      "path": "ui-dashboard/src/components/__tests__/address-label-editor.test.tsx",
+      "startLine": 164,
+      "endLine": 177,
+      "symbol": "AddressLabelEditor modal lifecycle test",
+      "quote": "rerender({ address: VALID_ADDR, onClose: () => undefined });"
+    }
+  ],
+  "reasoning": "The editor intentionally initializes draftAddress from the address prop only once, and the report editor reads draftAddress rather than the current address prop. If the same open editor instance is retargeted from one existing address to another, the label form receives the new address prop but the report tab continues to fetch and save against the old draftAddress until the form emits onAddressChange. The tests prove same-instance rerender is a supported lifecycle shape, but only cover rerendering with the same address, not a changed address.",
+  "reproduction": "Render AddressLabelEditor with address A, rerender the same root with address B without unmounting, switch to the Forensic Report tab, and observe AddressReportEditor still receives A through draftAddress.",
+  "recommendation": "Track whether the user has edited the address field and resync draftAddress when the address prop changes for existing-address flows, or force the editor/form subtree to remount by address. Preserve the current no-clobber behavior only for the add-new draft flow where address is intentionally editable.",
+  "whyTestsDoNotAlreadyCoverThis": "The editor tests rerender with the same address to protect the showModal lifecycle, and test typed-address bubbling in the add-new flow. They never rerender an open editor with a different address and assert the report tab receives the new address.",
+  "suggestedRegressionTest": "Add an editor test that renders with one valid address, rerenders the same AddressLabelEditor instance with a second valid address, opens the Forensic Report tab, and asserts the report-editor stub's data-address equals the second address.",
+  "minimumFixScope": "ui-dashboard/src/components/address-label-editor.tsx plus an editor-level regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "AddressLabelEditor now re-syncs draftAddress when the mounted editor switches to a different address, with a report-tab rerender regression test.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:40:29.614Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-0f4888fe08_696b37b1ef",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T103320-3c6e33",
+  "createdAt": "2026-05-20T10:34:07.197Z",
+  "updatedAt": "2026-05-20T10:40:29.614Z"
+}

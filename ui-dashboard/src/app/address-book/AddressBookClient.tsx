@@ -25,10 +25,58 @@ type EditTarget = { address: string };
 
 type AddressBookPageProps = { canEdit?: boolean };
 
+function LabelLoadStatus({
+  hasLoaded,
+  error,
+}: {
+  hasLoaded: boolean;
+  error: Error | undefined;
+}) {
+  if (!hasLoaded && !error) {
+    return <p className="text-sm text-slate-500">Loading labels…</p>;
+  }
+  if (!hasLoaded && error) {
+    return (
+      <p role="alert" className="text-sm text-red-400">
+        Error loading custom labels: {error.message}. Editing is unavailable
+        until labels load.
+      </p>
+    );
+  }
+  if (error) {
+    return (
+      <p role="alert" className="text-sm text-red-400">
+        Error loading custom labels: {error.message}
+      </p>
+    );
+  }
+  return null;
+}
+
+function EmptyRowsState({
+  hasLoaded,
+  isLoading,
+  rowCount,
+  search,
+}: {
+  hasLoaded: boolean;
+  isLoading: boolean;
+  rowCount: number;
+  search: string;
+}) {
+  if (!hasLoaded || isLoading || rowCount > 0) return null;
+  return (
+    <p className="text-sm text-slate-500">
+      {search ? "No labels match your search." : "No labels yet. Add one!"}
+    </p>
+  );
+}
+
 // 6 useState calls — independent UI pieces (search, modal targets,
 // import banners, draft); a reducer would just rename the setters.
 // Keep the table + modal ownership in one component so pending label/report
 // ledgers stay easy to audit.
+/* eslint-disable complexity, max-lines-per-function -- Address book page coordinates URL state, edit modals, and pending mutation ledgers in one route surface. */
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
 export default function AddressBookPage(props: AddressBookPageProps) {
   const { canEdit: userCanEdit = false } = props;
@@ -37,6 +85,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
     getEntry,
     revalidate,
     isLoading,
+    hasLoaded,
     error,
     markPendingMutation,
     isMutationPending,
@@ -109,6 +158,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
   // user types — needs to flip live on each keystroke since
   // `hasAmbiguousContractMatches` only matters for valid addresses.
   const [addNewDraftAddress, setAddNewDraftAddress] = useState("");
+  const canEdit = userCanEdit && hasLoaded;
   const labelUnmarkRef = useRef<Map<string, () => void>>(new Map());
   const reportUnmarkRef = useRef<Map<string, () => void>>(new Map());
   const handleLabelSavingChange = useCallback(
@@ -198,7 +248,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
             Contract and custom labels across every chain — one unified view.
           </p>
         </div>
-        {userCanEdit && (
+        {canEdit && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -223,7 +273,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
         )}
       </div>
 
-      {userCanEdit && importError && (
+      {canEdit && importError && (
         <p
           role="alert"
           className="rounded-lg border border-red-800 bg-red-950 px-4 py-2 text-xs text-red-300"
@@ -231,7 +281,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
           {importError}
         </p>
       )}
-      {userCanEdit && importSuccess && (
+      {canEdit && importSuccess && (
         <p
           role="status"
           className="rounded-lg border border-emerald-800 bg-emerald-950 px-4 py-2 text-xs text-emerald-300"
@@ -251,12 +301,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
         />
       </div>
 
-      {isLoading && <p className="text-sm text-slate-500">Loading labels…</p>}
-      {error && (
-        <p role="alert" className="text-sm text-red-400">
-          Error loading custom labels: {error.message}
-        </p>
-      )}
+      <LabelLoadStatus hasLoaded={hasLoaded} error={error} />
       {reportsIndexError && (
         <div
           role="alert"
@@ -276,11 +321,12 @@ export default function AddressBookPage(props: AddressBookPageProps) {
         </div>
       )}
 
-      {!isLoading && allRows.length === 0 && (
-        <p className="text-sm text-slate-500">
-          {search ? "No labels match your search." : "No labels yet. Add one!"}
-        </p>
-      )}
+      <EmptyRowsState
+        hasLoaded={hasLoaded}
+        isLoading={isLoading}
+        rowCount={allRows.length}
+        search={search}
+      />
 
       {allRows.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-slate-800">
@@ -338,7 +384,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
                     source={row.source}
                     createdAt={row.createdAt ?? resolved?.entry.createdAt}
                     updatedAt={row.updatedAt ?? resolved?.entry.updatedAt}
-                    canEdit={userCanEdit}
+                    canEdit={canEdit}
                     reportPresent={hasReport(row.address)}
                     explorerUrl={
                       // Custom rows are chainless (the `network` is just the
@@ -362,7 +408,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
                     // would round-trip into an editable detail page and
                     // bypass the read-only mode entirely.
                     detailHref={
-                      userCanEdit ? `/address-book/${row.address}` : undefined
+                      canEdit ? `/address-book/${row.address}` : undefined
                     }
                   />
                 );
@@ -372,7 +418,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
         </div>
       )}
 
-      {userCanEdit && addingNew && (
+      {canEdit && addingNew && (
         <AddressLabelEditor
           address=""
           onClose={() => {
@@ -405,7 +451,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
         />
       )}
 
-      {userCanEdit && editTarget && (
+      {canEdit && editTarget && (
         <AddressLabelEditor
           address={editTarget.address}
           initial={
@@ -441,3 +487,4 @@ export default function AddressBookPage(props: AddressBookPageProps) {
     </div>
   );
 }
+/* eslint-enable complexity, max-lines-per-function */

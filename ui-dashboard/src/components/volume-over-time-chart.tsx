@@ -350,24 +350,24 @@ function computeHeadline(
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
-  const v3Display =
-    v3Partial === null
-      ? "—"
-      : v3Partial
-        ? `≈ ${formatUSD(v3Total)}`
-        : formatUSD(v3Total);
+  const v3Unavailable =
+    v3Partial === null || (hasSnapshotError && v3Points.length === 0);
+  const v3Display = v3Unavailable
+    ? "—"
+    : v3Partial
+      ? `≈ ${formatUSD(v3Total)}`
+      : formatUSD(v3Total);
   // Visual layout has no whitespace/punctuation between values and pill
   // badges, and gap-x-3 between the v3 and v2 cells is rendering-only.
   // Without an explicit `aria-label`, screen readers read the headline as
   // "$3.00v3$0.00v2"; the explicit label restores the original
   // "$X v3 · $Y v2" reading.
   const v2Display = hasBrokerSnapshotError ? "—" : formatUSD(v2Total);
-  const v3AriaLabel =
-    v3Partial === null
-      ? "— v3"
-      : v3Partial
-        ? `approximately ${formatUSD(v3Total)} partial v3`
-        : `${formatUSD(v3Total)} v3`;
+  const v3AriaLabel = v3Unavailable
+    ? "— v3"
+    : v3Partial
+      ? `approximately ${formatUSD(v3Total)} partial v3`
+      : `${formatUSD(v3Total)} v3`;
   const ariaLabel = `${v3AriaLabel} · ${v2Display} v2`;
   // `role="group"` is required: a bare `<span>` has the implicit `generic`
   // role, which doesn't honor `aria-label` per WAI-ARIA. NVDA/JAWS skip the
@@ -390,7 +390,7 @@ function computeHeadline(
       <span
         aria-hidden="true"
         title={
-          v3Partial === null
+          v3Unavailable
             ? "New Mento (v3): unavailable because token decimals are unverified for every v3 pool in this window."
             : v3Partial
               ? "New Mento (v3): partial because one or more pool snapshots were skipped until token decimals are verified."
