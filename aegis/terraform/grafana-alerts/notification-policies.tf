@@ -301,6 +301,9 @@ resource "grafana_notification_policy" "all" {
     # on FX feeds — see `weekend_disabled_feeds` in locals.tf.
 
     # Oracle Relayer page alerts → #alerts-critical (non-weekend FX)
+    # `chain = celo` guards against a future testnet-emitted page alert
+    # fanning out into both #alerts-critical and #alerts-testnet via the
+    # `continue = true` chain — matches the trading-modes prod policy.
     policy {
       contact_point = grafana_contact_point.slack_alerts_critical.name
 
@@ -314,6 +317,12 @@ resource "grafana_notification_policy" "all" {
         label = "service"
         match = "="
         value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
       }
 
       matcher {
@@ -340,6 +349,12 @@ resource "grafana_notification_policy" "all" {
         label = "service"
         match = "="
         value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "chain"
+        match = "="
+        value = "celo"
       }
 
       matcher {
