@@ -289,7 +289,7 @@ describe("AddressReportEditor — save", () => {
     expect(findButton("Save report")?.disabled).toBe(true);
   });
 
-  it("sends only address + body + title (no scope) on save", async () => {
+  it("sends only address + body + title (no scope or version precondition) on new-report save", async () => {
     mockSwrData = null;
     render();
     setTextarea("ar-body", "first draft");
@@ -305,6 +305,39 @@ describe("AddressReportEditor — save", () => {
     expect(body.body).toBe("first draft");
     // Reports are address-keyed only — no scope in the request body.
     expect(body.scope).toBeUndefined();
+    expect(body.baseVersion).toBeUndefined();
+    expect((init as RequestInit).headers).toEqual({
+      "Content-Type": "application/json",
+    });
+  });
+
+  it("sends the current report version header as the save precondition when editing", async () => {
+    mockSwrData = {
+      body: "# Hi",
+      title: "T",
+      authorEmail: "alice@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render();
+    act(() => {
+      findButton("Edit")?.click();
+    });
+    setTextarea("ar-body", "# Updated");
+
+    await act(async () => {
+      findButton("Save changes")?.click();
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.baseVersion).toBeUndefined();
+    expect((init as RequestInit).headers).toEqual({
+      "Content-Type": "application/json",
+      "If-Match": '"3"',
+    });
   });
 
   it("save fetch uses AbortSignal.timeout (defense against wedged TCP)", async () => {

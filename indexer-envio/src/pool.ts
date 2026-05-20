@@ -224,6 +224,7 @@ const defaultPool = (
   updatedAtTimestamp: 0n,
 });
 
+// eslint-disable-next-line max-lines-per-function -- Existing pool upsert pipeline remains intentionally centralized for atomic state updates.
 export const upsertPool = async ({
   context,
   chainId,
@@ -234,6 +235,7 @@ export const upsertPool = async ({
   blockNumber,
   blockTimestamp,
   txHash,
+  logIndex,
   strategy,
   reservesDelta,
   swapDelta,
@@ -251,9 +253,8 @@ export const upsertPool = async ({
   source: PoolUpdateSource;
   blockNumber: bigint;
   blockTimestamp: bigint;
-  /** Transaction hash of the event driving this upsert. Required —
-   * breach-transition rows store it as `startedByTxHash` / `endedByTxHash`.
-   * All handler callers have `event.transaction.hash` available. */
+  logIndex?: number | undefined;
+  /** Transaction hash stored on breach rows as startedBy/endedBy tx hash. */
   txHash: string;
   /** Rebalancer strategy contract that fired the event. Only read when
    * source === "fpmm_rebalanced" — populates `endedByStrategy` on a breach
@@ -519,17 +520,14 @@ export const upsertPool = async ({
   };
   const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
 
-  // Maintain the per-breach history entity + roll closed-breach durations
-  // into the Pool's cumulative counters. Runs against existing → withBreach
-  // so the transition detector sees pre/post states on the same basis as
-  // `nextDeviationBreachStartedAt`.
+  // Maintain breach history and roll closed durations into Pool counters.
   const breachPoolUpdate = await recordBreachTransition(
     context,
     existing.source === "" ? undefined : existing, // brand-new pool → no prev
     { ...withBreach, healthStatus },
     strategy === undefined
-      ? { blockTimestamp, blockNumber, txHash, source }
-      : { blockTimestamp, blockNumber, txHash, source, strategy },
+      ? { blockTimestamp, blockNumber, txHash, logIndex, source }
+      : { blockTimestamp, blockNumber, txHash, logIndex, source, strategy },
   );
 
   const final: Pool = {

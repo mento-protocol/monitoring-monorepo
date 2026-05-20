@@ -49,27 +49,6 @@
     "linePreview": " | async function ensureBiPoolExchange( | context: EvmOnEventContext,"
   },
   {
-    "file": "src/handlers/fpmm.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (157). Maximum allowed is 150.",
-    "line": 25,
-    "linePreview": "{ contract: \"FPMM\", event: \"Swap\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
-  },
-  {
-    "file": "src/handlers/sortedOracles.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (153). Maximum allowed is 150.",
-    "line": 309,
-    "linePreview": "await Promise.all( | poolIds.map(async (poolId) => { | const initial = await context.Pool.get(poolId);"
-  },
-  {
-    "file": "src/handlers/sortedOracles.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (222). Maximum allowed is 150.",
-    "line": 276,
-    "linePreview": "{ contract: \"SortedOracles\", event: \"MedianUpdated\" }, | async ({ event, context }) => { | const rateFeedID = asAddress(event.params.token);"
-  },
-  {
     "file": "src/healthScore.ts",
     "ruleId": "max-params",
     "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",
@@ -87,21 +66,14 @@
     "file": "src/pool.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 57. Maximum allowed is 15.",
-    "line": 283,
+    "line": 284,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
-  },
-  {
-    "file": "src/pool.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (191). Maximum allowed is 80.",
-    "line": 227,
-    "linePreview": " | export const upsertPool = async ({ | context,"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 283,
+    "line": 284,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {

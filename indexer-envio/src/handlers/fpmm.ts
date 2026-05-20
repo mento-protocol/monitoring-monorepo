@@ -22,6 +22,7 @@ import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
 
 indexer.onEvent(
   { contract: "FPMM", event: "Swap" },
+  // eslint-disable-next-line max-lines-per-function -- Existing swap handler coordinates pool, limits, snapshots, and volume rollups.
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
@@ -59,10 +60,7 @@ indexer.onEvent(
         : event.params.amount1Out;
 
     // No fetchReserves RPC call needed: the FPMM contract calls _update()
-    // before emitting Swap, so an UpdateReserves event with the exact post-swap
-    // reserves always precedes this Swap event in the same tx. By the time this
-    // handler runs, the UpdateReserves handler has already written reserves to
-    // the Pool entity.
+    // before emitting Swap, so UpdateReserves has already written reserves.
     let pool = await upsertPool({
       context,
       chainId: event.chainId,
@@ -71,6 +69,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       swapDelta: { volume0, volume1 },
     });
 

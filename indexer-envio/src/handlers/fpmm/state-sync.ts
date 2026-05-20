@@ -171,6 +171,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       reservesDelta: {
         reserve0: event.params.reserve0,
         reserve1: event.params.reserve1,
@@ -420,6 +421,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       strategy: rebalancerAddress,
       rebalanceDelta: true,
       oracleDelta,

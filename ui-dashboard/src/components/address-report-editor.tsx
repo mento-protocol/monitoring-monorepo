@@ -174,7 +174,7 @@ export function AddressReportEditor(props: Props) {
     try {
       const res = await fetch("/api/address-reports", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: reportSaveHeaders(data),
         signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({
           address: trimmed,
@@ -203,9 +203,8 @@ export function AddressReportEditor(props: Props) {
       inFlightRef.current.saving = false;
     }
 
-    // Post-save bookkeeping. Failures here do NOT undo the save — Redis
-    // persisted the report, the local cache already shows it, and a
-    // transient SWR mutate failure shouldn't be surfaced as "Save failed".
+    // Failures here do NOT undo the save; transient SWR mutate failures
+    // shouldn't be surfaced as "Save failed".
     if (saved) {
       try {
         // Refresh the index so the address-book 📄 indicator picks up the
@@ -222,6 +221,7 @@ export function AddressReportEditor(props: Props) {
     body,
     title,
     trimmed,
+    data,
     isAddressValid,
     isLookupPending,
     overLimit,
@@ -445,7 +445,6 @@ export function AddressReportEditor(props: Props) {
         )}
       </div>
 
-      {/* Footer actions */}
       <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
         <div>
           {hasExisting && (
@@ -476,4 +475,12 @@ export function AddressReportEditor(props: Props) {
       </div>
     </fieldset>
   );
+}
+
+function reportSaveHeaders(
+  report: AddressReport | null | undefined,
+): Record<string, string> {
+  return report === undefined || report === null
+    ? { "Content-Type": "application/json" }
+    : { "Content-Type": "application/json", "If-Match": `"${report.version}"` };
 }

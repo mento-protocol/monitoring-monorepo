@@ -259,6 +259,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       txHash: event.transaction.hash,
+      logIndex: event.logIndex,
       oracleDelta,
       tokenDecimals,
       ...(rateFeedID == null ? {} : { referenceRateFeedID: rateFeedID }),

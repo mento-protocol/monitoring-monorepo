@@ -77,6 +77,8 @@ export type BreachTrigger = {
   blockTimestamp: bigint;
   blockNumber: bigint;
   txHash: string;
+  /** Triggering event log index. Present for handler-driven rows. */
+  logIndex?: number | undefined;
   /** Triggering event's raw source (see `classifyBreachEvent`). */
   source: string;
   /** Strategy contract that fired the rebalance, if this transition was
@@ -85,17 +87,23 @@ export type BreachTrigger = {
 };
 
 /** Deterministic id for a breach row. The legacy two-argument form is kept
- * for old rows/tests; new rows include block+tx entropy because a pool can
- * exit and re-enter breach multiple times in distinct events that share the
- * same block timestamp. */
+ * for old rows/tests; new handler rows include block+tx+log entropy because a
+ * pool can exit and re-enter breach multiple times inside one transaction. */
 export function openBreachId(
   poolId: string,
   startedAt: bigint,
-  eventEntropy?: { blockNumber: bigint; txHash: string },
+  eventEntropy?: {
+    blockNumber: bigint;
+    txHash: string;
+    logIndex?: number | undefined;
+  },
 ): string {
   const base = `${poolId}-${startedAt}`;
   if (!eventEntropy) return base;
-  return `${base}-${eventEntropy.blockNumber}-${eventEntropy.txHash.toLowerCase()}`;
+  const blockAndTx = `${base}-${eventEntropy.blockNumber}-${eventEntropy.txHash.toLowerCase()}`;
+  return eventEntropy.logIndex === undefined
+    ? blockAndTx
+    : `${blockAndTx}-${eventEntropy.logIndex}`;
 }
 
 async function getOpenBreach(

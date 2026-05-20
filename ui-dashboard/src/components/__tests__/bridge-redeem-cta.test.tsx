@@ -85,4 +85,30 @@ describe("BridgeRedeemPill", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result).toEqual({ status: "0x1" });
   });
+
+  it("stops receipt polling at the 90-second wall-clock deadline", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((_, init) => {
+        const signal = (init as RequestInit | undefined)?.signal;
+        if (!signal) return Promise.reject(new Error("missing signal"));
+        return new Promise<Response>((_, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      });
+
+    const resultPromise = waitForTransaction(
+      "0x" + "c".repeat(64),
+      "https://rpc.example",
+      new AbortController().signal,
+    );
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    await expect(resultPromise).resolves.toBeNull();
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    expect(fetchMock.mock.calls.length).toBeLessThan(12);
+  });
 });

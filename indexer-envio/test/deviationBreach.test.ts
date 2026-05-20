@@ -77,13 +77,14 @@ describe("openBreachId", () => {
     assert.equal(openBreachId("42220-0xpool", 1000n), "42220-0xpool-1000");
   });
 
-  it("adds block and tx entropy when provided", () => {
+  it("adds block, tx, and log-index entropy when provided", () => {
     assert.equal(
       openBreachId("42220-0xpool", 1000n, {
         blockNumber: 123n,
         txHash: "0xABC",
+        logIndex: 7,
       }),
-      "42220-0xpool-1000-123-0xabc",
+      "42220-0xpool-1000-123-0xabc-7",
     );
   });
 });

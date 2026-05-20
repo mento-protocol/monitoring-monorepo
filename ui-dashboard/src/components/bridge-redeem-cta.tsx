@@ -175,6 +175,8 @@ type TxReceipt = { status: `0x${string}` } | null;
 
 const RECEIPT_POLL_TIMEOUT_MS = 8_000;
 const RECEIPT_POLL_SLEEP_MS = 3_000;
+const RECEIPT_POLL_DEADLINE_MS = 90_000;
+const REDEEM_PAYLOAD_TIMEOUT_MS = 15_000;
 
 function isAbortLikeError(error: unknown): boolean {
   return (
@@ -201,6 +203,30 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function timeoutError(): DOMException {
+  return new DOMException("Timed out.", "TimeoutError");
+}
+
+async function withTimeoutSignal<T>(
+  parentSignal: AbortSignal,
+  timeoutMs: number,
+  task: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (parentSignal.aborted) throw parentSignal.reason;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(timeoutError());
+  }, timeoutMs);
+  const abort = () => controller.abort(parentSignal.reason);
+  parentSignal.addEventListener("abort", abort, { once: true });
+  try {
+    return await task(controller.signal);
+  } finally {
+    clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", abort);
+  }
+}
+
 export async function waitForTransaction(
   txHash: string,
   rpcUrl: string,
@@ -208,32 +234,47 @@ export async function waitForTransaction(
 ): Promise<TxReceipt> {
   // Sequential RPC poll — each iteration checks tx receipt and decides
   // whether to keep waiting; parallelism doesn't apply to status polls.
-  for (let attempt = 0; attempt < 30; attempt++) {
+  const deadline = Date.now() + RECEIPT_POLL_DEADLINE_MS;
+  while (Date.now() < deadline) {
     if (signal.aborted) return null;
     try {
-      const requestSignal = AbortSignal.any([
-        signal,
-        AbortSignal.timeout(RECEIPT_POLL_TIMEOUT_MS),
-      ]);
+      const requestTimeoutMs = Math.min(
+        RECEIPT_POLL_TIMEOUT_MS,
+        deadline - Date.now(),
+      );
       // react-doctor-disable-next-line react-doctor/async-await-in-loop
-      const response = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_getTransactionReceipt",
-          params: [txHash],
-        }),
-        signal: requestSignal,
-      });
+      const response = await withTimeoutSignal(
+        signal,
+        requestTimeoutMs,
+        async (requestSignal) =>
+          fetch(rpcUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "eth_getTransactionReceipt",
+              params: [txHash],
+            }),
+            signal: requestSignal,
+          }),
+      );
       const json = (await response.json()) as { result: TxReceipt };
       if (json.result) return json.result;
     } catch (err) {
-      if (signal.aborted) throw err;
-      // Transient network or JSON-parse error — retry on next iteration
+      if (signal.aborted) return null;
+      void err;
+      // Transient network, timeout, or JSON-parse error — retry on next iteration.
     }
-    await sleep(RECEIPT_POLL_SLEEP_MS, signal);
+    const sleepMs = Math.min(RECEIPT_POLL_SLEEP_MS, deadline - Date.now());
+    if (sleepMs <= 0) break;
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      await sleep(sleepMs, signal);
+    } catch (err) {
+      if (signal.aborted) return null;
+      throw err;
+    }
   }
   return null;
 }
@@ -256,10 +297,15 @@ async function fetchRedeemPayload({
     destChainId: String(destChainId),
     tokenSymbol,
   });
-  const res = await fetch(`/api/bridge-redeem?${params.toString()}`, {
-    cache: "no-store",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-  });
+  const res = await withTimeoutSignal(
+    signal,
+    REDEEM_PAYLOAD_TIMEOUT_MS,
+    async (requestSignal) =>
+      fetch(`/api/bridge-redeem?${params.toString()}`, {
+        cache: "no-store",
+        signal: requestSignal,
+      }),
+  );
   const raw = await res.text();
   let body: BridgeRedeemPayload | { error?: string };
   try {
@@ -335,23 +381,26 @@ async function finishRedeemPolling(
   setPhase: (phase: RedeemPhase) => void,
   addToast: AddToast,
 ) {
-  const receipt = await waitForTransaction(txHash, body.rpcUrl, signal);
   const href = body.explorerUrl
     ? `${body.explorerUrl}/tx/${txHash}`
     : undefined;
-  if (!receipt) {
+  if (signal.aborted) return;
+  const receipt = await waitForTransaction(txHash, body.rpcUrl, signal);
+  if (!signal.aborted) {
+    if (!receipt) {
+      setPhase("done");
+      addToast(
+        `Submitted: ${shortHash(txHash)} — not confirmed after 90 s, check explorer`,
+        "success",
+        href,
+      );
+      return;
+    }
+    if (receipt.status !== "0x1")
+      throw new Error("Transaction reverted on-chain.");
     setPhase("done");
-    addToast(
-      `Submitted: ${shortHash(txHash)} — not confirmed after 90 s, check explorer`,
-      "success",
-      href,
-    );
-    return;
+    addToast(`Redeem confirmed: ${shortHash(txHash)}`, "success", href);
   }
-  if (receipt.status !== "0x1")
-    throw new Error("Transaction reverted on-chain.");
-  setPhase("done");
-  addToast(`Redeem confirmed: ${shortHash(txHash)}`, "success", href);
 }
 
 export function BridgeRedeemPill({
