@@ -6,7 +6,8 @@ cd "$repo_root"
 
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
-trap 'rm -f "$paths_file" "$output_file" "$output_file.pnpm-args"' EXIT
+untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
+trap 'rm -f "$paths_file" "$output_file" "$output_file.pnpm-args" "$untracked_skill_artifact"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -110,6 +111,11 @@ assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
 assert_script_occurrences 0 'shasum -a 256 "$1"'
 
+printf 'scratch\n' > "$untracked_skill_artifact"
+node scripts/check-agent-context.mjs > "$output_file"
+assert_contains "Agent context check passed"
+rm -f "$untracked_skill_artifact"
+
 hook_repo="$(mktemp -d)"
 (
   cd "$hook_repo"
@@ -125,8 +131,13 @@ hook_repo="$(mktemp -d)"
   echo changed >> README.md
   git add README.md
   git commit -qm "commit from session"
+  minimal_bin="$(mktemp -d)"
+  for tool in awk cat dirname git pwd tr wc; do
+    ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
+  done
   printf '{"cwd":"%s"}' "$hook_repo" |
-    bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+    env PATH="$minimal_bin" /bin/bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+  rm -rf "$minimal_bin"
 )
 rm -rf "$hook_repo"
 assert_contains "Session touched the tree (1 recent commit(s), 0 unstaged file(s))."

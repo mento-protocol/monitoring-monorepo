@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -106,6 +107,32 @@ function walk(dir, predicate = () => true, { required = false } = {}) {
   return out;
 }
 
+function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
+  if (required && !exists(dir)) {
+    fail(`${dir}: expected directory is missing or unreadable (ENOENT)`);
+    return [];
+  }
+  let output;
+  try {
+    output = execFileSync("git", ["ls-files", "--", dir], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+  } catch (error) {
+    if (required) {
+      fail(
+        `${dir}: unable to list tracked files (${error.code ?? error.message})`,
+      );
+    }
+    return [];
+  }
+  const files = output.split("\n").filter(Boolean).filter(predicate);
+  if (required && files.length === 0) {
+    fail(`${dir}: expected tracked files`);
+  }
+  return files;
+}
+
 function parseFrontmatter(filePath) {
   const content = read(filePath);
   if (!content.startsWith("---\n")) return null;
@@ -150,14 +177,18 @@ const scopedAgentDirs = [
   "ui-dashboard",
 ];
 
-const canonicalSkillFiles = walk(
+const canonicalSkillFiles = trackedFiles(
   ".agents/skills",
   (file) => !file.endsWith("/"),
   { required: true },
 );
-const claudeSkillFiles = walk(".claude/skills", (file) => !file.endsWith("/"), {
-  required: true,
-});
+const claudeSkillFiles = trackedFiles(
+  ".claude/skills",
+  (file) => !file.endsWith("/"),
+  {
+    required: true,
+  },
+);
 
 const managedContextFiles = [
   "AGENTS.md",
@@ -165,7 +196,7 @@ const managedContextFiles = [
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
   ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
-  ...walk(".agents/roles", (file) => file.endsWith(".md"), {
+  ...trackedFiles(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,
   }),
 ];
