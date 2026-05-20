@@ -10,11 +10,13 @@ import { IntelWealthChart } from "./intel-wealth-chart";
  * the address has no Intel coverage.
  */
 export function IntelPanels({ address }: { address: string }) {
+  // Wrap in a flex container so the three panels get vertical gaps even
+  // though the page-level `space-y-6` only sees IntelPanels as one child.
   return (
-    <>
+    <div className="space-y-6">
       <IntelCounterparties address={address} />
       <IntelTransfers address={address} />
       <IntelWealthChart address={address} />
-    </>
+    </div>
   );
 }
