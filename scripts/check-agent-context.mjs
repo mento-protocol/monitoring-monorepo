@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -71,40 +71,6 @@ function hasExecutableLine(content, pattern) {
         !line.trim().startsWith("#") &&
         pattern.test(line),
     );
-}
-
-function walk(dir, predicate = () => true, { required = false } = {}) {
-  const root = path.join(repoRoot, dir);
-  const out = [];
-  let entries;
-  try {
-    entries = readdirSync(root, { withFileTypes: true });
-  } catch (error) {
-    if (required) {
-      fail(
-        `${dir}: expected directory is missing or unreadable (${error.code ?? error.message})`,
-      );
-    }
-    return out;
-  }
-  for (const entry of entries) {
-    const rel = path.join(dir, entry.name);
-    if (
-      rel.includes("node_modules") ||
-      rel.includes(".next") ||
-      rel.includes("coverage") ||
-      rel.includes(".envio") ||
-      rel.includes("generated")
-    ) {
-      continue;
-    }
-    if (entry.isDirectory()) {
-      out.push(...walk(rel, predicate, { required }));
-    } else if (predicate(rel)) {
-      out.push(rel);
-    }
-  }
-  return out;
 }
 
 function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
