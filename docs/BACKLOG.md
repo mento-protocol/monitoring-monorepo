@@ -131,7 +131,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
-- [ ] **Migrate Aegis v2 alerts to Slack** — Aegis still posts to Discord; v3 went Slack-native (`#alerts-critical` / `#alerts-warnings`). Unify once the v3 channel pair has a week+ of soak.
+- [ ] **Migrate Aegis v2 alerts to Slack** — Aegis dual-routes to Slack alongside Discord today (per-domain warning channels + `#alerts-critical`). Final cutover removes the Discord contact points once dual-route has soaked.
 
 ---
 
@@ -211,7 +211,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 - [x] **High/critical npm advisory block** on merge (PR #191)
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
-- [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`)
+- [x] Envio deploy notification — replaced by Envio's native Slack integration; the `notify-envio-deploy.yml` workflow was removed
 - [x] Deployment docs (`docs/deployment.md`)
 - [x] Non-interactive deploy scripts (status, promote, logs)
 

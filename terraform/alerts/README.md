@@ -14,7 +14,7 @@ Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6
 
 ## Prerequisites
 
-1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to `#alerts-critical` and `#alerts-warning`.
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-infra` (per-domain warnings). Aegis dual-route additionally lands in `#alerts-reserve` and `#alerts-testnet`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
 
 ## Running
@@ -32,7 +32,7 @@ Both secrets live in `terraform/alerts/terraform.tfvars` (gitignored). Matches t
 
 ## Smoke test
 
-After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-warning` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
+After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-pools` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
 
 ## Service label routing
 

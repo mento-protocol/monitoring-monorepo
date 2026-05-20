@@ -74,7 +74,7 @@ Last updated: 2026-05-18
 - [x] **CI actions pinned to commit SHAs** (`claude-code-action`, `checkout`)
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after indexer redeploy
-- [x] **Discord notification on deploy branch push** (`notify-envio-deploy.yml`)
+- [x] **Envio deploy notification** — replaced by Envio's native Slack integration on the hosted indexer (the `notify-envio-deploy.yml` workflow was removed alongside)
 - [x] Deployment docs (`docs/deployment.md`)
 - [x] Non-interactive deploy scripts (status, promote, logs)
 
@@ -109,7 +109,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 - **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 - **Terraform module** `terraform/alerts/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`).
-- **Slack channels.** Severity-split: `#alerts-critical` (page-worthy) + `#alerts-warnings` (muted by default). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed.
+- **Slack channels.** Domain-split: `#alerts-critical` (page-worthy across services) + per-domain warning channels (`#alerts-oracles`, `#alerts-pools`, `#alerts-infra`). Aegis dual-route additionally lands in `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed for v3.
 
 **Live FPMM + bridge rule inventory:**
 
@@ -220,19 +220,20 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
                              │
                        Notifications
                              │
-                ┌────────────┴──────────────────┐
-                │ Discord (Aegis v2)            │
-                │ Splunk On-Call                │
-                │ Slack #alerts-critical (v3)   │
-                │ Slack #alerts-warnings (v3)   │
-                └───────────────────────────────┘
+                ┌────────────┴──────────────────────┐
+                │ Discord (Aegis v2)                │
+                │ Splunk On-Call                    │
+                │ Slack #alerts-critical            │
+                │ Slack #alerts-oracles / -pools /  │
+                │       -infra / -reserve / -testnet│
+                └───────────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events into Postgres → Hasura exposes GraphQL → Next.js dashboard renders
 2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → exposes `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
-3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → exports `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` + `#alerts-warnings` (severity-split)
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → exports `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`)
 
 ## Key Files
 

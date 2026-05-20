@@ -64,19 +64,20 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
                              │
                        Notifications
                              │
-                ┌────────────┴──────────────────┐
-                │ Discord (Aegis v2)            │
-                │ Splunk On-Call                │
-                │ Slack #alerts-critical (v3)   │
-                │ Slack #alerts-warnings (v3)   │
-                └───────────────────────────────┘
+                ┌────────────┴──────────────────────┐
+                │ Discord (Aegis v2)                │
+                │ Splunk On-Call                    │
+                │ Slack #alerts-critical            │
+                │ Slack #alerts-oracles / -pools /  │
+                │       -infra / -reserve / -testnet│
+                └───────────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
 2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
-3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` + `#alerts-warnings` (rules in `terraform/alerts/`)
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`) — rules in `terraform/alerts/`
 
 ### Components
 
@@ -347,14 +348,16 @@ Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metric
 
 **Terraform module** `terraform/alerts/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
 
-**Slack channels.** Severity-split, not domain-split:
+**Slack channels.** Domain-split warnings + cross-service critical channel:
 
 | Channel            | Use                                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
 | `#alerts-critical` | Page-worthy — deviation-critical, oracle-down, limit-tripped, rebalancer-stale, bridge-not-reporting |
-| `#alerts-warnings` | Muted by default; opened when investigating                                                          |
+| `#alerts-oracles`  | Oracle warnings — liveness, oracle jump above swap fee                                               |
+| `#alerts-pools`    | Pool-mechanics warnings — deviation, rebalancer effectiveness, trading-limit pressure                |
+| `#alerts-infra`    | Service-infra warnings — indexer, metrics-bridge, Aegis service health                               |
 
-Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is the axis operators actually toggle on. Per-domain splits can be layered later without relabelling series.
+Aegis v2 dual-route additionally lands in `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Initial rollout was severity-split (`#alerts-warnings` catch-all); refined to per-domain channels once operators wanted to mute/focus by service.
 
 **Rules shipped** (10 rules across 2 services — see `terraform/alerts/rules-*.tf`):
 
@@ -497,7 +500,7 @@ GitHub Actions (`.github/workflows/`):
 - `metrics-bridge.yml` — deploy-only (Cloud Run via Terraform) on `push` to `main` with paths filter. Quality is handled by `ci.yml`.
 - `infra.yml` — terraform validate, workflow-level path filter.
 - `trunk.yml` — repo-wide lint via Trunk; required separately as "Code Quality".
-- `notify-envio-deploy.yml` — Discord notification on `deploy/*` push.
+- Envio deploy notifications come from Envio's native Slack integration on the hosted indexer (the in-repo `notify-envio-deploy.yml` workflow was removed once the hosted integration shipped).
 - `claude.yml` — `@claude` mention automation.
 
 Branch protection: `CI / ci` + `Code Quality` (Trunk) + Vercel checks required on `main`.
