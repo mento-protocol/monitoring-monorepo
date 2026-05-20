@@ -163,6 +163,7 @@ function buildOpenBreachRow({
  * Returns `poolUpdate`: partial Pool fields to merge (cumulative counters
  * incremented when a breach closes).
  */
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function -- Existing stateful transition writer remains intentionally centralized for atomic breach lifecycle updates.
 export async function recordBreachTransition(
   context: BreachContext,
   prev: Pool | undefined,

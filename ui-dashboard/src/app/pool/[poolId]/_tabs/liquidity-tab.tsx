@@ -37,6 +37,7 @@ import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
 import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps query state, pagination, and chart/table rendering together for shared fallback handling.
 export function LiquidityTab({
   poolId,
   limit,

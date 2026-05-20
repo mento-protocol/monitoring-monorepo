@@ -43,6 +43,7 @@ export function PoolsPageClient() {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging.
 function PoolsContent() {
   const { networkData, isLoading: poolsLoading } = useAllNetworksData();
   const searchParams = useSearchParams();

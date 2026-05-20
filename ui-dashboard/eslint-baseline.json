@@ -35,20 +35,6 @@
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
   },
   {
-    "file": "src/app/address-book/AddressBookClient.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'AddressBookPage' has a complexity of 22. Maximum allowed is 15.",
-    "line": 80,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
-  },
-  {
-    "file": "src/app/address-book/AddressBookClient.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressBookPage' has too many lines (330). Maximum allowed is 100.",
-    "line": 80,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
-  },
-  {
     "file": "src/app/api/address-labels/route.ts",
     "ruleId": "complexity",
     "message": "Async function 'PUT' has a complexity of 19. Maximum allowed is 15.",
@@ -329,74 +315,25 @@
     "linePreview": "*/ | export function V2ExchangePanel({ | pool,"
   },
   {
-    "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'LiquidityTab' has a complexity of 34. Maximum allowed is 15.",
-    "line": 40,
-    "linePreview": " | export function LiquidityTab({ | poolId,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LiquidityTab' has too many lines (189). Maximum allowed is 100.",
-    "line": 40,
-    "linePreview": " | export function LiquidityTab({ | poolId,"
-  },
-  {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 201,
+    "line": 202,
     "linePreview": "<tbody> | {pagedPositions.map((position) => { | const fmtTok = ("
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15.",
-    "line": 40,
-    "linePreview": " | export function LpsTab({ | poolId,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LpsTab' has too many lines (249). Maximum allowed is 100.",
-    "line": 40,
-    "linePreview": " | export function LpsTab({ | poolId,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'OracleTab' has a complexity of 29. Maximum allowed is 15.",
-    "line": 47,
-    "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
+    "line": 41,
+    "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing tab keeps LP pagination, totals, and degraded-count copy in one route-owned surface. | export function LpsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'OracleSnapshotsTable' has too many lines (116). Maximum allowed is 100.",
-    "line": 239,
+    "line": 240,
     "linePreview": " | function OracleSnapshotsTable({ | rows,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleTab' has too many lines (145). Maximum allowed is 100.",
-    "line": 47,
-    "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'RebalancesTab' has a complexity of 26. Maximum allowed is 15.",
-    "line": 178,
-    "linePreview": " | export function RebalancesTab({ | poolId,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'RebalancesTab' has too many lines (269). Maximum allowed is 100.",
-    "line": 178,
-    "linePreview": " | export function RebalancesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
@@ -420,20 +357,6 @@
     "linePreview": " | export function ReservesTab({ | poolId,"
   },
   {
-    "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'SwapsTab' has a complexity of 41. Maximum allowed is 15.",
-    "line": 41,
-    "linePreview": " | export function SwapsTab({ | poolId,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'SwapsTab' has too many lines (228). Maximum allowed is 100.",
-    "line": 41,
-    "linePreview": " | export function SwapsTab({ | poolId,"
-  },
-  {
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
     "ruleId": "complexity",
     "message": "Function 'Card' has a complexity of 24. Maximum allowed is 15.",
@@ -451,22 +374,15 @@
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15.",
-    "line": 46,
-    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
-  },
-  {
-    "file": "src/app/pools/_components/pools-page-client.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolsContent' has too many lines (208). Maximum allowed is 100.",
-    "line": 46,
-    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
+    "line": 47,
+    "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent() { | const { networkData, isLoad"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
-    "line": 46,
-    "linePreview": " | function PoolsContent() { | const { networkData, isLoading: poolsLoading } = useAllNetworksData();"
+    "line": 47,
+    "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent() { | const { networkData, isLoad"
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
@@ -488,13 +404,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
     "line": 40,
     "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
-  },
-  {
-    "file": "src/components/address-label-editor.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressLabelEditor' has too many lines (141). Maximum allowed is 100.",
-    "line": 120,
-    "linePreview": " | export function AddressLabelEditor({ | address,"
   },
   {
     "file": "src/components/address-label-form.tsx",
@@ -663,20 +572,6 @@
     "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
     "line": 55,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
-  },
-  {
-    "file": "src/components/pool-config-panel.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'PoolConfigPanel' has a complexity of 19. Maximum allowed is 15.",
-    "line": 36,
-    "linePreview": "*  page survives the indexer deploy+resync window. */ | export function PoolConfigPanel({ pool }: PoolConfigPanelProps) { | const { network } = useNetwork();"
-  },
-  {
-    "file": "src/components/pool-config-panel.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolConfigPanel' has too many lines (103). Maximum allowed is 100.",
-    "line": 36,
-    "linePreview": "*  page survives the indexer deploy+resync window. */ | export function PoolConfigPanel({ pool }: PoolConfigPanelProps) { | const { network } = useNetwork();"
   },
   {
     "file": "src/components/pool-header/deviation-cell.tsx",

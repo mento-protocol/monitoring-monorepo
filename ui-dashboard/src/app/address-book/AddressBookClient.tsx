@@ -77,6 +77,7 @@ function EmptyRowsState({
 // Keep the table + modal ownership in one component so pending label/report
 // ledgers stay easy to audit.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
+// eslint-disable-next-line complexity, max-lines-per-function -- Address book page coordinates URL state, edit modals, and pending mutation ledgers in one route surface.
 export default function AddressBookPage(props: AddressBookPageProps) {
   const { canEdit: userCanEdit = false } = props;
   const {

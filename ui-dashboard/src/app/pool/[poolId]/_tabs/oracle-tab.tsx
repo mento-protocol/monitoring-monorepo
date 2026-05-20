@@ -44,6 +44,7 @@ type OracleTabProps = {
 // consistent with what the warning text says ("most recent N snapshots").
 const SEARCH_ORDER_BY = buildOrderBy("timestamp", "desc");
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
 export function OracleTab(props: OracleTabProps) {
   const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();

@@ -28,27 +28,6 @@
     "linePreview": "const label = PRICING_MODULE_LABELS[rawName]; | if (label && entry.address) { | index.set(entry.address.toLowerCase(), label);"
   },
   {
-    "file": "src/deviationBreach.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'recordBreachTransition' has a complexity of 26. Maximum allowed is 15.",
-    "line": 166,
-    "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
-  },
-  {
-    "file": "src/deviationBreach.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'recordBreachTransition' has too many lines (112). Maximum allowed is 80.",
-    "line": 166,
-    "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
-  },
-  {
-    "file": "src/deviationBreach.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 32 to the 18 allowed.",
-    "line": 166,
-    "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
-  },
-  {
     "file": "src/handlers/biPoolManager.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 26. Maximum allowed is 25.",
@@ -77,13 +56,6 @@
     "linePreview": "{ contract: \"FPMM\", event: \"Swap\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {
-    "file": "src/handlers/fpmm/state-sync.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (174). Maximum allowed is 150.",
-    "line": 269,
-    "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
-  },
-  {
     "file": "src/handlers/sortedOracles.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (153). Maximum allowed is 150.",
@@ -101,7 +73,7 @@
     "file": "src/healthScore.ts",
     "ruleId": "max-params",
     "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",
-    "line": 307,
+    "line": 315,
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
@@ -213,14 +185,14 @@
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Async function 'readContractWithBlockFallback' has too many parameters (6). Maximum allowed is 4.",
-    "line": 136,
+    "line": 157,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Method 'logRpcFailure' has too many parameters (5). Maximum allowed is 4.",
-    "line": 97,
+    "line": 114,
     "linePreview": "isRateLimitError: (err: unknown): boolean => isRateLimitError(err), | logRpcFailure: ( | chainId: number,"
   },
   {
@@ -269,14 +241,14 @@
     "file": "src/rpc/client.ts",
     "ruleId": "max-params",
     "message": "Function 'logRpcFailure' has too many parameters (6). Maximum allowed is 4.",
-    "line": 83,
+    "line": 84,
     "linePreview": "*/ | export function logRpcFailure( | chainId: number,"
   },
   {
     "file": "src/rpc/http-test-mocks.ts",
     "ruleId": "complexity",
     "message": "Function 'handleRpcCall' has a complexity of 16. Maximum allowed is 15.",
-    "line": 152,
+    "line": 162,
     "linePreview": " | function handleRpcCall(chainId: number, request: JsonRpcRequest): object { | const id = request.id;"
   },
   {
@@ -297,7 +269,7 @@
     "file": "src/rpc/pool-state.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchTradingLimits' has too many parameters (5). Maximum allowed is 4.",
-    "line": 469,
+    "line": 465,
     "linePreview": " | export async function fetchTradingLimits( | chainId: number,"
   },
   {

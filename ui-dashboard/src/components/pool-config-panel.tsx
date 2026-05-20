@@ -33,6 +33,7 @@ function formatBps(bps: number | null | undefined): string {
  *  hairline divider. Hidden for virtual pools (no fees or rebalance
  *  mechanics). `rebalanceReward` is fetched via POOL_CONFIG_EXT so the
  *  page survives the indexer deploy+resync window. */
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing panel keeps schema-lag fallback and pool config rendering together.
 export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);

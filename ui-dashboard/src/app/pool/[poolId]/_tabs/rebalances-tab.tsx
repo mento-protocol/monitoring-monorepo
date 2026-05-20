@@ -175,6 +175,7 @@ function RewardCell({
   return renderRewardCell(rewardUsd, thresholds);
 }
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps rebalance filtering, sorting, and URL-backed pagination together.
 export function RebalancesTab({
   poolId,
   limit,

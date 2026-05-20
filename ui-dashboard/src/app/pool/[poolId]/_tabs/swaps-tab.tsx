@@ -38,6 +38,7 @@ import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
 import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps swap filters, pagination, and fallback counters in one query surface.
 export function SwapsTab({
   poolId,
   limit,

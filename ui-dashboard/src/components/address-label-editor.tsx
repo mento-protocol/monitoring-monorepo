@@ -117,6 +117,7 @@ function useAddressDraft(address: string): [string, (next: string) => void] {
   ];
 }
 
+// eslint-disable-next-line max-lines-per-function -- Modal owns label/report tab wiring so pending-mutation ownership stays in one surface.
 export function AddressLabelEditor({
   address,
   initial,

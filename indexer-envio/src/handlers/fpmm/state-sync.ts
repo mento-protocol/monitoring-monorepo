@@ -266,6 +266,7 @@ indexer.onEvent(
 
 indexer.onEvent(
   { contract: "FPMM", event: "Rebalanced" },
+  // eslint-disable-next-line max-lines-per-function -- Existing handler keeps same-event reserve, breach, and rebalance writes together for ordering parity.
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);

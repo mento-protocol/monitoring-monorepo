@@ -37,6 +37,7 @@ function isLiquidityPositionSchemaError(error: Error | undefined) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- Existing tab keeps LP pagination, totals, and degraded-count copy in one route-owned surface.
 export function LpsTab({
   poolId,
   limit,
