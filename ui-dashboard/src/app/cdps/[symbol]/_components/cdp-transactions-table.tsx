@@ -15,6 +15,7 @@ import type {
   CdpRedemptionEventRow,
   CdpSpRebalanceEventRow,
   CdpTransactionRow,
+  CdpTroveOperationEventRow,
 } from "../../_lib/types";
 
 const PAGE_SIZE = 20;
@@ -23,19 +24,31 @@ type CdpTransactionsResponse = {
   LiquidationEvent: CdpLiquidationEventRow[];
   RedemptionEvent: CdpRedemptionEventRow[];
   SpRebalanceEvent: CdpSpRebalanceEventRow[];
+  TroveOperationEvent: CdpTroveOperationEventRow[];
 };
 
 type BadgeKind =
   | "liquidation"
   | "userRedemption"
   | "rebalanceRedemption"
-  | "spRebalance";
+  | "spRebalance"
+  | "troveOpen"
+  | "troveClose"
+  | "troveAdjust"
+  | "troveInterestRateChange"
+  | "troveBatch";
 
 const BADGE_STYLES: Record<BadgeKind, string> = {
   liquidation: "bg-amber-500/10 text-amber-300 border-amber-700/40",
   userRedemption: "bg-indigo-500/10 text-indigo-300 border-indigo-700/40",
   rebalanceRedemption: "bg-slate-500/10 text-slate-300 border-slate-600/40",
   spRebalance: "bg-cyan-500/10 text-cyan-300 border-cyan-700/40",
+  troveOpen: "bg-emerald-500/10 text-emerald-300 border-emerald-700/40",
+  troveClose: "bg-rose-500/10 text-rose-300 border-rose-700/40",
+  troveAdjust: "bg-sky-500/10 text-sky-300 border-sky-700/40",
+  troveInterestRateChange:
+    "bg-violet-500/10 text-violet-300 border-violet-700/40",
+  troveBatch: "bg-zinc-500/10 text-zinc-300 border-zinc-600/40",
 };
 
 const BADGE_LABELS: Record<BadgeKind, string> = {
@@ -43,12 +56,37 @@ const BADGE_LABELS: Record<BadgeKind, string> = {
   userRedemption: "Redemption",
   rebalanceRedemption: "Rebalance Redemption",
   spRebalance: "SP Rebalance",
+  troveOpen: "Open Trove",
+  troveClose: "Close Trove",
+  troveAdjust: "Adjust Trove",
+  troveInterestRateChange: "Change Interest Rate",
+  troveBatch: "Batch Membership",
+};
+
+// Mirrors `OP` in indexer-envio/src/handlers/liquity/operations.ts. Kept
+// inline here so the UI doesn't reach across the package boundary; if the
+// indexer ever renumbers these, both files must move together.
+const TROVE_OP_BADGE: Record<number, BadgeKind> = {
+  0: "troveOpen",
+  1: "troveClose",
+  2: "troveAdjust",
+  3: "troveInterestRateChange",
+  7: "troveOpen",
+  8: "troveBatch",
+  9: "troveBatch",
 };
 
 function badgeKindFor(row: CdpTransactionRow): BadgeKind {
-  if (row.kind === "liquidation") return "liquidation";
-  if (row.kind === "spRebalance") return "spRebalance";
-  return row.isRebalance ? "rebalanceRedemption" : "userRedemption";
+  switch (row.kind) {
+    case "liquidation":
+      return "liquidation";
+    case "spRebalance":
+      return "spRebalance";
+    case "redemption":
+      return row.isRebalance ? "rebalanceRedemption" : "userRedemption";
+    case "troveOp":
+      return TROVE_OP_BADGE[row.operation] ?? "troveAdjust";
+  }
 }
 
 function sumWei(...parts: string[]): string {
@@ -83,6 +121,10 @@ function amountsFor(row: CdpTransactionRow): AmountSlice {
       return { debt: row.actualBoldAmount, coll: row.ETHSent };
     case "spRebalance":
       return { debt: row.amountStableOut, coll: row.amountCollIn };
+    case "troveOp":
+      // Signed deltas from the ABI — positive = added to trove, negative =
+      // removed. Rendered with leading minus for withdrawals/repayments.
+      return { debt: row.debtChange, coll: row.collChange };
   }
 }
 
@@ -100,10 +142,18 @@ function mergeRows(data: CdpTransactionsResponse | undefined): {
   const rebalances: CdpTransactionRow[] = (data.SpRebalanceEvent ?? []).map(
     (r) => ({ kind: "spRebalance", ...r }),
   );
+  const troveOps: CdpTransactionRow[] = (data.TroveOperationEvent ?? []).map(
+    (r) => ({ kind: "troveOp", ...r }),
+  );
   // Tiebreak on id desc so same-timestamp events (common when multiple
   // ops land in the same block) sort deterministically across event kinds
   // instead of falling back to the array concat order.
-  const rows = [...liquidations, ...redemptions, ...rebalances].sort((a, b) => {
+  const rows = [
+    ...liquidations,
+    ...redemptions,
+    ...rebalances,
+    ...troveOps,
+  ].sort((a, b) => {
     const ts = Number(b.timestamp) - Number(a.timestamp);
     if (ts !== 0) return ts;
     return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
@@ -111,7 +161,8 @@ function mergeRows(data: CdpTransactionsResponse | undefined): {
   const capped =
     liquidations.length >= ENVIO_MAX_ROWS ||
     redemptions.length >= ENVIO_MAX_ROWS ||
-    rebalances.length >= ENVIO_MAX_ROWS;
+    rebalances.length >= ENVIO_MAX_ROWS ||
+    troveOps.length >= ENVIO_MAX_ROWS;
   return { rows, capped };
 }
 

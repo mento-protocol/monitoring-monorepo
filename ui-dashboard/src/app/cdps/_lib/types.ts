@@ -152,8 +152,28 @@ export type CdpSpRebalanceEventRow = {
   txHash: string;
 };
 
+export type CdpTroveOperationEventRow = {
+  id: string;
+  troveId: string;
+  /** Liquity v2 OP enum: 0=open, 1=close, 2=adjust, 3=adjustInterestRate,
+   *  7=openAndJoinBatch, 8=setBatchManager, 9=removeFromBatch.
+   *  LIQUIDATE / REDEEM_COLLATERAL / APPLY_PENDING_DEBT are NOT persisted
+   *  here — they have dedicated entities or aren't user actions. */
+  operation: number;
+  /** Signed delta: positive = collateral added, negative = withdrawn. */
+  collChange: string;
+  /** Signed delta: positive = debt borrowed, negative = repaid. */
+  debtChange: string;
+  annualInterestRate: string;
+  debtIncreaseFromUpfrontFee: string;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
 /** Discriminated union used by the unified CDP transactions table. */
 export type CdpTransactionRow =
   | ({ kind: "liquidation" } & CdpLiquidationEventRow)
   | ({ kind: "redemption" } & CdpRedemptionEventRow)
-  | ({ kind: "spRebalance" } & CdpSpRebalanceEventRow);
+  | ({ kind: "spRebalance" } & CdpSpRebalanceEventRow)
+  | ({ kind: "troveOp" } & CdpTroveOperationEventRow);

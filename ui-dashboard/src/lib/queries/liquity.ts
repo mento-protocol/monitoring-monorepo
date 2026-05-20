@@ -105,7 +105,7 @@ export const CDP_INSTANCE_DAILY_SNAPSHOTS = `
 `;
 
 // Unified CDP transactions feed. The indexer has no single CDPOperation
-// entity, so we fetch the three event types in parallel and merge them
+// entity, so we fetch the four event types in parallel and merge them
 // client-side. Each branch's history is well under ENVIO_MAX_ROWS, so a
 // single capped query per kind suffices — the merged result is paginated
 // client-side via array slice. If any per-kind array hits the cap, the
@@ -136,6 +136,15 @@ export const CDP_TRANSACTIONS = `
       limit: $limit
     ) {
       id amountCollIn amountStableOut
+      timestamp blockNumber txHash
+    }
+    TroveOperationEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id troveId operation collChange debtChange
+      annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
     }
   }

@@ -46,6 +46,16 @@ id collateralId status debt coll }` selection from `CDP_MARKETS`, stop
       Hasura returns the new fields. Existing UI shows nothing about
       redemptions, but Total / Rebalance / User KPI tiles or a stacked
       time-series in the CDP detail page would be the natural next surface.
+- [ ] **Replace `formatTokenAmount`'s `-1` sentinel for signed values.**
+      `ui-dashboard/src/app/cdps/_lib/format.ts` treats `-1` as the
+      "unknown" sentinel for unsigned counters, but with the new signed
+      `collChange` / `debtChange` int256 deltas (PR #477) a hypothetical
+      `-1 wei` withdrawal would render as `—` instead of the actual
+      amount. Astronomically unlikely in practice, but the semantic
+      collision worsens as the helper grows. Fix: split into
+      `formatTokenAmount` (unsigned, keeps the sentinel) and
+      `formatSignedWei` (signed, only guards `null`/`undefined`); migrate
+      callers individually.
 
 ## CDP glue contracts: state mutations without events (NICE TO KNOW)
 

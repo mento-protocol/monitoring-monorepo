@@ -1221,6 +1221,28 @@ type SpRebalanceEvent @index(fields: ["instanceId", "timestamp"]) {
   txHash: String!
 }
 
+# One row per `TroveOperation` from the TroveManager — user-initiated trove
+# lifecycle (open / close / adjust / interest-rate change / batch-membership
+# moves). Protocol-forced ops (LIQUIDATE, REDEEM_COLLATERAL, APPLY_PENDING_DEBT)
+# are skipped because they already have dedicated event entities or aren't
+# user actions; rendering them here too would double-count in the UI.
+# `collChange` / `debtChange` preserve the ABI's int256 sign so the UI can
+# distinguish deposits from withdrawals and borrows from repayments.
+type TroveOperationEvent @index(fields: ["instanceId", "timestamp"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  troveId: String! @index
+  operation: Int!
+  collChange: BigInt!
+  debtChange: BigInt!
+  annualInterestRate: BigInt!
+  debtIncreaseFromUpfrontFee: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
 type CdpPool {
   id: ID!
   chainId: Int! @index
