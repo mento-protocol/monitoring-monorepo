@@ -10,7 +10,10 @@ import { getAllIntelEntities } from "@/lib/intel-entities";
 import { getAllIntelEntityCps } from "@/lib/intel-entity-cps";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { MAX_RESTORE_BLOB_BYTES } from "@/app/api/address-labels/restore/route";
-import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
+import {
+  MAX_REDIS_HASH_REPLACE_BYTES,
+  restoreReplacePayloadBytes,
+} from "@/lib/redis-hash";
 
 // Bumped from the platform default (60s on Pro) to cover the ~19MB combined
 // snapshot — 7 parallel HGETALLs + a single Blob upload. Largest single hash
@@ -121,10 +124,23 @@ function flagOversizeBackup(
     );
   }
   for (const [name, hash] of Object.entries(hashes)) {
-    const hashBytes = Buffer.byteLength(JSON.stringify(hash), "utf8");
+    // Use the true EVAL payload size — what the restore would actually send
+    // to Upstash — rather than the raw JSON.stringify(records) size. The wire
+    // payload is meaningfully larger because each record gets a second JSON
+    // encode inside the HSET argv, plus the Lua script + key array. Without
+    // this, a near-cap hash can silently slip past preflight and only fail at
+    // restore time.
+    const replacementFields: Record<string, string> = {};
+    for (const [field, value] of Object.entries(hash)) {
+      replacementFields[field.toLowerCase()] = JSON.stringify(value);
+    }
+    const hashBytes = restoreReplacePayloadBytes({
+      key: name,
+      fields: replacementFields,
+    });
     if (hashBytes > MAX_REDIS_HASH_REPLACE_BYTES) {
       Sentry.captureMessage(
-        `[backup] hash ${name} ${hashBytes} bytes exceeds per-script cap ${MAX_REDIS_HASH_REPLACE_BYTES} — restore will fail on this hash`,
+        `[backup] hash ${name} EVAL payload ${hashBytes} bytes exceeds per-script cap ${MAX_REDIS_HASH_REPLACE_BYTES} — restore will fail on this hash`,
         {
           level: "warning",
           tags: { route: "address-labels/backup", hash: name },

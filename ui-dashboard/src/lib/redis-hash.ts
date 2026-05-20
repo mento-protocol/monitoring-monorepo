@@ -95,6 +95,18 @@ function payloadBytesFor(
 }
 
 /**
+ * Bytes the trusted-restore EVAL would send to Upstash for a single hash.
+ * Use this for backup-time preflight sizing — the wire payload is meaningfully
+ * larger than `JSON.stringify(records)` because each record value gets a
+ * second JSON encode inside the Redis HSET argv, plus the script + key array.
+ */
+export function restoreReplacePayloadBytes(
+  replacement: RedisHashReplacement,
+): number {
+  return payloadBytesFor(REPLACE_HASHES_SCRIPT, [replacement]);
+}
+
+/**
  * Greedy-pack the replacements into sub-batches each fitting under the
  * Upstash request cap, in the input order. Throws (without issuing any
  * round-trip) if any single replacement exceeds the cap.

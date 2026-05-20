@@ -48,14 +48,18 @@ export async function importSnapshotHashes(
 /**
  * Intel records are stored as JSON-encoded values keyed by the record's
  * natural identifier (address for deep/transfers/wealth, slug for entities/
- * entity-cps). No normalization — the backup writes exactly what HSET reads.
+ * entity-cps). Keys are lower-cased on restore: runtime reads always use
+ * `address.toLowerCase()`, so a legacy snapshot that carried mixed-case
+ * address keys would otherwise restore as effectively-unreachable rows.
+ * Slug-keyed hashes are spec-lowercase (`INTEL_ENTITY_SLUG_RE`), so this is
+ * a defensive no-op for them.
  */
 function encodeIntelFields<T>(
   records: Record<string, T>,
 ): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const [key, record] of Object.entries(records)) {
-    fields[key] = JSON.stringify(record);
+    fields[key.toLowerCase()] = JSON.stringify(record);
   }
   return fields;
 }
