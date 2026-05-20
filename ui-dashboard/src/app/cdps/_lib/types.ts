@@ -178,6 +178,28 @@ export type CdpTroveOperationEventRow = {
   txHash: string;
 };
 
+/** Row from `CDP_TROVE_OP_SNAPSHOTS` — the isolated query that adds the
+ *  schema-lag-fragile fields (owner + before/after debt/coll) without
+ *  poisoning the primary `CDP_TRANSACTIONS` query. The UI merges these
+ *  into the trove-op rows by `id` and degrades gracefully (flat amounts,
+ *  hidden address filter) when the snapshot query fails during the
+ *  deploy+resync window. */
+export type CdpTroveOpSnapshotRow = {
+  id: string;
+  /** Trove NFT owner at the time of the operation, lowercased. */
+  owner: string;
+  /** Trove debt immediately before this op (BigInt-as-string, debt-token wei). */
+  debtBefore: string;
+  /** Trove debt immediately after this op — computed from ABI deltas
+   *  (`debtChange + debtIncreaseFromUpfrontFee + debtIncreaseFromRedist`),
+   *  so it includes pending redistribution that materializes on this op. */
+  debtAfter: string;
+  /** Trove collateral immediately before this op. */
+  collBefore: string;
+  /** Trove collateral immediately after this op. */
+  collAfter: string;
+};
+
 /** Discriminated union used by the unified CDP transactions table. */
 export type CdpTransactionRow =
   | ({ kind: "liquidation" } & CdpLiquidationEventRow)

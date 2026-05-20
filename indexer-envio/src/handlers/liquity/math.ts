@@ -30,6 +30,52 @@ export const addSigned = (base: bigint, delta: bigint): bigint => {
 export const negativeToPositive = (value: bigint): bigint =>
   value < 0n ? -value : value;
 
+/**
+ * Compute the trove's debt and collateral immediately after a `TroveOperation`
+ * applies, given the pre-operation values and every signed/unsigned delta the
+ * ABI exposes. Used to snapshot before/after on `TroveOperationEvent` rows so
+ * the UI can render `5,000 → 4,000 (−1,000)` without waiting for the
+ * subsequent `TroveUpdated`.
+ *
+ * Inputs mirror the ABI's `TroveOperation` payload exactly:
+ *   debtAfter = debtBefore + debtChange + upfrontFee + debtFromRedist
+ *   collAfter = collBefore + collChange + collFromRedist
+ *
+ * The redist terms are critical when pending redistribution materializes on
+ * this op; omitting them lets the snapshot drift from `TroveUpdated._debt`.
+ *
+ * For batch-membership ops (SET_BATCH_MANAGER / REMOVE_FROM_BATCH /
+ * OPEN_AND_JOIN_BATCH), the matching debt-truth event is `BatchUpdated`
+ * (not `TroveUpdated`), which derives per-trove debt via
+ * `batch.debt * shares / totalShares`. That share-rounding can introduce
+ * tiny per-trove drift vs. this arithmetic — acceptable here because the
+ * UI rounds to display precision well above any wei-level discrepancy.
+ */
+export const computeTroveOperationSnapshot = (params: {
+  debtBefore: bigint;
+  collBefore: bigint;
+  debtChange: bigint;
+  debtIncreaseFromUpfrontFee: bigint;
+  debtIncreaseFromRedist: bigint;
+  collChange: bigint;
+  collIncreaseFromRedist: bigint;
+}): { debtAfter: bigint; collAfter: bigint } => {
+  const debtAfter =
+    params.debtBefore +
+    params.debtChange +
+    params.debtIncreaseFromUpfrontFee +
+    params.debtIncreaseFromRedist;
+  const collAfter =
+    params.collBefore + params.collChange + params.collIncreaseFromRedist;
+  // Floor at 0 — a CLOSE_TROVE that fully repays can produce mathematical
+  // zero, and we never want a negative on-chain quantity to leak out via
+  // signed-bigint underflow if a future ABI revision violates invariants.
+  return {
+    debtAfter: debtAfter > 0n ? debtAfter : 0n,
+    collAfter: collAfter > 0n ? collAfter : 0n,
+  };
+};
+
 export const accrueDebtTimesRate = ({
   totalDebt,
   sumDebtTimesRateD36,

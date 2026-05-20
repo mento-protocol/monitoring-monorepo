@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  CdpTxAddressFilter,
   CdpTxMarketFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
+  normalizeAddressFilter,
 } from "../cdp-tx-filters";
 import type { BadgeKind } from "../../_lib/transactions";
 
@@ -264,5 +266,120 @@ describe("CdpTxMarketFilter", () => {
       pillByLabel(container, "All").click();
     });
     expect(onChange).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("CdpTxAddressFilter", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  function getInput(): HTMLInputElement {
+    const input = container.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("No address input rendered");
+    return input;
+  }
+
+  it("renders an empty input when value is the empty string", () => {
+    act(() => {
+      root.render(<CdpTxAddressFilter value="" onChange={vi.fn()} />);
+    });
+    const input = getInput();
+    expect(input.value).toBe("");
+    // The aria-label is the load-bearing accessible name; if a future
+    // refactor strips it the screen-reader experience regresses silently.
+    expect(input.getAttribute("aria-label")).toBe(
+      "Filter CDP transactions by trove owner address",
+    );
+  });
+
+  it("typing into the input emits the raw value (no normalization)", () => {
+    const onChange = vi.fn<(next: string) => void>();
+    act(() => {
+      root.render(<CdpTxAddressFilter value="" onChange={onChange} />);
+    });
+    const input = getInput();
+    act(() => {
+      // Mimic the user typing — set value then dispatch the React-aware
+      // input event so the synthetic event fires through React's tree.
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "  0xAbCd  ");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // Component is controlled, so it forwards the raw (un-normalized)
+    // string. Normalization happens at the comparison site via
+    // `normalizeAddressFilter`.
+    expect(onChange).toHaveBeenCalledWith("  0xAbCd  ");
+  });
+
+  it("renders the controlled value verbatim, preserving whitespace + case", () => {
+    act(() => {
+      root.render(<CdpTxAddressFilter value="  0xAbCd  " onChange={vi.fn()} />);
+    });
+    expect(getInput().value).toBe("  0xAbCd  ");
+  });
+
+  it("renders disabled with a hint when the snapshot query isn't ready", () => {
+    act(() => {
+      root.render(
+        <CdpTxAddressFilter
+          value=""
+          onChange={vi.fn()}
+          disabled
+          disabledHint="(unavailable while indexer syncs)"
+        />,
+      );
+    });
+    const input = getInput();
+    expect(input.disabled).toBe(true);
+    // Hint sits as a sibling span — assert it shows up in the rendered DOM
+    // so users see *why* the input is greyed out instead of guessing.
+    expect(container.textContent).toContain(
+      "(unavailable while indexer syncs)",
+    );
+  });
+
+  it("omits the disabled hint when disabled is false", () => {
+    act(() => {
+      root.render(
+        <CdpTxAddressFilter
+          value=""
+          onChange={vi.fn()}
+          disabledHint="(should not render)"
+        />,
+      );
+    });
+    expect(getInput().disabled).toBe(false);
+    expect(container.textContent).not.toContain("(should not render)");
+  });
+});
+
+describe("normalizeAddressFilter", () => {
+  it("trims whitespace and lowercases the address", () => {
+    expect(normalizeAddressFilter("  0xAbCd  ")).toBe("0xabcd");
+  });
+
+  it("returns the empty string for blank input (signal to disable the filter)", () => {
+    expect(normalizeAddressFilter("")).toBe("");
+    expect(normalizeAddressFilter("   ")).toBe("");
+  });
+
+  it("is idempotent on already-normalized values", () => {
+    expect(normalizeAddressFilter("0xabcd1234")).toBe("0xabcd1234");
   });
 });
