@@ -86,6 +86,15 @@ function testRpcPort(): number {
   return 45_000 + (process.pid % 10_000);
 }
 
+function publishServerUrl(url: string): void {
+  serverUrl = url;
+  for (const chainId of TEST_CHAIN_IDS) {
+    process.env[`ENVIO_RPC_URL_${chainId}`] = `${serverUrl}/${chainId}`;
+    process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`] =
+      `${serverUrl}/${chainId}`;
+  }
+}
+
 function normalize(value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "string") {
@@ -217,32 +226,48 @@ async function handleRequest(
 
 export function ensureHttpTestRpc(): void {
   if (!serverUrl) {
-    const port = testRpcPort();
-    rpcServer = createServer((req, res) => {
-      handleRequest(req, res).catch((err) => {
-        res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: String(err) }));
+    const explicitPort = env.ENVIO_TEST_RPC_PORT;
+    const startServer = (port: number): void => {
+      rpcServer = createServer((req, res) => {
+        handleRequest(req, res).catch((err) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: String(err) }));
+        });
       });
-    });
-    serverReady = new Promise((resolve, reject) => {
-      const onError = (err: Error) => {
-        rpcServer?.off("listening", onListening);
-        reject(err);
-      };
-      const onListening = () => {
-        rpcServer?.off("error", onError);
-        resolve();
-      };
-      rpcServer?.once("error", onError);
-      rpcServer?.once("listening", onListening);
-      rpcServer?.listen(port, "127.0.0.1");
-    });
-    serverUrl = `http://127.0.0.1:${port}`;
-  }
-  for (const chainId of TEST_CHAIN_IDS) {
-    process.env[`ENVIO_RPC_URL_${chainId}`] = `${serverUrl}/${chainId}`;
-    process.env[`ENVIO_RPC_FALLBACK_URL_${chainId}`] =
-      `${serverUrl}/${chainId}`;
+      if (port > 0) publishServerUrl(`http://127.0.0.1:${port}`);
+      serverReady = new Promise((resolve, reject) => {
+        const onError = (err: NodeJS.ErrnoException) => {
+          rpcServer?.off("listening", onListening);
+          if (
+            err.code === "EADDRINUSE" &&
+            explicitPort === undefined &&
+            port !== 0
+          ) {
+            rpcServer?.close();
+            rpcServer = undefined;
+            serverUrl = undefined;
+            startServer(0);
+            serverReady?.then(resolve, reject);
+            return;
+          }
+          reject(err);
+        };
+        const onListening = () => {
+          rpcServer?.off("error", onError);
+          const address = rpcServer?.address();
+          const actualPort =
+            typeof address === "object" && address !== null
+              ? address.port
+              : port;
+          publishServerUrl(`http://127.0.0.1:${actualPort}`);
+          resolve();
+        };
+        rpcServer?.once("error", onError);
+        rpcServer?.once("listening", onListening);
+        rpcServer?.listen(port, "127.0.0.1");
+      });
+    };
+    startServer(testRpcPort());
   }
 }
 

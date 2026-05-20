@@ -3,6 +3,8 @@ import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import { buildSnapshotWindows } from "@/lib/volume";
 
+export const TEST_NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
+
 export const BASE_NETWORK: Network = {
   id: "celo-mainnet",
   label: "Celo",
@@ -110,7 +112,7 @@ export function makeNetworkData(
   const snapshotsAllDaily = overrides.snapshotsAllDaily ?? snapshots30d;
   const base: NetworkData = {
     network: BASE_NETWORK,
-    snapshotWindows: buildSnapshotWindows(Date.now()),
+    snapshotWindows: buildSnapshotWindows(TEST_NOW),
     pools: [],
     snapshots: [],
     snapshots7d: [],

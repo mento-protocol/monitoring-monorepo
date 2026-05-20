@@ -59,6 +59,16 @@ type Response = {
   BreakerConfig: BreakerConfig[];
 };
 
+function findEnabledMarketHoursConfig(
+  configs: BreakerConfig[] | undefined,
+): BreakerConfig | undefined {
+  return configs?.find((c) => c.breaker.kind === "MARKET_HOURS" && c.enabled);
+}
+
+function isBreakerClosure(config: BreakerConfig | undefined): boolean {
+  return config?.status === "TRIPPED" || (config?.tradingMode ?? 0) !== 0;
+}
+
 /**
  * Title-row pill summarising whether the pool's FX market is currently open.
  * Renders only when the pool's rateFeedID is gated by an on-chain
@@ -86,11 +96,8 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   // the market-hours breaker for a feed (`BreakerStatusUpdated(..., false)`)
   // also hides the pill — otherwise operators would see a "Market Open/Closed"
   // countdown that no longer reflects the on-chain trading gate.
-  const enabled =
-    !isVirtual &&
-    !!data?.BreakerConfig?.some(
-      (c) => c.breaker.kind === "MARKET_HOURS" && c.enabled,
-    );
+  const marketHoursConfig = findEnabledMarketHoursConfig(data?.BreakerConfig);
+  const enabled = !isVirtual && !!marketHoursConfig;
 
   const [now, setNow] = useState(() => new Date());
 
@@ -111,7 +118,9 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
 
   if (!enabled) return null;
 
-  const open = !isWeekend(now);
+  const breakerClosed = isBreakerClosure(marketHoursConfig);
+  const calendarClosed = isWeekend(now);
+  const open = !breakerClosed && !calendarClosed;
   const transition = nextMarketHoursTransition(now);
   const secondsUntilTransition = Math.max(
     0,
@@ -127,17 +136,22 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   // inside the pill exposes the explanation to assistive tech without
   // changing the visual.
   if (!open) {
-    // Closed — countdown to next open.
+    // Calendar closure — countdown to next open. Breaker-driven weekday
+    // closures do not have a known reopen time in the weekly FX calendar.
     return (
       <span
         className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
         title={tooltip}
       >
         <span className="text-slate-300 font-medium">Market Closed</span>
-        <span className="text-slate-500">·</span>
-        <span className="font-mono text-slate-300">
-          {formatHoursMinutes(secondsUntilTransition)} until open
-        </span>
+        {calendarClosed && (
+          <>
+            <span className="text-slate-500">·</span>
+            <span className="font-mono text-slate-300">
+              {formatHoursMinutes(secondsUntilTransition)} until open
+            </span>
+          </>
+        )}
         <span className="sr-only"> — {tooltip}</span>
       </span>
     );

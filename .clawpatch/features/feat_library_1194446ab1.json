@@ -144,11 +144,30 @@
     "project-root:ui-dashboard"
   ],
   "trustBoundaries": [],
-  "status": "pending",
+  "status": "fixed",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-1194446ab1-8488_272cccfa97"
+  ],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T071510-134fcc",
+      "kind": "review-error",
+      "summary": "codex provider failed: WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T07:15:11.116Z"
+    },
+    {
+      "runId": "20260520T071522-d9847f",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T07:16:55.691Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T07:26:08.963Z"
 }

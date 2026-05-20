@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-154c0c9955-a1d8_e641061b6e",
+  "featureId": "feat_library_154c0c9955",
+  "title": "Delivered rollups are skipped when the destination NTT manager is missing from the manifest",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 402,
+      "endLine": 409,
+      "symbol": "TransferRedeemed handler",
+      "quote": "if (\n      !alreadyDelivered &&\n      mgr &&\n      transfer.sourceChainId !== undefined &&\n      transfer.sourceChainId !== null &&\n      transfer.amount\n    )"
+    },
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 410,
+      "endLine": 420,
+      "symbol": "TransferRedeemed handler",
+      "quote": "await updateDailySnapshot(context as HandlerContext, {\n        blockTimestamp: ts,\n        tokenSymbol: transfer.tokenSymbol,\n        sourceChainId: transfer.sourceChainId,\n        destChainId: chainId,\n        deliveredDelta: { count: 1, volume: transfer.amount },\n      });"
+    },
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 226,
+      "endLine": 234,
+      "symbol": "TransferSentDigest handler",
+      "quote": "// Manifest miss ... persists source identity + sender/amount\n    // in a degraded \"UNKNOWN\"-token mode rather than dropping the transfer\n    // entirely"
+    }
+  ],
+  "reasoning": "The source-side handler explicitly supports degraded manifest-miss mode by still writing a recoverable BridgeTransfer with source identity, amount, and token metadata when available. The destination TransferRedeemed handler, however, gates the delivered daily snapshot on `mgr`, which is the destination-chain NTT manifest lookup. In a source-first transfer where the source side has already set `sourceChainId`, `tokenSymbol`, and `amount`, a missing or stale destination manifest still prevents the delivered rollup from ever being recorded, even though the rollup uses `transfer.tokenSymbol` and does not otherwise need the destination manager metadata. This creates permanent under-counting of deliveredCount/deliveredVolume for that route until a replay occurs after manifest regeneration.",
+  "reproduction": null,
+  "recommendation": "Gate the delivered rollup on the merged transfer fields required for the snapshot, not on the destination `mgr`. For example require `transfer.tokenSymbol`, `transfer.sourceChainId != null`, and `transfer.amount != null`, while keeping destination manifest seeding limited to destination-only metadata.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were included for this feature, and the owned files do not show a source-first TransferSentDigest followed by TransferRedeemed with a missing destination manifest entry.",
+  "suggestedRegressionTest": "Add a handler test where TransferSentDetailed/TransferSentDigest records amount and token metadata, `findByNttManager` fails for the destination TransferRedeemed manager, and the delivered BridgeDailySnapshot is still incremented once.",
+  "minimumFixScope": "TransferRedeemed rollup condition in `indexer-envio/src/handlers/wormhole/nttManager.ts` plus a focused wormhole handler regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: TransferRedeemed delivered rollups now gate on merged transfer fields instead of destination manager metadata, excluding UNKNOWN token rows; handler regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:09.315Z"
+    }
+  ],
+  "signature": "sig_feat-library-154c0c9955_a1d8df6068",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:16:02.100Z",
+  "updatedAt": "2026-05-20T07:26:09.314Z"
+}

@@ -67,6 +67,18 @@ describe("computeHealthStatus", () => {
     ).toBe("CRITICAL");
   });
 
+  it('returns "CRITICAL" when oracleOk is false even if the oracle timestamp is fresh', () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: false,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("CRITICAL");
+  });
+
   it('returns "OK" when oracle is fresh and deviation is low', () => {
     // priceDifference = 1000, threshold = 5000 → ratio = 0.2 → OK
     expect(
@@ -403,6 +415,24 @@ describe("computeHealthStatus", () => {
         rebalanceThreshold: 5000,
       }),
     ).toBe("WEEKEND");
+  });
+
+  it('returns "CRITICAL" when oracleOk is false during weekend with a fresh oracle', async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValue(true);
+    try {
+      expect(
+        computeHealthStatus({
+          source: "fpmm_factory",
+          oracleOk: false,
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        }),
+      ).toBe("CRITICAL");
+    } finally {
+      vi.mocked(weekend.isWeekend).mockReturnValue(false);
+    }
   });
 
   it("returns OK for zero priceDifference with valid threshold", () => {

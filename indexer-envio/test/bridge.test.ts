@@ -27,6 +27,7 @@ import {
   wormholeToEvmChainId,
   WORMHOLE_TO_EVM_CHAIN_ID,
 } from "../src/wormhole/chainIds.js";
+import { findAndDrainPendingScratch } from "../src/wormhole/pairing.js";
 import { findByNttManager } from "../src/wormhole/nttAddresses.js";
 import nttAddresses from "../config/nttAddresses.json" with { type: "json" };
 import { readFileSync } from "fs";
@@ -167,6 +168,30 @@ describe("snapshotId", () => {
       destChainId: 143,
     });
     assert.notStrictEqual(a.id, b.id);
+  });
+});
+
+describe("findAndDrainPendingScratch", () => {
+  it("deletes the matched scratch row", async () => {
+    const rows = new Map<string, { id: string }>([
+      ["42220-0xabc-3", { id: "42220-0xabc-3" }],
+    ]);
+    const deleted: string[] = [];
+
+    const row = await findAndDrainPendingScratch(
+      {
+        get: async (id: string) => rows.get(id),
+        deleteUnsafe: (id: string) => {
+          deleted.push(id);
+          rows.delete(id);
+        },
+      },
+      { chainId: 42220, txHash: "0xABC", currentLogIndex: 4 },
+    );
+
+    assert.deepEqual(row, { id: "42220-0xabc-3" });
+    assert.deepEqual(deleted, ["42220-0xabc-3"]);
+    assert.equal(rows.has("42220-0xabc-3"), false);
   });
 });
 

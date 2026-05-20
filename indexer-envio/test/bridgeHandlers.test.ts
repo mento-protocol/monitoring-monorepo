@@ -332,6 +332,38 @@ describe("Bridge-flows handlers — replay idempotency", () => {
     const total2 = after2.reduce((a, s) => a + s.deliveredCount, 0);
     assert.equal(total2, 1, "delivered count must stay at 1 on replay");
   });
+
+  it("source-first TransferRedeemed counts delivery when destination manager is missing from the manifest", async () => {
+    const e = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+
+    mockDb = await processTransferSentPair({
+      mockDb,
+      chainId: e.chainId,
+      manager: e.nttManagerProxy,
+      digest: DIGEST_1,
+      amount: 700n,
+      recipientWormholeChainId: 48,
+      msgSequence: 1,
+      detailLogIndex: 4,
+    });
+
+    mockDb = await processTransferRedeemed({
+      mockDb,
+      chainId: 143,
+      manager: "0x00000000000000000000000000000000000000ff",
+      digest: DIGEST_1,
+      blockTimestamp: 1_700_001_000,
+      txHash:
+        "0x4444444444444444444444444444444444444444444444444444444444444444",
+    });
+
+    const snaps = mockDb.entities.BridgeDailySnapshot.getAll();
+    const totalDelivered = snaps.reduce((a, s) => a + s.deliveredCount, 0);
+    const deliveredVolume = snaps.reduce((a, s) => a + s.deliveredVolume, 0n);
+    assert.equal(totalDelivered, 1, "delivered count should not require mgr");
+    assert.equal(deliveredVolume, 700n);
+  });
 });
 
 describe("Bridge-flows handlers — tokenAddress source-chain resolution", () => {

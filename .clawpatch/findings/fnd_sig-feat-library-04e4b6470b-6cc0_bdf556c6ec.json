@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-04e4b6470b-6cc0_bdf556c6ec",
+  "featureId": "feat_library_04e4b6470b",
+  "title": "`clean` script invokes TypeScript clean mode without build mode",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/package.json",
+      "startLine": 8,
+      "endLine": 10,
+      "symbol": null,
+      "quote": "\"clean\": \"tsc --clean\","
+    },
+    {
+      "path": "indexer-envio/package.json",
+      "startLine": 9,
+      "endLine": 9,
+      "symbol": null,
+      "quote": "\"build\": \"tsc --build\","
+    }
+  ],
+  "reasoning": "TypeScript clean mode is part of project-build mode and is normally invoked as `tsc --build --clean` or `tsc -b --clean`. The package's build script uses build mode, but the clean script omits it, so `pnpm --filter @mento-protocol/indexer-envio clean` is likely to fail instead of removing build outputs. This is a release/build hygiene issue because stale generated output can survive a failed clean before rebuilds.",
+  "reproduction": "From `indexer-envio/`, run `pnpm clean`; TypeScript should reject `--clean` unless it is paired with build mode.",
+  "recommendation": "Change the script to `tsc --build --clean` so it targets the same project-build graph as the `build` script.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests or package-script validation are included for lifecycle scripts, and the listed feature tests array is empty.",
+  "suggestedRegressionTest": "Add a package script smoke test or quality-gate assertion that runs `pnpm --filter @mento-protocol/indexer-envio clean` in a temporary build-output fixture.",
+  "minimumFixScope": "`indexer-envio/package.json` only",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: clean now uses TypeScript build-mode clean via tsc --build --clean; verified clean after install and regenerated code before build/typecheck.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:08.814Z"
+    }
+  ],
+  "signature": "sig_feat-library-04e4b6470b_6cc0dbd2ee",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:15:53.673Z",
+  "updatedAt": "2026-05-20T07:26:08.811Z"
+}

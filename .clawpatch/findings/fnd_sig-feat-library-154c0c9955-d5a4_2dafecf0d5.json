@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-154c0c9955-d5a4_2dafecf0d5",
+  "featureId": "feat_library_154c0c9955",
+  "title": "Optional scratch deletion can silently leave source pending rows available for wrong later pairing",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 263,
+      "endLine": 265,
+      "symbol": "TransferSentDigest handler",
+      "quote": "(context as HandlerContext).WormholeTransferPending.deleteUnsafe?.(\n        pendingId,\n      );"
+    },
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 313,
+      "endLine": 322,
+      "symbol": "TransferSentDetailed handler",
+      "quote": "We can't key by digest yet (unknown until the 1-arg variant fires), so stash\n * the payload in WormholeTransferPending keyed by (chainId, txHash, logIndex).\n * logIndex is needed because a single tx can ... emit multiple TransferSent pairs; keying only by txHash would\n * cause later sends to overwrite earlier pending rows and join the wrong\n * payload to the wrong digest. The matching digest handler walks backward\n * a few logIndex offsets to find this row."
+    },
+    {
+      "path": "indexer-envio/src/handlers/wormhole/nttManager.ts",
+      "startLine": 189,
+      "endLine": 200,
+      "symbol": "TransferSentDigest handler",
+      "quote": "const { row: pending, id: pendingId } = await findPendingScratch(\n      (context as HandlerContext).WormholeTransferPending,\n      {\n        chainId,\n        txHash: event.transaction.hash,\n        currentLogIndex: event.logIndex,\n      },\n    );"
+    }
+  ],
+  "reasoning": "The handler relies on deleting the matched source scratch row after it has been paired to a digest. The deletion is optional-chained, so if the generated entity API is missing or changes the delete method, the handler continues without failing and leaves the scratch row behind. Because matching walks backward within the same transaction, a later TransferSentDigest in a multi-send transaction can see the stale earlier row and stamp the wrong sender/recipient/amount/msgSequence onto a different digest. The comment already identifies multi-send same-tx pairing as a correctness hazard; silently skipping deletion reintroduces that hazard.",
+  "reproduction": null,
+  "recommendation": "Make scratch deletion mandatory and fail visibly if unavailable, or route through a typed helper that the generated context is guaranteed to provide. Avoid optional chaining for required state cleanup.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were included, and there is no visible test covering same-transaction multi-send pairing when the first pending row is not removed.",
+  "suggestedRegressionTest": "Add a same-transaction test with two TransferSentDetailed/TransferSentDigest pairs and assert each digest receives its own amount/recipient, plus a type/API test that the pending entity store exposes the delete method used by the handler.",
+  "minimumFixScope": "Replace optional deletion in `TransferSentDigest` with a guaranteed delete path and add a focused multi-send pairing regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: wormhole scratch deletion is mandatory in context/accessor types and callers invoke deleteUnsafe directly; helper and multi-send tests cover deletion.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:09.064Z"
+    }
+  ],
+  "signature": "sig_feat-library-154c0c9955_d5a4c04f8d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:16:02.100Z",
+  "updatedAt": "2026-05-20T07:26:09.063Z"
+}

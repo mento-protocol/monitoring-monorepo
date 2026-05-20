@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-1194446ab1-8488_272cccfa97",
+  "featureId": "feat_library_1194446ab1",
+  "title": "Fresh rows with oracleOk=false can be rendered healthy",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/health.ts",
+      "startLine": 48,
+      "endLine": 50,
+      "symbol": "PoolHealthState",
+      "quote": "oracleOk?: boolean;"
+    },
+    {
+      "path": "ui-dashboard/src/lib/health.ts",
+      "startLine": 223,
+      "endLine": 247,
+      "symbol": "computeHealthStatus",
+      "quote": "const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);"
+    }
+  ],
+  "reasoning": "The health input type carries oracleOk, but computeHealthStatus never reads it. It derives oracle failure only from oracleTimestamp/oracleExpiry freshness, then returns OK for a fresh timestamp with low deviation. That means a pool row with oracleOk=false but a recent timestamp can be displayed as OK/N/A-derived effective health instead of surfacing the oracle failure. This also contradicts the function's stated intent to mirror indexer health semantics for oracle monitoring.",
+  "reproduction": null,
+  "recommendation": "Treat pool.oracleOk === false as an alertable oracle failure before the hasHealthData/deviation branches, while preserving the existing weekend distinction if that is the intended UI behavior for stale FX closures.",
+  "whyTestsDoNotAlreadyCoverThis": "The provided associated tests are for address labels, address reports, Arkham, and bridge helpers, not health status. The health logic also needs a case where oracleOk is false while oracleTimestamp is still within the freshness window; stale-timestamp cases do not isolate this branch.",
+  "suggestedRegressionTest": "Add a health test asserting computeHealthStatus({ source: 'fpmm_factory', oracleOk: false, oracleTimestamp: freshTs, priceDifference: '0', rebalanceThreshold: 5000 }, chainId, now) returns CRITICAL or WEEKEND according to the expected weekend policy.",
+  "minimumFixScope": "ui-dashboard/src/lib/health.ts plus a targeted health unit test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: computeHealthStatus now treats fresh oracleOk=false rows as CRITICAL, with a focused fresh-timestamp regression test.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:08.938Z"
+    }
+  ],
+  "signature": "sig_feat-library-1194446ab1_8488d3e9d2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:16:55.690Z",
+  "updatedAt": "2026-05-20T07:26:08.937Z"
+}

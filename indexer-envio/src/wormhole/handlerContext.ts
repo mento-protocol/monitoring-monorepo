@@ -21,7 +21,7 @@ type EntityRW<T> = {
 };
 
 type EphemeralEntityRW<T> = EntityRW<T> & {
-  deleteUnsafe?: (id: string) => void;
+  deleteUnsafe: (id: string) => void;
 };
 
 export type WormholeHandlerContext = {

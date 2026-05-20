@@ -278,7 +278,7 @@ indexer.onEvent(
     );
 
     if (pending) {
-      (context as HandlerContext).WormholeTransferPending.deleteUnsafe?.(
+      (context as HandlerContext).WormholeTransferPending.deleteUnsafe(
         pendingId,
       );
 
@@ -444,7 +444,7 @@ indexer.onEvent(
 
     if (
       !alreadyDelivered &&
-      mgr &&
+      transfer.tokenSymbol !== "UNKNOWN" &&
       transfer.sourceChainId !== undefined &&
       transfer.sourceChainId !== null &&
       transfer.amount
