@@ -68,8 +68,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       );
     }
 
-    const text = await new Response(result.stream).text();
-    if (Buffer.byteLength(text, "utf8") > MAX_RESTORE_BLOB_BYTES) {
+    const text = await readBoundedUtf8(result.stream, MAX_RESTORE_BLOB_BYTES);
+    if (text === null) {
       return NextResponse.json(
         { error: "Snapshot is too large to restore safely" },
         { status: 413 },
@@ -137,4 +137,41 @@ function isAllowedRestorePathname(pathname: string): boolean {
       pathname,
     )
   );
+}
+
+async function readBoundedUtf8(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<string | null> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      // Stream reads are intentionally sequential: each `read()` advances the
+      // same reader cursor and enforces the byte cap before accepting a chunk.
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(concatChunks(chunks, total));
+}
+
+function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }

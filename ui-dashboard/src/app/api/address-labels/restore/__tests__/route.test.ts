@@ -55,6 +55,15 @@ function blobResult(body: unknown, size?: number | null) {
   };
 }
 
+function streamBlobResult(stream: ReadableStream<Uint8Array>) {
+  return {
+    statusCode: 200,
+    stream,
+    headers: new Headers(),
+    blob: { size: null },
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("CRON_SECRET", "secret");
@@ -164,12 +173,20 @@ describe("POST /api/address-labels/restore", () => {
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 
-  it("rejects an oversized Blob after reading when metadata size is unavailable", async () => {
-    const byteLengthSpy = vi
-      .spyOn(Buffer, "byteLength")
-      .mockImplementation(() => RESTORE_LIMIT + 1);
+  it("rejects an oversized Blob without draining the stream when metadata size is unavailable", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(RESTORE_LIMIT + 1));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
     mockGet.mockResolvedValueOnce(
-      blobResult({ addresses: {} }, null) as Awaited<ReturnType<typeof get>>,
+      streamBlobResult(stream) as unknown as Awaited<ReturnType<typeof get>>,
     );
     const res = await POST(
       req("address-labels-backup-2026-05-11.json", {
@@ -177,9 +194,9 @@ describe("POST /api/address-labels/restore", () => {
       }),
     );
     expect(res.status).toBe(413);
-    expect(byteLengthSpy).toHaveBeenCalledWith(expect.any(String), "utf8");
+    expect(pulled).toBeLessThanOrEqual(2);
+    expect(cancelled).toBe(true);
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
-    byteLengthSpy.mockRestore();
   });
 
   it("rejects invalid JSON blobs", async () => {

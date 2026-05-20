@@ -173,7 +173,35 @@ export function ToastPortal({
 
 type TxReceipt = { status: `0x${string}` } | null;
 
-async function waitForTransaction(
+const RECEIPT_POLL_TIMEOUT_MS = 8_000;
+const RECEIPT_POLL_SLEEP_MS = 3_000;
+
+function isAbortLikeError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  );
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timeout = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+export async function waitForTransaction(
   txHash: string,
   rpcUrl: string,
   signal: AbortSignal,
@@ -183,6 +211,10 @@ async function waitForTransaction(
   for (let attempt = 0; attempt < 30; attempt++) {
     if (signal.aborted) return null;
     try {
+      const requestSignal = AbortSignal.any([
+        signal,
+        AbortSignal.timeout(RECEIPT_POLL_TIMEOUT_MS),
+      ]);
       // react-doctor-disable-next-line react-doctor/async-await-in-loop
       const response = await fetch(rpcUrl, {
         method: "POST",
@@ -193,20 +225,134 @@ async function waitForTransaction(
           method: "eth_getTransactionReceipt",
           params: [txHash],
         }),
-        signal,
+        signal: requestSignal,
       });
       const json = (await response.json()) as { result: TxReceipt };
       if (json.result) return json.result;
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      if (signal.aborted) throw err;
       // Transient network or JSON-parse error — retry on next iteration
     }
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await sleep(RECEIPT_POLL_SLEEP_MS, signal);
   }
   return null;
 }
 
 type RedeemPhase = "idle" | "fetching" | "sending" | "mining" | "done";
+
+async function fetchRedeemPayload({
+  sentTxHash,
+  destChainId,
+  tokenSymbol,
+  signal,
+}: {
+  sentTxHash: string;
+  destChainId: number;
+  tokenSymbol: string;
+  signal: AbortSignal;
+}): Promise<BridgeRedeemPayload> {
+  const params = new URLSearchParams({
+    txHash: sentTxHash,
+    destChainId: String(destChainId),
+    tokenSymbol,
+  });
+  const res = await fetch(`/api/bridge-redeem?${params.toString()}`, {
+    cache: "no-store",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  });
+  const raw = await res.text();
+  let body: BridgeRedeemPayload | { error?: string };
+  try {
+    body = JSON.parse(raw) as BridgeRedeemPayload | { error?: string };
+  } catch {
+    throw new Error("Failed to fetch Wormhole VAA.");
+  }
+  if (!res.ok || !("vaaHex" in body)) {
+    throw new Error(
+      "error" in body && typeof body.error === "string"
+        ? body.error
+        : "Failed to fetch Wormhole VAA.",
+    );
+  }
+  return body;
+}
+
+function bridgeRedeemErrorMessage(error: unknown): string {
+  if (isAbortLikeError(error)) return "Redeem request timed out. Try again.";
+  return error instanceof Error ? error.message : "Redeem failed.";
+}
+
+function useBridgeRedeem({
+  sentTxHash,
+  destChainId,
+  tokenSymbol,
+  addToast,
+}: {
+  sentTxHash: string;
+  destChainId: number;
+  tokenSymbol: string;
+  addToast: AddToast;
+}) {
+  // react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
+  const [phase, setPhase] = useState<RedeemPhase>("idle");
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  async function handleClick() {
+    if (phase !== "idle") return;
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setPhase("fetching");
+    try {
+      const body = await fetchRedeemPayload({
+        sentTxHash,
+        destChainId,
+        tokenSymbol,
+        signal: ac.signal,
+      });
+      setPhase("sending");
+      const txHash = await sendRedeemTransaction(
+        body,
+        buildReceiveMessageCalldata(body.vaaHex),
+      );
+      setPhase("mining");
+      await finishRedeemPolling(txHash, body, ac.signal, setPhase, addToast);
+    } catch (err) {
+      if (ac.signal.aborted) return;
+      setPhase("idle");
+      addToast(bridgeRedeemErrorMessage(err), "error");
+    }
+  }
+
+  return { phase, handleClick };
+}
+
+async function finishRedeemPolling(
+  txHash: string,
+  body: BridgeRedeemPayload,
+  signal: AbortSignal,
+  setPhase: (phase: RedeemPhase) => void,
+  addToast: AddToast,
+) {
+  const receipt = await waitForTransaction(txHash, body.rpcUrl, signal);
+  const href = body.explorerUrl
+    ? `${body.explorerUrl}/tx/${txHash}`
+    : undefined;
+  if (!receipt) {
+    setPhase("done");
+    addToast(
+      `Submitted: ${shortHash(txHash)} — not confirmed after 90 s, check explorer`,
+      "success",
+      href,
+    );
+    return;
+  }
+  if (receipt.status !== "0x1")
+    throw new Error("Transaction reverted on-chain.");
+  setPhase("done");
+  addToast(`Redeem confirmed: ${shortHash(txHash)}`, "success", href);
+}
 
 export function BridgeRedeemPill({
   sentTxHash,
@@ -219,83 +365,12 @@ export function BridgeRedeemPill({
   tokenSymbol: string;
   addToast: AddToast;
 }) {
-  // `phase` IS rendered — drives both the spinner-vs-button branch
-  // selection and the `"fetching…"/"sending…"/"pending…"` label below.
-  // Rule misses the conditional-return usage; phase must remain
-  // useState so transitions trigger a re-render.
-  // react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
-  const [phase, setPhase] = useState<RedeemPhase>("idle");
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
-
-  async function handleClick() {
-    if (phase !== "idle") return;
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setPhase("fetching");
-    try {
-      const params = new URLSearchParams({
-        txHash: sentTxHash,
-        destChainId: String(destChainId),
-        tokenSymbol,
-      });
-      const res = await fetch(`/api/bridge-redeem?${params.toString()}`, {
-        cache: "no-store",
-        signal: AbortSignal.any([ac.signal, AbortSignal.timeout(15_000)]),
-      });
-      const raw = await res.text();
-      let body: BridgeRedeemPayload | { error?: string };
-      try {
-        body = JSON.parse(raw) as BridgeRedeemPayload | { error?: string };
-      } catch {
-        throw new Error("Failed to fetch Wormhole VAA.");
-      }
-      if (!res.ok || !("vaaHex" in body)) {
-        throw new Error(
-          "error" in body && typeof body.error === "string"
-            ? body.error
-            : "Failed to fetch Wormhole VAA.",
-        );
-      }
-
-      setPhase("sending");
-      const calldata = buildReceiveMessageCalldata(body.vaaHex);
-      const txHash = await sendRedeemTransaction(body, calldata);
-
-      setPhase("mining");
-      const receipt = await waitForTransaction(txHash, body.rpcUrl, ac.signal);
-      if (ac.signal.aborted) return;
-      if (!receipt) {
-        // Tx submitted but not confirmed within 90 s — lock the pill as done
-        // so the user can't re-submit an already in-flight transaction.
-        setPhase("done");
-        addToast(
-          `Submitted: ${shortHash(txHash)} — not confirmed after 90 s, check explorer`,
-          "success",
-          body.explorerUrl ? `${body.explorerUrl}/tx/${txHash}` : undefined,
-        );
-        return;
-      }
-      if (receipt.status !== "0x1")
-        throw new Error("Transaction reverted on-chain.");
-
-      setPhase("done");
-      addToast(
-        `Redeem confirmed: ${shortHash(txHash)}`,
-        "success",
-        body.explorerUrl ? `${body.explorerUrl}/tx/${txHash}` : undefined,
-      );
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setPhase("idle");
-      addToast(err instanceof Error ? err.message : "Redeem failed.", "error");
-    }
-  }
+  const { phase, handleClick } = useBridgeRedeem({
+    sentTxHash,
+    destChainId,
+    tokenSymbol,
+    addToast,
+  });
 
   const baseClass =
     "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-mono";

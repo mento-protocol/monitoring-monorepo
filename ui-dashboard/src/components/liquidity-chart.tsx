@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { Pool, PoolSnapshot } from "@/lib/types";
-import { parseWei } from "@/lib/format";
+import { parseOraclePriceToNumber, parseWei } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -21,6 +21,49 @@ interface LiquidityChartProps {
   token1Symbol?: string;
 }
 
+type LiquiditySeries = {
+  useUsd: boolean;
+  timestamps: string[];
+  reserves0Usd: number[];
+  reserves1Usd: number[];
+  raw0: number[];
+  raw1: number[];
+};
+
+function buildLiquiditySeries({
+  snapshots,
+  pool,
+  token0Symbol,
+}: Required<LiquidityChartProps>): LiquiditySeries {
+  const nonUsdmUsdPrice = parseOraclePriceToNumber(
+    pool?.oraclePrice ?? "0",
+    token0Symbol,
+  );
+  const usdmIsToken0 = token0Symbol === "USDm";
+  const useUsd = nonUsdmUsdPrice > 0;
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
+  const toUsd0 = (raw: string) => {
+    const amount = parseWei(raw, dec0);
+    return useUsd && !usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
+  };
+  const toUsd1 = (raw: string) => {
+    const amount = parseWei(raw, dec1);
+    return useUsd && usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
+  };
+
+  return {
+    useUsd,
+    timestamps: snapshots.map((s) =>
+      new Date(Number(s.timestamp) * 1000).toISOString(),
+    ),
+    reserves0Usd: snapshots.map((s) => toUsd0(s.reserves0)),
+    reserves1Usd: snapshots.map((s) => toUsd1(s.reserves1)),
+    raw0: snapshots.map((s) => parseWei(s.reserves0, dec0)),
+    raw1: snapshots.map((s) => parseWei(s.reserves1, dec1)),
+  };
+}
+
 export function LiquidityChart({
   snapshots,
   pool,
@@ -33,103 +76,28 @@ export function LiquidityChart({
   // an approximation for all historical data points. This lets both series share
   // a single Y-axis so a balanced pool shows two overlapping lines.
   //
-  // Oracle price is stored in feed direction ("feedToken/USD"). One token is always
-  // USDm (already USD). The other is priced via the feed:
-  //   sym0 === "USDm": reserve0 stays as-is; reserve1 × feedValue
-  //   sym1 === "USDm": reserve0 × feedValue; reserve1 stays as-is
-  //
-  // feedValue = oraclePrice / 1e24 (but parseOraclePriceToNumber inverts for USDm-base)
-  // so we get feedValue directly as: oraclePrice / 1e24 without inversion.
-  const rawOraclePrice = pool?.oraclePrice ?? "0";
-  const rawFeedValue =
-    rawOraclePrice !== "0" ? Number(rawOraclePrice) / 10 ** 24 : 0;
-
-  // For USDm-base pools (token0=USDm): reserve0 is USD, reserve1 needs × feedValue
-  // For USDm-quote pools (token1=USDm): reserve0 needs × feedValue, reserve1 is USD
-  const usdmIsToken0 = token0Symbol === "USDm";
-
-  // Use token amounts as fallback when oracle price is unavailable
-  const useUsd = rawFeedValue > 0;
-
-  const dec0 = pool?.token0Decimals ?? 18;
-  const dec1 = pool?.token1Decimals ?? 18;
-
-  const toUsd0 = (raw: string) => {
-    const amount = parseWei(raw, dec0);
-    if (!useUsd) return amount;
-    return usdmIsToken0 ? amount : amount * rawFeedValue;
-  };
-
-  const toUsd1 = (raw: string) => {
-    const amount = parseWei(raw, dec1);
-    if (!useUsd) return amount;
-    return usdmIsToken0 ? amount * rawFeedValue : amount;
-  };
-
-  const timestamps = snapshots.map((s) =>
-    new Date(Number(s.timestamp) * 1000).toISOString(),
-  );
-  const reserves0Usd = snapshots.map((s) => toUsd0(s.reserves0));
-  const reserves1Usd = snapshots.map((s) => toUsd1(s.reserves1));
-  const raw0 = snapshots.map((s) => parseWei(s.reserves0, dec0));
-  const raw1 = snapshots.map((s) => parseWei(s.reserves1, dec1));
-
-  const yAxisTitle = useUsd ? "Reserve Value (USD)" : "Reserve Balance";
-  const name0 = useUsd ? `${token0Symbol} (USD)` : token0Symbol;
-  const name1 = useUsd ? `${token1Symbol} (USD)` : token1Symbol;
-
-  const trace0 = {
-    x: timestamps,
-    y: reserves0Usd,
-    customdata: raw0,
-    hovertemplate: useUsd
-      ? `<b>%{customdata:,.2f} ${token0Symbol}</b><br>≈ $%{y:,.2f} USD<br>%{x|%b %d, %Y %H:%M}<extra></extra>`
-      : `<b>%{customdata:,.2f} ${token0Symbol}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
-    type: "scatter" as const,
-    mode: "lines" as const,
-    name: name0,
-    line: { color: "#6366f1", width: 2 },
-    fill: "tozeroy" as const,
+  // Oracle prices must go through the canonical parser so USDm-base pools
+  // use the same inversion as the oracle chart.
+  const { useUsd, timestamps, reserves0Usd, reserves1Usd, raw0, raw1 } =
+    buildLiquiditySeries({ snapshots, pool, token0Symbol, token1Symbol });
+  const trace0 = makeReserveTrace({
+    timestamps,
+    values: reserves0Usd,
+    raw: raw0,
+    tokenSymbol: token0Symbol,
+    useUsd,
+    color: "#6366f1",
     fillcolor: "rgba(99,102,241,0.1)",
-    yaxis: "y" as const,
-  };
-
-  const trace1 = {
-    x: timestamps,
-    y: reserves1Usd,
-    customdata: raw1,
-    hovertemplate: useUsd
-      ? `<b>%{customdata:,.2f} ${token1Symbol}</b><br>≈ $%{y:,.2f} USD<br>%{x|%b %d, %Y %H:%M}<extra></extra>`
-      : `<b>%{customdata:,.2f} ${token1Symbol}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
-    type: "scatter" as const,
-    mode: "lines" as const,
-    name: name1,
-    line: { color: "#a78bfa", width: 2 },
-    fill: "tozeroy" as const,
+  });
+  const trace1 = makeReserveTrace({
+    timestamps,
+    values: reserves1Usd,
+    raw: raw1,
+    tokenSymbol: token1Symbol,
+    useUsd,
+    color: "#a78bfa",
     fillcolor: "rgba(167,139,250,0.1)",
-    yaxis: "y" as const,
-  };
-
-  const layout = {
-    ...PLOTLY_BASE_LAYOUT,
-    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
-    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
-    yaxis: {
-      title: { text: yAxisTitle },
-      ...PLOTLY_AXIS_DEFAULTS,
-    },
-    legend: {
-      ...PLOTLY_LEGEND,
-      orientation: "h" as const,
-      x: 0.5,
-      y: -0.25,
-      xanchor: "center" as const,
-      yanchor: "top" as const,
-    },
-    margin: { t: 8, r: 16, b: 8, l: 48 },
-    autosize: true,
-    dragmode: "pan" as const,
-  };
+  });
 
   const subtitle = useUsd
     ? "Estimated using current oracle price — balanced pool = lines overlap"
@@ -145,11 +113,69 @@ export function LiquidityChart({
       </div>
       <Plot
         data={[trace0, trace1]}
-        layout={layout}
+        layout={makeLayout(useUsd)}
         config={PLOTLY_CONFIG}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
       />
     </div>
   );
+}
+
+function makeReserveTrace({
+  timestamps,
+  values,
+  raw,
+  tokenSymbol,
+  useUsd,
+  color,
+  fillcolor,
+}: {
+  timestamps: string[];
+  values: number[];
+  raw: number[];
+  tokenSymbol: string;
+  useUsd: boolean;
+  color: string;
+  fillcolor: string;
+}) {
+  const name = useUsd ? `${tokenSymbol} (USD)` : tokenSymbol;
+  return {
+    x: timestamps,
+    y: values,
+    customdata: raw,
+    hovertemplate: useUsd
+      ? `<b>%{customdata:,.2f} ${tokenSymbol}</b><br>≈ $%{y:,.2f} USD<br>%{x|%b %d, %Y %H:%M}<extra></extra>`
+      : `<b>%{customdata:,.2f} ${tokenSymbol}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
+    type: "scatter" as const,
+    mode: "lines" as const,
+    name,
+    line: { color, width: 2 },
+    fill: "tozeroy" as const,
+    fillcolor,
+    yaxis: "y" as const,
+  };
+}
+
+function makeLayout(useUsd: boolean) {
+  return {
+    ...PLOTLY_BASE_LAYOUT,
+    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
+    yaxis: {
+      title: { text: useUsd ? "Reserve Value (USD)" : "Reserve Balance" },
+      ...PLOTLY_AXIS_DEFAULTS,
+    },
+    legend: {
+      ...PLOTLY_LEGEND,
+      orientation: "h" as const,
+      x: 0.5,
+      y: -0.25,
+      xanchor: "center" as const,
+      yanchor: "top" as const,
+    },
+    margin: { t: 8, r: 16, b: 8, l: 48 },
+    autosize: true,
+    dragmode: "pan" as const,
+  };
 }

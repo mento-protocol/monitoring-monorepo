@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-6439a16115-56b2f2_fc8ae4c7af",
+  "featureId": "feat_route_6439a16115",
+  "title": "Empty cursor makes the cron attempt an unsupported full MiniPay backfill",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/minipay/sync/route.ts",
+      "startLine": 67,
+      "endLine": 87,
+      "symbol": "GET",
+      "quote": "const fromBlock = await getLastSyncedBlock();"
+    },
+    {
+      "path": "ui-dashboard/scripts/minipay-bulk-seed.mjs",
+      "startLine": 5,
+      "endLine": 9,
+      "symbol": null,
+      "quote": "The /api/minipay/sync route can't do the first-run backfill"
+    }
+  ],
+  "reasoning": "The route unconditionally uses the persisted cursor as the Dune lower bound and advances it only after all fetched pages are written. When Redis is empty, getLastSyncedBlock returns 0, so the deployed daily cron attempts the full historical MiniPay query. The repo's own seed script documents that this full backfill is too large for the route/Vercel budget and must be run once locally. In a fresh or reset environment this route will time out after partially writing Redis, leave the cursor at 0, and repeat the same oversized job on every cron run instead of failing with an actionable seed-required state.",
+  "reproduction": "Deploy with an empty minipay:lastBlock key and valid DUNE_API_KEY/Upstash env, then invoke GET /api/minipay/sync with cron auth. The route passes lastBlock=0 into fetchMiniPayUsers and cannot complete the documented ~16M-row backfill before the function cap, so the next run starts from 0 again.",
+  "recommendation": "Add an explicit guard for fromBlock === 0 in the cron route unless an intentional backfill override is provided, returning a clear 409/500 message instructing operators to run the bulk seed first. Alternatively make the route capable of resumable first-run backfill by persisting a separate execution/progress cursor that survives timeouts.",
+  "whyTestsDoNotAlreadyCoverThis": "The route tests mock a tiny BigInt(0) sync as a normal happy path and never encode the documented production constraint that cursor 0 is not safe for this route.",
+  "suggestedRegressionTest": "Add a route test where getLastSyncedBlock resolves to 0 and assert the route does not call fetchMiniPayUsers by default, returning the seed-required error instead.",
+  "minimumFixScope": "ui-dashboard/src/app/api/minipay/sync/route.ts plus its sync route test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by failing the MiniPay cron route with a seed-required 409 when the persisted cursor is empty; added regression coverage that no Dune fetch or cursor advance occurs.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:20:07.587Z"
+    }
+  ],
+  "signature": "sig_feat-route-6439a16115_56b2f23522",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T101016-ad2735",
+  "createdAt": "2026-05-20T10:11:27.193Z",
+  "updatedAt": "2026-05-20T10:20:07.586Z"
+}

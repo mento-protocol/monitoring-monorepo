@@ -92,7 +92,7 @@ describe("PUT /api/address-labels", () => {
     });
   });
 
-  function jsonReq(body: Record<string, unknown>): NextRequest {
+  function jsonReq(body: unknown): NextRequest {
     return new NextRequest("http://localhost/api/address-labels", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -110,6 +110,22 @@ describe("PUT /api/address-labels", () => {
   it("rejects an invalid address", async () => {
     const res = await PUT(jsonReq({ address: "not-an-address", name: "X" }));
     expect(res.status).toBe(400);
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects a JSON null body", async () => {
+    const res = await PUT(jsonReq(null));
+    expect(res.status).toBe(400);
+    expect(getLabel).not.toHaveBeenCalled();
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects a JSON array body", async () => {
+    const res = await PUT(
+      jsonReq([{ address: VALID_ADDR, name: "array body" }]),
+    );
+    expect(res.status).toBe(400);
+    expect(getLabel).not.toHaveBeenCalled();
     expect(upsertEntry).not.toHaveBeenCalled();
   });
 
@@ -267,7 +283,7 @@ describe("DELETE /api/address-labels", () => {
     });
   });
 
-  function jsonReq(body: Record<string, unknown>): NextRequest {
+  function jsonReq(body: unknown): NextRequest {
     return new NextRequest("http://localhost/api/address-labels", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -284,6 +300,18 @@ describe("DELETE /api/address-labels", () => {
 
   it("rejects an invalid address", async () => {
     const res = await DELETE(jsonReq({ address: "not-an-address" }));
+    expect(res.status).toBe(400);
+    expect(deleteLabel).not.toHaveBeenCalled();
+  });
+
+  it("rejects a JSON null body", async () => {
+    const res = await DELETE(jsonReq(null));
+    expect(res.status).toBe(400);
+    expect(deleteLabel).not.toHaveBeenCalled();
+  });
+
+  it("rejects a JSON array body", async () => {
+    const res = await DELETE(jsonReq([{ address: VALID_ADDR }]));
     expect(res.status).toBe(400);
     expect(deleteLabel).not.toHaveBeenCalled();
   });

@@ -123,7 +123,7 @@ describe("GET /api/minipay/sync — happy path", () => {
   });
 
   it("SADDs each page incrementally (memory-bounded streaming)", async () => {
-    mockGetCursor.mockResolvedValue(BigInt(0));
+    mockGetCursor.mockResolvedValue(BigInt(100));
     mockFetch.mockReturnValue(
       yieldPages([
         { addresses: ["0xa", "0xb"], maxBlock: BigInt(100) },
@@ -149,7 +149,7 @@ describe("GET /api/minipay/sync — happy path", () => {
   });
 
   it("preserves earlier-page SADDs when a later page throws — cursor unchanged", async () => {
-    mockGetCursor.mockResolvedValue(BigInt(0));
+    mockGetCursor.mockResolvedValue(BigInt(100));
     mockFetch.mockReturnValue(
       yieldPages([
         { addresses: ["0xa"], maxBlock: BigInt(100) },
@@ -167,8 +167,18 @@ describe("GET /api/minipay/sync — happy path", () => {
     expect(mockAdvanceCursor).not.toHaveBeenCalled();
   });
 
-  it("returns DuneAuthError as 502", async () => {
+  it("requires the bulk seed before first cron sync", async () => {
     mockGetCursor.mockResolvedValue(BigInt(0));
+
+    const res = await GET(makeReq("cron-secret"));
+    expect(res.status).toBe(409);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockAdd).not.toHaveBeenCalled();
+    expect(mockAdvanceCursor).not.toHaveBeenCalled();
+  });
+
+  it("returns DuneAuthError as 502", async () => {
+    mockGetCursor.mockResolvedValue(BigInt(100));
     mockFetch.mockReturnValue(yieldPages([new DuneAuthError("rejected")]));
 
     const res = await GET(makeReq("cron-secret"));

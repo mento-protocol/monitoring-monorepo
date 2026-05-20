@@ -150,6 +150,19 @@ function setTextarea(id: string, value: string): void {
   });
 }
 
+function setInput(id: string, value: string): void {
+  const input = container.querySelector(`#${id}`) as HTMLInputElement | null;
+  if (!input) throw new Error(`input #${id} not found`);
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(input, value);
+  act(() => {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 // ---- Tests -----------------------------------------------------------------
 
 describe("AddressReportEditor — invalid address", () => {
@@ -201,6 +214,41 @@ describe("AddressReportEditor — loaded state", () => {
     expect(findButton("Edit")).not.toBeNull();
     expect(findButton("Preview")).not.toBeNull();
     expect(findButton("Save changes")).not.toBeNull();
+  });
+
+  it("rehydrates existing-report fields when the address changes but updatedAt and version collide", () => {
+    mockSwrData = {
+      body: "# Report A",
+      title: "Report A",
+      authorEmail: "alice@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render({ address: VALID_ADDR });
+    act(() => {
+      findButton("Edit")?.click();
+    });
+    setInput("ar-title", "Draft title for address A");
+    setTextarea("ar-body", "draft body for address A");
+
+    mockSwrData = {
+      body: "# Report B",
+      title: "Report B",
+      authorEmail: "bob@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+    render({ address: SECOND_VALID_ADDR });
+    act(() => {
+      findButton("Edit")?.click();
+    });
+
+    const titleInput = container.querySelector("#ar-title") as HTMLInputElement;
+    const textarea = container.querySelector("#ar-body") as HTMLTextAreaElement;
+    expect(titleInput.value).toBe("Report B");
+    expect(textarea.value).toBe("# Report B");
   });
 });
 

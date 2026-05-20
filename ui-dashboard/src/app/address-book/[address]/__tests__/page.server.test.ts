@@ -94,7 +94,7 @@ describe("AddressDetailPage server shell — valid input renders the client", ()
     redirectCalls.length = 0;
     // Some routers double-encode the path on certain navigations; the
     // shell's `decodeURIComponent` should handle it transparently.
-    const encoded = encodeURIComponent(VALID_ADDR);
+    const encoded = `0%78${"a".repeat(40)}`;
     const result = (await AddressDetailPage({
       params: makeParams(encoded),
     })) as React.ReactElement<{ address: string }>;

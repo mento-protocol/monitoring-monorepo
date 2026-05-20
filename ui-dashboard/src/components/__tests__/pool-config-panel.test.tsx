@@ -2,15 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
+import { POOL_CONFIG_EXT } from "@/lib/queries";
+import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
 
 const mockUseGQL = vi.fn<
-  () => { data?: { Pool: { rebalanceReward?: number }[] } }
+  (
+    query?: unknown,
+    variables?: unknown,
+    options?: unknown,
+  ) => { data?: { Pool: { rebalanceReward?: number }[] } }
 >(() => ({ data: { Pool: [{ rebalanceReward: 1 }] } }));
 
 const mockGetName = vi.fn((address: string) => `name-for-${address.slice(-4)}`);
 
 vi.mock("@/lib/graphql", () => ({
-  useGQL: () => mockUseGQL(),
+  HASURA_TIMEOUT_MS: 5000,
+  useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({
@@ -71,6 +78,19 @@ const BASE_POOL: Pool = {
 };
 
 describe("PoolConfigPanel", () => {
+  it("fetches the isolated config extension query with timeout and schema validation", () => {
+    renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
+
+    expect(mockUseGQL).toHaveBeenCalledWith(
+      POOL_CONFIG_EXT,
+      { id: BASE_POOL.id, chainId: BASE_POOL.chainId },
+      {
+        timeoutMs: 5000,
+        schema: PoolConfigExtSchema,
+      },
+    );
+  });
+
   describe("Rebalance Threshold tile", () => {
     it("renders 'Never' when governance disabled rebalancing for the pool", () => {
       const pool: Pool = {

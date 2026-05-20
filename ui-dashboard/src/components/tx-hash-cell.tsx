@@ -15,9 +15,19 @@ export function TxHashCell({
   const network = (() => {
     if (chainId == null) return contextNetwork;
     const id = networkIdForChainId(chainId);
-    return id ? NETWORKS[id] : contextNetwork;
+    return id ? NETWORKS[id] : null;
   })();
   const short = `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
+  if (!network) {
+    return (
+      <td
+        className="px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-300"
+        title={txHash}
+      >
+        {short}
+      </td>
+    );
+  }
   return (
     <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-xs">
       <a

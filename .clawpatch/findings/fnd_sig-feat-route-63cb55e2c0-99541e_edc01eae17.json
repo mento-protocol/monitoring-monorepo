@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-63cb55e2c0-99541e_edc01eae17",
+  "featureId": "feat_route_63cb55e2c0",
+  "title": "Export endpoint is authenticated but not authorization-gated",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/route.ts",
+      "startLine": 8,
+      "endLine": 14,
+      "symbol": "GET",
+      "quote": "const session = await getAuthSession();\n  if (!session) {\n    return NextResponse.json(\n      { error: \"Authentication required\" },\n      { status: 401 },\n    );\n  }"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-labels/export/route.ts",
+      "startLine": 20,
+      "endLine": 25,
+      "symbol": "GET",
+      "quote": "const [labels, reports] = await Promise.all([getLabels(), getAllReports()]);\n    const snapshot: AddressLabelsSnapshot = {\n      exportedAt: new Date().toISOString(),\n      addresses: labels,\n      reports,\n    };"
+    }
+  ],
+  "reasoning": "The route exports the full address-label snapshot plus all forensic reports after checking only that some session exists. The inline comment describes this as a maintainer-driven export/reimport path, and the response contains bulk operational data; if normal signed-in dashboard users exist, they can download the entire dataset without an explicit maintainer/admin/domain authorization check at this route boundary.",
+  "reproduction": null,
+  "recommendation": "Add an explicit authorization check for the role/domain/group that is allowed to manage address labels and forensic reports before reading Redis/blob data, and return 403 for authenticated but unauthorized users.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests cover unauthenticated 401 and successful export for a mocked session, but they do not model an authenticated user who lacks export privileges or assert that a maintainer/admin predicate is enforced.",
+  "suggestedRegressionTest": "Mock getAuthSession to return an authenticated non-maintainer user and assert GET returns 403 without calling getLabels or getAllReports; add a separate test for an authorized maintainer session that preserves the current 200 behavior.",
+  "minimumFixScope": "ui-dashboard/src/app/api/address-labels/export/route.ts plus the route test file to cover authorized and unauthorized authenticated sessions.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by requiring an authenticated maintainer-domain session before exporting labels/reports; added unauthorized and authorized export route coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:20:03.588Z"
+    }
+  ],
+  "signature": "sig_feat-route-63cb55e2c0_99541e3992",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T101016-ad2735",
+  "createdAt": "2026-05-20T10:10:55.503Z",
+  "updatedAt": "2026-05-20T10:20:03.587Z"
+}

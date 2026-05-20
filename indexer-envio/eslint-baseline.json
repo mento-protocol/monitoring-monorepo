@@ -70,13 +70,6 @@
     "linePreview": " | async function ensureBiPoolExchange( | context: EvmOnEventContext,"
   },
   {
-    "file": "src/handlers/broker.ts",
-    "ruleId": "complexity",
-    "message": "Async arrow function has a complexity of 33. Maximum allowed is 25.",
-    "line": 63,
-    "linePreview": "{ contract: \"Broker\", event: \"Swap\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
-  },
-  {
     "file": "src/handlers/fpmm.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async arrow function has too many lines (157). Maximum allowed is 150.",
@@ -86,8 +79,8 @@
   {
     "file": "src/handlers/fpmm/state-sync.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (176). Maximum allowed is 150.",
-    "line": 264,
+    "message": "Async arrow function has too many lines (174). Maximum allowed is 150.",
+    "line": 269,
     "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {

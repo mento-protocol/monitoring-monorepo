@@ -5,8 +5,9 @@ import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
-import { useGQL } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { POOL_CONFIG_EXT } from "@/lib/queries";
+import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
 import { useNetwork } from "@/components/network-provider";
 import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
@@ -36,10 +37,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const neverRebalances = isNeverRebalance(pool);
-  const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(
-    isVirtual ? null : POOL_CONFIG_EXT,
-    { id: pool.id, chainId: pool.chainId },
-  );
+  const { data: configExt } = usePoolConfigExt(pool, isVirtual);
 
   if (isVirtual) return null;
 
@@ -157,5 +155,16 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
         }
       />
     </dl>
+  );
+}
+
+function usePoolConfigExt(pool: Pool, isVirtual: boolean) {
+  return useGQL<{ Pool: PoolConfigExtRow[] }>(
+    isVirtual ? null : POOL_CONFIG_EXT,
+    { id: pool.id, chainId: pool.chainId },
+    {
+      timeoutMs: HASURA_TIMEOUT_MS,
+      schema: PoolConfigExtSchema,
+    },
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
   upsertReport,
@@ -69,6 +70,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     address,
     body: reportBody,
     title,
+    baseVersion: rawBaseVersion,
   } = parsed as Record<string, unknown>;
 
   if (typeof address !== "string" || !isValidAddress(address)) {
@@ -78,6 +80,17 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   const sanitized = sanitizeReportInput({ body: reportBody, title });
   if (!sanitized.ok) {
     return NextResponse.json({ error: sanitized.error }, { status: 400 });
+  }
+
+  const parsedBaseVersion = parseBaseVersion(
+    rawBaseVersion,
+    req.headers.get("if-match"),
+  );
+  if (!parsedBaseVersion.ok) {
+    return NextResponse.json(
+      { error: parsedBaseVersion.error },
+      { status: 400 },
+    );
   }
 
   try {
@@ -91,10 +104,22 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       title: sanitized.title,
       authorEmail,
       source: "manual",
+      ...(parsedBaseVersion.baseVersion !== undefined
+        ? { baseVersion: parsedBaseVersion.baseVersion }
+        : {}),
     });
 
     return NextResponse.json({ ok: true, report: saved });
   } catch (err) {
+    if (err instanceof AddressReportVersionConflictError) {
+      return NextResponse.json(
+        {
+          error: "Report version conflict",
+          existingVersion: err.existingVersion,
+        },
+        { status: 409 },
+      );
+    }
     return serverError(err, "save");
   }
 }
@@ -156,6 +181,34 @@ async function readBoundedJson(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+}
+
+function parseBaseVersion(
+  rawBaseVersion: unknown,
+  ifMatch: string | null,
+): { ok: true; baseVersion?: number } | { ok: false; error: string } {
+  if (rawBaseVersion !== undefined && rawBaseVersion !== null) {
+    if (!isValidBaseVersion(rawBaseVersion)) {
+      return { ok: false, error: "baseVersion must be a positive integer" };
+    }
+    return { ok: true, baseVersion: rawBaseVersion };
+  }
+
+  if (ifMatch === null) return { ok: true };
+
+  const trimmed = ifMatch.trim();
+  const value = trimmed.startsWith("W/") ? trimmed.slice(2).trim() : trimmed;
+  const unquoted =
+    value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+  const version = Number(unquoted);
+  if (!isValidBaseVersion(version)) {
+    return { ok: false, error: "If-Match must contain a positive integer" };
+  }
+  return { ok: true, baseVersion: version };
+}
+
+function isValidBaseVersion(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
 function serverError(

@@ -90,8 +90,22 @@ function PoolsContent() {
     return m;
   }, [poolsByNamespacedId]);
 
-  const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
-  const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
+  const activePoolFilter = useMemo(
+    () =>
+      resolveActivePoolFilter({
+        poolFilter,
+        poolsLoading,
+        poolsByNamespacedId,
+      }),
+    [poolFilter, poolsLoading, poolsByNamespacedId],
+  );
+  // Raw-address URLs resolve once the cross-chain pool list is available.
+  // Until then the page shows recent swaps instead of querying a raw ID.
+
+  const swapQuery = activePoolFilter ? POOL_SWAPS : RECENT_SWAPS;
+  const swapVars = activePoolFilter
+    ? { poolId: activePoolFilter, limit }
+    : { limit };
   const {
     data: swapsData,
     error: swapsErr,
@@ -117,30 +131,16 @@ function PoolsContent() {
     [replace],
   );
 
-  const resolvePoolFilter = useCallback(
-    (raw: string): string | null => {
-      if (!raw) return "";
-      if (isNamespacedPoolId(raw)) return raw;
-      if (!isValidAddress(raw)) return null;
-      const lower = raw.toLowerCase();
-      for (const [id] of poolsByNamespacedId) {
-        if (id.toLowerCase().endsWith(lower)) return id;
-      }
-      return raw;
-    },
-    [poolsByNamespacedId],
-  );
-
   const applyFilter = useCallback(() => {
     const v = filterInput.trim();
-    const resolved = resolvePoolFilter(v);
+    const resolved = resolvePoolFilter(v, poolsByNamespacedId);
     if (resolved === null) {
       setFilterError("Invalid pool filter (expected 0x… or {chainId}-0x…)");
       return;
     }
     setFilterError("");
     setURL(resolved, limit);
-  }, [filterInput, resolvePoolFilter, limit, setURL]);
+  }, [filterInput, poolsByNamespacedId, limit, setURL]);
 
   const clearFilter = useCallback(() => {
     setFilterInput("");
@@ -204,8 +204,8 @@ function PoolsContent() {
           id="swaps-heading"
           className="text-lg font-semibold text-white mb-3"
         >
-          {poolFilter
-            ? `Swaps for ${poolNames[poolFilter] ?? truncateAddress(poolFilter)}`
+          {activePoolFilter
+            ? `Swaps for ${poolNames[activePoolFilter] ?? truncateAddress(activePoolFilter)}`
             : "Recent Swaps"}
         </h2>
 
@@ -245,7 +245,7 @@ function PoolsContent() {
           <LimitSelect
             id="limit-select"
             value={limit}
-            onChange={(l) => setURL(poolFilter, l)}
+            onChange={(l) => setURL(activePoolFilter, l)}
           />
         </div>
 
@@ -282,6 +282,35 @@ function PoolsContent() {
       </section>
     </div>
   );
+}
+
+function resolvePoolFilter(
+  raw: string,
+  poolsByNamespacedId: Map<string, GlobalPoolEntry>,
+): string | null {
+  if (!raw) return "";
+  if (isNamespacedPoolId(raw)) return raw;
+  if (!isValidAddress(raw)) return null;
+  const lower = raw.toLowerCase();
+  for (const [id] of poolsByNamespacedId) {
+    if (id.toLowerCase().endsWith(lower)) return id;
+  }
+  return raw;
+}
+
+function resolveActivePoolFilter({
+  poolFilter,
+  poolsLoading,
+  poolsByNamespacedId,
+}: {
+  poolFilter: string;
+  poolsLoading: boolean;
+  poolsByNamespacedId: Map<string, GlobalPoolEntry>;
+}): string {
+  const resolved = resolvePoolFilter(poolFilter, poolsByNamespacedId);
+  if (resolved === null) return poolFilter;
+  if (!poolFilter || isNamespacedPoolId(poolFilter)) return resolved;
+  return resolved === poolFilter && poolsLoading ? "" : resolved;
 }
 
 function networkForChainId(chainId: number): Network {

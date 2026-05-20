@@ -47,17 +47,10 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const payload = await readJsonObject(req);
+  if (payload instanceof NextResponse) return payload;
 
-  const { address, name, tags, notes, isPublic } = body as Record<
-    string,
-    unknown
-  >;
+  const { address, name, tags, notes, isPublic } = payload;
 
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
@@ -155,14 +148,10 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const payload = await readJsonObject(req);
+  if (payload instanceof NextResponse) return payload;
 
-  const { address } = body as Record<string, unknown>;
+  const { address } = payload;
 
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
@@ -174,6 +163,28 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     return serverError(err, "delete");
   }
+}
+
+async function readJsonObject(
+  req: NextRequest,
+): Promise<Record<string, unknown> | NextResponse> {
+  try {
+    const body = await req.json();
+    const payload = asObjectBody(body);
+    return (
+      payload ??
+      NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+    );
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+}
+
+function asObjectBody(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return null;
+  }
+  return body as Record<string, unknown>;
 }
 
 // op distinguishes which handler failed (read/save/delete) so the Sentry

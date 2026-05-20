@@ -82,8 +82,8 @@ export function BreachHistoryChart({ breaches }: Props) {
     // tolerance, below critical magnitude), which the rest of the app
     // does not score as critical seconds.
     const critical = isOpen
-      ? peakAboveCritical && nowSeconds > startedAt + grace
-        ? tradingSecondsInRange(startedAt + grace, nowSeconds)
+      ? peakAboveCritical
+        ? Math.max(0, duration - grace)
         : 0
       : Number(b.criticalDurationSeconds ?? "0");
     const peakPct = (Number(b.peakPriceDifference) / entryThreshold) * 100;

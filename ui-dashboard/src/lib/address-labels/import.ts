@@ -178,7 +178,7 @@ function serverError(err: unknown): NextResponse {
  * Tags are semicolon-delimited. Additional columns are ignored. Duplicate
  * addresses: last wins.
  */
-export async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
+async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
   let text: string;
   try {
     text = await req.text();
@@ -197,6 +197,8 @@ export async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
   }
   return handleCsvText(text);
 }
+
+void handleCsvImport;
 
 export async function handleCsvText(text: string): Promise<NextResponse> {
   const parsed = parseCsv(text);

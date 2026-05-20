@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-vi.mock("@/auth", () => ({
-  getAuthSession: vi.fn(),
+vi.mock("@/lib/cron-auth", () => ({
+  requireCronAuth: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/address-labels", () => ({
@@ -33,18 +33,20 @@ vi.mock("@sentry/nextjs", () => ({
 
 import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
-import { getAuthSession } from "@/auth";
 import { getLabels, importLabels } from "@/lib/address-labels";
 import { ARKHAM_TAG } from "@/lib/address-labels-shared";
 import { ArkhamAuthError, enrichBatch, fetchHealth } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
+import { requireCronAuth } from "@/lib/cron-auth";
+import * as Sentry from "@sentry/nextjs";
 
-const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGetLabels = vi.mocked(getLabels);
 const mockImportLabels = vi.mocked(importLabels);
 const mockFetchHealth = vi.mocked(fetchHealth);
 const mockEnrichBatch = vi.mocked(enrichBatch);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
+const mockRequireCronAuth = vi.mocked(requireCronAuth);
+const mockCaptureMessage = vi.mocked(Sentry.captureMessage);
 
 function emptyLabels(): Record<string, AddressEntry> {
   return {};
@@ -64,6 +66,7 @@ beforeEach(() => {
   vi.stubEnv("NODE_ENV", "production");
   // Default to a healthy reachability probe; tests that need to fail it
   // override per-case.
+  mockRequireCronAuth.mockResolvedValue(null);
   mockFetchHealth.mockResolvedValue(true);
 });
 
@@ -86,40 +89,33 @@ function makeReq(
 }
 
 describe("GET /api/arkham/enrich — auth", () => {
-  it("401s when no auth and no session", async () => {
-    mockGetAuthSession.mockResolvedValue(null);
-    const res = await GET(makeReq());
+  it("returns the cron auth failure before touching expensive dependencies", async () => {
+    mockRequireCronAuth.mockResolvedValueOnce(
+      NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    );
+
+    const req = makeReq();
+    const res = await GET(req);
+
     expect(res.status).toBe(401);
+    expect(mockRequireCronAuth).toHaveBeenCalledWith(req, "arkham/enrich");
+    expect(mockFetchHealth).not.toHaveBeenCalled();
+    expect(mockDiscover).not.toHaveBeenCalled();
+    expect(mockGetLabels).not.toHaveBeenCalled();
+    expect(mockEnrichBatch).not.toHaveBeenCalled();
+    expect(mockImportLabels).not.toHaveBeenCalled();
   });
 
-  it("accepts Bearer CRON_SECRET", async () => {
+  it("runs when cron auth passes", async () => {
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
     mockGetLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
-    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    const req = makeReq({ bearer: "cron-secret" });
+    const res = await GET(req);
+
     expect(res.status).toBe(200);
-  });
-
-  it("rejects wrong Bearer", async () => {
-    mockGetAuthSession.mockResolvedValue(null);
-    const res = await GET(makeReq({ bearer: "wrong" }));
-    expect(res.status).toBe(401);
-  });
-
-  it("401s on session-only auth — bearer required for cron GET (CSRF defence)", async () => {
-    mockGetAuthSession.mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-      expires: "2099-01-01T00:00:00Z",
-    });
-    const res = await GET(makeReq());
-    expect(res.status).toBe(401);
-  });
-
-  it("500s when CRON_SECRET is unset", async () => {
-    vi.stubEnv("CRON_SECRET", "");
-    const res = await GET(makeReq({ bearer: "anything" }));
-    expect(res.status).toBe(500);
+    expect(mockRequireCronAuth).toHaveBeenCalledWith(req, "arkham/enrich");
   });
 });
 
@@ -181,9 +177,15 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       },
     ]);
 
-    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(
+      makeReq({
+        bearer: "cron-secret",
+        searchParams: { mode: "bogus" },
+      }),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
+    expect(body.mode).toBe("new"); // unknown modes fall back to one-shot backfill
     expect(body.discovered).toBe(3);
     expect(body.candidates).toBe(1); // only 0xnew passes the filter
     expect(body.enriched).toBe(1);
@@ -213,7 +215,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       existingLabels({
         "0xark": {
           name: "Binance",
-          tags: [ARKHAM_TAG],
+          tags: [ARKHAM_TAG, "user-curated"],
           notes: "user note about this address",
           isPublic: true,
           updatedAt: "2026-01-01T00:00:00Z",
@@ -247,6 +249,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
           notes: "user note about this address",
           isPublic: true,
           source: "arkham",
+          tags: expect.arrayContaining(["exchange", "user-curated"]),
         }),
       }),
     );
@@ -363,6 +366,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.mode).toBe("dryRun");
     expect(body.enriched).toBe(1);
+    expect(body.errors).toBe(0);
   });
 
   it("respects the limit query param", async () => {
@@ -443,5 +447,19 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.errors).toBe(1);
     expect(body.enriched).toBe(1);
+    expect(body.skipped).toBe(0);
+    expect(body.sampleErrors).toEqual(["0xa: 5xx"]);
+    expect(mockImportLabels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "0xb": expect.objectContaining({ source: "arkham" }),
+      }),
+    );
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "[arkham/enrich] 1 errors during batch",
+      expect.objectContaining({
+        tags: { route: "arkham/enrich", mode: "new" },
+        level: "warning",
+      }),
+    );
   });
 });

@@ -43,6 +43,30 @@ type LastKnownTotal = {
   total: number;
 };
 
+type BridgeFlowUrlState = {
+  rawPage: number;
+  selectedStatus: BridgeStatus | null;
+  statusIn: BridgeStatus[];
+  setPage: (page: number) => void;
+  handleStatusChange: (status: BridgeStatus | null) => void;
+};
+
+type RecentTransfersSectionProps = {
+  selectedStatus: BridgeStatus | null;
+  handleStatusChange: (status: BridgeStatus | null) => void;
+  transfersResult: ReturnType<
+    typeof useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>
+  >;
+  transfers: BridgeTransfer[];
+  rates: ReturnType<typeof useOracleRates>["merged"];
+  addToast: AddToast;
+  page: number;
+  total: number;
+  setPage: (page: number) => void;
+  totalCapped: boolean;
+  countHasError: boolean;
+};
+
 function updateLastKnownTotal(
   ref: { current: LastKnownTotal },
   key: string,
@@ -55,32 +79,16 @@ function updateLastKnownTotal(
   return ref.current.total;
 }
 
-export function BridgeFlowsPageClient() {
-  return (
-    <Suspense>
-      <BridgeFlowsContent />
-    </Suspense>
-  );
-}
-
-function BridgeFlowsContent() {
-  // Page + status filter are URL-backed so users can refresh, share, or
-  // navigate back without losing their view. Pattern mirrors pools/page.tsx
-  // and pool/[poolId]/page.tsx. Resetting page to 1 on filter change keeps
-  // users out of empty trailing pages. The active `page` is clamped against
-  // `totalPages` below to guard against stale indices from count shrinkage.
+function useBridgeFlowUrlState(): BridgeFlowUrlState {
   const searchParams = useSearchParams();
   const { replace } = useRouter();
 
-  // ReadonlyURLSearchParams methods rely on `this` (prototype-based);
-  // destructuring breaks runtime, so calls stay member-form.
   const rawPage = Math.max(
     1,
     // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
     parseInt(searchParams.get("page") ?? "1", 10) || 1,
   );
 
-  // null = ALL (default); a specific status = radio-selected filter.
   const selectedStatus = useMemo<BridgeStatus | null>(() => {
     // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
     const param = searchParams.get("status");
@@ -89,7 +97,6 @@ function BridgeFlowsContent() {
     return validSet.has(param) ? (param as BridgeStatus) : null;
   }, [searchParams]);
 
-  // Expand the single selection into the array the query expects.
   const statusIn =
     selectedStatus !== null ? [selectedStatus] : ALL_BRIDGE_STATUSES.slice();
 
@@ -108,16 +115,114 @@ function BridgeFlowsContent() {
       const params = new URLSearchParams(searchParams.toString());
       if (next === null) params.delete("status");
       else params.set("status", next);
-      params.delete("page"); // reset to page 1 on filter change
+      params.delete("page");
       replace(`?${params.toString()}`, { scroll: false });
     },
     [replace, searchParams],
   );
 
-  // Total row count for the pagination denominator. Shape matches
-  // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
-  // since hosted Hasura has no _aggregate support. Preserved-last-known
-  // pattern avoids the pager collapsing on a transient count error.
+  return { rawPage, selectedStatus, statusIn, setPage, handleStatusChange };
+}
+
+function useBridgeToasts(): [ToastEntry[], AddToast, (id: number) => void] {
+  const toastIdRef = useRef(0);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const dismissToast = useCallback(
+    (id: number) => setToasts((t) => t.filter((x) => x.id !== id)),
+    [],
+  );
+  const addToast = useCallback<AddToast>(
+    (message, type, href) => {
+      const id = ++toastIdRef.current;
+      setToasts((t) => [...t, { id, message, type, href }]);
+      setTimeout(() => dismissToast(id), 6_000);
+    },
+    [dismissToast],
+  );
+  return [toasts, addToast, dismissToast];
+}
+
+function BridgeFlowsHeader() {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-white mb-1">Bridge Flows</h1>
+      <p className="text-sm text-slate-400">
+        Wormhole NTT transfers of Mento stable tokens across Celo and Monad
+      </p>
+    </div>
+  );
+}
+
+function RecentTransfersSection({
+  selectedStatus,
+  handleStatusChange,
+  transfersResult,
+  transfers,
+  rates,
+  addToast,
+  page,
+  total,
+  setPage,
+  totalCapped,
+  countHasError,
+}: RecentTransfersSectionProps) {
+  return (
+    <section aria-label="Recent transfers">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
+        <BridgeStatusFilter
+          options={ALL_BRIDGE_STATUSES}
+          selected={selectedStatus}
+          onChange={handleStatusChange}
+        />
+      </div>
+      {transfersResult.error ? (
+        <EmptyBox message="Unable to load transfers — see error above." />
+      ) : transfersResult.isLoading && transfers.length === 0 ? (
+        <Skeleton rows={5} />
+      ) : transfers.length === 0 ? (
+        <EmptyBox
+          message={
+            selectedStatus !== null
+              ? "No bridge transfers match the selected status."
+              : "No bridge transfers yet."
+          }
+        />
+      ) : (
+        <>
+          <TransfersTable
+            transfers={transfers}
+            rates={rates}
+            addToast={addToast}
+          />
+          <Pagination
+            page={page}
+            pageSize={PAGE_LIMIT}
+            total={total}
+            onPageChange={setPage}
+          />
+          {totalCapped && (
+            <p className="mt-1 text-xs text-slate-500">
+              Showing first {ENVIO_MAX_ROWS.toLocaleString()} transfers — older
+              entries may exist beyond this page range.
+            </p>
+          )}
+          {countHasError && (
+            <p className="mt-1 text-xs text-slate-500">
+              Total count degraded — showing last known denominator.
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function useBridgePaginationData(
+  rawPage: number,
+  selectedStatus: BridgeStatus | null,
+  statusIn: BridgeStatus[],
+) {
   const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     BRIDGE_TRANSFERS_COUNT,
     {
@@ -133,16 +238,8 @@ function BridgeFlowsContent() {
     statusKey,
     rawTotal,
   );
-  // On count error, fall back to the preserved value but gate `totalCapped`
-  // on that same preserved value — otherwise a transient error with a stale
-  // ref of 0 could claim rawTotal < ENVIO_MAX_ROWS while the banner reads
-  // off whatever last-known count we held.
   const total = countResult.error ? lastKnownTotal : rawTotal;
   const totalCapped = !countResult.error && rawTotal >= ENVIO_MAX_ROWS;
-
-  // Clamp the active page against totalPages — guards against stale URL
-  // indices when the count shrinks (window roll, narrower filter on refresh).
-  // `handleStatusChange` resets via URL param delete for the common case.
   const totalPages = total > 0 ? Math.ceil(total / PAGE_LIMIT) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
 
@@ -154,30 +251,42 @@ function BridgeFlowsContent() {
       statusIn,
     },
   );
+  return {
+    countHasError: !!countResult.error,
+    page,
+    total,
+    totalCapped,
+    transfers: transfersResult.data?.BridgeTransfer ?? [],
+    transfersResult,
+  };
+}
 
-  // All-time daily snapshots feed both the KPI row (24h/7d/30d sums) and the
-  // charts. One fetch → many derived views. `afterDate: 0` requests all
-  // history; at the cap (1000 rows ≈ ~80 days at current cardinality) the
-  // query returns the most-recent days because of the `date desc` ordering.
+function summarizeCappedCount(rowCount: number | null) {
+  return {
+    capped: rowCount !== null && rowCount >= 1000,
+    count: rowCount === null ? null : Math.min(rowCount, 1000),
+  };
+}
+
+function isLoadingEmpty(isLoading: boolean, rowCount: number) {
+  return isLoading && rowCount === 0;
+}
+
+function firstErrorMessage(...errors: Array<Error | undefined>) {
+  return errors.find(Boolean)?.message ?? null;
+}
+
+function useBridgeOverviewData() {
   const snapshotsResult = useBridgeGQL<{
     BridgeDailySnapshot: BridgeDailySnapshot[];
   }>(BRIDGE_DAILY_SNAPSHOT, { afterDate: 0 });
-
-  // Pending: paginate IDs, count client-side (capped at 1000). A count of
-  // 1000 is a wire signal of pagination cap — surface as "1,000+".
   const pendingResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     BRIDGE_PENDING_IDS,
   );
-
-  // Top bridgers for the leaderboard chart. 25 is the expanded-view cap.
   const topBridgersResult = useBridgeGQL<{ BridgeBridger: BridgeBridger[] }>(
     BRIDGE_TOP_BRIDGERS,
     { limit: TOP_BRIDGERS_EXPANDED },
   );
-
-  // Last ROUTE_STATS_LIMIT delivered transfers for the per-route avg delivery
-  // time tile. Fetched independently so the tile's sample is not capped by the
-  // table's PAGE_LIMIT or the current status filter.
   const deliveredRecentResult = useBridgeGQL<{
     BridgeTransfer: Array<{
       status: BridgeStatus;
@@ -187,136 +296,107 @@ function BridgeFlowsContent() {
       destChainId: number | null;
     }>;
   }>(BRIDGE_DELIVERED_RECENT, { limit: ROUTE_STATS_LIMIT });
-
-  // Oracle rate map for USD conversion. Uses the slim `useOracleRates` hook
-  // instead of `useAllNetworksData`: we only need ~5 fields per pool to build
-  // the rate map, not the full 44-field per-pool payload plus paginated
-  // snapshots / LPs / fees that the dashboard hook fetches. Saves ~6 queries
-  // per chain per bridge-page mount.
   const { merged: rates } = useOracleRates();
 
-  const transfers = transfersResult.data?.BridgeTransfer ?? [];
   const snapshots = snapshotsResult.data?.BridgeDailySnapshot ?? [];
-  const snapshotsCapped = snapshots.length >= 1000;
   const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];
-
+  const deliveredTransfers = deliveredRecentResult.data?.BridgeTransfer ?? [];
   const transferTotals = useMemo(
     () => windowTotals(snapshots, (s) => s.sentCount ?? 0),
     [snapshots],
   );
-
   const pendingRows = pendingResult.data?.BridgeTransfer?.length ?? null;
-  const pendingCount =
-    pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
-  const pendingCapped = pendingRows !== null && pendingRows >= 1000;
+  const pending = summarizeCappedCount(pendingRows);
 
-  // Aggregate only for the top-of-page ErrorBox banner — each KPI tile +
-  // chart + table below gates on its own backing query's error so a partial
-  // failure doesn't mask valid data from the other queries.
+  return {
+    deliveredHasError: !!deliveredRecentResult.error,
+    deliveredIsLoading: isLoadingEmpty(
+      deliveredRecentResult.isLoading,
+      deliveredTransfers.length,
+    ),
+    deliveredTransfers,
+    error: firstErrorMessage(snapshotsResult.error, pendingResult.error),
+    pendingCapped: pending.capped,
+    pendingCount: pending.count,
+    pendingHasError: !!pendingResult.error,
+    rates,
+    snapshots,
+    snapshotsCapped: snapshots.length >= 1000,
+    snapshotsHasError: !!snapshotsResult.error,
+    snapshotsIsLoading: isLoadingEmpty(
+      snapshotsResult.isLoading,
+      snapshots.length,
+    ),
+    topBridgers,
+    topBridgersHasError: !!topBridgersResult.error,
+    topBridgersIsLoading: isLoadingEmpty(
+      topBridgersResult.isLoading,
+      topBridgers.length,
+    ),
+    transferTotals,
+  };
+}
+
+export function BridgeFlowsPageClient() {
+  return (
+    <Suspense>
+      <BridgeFlowsContent />
+    </Suspense>
+  );
+}
+
+function BridgeFlowsContent() {
+  // Page + status filter are URL-backed so users can refresh, share, or
+  // navigate back without losing their view. Pattern mirrors pools/page.tsx
+  // and pool/[poolId]/page.tsx. Resetting page to 1 on filter change keeps
+  // users out of empty trailing pages. The active `page` is clamped against
+  // `totalPages` below to guard against stale indices from count shrinkage.
+  const { rawPage, selectedStatus, statusIn, setPage, handleStatusChange } =
+    useBridgeFlowUrlState();
+  const pagination = useBridgePaginationData(rawPage, selectedStatus, statusIn);
+  const overview = useBridgeOverviewData();
+  const [toasts, addToast, dismissToast] = useBridgeToasts();
   const error =
-    transfersResult.error?.message ??
-    snapshotsResult.error?.message ??
-    pendingResult.error?.message ??
-    null;
-  const snapshotsError = !!snapshotsResult.error;
-  const topBridgersError = !!topBridgersResult.error;
-  const pendingError = !!pendingResult.error;
-  const deliveredError = !!deliveredRecentResult.error;
-
-  const toastIdRef = useRef(0);
-  const [toasts, setToasts] = useState<ToastEntry[]>([]);
-  const addToast = useCallback<AddToast>((message, type, href) => {
-    const id = ++toastIdRef.current;
-    setToasts((t) => [...t, { id, message, type, href }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
-  }, []);
+    pagination.transfersResult.error?.message ?? overview.error ?? null;
 
   return (
     <div className="space-y-8">
-      <ToastPortal
-        toasts={toasts}
-        onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
-      />
-      <div>
-        <h1 className="text-2xl font-bold text-white mb-1">Bridge Flows</h1>
-        <p className="text-sm text-slate-400">
-          Wormhole NTT transfers of Mento stable tokens across Celo and Monad
-        </p>
-      </div>
+      <ToastPortal toasts={toasts} onDismiss={dismissToast} />
+      <BridgeFlowsHeader />
 
       {error && <ErrorBox message={error} />}
 
       <BridgeOverviewSection
-        snapshots={snapshots}
-        rates={rates}
-        snapshotsIsLoading={snapshotsResult.isLoading && snapshots.length === 0}
-        snapshotsHasError={snapshotsError}
-        snapshotsCapped={snapshotsCapped}
-        topBridgers={topBridgers}
-        topBridgersIsLoading={
-          topBridgersResult.isLoading && topBridgers.length === 0
-        }
-        topBridgersHasError={topBridgersError}
-        transferTotals={transferTotals}
-        pendingHasError={pendingError}
-        pendingCount={pendingCount}
-        pendingCapped={pendingCapped}
-        deliveredTransfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
-        deliveredIsLoading={
-          deliveredRecentResult.isLoading &&
-          (deliveredRecentResult.data?.BridgeTransfer ?? []).length === 0
-        }
-        deliveredHasError={deliveredError}
+        snapshots={overview.snapshots}
+        rates={overview.rates}
+        snapshotsIsLoading={overview.snapshotsIsLoading}
+        snapshotsHasError={overview.snapshotsHasError}
+        snapshotsCapped={overview.snapshotsCapped}
+        topBridgers={overview.topBridgers}
+        topBridgersIsLoading={overview.topBridgersIsLoading}
+        topBridgersHasError={overview.topBridgersHasError}
+        transferTotals={overview.transferTotals}
+        pendingHasError={overview.pendingHasError}
+        pendingCount={overview.pendingCount}
+        pendingCapped={overview.pendingCapped}
+        deliveredTransfers={overview.deliveredTransfers}
+        deliveredIsLoading={overview.deliveredIsLoading}
+        deliveredHasError={overview.deliveredHasError}
       />
 
-      <section aria-label="Recent transfers">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
-          <BridgeStatusFilter
-            options={ALL_BRIDGE_STATUSES}
-            selected={selectedStatus}
-            onChange={handleStatusChange}
-          />
-        </div>
-        {transfersResult.error ? (
-          <EmptyBox message="Unable to load transfers — see error above." />
-        ) : transfersResult.isLoading && transfers.length === 0 ? (
-          <Skeleton rows={5} />
-        ) : transfers.length === 0 ? (
-          <EmptyBox
-            message={
-              selectedStatus !== null
-                ? "No bridge transfers match the selected status."
-                : "No bridge transfers yet."
-            }
-          />
-        ) : (
-          <>
-            <TransfersTable
-              transfers={transfers}
-              rates={rates}
-              addToast={addToast}
-            />
-            <Pagination
-              page={page}
-              pageSize={PAGE_LIMIT}
-              total={total}
-              onPageChange={setPage}
-            />
-            {totalCapped && (
-              <p className="mt-1 text-xs text-slate-500">
-                Showing first {ENVIO_MAX_ROWS.toLocaleString()} transfers —
-                older entries may exist beyond this page range.
-              </p>
-            )}
-            {countResult.error && (
-              <p className="mt-1 text-xs text-slate-500">
-                Total count degraded — showing last known denominator.
-              </p>
-            )}
-          </>
-        )}
-      </section>
+      <RecentTransfersSection
+        selectedStatus={selectedStatus}
+        handleStatusChange={handleStatusChange}
+        transfersResult={pagination.transfersResult}
+        transfers={pagination.transfers}
+        rates={overview.rates}
+        addToast={addToast}
+        page={pagination.page}
+        total={pagination.total}
+        setPage={setPage}
+        totalCapped={pagination.totalCapped}
+        countHasError={pagination.countHasError}
+      />
     </div>
   );
 }

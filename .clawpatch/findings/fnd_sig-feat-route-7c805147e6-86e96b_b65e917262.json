@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-7c805147e6-86e96b_b65e917262",
+  "featureId": "feat_route_7c805147e6",
+  "title": "PUT overwrites reports without any version precondition",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/address-reports/route.ts",
+      "startLine": 63,
+      "endLine": 87,
+      "symbol": "PUT",
+      "quote": "const sanitized = sanitizeReportInput({ body: reportBody, title });"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-reports/route.ts",
+      "startLine": 77,
+      "endLine": 83,
+      "symbol": "PUT",
+      "quote": "const saved: AddressReport = await upsertReport(address, {"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/address-reports/__tests__/route.test.ts",
+      "startLine": 75,
+      "endLine": 82,
+      "symbol": "GET /api/address-reports returns the report when found",
+      "quote": "version: 3,"
+    }
+  ],
+  "reasoning": "The route exposes report versions on read but PUT accepts only address/body/title and calls upsertReport without checking a client-supplied base version or conditional token. If two authenticated editors load version 3, edit independently, and save, the later PUT silently overwrites the earlier one. Because these reports are free-form markdown, this is a real lost-update/data-loss risk, not just metadata churn.",
+  "reproduction": "1. Authenticated user A and user B both GET the same address report and receive version 3. 2. A PUTs body/title changes and the stored report advances. 3. B PUTs their stale edit. 4. B's request succeeds and overwrites A's changes because the route has no stale-version guard.",
+  "recommendation": "Require a base version or ETag/If-Match-style precondition on PUT, pass it through to the storage layer, and return 409 Conflict when the stored version no longer matches. Keep create semantics explicit, for example allowing no version only when the report does not yet exist.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests verify validation, authentication, body limits, and that authorEmail is server-derived, but they never simulate two saves against an existing version or assert that stale writes are rejected.",
+  "suggestedRegressionTest": "Add a route test where PUT includes an expected/base version, mock the storage layer to reject a stale version, and assert the route returns 409 without reporting success. Also add a success case for matching version and create-without-existing-report if that is intended.",
+  "minimumFixScope": "ui-dashboard/src/app/api/address-reports/route.ts plus the address-reports storage helper contract and route tests for stale-write behavior.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by threading baseVersion/If-Match through the report PUT route and atomic Redis upsert; stale writes now return 409 and the editor sends the loaded version.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:20:11.990Z"
+    }
+  ],
+  "signature": "sig_feat-route-7c805147e6_86e96b41b4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T101016-ad2735",
+  "createdAt": "2026-05-20T10:10:54.457Z",
+  "updatedAt": "2026-05-20T10:20:11.990Z"
+}

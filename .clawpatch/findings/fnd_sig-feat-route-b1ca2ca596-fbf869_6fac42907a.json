@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-b1ca2ca596-fbf869_6fac42907a",
+  "featureId": "feat_route_b1ca2ca596",
+  "title": "Homepage metadata renders a bogus offline-chain warning for non-offline partial data",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/page.tsx",
+      "startLine": 22,
+      "endLine": 23,
+      "symbol": "buildDescription",
+      "quote": "if (data.partial) {\n    parts.push(`Partial — ${data.offlineChains.join(\", \")} offline`);"
+    },
+    {
+      "path": "ui-dashboard/src/lib/homepage-og.ts",
+      "startLine": 273,
+      "endLine": 276,
+      "symbol": "fetchHomepageOgDataUncached",
+      "quote": "const anyPoolUntrusted = slices.some((s) =>\n    s.pools.some((p) => p.tokenDecimalsKnown !== true),\n  );\n  const partial = offlineChains.length > 0 || anyPoolUntrusted;"
+    },
+    {
+      "path": "ui-dashboard/src/lib/__tests__/homepage-og.test.ts",
+      "startLine": 313,
+      "endLine": 321,
+      "symbol": "fetchHomepageOgDataUncached",
+      "quote": "expect(result!.partial).toBe(true);\n    expect(result!.poolCount).toBe(2);\n    // Aggregate TVL: every pool's poolTvlUSD returned null, so totalTvlUsd\n    // collapses to null rather than reporting a misleading 0.\n    expect(result!.totalTvlUsd).toBeNull();\n    expect(result!.offlineChains).toEqual([]);"
+    }
+  ],
+  "reasoning": "`buildDescription` assumes every `partial` result has at least one offline chain and emits `Partial — ${offlineChains} offline`. The OG data helper intentionally sets `partial=true` when pool decimal trust flags are missing even if `offlineChains` is empty, and the helper test pins that state. In that case the homepage metadata description becomes `Partial —  offline`, which is malformed and misdiagnoses the degraded condition as a chain outage.",
+  "reproduction": "Mock `fetchHomepageOgData()` to return `{ partial: true, offlineChains: [], totalTvlUsd: null, totalVolume7dUsd: null, poolCount: 2, chains: [\"Celo\", \"Monad\"], healthBuckets: {} }`, call `generateMetadata()`, and inspect `description`.",
+  "recommendation": "Only include the offline-chain phrase when `offlineChains.length > 0`; otherwise use a generic partial/degraded-data phrase such as `Partial data` before appending the remaining metrics.",
+  "whyTestsDoNotAlreadyCoverThis": "The included homepage route tests import `page-client` explicitly and do not execute `ui-dashboard/src/app/page.tsx`, `generateMetadata`, or `buildDescription`. The existing OG helper test covers the partial-with-empty-offlineChains producer state, but no route-level metadata test covers its consumer formatting.",
+  "suggestedRegressionTest": "Add a route-level test for `generateMetadata()` that mocks `fetchHomepageOgData()` with `partial: true` and `offlineChains: []`, then asserts the returned description does not contain `offline` and does contain a generic partial-data marker.",
+  "minimumFixScope": "Update `buildDescription` in `ui-dashboard/src/app/page.tsx` and add a focused metadata formatting test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by using generic 'Partial data' homepage metadata when partial data has no offline chains; added metadata formatting regression coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:25:14.515Z"
+    }
+  ],
+  "signature": "sig_feat-route-b1ca2ca596_fbf869f42e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:52.283Z",
+  "updatedAt": "2026-05-20T10:25:14.514Z"
+}

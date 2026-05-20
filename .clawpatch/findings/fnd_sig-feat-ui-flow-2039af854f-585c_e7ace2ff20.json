@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-2039af854f-585c_e7ace2ff20",
+  "featureId": "feat_ui-flow_2039af854f",
+  "title": "Liquidity values are inverted for USDm-base pools",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/liquidity-chart.tsx",
+      "startLine": 29,
+      "endLine": 35,
+      "symbol": "LiquidityChart",
+      "quote": "Oracle price is stored in feed direction (\"feedToken/USD\"). One token is always\n  // USDm (already USD). The other is priced via the feed:\n  //   sym0 === \"USDm\": reserve0 stays as-is; reserve1 × feedValue\n  //   sym1 === \"USDm\": reserve0 × feedValue; reserve1 stays as-is\n  //\n  // feedValue = oraclePrice / 1e24 (but parseOraclePriceToNumber inverts for USDm-base)\n  // so we get feedValue directly as: oraclePrice / 1e24 without inversion."
+    },
+    {
+      "path": "ui-dashboard/src/components/liquidity-chart.tsx",
+      "startLine": 38,
+      "endLine": 39,
+      "symbol": "LiquidityChart",
+      "quote": "const rawFeedValue =\n    rawOraclePrice !== \"0\" ? Number(rawOraclePrice) / 10 ** 24 : 0;"
+    },
+    {
+      "path": "ui-dashboard/src/components/liquidity-chart.tsx",
+      "startLine": 49,
+      "endLine": 59,
+      "symbol": "LiquidityChart",
+      "quote": "const toUsd0 = (raw: string) => {\n    const amount = parseWei(raw, dec0);\n    if (!useUsd) return amount;\n    return usdmIsToken0 ? amount : amount * rawFeedValue;\n  };\n\n  const toUsd1 = (raw: string) => {\n    const amount = parseWei(raw, dec1);\n    if (!useUsd) return amount;\n    return usdmIsToken0 ? amount * rawFeedValue : amount;\n  };"
+    }
+  ],
+  "reasoning": "The component explicitly says USDm-base pools require the existing oracle parser to invert the raw feed direction, but then bypasses that parser and always uses oraclePrice / 1e24. For a USDm-base pool, the non-USDm reserve is multiplied by the inverse of the needed USD value, so the two reserve-value series are wrong by roughly price^2 relative to each other. This undermines the chart's stated invariant that a balanced pool should produce overlapping lines.",
+  "reproduction": "Render LiquidityChart with token0Symbol=\"USDm\", token1Symbol=\"CELO\", oraclePrice=\"2000000000000000000000000\" and equal USD value reserves. The chart multiplies CELO amount by 2 instead of the inverted USDm-base value expected by the existing parser contract described in the component comment, so the lines do not overlap for a balanced pool.",
+  "recommendation": "Use the same canonical oracle-price conversion helper used elsewhere for pool display, or branch on USDm-base direction and invert the raw value before multiplying the non-USDm reserve. Keep the feed-direction handling in one shared helper so charts and summary metrics cannot drift.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests exercise unrelated address-label, breach-history, and breaker components. None render LiquidityChart or assert USD conversion for USDm-base versus USDm-quote pools.",
+  "suggestedRegressionTest": "Add a LiquidityChart unit test with react-plotly.js mocked to capture props. Cover both token0Symbol=\"USDm\" and token1Symbol=\"USDm\" with equivalent reserve values and assert the plotted y arrays overlap when converted to USD.",
+  "minimumFixScope": "ui-dashboard/src/components/liquidity-chart.tsx plus a focused component test for the two feed directions.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "LiquidityChart now uses parseOraclePriceToNumber for canonical USDm-base inversion and has a Plotly-prop regression for USDm-base/quote balanced reserves.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:53:50.939Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-2039af854f_585caaace7",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T104043-436ff7",
+  "createdAt": "2026-05-20T10:41:41.699Z",
+  "updatedAt": "2026-05-20T10:53:50.939Z"
+}

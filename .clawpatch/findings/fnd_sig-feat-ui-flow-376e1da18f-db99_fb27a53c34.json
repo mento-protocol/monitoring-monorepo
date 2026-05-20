@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-376e1da18f-db99_fb27a53c34",
+  "featureId": "feat_ui-flow_376e1da18f",
+  "title": "Capped snapshot warning appears on bounded bridge-volume ranges",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/bridge-volume-chart.tsx",
+      "startLine": 34,
+      "endLine": 34,
+      "symbol": "BridgeVolumeChart",
+      "quote": "const [range, setRange] = useState<RangeKey>(\"30d\");"
+    },
+    {
+      "path": "ui-dashboard/src/components/bridge-volume-chart.tsx",
+      "startLine": 63,
+      "endLine": 70,
+      "symbol": "BridgeVolumeChart",
+      "quote": "series={rangeSeries}\n      range={range}\n      onRangeChange={setRange}\n      headline={headline}\n      change={wow}\n      isLoading={isLoading}\n      hasError={hasError}\n      hasSnapshotError={isCapped}"
+    }
+  ],
+  "reasoning": "The card defaults to the bounded 30d range and range-filters the plotted series, but it forwards the raw dataset-level `isCapped` flag into the chart warning for every range. When Hasura's 1000-row cap is hit, the all-history dataset is partial, but the bounded 7d/30d views are the least likely windows to be truncated. This makes the default chart show a partial-data warning even while displaying a bounded window, creating a false degraded-state signal.",
+  "reproduction": "Render BridgeVolumeChart with `isCapped={true}`, `hasError={false}`, and the default range. The component passes `hasSnapshotError={true}` to TimeSeriesChartCard before the user selects the all-time range.",
+  "recommendation": "Gate the cap warning by the active range, e.g. derive `const showCapNote = isCapped && range === \"all\"` and pass that as `hasSnapshotError`. Keep the chart data filtering unchanged.",
+  "whyTestsDoNotAlreadyCoverThis": "The included linked tests exercise address-label, auth, breach-history, and breaker components, not BridgeVolumeChart's cap/range behavior. They do not render `BridgeVolumeChart` with `isCapped=true` or assert the warning visibility across range changes.",
+  "suggestedRegressionTest": "Add a BridgeVolumeChart test that renders with `isCapped={true}` on the default 30d range and asserts the partial-data note is absent, then switches to the All range and asserts the note appears.",
+  "minimumFixScope": "ui-dashboard/src/components/bridge-volume-chart.tsx plus a focused component regression test for cap-note visibility.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "BridgeVolumeChart cap warning is gated to the All range, with default-range hidden and All-range visible regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:53:51.371Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-376e1da18f_db9920c64a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T104043-436ff7",
+  "createdAt": "2026-05-20T10:42:16.933Z",
+  "updatedAt": "2026-05-20T10:53:51.371Z"
+}

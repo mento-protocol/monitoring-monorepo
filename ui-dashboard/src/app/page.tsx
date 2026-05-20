@@ -13,14 +13,18 @@ const FALLBACK_TITLE = "Mento Analytics";
 const FALLBACK_DESCRIPTION =
   "Cross-chain analytics dashboard for Mento protocol";
 
-function buildDescription(
+export function buildDescription(
   data: NonNullable<Awaited<ReturnType<typeof fetchHomepageOgData>>>,
 ): string {
   const parts: string[] = [];
   // Lead with a partial-overview warning when any chain is offline — the
   // surviving-chain numbers aren't protocol-wide in that case.
   if (data.partial) {
-    parts.push(`Partial — ${data.offlineChains.join(", ")} offline`);
+    parts.push(
+      data.offlineChains.length > 0
+        ? `Partial — ${data.offlineChains.join(", ")} offline`
+        : "Partial data",
+    );
   }
   // `null` = unavailable (omit); `0` = real empty state (render as "$0.00").
   if (data.totalTvlUsd != null)

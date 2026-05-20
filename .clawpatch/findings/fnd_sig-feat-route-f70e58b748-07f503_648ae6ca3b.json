@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-route-f70e58b748-07f503_648ae6ca3b",
+  "featureId": "feat_route_f70e58b748",
+  "title": "Invalid VAA encoding can crash the route instead of returning a controlled error",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/bridge-redeem/route.ts",
+      "startLine": 88,
+      "endLine": 88,
+      "symbol": "GET",
+      "quote": "const vaaHex = vaaBase64ToHex(vaaRaw);"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/bridge-redeem/route.ts",
+      "startLine": 65,
+      "endLine": 69,
+      "symbol": "GET",
+      "quote": "try {\n    body = (await response.json()) as WormholeOperationResponse;\n  } catch {\n    return badRequest(\"Wormholescan returned an invalid response.\", 502);\n  }"
+    }
+  ],
+  "reasoning": "The handler validates that a Wormholescan operation has a non-empty `vaa.raw`, but it does not catch conversion failures from `vaaBase64ToHex`. Since `vaa.raw` is network-sourced data, a malformed value can throw after the JSON parse guard and produce an unstructured 500 instead of the route's documented JSON error shape. The confidence is medium because the exact throw behavior depends on the imported helper, but this route treats the upstream response as untrusted everywhere else and leaves this conversion outside that error-handling boundary.",
+  "reproduction": null,
+  "recommendation": "Wrap `vaaBase64ToHex(vaaRaw)` in a try/catch and return a 502 JSON error such as `Wormholescan returned an invalid VAA.` when decoding fails.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were included for this route, and the current code only guards invalid JSON, empty operations, multiple operations, and empty raw VAA by direct control flow.",
+  "suggestedRegressionTest": "Add a route handler test that mocks Wormholescan with one operation whose `vaa.raw` is malformed and asserts a 502 JSON error rather than an uncaught exception.",
+  "minimumFixScope": "`ui-dashboard/src/app/api/bridge-redeem/route.ts` plus a focused route test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by catching invalid VAA base64/hex conversion and returning a controlled 502 JSON response; added bridge redeem route coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:24:54.206Z"
+    }
+  ],
+  "signature": "sig_feat-route-f70e58b748_07f50368ce",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T102031-b65f32",
+  "createdAt": "2026-05-20T10:21:11.358Z",
+  "updatedAt": "2026-05-20T10:24:54.205Z"
+}

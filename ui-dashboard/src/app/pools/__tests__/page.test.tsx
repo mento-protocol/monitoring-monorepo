@@ -104,8 +104,11 @@ function makeNetwork(id: string, chainId: number, label = id): Network {
 const celoNet = makeNetwork("celo-mainnet", 42220, "Celo");
 const monadNet = makeNetwork("monad-mainnet", 143, "Monad");
 
+const CELO_POOL_ADDRESS = "0x" + "a".repeat(40);
+const MONAD_POOL_ADDRESS = "0x" + "b".repeat(40);
+
 const celoPool = {
-  id: "42220-0xpool-celo",
+  id: `42220-${CELO_POOL_ADDRESS}`,
   chainId: 42220,
   token0: "0x1",
   token1: "0x2",
@@ -117,7 +120,7 @@ const celoPool = {
 };
 
 const monadPool = {
-  id: "143-0xpool-monad",
+  id: `143-${MONAD_POOL_ADDRESS}`,
   chainId: 143,
   token0: "0x3",
   token1: "0x4",
@@ -207,9 +210,7 @@ describe("PoolsPage multichain rendering", () => {
   });
 
   it("accepts a Monad (foreign-chain) namespaced pool filter without blocking", () => {
-    mockSearchParams = new URLSearchParams(
-      "pool=143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115",
-    );
+    mockSearchParams = new URLSearchParams(`pool=143-${MONAD_POOL_ADDRESS}`);
 
     const poolSwapsSeen: unknown[] = [];
     vi.mocked(useGQL).mockImplementation(
@@ -225,8 +226,25 @@ describe("PoolsPage multichain rendering", () => {
     const html = renderToStaticMarkup(<PoolsPage />);
     expect(html).not.toContain("belongs to chain 143");
     expect(html).not.toContain("Switch networks to view its swaps");
-    expect(poolSwapsSeen).toEqual([
-      { poolId: "143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115", limit: 25 },
-    ]);
+    expect(poolSwapsSeen).toEqual([{ poolId: monadPool.id, limit: 25 }]);
+  });
+
+  it("normalizes direct raw-address pool filters before querying swaps", () => {
+    mockSearchParams = new URLSearchParams(`pool=${CELO_POOL_ADDRESS}`);
+
+    const poolSwapsSeen: unknown[] = [];
+    vi.mocked(useGQL).mockImplementation(
+      (query: string | null, variables?: unknown): SWRResponse => {
+        if (query?.includes("query PoolSwaps")) {
+          poolSwapsSeen.push(variables);
+          return baseSwapsResult as SWRResponse;
+        }
+        return baseSwapsResult as SWRResponse;
+      },
+    );
+
+    renderToStaticMarkup(<PoolsPage />);
+
+    expect(poolSwapsSeen).toEqual([{ poolId: celoPool.id, limit: 25 }]);
   });
 });

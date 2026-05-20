@@ -22,8 +22,9 @@ import {
 // report applies wherever the address appears. Earlier per-scope storage
 // caused recurring scope-mismatch bugs that the model itself doesn't
 // justify (PR #330).
-// Atomic upsert script. Reads prior, increments version, preserves
-// createdAt, writes. Atomicity guards the version monotonicity invariant
+// Atomic conditional upsert script. Reads prior, verifies the caller's
+// base-version precondition, increments version, preserves createdAt, writes.
+// Atomicity guards both the no-lost-update invariant and version monotonicity
 // against concurrent writers — without the script, two simultaneous saves
 // could both observe v=N and both write v=N+1.
 //
@@ -31,14 +32,17 @@ import {
 // ARGV[1]  = address (lowercase)
 // ARGV[2]  = JSON-encoded payload (body + optional title/authorEmail/source)
 // ARGV[3]  = ISO timestamp for `now`
+// ARGV[4]  = expected base version, or "" for create-only
 //
-// Returns the JSON-encoded persisted record so the caller knows the
-// assigned version.
+// Returns a JSON-encoded envelope. On success, `report` is the persisted
+// record. On conflict, `existingVersion` is the current stored version when
+// one exists.
 const UPSERT_SCRIPT = `
 local key = KEYS[1]
 local addr = ARGV[1]
 local payload = cjson.decode(ARGV[2])
 local now = ARGV[3]
+local expectedVersionArg = ARGV[4]
 
 local existing = redis.call('HGET', key, addr)
 local prior = nil
@@ -49,25 +53,61 @@ end
 payload.createdAt = (prior and prior.createdAt) or now
 payload.updatedAt = now
 
--- Coerce non-numeric prior versions to 0 before incrementing. Lua's
+-- Match upgradeReport()'s read-side version normalization before comparing
+-- or incrementing. Lua's
 -- 'or' short-circuits on falsy, but cjson.decode maps JSON null to
 -- cjson.null (truthy in Lua) — without the type check, a stored
 -- {"version": null} (which an earlier split-write path could have
 -- produced for legacy/partial records) would propagate cjson.null
--- into the arithmetic and crash the EVAL. The dashboard's
--- upgradeReport() reader already defaults missing version to 1; this
--- mirrors that defensiveness on the writer side so the upsert always
--- succeeds and yields a valid monotonic version.
-local priorVersion = prior and prior.version
-if type(priorVersion) ~= 'number' then priorVersion = 0 end
+-- into the arithmetic and crash the EVAL. Existing partial records read as
+-- version 1 in JS, so they must compare as version 1 here too.
+local priorVersion = 0
+if prior then
+  priorVersion = prior.version
+  if type(priorVersion) ~= 'number' or priorVersion <= 0 then
+    priorVersion = 1
+  else
+    priorVersion = math.floor(priorVersion)
+  end
+end
+
+if expectedVersionArg == '' then
+  if prior then
+    return cjson.encode({
+      ok = false,
+      error = 'version_conflict',
+      existingVersion = priorVersion
+    })
+  end
+else
+  local expectedVersion = tonumber(expectedVersionArg)
+  if (not prior) or priorVersion ~= expectedVersion then
+    return cjson.encode({
+      ok = false,
+      error = 'version_conflict',
+      existingVersion = prior and priorVersion or cjson.null
+    })
+  end
+end
+
 payload.version = priorVersion + 1
 
 local encoded = cjson.encode(payload)
 redis.call('HSET', key, addr, encoded)
-return encoded
+return cjson.encode({ ok = true, report = payload })
 `;
 
 // Data access helpers (all server-side)
+
+export class AddressReportVersionConflictError extends Error {
+  readonly existingVersion: number | null;
+
+  constructor(existingVersion: number | null) {
+    super("Address report version conflict");
+    this.name = "AddressReportVersionConflictError";
+    this.existingVersion = existingVersion;
+  }
+}
 
 /**
  * Read the report for an address. Returns null if no report exists.
@@ -96,6 +136,7 @@ export async function upsertReport(
     title?: string;
     authorEmail?: string;
     source?: AddressReport["source"];
+    baseVersion?: number;
   },
 ): Promise<AddressReport> {
   const redis = getRedis();
@@ -112,16 +153,33 @@ export async function upsertReport(
   };
 
   // The Upstash SDK auto-parses JSON-shaped responses (`parseResponse` →
-  // `parseRecursive`), so the script's `cjson.encode(payload)` return value
+  // `parseRecursive`), so the script's `cjson.encode(envelope)` return value
   // arrives here as an already-deserialized object — calling JSON.parse on
   // it would coerce to "[object Object]" and throw at runtime.
   const result = (await redis.eval(
     UPSERT_SCRIPT,
     [REPORTS_KEY],
-    [lower, JSON.stringify(partial), now],
+    [
+      lower,
+      JSON.stringify(partial),
+      now,
+      payload.baseVersion === undefined ? "" : String(payload.baseVersion),
+    ],
   )) as Record<string, unknown>;
 
-  return upgradeReport(result);
+  if (result.ok !== true) {
+    throw new AddressReportVersionConflictError(
+      typeof result.existingVersion === "number"
+        ? result.existingVersion
+        : null,
+    );
+  }
+
+  if (typeof result.report !== "object" || result.report === null) {
+    throw new Error("Invalid address report upsert response");
+  }
+
+  return upgradeReport(result.report as Record<string, unknown>);
 }
 
 export async function deleteReport(address: string): Promise<void> {

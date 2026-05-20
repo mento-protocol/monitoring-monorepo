@@ -58,6 +58,16 @@ async function fetchSingleReport(
   return (await res.json()) as AddressReport;
 }
 
+function fingerprintReportContent(report: AddressReport): string {
+  const content = JSON.stringify([report.title ?? "", report.body]);
+  let hash = 2166136261;
+  for (let i = 0; i < content.length; i += 1) {
+    hash ^= content.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 // 6 useState calls — independent fields plus orthogonal flow flags;
 // a reducer would just rename the setters. The component is intentionally kept
 // together because save/delete ownership and preview state share one form.
@@ -86,11 +96,11 @@ export function AddressReportEditor(props: Props) {
   // Hydrate form state when the fetched report changes (or arrives for the
   // first time). `recordKey` changes only on identity moves of the underlying
   // record — SWR background refetches that return identical data don't reset
-  // user edits. The empty-state key includes the normalized address so a
-  // user typing in the new-address flow doesn't carry a draft from one
-  // address into the next when both happen to be empty.
+  // user edits. Include the normalized address and editable-content fingerprint
+  // so a same-mounted editor never carries one address's draft into another
+  // address whose existing report happens to share updatedAt/version.
   const recordKey = data
-    ? `${data.updatedAt}:${data.version}`
+    ? `existing:${normalizedAddress}:${data.updatedAt}:${data.version}:${fingerprintReportContent(data)}`
     : `empty:${normalizedAddress}`;
   const [title, setTitle] = useState(data?.title ?? "");
   const [body, setBody] = useState(data?.body ?? "");
