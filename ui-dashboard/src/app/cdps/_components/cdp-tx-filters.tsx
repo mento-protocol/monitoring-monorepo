@@ -181,9 +181,17 @@ function pillClasses(active: boolean, isAll: boolean): string {
 export function CdpTxAddressFilter({
   value,
   onChange,
+  disabled,
+  disabledHint,
 }: {
   value: string;
   onChange: (next: string) => void;
+  /** When the snapshot-isolated query (the source of owner data) hasn't
+   *  resolved yet, render the input disabled with a small hint so users
+   *  understand why the filter is unavailable instead of seeing zero
+   *  matches after typing an address. */
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   return (
     <label className="flex flex-wrap items-center gap-1.5">
@@ -196,8 +204,12 @@ export function CdpTxAddressFilter({
         spellCheck={false}
         autoComplete="off"
         aria-label="Filter CDP transactions by trove owner address"
-        className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        disabled={disabled}
+        className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
       />
+      {disabled && disabledHint != null && (
+        <span className="text-[10px] text-slate-500">{disabledHint}</span>
+      )}
     </label>
   );
 }

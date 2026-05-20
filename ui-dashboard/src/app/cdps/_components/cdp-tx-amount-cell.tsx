@@ -2,18 +2,15 @@
 
 import { Td } from "@/components/table";
 import { formatTokenAmount } from "../_lib/format";
-import {
-  amountsFor,
-  troveSnapshotFor,
-  type TroveSnapshot,
-} from "../_lib/transactions";
+import { amountsFor, type TroveSnapshot } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
 
 /** Renders one of the two amount columns (debt or collateral) on a CDP
- *  transactions row. For trove-op rows it shows `before → after` with the
- *  signed delta below; for pool-level events (liquidation / redemption /
- *  SP rebalance) it falls back to the existing flat amount because they
- *  don't have a single-trove before/after dimension.
+ *  transactions row. For trove-op rows with a resolved snapshot it shows
+ *  `before → after` with the signed delta below; for pool-level events
+ *  (liquidation / redemption / SP rebalance) or trove-ops whose snapshot
+ *  hasn't resolved yet (deploy+resync window / backfill catching up) it
+ *  falls back to the existing flat amount so the table keeps rendering.
  *
  *  Shared between the per-market table (`/cdps/[symbol]`) and the
  *  cross-market overview (`/cdps`) so the rendering policy lives in one
@@ -22,15 +19,14 @@ export function CdpTxAmountCell({
   row,
   symbol,
   leg,
-  snapshot = troveSnapshotFor(row),
+  snapshot,
 }: {
   row: CdpTransactionRow;
   symbol: string;
   leg: "debt" | "coll";
-  /** Optional override — callers that already computed the snapshot for
-   *  both legs (debt + coll) can pass it in to avoid the redundant
-   *  `BigInt()` parse on every render. */
-  snapshot?: TroveSnapshot | null;
+  /** Resolved snapshot from `troveSnapshotFor`. `null` triggers the flat
+   *  fallback rendering — see comment on the function for the cases. */
+  snapshot: TroveSnapshot | null;
 }) {
   if (snapshot == null) {
     const { debt, coll } = amountsFor(row);

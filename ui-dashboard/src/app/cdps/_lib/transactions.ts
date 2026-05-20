@@ -5,7 +5,27 @@ import type {
   CdpSpRebalanceEventRow,
   CdpTransactionRow,
   CdpTroveOperationEventRow,
+  CdpTroveOpSnapshotRow,
 } from "./types";
+
+/** Response shape for `CDP_TROVE_OP_SNAPSHOTS` / `ALL_CDP_TROVE_OP_SNAPSHOTS`. */
+export type CdpTroveOpSnapshotResponse = {
+  TroveOperationEvent: CdpTroveOpSnapshotRow[];
+};
+
+/** Index snapshot rows by event id so the table can look them up in
+ *  O(1) when merging into the trove-op rows. Returns an empty map when
+ *  the isolated query is loading or returned an error — the caller
+ *  treats any missing snapshot as "render flat amount, hide owner". */
+export function indexSnapshotsById(
+  data: CdpTroveOpSnapshotResponse | undefined,
+): Map<string, CdpTroveOpSnapshotRow> {
+  const m = new Map<string, CdpTroveOpSnapshotRow>();
+  for (const row of data?.TroveOperationEvent ?? []) {
+    m.set(row.id, row);
+  }
+  return m;
+}
 
 /** Per-kind fetch cap for the cross-CDP transactions query. Shared between
  *  the overview table and the page-level fetch that derives per-market
@@ -136,24 +156,38 @@ export interface TroveSnapshot {
   coll: TroveSnapshotLeg;
 }
 
-/** Returns null for non-troveOp rows — keeps the discriminated-union
- *  branching at the call site explicit rather than forcing every caller
- *  to switch on `row.kind` twice. */
-export function troveSnapshotFor(row: CdpTransactionRow): TroveSnapshot | null {
-  if (row.kind !== "troveOp") return null;
-  const debtBefore = BigInt(row.debtBefore);
-  const debtAfter = BigInt(row.debtAfter);
-  const collBefore = BigInt(row.collBefore);
-  const collAfter = BigInt(row.collAfter);
+/** Returns null when there is no usable snapshot for this row — either
+ *  the row is not a trove-op, or the isolated `CDP_TROVE_OP_SNAPSHOTS`
+ *  query hasn't resolved a matching entry (deploy+resync window, backfill
+ *  not yet caught up, or a missing/null column on the indexer side).
+ *  Callers fall back to the flat-amount rendering (`amountsFor`) in
+ *  that case so the table keeps working while the schema catches up. */
+export function troveSnapshotFor(
+  row: CdpTransactionRow,
+  snapshot: CdpTroveOpSnapshotRow | undefined,
+): TroveSnapshot | null {
+  if (row.kind !== "troveOp" || snapshot == null) return null;
+  if (
+    snapshot.debtBefore == null ||
+    snapshot.debtAfter == null ||
+    snapshot.collBefore == null ||
+    snapshot.collAfter == null
+  ) {
+    return null;
+  }
+  const debtBefore = BigInt(snapshot.debtBefore);
+  const debtAfter = BigInt(snapshot.debtAfter);
+  const collBefore = BigInt(snapshot.collBefore);
+  const collAfter = BigInt(snapshot.collAfter);
   return {
     debt: {
-      before: row.debtBefore,
-      after: row.debtAfter,
+      before: snapshot.debtBefore,
+      after: snapshot.debtAfter,
       delta: (debtAfter - debtBefore).toString(),
     },
     coll: {
-      before: row.collBefore,
-      after: row.collAfter,
+      before: snapshot.collBefore,
+      after: snapshot.collAfter,
       delta: (collAfter - collBefore).toString(),
     },
   };
