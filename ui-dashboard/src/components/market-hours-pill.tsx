@@ -119,7 +119,8 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
-  const open = !breakerClosed && !isWeekend(now);
+  const calendarClosed = isWeekend(now);
+  const open = !breakerClosed && !calendarClosed;
   const transition = nextMarketHoursTransition(now);
   const secondsUntilTransition = Math.max(
     0,
@@ -143,7 +144,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
         title={tooltip}
       >
         <span className="text-slate-300 font-medium">Market Closed</span>
-        {!breakerClosed && (
+        {calendarClosed && (
           <>
             <span className="text-slate-500">·</span>
             <span className="font-mono text-slate-300">

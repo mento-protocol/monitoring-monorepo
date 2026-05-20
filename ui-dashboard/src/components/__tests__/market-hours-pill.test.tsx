@@ -175,4 +175,20 @@ describe("MarketHoursPill", () => {
     expect(html).not.toContain("until open");
     expect(html).not.toContain("Market Open");
   });
+
+  it("preserves the reopen countdown when a weekend closure also has a breaker trip", () => {
+    mockUseGQL.mockReturnValue({
+      data: {
+        BreakerConfig: [
+          marketHoursConfig({ status: "TRIPPED", tradingMode: 3 }),
+        ],
+        BreakerTripEvent: [],
+      },
+    });
+    freezeNow("2026-05-02T12:00:00Z"); // Saturday noon
+    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    expect(html).toContain("Market Closed");
+    expect(html).toContain("until open");
+    expect(html).not.toContain("Market Open");
+  });
 });
