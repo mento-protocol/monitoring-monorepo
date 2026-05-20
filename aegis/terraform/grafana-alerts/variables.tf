@@ -101,37 +101,37 @@ variable "slack_bot_token" {
 }
 
 variable "slack_channel_critical" {
-  description = "Slack channel name (without #) for pager-tier Aegis alerts (severity=page)."
+  description = "Slack channel for pager-tier Aegis alerts (severity=page)."
   type        = string
-  default     = "alerts-critical"
+  default     = "#alerts-critical"
 }
 
 variable "slack_channel_oracles" {
-  description = "Slack channel name (without #) for oracle warning alerts (oracle-relayers, oracle liveness)."
+  description = "Slack channel for oracle warning alerts (oracle-relayers, oracle liveness)."
   type        = string
-  default     = "alerts-oracles"
+  default     = "#alerts-oracles"
 }
 
 variable "slack_channel_pools" {
-  description = "Slack channel name (without #) for pool-mechanics warning alerts (trading-limits, trading-modes, deviation)."
+  description = "Slack channel for pool-mechanics warning alerts (trading-limits, trading-modes, deviation)."
   type        = string
-  default     = "alerts-pools"
+  default     = "#alerts-pools"
 }
 
 variable "slack_channel_reserve" {
-  description = "Slack channel name (without #) for reserve balance warning alerts."
+  description = "Slack channel for reserve balance warning alerts."
   type        = string
-  default     = "alerts-reserve"
+  default     = "#alerts-reserve"
 }
 
 variable "slack_channel_infra" {
-  description = "Slack channel name (without #) for infrastructure warning alerts (aegis service, metrics-bridge, indexer) and the root catch-all."
+  description = "Slack channel for infrastructure warning alerts (aegis service, metrics-bridge, indexer) and the root catch-all."
   type        = string
-  default     = "alerts-infra"
+  default     = "#alerts-infra"
 }
 
 variable "slack_channel_testnet" {
-  description = "Slack channel name (without #) for all non-prod alerts (celo-sepolia, monad-testnet)."
+  description = "Slack channel for all non-prod alerts (celo-sepolia, monad-testnet)."
   type        = string
-  default     = "alerts-testnet"
+  default     = "#alerts-testnet"
 }
