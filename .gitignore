@@ -45,3 +45,7 @@ CLAUDE.md
 .clawpatch/patches/
 .clawpatch/reports/
 .clawpatch/locks/
+
+# Arkham marathon — output JSONLs (raw API responses, progress checkpoints).
+# Persisted to disk + Vercel Blob; never committed.
+.intel-marathon/

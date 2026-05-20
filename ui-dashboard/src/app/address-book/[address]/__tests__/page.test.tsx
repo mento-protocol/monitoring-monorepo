@@ -76,6 +76,12 @@ vi.mock("@/components/tag-input", () => ({
   ),
 }));
 
+// Intel panels call useSession + SWR; test focuses on page composition,
+// not the new panels (each has its own coverage if needed).
+vi.mock("../_components/intel-panels", () => ({
+  IntelPanels: () => null,
+}));
+
 import { AddressDetailPageClient } from "../_components/address-detail-page-client";
 
 let container: HTMLDivElement;

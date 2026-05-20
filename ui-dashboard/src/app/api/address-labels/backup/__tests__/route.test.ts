@@ -40,6 +40,26 @@ vi.mock("@vercel/blob", () => ({
   put: (...args: unknown[]) => mockPut(...args),
 }));
 
+vi.mock("@/lib/intel-deep", () => ({
+  getAllIntelDeep: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("@/lib/intel-transfers", () => ({
+  getAllIntelTransfers: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("@/lib/intel-wealth", () => ({
+  getAllIntelWealth: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("@/lib/intel-entities", () => ({
+  getAllIntelEntities: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("@/lib/intel-entity-cps", () => ({
+  getAllIntelEntityCps: vi.fn().mockResolvedValue({}),
+}));
+
 import { getAuthSession } from "@/auth";
 import { getAllReports } from "@/lib/address-reports";
 

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   flattenHashReplacements,
-  MAX_REDIS_HASH_REPLACE_BYTES,
   mergeRedisHashes,
   REDIS_HSET_FIELD_CHUNK_SIZE,
   replaceRedisHashes,
@@ -54,20 +53,47 @@ describe("replaceRedisHashes", () => {
     ).toEqual(["0", "1", "0xbbb", "report"]);
   });
 
-  it("rejects payloads above the safe Upstash request budget before EVAL", async () => {
-    const evalMock = vi.fn();
-    const byteLengthSpy = vi
-      .spyOn(Buffer, "byteLength")
-      .mockReturnValueOnce(MAX_REDIS_HASH_REPLACE_BYTES + 1);
+  it("splits each hash into its own batch when combined exceeds the cap but each fits", async () => {
+    const evalMock = vi.fn().mockResolvedValue(1);
+    // Each replacement is ~6 MB; combined ~12 MB > 8 MB cap. Neither fits
+    // with another, so greedy-pack puts each in its own batch.
+    const bigField = "x".repeat(6 * 1024 * 1024);
+    await replaceRedisHashes({ eval: evalMock }, [
+      { key: "labels", fields: { "0xaaa": bigField } },
+      { key: "reports", fields: { "0xbbb": bigField } },
+    ]);
+    expect(evalMock).toHaveBeenCalledTimes(2);
+    expect(evalMock.mock.calls[0]?.[1]).toEqual(["labels"]);
+    expect(evalMock.mock.calls[1]?.[1]).toEqual(["reports"]);
+  });
 
+  it("keeps small hashes packed together when only a later large hash forces a split", async () => {
+    const evalMock = vi.fn().mockResolvedValue(1);
+    // labels + reports together = 2 MB; arkham_deep alone = 7 MB. Combined
+    // 9 MB > 8 MB cap. Greedy-pack puts labels+reports in one EVAL (their
+    // 2 MB fits, atomic invariant preserved), arkham_deep in another.
+    const oneMb = "z".repeat(1024 * 1024);
+    const sevenMb = "z".repeat(7 * 1024 * 1024);
+    await replaceRedisHashes({ eval: evalMock }, [
+      { key: "labels", fields: { "0xaaa": oneMb } },
+      { key: "reports", fields: { "0xbbb": oneMb } },
+      { key: "arkham_deep", fields: { "0xccc": sevenMb } },
+    ]);
+    expect(evalMock).toHaveBeenCalledTimes(2);
+    expect(evalMock.mock.calls[0]?.[1]).toEqual(["labels", "reports"]);
+    expect(evalMock.mock.calls[1]?.[1]).toEqual(["arkham_deep"]);
+  });
+
+  it("rejects a single-hash payload above the cap before any write (preflight)", async () => {
+    const evalMock = vi.fn();
+    const huge = "x".repeat(9 * 1024 * 1024);
     await expect(
       replaceRedisHashes({ eval: evalMock }, [
-        { key: "reports", fields: { "0xaaa": "report" } },
+        { key: "labels", fields: { "0xaaa": "ok" } },
+        { key: "reports", fields: { "0xbbb": huge } },
       ]),
-    ).rejects.toThrow(/Redis hash replacement payload exceeds/);
-
+    ).rejects.toThrow(/Redis hash replacement payload for reports exceeds/);
     expect(evalMock).not.toHaveBeenCalled();
-    byteLengthSpy.mockRestore();
   });
 });
 

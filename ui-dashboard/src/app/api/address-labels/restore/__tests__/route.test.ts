@@ -25,15 +25,14 @@ import { getAuthSession } from "@/auth";
 import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
-import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
-import { POST } from "../route";
+import { MAX_RESTORE_BLOB_BYTES, POST } from "../route";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGet = vi.mocked(get);
 const mockCaptureException = vi.mocked(Sentry.captureException);
 const mockHandleSnapshot = vi.mocked(handleSnapshot);
 const mockIsSnapshot = vi.mocked(isSnapshot);
-const RESTORE_LIMIT = MAX_REDIS_HASH_REPLACE_BYTES;
+const RESTORE_LIMIT = MAX_RESTORE_BLOB_BYTES;
 
 function req(
   pathname = "address-labels-backup-2026-05-11.json",

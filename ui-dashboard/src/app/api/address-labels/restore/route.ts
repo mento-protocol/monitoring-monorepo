@@ -3,12 +3,13 @@ import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
-import { MAX_REDIS_HASH_REPLACE_BYTES } from "@/lib/redis-hash";
-
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const MAX_RESTORE_BLOB_BYTES = MAX_REDIS_HASH_REPLACE_BYTES;
+// 32 MB blob cap — comfortably above the current ~19 MB daily backup (labels +
+// reports + 5 Arkham hashes). The per-script request cap stays at 8 MB per
+// hash: `replaceRedisHashes` splits oversized payloads into per-hash scripts.
+export const MAX_RESTORE_BLOB_BYTES = 32 * 1024 * 1024;
 
 type RestoreActor =
   | { kind: "cron"; importerEmail: "restore@cron" }

@@ -7,7 +7,12 @@ const authConfigured = !!(
 );
 
 function isAddressBookPath(path: string) {
-  return path === "/address-book" || path.startsWith("/address-book/");
+  return (
+    path === "/address-book" ||
+    path.startsWith("/address-book/") ||
+    path === "/entities" ||
+    path.startsWith("/entities/")
+  );
 }
 
 function isProtectedAddressLabelsApi(path: string) {

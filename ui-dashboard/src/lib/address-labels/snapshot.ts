@@ -122,15 +122,25 @@ function parseLabelPayload(body: AddressLabelsSnapshot): LabelParseResult {
 async function applyReplace(
   merged: Record<string, AddressEntry>,
   reportsToImport: Record<string, AddressReport>,
-  flags: { hasLabelPayload: boolean; hasReportPayload: boolean },
+  arkham: IntelSnapshotFields,
+  flags: {
+    hasLabelPayload: boolean;
+    hasReportPayload: boolean;
+    hasArkhamPayload: boolean;
+  },
 ): Promise<number> {
   const finalLabels = flags.hasLabelPayload
     ? sanitizeAndFilter(merged)
     : undefined;
-  if (flags.hasLabelPayload || flags.hasReportPayload) {
+  if (
+    flags.hasLabelPayload ||
+    flags.hasReportPayload ||
+    flags.hasArkhamPayload
+  ) {
     await replaceSnapshotHashes({
       ...(finalLabels !== undefined ? { labels: finalLabels } : {}),
       ...(flags.hasReportPayload ? { reports: reportsToImport } : {}),
+      ...arkham,
     });
   }
   return finalLabels ? Object.keys(finalLabels).length : 0;
@@ -185,13 +195,23 @@ export async function handleSnapshot(
   const writeMode = options.writeMode ?? "merge";
   const hasReportPayload = body.reports !== undefined;
 
+  // Intel hashes restore only via the trusted (replace) path; user-uploaded
+  // imports go through the merge path which ignores them.
+  const arkhamExtract =
+    writeMode === "replace"
+      ? extractIntelFields(body)
+      : { fields: {}, hasArkhamPayload: false };
+
   // No-op short-circuit for merge mode with empty payload. Replace mode with
   // an explicit empty payload still goes through so callers can intentionally
   // clear a hash.
   if (
     Object.keys(merged).length === 0 &&
     importedReports === 0 &&
-    !(writeMode === "replace" && (hasLabelPayload || hasReportPayload))
+    !(
+      writeMode === "replace" &&
+      (hasLabelPayload || hasReportPayload || arkhamExtract.hasArkhamPayload)
+    )
   ) {
     return NextResponse.json({
       ok: true,
@@ -202,9 +222,10 @@ export async function handleSnapshot(
   try {
     const importedAddresses =
       writeMode === "replace"
-        ? await applyReplace(merged, reportsToImport, {
+        ? await applyReplace(merged, reportsToImport, arkhamExtract.fields, {
             hasLabelPayload,
             hasReportPayload,
+            hasArkhamPayload: arkhamExtract.hasArkhamPayload,
           })
         : await applyMerge(
             merged,
@@ -320,12 +341,37 @@ export function validateSnapshotReports(
   return { reports: result };
 }
 
+const INTEL_SNAPSHOT_KEYS = [
+  "intelDeep",
+  "intelTransfers",
+  "intelWealth",
+  "intelEntities",
+  "intelEntityCps",
+] as const;
+
+// Legacy field names — read-only, accepted on restore for backup compat.
+const ARKHAM_LEGACY_SNAPSHOT_KEYS = [
+  "arkhamDeep",
+  "arkhamTransfers",
+  "arkhamWealth",
+  "arkhamEntities",
+  "arkhamEntityCps",
+] as const;
+
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
   if (typeof v !== "object" || v === null) return false;
-  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`.
+  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`,
+  // or any intel/legacy marathon hash fields — the latter let partial
+  // disaster-recovery restores (re-uploading just the intel corpus) succeed
+  // instead of returning the misleading "not an address-label snapshot" 400.
   const obj = v as Record<string, unknown>;
   return (
-    "addresses" in obj || "global" in obj || "chains" in obj || "reports" in obj
+    "addresses" in obj ||
+    "global" in obj ||
+    "chains" in obj ||
+    "reports" in obj ||
+    INTEL_SNAPSHOT_KEYS.some((key) => key in obj) ||
+    ARKHAM_LEGACY_SNAPSHOT_KEYS.some((key) => key in obj)
   );
 }
 
@@ -348,6 +394,38 @@ export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
       return hasName || hasTags;
     },
   );
+}
+
+type IntelSnapshotFields = {
+  intelDeep?: AddressLabelsSnapshot["intelDeep"];
+  intelTransfers?: AddressLabelsSnapshot["intelTransfers"];
+  intelWealth?: AddressLabelsSnapshot["intelWealth"];
+  intelEntities?: AddressLabelsSnapshot["intelEntities"];
+  intelEntityCps?: AddressLabelsSnapshot["intelEntityCps"];
+};
+
+/**
+ * Extract intel hashes from a snapshot body for pass-through to the restore
+ * writer. Trusted (cron-restore) mode only — no sanitization; the cron wrote
+ * exactly what it read out of Redis. Accepts both new (`intelDeep`) and legacy
+ * (`arkhamDeep`) field names so older Blob backups can still be restored.
+ */
+function extractIntelFields(body: AddressLabelsSnapshot): {
+  fields: IntelSnapshotFields;
+  hasArkhamPayload: boolean;
+} {
+  const fields: IntelSnapshotFields = {};
+  // Prefer new names; fall back to legacy names for older backups.
+  fields.intelDeep = body.intelDeep ?? body.arkhamDeep;
+  fields.intelTransfers = body.intelTransfers ?? body.arkhamTransfers;
+  fields.intelWealth = body.intelWealth ?? body.arkhamWealth;
+  fields.intelEntities = body.intelEntities ?? body.arkhamEntities;
+  fields.intelEntityCps = body.intelEntityCps ?? body.arkhamEntityCps;
+  // Strip undefined fields so we can test hasArkhamPayload accurately.
+  for (const k of Object.keys(fields) as Array<keyof IntelSnapshotFields>) {
+    if (fields[k] === undefined) delete fields[k];
+  }
+  return { fields, hasArkhamPayload: Object.keys(fields).length > 0 };
 }
 
 function mergePreservingProvenance(

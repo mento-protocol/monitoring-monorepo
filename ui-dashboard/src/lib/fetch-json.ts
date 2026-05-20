@@ -28,3 +28,28 @@ export async function fetchJsonOrThrow<T>(
   }
   return (await res.json()) as T;
 }
+
+/**
+ * Like `fetchJsonOrThrow`, but resolves to `null` on a 404 instead of
+ * throwing. Use for SWR hooks where the absence of a record is a
+ * legitimate "nothing to render" state, not an error — e.g. the Arkham
+ * detail panels where most addresses simply have no enriched data.
+ *
+ * Other non-2xx responses still throw so SWR can surface the message.
+ */
+export async function fetchJsonOr404<T>(
+  url: string,
+  label: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<T | null> {
+  const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(body?.error ?? `${label} failed (HTTP ${res.status})`);
+  }
+  return (await res.json()) as T;
+}

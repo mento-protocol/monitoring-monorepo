@@ -171,6 +171,31 @@ after skipping blanks and comments. Refresh before starting a split.
 - [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
 - [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely.
 
+## Intel marathon follow-ups (deferred from PR #488)
+
+Three items deferred from the May 2026 marathon PR review. Each is real
+but out of scope for the bug-fix PR cycle; pick up when re-running the
+marathon (post-API-key renewal) or as a focused refactor.
+
+1. **URL-state for paginated UI surfaces** — `IntelTransfers` and
+   `EntitySearch` keep `page` (and `EntitySearch`'s `query`) in
+   `useState` only. Refresh / back-forward / bookmark-share all lose the
+   current view. Internal-only tool so low priority, but the existing
+   stateful-data UI checklist (`docs/pr-checklists/stateful-data-ui.md`)
+   already covers the URL-as-state idiom.
+2. **Marathon scripts: per-command pipeline error checks** — the
+   `extract-*.mjs` scripts consume Upstash REST pipeline responses as
+   `result ?? []` without checking each element's `.error`. Silent
+   failure swallowed by the `?? []` fallback. Acceptable in one-shot
+   mode (we'd notice empty output), but the next run should fail loud
+   on any pipeline command error.
+3. **`tier2-light-forensic.mjs` contract endpoint shape** — calls
+   `/intelligence/contract/${address}?chain=${chain}` instead of the
+   documented `/intelligence/contract/{chain}/{address}`. The
+   surrounding catch absorbs the 404 cleanly, so contract enrichment
+   silently dropped during the May marathon. Fix the call shape before
+   the next run.
+
 ## Discord → Slack alert migration: cutover + cleanup
 
 Phase 1 (setup + dual-route) shipped in PRs #485 and #494. Both Aegis and v3 alert stacks are live in Grafana Cloud; every Aegis alert fires both Discord (legacy) and Slack (new) during the soak window. Splunk On-Call routing for `severity=page` is preserved and now also fires for prod trading-modes (newly-escalated). Weekend FX mute timing extended to every new Slack route.
