@@ -76,7 +76,7 @@ function walk(dir, predicate = () => true, { required = false } = {}) {
       continue;
     }
     if (entry.isDirectory()) {
-      out.push(...walk(rel, predicate));
+      out.push(...walk(rel, predicate, { required }));
     } else if (predicate(rel)) {
       out.push(rel);
     }
