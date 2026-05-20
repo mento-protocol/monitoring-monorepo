@@ -71,15 +71,13 @@ const requireSymbolAddress = (
   role: Role,
   symbol: Sym,
 ): string => {
-  // StabilityPool is the only role where `@mento-protocol/contracts`
-  // publishes the canonical address under `StabilityPool${symbol}` (no
-  // v300 suffix). The `StabilityPoolv300${symbol}` keys exist in the
-  // package but point at stale earlier deployments — the on-chain
-  // AddressesRegistry returns the no-suffix variant. Without this
-  // special case the indexer subscribes to a dead contract and silently
-  // never records any SP activity (deposits, withdrawals, rebalances,
-  // headroom). Confirmed against `AddressesRegistry.stabilityPool()`
-  // for all three markets (GBPm, CHFm, JPYm) on 2026-05-19.
+  // StabilityPool is the only CDP role behind a TransparentUpgradeableProxy
+  // (the rest are direct CREATE3 deployments). `@mento-protocol/contracts`
+  // publishes the proxy address under `StabilityPool${symbol}` (no v300
+  // suffix) and the UUPS implementation singleton under
+  // `StabilityPoolv300${symbol}`. We want the proxy — that's what
+  // `AddressesRegistry.stabilityPool()` returns and what emits the events
+  // we subscribe to. Confirmed on-chain for GBPm, CHFm, JPYm on 2026-05-19.
   const key =
     role === "StabilityPool" ? `${role}${symbol}` : `${role}v300${symbol}`;
   return asAddress(requireContractAddress(chainId, key));
