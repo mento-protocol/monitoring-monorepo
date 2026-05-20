@@ -4,7 +4,7 @@
  *
  * For the 5 most-active Mento operators (rebalancer, cluster deployer, top
  * traders by USD), pulls /transfers?base=X&limit=1000. Overwrites
- * arkham_transfers entries with deeper history.
+ * intel_transfers entries with deeper history.
  */
 
 import process from "node:process";
@@ -133,7 +133,7 @@ async function main() {
             _truncatedFrom: count,
           });
         }
-        await pipeline([["HSET", "arkham_transfers", address, jsonStr]]);
+        await pipeline([["HSET", "intel_transfers", address, jsonStr]]);
         success++;
         totalTransfers += count;
         console.log(

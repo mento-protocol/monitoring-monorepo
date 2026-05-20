@@ -13,11 +13,7 @@ async function upstash(path) {
   return res.json();
 }
 
-for (const hash of [
-  "arkham_entities",
-  "arkham_entity_cps",
-  "arkham_transfers",
-]) {
+for (const hash of ["intel_entities", "intel_entity_cps", "intel_transfers"]) {
   console.log(`\n========== ${hash} ==========`);
   const { result: keys } = await upstash(`/hkeys/${hash}`);
   console.log(`Total: ${keys.length}`);
@@ -35,12 +31,12 @@ for (const hash of [
   }
 }
 // Also look for a transfers entry that's non-empty
-console.log(`\n========== arkham_transfers (non-empty samples) ==========`);
-const { result: tk } = await upstash(`/hkeys/arkham_transfers`);
+console.log(`\n========== intel_transfers (non-empty samples) ==========`);
+const { result: tk } = await upstash(`/hkeys/intel_transfers`);
 let found = 0;
 for (const key of tk) {
   const { result: value } = await upstash(
-    `/hget/arkham_transfers/${encodeURIComponent(key)}`,
+    `/hget/intel_transfers/${encodeURIComponent(key)}`,
   );
   try {
     const parsed = JSON.parse(value);

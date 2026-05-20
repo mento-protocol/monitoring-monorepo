@@ -58,10 +58,37 @@ describe("intel-deep", () => {
   it("getAllIntelDeep: returns all records, falls back to {} on null", async () => {
     const all = { "0xaaa": { address: "0xaaa", fetchedAt: "2026-01-01" } };
     hgetall.mockResolvedValue(all);
-    expect(await getAllIntelDeep()).toBe(all);
+    // toEqual (not toBe) because the legacy-fallback helper spreads-merges
+    // intel + arkham hashes into a fresh object.
+    expect(await getAllIntelDeep()).toEqual(all);
 
     hgetall.mockResolvedValue(null);
     expect(await getAllIntelDeep()).toEqual({});
+  });
+
+  it("getIntelDeep: falls back to legacy arkham_deep when intel is empty", async () => {
+    const legacyRecord = { address: "0xbbb", fetchedAt: "2026-01-01" };
+    hget.mockResolvedValueOnce(null).mockResolvedValueOnce(legacyRecord);
+    const result = await getIntelDeep("0xBBB");
+    expect(hget).toHaveBeenNthCalledWith(1, INTEL_DEEP_KEY, "0xbbb");
+    expect(hget).toHaveBeenNthCalledWith(2, "arkham_deep", "0xbbb");
+    expect(result).toBe(legacyRecord);
+  });
+
+  it("getAllIntelDeep: merges legacy entries, intel wins on collision", async () => {
+    const intel = { "0xaaa": { address: "0xaaa", source: "intel" } };
+    const legacy = {
+      "0xaaa": { address: "0xaaa", source: "arkham" }, // collides
+      "0xbbb": { address: "0xbbb", source: "arkham" }, // legacy-only
+    };
+    hgetall.mockImplementation((key: string) =>
+      Promise.resolve(key === INTEL_DEEP_KEY ? intel : legacy),
+    );
+    const result = await getAllIntelDeep();
+    expect(result).toEqual({
+      "0xaaa": { address: "0xaaa", source: "intel" },
+      "0xbbb": { address: "0xbbb", source: "arkham" },
+    });
   });
 });
 

@@ -1,7 +1,8 @@
-import { getRedis } from "./redis";
+import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 
 export const INTEL_TRANSFERS_KEY = "intel_transfers";
 const HASH_KEY = INTEL_TRANSFERS_KEY;
+const LEGACY_HASH_KEY = "arkham_transfers";
 
 // Types
 
@@ -46,15 +47,15 @@ export type IntelTransfersRecord = {
 export async function getIntelTransfers(
   address: string,
 ): Promise<IntelTransfersRecord | null> {
-  const redis = getRedis();
-  return redis.hget<IntelTransfersRecord>(HASH_KEY, address.toLowerCase());
+  return hgetWithLegacy<IntelTransfersRecord>(
+    HASH_KEY,
+    LEGACY_HASH_KEY,
+    address.toLowerCase(),
+  );
 }
 
 export async function getAllIntelTransfers(): Promise<
   Record<string, IntelTransfersRecord>
 > {
-  const redis = getRedis();
-  const raw =
-    await redis.hgetall<Record<string, IntelTransfersRecord>>(HASH_KEY);
-  return raw ?? {};
+  return hgetallWithLegacy<IntelTransfersRecord>(HASH_KEY, LEGACY_HASH_KEY);
 }

@@ -1,7 +1,8 @@
-import { getRedis } from "./redis";
+import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 
 export const INTEL_DEEP_KEY = "intel_deep";
 const HASH_KEY = INTEL_DEEP_KEY;
+const LEGACY_HASH_KEY = "arkham_deep";
 
 // Types
 
@@ -42,14 +43,15 @@ export type IntelDeepRecord = {
 export async function getIntelDeep(
   address: string,
 ): Promise<IntelDeepRecord | null> {
-  const redis = getRedis();
-  return redis.hget<IntelDeepRecord>(HASH_KEY, address.toLowerCase());
+  return hgetWithLegacy<IntelDeepRecord>(
+    HASH_KEY,
+    LEGACY_HASH_KEY,
+    address.toLowerCase(),
+  );
 }
 
 export async function getAllIntelDeep(): Promise<
   Record<string, IntelDeepRecord>
 > {
-  const redis = getRedis();
-  const raw = await redis.hgetall<Record<string, IntelDeepRecord>>(HASH_KEY);
-  return raw ?? {};
+  return hgetallWithLegacy<IntelDeepRecord>(HASH_KEY, LEGACY_HASH_KEY);
 }

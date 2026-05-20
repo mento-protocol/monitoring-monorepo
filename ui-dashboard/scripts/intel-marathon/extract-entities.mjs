@@ -2,10 +2,10 @@
 /**
  * Extraction #1 — Entity reverse-mapping.
  *
- * Scans existing arkham_deep + labels for every distinct Arkham entity slug
+ * Scans existing intel_deep + labels for every distinct Arkham entity slug
  * surfaced so far, then calls /intelligence/entity/{slug} for each. Persists
  * the full entity record (including the `addresses` list) into a new Upstash
- * hash `arkham_entities` keyed by slug.
+ * hash `intel_entities` keyed by slug.
  *
  * Goal: frozen reverse-lookup. After Arkham access expires, we can still
  * answer "is this address Binance?" by checking set membership against the
@@ -67,7 +67,7 @@ async function pipeline(commands) {
 function extractSlugs(deepEntries, labelEntries) {
   const slugs = new Set();
 
-  // From arkham_deep: walk every nested arkhamEntity.id
+  // From intel_deep: walk every nested arkhamEntity.id
   for (const raw of deepEntries) {
     try {
       const rec = JSON.parse(raw);
@@ -129,16 +129,16 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const rawFile = `${OUT_DIR}/extract-entities-raw.jsonl`;
 
-  console.log("→ Scanning arkham_deep + labels for entity slugs...");
+  console.log("→ Scanning intel_deep + labels for entity slugs...");
   const [deepResp, labelResp] = await pipeline([
-    ["HVALS", "arkham_deep"],
+    ["HVALS", "intel_deep"],
     ["HVALS", "labels"],
   ]);
   const slugs = extractSlugs(deepResp.result ?? [], labelResp.result ?? []);
   console.log(`  found ${slugs.length} unique entity slugs`);
 
   // Filter out slugs we've already fetched (resume safety).
-  const existing = await upstash(`/hkeys/arkham_entities`).catch(() => ({
+  const existing = await upstash(`/hkeys/intel_entities`).catch(() => ({
     result: [],
   }));
   const done = new Set(existing.result ?? []);
@@ -174,7 +174,7 @@ async function main() {
         };
         const addrCount = (data.addresses ?? []).length;
         totalAddresses += addrCount;
-        writes.push(["HSET", "arkham_entities", slug, JSON.stringify(record)]);
+        writes.push(["HSET", "intel_entities", slug, JSON.stringify(record)]);
         success++;
         if (writes.length >= 25) {
           await pipeline(writes.splice(0));

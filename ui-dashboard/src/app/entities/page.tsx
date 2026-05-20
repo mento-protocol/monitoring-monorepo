@@ -10,7 +10,10 @@ export default async function EntitiesPage() {
   const session = await getAuthSession();
   const email = session?.user?.email?.toLowerCase();
   if (!email?.endsWith(ALLOWED_DOMAIN)) notFound();
-  const slugs = await hkeysIntelEntities();
+  // Sort server-side: Redis HKEYS returns fields in storage order, which is
+  // not stable across requests (rehash, growth). Without sorting, paginated
+  // navigation can reshuffle between page loads and miss/repeat entities.
+  const slugs = (await hkeysIntelEntities()).slice().sort();
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">

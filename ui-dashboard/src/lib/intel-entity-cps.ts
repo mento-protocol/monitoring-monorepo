@@ -1,7 +1,8 @@
-import { getRedis } from "./redis";
+import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 
 export const INTEL_ENTITY_CPS_KEY = "intel_entity_cps";
 const HASH_KEY = INTEL_ENTITY_CPS_KEY;
+const LEGACY_HASH_KEY = "arkham_entity_cps";
 
 // Types
 
@@ -31,15 +32,11 @@ export type IntelEntityCpsRecord = {
 export async function getIntelEntityCps(
   slug: string,
 ): Promise<IntelEntityCpsRecord | null> {
-  const redis = getRedis();
-  return redis.hget<IntelEntityCpsRecord>(HASH_KEY, slug);
+  return hgetWithLegacy<IntelEntityCpsRecord>(HASH_KEY, LEGACY_HASH_KEY, slug);
 }
 
 export async function getAllIntelEntityCps(): Promise<
   Record<string, IntelEntityCpsRecord>
 > {
-  const redis = getRedis();
-  const raw =
-    await redis.hgetall<Record<string, IntelEntityCpsRecord>>(HASH_KEY);
-  return raw ?? {};
+  return hgetallWithLegacy<IntelEntityCpsRecord>(HASH_KEY, LEGACY_HASH_KEY);
 }

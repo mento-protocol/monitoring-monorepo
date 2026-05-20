@@ -8,7 +8,7 @@
  *
  * Standard bucket — fast.
  *
- * Persists combined record into arkham_wealth hash keyed by address.
+ * Persists combined record into intel_wealth hash keyed by address.
  */
 
 import process from "node:process";
@@ -99,7 +99,7 @@ async function buildTargets() {
     else targets.set(lower, { sources: ["has-forensic-report"] });
   }
 
-  const deep = await upstash(`/hgetall/arkham_deep`);
+  const deep = await upstash(`/hgetall/intel_deep`);
   const flat = deep.result ?? [];
   const ranked = [];
   for (let i = 0; i < flat.length; i += 2) {
@@ -149,7 +149,7 @@ async function main() {
   const targets = await buildTargets();
   console.log(`  ${targets.length} unique targets`);
 
-  const { result: doneArr } = await upstash(`/hkeys/arkham_wealth`).catch(
+  const { result: doneArr } = await upstash(`/hkeys/intel_wealth`).catch(
     () => ({ result: [] }),
   );
   const done = new Set(doneArr ?? []);
@@ -204,7 +204,7 @@ async function main() {
           _truncated: true,
         });
       }
-      writes.push(["HSET", "arkham_wealth", address, jsonStr]);
+      writes.push(["HSET", "intel_wealth", address, jsonStr]);
       success++;
       if (writes.length >= 5) await pipeline(writes.splice(0));
       appendFileSync(rawFile, JSON.stringify({ address, ts: now }) + "\n");

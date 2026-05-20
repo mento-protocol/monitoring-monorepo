@@ -18,14 +18,14 @@ if (!url || !token) {
 const redis = new Redis({ url, token });
 
 const samples = [
-  { hash: "arkham_deep", key: "0x747ff380cd43248824ec4d16510142e63b6e3b7e" },
+  { hash: "intel_deep", key: "0x747ff380cd43248824ec4d16510142e63b6e3b7e" },
   {
-    hash: "arkham_transfers",
+    hash: "intel_transfers",
     key: "0xb28837949e7a3f1ac862036e8a0ae392c9ff9bb4",
   },
-  { hash: "arkham_wealth", key: "0x747ff380cd43248824ec4d16510142e63b6e3b7e" },
-  { hash: "arkham_entities", key: "openocean" },
-  { hash: "arkham_entity_cps", key: "sharofbek84" },
+  { hash: "intel_wealth", key: "0x747ff380cd43248824ec4d16510142e63b6e3b7e" },
+  { hash: "intel_entities", key: "openocean" },
+  { hash: "intel_entity_cps", key: "sharofbek84" },
 ];
 
 for (const { hash, key } of samples) {
@@ -43,11 +43,11 @@ for (const { hash, key } of samples) {
 
 const counts = {};
 for (const hash of [
-  "arkham_deep",
-  "arkham_transfers",
-  "arkham_wealth",
-  "arkham_entities",
-  "arkham_entity_cps",
+  "intel_deep",
+  "intel_transfers",
+  "intel_wealth",
+  "intel_entities",
+  "intel_entity_cps",
 ]) {
   const keys = await redis.hkeys(hash);
   counts[hash] = keys?.length ?? 0;

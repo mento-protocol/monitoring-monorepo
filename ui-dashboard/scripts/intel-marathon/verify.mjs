@@ -48,20 +48,20 @@ async function main() {
 
   const [labelsLen, deepLen, reportsLen] = await pipeline([
     ["HLEN", "labels"],
-    ["HLEN", "arkham_deep"],
+    ["HLEN", "intel_deep"],
     ["HLEN", "reports"],
   ]);
 
   console.log(`Hash sizes:`);
   console.log(`  labels:      ${labelsLen.result}`);
-  console.log(`  arkham_deep: ${deepLen.result}`);
+  console.log(`  intel_deep: ${deepLen.result}`);
   console.log(`  reports:     ${reportsLen.result}`);
   console.log("");
 
-  // Sample 10 random arkham_deep rows.
-  const { result: keys } = await upstash(`/hkeys/arkham_deep`);
+  // Sample 10 random intel_deep rows.
+  const { result: keys } = await upstash(`/hkeys/intel_deep`);
   if (keys.length > 0) {
-    console.log("Random arkham_deep samples:");
+    console.log("Random intel_deep samples:");
     const sample = [];
     const seen = new Set();
     while (sample.length < Math.min(10, keys.length)) {
@@ -71,7 +71,7 @@ async function main() {
       sample.push(keys[i]);
     }
     for (const addr of sample) {
-      const { result } = await upstash(`/hget/arkham_deep/${addr}`);
+      const { result } = await upstash(`/hget/intel_deep/${addr}`);
       try {
         const rec = JSON.parse(result);
         // counterparties is keyed by chain (e.g. {ethereum: [...], polygon: [...]})

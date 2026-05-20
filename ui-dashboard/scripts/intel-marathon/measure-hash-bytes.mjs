@@ -10,11 +10,11 @@ const redis = new Redis({
 const HASHES = [
   "labels",
   "reports",
-  "arkham_deep",
-  "arkham_transfers",
-  "arkham_wealth",
-  "arkham_entities",
-  "arkham_entity_cps",
+  "intel_deep",
+  "intel_transfers",
+  "intel_wealth",
+  "intel_entities",
+  "intel_entity_cps",
 ];
 
 for (const hash of HASHES) {

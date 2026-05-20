@@ -409,6 +409,11 @@ type IntelSnapshotFields = {
  * writer. Trusted (cron-restore) mode only — no sanitization; the cron wrote
  * exactly what it read out of Redis. Accepts both new (`intelDeep`) and legacy
  * (`arkhamDeep`) field names so older Blob backups can still be restored.
+ *
+ * Empty `{}` maps are stripped alongside `undefined`: a backup captured while
+ * Redis was empty (e.g. between deploy and the rename migration) would otherwise
+ * route into the trusted-replace path and DEL the live intel hashes, wiping
+ * the marathon corpus on disaster-recovery restore.
  */
 function extractIntelFields(body: AddressLabelsSnapshot): {
   fields: IntelSnapshotFields;
@@ -421,9 +426,14 @@ function extractIntelFields(body: AddressLabelsSnapshot): {
   fields.intelWealth = body.intelWealth ?? body.arkhamWealth;
   fields.intelEntities = body.intelEntities ?? body.arkhamEntities;
   fields.intelEntityCps = body.intelEntityCps ?? body.arkhamEntityCps;
-  // Strip undefined fields so we can test hasArkhamPayload accurately.
   for (const k of Object.keys(fields) as Array<keyof IntelSnapshotFields>) {
-    if (fields[k] === undefined) delete fields[k];
+    const v = fields[k];
+    if (
+      v === undefined ||
+      (typeof v === "object" && v !== null && Object.keys(v).length === 0)
+    ) {
+      delete fields[k];
+    }
   }
   return { fields, hasArkhamPayload: Object.keys(fields).length > 0 };
 }

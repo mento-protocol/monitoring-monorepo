@@ -16,23 +16,6 @@ type Props = {
   params: Promise<{ slug: string }>;
 };
 
-function EntityNotFound({ slug }: { slug: string }) {
-  return (
-    <div className="mx-auto max-w-2xl px-4 py-16 text-center">
-      <p className="text-lg font-semibold text-white">Entity not found</p>
-      <p className="mt-2 text-sm text-slate-400">
-        No entity with slug &ldquo;{slug}&rdquo; exists in the database.
-      </p>
-      <Link
-        href="/entities"
-        className="mt-6 inline-block text-sm text-indigo-400 hover:underline"
-      >
-        &larr; Back to entities
-      </Link>
-    </div>
-  );
-}
-
 function EntityHeader({
   entity,
   slug,
@@ -113,7 +96,7 @@ export default async function EntityDetailPage({ params }: Props) {
   // Avoids a floating promise on the 404 path; the extra hget on the happy
   // path is sub-ms keyed by the same slug.
   const entity = await getIntelEntity(slug);
-  if (!entity) return <EntityNotFound slug={slug} />;
+  if (!entity) notFound();
   const cps = await getIntelEntityCps(slug);
 
   const tags = (entity.populatedTags ?? []) as Array<{

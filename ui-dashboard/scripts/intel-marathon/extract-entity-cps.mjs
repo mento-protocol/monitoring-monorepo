@@ -2,9 +2,9 @@
 /**
  * Extraction #1b — Entity-to-entity counterparty graph.
  *
- * For each entity in arkham_entities, calls /counterparties/entity/{slug}
+ * For each entity in intel_entities, calls /counterparties/entity/{slug}
  * (HEAVY bucket, 1.1s pace). Persists chain-keyed counterparty arrays into
- * a new arkham_entity_cps hash. Captures Arkham's edge graph — who does
+ * a new intel_entity_cps hash. Captures Arkham's edge graph — who does
  * Binance/Squid/Uniswap interact with most — that's uniquely Arkham and
  * not derivable from any other source.
  */
@@ -77,12 +77,12 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const rawFile = `${OUT_DIR}/extract-entity-cps-raw.jsonl`;
 
-  console.log("→ Loading entity slugs from arkham_entities...");
-  const { result: slugs } = await upstash(`/hkeys/arkham_entities`);
+  console.log("→ Loading entity slugs from intel_entities...");
+  const { result: slugs } = await upstash(`/hkeys/intel_entities`);
   console.log(`  ${slugs.length} entities cached`);
 
   // Resume: skip entities already fetched.
-  const { result: doneArr } = await upstash(`/hkeys/arkham_entity_cps`).catch(
+  const { result: doneArr } = await upstash(`/hkeys/intel_entity_cps`).catch(
     () => ({ result: [] }),
   );
   const done = new Set(doneArr ?? []);
@@ -134,7 +134,7 @@ async function main() {
             _truncated: true,
           });
         }
-        writes.push(["HSET", "arkham_entity_cps", slug, jsonStr]);
+        writes.push(["HSET", "intel_entity_cps", slug, jsonStr]);
         success++;
         totalCps += cpsCount;
         if (writes.length >= 10) await pipeline(writes.splice(0));

@@ -1,7 +1,8 @@
-import { getRedis } from "./redis";
+import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 
 export const INTEL_WEALTH_KEY = "intel_wealth";
 const HASH_KEY = INTEL_WEALTH_KEY;
+const LEGACY_HASH_KEY = "arkham_wealth";
 
 // Types
 
@@ -43,14 +44,15 @@ export type IntelWealthRecord = {
 export async function getIntelWealth(
   address: string,
 ): Promise<IntelWealthRecord | null> {
-  const redis = getRedis();
-  return redis.hget<IntelWealthRecord>(HASH_KEY, address.toLowerCase());
+  return hgetWithLegacy<IntelWealthRecord>(
+    HASH_KEY,
+    LEGACY_HASH_KEY,
+    address.toLowerCase(),
+  );
 }
 
 export async function getAllIntelWealth(): Promise<
   Record<string, IntelWealthRecord>
 > {
-  const redis = getRedis();
-  const raw = await redis.hgetall<Record<string, IntelWealthRecord>>(HASH_KEY);
-  return raw ?? {};
+  return hgetallWithLegacy<IntelWealthRecord>(HASH_KEY, LEGACY_HASH_KEY);
 }

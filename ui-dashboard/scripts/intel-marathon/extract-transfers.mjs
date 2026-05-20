@@ -10,9 +10,9 @@
  *  - cluster-7dc08ec28f299c06 deployer EOA + 16 fleet contracts
  *  - 11 already-investigated forensic-report addresses (from `reports` hash)
  *  - The Mento Cross-Chain Rebalancer + Foundation Safe
- *  - Top N attested Mento traders from `arkham_deep` (by counterparty USD)
+ *  - Top N attested Mento traders from `intel_deep` (by counterparty USD)
  *
- * Persists to NEW Upstash hash `arkham_transfers`, keyed by address.
+ * Persists to NEW Upstash hash `intel_transfers`, keyed by address.
  *
  * Usage:
  *   UPSTASH_REDIS_REST_URL=... UPSTASH_REDIS_REST_TOKEN=... ARKHAM_API_KEY=... \
@@ -128,8 +128,8 @@ async function buildTargetList() {
     }
   }
 
-  // 4. Top attested addresses from arkham_deep — pick by counterparty USD volume.
-  const deep = await upstash(`/hgetall/arkham_deep`);
+  // 4. Top attested addresses from intel_deep — pick by counterparty USD volume.
+  const deep = await upstash(`/hgetall/intel_deep`);
   const flat = deep.result ?? [];
   const ranked = [];
   for (let i = 0; i < flat.length; i += 2) {
@@ -190,7 +190,7 @@ async function main() {
   );
 
   // Filter out already-fetched.
-  const existing = await upstash(`/hkeys/arkham_transfers`).catch(() => ({
+  const existing = await upstash(`/hkeys/intel_transfers`).catch(() => ({
     result: [],
   }));
   const done = new Set(existing.result ?? []);
@@ -242,7 +242,7 @@ async function main() {
             _truncated: true,
           });
         }
-        writes.push(["HSET", "arkham_transfers", address, jsonStr]);
+        writes.push(["HSET", "intel_transfers", address, jsonStr]);
         success++;
         totalTransfers += transferCount;
         if (writes.length >= 10) await pipeline(writes.splice(0));

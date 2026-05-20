@@ -1056,6 +1056,39 @@ describe("handleSnapshot trusted restore mode", () => {
     );
   });
 
+  it("strips empty intel maps from replace mode (prevents disaster-recovery wipe)", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({ name: "Test", tags: ["mento"] }),
+        },
+        reports: {},
+        // Simulates the deploy-before-migration window: backup captured live
+        // Redis when intel_* hashes were still empty. Without stripping,
+        // replaceSnapshotHashes would DEL each intel hash on restore, wiping
+        // any marathon data that landed in the meantime.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: {} as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelTransfers: {} as any,
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(replaceSnapshotHashes).toHaveBeenCalledOnce();
+    const call = (replaceSnapshotHashes as ReturnType<typeof vi.fn>).mock
+      .calls[0] as unknown[];
+    expect(call?.[0]).not.toHaveProperty("intelDeep");
+    expect(call?.[0]).not.toHaveProperty("intelTransfers");
+  });
+
   it("does NOT pass intel hashes through in merge mode (user-uploaded import)", async () => {
     const res = await handleSnapshot(
       {

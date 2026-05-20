@@ -1,7 +1,12 @@
-import { getRedis } from "./redis";
+import {
+  hgetWithLegacy,
+  hgetallWithLegacy,
+  hkeysWithLegacy,
+} from "./intel-legacy-fallback";
 
 export const INTEL_ENTITIES_KEY = "intel_entities";
 const HASH_KEY = INTEL_ENTITIES_KEY;
+const LEGACY_HASH_KEY = "arkham_entities";
 
 // Types
 
@@ -37,19 +42,15 @@ export const INTEL_ENTITY_SLUG_RE = /^[a-z0-9_-]{1,128}$/;
 export async function getIntelEntity(
   slug: string,
 ): Promise<IntelEntityRecord | null> {
-  const redis = getRedis();
-  return redis.hget<IntelEntityRecord>(HASH_KEY, slug);
+  return hgetWithLegacy<IntelEntityRecord>(HASH_KEY, LEGACY_HASH_KEY, slug);
 }
 
 export async function getAllIntelEntities(): Promise<
   Record<string, IntelEntityRecord>
 > {
-  const redis = getRedis();
-  const raw = await redis.hgetall<Record<string, IntelEntityRecord>>(HASH_KEY);
-  return raw ?? {};
+  return hgetallWithLegacy<IntelEntityRecord>(HASH_KEY, LEGACY_HASH_KEY);
 }
 
 export async function hkeysIntelEntities(): Promise<string[]> {
-  const redis = getRedis();
-  return redis.hkeys(HASH_KEY);
+  return hkeysWithLegacy(HASH_KEY, LEGACY_HASH_KEY);
 }

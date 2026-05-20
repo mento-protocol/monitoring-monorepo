@@ -5,7 +5,7 @@
  *  - conditional /intelligence/entity/{slug} if Tier 1 surfaced an entity
  *  - conditional /intelligence/contract/{addr}?chain=… if contract:true on a supported chain
  *
- * Persists derived tags into `labels` hash + raw JSON into NEW `arkham_deep` hash.
+ * Persists derived tags into `labels` hash + raw JSON into NEW `intel_deep` hash.
  *
  * Candidate set (in priority order):
  *  1. cluster-7dc08ec callers (top N from Hasura SwapEvent where txTo in 16 cluster contracts)
@@ -141,7 +141,7 @@ async function getLabels() {
 }
 
 async function hexistsArkhamDeep(addr) {
-  const { result } = await upstash(`/hexists/arkham_deep/${addr}`);
+  const { result } = await upstash(`/hexists/intel_deep/${addr}`);
   return result === 1;
 }
 
@@ -480,7 +480,7 @@ async function main() {
   const rawFile = `${OUT_DIR}/tier2-raw.jsonl`;
   const progressFile = `${OUT_DIR}/tier2-progress.jsonl`;
 
-  // Resume: skip addresses already in arkham_deep.
+  // Resume: skip addresses already in intel_deep.
   const ranked = await buildCandidateSet();
   writeFileSync(
     `${OUT_DIR}/tier2-candidates.json`,
@@ -645,17 +645,17 @@ async function main() {
         };
         await pipeline([
           ["HSET", "labels", address, JSON.stringify(newEntry)],
-          ["HSET", "arkham_deep", address, deepJson],
+          ["HSET", "intel_deep", address, deepJson],
         ]);
         existingLabels[address] = newEntry;
         if (derived.name) attested++;
       } else {
         // Manual label — don't touch labels, but store deep data.
-        await pipeline([["HSET", "arkham_deep", address, deepJson]]);
+        await pipeline([["HSET", "intel_deep", address, deepJson]]);
       }
     } else {
       // No derived attribution — still store deep for completeness.
-      await pipeline([["HSET", "arkham_deep", address, deepJson]]);
+      await pipeline([["HSET", "intel_deep", address, deepJson]]);
       nullCount++;
     }
 
