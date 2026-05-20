@@ -96,11 +96,10 @@ echo "Resolved: ${IMAGE_BY_DIGEST}"
 #   --to-revisions=<prev-revision>=100 --region="$REGION"
 echo ""
 echo "Rolling Cloud Run revision..."
-# Revision name format: <short-sha>-<epoch>. Epoch disambiguator avoids the
-# 409 "revision already exists" error when redeploying the same commit
-# (same pattern as the CI workflow, which uses $GITHUB_RUN_ID for the
-# equivalent role).
-REVISION_SUFFIX="${TAG}-$(date +%s)"
+# Revision name format: r-<short-sha>-<epoch>. The letter prefix is required
+# because Cloud Run revision suffixes must start with [a-z], while raw git SHAs
+# can start with a digit. Epoch disambiguates redeploys of the same commit.
+REVISION_SUFFIX="r-${TAG}-$(date +%s)"
 gcloud run services update metrics-bridge \
   --project="$PROJECT" \
   --region="$REGION" \

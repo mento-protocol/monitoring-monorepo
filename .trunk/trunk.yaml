@@ -79,7 +79,7 @@ actions:
         Runs the path-aware agent quality gate before push. The gate maps the
         branch diff to the required local checks instead of always running the
         full monorepo pre-push suite.
-      run: git fetch --quiet origin main && bash scripts/agent-quality-gate.sh --run --fail-fast --base origin/main
+      run: git fetch --quiet origin main && bash scripts/agent-quality-gate.sh --run --fail-fast --skip-if-fresh --base origin/main
       triggers:
         - git_hooks: [pre-push]
   enabled:
