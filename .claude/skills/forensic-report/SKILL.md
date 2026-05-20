@@ -71,19 +71,19 @@ Before making any live Arkham API calls, check the five caches populated by the 
 // 1. Full enrichment (multi-chain address_enriched + counterparties)
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HGET", "arkham_deep", "<addrLower>"]],
+  commands: [["HGET", "intel_deep", "<addrLower>"]],
 });
 
 // 2. Transfer history (transfers?base=<addr>&limit=1000)
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HGET", "arkham_transfers", "<addrLower>"]],
+  commands: [["HGET", "intel_transfers", "<addrLower>"]],
 });
 
 // 3. Wealth snapshot (balances + portfolio 0d/30d/90d/180d)
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HGET", "arkham_wealth", "<addrLower>"]],
+  commands: [["HGET", "intel_wealth", "<addrLower>"]],
 });
 ```
 
@@ -91,23 +91,23 @@ mcp__upstash__redis_database_run_redis_commands({
 
 **If the API key is still valid AND the cached entry is older than ~7 days**, you MAY refresh with a live call; otherwise prefer cache.
 
-**Entity cache path:** if `arkham_deep` returns an entity slug (look for `arkhamEntity.id` or a similar slug field in the payload), check the entity-level caches too:
+**Entity cache path:** if `intel_deep` returns an entity slug (look for `arkhamEntity.id` or a similar slug field in the payload), check the entity-level caches too:
 
 ```js
 // 4. Entity profile (fetched from /intelligence/entity/{slug})
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HGET", "arkham_entities", "<entitySlug>"]],
+  commands: [["HGET", "intel_entities", "<entitySlug>"]],
 });
 
 // 5. Entity counterparties (/counterparties/entity/{slug})
 mcp__upstash__redis_database_run_redis_commands({
   database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
-  commands: [["HGET", "arkham_entity_cps", "<entitySlug>"]],
+  commands: [["HGET", "intel_entity_cps", "<entitySlug>"]],
 });
 ```
 
-Cache sizes (as of 2026-05-20): `arkham_deep` 529 entries, `arkham_transfers` 60, `arkham_wealth` 80, `arkham_entities` 161, `arkham_entity_cps` 161.
+Cache sizes (as of 2026-05-20): `intel_deep` 529 entries, `intel_transfers` 60, `intel_wealth` 80, `intel_entities` 161, `intel_entity_cps` 161.
 
 ### Step 2 — Cast of characters (Arkham + funder graph)
 

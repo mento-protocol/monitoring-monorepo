@@ -19,7 +19,7 @@ type Transfer = {
   toAddress: { address: string };
   tokenSymbol?: string | null;
   unitValue?: number | null;
-  historicalUSD?: number | null;
+  usd?: number | null;
   chain: string;
   transactionHash: string;
 };
@@ -92,7 +92,7 @@ function TransferRow({ tx, isIn }: { tx: Transfer; isIn: boolean }) {
         {tx.unitValue != null ? `${tx.unitValue.toLocaleString()} ${sym}` : "—"}
       </Td>
       <Td align="right" small mono>
-        {formatTransferUsd(tx.historicalUSD)}
+        {formatTransferUsd(tx.usd)}
       </Td>
       <Td small muted>
         {tx.chain}

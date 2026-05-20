@@ -32,7 +32,7 @@ type ArkhamTransfer = {
   tokenDecimals: number;
   unitValue: number;
   tokenId: string | null;
-  historicalUSD: number;
+  usd: number;
   chain: string;
 };
 

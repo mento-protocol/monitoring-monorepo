@@ -61,18 +61,29 @@ redis.call('DEL', src)
 return 'merged:' .. added
 `.trim();
 
-async function upstashPost(path, body) {
-  const res = await fetch(`${REST_URL}${path}`, {
+async function upstashPipeline(commands) {
+  const res = await fetch(`${REST_URL}/pipeline`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${REST_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(commands),
   });
+  if (!res.ok) {
+    throw new Error(
+      `Upstash pipeline → ${res.status}: ${await res.text().catch(() => "")}`,
+    );
+  }
   const json = await res.json();
-  if (json.error) throw new Error(`Upstash error: ${json.error}`);
-  return json.result;
+  for (let i = 0; i < json.length; i++) {
+    if (json[i] && json[i].error) {
+      throw new Error(
+        `Upstash pipeline cmd[${i}] (${commands[i][0]}): ${json[i].error}`,
+      );
+    }
+  }
+  return json;
 }
 
 async function upstashGet(command, ...args) {
@@ -90,8 +101,12 @@ async function hlen(key) {
 }
 
 async function migratePair(src, dst) {
-  // EVAL signature via Upstash REST: [script, [keys], [args]]
-  return upstashPost(`/eval`, [MIGRATE_LUA, [src, dst], []]);
+  // Upstash pipeline EVAL shape: ["EVAL", <script>, "<numkeys>", key1, key2, ...].
+  // Earlier POST /eval body shape was wrong and would have failed at runtime.
+  const [evalResp] = await upstashPipeline([
+    ["EVAL", MIGRATE_LUA, "2", src, dst],
+  ]);
+  return evalResp.result;
 }
 
 async function main() {
