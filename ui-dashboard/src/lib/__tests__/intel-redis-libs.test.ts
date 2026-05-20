@@ -162,6 +162,8 @@ describe("intel-entities", () => {
   it("INTEL_ENTITY_SLUG_RE accepts valid slugs and rejects invalid ones", () => {
     expect(INTEL_ENTITY_SLUG_RE.test("binance")).toBe(true);
     expect(INTEL_ENTITY_SLUG_RE.test("some-entity_123")).toBe(true);
+    // Arkham slugs may contain dots (e.g. "crypto.com"); regex must accept.
+    expect(INTEL_ENTITY_SLUG_RE.test("crypto.com")).toBe(true);
     expect(INTEL_ENTITY_SLUG_RE.test("Invalid Slug!")).toBe(false);
     expect(INTEL_ENTITY_SLUG_RE.test("")).toBe(false);
   });

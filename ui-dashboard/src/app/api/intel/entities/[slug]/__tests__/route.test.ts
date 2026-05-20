@@ -7,7 +7,7 @@ vi.mock("@/auth", () => ({
 }));
 vi.mock("@/lib/intel-entities", () => ({
   getIntelEntity: vi.fn(),
-  INTEL_ENTITY_SLUG_RE: /^[a-z0-9_-]{1,128}$/,
+  INTEL_ENTITY_SLUG_RE: /^[a-z0-9_.-]{1,128}$/,
 }));
 vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
 

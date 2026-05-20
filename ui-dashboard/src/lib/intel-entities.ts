@@ -36,8 +36,13 @@ export type IntelEntityRecord = {
   populatedTags: ArkhamTag[] | null;
 };
 
-/** Slug validation regex shared by the entity + entity-cps API routes. */
-export const INTEL_ENTITY_SLUG_RE = /^[a-z0-9_-]{1,128}$/;
+/**
+ * Slug validation regex shared by the entity + entity-cps API routes.
+ * Arkham slugs can contain dots (e.g. `crypto.com`) — extraction stores
+ * whatever Arkham returns, so the regex has to accept them or the API
+ * route 400s a record that exists in Redis.
+ */
+export const INTEL_ENTITY_SLUG_RE = /^[a-z0-9_.-]{1,128}$/;
 
 export async function getIntelEntity(
   slug: string,
