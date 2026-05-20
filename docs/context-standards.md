@@ -58,4 +58,4 @@ Rules:
 
 ## Maintenance Checks
 
-Run `pnpm agent:context-check` to verify managed metadata, scoped AGENTS coverage, skill mirrors, and Cloud Run revision suffix guardrails.
+Run `pnpm agent:context-check` to verify managed metadata, scoped AGENTS coverage, skill mirrors, and Cloud Run revision suffix guardrails. Skill mirrors must match their canonical `.agents/skills` source except for documented runtime-specific provenance literals, such as forensic-report writes using `source: "Codex"` in the Codex skill and `source: "claude"` in the Claude skill.

@@ -257,7 +257,7 @@ The address-book index endpoint reads from the same hash on every request, so th
 
 - `body`: required, non-empty, ≤ 50,000 characters (50KB)
 - `title`: optional, ≤ 200 characters, dropped if empty after trim
-- `source`: `"manual" | "Codex" | "import"` — always set `"Codex"` from this skill
+- `source`: always set `"Codex"` from this skill; the API also accepts other provenance values
 - `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
 
 These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.

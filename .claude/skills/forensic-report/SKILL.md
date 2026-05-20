@@ -29,7 +29,7 @@ If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"),
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "Codex"` so the editor can distinguish skill-produced from hand-typed reports.
+2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
 
 ## Output template
 
@@ -185,7 +185,7 @@ const partial = {
   body,
   ...(title ? { title: title.slice(0, 200) } : {}),
   authorEmail: AUTHOR_EMAIL, // from git config user.email at runtime
-  source: "Codex", // already in the AddressReport enum
+  source: "claude", // already in the AddressReport enum
 };
 ```
 
@@ -257,7 +257,7 @@ The address-book index endpoint reads from the same hash on every request, so th
 
 - `body`: required, non-empty, ≤ 50,000 characters (50KB)
 - `title`: optional, ≤ 200 characters, dropped if empty after trim
-- `source`: `"manual" | "Codex" | "import"` — always set `"Codex"` from this skill
+- `source`: always set `"claude"` from this skill; the API also accepts other provenance values
 - `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
 
 These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.

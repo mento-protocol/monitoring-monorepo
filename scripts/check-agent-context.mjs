@@ -33,6 +33,23 @@ function readRequired(filePath) {
   return read(filePath);
 }
 
+function normalizeSkillContent(filePath, content) {
+  if (!filePath.endsWith("forensic-report/SKILL.md")) return content;
+  return content
+    .replaceAll('source: "Codex"', 'source: "<agent-source>"')
+    .replaceAll('source: "claude"', 'source: "<agent-source>"')
+    .replaceAll('`source: "Codex"`', '`source: "<agent-source>"`')
+    .replaceAll('`source: "claude"`', '`source: "<agent-source>"`')
+    .replaceAll(
+      'set `"Codex"` from this skill',
+      'set `"<agent-source>"` from this skill',
+    )
+    .replaceAll(
+      'set `"claude"` from this skill',
+      'set `"<agent-source>"` from this skill',
+    );
+}
+
 function walk(dir, predicate = () => true) {
   const root = path.join(repoRoot, dir);
   const out = [];
@@ -135,7 +152,9 @@ for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"))) {
     fail(`${mirror}: missing mirror for canonical ${skill}`);
     continue;
   }
-  if (read(skill) !== read(mirror)) {
+  const canonicalSkill = normalizeSkillContent(skill, read(skill));
+  const mirrorSkill = normalizeSkillContent(mirror, read(mirror));
+  if (canonicalSkill !== mirrorSkill) {
     fail(`${mirror}: differs from canonical ${skill}`);
   }
 }
