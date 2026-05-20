@@ -137,6 +137,7 @@ function RadioPillGroup<TOption, TValue extends string>({
         const value = resolveValue(option);
         const active = selected === value;
         const props = getItemProps(i + 1);
+        const label = renderLabel(option);
         return (
           <button
             key={value}
@@ -149,7 +150,7 @@ function RadioPillGroup<TOption, TValue extends string>({
             onClick={() => !active && onChange(value)}
             className={pillClasses(active, false)}
           >
-            {renderLabel(option)}
+            {label}
           </button>
         );
       })}

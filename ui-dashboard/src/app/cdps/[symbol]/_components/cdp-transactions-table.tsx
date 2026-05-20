@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -86,12 +86,9 @@ function TransactionsBody({
     return rows.filter((row) => badgeKindFor(row) === typeFilter);
   }, [rows, typeFilter]);
 
-  // Reset to page 1 when the filter narrows the view so users don't land on
-  // an empty page N after a previously valid pagination.
-  useEffect(() => {
-    setPage(1);
-  }, [typeFilter]);
-
+  // When a filter narrows the result set, clamp the requested page down
+  // to the last valid page so users don't land on an empty page N. No
+  // useEffect needed — the derived clamp absorbs the stale `page`.
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const clampedPage = Math.max(1, Math.min(page, totalPages));
   const start = (clampedPage - 1) * PAGE_SIZE;
