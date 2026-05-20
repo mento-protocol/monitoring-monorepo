@@ -93,3 +93,45 @@ variable "splunk_on_call_alerts_webhook_url" {
   type        = string
   sensitive   = true
 }
+
+variable "slack_bot_token" {
+  description = "Slack Bot User OAuth Token (xoxb-...) used by Grafana to post alerts. Same bot as the v3 alerts in terraform/alerts/."
+  type        = string
+  sensitive   = true
+}
+
+variable "slack_channel_critical" {
+  description = "Slack channel name (without #) for pager-tier Aegis alerts (severity=page)."
+  type        = string
+  default     = "alerts-critical"
+}
+
+variable "slack_channel_oracles" {
+  description = "Slack channel name (without #) for oracle warning alerts (oracle-relayers, oracle liveness)."
+  type        = string
+  default     = "alerts-oracles"
+}
+
+variable "slack_channel_pools" {
+  description = "Slack channel name (without #) for pool-mechanics warning alerts (trading-limits, trading-modes, deviation)."
+  type        = string
+  default     = "alerts-pools"
+}
+
+variable "slack_channel_reserve" {
+  description = "Slack channel name (without #) for reserve balance warning alerts."
+  type        = string
+  default     = "alerts-reserve"
+}
+
+variable "slack_channel_infra" {
+  description = "Slack channel name (without #) for infrastructure warning alerts (aegis service, metrics-bridge, indexer) and the root catch-all."
+  type        = string
+  default     = "alerts-infra"
+}
+
+variable "slack_channel_testnet" {
+  description = "Slack channel name (without #) for all non-prod alerts (celo-sepolia, monad-testnet)."
+  type        = string
+  default     = "alerts-testnet"
+}
