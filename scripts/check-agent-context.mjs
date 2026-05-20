@@ -175,6 +175,9 @@ for (const file of managedContextFiles) {
     fail(`${file}: required managed context file is missing`);
   } else {
     requireMetadata(file);
+    if (read(file).includes("/Users/")) {
+      fail(`${file}: managed context must not include /Users paths`);
+    }
   }
 }
 

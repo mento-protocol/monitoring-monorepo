@@ -29,6 +29,11 @@ cwd_repo="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
 recent_commits=0
 if [ -n "$session_started_at" ]; then
   recent_commits="$(git -C "$cwd" rev-list --count --since="$session_started_at" HEAD 2>/dev/null || echo 0)"
+else
+  recent_commits="$(
+    git -C "$cwd" reflog --since='2 hours ago' --format=%gs HEAD 2>/dev/null |
+      awk '/^(commit|commit \(amend\)|rebase .*: commit)/ { count++ } END { print count + 0 }'
+  )"
 fi
 modified="$(git -C "$cwd" status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
 

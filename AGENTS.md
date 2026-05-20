@@ -165,7 +165,7 @@ pnpm alerts:init / alerts:plan / alerts:apply
 
 ```bash
 terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
-terraform plan  -var-file=/Users/chapati/code/mento/monitoring-monorepo/terraform/terraform.tfvars
+terraform plan  -var-file=<main-checkout>/terraform/terraform.tfvars
 ```
 
 Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.

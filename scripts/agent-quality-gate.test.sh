@@ -110,6 +110,45 @@ assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
 assert_script_occurrences 0 'shasum -a 256 "$1"'
 
+hook_repo="$(mktemp -d)"
+(
+  cd "$hook_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  cp "$repo_root/scripts/agent-session-end-hook.sh" scripts/
+  echo initial > README.md
+  git add README.md scripts/agent-session-end-hook.sh
+  git commit -qm init
+  git reflog expire --expire=now --all
+  echo changed >> README.md
+  git add README.md
+  git commit -qm "commit from session"
+  printf '{"cwd":"%s"}' "$hook_repo" |
+    bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+)
+rm -rf "$hook_repo"
+assert_contains "Session touched the tree (1 recent commit(s), 0 unstaged file(s))."
+
+hook_noop_repo="$(mktemp -d)"
+(
+  cd "$hook_noop_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  cp "$repo_root/scripts/agent-session-end-hook.sh" scripts/
+  echo initial > README.md
+  git add README.md scripts/agent-session-end-hook.sh
+  git commit -qm init
+  git reflog expire --expire=now --all
+  printf '{"cwd":"%s"}' "$hook_noop_repo" |
+    bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+)
+rm -rf "$hook_noop_repo"
+assert_not_contains "Session touched the tree"
+
 validator_repo="$(mktemp -d)"
 (
   cd "$validator_repo"
