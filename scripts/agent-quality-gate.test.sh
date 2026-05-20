@@ -758,6 +758,10 @@ run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
 
+run_gate "scripts/agent-session-end-hook.sh"
+assert_contains "- bash -n scripts/agent-session-end-hook.sh (shell script changed)"
+assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
+
 run_gate "scripts/check-react-doctor-diff.sh"
 assert_contains "- bash -n scripts/check-react-doctor-diff.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
@@ -1106,6 +1110,11 @@ run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
+: > .codex/hooks.json
+run_context_check_expect_failure
+assert_contains ".codex/hooks.json: invalid JSON"
+restore_hook_configs
+
 node - <<'NODE'
 const fs = require("node:fs");
 const hooks = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
@@ -1121,6 +1130,11 @@ run_gate ".claude/settings.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
+: > .claude/settings.json
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: invalid JSON"
+restore_hook_configs
+
 node - <<'NODE'
 const fs = require("node:fs");
 const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
@@ -1129,7 +1143,7 @@ settings.hooks.SessionEnd[0].hooks[0].command =
 fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
 NODE
 run_context_check_expect_failure
-assert_contains '.claude/settings.json: expected SessionEnd command to execute ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
+assert_contains '.claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
 restore_hook_configs
 
 run_gate "docs/deleted.md"

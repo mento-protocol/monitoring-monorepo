@@ -954,6 +954,9 @@ while IFS= read -r path; do
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;
+        scripts/agent-session-end-hook.sh)
+          add_command "pnpm agent:context-check" "agent SessionEnd hook changed"
+          ;;
       esac
       ;;
     scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)

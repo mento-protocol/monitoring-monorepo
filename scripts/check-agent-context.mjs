@@ -36,7 +36,7 @@ function readRequired(filePath) {
 
 function readJsonRequired(filePath) {
   const content = readRequired(filePath);
-  if (!content) return null;
+  if (content === null) return null;
   try {
     return JSON.parse(content);
   } catch (error) {
@@ -257,7 +257,7 @@ function isCodexSessionEndCommand(command) {
 }
 
 function isClaudeSessionEndCommand(command) {
-  return /^bash\s+\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh(?:\s|$)/.test(
+  return /^bash\s+["']\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh["'](?:\s|$)/.test(
     command,
   );
 }
@@ -285,7 +285,7 @@ if (claudeSettings) {
   }
   if (!commands.some(isClaudeSessionEndCommand)) {
     fail(
-      ".claude/settings.json: expected SessionEnd command to execute ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash",
+      ".claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash",
     );
   }
 }
