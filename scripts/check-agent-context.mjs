@@ -50,6 +50,17 @@ function normalizeSkillContent(filePath, content) {
     );
 }
 
+function hasExecutableLine(content, pattern) {
+  return content
+    .split("\n")
+    .some(
+      (line) =>
+        line.trim() !== "" &&
+        !line.trim().startsWith("#") &&
+        pattern.test(line),
+    );
+}
+
 function walk(dir, predicate = () => true, { required = false } = {}) {
   const root = path.join(repoRoot, dir);
   const out = [];
@@ -128,14 +139,21 @@ const scopedAgentDirs = [
   "ui-dashboard",
 ];
 
+const canonicalSkillFiles = walk(
+  ".agents/skills",
+  (file) => !file.endsWith("/"),
+  { required: true },
+);
+const claudeSkillFiles = walk(".claude/skills", (file) => !file.endsWith("/"), {
+  required: true,
+});
+
 const managedContextFiles = [
   "AGENTS.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
-  ...walk(".agents/skills", (file) => file.endsWith("/SKILL.md"), {
-    required: true,
-  }),
+  ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
   ...walk(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,
   }),
@@ -155,9 +173,14 @@ for (const dir of scopedAgentDirs) {
   }
 }
 
-for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"), {
-  required: true,
-})) {
+for (const mirror of claudeSkillFiles) {
+  const canonical = mirror.replace(/^\.claude\/skills\//, ".agents/skills/");
+  if (!exists(canonical)) {
+    fail(`${mirror}: extra mirror without canonical ${canonical}`);
+  }
+}
+
+for (const skill of canonicalSkillFiles) {
   const mirror = skill.replace(/^\.agents\/skills\//, ".claude/skills/");
   if (!exists(mirror)) {
     fail(`${mirror}: missing mirror for canonical ${skill}`);
@@ -173,8 +196,9 @@ for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"), {
 const metricsWorkflow = readRequired(".github/workflows/metrics-bridge.yml");
 if (
   metricsWorkflow &&
-  !metricsWorkflow.includes(
-    '--revision-suffix="r-${GITHUB_SHA::7}-${GITHUB_RUN_ID}"',
+  !hasExecutableLine(
+    metricsWorkflow,
+    /^\s*--revision-suffix="r-\$\{GITHUB_SHA::7\}-\$\{GITHUB_RUN_ID\}"\s*\\?\s*$/,
   )
 ) {
   fail(
@@ -185,7 +209,10 @@ if (
 const bridgeDeploy = readRequired("scripts/deploy-bridge.sh");
 if (
   bridgeDeploy &&
-  !bridgeDeploy.includes('REVISION_SUFFIX="r-${TAG}-$(date +%s)"')
+  !hasExecutableLine(
+    bridgeDeploy,
+    /^\s*REVISION_SUFFIX="r-\$\{TAG\}-\$\(date \+%s\)"\s*$/,
+  )
 ) {
   fail(
     "scripts/deploy-bridge.sh: expected Cloud Run revision suffix to use r-${TAG}-$(date +%s)",

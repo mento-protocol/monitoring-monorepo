@@ -931,7 +931,7 @@ while IFS= read -r path; do
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
       case "$path" in
-        docs/context-standards.md|AGENTS.md|*/AGENTS.md)
+        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
       esac
