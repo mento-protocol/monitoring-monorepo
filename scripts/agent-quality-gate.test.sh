@@ -6,7 +6,18 @@ cd "$repo_root"
 
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
-trap 'rm -f "$paths_file" "$output_file" "$output_file.pnpm-args"' EXIT
+codex_hooks_backup="$(mktemp)"
+claude_settings_backup="$(mktemp)"
+untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
+cp .codex/hooks.json "$codex_hooks_backup"
+cp .claude/settings.json "$claude_settings_backup"
+
+restore_hook_configs() {
+  cp "$codex_hooks_backup" .codex/hooks.json
+  cp "$claude_settings_backup" .claude/settings.json
+}
+
+trap 'restore_hook_configs; rm -f "$paths_file" "$output_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -73,6 +84,16 @@ assert_not_contains() {
   fi
 }
 
+run_context_check_expect_failure() {
+  set +e
+  node scripts/check-agent-context.mjs > "$output_file" 2>&1
+  local exit_code=$?
+  set -e
+
+  [[ "$exit_code" -ne 0 ]] ||
+    fail "expected agent context check to fail, but it exited 0"
+}
+
 line_number() {
   local needle="$1"
   grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
@@ -105,6 +126,59 @@ assert_script_occurrences() {
 assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
+assert_script_occurrences 1 "command -v sha256sum"
+assert_script_occurrences 1 "command -v shasum"
+assert_script_occurrences 0 "shasum -a 256 | awk"
+assert_script_occurrences 0 'shasum -a 256 "$1"'
+
+printf 'scratch\n' > "$untracked_skill_artifact"
+node scripts/check-agent-context.mjs > "$output_file"
+assert_contains "Agent context check passed"
+rm -f "$untracked_skill_artifact"
+
+hook_repo="$(mktemp -d)"
+(
+  cd "$hook_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  cp "$repo_root/scripts/agent-session-end-hook.sh" scripts/
+  echo initial > README.md
+  git add README.md scripts/agent-session-end-hook.sh
+  git commit -qm init
+  git reflog expire --expire=now --all
+  echo changed >> README.md
+  git add README.md
+  git commit -qm "commit from session"
+  minimal_bin="$(mktemp -d)"
+  for tool in awk cat dirname git pwd tr wc; do
+    ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
+  done
+  printf '{"cwd":"%s"}' "$hook_repo" |
+    env PATH="$minimal_bin" /bin/bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+  rm -rf "$minimal_bin"
+)
+rm -rf "$hook_repo"
+assert_contains "Session touched the tree (1 recent commit(s), 0 unstaged file(s))."
+
+hook_noop_repo="$(mktemp -d)"
+(
+  cd "$hook_noop_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  cp "$repo_root/scripts/agent-session-end-hook.sh" scripts/
+  echo initial > README.md
+  git add README.md scripts/agent-session-end-hook.sh
+  git commit -qm init
+  git reflog expire --expire=now --all
+  printf '{"cwd":"%s"}' "$hook_noop_repo" |
+    bash scripts/agent-session-end-hook.sh > "$output_file" 2>&1
+)
+rm -rf "$hook_noop_repo"
+assert_not_contains "Session touched the tree"
 
 validator_repo="$(mktemp -d)"
 (
@@ -114,7 +188,8 @@ validator_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "true",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   }
 }
 JSON
@@ -209,7 +284,8 @@ package_json_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   }
 }
 JSON
@@ -244,6 +320,7 @@ package_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -281,6 +358,7 @@ package_scripts_object_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -314,7 +392,8 @@ mixed_package_script_repo="$(mktemp -d)"
   "name": "fixture",
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh"
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs"
   },
   "dependencies": {
     "left-pad": "1.3.0"
@@ -608,6 +687,7 @@ assert_contains "- TF_DATA_DIR=terraform/alerts/.terraform-agent-gate terraform 
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -678,6 +758,10 @@ run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
 
+run_gate "scripts/agent-session-end-hook.sh"
+assert_contains "- bash -n scripts/agent-session-end-hook.sh (shell script changed)"
+assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
+
 run_gate "scripts/check-react-doctor-diff.sh"
 assert_contains "- bash -n scripts/check-react-doctor-diff.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
@@ -745,6 +829,114 @@ assert_contains "Command elapsed-time summary:"
 assert_contains "- ok "
 assert_not_contains "expected fixture failure that should stay quiet"
 assert_not_contains "successful command noise that should stay quiet"
+
+fresh_stamp_repo="$(mktemp -d)"
+(
+  cd "$fresh_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> README.md
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+  git add README.md
+  git commit -qm "commit validated content"
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "fresh gate stamp did not skip duplicate run"
+)
+rm -rf "$fresh_stamp_repo"
+assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+stale_stamp_repo="$(mktemp -d)"
+(
+  cd "$stale_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> README.md
+  COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+  printf 'changed again\n' >> README.md
+  COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "fresh gate stamp was reused after worktree content changed"
+)
+rm -rf "$stale_stamp_repo"
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+sha256sum_repo="$(mktemp -d)"
+(
+  cd "$sha256sum_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p bin tools
+  cat > bin/sha256sum <<'STUB'
+#!/usr/bin/env bash
+counter_file="${SHA256SUM_COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+if [[ "$#" -eq 0 ]]; then
+  cat >/dev/null
+fi
+printf 'fixturehash  %s\n' "${1:--}"
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/sha256sum tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> README.md
+  SHA256SUM_COUNTER_FILE="$sha256sum_repo/sha256sum-count" \
+    PATH="$sha256sum_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  [[ -s "$sha256sum_repo/sha256sum-count" ]] ||
+    fail "gate did not use sha256sum when it was available"
+)
+rm -rf "$sha256sum_repo"
+assert_contains "+ ./tools/trunk check README.md"
 
 quiet_failure_repo="$(mktemp -d)"
 (
@@ -870,6 +1062,7 @@ rename_repo="$(mktemp -d)"
 rm -rf "$rename_repo"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 rename_repo="$(mktemp -d)"
 (
@@ -908,6 +1101,50 @@ assert_contains "Detected surfaces:"
 assert_contains "- docs"
 assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
+
+run_gate "docs/pr-checklists/recurring-review-patterns.md"
+assert_contains "- docs"
+assert_contains "- pnpm agent:context-check (agent context standards changed)"
+
+run_gate ".codex/hooks.json"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-check (agent context files changed)"
+
+: > .codex/hooks.json
+run_context_check_expect_failure
+assert_contains ".codex/hooks.json: invalid JSON"
+restore_hook_configs
+
+node - <<'NODE'
+const fs = require("node:fs");
+const hooks = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
+hooks.hooks.SessionEnd[0].hooks[0].command =
+  "bash -lc 'echo git rev-parse --show-toplevel && echo scripts/agent-session-end-hook.sh'";
+fs.writeFileSync(".codex/hooks.json", `${JSON.stringify(hooks, null, 2)}\n`);
+NODE
+run_context_check_expect_failure
+assert_contains ".codex/hooks.json: expected SessionEnd command to execute scripts/agent-session-end-hook.sh via resolved repo root"
+restore_hook_configs
+
+run_gate ".claude/settings.json"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-check (agent context files changed)"
+
+: > .claude/settings.json
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: invalid JSON"
+restore_hook_configs
+
+node - <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+settings.hooks.SessionEnd[0].hooks[0].command =
+  "echo ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh";
+fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
+NODE
+run_context_check_expect_failure
+assert_contains '.claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
+restore_hook_configs
 
 run_gate "docs/deleted.md"
 assert_contains "- docs"

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null) && exec bash \"$repo/scripts/agent-session-end-hook.sh\"'"
+          }
+        ]
+      }
+    ]
+  }
+}

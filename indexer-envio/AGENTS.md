@@ -1,3 +1,11 @@
+---
+title: Envio Indexer Instructions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
+---
+
 # AGENTS.md — Envio Indexer
 
 ## What This Is
@@ -76,6 +84,46 @@ Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
 Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
+
+## Local dev gotchas
+
+### Hasura must run on port 8080
+
+The envio binary hardcodes `http://localhost:8080/hasura/healthz?strict=true` for its startup liveness check. This port is not configurable via env vars. **Never set `HASURA_EXTERNAL_PORT` to anything other than 8080** (or omit it entirely) — the binary will silently fail its health check and retry with exponential backoff, stalling startup for 5+ minutes per attempt.
+
+### Only one local indexer at a time
+
+All envio configs share the same Docker project name (`generated`, derived from the `generated/` directory name) and the same Hasura port (8080). Running two local indexers simultaneously will cause container name conflicts. Start one, stop it, then start the other.
+
+### Postgres healthcheck is auto-patched after codegen
+
+The envio-generated `generated/docker-compose.yaml` does not include a healthcheck for the postgres service. Without one, Docker reports `Health:""` and the envio binary waits indefinitely. `scripts/run-envio-with-env.mjs` automatically patches the file to add a `pg_isready` healthcheck after every `pnpm codegen` run. If you regenerate the compose file manually, re-run codegen via the script (not directly via `envio codegen`) to re-apply the patch.
+
+### EventHandlers.ts must remain the handler entry point
+
+Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects all handler registrations (e.g. `FPMM.Swap.handler(...)`) to be reachable from this file at module load time. The actual logic lives in `src/handlers/*.ts` — these are imported as side effects from `EventHandlers.ts`. If you add a new handler file, you **must** add a corresponding `import "./handlers/yourFile"` in `EventHandlers.ts` and then re-run `pnpm indexer:codegen` to verify Envio picks it up.
+
+## Adding to the indexer
+
+### Promoting a new treb deployment
+
+When a new set of contracts has been deployed and a new `@mento-protocol/contracts` version is published:
+
+1. Update the `@mento-protocol/contracts` version in `package.json` and `../ui-dashboard/package.json`
+2. Update namespace string(s) in `../shared-config/deployment-namespaces.json` (e.g. `"42220": "mainnet-v2"`)
+3. Run `pnpm install` from the repo root
+4. Refresh vendored ABIs from the new package: `pnpm generate:abis`. Commit any resulting diff under `abis/`.
+5. Typecheck: `pnpm --filter @mento-protocol/ui-dashboard typecheck` and `pnpm typecheck`
+
+### Adding a new contract to index
+
+1. Add the ABI to `abis/`:
+   - **If it ships in `@mento-protocol/contracts`:** add the filename to the allow-list in `scripts/generateAbis.mjs` and run `pnpm generate:abis`.
+   - **Otherwise** (e.g. external/minimal-subset ABIs like the Wormhole NTT trio): hand-vendor under `abis/` and document the exclusion in the `generateAbis.mjs` header so future runs don't try to overwrite it.
+2. Add contract entry in the relevant config(s): `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`
+3. Add entity to `schema.graphql`
+4. Add handler in the appropriate `src/handlers/*.ts` file (or create a new one and import it from `src/EventHandlers.ts`)
+5. Run `pnpm codegen` to regenerate types
 
 ## Indexer patterns the bots keep catching
 

@@ -9,6 +9,7 @@ const scripts = pkg.scripts ?? {};
 const expectedScripts = {
   "agent:quality-gate": "./scripts/agent-quality-gate.sh",
   "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+  "agent:context-check": "node scripts/check-agent-context.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {

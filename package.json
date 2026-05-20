@@ -13,6 +13,7 @@
     "deploy:dashboard": "./scripts/deploy-dashboard.sh",
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
     "aegis:build": "pnpm --filter @mento-protocol/aegis build",
     "aegis:dev": "pnpm --filter @mento-protocol/aegis dev",
     "aegis:typecheck": "pnpm --filter @mento-protocol/aegis typecheck",

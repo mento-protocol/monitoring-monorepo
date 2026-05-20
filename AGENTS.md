@@ -1,3 +1,11 @@
+---
+title: Monitoring Monorepo Instructions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
+---
+
 # AGENTS.md — Monitoring Monorepo
 
 ## Overview
@@ -11,6 +19,11 @@ pnpm monorepo with three packages:
 - `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Agent, dashboards, and alert-rule Terraform
 
 ## Operating Rule (read this before opening PRs)
+
+Context authority, placement, and metadata rules live in
+`docs/context-standards.md`. Treat canonical context as current operating truth
+and non-canonical notes/plans as historical input that must be verified before
+use.
 
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
@@ -59,12 +72,14 @@ package-script refusal path. Docs-only changes run targeted Trunk checks against
 the changed docs paths instead of full-repo Trunk.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--fail-fast`, so the hook stops on the first failed mapped command instead of
-burning through the rest of the suite. For a push that intentionally changes
-package scripts or package-manager config, review the script/lifecycle diff
-first, then temporarily set
-`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
-push.
+`--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
+command instead of burning through the rest of the suite, and it reuses a
+recent successful manual gate run when the fetched base commit, mapped command
+plan, gate implementation, changed paths, and validated file content are
+unchanged. For a push that intentionally changes package scripts or
+package-manager config, review the script/lifecycle diff first, then
+temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
+config for that push.
 
 ## PR feedback sweep rule
 
@@ -76,110 +91,14 @@ Treat code review as a batch-boundary verifier, not as the inner edit loop. When
 
 For process or policy-router PRs, build a coverage matrix before implementation. Use `AGENTS.md`, `docs/pr-checklists/*`, CI path filters, package scripts, and existing command docs to map each changed-path class to its required commands, checklist prompts, refusal guards, and regression tests. Run cheap targeted checks while editing; reserve broad local reviews and external bot reviews for completed batches.
 
-## Recurring PR-review patterns — fix locally, not in review
+## Recurring PR-review patterns
 
-Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. **Subsections with a linked checklist (`— docs/pr-checklists/X.md`)** treat the checklist as canonical — the inline tldr is a routing hint, not the source of truth. Subsections without a link are inline-canonical (no upstream checklist yet — candidates for future extraction).
-
-### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
-
-tldr: every Hasura-polling SWR hook MUST set `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`) and `AbortSignal.timeout(8_000)` paired with the 10s interval. Respect the 1000-row cap with pre-rolled snapshots or the `fetchAllFeeSnapshotPages` offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts:333`). New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern) — NEVER mixed into the page's primary pool query (hosted Hasura rejects unknown columns during the deploy+resync window). Distinguish `isLoading` from "data resolved to zero" — NEVER render "100% / no breaches" while `data === undefined`. Full rules in the linked checklist.
-
-### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
-
-tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), NEVER `now - start` directly. Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, NEVER from the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
-
-### Keyboard a11y on controlled widgets — `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`
-
-tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` locally, re-sync via render-time ref check — not `useEffect`). `router.replace`-backed tablists use manual activation (arrows = focus only; Enter/Space = activate via native `<button>` onClick). Never gate keyboard activations on `selected`-equality (racy under URL render-lag — bit us 3× on PR #350). `role="tablist"` contains ONLY `role="tab"` children (axe critical) — wrap LimitSelect / dropdowns / search inputs as siblings. Full rules in the linked checklist.
-
-### Indexer entity IDs
-
-- Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
-- Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
-
-### Multi-chain coverage
-
-- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). Bit us on PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries) — flagged 4× across cursor + codex inline reviews
-
-### Config-name → metadata cross-reference tests
-
-- When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). Caught by cursor + claude[bot] on PR #316
-
-### Indexer RPC self-heal (`rpc.ts`)
-
-- Multi-getter RPC helpers (`fetchFees` etc.) use `Promise.allSettled` + distinct sentinels: `-1` = not yet attempted (retry), `-2` = viem "returned no data" signature = getter missing from bytecode (stop retrying). All-or-nothing `Promise.all` loses wins from fulfilled getters; a single sentinel creates forever-retry loops on older deployments lacking a getter (bit us on PR #222)
-- Every `rpc.ts` helper that calls `getRpcClient` wraps it in try/catch. `getRpcClient` throws synchronously on unknown chainIds + missing HyperRPC tokens; unwrapped throws escape into handlers and stall indexing. Regressed twice in PR #222 — if you touch fee/rebalancing RPC helpers, check the outer guard is still in place
-
-### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
-
-tldr: rename/remove resources REQUIRE a `moved` block (`deletion_protection = true` makes a missed `moved` block fatal). Cloud Run `--revision-suffix` MUST start with a lowercase letter (RFC 1035) AND be unique per run (`$GITHUB_RUN_ID`). Probe path is `/health`, NEVER `/healthz` (Cloud Run v2 reserves `/healthz`). Bootstrap `image` MUST respond to the configured probe path. WIF requires `roles/iam.serviceAccountTokenCreator` on the runtime SA the deployer impersonates. Full rules in the linked checklist.
-
-### CI workflow gates — `docs/pr-checklists/ci-workflow-gates.md`
-
-tldr: required-status workflows MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
-
-### File-size budget
-
-- Source files MUST stay under **600 lines** (soft cap, advisory). If your change would push a file over 600 lines, split it in the same PR — extract sub-components, helpers, or per-domain modules. Don't append "just one more thing" to a file that's already drifting up.
-- Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
-- Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness).
-- **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
-- A monthly drift detector runs on cron and opens a PR appending newly-over-budget files to `BACKLOG.md` so growth doesn't slip past unnoticed.
-- Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
-
-### Security / CSP
-
-- CSP `connect-src` MUST include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/src/lib/csp.ts`'s `CSP_CONNECT_SRC`)
-- Do NOT widen `script-src` with `unsafe-eval` without proof a library actually needs it — the current policy is deliberately tight and Plotly runs fine without it
-- Auth/allowlist constants must be centralized — don't repeat domain literals across files
-
-### Migration discipline
-
-- Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
-
-### Dynamic-route metadata + private data — `docs/pr-checklists/dynamic-route-metadata.md`
-
-tldr: `generateMetadata` reading access-controlled data must gate on `isPublic === true` before emitting tags (no session, tags visible to crawlers). `export const revalidate = 0` for access-controlled sources (ISR would serve stale post-revocation tags from the edge cache). Metadata-fetching body lives in a dedicated `_lib/og-metadata.ts` helper imported by the page — not directly in `layout.tsx` — to keep the RSC label-leak guard allowlist narrow (PR #345 commit `b476776`). Full rules in the linked checklist.
-
-### SWR optimistic-update + React-key remount races
-
-- When a child component is React-keyed by a field your optimistic update also writes to (e.g. `key={entry.updatedAt}` while `upsertEntry` bumps `updatedAt` synchronously in `mutate(...)`), you've created a self-remount race against your own writes. Mid-PUT the form unmounts and a fresh mount (with `saving=false`) re-enables the Save button, opening a double-submit window. Reach for the pending-ledger architecture shipped in PR #345 (`address-labels-provider.tsx` + `address-book/[address]/page.tsx`) before re-deriving these through 15 review rounds:
-  - **Per-mount instance ID via counter-backed ref** — NOT `useId`. `useId` is tree-position-stable, so a remount at the same key path returns the same id and stale-callback dedup falsely accepts old `(false)` calls.
-  - **Separate save / delete owner refs** — a single shared `mutationOwnerRef` breaks under cross-flow timing (Save→Remove fast-click); each flow needs its own owner.
-  - **Pending ledger lifted to provider state** — page-mount-scoped state dies on navigation; a user who saves → bounces to the index → re-enters the same address sees a fresh empty ledger and an enabled Save button. Survive page mounts by living in `AddressLabelsProvider`.
-  - **Synchronous `inFlightRef` guards** — React's `setSaving(true)` is async; a fast double-click slips past the disabled state. A `useRef({ saving: false, deleting: false })` flipped synchronously inside the handler before any state setter is the only thing that prevents two PUTs from leaving the form for the same Save click.
-  - **`<fieldset disabled>` cascade** — disabling Save/Remove without disabling the inputs lets users type into a "would-be-discarded" form; on the optimistic→settled `updatedAt` transition the remount drops their edits. Wrap inputs+buttons in a fieldset.
-  - **Content fingerprint always in keys** — not just when `updatedAt` is empty. Imports preserve a non-empty `updatedAt` even when content changed; `JSON.stringify([name, tags, notes, isPublic])` in the key catches that case.
-
-### Sibling-audit rule for multi-component flows
-
-- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
-
-### Code health budgets — `docs/pr-checklists/code-health.md`
-
-CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
-ratchet in over PR 2-6 of the BACKLOG plan.
-
-- **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard`, `metrics-bridge`, and `aegis` must not import each other's internals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
-- **No circular dependencies (blocking)**: `pnpm code-health:deps` fails on any cycle. The historical `indexer-envio/src/{pool,deviationBreach}.ts` cycle was broken by importing health predicates directly from `pool/health.js`; no baseline carve-out remains.
-- **Dashboard lib/ → components/ direction (blocking, `pnpm code-health:deps`)**: `ui-dashboard/src/lib/` must not import from `src/components/`. The allowed direction is `components/ → lib/` (components use utilities, never the reverse). Violations indicate lib has accidentally coupled pure logic to the render layer. Pre-inventory: zero violations; rule ships at `error`.
-- **Dashboard route-private directories (blocking, `pnpm code-health:deps`)**: `_components/` and `_tabs/` directories inside `app/<route>/` are private to that route. Code from `app/<route-A>/` must not import from `app/<route-B>/_components/` or `app/<route-B>/_tabs/`. Adding a new route with a `_components/` or `_tabs/` directory requires a matching `dashboard-route-private-<routename>` rule in `.dependency-cruiser.cjs`. Pre-inventory: zero violations; rules ship at `error`.
-- **Indexer handlers must not bypass the RPC effect layer (blocking, `pnpm code-health:deps`)**: `indexer-envio/src/handlers/**` must not import directly from `rpc/` implementation files (`rpc/pool-state.ts`, `rpc/oracle-state.ts`, `rpc/biPoolManager.ts`, `rpc/breakers.ts`, etc.). Handlers must go through `rpc/effects.ts` (the Envio Effect API facade, which provides per-batch memoisation, deduplication, and rate-limiting) or the `rpc.ts` barrel (for DB helpers like `getPoolsByFeed`). Direct fetcher imports bypass effect deduplication and fire two RPC reads per event instead of one. Pre-inventory: zero violations; rule ships at `error`.
-- **Dead-code / dep hygiene (blocking, `pnpm --filter <pkg> knip`)**: every package runs `knip` in strict mode. Unused files / unlisted deps / binary entries are errors. Unused exports + types are warns — clean them when you touch the file. Peer-dep build tools (axe-core, tailwindcss, @stryker-mutator/api) go in `ignoreDependencies` with a 1-line "why" in this checklist.
-- **Complexity / size / cognitive-complexity budgets (blocking, diff-aware baseline)**: per-package thresholds for `complexity`, `max-lines-per-function`, `max-depth`, `max-params`, plus `eslint-plugin-sonarjs` (cognitive-complexity + 4 suspicious-pattern rules). Strictest on `shared-config`; loosest inside `indexer-envio/src/handlers/**`. Pre-existing violations live in each package's `eslint-baseline.json`; new violations fail `pnpm --filter <pkg> lint` via `scripts/eslint-baseline-diff.mjs`. See `docs/pr-checklists/code-health.md`.
-- **Duplication detection (advisory, `pnpm code-health:duplication`)**: `jscpd` scans `src/` across all packages on every PR (excluding tests, `indexer-envio/src/handlers/**`, route entry pages, and pure type modules — they're intentionally repetitive). The CI job is non-blocking — surfaces a comment-summary + an artifact in `reports/jscpd/`. Use the artifact to plan extract-helper refactors.
-- **Code-health history report (advisory, `pnpm code-health:history`)**: writes `reports/code-health-history.md` with hotspots, change-coupling, ownership concentration, weekly delta. Run before large refactors so the targets are picked from data, not vibes. Weekly cron + Slack delivery in a follow-up PR.
-- **Per-package coverage floors (blocking, `pnpm --filter <pkg> test:coverage`)**: vitest `coverage.thresholds` in each `vitest.config.ts` enforces a floor so deleting tests can't silently lower coverage below the baseline. Floors calibrated at `floor(measured) - 2` to absorb variance. Current per-package floors live in each `vitest.config.ts` (source of truth). CI calls `test:coverage` (not bare `test`) for all four packages. When adding significant new code, re-measure and raise the floors accordingly.
-- **Bridge mutation score (blocking, `pnpm bridge:mutation`)**: `metrics-bridge/stryker.config.mjs` sets `break: 84` (current baseline 86.01% with a 2-pt margin for measurement noise). `.github/workflows/mutation-testing.yml` runs the bridge job on every PR (no `paths:` filter, so the check is required-status-safe per `AGENTS.md` rule above). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the mutation step runs when the trigger isn't `pull_request`, when the filter failed, or when the diff touched bridge inputs (probe source, test files, stryker + mutation vitest configs, `metrics-bridge/package.json`, `metrics-bridge/tsconfig.json`, shared-config inputs, root package-manager files, or the workflow). The job fails when the rebalance-probe mutation score drops below 84%. Dashboard + indexer mutation stay advisory (weekly cron + manual). See `docs/pr-checklists/mutation-testing.md`.
-- **Type-aware async safety + exhaustive switches (blocking, diff-aware baseline)**: `@typescript-eslint/no-floating-promises`, `no-misused-promises`, and `switch-exhaustiveness-check` are `error` on all four packages. Floating-promises catches missing `await`; misused-promises catches passing async callbacks where a void return is expected (use `void doSomething()` or wrap in a sync callback); switch-exhaustiveness forces every discriminated-union / enum switch to cover every variant. `ui-dashboard` configures `no-misused-promises` with `checksVoidReturn.attributes: false` so React event-handler attributes (`<button onClick={async () => ...}>`) are allowed — the synthetic event system swallows rejections correctly. Non-attribute void-return contexts (`setTimeout(async ...)`, function arguments, etc.) still fire and caught the `poller.ts` + `gql-retry.ts` bugs in this PR. Type-aware rules are scoped to `src/**/*.{ts,tsx}` minus `*.d.ts` + tests (the TS project service doesn't pick those up, and async tests are intentionally noisy).
-- **`noUncheckedIndexedAccess` (blocking via `pnpm <pkg> typecheck`)**: `shared-config`, `indexer-envio`, `metrics-bridge`, and `aegis` ship with the TS compiler flag on — `arr[i]` is typed as `T | undefined`, forcing explicit guards on every index access. `ui-dashboard` is deferred (355 typecheck errors) and tracked in BACKLOG for incremental burn-down.
-- **`exactOptionalPropertyTypes` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — `{ x?: T }` (absent key) is distinct from `{ x: T | undefined }` (present but undefined). Assigning `undefined` to an optional property is an error; omit the key instead (spread pattern: `...(val !== undefined && { key: val })`). `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
-- **`verbatimModuleSyntax` (blocking via `pnpm <pkg> typecheck`)**: `shared-config` ships with this flag — every type-only import must use `import type { ... }` syntax; value imports use plain `import`. Prevents accidental runtime imports of pure types, makes intent explicit, and plays well with `isolatedModules`. `indexer-envio`, `metrics-bridge`, and `ui-dashboard` remain on the ratchet backlog.
-- **Bundle size gate (blocking, `pnpm dashboard:size-limit`)**: `.github/workflows/size-limit.yml` runs on every PR (no `paths:` filter, required-status-safe). The job's inline `filter` step (`continue-on-error: true`) + `decide` step fail-closed when path detection fails — the build + size check runs when the filter failed or when the diff touched dashboard inputs. Budgets and current baseline live in `ui-dashboard/.size-limit.cjs` (source of truth — brotli-compressed `.next/static/` output, budget = baseline × 1.10). To tighten: `pnpm dashboard:build && pnpm dashboard:size-limit --json`, update limits in `.size-limit.cjs`, commit the updated baseline comment.
-- **Lockfile integrity + registry check (blocking, `pnpm lockfile:lint`)**: `scripts/lockfile-lint.mjs` validates pnpm-lock.yaml on every PR via `.github/workflows/supply-chain.yml`. Two checks: (1) every package in the `packages:` section has a valid sha512 integrity hash — prevents tampered-tarball installs; (2) every `.npmrc` discovered by walking the repo (excluding `.git/` + `node_modules/`) and every `registries:` block in `pnpm-workspace.yaml` is verified to NOT redirect to a non-canonical host (exact-match host check, not prefix — lookalikes like `registry.npmjs.org.evil.com` are rejected). Note: pnpm v9 no longer embeds `resolved:` URLs in the lockfile (unlike npm/yarn), so the `lockfile-lint` npm package cannot parse it; the check is a custom Node.js script with zero additional deps. CI job is sub-30s (no `pnpm install`). Part of the "Package-Manager Supply-Chain Hardening" thread.
-- **Core Web Vitals + accessibility gate (`lhci autorun`, advisory only)**: `.github/workflows/lighthouse.yml` runs on every PR (no `paths:` filter, required-status-safe). Polls the Vercel preview URL via GitHub Deployments API (5-min timeout), then runs `@lhci/cli` against homepage + `/pools`. Skips fork PRs and Dependabot. Budgets and current baselines in `.lighthouserc.cjs`. Assertions are currently `warn` (non-blocking) pending a reliable Vercel deployment-protection bypass — see BACKLOG entry. Promote to `error` once 5+ stable runs are collected with bypass working. Pairs with `size-limit.yml` (bundle bytes) — different failure classes.
-- **GraphQL schema diff (advisory, `pnpm code-health:schema-diff`)**: `.github/workflows/schema-diff.yml` runs on every PR (no `paths:` filter, required-status-safe). Inline `filter` step + `decide` step run the diff only when `indexer-envio/schema.graphql` changed (fail-closed on path-detection error). Uses `graphql`'s `findBreakingChanges` + `findDangerousChanges` to compare `origin/<base>:indexer-envio/schema.graphql` against `HEAD`. Results posted as a sticky PR comment (header `schema-diff`); exit code always 0 (advisory). Breaking changes (removals, type narrowing, new required args) surfaced prominently; dangerous changes (default shifts, new optional fields) listed separately; safe additions skipped. Local run: `pnpm code-health:schema-diff`. Promotion to blocking is a follow-up once real-PR signal has been collected.
-- **Env-var validation (pattern — `src/env.ts` per package)**: each package owns a `src/env.ts` that parses `process.env` via Zod at module load and exports typed constants (`env` for indexer-envio + metrics-bridge; `clientEnv` / `serverEnv` for ui-dashboard). Use `.catch(default)` (not `.default()`) for numeric/enum fields that have a fallback so invalid values silently resolve instead of throwing. `ui-dashboard` splits `NEXT_PUBLIC_*` into `clientEnv` and server-only secrets into `serverEnv` — never import `serverEnv` from a client component. Files whose tests manipulate `process.env` at test time (via `vi.stubEnv`) keep direct `process.env` reads; the static parse runs before any test hook fires. Dynamic computed-key reads (`process.env[config.envVar]`) also stay as-is.
+Recurring automated-review hazards are canonicalized in
+`docs/pr-checklists/recurring-review-patterns.md`. Read that checklist when a
+change touches cross-layer state, CI/deploy behavior, code-health rules,
+dashboard interaction flows, security headers, package-manager behavior, or
+other review-prone surfaces. Keep root instructions as routing context; put the
+detailed rules in the checklist.
 
 ## Quick Commands
 
@@ -246,65 +165,24 @@ pnpm alerts:init / alerts:plan / alerts:apply
 
 ```bash
 terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
-terraform plan  -var-file=/Users/chapati/code/mento/monitoring-monorepo/terraform/terraform.tfvars
+terraform plan  -var-file=<main-checkout>/terraform/terraform.tfvars
 ```
 
 Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.
 
-## Package Details
+## Package routing index
 
-### aegis
+Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via symlink). Open the relevant file for package-specific rules, gotchas, and verification.
 
-- **Package:** `@mento-protocol/aegis`
-- **Runtime:** NestJS service deployed to GCP App Engine in `mento-monitoring` (`aegis/app.yaml`)
-- **Purpose:** Polls v2 on-chain contract state via RPC view calls and exposes Prometheus metrics at `/metrics`
-- **Grafana Agent:** `aegis/grafana-agent/` remains the App Engine service that scrapes Aegis and metrics-bridge, then remote-writes to Grafana Cloud. Terraform creates the Secret Manager containers; run `pnpm aegis:agent:seed-secrets` before the first agent deploy in a fresh project.
-- **Terraform:** `aegis/terraform/` owns the Aegis Grafana dashboards, folders, alert rules, Discord contact points, and Splunk On-Call routing. The backend remains `gs://mento-terraform-tfstate-6ed6/aegis`.
-- **Contracts:** `aegis/contracts/` uses Foundry with submodules under `aegis/lib/`; run `forge test` from `aegis/` when Solidity helpers change.
-- **Commands:** Use the root `pnpm aegis:*` scripts for build/dev/test/lint/deploy/logs/Terraform/Grafana Agent deploy.
-
-### shared-config
-
-- **Package:** `@mento-protocol/monitoring-config` (private, built with `pnpm --filter @mento-protocol/monitoring-config build`)
-- **Purpose:** Single source of truth for chain + token metadata across the monorepo. Derives token symbols, pool pair labels, and explorer URLs from `@mento-protocol/contracts` + `shared-config/*.json` so every consumer stays on the same data.
-- **Consumed by:** `ui-dashboard` and `metrics-bridge` via `workspace:*` dependency. `indexer-envio` intentionally vendors `config/deployment-namespaces.json` + reimplements its token filter in `src/feeToken.ts` — Envio may build the indexer outside the pnpm workspace, so the workspace dep is unsafe there (see `indexer-envio/src/contractAddresses.ts:14-18`).
-- **Exports:**
-  - `./deployment-namespaces.json` — chain ID → active treb namespace (edit when promoting a new deployment)
-  - `./fx-calendar.json` — FX market close/reopen anchors for weekend-aware oracle math
-  - `./chain-metadata.json` — chain ID → `{ slug, label, explorerBaseUrl }` (new — edit when a new chain comes online)
-  - `./chains` — `chainSlug`, `chainLabel`, `explorerBaseUrl`, `explorerAddressUrl`, `explorerTxUrl`
-  - `./tokens` — `tokenSymbol`, `poolName`, `contractEntries`, `chainTokenSymbols`, `chainAddressLabels`
-  - `./format` — `poolIdAddress`, `shortAddress`
-
-**Rule:** Before hardcoding a chain slug, explorer URL, pool pair label, or token symbol, check whether `@mento-protocol/monitoring-config` already exposes it. Duplicating chain/token metadata caused PR #209 (Monad Slack alerts shipped raw `143-0x93e1…` pool ids).
-
-### indexer-envio
-
-- **Runtime:** Envio HyperIndex (envio@3.0.0)
-- **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
-- **Configs:** `config.multichain.mainnet.yaml` (default), `config.multichain.testnet.yaml`. `config.yaml` is a symlink to the mainnet config so `createTestIndexer()` resolves a default config when tests run without `--config`.
-- **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (barrel re-exports + Oracle DB helpers; RPC primitives split into `src/rpc/` sub-modules), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
-- **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
-- **ABIs:** `abis/` — vendored ABIs, refreshed from `@mento-protocol/contracts` via `pnpm --filter @mento-protocol/indexer-envio generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `indexer-envio/scripts/generateAbis.mjs` header).
-- **Codegen output:** `.envio/types.d.ts` (gitignored) is generated by `pnpm codegen`; the tracked `envio-env.d.ts` triple-slash references it into the `envio` module. A fresh clone needs `pnpm codegen` (or `./scripts/setup.sh`) before `pnpm typecheck` will succeed.
-- **Scripts:** `scripts/run-envio-with-env.mjs` — loads .env and runs envio CLI
-- **Performance diagnostics:** `INDEXER_PERF=1 INDEXER_PERF_LOG_INTERVAL_EVENTS=10000 pnpm indexer:dev` logs opt-in handler/effect/entity counters; `node indexer-envio/scripts/auditSchemaIndexes.mjs` audits schema indexes against local handler `getWhere`, dashboard/bridge GraphQL usage, and known dynamic discovery queries before any pruning.
-- **Tests:** `test/` — vitest. MockDb-facade integration tests run through `test/helpers/indexerTestHarness.ts`, which adapts MockDb-style entity assertions onto Envio v3's `createTestIndexer()` and the local HTTP RPC mock layer.
-- **Docker:** Envio dev mode spins up Postgres + Hasura automatically
-
-### ui-dashboard
-
-- **Framework:** Next.js 16 (App Router, React 19)
-- **Charts:** Plotly.js via react-plotly.js
-- **Data:** GraphQL queries to Hasura (via graphql-request + SWR)
-- **Styling:** Tailwind CSS 4
-- **Multi-chain:** Network selector switches between celo-mainnet, celo-sepolia, monad-mainnet, monad-testnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
-- **Contract labels:** token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge); `src/lib/networks.ts` layers per-network `addressLabels` overrides on top. Explorer base URLs default from `@mento-protocol/monitoring-config/chains`; each network keeps its env-var override (`NEXT_PUBLIC_EXPLORER_URL_*`) for local dev
-- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis under a single `labels` hash keyed by lowercase address (no chain/global scope — same EVM address means same entity, so a single label applies wherever the address appears). Backed up daily to Vercel Blob alongside forensic reports (same blob, `addresses` + `reports` keys); custom labels override/extend the package-derived ones. Large restores use `POST /api/address-labels/restore?pathname=<blob-pathname>` (cron-secret or session) so the server pulls the private Blob snapshot directly and preserves forensic-report author/timestamp/version metadata from first-party backups. User-uploaded imports through `/api/address-labels/import` still re-stamp report metadata to the importing session.
-- **Forensic reports:** long-form markdown investigations attached to an address (separate from the 500-char `notes` field). Stored in Upstash under a single `reports` hash keyed by lowercase address. Reports are address-keyed only — no chain/global scope. Same EVM address means same entity (same private key derives the same address across every chain), so a single report applies wherever the address appears. Backed up daily inside the same Vercel Blob snapshot as labels (`reports` key in the snapshot JSON; restorable via `/api/address-labels/import`). Never write deep investigations into `notes` — use the address detail page's report editor or the `/forensic-report` skill. Body cap is 50KB; auth-gated, never public. Drafts live in the gitignored `.investigations/` folder at the repo root; the skill produces them and can push the finished draft directly to Upstash so the prose never round-trips through copy-paste
-- **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
-- **Browser tests:** `pnpm --filter @mento-protocol/ui-dashboard test:browser` runs Playwright against the real Next.js app with a local GraphQL fixture server (`ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs`). These tests must stay fixture-driven and must not hit hosted Hasura/Envio.
-  - **Visual snapshots:** 5 pages snapshotted (pools list, pool detail LPs, pool detail Swaps, bridge flows, leaderboard). Baselines live in `ui-dashboard/tests/browser/visual-snapshots.test.ts-snapshots/` and are committed. Re-baseline after a legitimate UI change: `pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots`. PRs touching styled components must verify baselines pass. Threshold: `maxDiffPixelRatio: 0.03` (3% ratio; accommodates macOS/Linux font anti-aliasing differences); relative timestamps are masked so they do not cause false-positive failures. To regenerate Linux-native baselines on CI: trigger `.github/workflows/update-snapshots.yml` via workflow_dispatch on the branch.
+| Package           | What it does                                                                                                                                                                                                                                                              | Read                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `aegis/`          | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns Aegis Grafana dashboards/alerts (`aegis/terraform/`)                                                                                                                                   | [`aegis/AGENTS.md`](aegis/AGENTS.md)                   |
+| `shared-config/`  | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace. | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)   |
+| `indexer-envio/`  | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM + v2 Broker. Schema in `schema.graphql`. Handler entry point is `src/EventHandlers.ts` (imports under `src/handlers/`).                                                                                                 | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)   |
+| `ui-dashboard/`   | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                               | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)     |
+| `metrics-bridge/` | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md) |
+| `terraform/`      | Vercel project + Upstash Redis + env vars + Cloud Run services + Grafana alerting. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                | [`terraform/AGENTS.md`](terraform/AGENTS.md)           |
+| `scripts/`        | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                        | [`scripts/AGENTS.md`](scripts/AGENTS.md)               |
 
 ### PR Review Guidance (Dashboard Scale)
 
@@ -312,78 +190,10 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - At this size, client-side aggregation for the 24h volume tiles/table is acceptable with the current polling setup.
 - Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production).
 
-## File Structure
+## Repo conventions
 
-```text
-monitoring-monorepo/
-├── package.json              # Root workspace config
-├── pnpm-workspace.yaml       # Workspace package list
-├── terraform/                # Terraform — Vercel project + Upstash Redis + env vars
-│   ├── main.tf               # All resources
-│   ├── variables.tf          # Input variables
-│   ├── outputs.tf            # Outputs (project ID, Redis URL, etc.)
-│   ├── terraform.tfvars.example  # Template (copy to terraform.tfvars)
-│   └── .gitignore            # Ignores tfstate, tfvars, .terraform/
-├── shared-config/            # @mento-protocol/monitoring-config (private, built TS)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── deployment-namespaces.json  # ← edit when promoting a new deployment
-│   ├── chain-metadata.json         # ← edit when a new chain comes online
-│   ├── fx-calendar.json            # FX market close/reopen anchors
-│   ├── src/                        # chains.ts, tokens.ts, format.ts
-│   └── __tests__/                  # vitest suites (includes known-pool regression fixture)
-├── indexer-envio/
-│   ├── config.multichain.mainnet.yaml  # Mainnet indexer config (Celo + Monad) — DEFAULT
-│   ├── config.multichain.testnet.yaml  # Testnet multichain config
-│   ├── schema.graphql        # Entity definitions
-│   ├── src/
-│   │   ├── EventHandlers.ts  # Envio entry point (imports handlers, re-exports for tests)
-│   │   ├── handlers/         # Event handler registrations
-│   │   │   ├── fpmm.ts       # FPMMFactory + FPMM handlers
-│   │   │   ├── sortedOracles.ts  # SortedOracles handlers
-│   │   │   ├── virtualPool.ts    # VirtualPool handlers
-│   │   │   └── feeToken.ts       # ERC20FeeToken.Transfer handler
-│   │   ├── rpc.ts            # Barrel re-exports + Oracle DB query helpers (barrel for rpc/* primitives)
-│   │   ├── rpc/              # RPC sub-modules (extracted from rpc.ts in PR-S6 through PR-S9)
-│   │   │   ├── client.ts     # RPC client management, failure logging, rate-limit detection
-│   │   │   ├── block-fallback.ts  # readContractWithBlockFallback retry/fallback primitive
-│   │   │   ├── pool-state.ts # Pool/oracle RPC fetchers, caches, and test mocks
-│   │   │   └── breakers.ts   # Breaker RPC self-heal: fetchBreakerKind/Defaults/FeedState + probe
-│   │   ├── pool.ts           # Pool/PoolSnapshot upsert, health status
-│   │   ├── priceDifference.ts # Price math (computePriceDifference, normalizeTo18)
-│   │   ├── tradingLimits.ts  # Trading limit types and computation
-│   │   ├── feeToken.ts       # Fee token metadata, backfill, YIELD_SPLIT_ADDRESS
-│   │   ├── abis.ts           # ABI definitions
-│   │   ├── helpers.ts        # Pure utilities (eventId, asAddress, etc.)
-│   │   └── contractAddresses.ts  # Contract address resolution from @mento-protocol/contracts
-│   ├── abis/                 # Contract ABIs (FPMMFactory, FPMM, VirtualPoolFactory)
-│   ├── scripts/              # Helper scripts
-│   └── test/                 # Tests
-└── ui-dashboard/
-    ├── src/
-    │   ├── app/
-    │   │   ├── address-book/ # Address book page
-    │   │   ├── api/address-labels/   # Labels CRUD + export/import/backup routes
-    │   │   └── api/address-reports/  # Forensic-report CRUD (auth-gated, 50KB markdown bodies)
-    │   ├── components/
-    │   │   ├── address-label-editor.tsx     # Modal with Label/Tags + Forensic Report tabs
-    │   │   ├── address-labels-provider.tsx  # Context: merges package + custom labels
-    │   │   ├── address-report-editor.tsx    # Markdown editor + preview for the report tab
-    │   │   └── markdown-renderer.tsx        # react-markdown wrapper used by the report editor
-    │   ├── hooks/
-    │   │   └── use-address-reports-index.ts # SWR hook for the lightweight report-presence index (powers the 📄 indicator)
-    │   └── lib/
-    │       ├── address-labels.ts             # Upstash Redis data access (server-side)
-    │       ├── address-labels/import.ts      # Import handlers (CSV/JSON/Snapshot/Gnosis Safe) for /api/address-labels/import
-    │       ├── address-reports.ts            # Upstash Redis data access for forensic reports
-    │       ├── address-reports-shared.ts     # Isomorphic types + sanitization for reports (50KB body cap)
-    │       └── networks.ts                   # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
-    ├── public/               # Static assets
-    ├── vercel.json           # Vercel config + daily backup cron
-    └── next.config.ts        # Next.js config
-```
-
-Standalone investigation drafts live under the gitignored `.investigations/<address>-<slug>.md` (a directory at the repo root, NOT in `docs/`). Drafts stay local — they routinely identify individuals + on-chain identities, so committing them to a public history would be its own finding. The `/forensic-report` skill produces them in the canonical structure and, on confirmation, writes the finished draft straight to the `reports` hash in Upstash via the management MCP (no copy-paste through the report editor).
+- Investigation drafts live in the gitignored `.investigations/<address>-<slug>.md` (repo root, NOT in `docs/`). The `/forensic-report` skill produces them and pushes finished drafts to the `reports` Upstash hash via management MCP — never round-trip through copy-paste. Drafts stay local because they routinely identify individuals + on-chain identities.
+- Per-package deeper file maps live in each package's `AGENTS.md` — don't replicate them here.
 
 ## Environment
 
@@ -411,23 +221,16 @@ team-shareable agent workflows there instead of relying on local-only
 `.codex/config.toml`; local personal Codex settings still belong in
 `~/.codex/config.toml`.
 
+### SessionEnd hook (compound nudge)
+
+`scripts/agent-session-end-hook.sh` runs on SessionEnd for both Claude Code and Codex. When the session left commits or unstaged changes in the tree, it prints a one-line nudge to run `/compound` so any new learnings get captured in memory / `AGENTS.md` / `CLAUDE.md` before context is lost. Silent on no-op sessions.
+
+- Claude wiring: `.claude/settings.json` → `hooks.SessionEnd`.
+- Codex wiring: `.codex/hooks.json`. Codex auto-disables new hooks until trusted; on first encounter, codex either prompts to trust or you mirror the entry into `~/.codex/hooks.json` and toggle `enabled = true` (set the hash) in `[hooks.state]` of `~/.codex/config.toml`. Or pass `--dangerously-bypass-hook-trust` for automation.
+
 ### Status-polling commands use `Monitor`, not `/loop`
 
 For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.
-
-## Envio Gotchas
-
-### Hasura must run on port 8080
-
-The envio binary hardcodes `http://localhost:8080/hasura/healthz?strict=true` for its startup liveness check. This port is not configurable via env vars. **Never set `HASURA_EXTERNAL_PORT` to anything other than 8080** (or omit it entirely) — the binary will silently fail its health check and retry with exponential backoff, stalling startup for 5+ minutes per attempt.
-
-### Only one local indexer at a time
-
-All envio configs share the same Docker project name (`generated`, derived from the `generated/` directory name) and the same Hasura port (8080). Running two local indexers simultaneously will cause container name conflicts. Start one, stop it, then start the other.
-
-### Postgres healthcheck is auto-patched after codegen
-
-The envio-generated `generated/docker-compose.yaml` does not include a healthcheck for the postgres service. Without one, Docker reports `Health:""` and the envio binary waits indefinitely. `scripts/run-envio-with-env.mjs` automatically patches the file to add a `pg_isready` healthcheck after every `pnpm codegen` run. If you regenerate the compose file manually, re-run codegen via the script (not directly via `envio codegen`) to re-apply the patch.
 
 ## New Worktree / Clone Setup
 
@@ -469,41 +272,4 @@ Before pushing any cross-layer or stateful UI change, also read and apply:
 - `trunk check <file>` only checks the specified files — always use `--all` to match what CI runs
 - If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first
 
-### EventHandlers.ts must remain the handler entry point
-
-Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects all handler registrations (e.g. `FPMM.Swap.handler(...)`) to be reachable from this file at module load time. The actual logic lives in `src/handlers/*.ts` — these are imported as side effects from `EventHandlers.ts`. If you add a new handler file, you **must** add a corresponding `import "./handlers/yourFile"` in `EventHandlers.ts` and then re-run `pnpm indexer:codegen` to verify Envio picks it up.
-
-## Common Tasks
-
-### Promoting a new treb deployment
-
-When a new set of contracts has been deployed and a new `@mento-protocol/contracts` version is published:
-
-1. Update the `@mento-protocol/contracts` version in `indexer-envio/package.json` and `ui-dashboard/package.json`
-2. Update namespace string(s) in `shared-config/deployment-namespaces.json` (e.g. `"42220": "mainnet-v2"`)
-3. Run `pnpm install`
-4. Refresh vendored ABIs from the new package: `pnpm --filter @mento-protocol/indexer-envio generate:abis`. Commit any resulting diff under `indexer-envio/abis/`.
-5. Typecheck: `pnpm --filter @mento-protocol/ui-dashboard typecheck` and `pnpm --filter @mento-protocol/indexer-envio typecheck`
-
-### Adding a new contract to index
-
-1. Add the ABI to `indexer-envio/abis/`:
-   - **If it ships in `@mento-protocol/contracts`:** add the filename to the allow-list in `indexer-envio/scripts/generateAbis.mjs` and run `pnpm --filter @mento-protocol/indexer-envio generate:abis`.
-   - **Otherwise** (e.g. external/minimal-subset ABIs like the Wormhole NTT trio): hand-vendor under `indexer-envio/abis/` and document the exclusion in the `generateAbis.mjs` header so future runs don't try to overwrite it.
-2. Add contract entry in the relevant config(s): `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`
-3. Add entity to `schema.graphql`
-4. Add handler in the appropriate `src/handlers/*.ts` file (or create a new one and import it from `src/EventHandlers.ts`)
-5. Run `pnpm indexer:codegen` to regenerate types
-
-### Adding a new chart to the dashboard
-
-1. Create component in `ui-dashboard/src/`
-2. Add GraphQL query for the data
-3. Wire up with SWR for real-time updates
-
-### Adding or changing infrastructure (Vercel project, env vars, Redis)
-
-1. Edit `terraform/main.tf` or `terraform/variables.tf`
-2. Run `pnpm infra:plan` to preview
-3. Run `pnpm infra:apply` to apply
-4. Commit the updated `terraform/main.tf` and `terraform/.terraform.lock.hcl` (state file is gitignored)
+For package-specific workflows (promoting a deployment, adding a contract to the indexer, dashboard chart wiring, infrastructure changes), see the relevant package's `AGENTS.md` — they own the procedural detail.

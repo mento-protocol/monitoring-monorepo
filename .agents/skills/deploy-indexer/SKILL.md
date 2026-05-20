@@ -1,6 +1,11 @@
 ---
 name: deploy-indexer
-description: Codex-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+title: Deploy Indexer Skill
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-05-20
 ---
 
 # Deploy Indexer (end-to-end)
@@ -95,9 +100,8 @@ or the deployment record list.
 
 ## Phase 2 — Babysit the build + sync
 
-Codex does not have Claude's persistent `Monitor` / `Skill` tools. Watch sync
-in the main rollout and do not leave a background process running when you
-finish.
+Watch sync in the active rollout/session and do not leave a background process
+running when you finish.
 
 Preferred watcher:
 

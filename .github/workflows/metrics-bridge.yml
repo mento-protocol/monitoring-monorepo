@@ -96,16 +96,16 @@ jobs:
         #   --to-revisions=<prev-revision>=100 --region=europe-west1`.
         # Previous revision listed below so incident responders have it.
         run: |
-          # Revision name format: <short-sha>-<run-id>. The SHA doubles as a
-          # git-log pointer; the run-id disambiguates so re-running the same
-          # commit (workflow_dispatch, "re-run failed jobs") doesn't hit
-          # Cloud Run's 409 "revision already exists". GITHUB_RUN_ID is the
-          # globally-unique workflow invocation id.
+          # Revision name format: r-<short-sha>-<run-id>. The letter prefix is
+          # required because Cloud Run revision suffixes must start with
+          # [a-z], and raw git SHAs start with a digit often enough to make
+          # deploys flaky. GITHUB_RUN_ID disambiguates re-runs of the same
+          # commit.
           gcloud run services update metrics-bridge \
             --project="$GCP_PROJECT" \
             --region="$GCP_REGION" \
             --image="$IMAGE" \
-            --revision-suffix="${GITHUB_SHA::7}-${GITHUB_RUN_ID}"
+            --revision-suffix="r-${GITHUB_SHA::7}-${GITHUB_RUN_ID}"
 
           echo "Recent revisions (for rollback reference):"
           gcloud run revisions list \
