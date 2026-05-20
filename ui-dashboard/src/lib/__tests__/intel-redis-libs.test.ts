@@ -90,6 +90,20 @@ describe("intel-deep", () => {
       "0xbbb": { address: "0xbbb", source: "arkham" },
     });
   });
+
+  it("getAllIntelDeep: lowercases legacy mixed-case keys on merge", async () => {
+    const intel = {};
+    const legacy = {
+      "0xAaA": { address: "0xAaA", source: "arkham" }, // mixed-case key
+    };
+    hgetall.mockImplementation((key: string) =>
+      Promise.resolve(key === INTEL_DEEP_KEY ? intel : legacy),
+    );
+    const result = await getAllIntelDeep();
+    expect(result).toEqual({
+      "0xaaa": { address: "0xAaA", source: "arkham" },
+    });
+  });
 });
 
 describe("intel-transfers", () => {

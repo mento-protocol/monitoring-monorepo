@@ -163,12 +163,34 @@ async function evalHashWriteScript(
   // Redis in an unpredictable partial state. Serializing halts the sequence
   // at a known boundary on failure (batches 1..i applied, i+1..N untouched),
   // so an operator can re-run the restore with a deterministic resume point.
-  for (const batch of batches) {
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
     const keys = batch.map((r) => r.key);
     const argv = flattenHashReplacements(batch);
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop
-    await redis.eval(script, keys, argv);
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      await runEvalScript(redis, script, keys, argv);
+    } catch (err) {
+      // Decorate so operators can tell from the error which sub-batches
+      // committed (1..i) versus which key-set was being applied when the
+      // dispatch broke (batches i+1..N are still in their prior state).
+      throw new Error(
+        `Redis hash ${operation} failed at sub-batch ${i + 1}/${batches.length} ` +
+          `(keys=[${keys.join(", ")}]); sub-batches 1..${i} already committed. ` +
+          `Original: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
   }
+}
+
+async function runEvalScript(
+  redis: RedisEvalClient,
+  script: string,
+  keys: string[],
+  argv: string[],
+): Promise<unknown> {
+  return redis.eval(script, keys, argv);
 }
 
 export function flattenHashReplacements(

@@ -46,14 +46,14 @@ local dst = KEYS[2]
 if redis.call('EXISTS', src) == 0 then
   return 'skip:src_missing'
 end
-if redis.call('EXISTS', dst) == 0 then
-  redis.call('RENAME', src, dst)
-  return 'renamed'
-end
+-- Always merge (no RENAME fast path): legacy arkham_* hashes may carry
+-- mixed-case keys from older marathon writes, and the dashboard reads via
+-- address.toLowerCase(). Canonicalize during HSETNX so the post-migration
+-- intel_* hash has uniformly lowercase keys regardless of the source state.
 local entries = redis.call('HGETALL', src)
 local added = 0
 for i = 1, #entries, 2 do
-  if redis.call('HSETNX', dst, entries[i], entries[i+1]) == 1 then
+  if redis.call('HSETNX', dst, string.lower(entries[i]), entries[i+1]) == 1 then
     added = added + 1
   end
 end
