@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-0e71f4c2f6-d6e8_eec269820d",
+  "featureId": "feat_library_0e71f4c2f6",
+  "title": "Market-hours pill can show open during holiday breaker closures",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/components/market-hours-pill.tsx",
+      "startLine": 89,
+      "endLine": 93,
+      "symbol": "MarketHoursPill",
+      "quote": "const enabled =\n    !isVirtual &&\n    !!data?.BreakerConfig?.some(\n      (c) => c.breaker.kind === \"MARKET_HOURS\" && c.enabled,\n    );"
+    },
+    {
+      "path": "ui-dashboard/src/components/market-hours-pill.tsx",
+      "startLine": 114,
+      "endLine": 124,
+      "symbol": "MarketHoursPill",
+      "quote": "const open = !isWeekend(now);\n  const transition = nextMarketHoursTransition(now);\n...\n  const tooltip =\n    \"FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, \" +\n    \"plus major holidays, because they track real-world forex rates.\";"
+    }
+  ],
+  "reasoning": "The component only uses BreakerConfig to decide whether the pill should render, then derives open/closed solely from the weekend calendar. Its own tooltip says the market-hours gate also closes for major holidays, and the on-chain MARKET_HOURS breaker is the source being queried. On a weekday holiday closure, the enabled config will make the pill render, but `!isWeekend(now)` will mark the market open and show either schedule or countdown-to-close text even though trading is halted by the market-hours breaker.",
+  "reproduction": "Mock `useGQL` to return an enabled MARKET_HOURS BreakerConfig whose on-chain state represents a closure during a weekday holiday, freeze `Date` to that weekday, and render `MarketHoursPill`; it will enter the open branch because `isWeekend(now)` is false.",
+  "recommendation": "Derive the closed/open state from the MARKET_HOURS BreakerConfig status/tradingMode when available, or extend the shared calendar helper so `isWeekend`/`nextMarketHoursTransition` also model holidays before using them for the displayed state. Keep the enabled check only as a render gate.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing market-hours tests exercise no-config, disabled-config, normal weekday open, Friday countdown, and Saturday closed cases. They do not cover an enabled MARKET_HOURS breaker that is closed outside the weekly weekend window.",
+  "suggestedRegressionTest": "Add a MarketHoursPill test with an enabled MARKET_HOURS BreakerConfig carrying a closed/tripped trading state and a frozen weekday holiday timestamp, asserting the pill renders `Market Closed` rather than `Market Open`.",
+  "minimumFixScope": "`ui-dashboard/src/components/market-hours-pill.tsx` plus its component test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: MarketHoursPill now derives closed state from the enabled MARKET_HOURS breaker status/tradingMode, with a weekday-closure regression test.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:08.707Z"
+    }
+  ],
+  "signature": "sig_feat-library-0e71f4c2f6_d6e8a74138",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:17:12.297Z",
+  "updatedAt": "2026-05-20T07:26:08.707Z"
+}

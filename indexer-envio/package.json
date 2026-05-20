@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "clean": "tsc --clean",
+    "clean": "tsc --build --clean",
     "build": "tsc --build",
     "watch": "tsc --watch",
     "codegen": "node ./scripts/run-envio-with-env.mjs codegen",

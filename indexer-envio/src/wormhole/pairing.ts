@@ -23,7 +23,7 @@ export type PairingKey = {
 
 export type PairingEntityAccessor<T> = {
   get: (id: string) => Promise<T | undefined>;
-  deleteUnsafe?: (id: string) => void;
+  deleteUnsafe: (id: string) => void;
 };
 
 /** Walk backward from `currentLogIndex - 1` looking for an earlier-in-tx
@@ -56,6 +56,6 @@ export async function findAndDrainPendingScratch<T>(
   matches?: (row: T) => boolean,
 ): Promise<T | undefined> {
   const { row, id } = await findPendingScratch(entity, key, matches);
-  if (row && id) entity.deleteUnsafe?.(id);
+  if (row && id) entity.deleteUnsafe(id);
   return row;
 }

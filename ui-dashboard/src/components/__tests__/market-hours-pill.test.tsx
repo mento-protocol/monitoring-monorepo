@@ -11,6 +11,24 @@ vi.mock("@/lib/graphql", () => ({
 
 const FX_FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 
+function marketHoursConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "market-hours",
+    enabled: true,
+    status: "OK",
+    tradingMode: 0,
+    breaker: {
+      id: "breaker",
+      address: "0x0000000000000000000000000000000000000001",
+      kind: "MARKET_HOURS",
+      activatesTradingMode: 3,
+      defaultCooldownTime: "0",
+      defaultRateChangeThreshold: "0",
+    },
+    ...overrides,
+  };
+}
+
 function fxPool(): Pool {
   return {
     id: `42220-0x6297000000000000000000000000000000000000`,
@@ -85,7 +103,7 @@ describe("MarketHoursPill", () => {
     // reflects the on-chain trading mode.
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ enabled: false, breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [marketHoursConfig({ enabled: false })],
         BreakerTripEvent: [],
       },
     });
@@ -97,7 +115,7 @@ describe("MarketHoursPill", () => {
   it("renders schedule mode when market is open and >6h until close (Wed noon)", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [marketHoursConfig()],
         BreakerTripEvent: [],
       },
     });
@@ -114,7 +132,7 @@ describe("MarketHoursPill", () => {
   it("renders amber countdown mode when <6h until close (Fri 17:00)", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [marketHoursConfig()],
         BreakerTripEvent: [],
       },
     });
@@ -129,7 +147,7 @@ describe("MarketHoursPill", () => {
   it("renders Market Closed countdown to reopen on Saturday", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [marketHoursConfig()],
         BreakerTripEvent: [],
       },
     });
@@ -140,5 +158,21 @@ describe("MarketHoursPill", () => {
     // Closed-state is neutral slate, not amber.
     expect(html).toContain("text-slate-300");
     expect(html).not.toContain("text-amber-300");
+  });
+
+  it("renders Market Closed on weekday MARKET_HOURS breaker closures", () => {
+    mockUseGQL.mockReturnValue({
+      data: {
+        BreakerConfig: [
+          marketHoursConfig({ status: "TRIPPED", tradingMode: 3 }),
+        ],
+        BreakerTripEvent: [],
+      },
+    });
+    freezeNow("2026-04-29T12:00:00Z"); // Wednesday noon
+    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    expect(html).toContain("Market Closed");
+    expect(html).not.toContain("until open");
+    expect(html).not.toContain("Market Open");
   });
 });

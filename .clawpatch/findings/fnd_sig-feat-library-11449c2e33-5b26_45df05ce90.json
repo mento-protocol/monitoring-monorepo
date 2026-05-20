@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-11449c2e33-5b26_45df05ce90",
+  "featureId": "feat_library_11449c2e33",
+  "title": "Test fixture windows depend on wall-clock time",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/test-utils/network-fixtures.ts",
+      "startLine": 97,
+      "endLine": 103,
+      "symbol": "makeNetworkData",
+      "quote": "snapshotWindows: buildSnapshotWindows(Date.now()),"
+    }
+  ],
+  "reasoning": "makeNetworkData constructs default snapshotWindows from Date.now(), so tests that use the default fixture inherit the current wall-clock day/week/month. Assertions around KPI or chart window boundaries can change across timezones or date rollovers even when the fixture data is unchanged. Because this helper is shared test infrastructure, the nondeterminism can create flaky tests or make snapshot expectations depend on when the suite runs.",
+  "reproduction": null,
+  "recommendation": "Make the default reference time deterministic, for example by exporting a fixed TEST_NOW constant and using buildSnapshotWindows(TEST_NOW), while allowing callers to override snapshotWindows when they need current-time behavior.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests are included for this feature, and the helper itself does not pin or assert deterministic window generation.",
+  "suggestedRegressionTest": "Add a small unit test for makeNetworkData that verifies the default snapshotWindows are derived from a fixed timestamp, and that callers can still override snapshotWindows explicitly.",
+  "minimumFixScope": "Change the default timestamp used by makeNetworkData in ui-dashboard/src/test-utils/network-fixtures.ts and add or update the helper-level test coverage.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed manually: makeNetworkData now uses exported deterministic TEST_NOW by default, with override coverage and updated volume tests that need current windows.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T07:26:09.185Z"
+    }
+  ],
+  "signature": "sig_feat-library-11449c2e33_5b26d986b7",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T071522-d9847f",
+  "createdAt": "2026-05-20T07:15:45.928Z",
+  "updatedAt": "2026-05-20T07:26:09.185Z"
+}

@@ -236,6 +236,7 @@ export function computeHealthStatus(
     if (isWeekend()) return "WEEKEND";
     return "CRITICAL";
   }
+  if (pool.oracleOk === false) return "CRITICAL";
   // Indexer flagged the deviation accrual as untrusted — don't render
   // synthesized health status. See docblock for rationale.
   if (pool.hasHealthData === false) return "N/A";
