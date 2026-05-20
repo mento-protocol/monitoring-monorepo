@@ -273,5 +273,5 @@ retained as a backward-compat fallback for entries written before the
 - Official docs: <https://intel.arkm.com/api/docs> — gated behind
   Cloudflare; if WebFetch fails with 403, mirror via the GitHub-hosted
   copy at
-  <https://raw.githubusercontent.com/Vyntral/arkham-intelligence-Codex-skill/main/ARKHAM_API_DOCUMENTATION.md>
+  <https://raw.githubusercontent.com/Vyntral/arkham-intelligence-claude-skill/main/ARKHAM_API_DOCUMENTATION.md>
   (community mirror, treat as best-effort).

@@ -25,6 +25,14 @@ function read(filePath) {
   return readFileSync(path.join(repoRoot, filePath), "utf8");
 }
 
+function readRequired(filePath) {
+  if (!exists(filePath)) {
+    fail(`${filePath}: required guard input is missing`);
+    return null;
+  }
+  return read(filePath);
+}
+
 function walk(dir, predicate = () => true) {
   const root = path.join(repoRoot, dir);
   const out = [];
@@ -132,15 +140,15 @@ for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"))) {
   }
 }
 
-const metricsWorkflow = read(".github/workflows/metrics-bridge.yml");
-if (metricsWorkflow.includes('revision-suffix="${GITHUB_SHA::7}-')) {
+const metricsWorkflow = readRequired(".github/workflows/metrics-bridge.yml");
+if (metricsWorkflow?.includes('revision-suffix="${GITHUB_SHA::7}-')) {
   fail(
     ".github/workflows/metrics-bridge.yml: revision suffix must be prefixed with a lowercase letter",
   );
 }
 
-const bridgeDeploy = read("scripts/deploy-bridge.sh");
-if (bridgeDeploy.includes('REVISION_SUFFIX="${TAG}-')) {
+const bridgeDeploy = readRequired("scripts/deploy-bridge.sh");
+if (bridgeDeploy?.includes('REVISION_SUFFIX="${TAG}-')) {
   fail(
     "scripts/deploy-bridge.sh: revision suffix must be prefixed with a lowercase letter",
   );
