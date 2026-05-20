@@ -52,6 +52,7 @@
     "@mento-protocol/contracts": "0.8.1",
     "envio": "3.0.0",
     "viem": "2.47.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "engines": {

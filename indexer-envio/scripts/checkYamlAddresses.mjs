@@ -8,7 +8,7 @@
  * republishes addresses (StabilityPool proxy/impl rename in 0.8.1 was one
  * recent example), and these YAMLs drift unnoticed until indexing breaks.
  *
- * What this checks: every hex address under an `address:` key in a
+ * What this checks: every hex address under an `address:` key inside a
  * `chains[].id` section must be known **for that chain**. Sources:
  *   1. `@mento-protocol/contracts/contracts.json` — chain → namespace → key
  *   2. `indexer-envio/config/nttAddresses.json` — chain → NTT proxies
@@ -19,12 +19,19 @@
  * a Monad one would pass a flat global check but still wire the indexer to
  * the wrong contract. Anything else fails with a clear file:line pointer.
  *
+ * Uses `yaml@2` for parsing so every YAML form (scalar / list / inline-flow
+ * / multi-line-flow / quoted / with-trailing-comments) is handled by the
+ * parser instead of a regex. Source positions come from the AST's
+ * `range[0]` byte offsets — we keep one line-index per file to map those
+ * back to line numbers for error output.
+ *
  * When to re-run: pre-codegen + CI. Exits 0 on clean, 1 on drift.
  */
 
 import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseDocument, isMap, isSeq, isScalar } from "yaml";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, "..");
@@ -109,6 +116,8 @@ const ALLOWLIST = new Map([
   ],
 ]);
 
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
 // ───────────────────────────────────────────────────────────────────────────
 
 // Returns Map<chainIdString, Set<lowercaseAddress>>.
@@ -173,102 +182,142 @@ function findYamlFiles() {
     .filter((p) => !lstatSync(p).isSymbolicLink());
 }
 
-// Walks the YAML line-by-line tracking three pieces of state:
-//   1. `currentChain` — the chainId of the most recent `chains[].id` entry.
-//      Addresses outside any `chains:` block (e.g. under the top-level
-//      `contracts:` schema list) are emitted with chain=null so they fail
-//      validation visibly instead of being silently accepted.
-//   2. `inAddressBlock` / `blockIndent` — whether we're inside a list-form
-//      `address:` block, used to scope the per-item matcher.
-//   3. Each list item is required to be a complete `0x[hex]{40}` literal
-//      (un-, single-, or double-quoted). Malformed items inside an
-//      `address:` block fail loud — silently skipping them would let a
-//      typo like `0xdeadbe` slip past the gate.
-function extractAddresses(yamlSource) {
-  const out = [];
-  let currentChain = null;
-  let inAddressBlock = false;
-  let blockIndent = -1;
-  let inChainsBlock = false;
-  let chainsBlockIndent = -1;
-  const lines = yamlSource.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.replace(/#.*$/, "").trimEnd();
-    const leadingWs = line.match(/^(\s*)/)[1].length;
-
-    // Track chains: block entry/exit. Top-level `chains:` opens it; any
-    // line at column 0 that's a different top-level key closes it.
-    if (/^chains:\s*$/.test(line)) {
-      inChainsBlock = true;
-      chainsBlockIndent = 0;
-      continue;
+// Convert a byte offset (from yaml AST node.range) into a 1-based line
+// number for error output. Precompute newline positions once per file.
+function lineLookupFor(source) {
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) lineStarts.push(i + 1);
+  }
+  return (offset) => {
+    // binary search
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >>> 1;
+      if (lineStarts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
     }
-    if (
-      inChainsBlock &&
-      trimmed !== "" &&
-      leadingWs <= chainsBlockIndent &&
-      !/^\s/.test(line)
-    ) {
-      inChainsBlock = false;
-      currentChain = null;
-    }
+    return lo + 1;
+  };
+}
 
-    // Network entry under chains: `  - id: <N>`
-    if (inChainsBlock) {
-      const idMatch = line.match(/^\s+-\s+id:\s*(\d+)/);
-      if (idMatch) currentChain = idMatch[1];
-    }
+// Walk every `address:` value found inside any `chains[].id` block. Emits
+// one entry per address candidate, including malformed ones (so the caller
+// can fail loud instead of silently skipping a typo).
+function* extractAddresses(doc, src, lineOf) {
+  const top = doc.contents;
+  if (!isMap(top)) return;
+  const chainsPair = top.items.find(
+    (p) => isScalar(p.key) && p.key.value === "chains",
+  );
+  if (!chainsPair || !isSeq(chainsPair.value)) return;
 
-    // List-form `address:` block opener.
-    const blockOpen = line.match(/^(\s*)address:\s*$/);
-    if (blockOpen) {
-      inAddressBlock = true;
-      blockIndent = blockOpen[1].length;
-      continue;
-    }
+  for (const chainNode of chainsPair.value.items) {
+    if (!isMap(chainNode)) continue;
+    const idPair = chainNode.items.find(
+      (p) => isScalar(p.key) && p.key.value === "id",
+    );
+    const chainId =
+      idPair && isScalar(idPair.value) ? String(idPair.value.value) : null;
 
-    // Inline-form `address: [ 0x..., 0x.. ]`. Accepts un-, single-, and
-    // double-quoted entries.
-    const inline = line.match(/^\s*address:\s*\[(.*)\]/);
-    if (inline) {
-      const matches = inline[1].matchAll(/['"]?(0x[a-fA-F0-9]{40})['"]?/g);
-      for (const m of matches) {
-        out.push({ line: i + 1, addr: m[1], chainId: currentChain });
-      }
-      continue;
-    }
+    const contractsPair = chainNode.items.find(
+      (p) => isScalar(p.key) && p.key.value === "contracts",
+    );
+    if (!contractsPair || !isSeq(contractsPair.value)) continue;
 
-    if (!inAddressBlock) continue;
-
-    // Block-form list item — exit the block when indent drops back to the
-    // address: key level or below.
-    if (trimmed === "" || leadingWs <= blockIndent) {
-      if (trimmed === "") continue;
-      inAddressBlock = false;
-      i--; // re-process this line at the outer level
-      continue;
-    }
-    // Anything inside an address: block must be a `- 0x[hex]{40}` (un-,
-    // single-, or double-quoted). Treat anything else as malformed — fail
-    // loud instead of silently skipping a typo. Use the comment-stripped
-    // `trimmed` so trailing `# label` comments don't break value parsing.
-    const item = trimmed.match(/^\s*-\s*(.*?)\s*$/);
-    if (!item) continue; // shouldn't happen given the indent check above
-    const value = item[1].replace(/^['"]|['"]$/g, "");
-    const valid = value.match(/^0x[a-fA-F0-9]{40}$/);
-    if (valid) {
-      out.push({ line: i + 1, addr: valid[0], chainId: currentChain });
-    } else {
-      out.push({
-        line: i + 1,
-        addr: value,
-        chainId: currentChain,
-        malformed: true,
-      });
+    for (const contractNode of contractsPair.value.items) {
+      if (!isMap(contractNode)) continue;
+      const addressPair = contractNode.items.find(
+        (p) => isScalar(p.key) && p.key.value === "address",
+      );
+      if (!addressPair) continue;
+      yield* addressItems(addressPair.value, chainId, lineOf, src);
     }
   }
-  return out;
+}
+
+function* addressItems(value, chainId, lineOf, src) {
+  if (value == null) return;
+  if (isScalar(value)) {
+    if (value.value == null) return; // `address:` with empty value
+    yield buildItem(scalarSource(value, src), chainId, lineOf, value);
+    return;
+  }
+  if (isSeq(value)) {
+    for (const item of value.items) {
+      if (item == null) continue;
+      if (isScalar(item)) {
+        if (item.value == null) continue;
+        yield buildItem(scalarSource(item, src), chainId, lineOf, item);
+      } else {
+        // Non-scalar item inside an address: list is malformed.
+        const offset = nodeOffset(item);
+        yield {
+          line: offset == null ? 0 : lineOf(offset),
+          addr: yamlSnippet(item),
+          chainId,
+          malformed: true,
+        };
+      }
+    }
+    return;
+  }
+  // Anything other than null / scalar / sequence inside `address:` is
+  // structurally wrong — treat as a single malformed entry.
+  const offset = nodeOffset(value);
+  yield {
+    line: offset == null ? 0 : lineOf(offset),
+    addr: yamlSnippet(value),
+    chainId,
+    malformed: true,
+  };
+}
+
+function nodeOffset(node) {
+  if (!node) return null;
+  if (Array.isArray(node.range) && node.range.length > 0) return node.range[0];
+  return null;
+}
+
+// Read the raw source slice for a scalar's value, stripping surrounding
+// quotes if present. Necessary because yaml@2's parser auto-coerces tokens
+// like `0xabc…` to numbers (hex literal); the `.value` field is then a
+// useless float. We always want the on-disk literal.
+function scalarSource(node, src) {
+  if (!Array.isArray(node.range) || node.range.length < 2) {
+    return String(node.value);
+  }
+  const [start, end] = node.range;
+  let raw = src.slice(start, end).trim();
+  // Strip any inline comment after the value.
+  const hash = raw.indexOf("#");
+  if (hash >= 0) raw = raw.slice(0, hash).trim();
+  // Strip matching wrapping quotes.
+  if (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    raw = raw.slice(1, -1);
+  }
+  return raw;
+}
+
+function yamlSnippet(node) {
+  try {
+    return JSON.stringify(node.toJSON?.() ?? node).slice(0, 80);
+  } catch {
+    return "<unprintable>";
+  }
+}
+
+function buildItem(rawValue, chainId, lineOf, node) {
+  const offset = nodeOffset(node);
+  const line = offset == null ? 0 : lineOf(offset);
+  if (!ADDRESS_RE.test(rawValue)) {
+    return { line, addr: rawValue, chainId, malformed: true };
+  }
+  return { line, addr: rawValue, chainId };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -285,8 +334,16 @@ let total = 0;
 for (const filePath of yamls) {
   const rel = filePath.slice(REPO.length + 1);
   const src = readFileSync(filePath, "utf8");
-  const found = extractAddresses(src);
-  for (const item of found) {
+  const doc = parseDocument(src, { keepSourceTokens: true });
+  if (doc.errors.length > 0) {
+    drift++;
+    for (const err of doc.errors) {
+      console.error(`✖ ${rel}  YAML parse error: ${err.message}`);
+    }
+    continue;
+  }
+  const lineOf = lineLookupFor(src);
+  for (const item of extractAddresses(doc, src, lineOf)) {
     total++;
     const { line, addr, chainId, malformed } = item;
     if (malformed) {
