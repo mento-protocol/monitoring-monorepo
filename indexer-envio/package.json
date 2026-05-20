@@ -48,7 +48,7 @@
     "vitest": "^4.0.16"
   },
   "dependencies": {
-    "@mento-protocol/contracts": "0.8.0",
+    "@mento-protocol/contracts": "0.8.1",
     "envio": "3.0.0",
     "viem": "2.47.0",
     "zod": "^4.4.3"
