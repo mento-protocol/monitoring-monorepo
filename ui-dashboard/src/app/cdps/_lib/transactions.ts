@@ -125,7 +125,7 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
  *  derived as `after - before` so the rendered delta is internally
  *  consistent even if the underlying ABI ever exposed extra redist terms
  *  the indexer didn't fold in. */
-export interface TroveSnapshotLeg {
+interface TroveSnapshotLeg {
   before: string;
   after: string;
   delta: string;
