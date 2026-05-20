@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/chapati/code/mento/monitoring-monorepo/scripts/agent-session-end-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
