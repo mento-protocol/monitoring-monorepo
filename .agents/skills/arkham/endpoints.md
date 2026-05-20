@@ -132,25 +132,88 @@ in/out flows over a time window.
 
 Key params:
 
-- `flow`: `in` | `out` | `either`
+- `flow`: `in` | `out` — use `in`, `out`, or omit entirely for
+  bidirectional results. **`either`, `both`, and `all` are rejected
+  with `400 {"message":"flow must be 'in' or 'out' if not empty"}`.**
 - `limit`: 1–1000 (default 100)
 - `chains`: comma-separated (e.g. `celo,ethereum`)
 - `tokens`: comma-separated CoinGecko IDs or contract addresses
 - `timeLast`: `24h` | `7d` | `30d` (mutually exclusive with `timeGte`/`timeLte`)
 - `timeGte` / `timeLte`: Unix ms
 
-Response groups by `in` / `out` arrays of `{ address, usd,
-transactionCount, flow, chains[] }`. Each `address` carries the same
-nested `arkhamEntity` / `arkhamLabel` as the intelligence endpoints —
-so this single call doubles as a label discovery tool for everyone an
-address has touched.
+Response is **keyed by chain**, not grouped into `in`/`out` arrays. Each
+chain key maps to an array of counterparty objects:
+
+```json
+{
+  "ethereum": [
+    {
+      "address": {
+        /* nested Address object with arkhamEntity/arkhamLabel */
+      },
+      "usd": 1234567.89,
+      "transactionCount": 42,
+      "flow": "out",
+      "chains": ["ethereum"]
+    }
+  ],
+  "polygon": [
+    /* ... */
+  ]
+}
+```
+
+The `flow` field on each item shows which direction this counterparty was
+(`in` or `out`). Each `address` carries the same nested `arkhamEntity` /
+`arkhamLabel` as the intelligence endpoints — so this single call doubles
+as a label discovery tool for everyone an address has touched.
 
 ### `GET /counterparties/entity/{entitySlug}`
 
 Same shape, aggregated across every address Arkham knows for the
 entity. Useful for "show me Binance's top counterparties on Celo".
 
-## 5. User labels (private to your API key)
+## 5. Transfers (HEAVY — 1 req/sec)
+
+### `GET /transfers?base=<address>&limit=N`
+
+Transaction-level transfer history for an address. **The address goes in
+the `base` query parameter — there is no path segment.** `GET
+/transfers/{address}` returns `405 Method Not Allowed`.
+
+Key params:
+
+- `base`: EVM address (lowercase), required
+- `limit`: max results (default 10, max 100)
+- `timeLast`: `24h` | `7d` | `30d`
+- `timeGte` / `timeLte`: Unix ms
+- `chains`: comma-separated chain identifiers
+- `tokens`: comma-separated CoinGecko IDs or contract addresses
+- `flow`: `in` | `out` (omit for both directions; same rules as `/counterparties`)
+
+Response:
+
+```json
+{
+  "transfers": [
+    {
+      "transactionHash": "0xabc...",
+      "fromAddress": {
+        /* nested Address object */
+      },
+      "toAddress": {
+        /* nested Address object */
+      },
+      "tokenAddress": "0xdef...",
+      "usd": 500000.0,
+      "blockTimestamp": 1700000000000,
+      "chain": "ethereum"
+    }
+  ]
+}
+```
+
+## 7. User labels (private to your API key)
 
 ### `GET /user/labels`
 
@@ -182,7 +245,7 @@ User labels are **not** visible in the public Arkham label graph and
 don't enrich `/intelligence` responses for other consumers. They're a
 personal annotation layer scoped to your API key.
 
-## 6. Plumbing
+## 8. Plumbing
 
 ### `GET /health`
 
