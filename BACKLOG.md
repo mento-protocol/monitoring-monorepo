@@ -170,3 +170,43 @@ after skipping blanks and comments. Refresh before starting a split.
 
 - [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
 - [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely.
+
+## Discord → Slack alert migration: cutover + cleanup
+
+Phase 1 (setup + dual-route) shipped in PRs #485 and #494. Both Aegis and v3 alert stacks are live in Grafana Cloud; every Aegis alert fires both Discord (legacy) and Slack (new) during the soak window. Splunk On-Call routing for `severity=page` is preserved and now also fires for prod trading-modes (newly-escalated). Weekend FX mute timing extended to every new Slack route.
+
+### Soak verification (during the ≥5-day soak window)
+
+- [ ] **Oracle-relayer warning on Celo prod** — confirm parity in Discord `#prod-oracle-relayers` AND Slack `#alerts-oracles`.
+- [ ] **`severity=page` event** (oracle-relayers stale, trading-limits L1/LG, aegis service health, or trading-modes-prod circuit-breaker) — confirm Splunk On-Call still pages, `#alerts-critical` lights up, Discord side still fires.
+- [ ] **FX-feed alert during Fri 21:00 – Sun 21:00 UTC** — confirm muted on Splunk + `#alerts-critical` + `#alerts-oracles` + `#alerts-testnet`. Easy to test on a weekend-disabled feed (e.g. CELOPHP, EURXOF).
+- [ ] **celo-sepolia alert** — confirm it lands in `#alerts-testnet` only, NOT `#alerts-critical` or `#alerts-oracles`.
+- [ ] **Daily catch-all sweep** — eyeball Discord `#alerts-catch-all` for any unmapped alerts. Anything that lands there is alert-config-drift signal worth fixing before cutover.
+
+### Cutover PR (when soak shows clean parity, ≥5 days dual-routing without surprises)
+
+Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`. After this PR ships, Discord alerts stop firing entirely; Slack is the only delivery (plus Splunk for page-severity).
+
+- [ ] Remove the 8 Discord-contact-point policy blocks (oracle-relayers staging/prod, reserve, trading-modes staging/prod, aegis, trading-limits).
+- [ ] Flip root `contact_point` from `discord_channel_catch_all` → `grafana_contact_point.slack_alerts_infra`.
+- [ ] Flip the 2 weekend-FX `continue = true` flags back to `false` (no Discord siblings left to chain into).
+- [ ] Test plan mirrors the soak checks above, but with Discord channels now expected to be silent.
+
+### Cleanup PR (final, immediately after cutover)
+
+- [ ] Delete the 8 `discord_channel_*` contact-point resources from `aegis/terraform/grafana-alerts/contact-points.tf`.
+- [ ] Delete `aegis/terraform/grafana-alerts/message-templates-discord.tf` (the consolidated bundle — its whole purpose was a stepping stone to free template quota; goes away when Discord retires).
+- [ ] Delete `local.alert_config` dispatcher in `aegis/terraform/grafana-alerts/locals.tf`. Splunk already migrated to `alert_config_victorops`; only Discord references the original.
+- [ ] Drop the 6 `discord_*_template` fields from each `alert_types` entry in `locals.tf` (Discord-named templates won't exist anymore).
+- [ ] Remove the 8 `discord_alerts_webhook_url_*` variables from `aegis/terraform/grafana-alerts/variables.tf`, `aegis/terraform/variables.tf`, and `aegis/terraform/main.tf`.
+- [ ] Drop the Discord webhook URLs from `aegis/terraform/terraform.tfvars` (manual; gitignored).
+- [ ] Update docs: `aegis/README.md` lines 305–393 (replace Discord setup with Slack setup), root `AGENTS.md` (change "Discord contact points" → "Slack contact points" in the Aegis terraform description), `docs/BACKLOG.md` (drop this entire section), `docs/ROADMAP.md` (mark Aegis migration complete, remove dual-route notes).
+- [ ] Archive (don't delete) the 8 Discord channels in the Discord server UI. Preserves incident archaeology.
+- [ ] Confirm `DISCORD_BOT_TOKEN` GitHub Actions secret is deleted (was deleted earlier when the deploy-notification workflow retired; re-verify).
+- [ ] Confirm no other repo references to Discord remain: `rg -i 'discord' aegis/ .github/ docs/ scripts/ AGENTS.md CLAUDE.md README.md` should be empty after this PR.
+
+### Loose ends carried in from the migration session
+
+- [ ] **`BLOB_READ_WRITE_TOKEN` lost `preview` + `development` scopes** during the unrelated root-stack apply on 2026-05-20. Fix is a one-line `target = ["production", "preview", "development"]` change in `terraform/main.tf:117` + one more destroy/recreate cycle on the env var. Risk: rotates the production token again briefly — schedule for a quiet window. If preview/dev BLOB callers haven't broken in the meantime, no urgency.
+- [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
+- [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
