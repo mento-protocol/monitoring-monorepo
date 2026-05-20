@@ -877,6 +877,7 @@ while IFS= read -r path; do
           ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
+          add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;
         .github/workflows/aegis-app-engine.yml)
           add_aegis_quality_commands "Aegis App Engine workflow changed"

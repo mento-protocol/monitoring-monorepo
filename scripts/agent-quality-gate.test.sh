@@ -613,6 +613,7 @@ assert_contains "- TF_DATA_DIR=terraform/alerts/.terraform-agent-gate terraform 
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -875,6 +876,7 @@ rename_repo="$(mktemp -d)"
 rm -rf "$rename_repo"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 rename_repo="$(mktemp -d)"
 (

@@ -8,7 +8,7 @@ last_verified: 2026-05-20
 
 # Recurring PR Review Patterns
 
-Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. **Subsections with a linked checklist (`— docs/pr-checklists/X.md`)** treat the checklist as canonical — the inline tldr is a routing hint, not the source of truth. Subsections without a link are inline-canonical (no upstream checklist yet — candidates for future extraction).
+Across the last 20 PRs, review findings clustered into the categories below. **Subsections with a linked checklist (`— docs/pr-checklists/X.md`)** treat the checklist as canonical — the inline tldr is a routing hint, not the source of truth. Subsections without a link are inline-canonical (no upstream checklist yet — candidates for future extraction).
 
 ## Patterns
 
@@ -31,11 +31,11 @@ tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` local
 
 ### Multi-chain coverage
 
-- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). Bit us on PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries) — flagged 4× across cursor + codex inline reviews
+- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). This regressed in PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries).
 
 ### Config-name → metadata cross-reference tests
 
-- When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). Caught by cursor + claude[bot] on PR #316
+- When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). This was caught during PR #316 review.
 
 ### Indexer RPC self-heal (`rpc.ts`)
 
@@ -85,7 +85,7 @@ tldr: `generateMetadata` reading access-controlled data must gate on `isPublic =
 
 ### Sibling-audit rule for multi-component flows
 
-- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds where each fix landed in one surface and the bots flagged the other surface for the symmetric bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
+- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds because each fix landed in one surface while the symmetric surface still had the same bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
 
 ### Code health budgets — `docs/pr-checklists/code-health.md`
 
