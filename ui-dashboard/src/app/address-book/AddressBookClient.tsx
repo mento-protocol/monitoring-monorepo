@@ -76,8 +76,8 @@ function EmptyRowsState({
 // import banners, draft); a reducer would just rename the setters.
 // Keep the table + modal ownership in one component so pending label/report
 // ledgers stay easy to audit.
+/* eslint-disable complexity, max-lines-per-function -- Address book page coordinates URL state, edit modals, and pending mutation ledgers in one route surface. */
 // react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component
-// eslint-disable-next-line complexity, max-lines-per-function -- Address book page coordinates URL state, edit modals, and pending mutation ledgers in one route surface.
 export default function AddressBookPage(props: AddressBookPageProps) {
   const { canEdit: userCanEdit = false } = props;
   const {
@@ -487,3 +487,4 @@ export default function AddressBookPage(props: AddressBookPageProps) {
     </div>
   );
 }
+/* eslint-enable complexity, max-lines-per-function */
