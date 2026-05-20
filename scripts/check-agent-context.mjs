@@ -50,13 +50,18 @@ function normalizeSkillContent(filePath, content) {
     );
 }
 
-function walk(dir, predicate = () => true) {
+function walk(dir, predicate = () => true, { required = false } = {}) {
   const root = path.join(repoRoot, dir);
   const out = [];
   let entries;
   try {
     entries = readdirSync(root, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if (required) {
+      fail(
+        `${dir}: expected directory is missing or unreadable (${error.code ?? error.message})`,
+      );
+    }
     return out;
   }
   for (const entry of entries) {
@@ -128,7 +133,9 @@ const managedContextFiles = [
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
-  ...walk(".agents/skills", (file) => file.endsWith("/SKILL.md")),
+  ...walk(".agents/skills", (file) => file.endsWith("/SKILL.md"), {
+    required: true,
+  }),
   ...walk(".agents/roles", (file) => file.endsWith(".md")),
 ];
 
@@ -146,7 +153,9 @@ for (const dir of scopedAgentDirs) {
   }
 }
 
-for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"))) {
+for (const skill of walk(".agents/skills", (file) => !file.endsWith("/"), {
+  required: true,
+})) {
   const mirror = skill.replace(/^\.agents\/skills\//, ".claude/skills/");
   if (!exists(mirror)) {
     fail(`${mirror}: missing mirror for canonical ${skill}`);
