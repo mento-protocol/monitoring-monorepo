@@ -749,20 +749,6 @@
     "linePreview": "/** Split a single CSV line respecting double-quoted fields. */ | export function splitCsvLine( | line: string,"
   },
   {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "complexity",
-    "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15.",
-    "line": 316,
-    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 316,
-    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
-  },
-  {
     "file": "src/lib/address-reports-shared.ts",
     "ruleId": "complexity",
     "message": "Function 'upgradeReport' has a complexity of 19. Maximum allowed is 15.",

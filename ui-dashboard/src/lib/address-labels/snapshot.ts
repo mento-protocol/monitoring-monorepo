@@ -334,71 +334,109 @@ export function validateSnapshotReports(
   for (const [addr, payload] of Object.entries(
     raw as Record<string, unknown>,
   )) {
-    if (!isValidAddress(addr)) {
-      return { error: `Invalid report address: ${addr}` };
-    }
-    if (
-      typeof payload !== "object" ||
-      payload === null ||
-      Array.isArray(payload)
-    ) {
-      return { error: `Invalid report payload for ${addr}` };
-    }
-    const p = payload as Record<string, unknown>;
-    if (typeof p.body !== "string" || p.body.trim() === "") {
-      return { error: `Report for ${addr} has an empty or non-string body` };
-    }
-    if (p.body.length > MAX_REPORT_BODY_LENGTH) {
-      return {
-        error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
-      };
-    }
-    let title: string | undefined;
-    if (p.title !== undefined && p.title !== null) {
-      if (typeof p.title !== "string") {
-        return { error: `Report for ${addr} title is not a string` };
-      }
-      if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
-        return {
-          error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
-        };
-      }
-      // Match `sanitizeReportInput`: trim + drop if empty.
-      const trimmed = p.title.trim();
-      if (trimmed) title = trimmed;
-    }
-
-    if (mode === "preserve") {
-      if (
-        p.authorEmail !== undefined &&
-        p.authorEmail !== null &&
-        (typeof p.authorEmail !== "string" || !/@/.test(p.authorEmail))
-      ) {
-        return { error: `Report for ${addr} has invalid authorEmail` };
-      }
-      const restored = upgradeReport(p);
-      result[addr.toLowerCase()] = {
-        ...restored,
-        body: p.body,
-        ...(title ? { title } : {}),
-      };
-      continue;
-    }
-
-    // Re-stamp server-controlled metadata. Importer's email + `"import"`
-    // source identifies the restore round; `version: 1` resets the monotonic
-    // counter (any subsequent live edit will bump from 1 → 2).
-    result[addr.toLowerCase()] = {
-      body: p.body,
-      ...(title ? { title } : {}),
-      authorEmail: options.importerEmail,
-      source: "import",
-      createdAt: now,
-      updatedAt: now,
-      version: 1,
-    };
+    const entry = validateSingleReportEntry(addr, payload, {
+      importerEmail: options.importerEmail,
+      mode,
+      now,
+    });
+    if ("error" in entry) return { error: entry.error };
+    result[addr.toLowerCase()] = entry.report;
   }
   return { reports: result };
+}
+
+function validateSingleReportEntry(
+  addr: string,
+  payload: unknown,
+  ctx: { importerEmail: string; mode: SnapshotReportMetadataMode; now: string },
+): { report: AddressReport } | { error: string } {
+  if (!isValidAddress(addr)) {
+    return { error: `Invalid report address: ${addr}` };
+  }
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    return { error: `Invalid report payload for ${addr}` };
+  }
+  const p = payload as Record<string, unknown>;
+
+  const bodyErr = checkReportBody(addr, p);
+  if (bodyErr) return { error: bodyErr };
+
+  const titleResult = extractReportTitle(addr, p);
+  if ("error" in titleResult) return { error: titleResult.error };
+
+  if (ctx.mode === "preserve") {
+    const authorErr = checkAuthorEmail(addr, p);
+    if (authorErr) return { error: authorErr };
+    const restored = upgradeReport(p);
+    return {
+      report: {
+        ...restored,
+        body: p.body as string,
+        ...(titleResult.title ? { title: titleResult.title } : {}),
+      },
+    };
+  }
+
+  // Re-stamp server-controlled metadata. Importer's email + `"import"`
+  // source identifies the restore round; `version: 1` resets the monotonic
+  // counter (any subsequent live edit will bump from 1 → 2).
+  return {
+    report: {
+      body: p.body as string,
+      ...(titleResult.title ? { title: titleResult.title } : {}),
+      authorEmail: ctx.importerEmail,
+      source: "import",
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+      version: 1,
+    },
+  };
+}
+
+function checkReportBody(
+  addr: string,
+  p: Record<string, unknown>,
+): string | null {
+  if (typeof p.body !== "string" || p.body.trim() === "") {
+    return `Report for ${addr} has an empty or non-string body`;
+  }
+  if (p.body.length > MAX_REPORT_BODY_LENGTH) {
+    return `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`;
+  }
+  return null;
+}
+
+function extractReportTitle(
+  addr: string,
+  p: Record<string, unknown>,
+): { title?: string } | { error: string } {
+  if (p.title === undefined || p.title === null) return {};
+  if (typeof p.title !== "string") {
+    return { error: `Report for ${addr} title is not a string` };
+  }
+  if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
+    return {
+      error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
+    };
+  }
+  // Match `sanitizeReportInput`: trim + drop if empty.
+  const trimmed = p.title.trim();
+  return trimmed ? { title: trimmed } : {};
+}
+
+function checkAuthorEmail(
+  addr: string,
+  p: Record<string, unknown>,
+): string | null {
+  if (p.authorEmail === undefined || p.authorEmail === null) return null;
+  if (typeof p.authorEmail !== "string" || !/@/.test(p.authorEmail)) {
+    return `Report for ${addr} has invalid authorEmail`;
+  }
+  return null;
 }
 
 function isIntelOnlyPayload(
