@@ -16,15 +16,20 @@ REPO="$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel 2>/dev/null || true)"
 
 input="$(cat 2>/dev/null || true)"
 cwd=""
+session_started_at=""
 if command -v jq >/dev/null 2>&1; then
   cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+  session_started_at="$(printf '%s' "$input" | jq -r '.session_started_at // .session_start_time // .started_at // empty' 2>/dev/null || true)"
 fi
 [ -z "$cwd" ] && cwd="$(pwd)"
 
 cwd_repo="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
 [ "$cwd_repo" = "$REPO" ] || exit 0
 
-recent_commits="$(git -C "$cwd" rev-list --count --since='2 hours ago' HEAD 2>/dev/null || echo 0)"
+recent_commits=0
+if [ -n "$session_started_at" ]; then
+  recent_commits="$(git -C "$cwd" rev-list --count --since="$session_started_at" HEAD 2>/dev/null || echo 0)"
+fi
 modified="$(git -C "$cwd" status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
 
 if [ "$recent_commits" -gt 0 ] || [ "$modified" -gt 0 ]; then

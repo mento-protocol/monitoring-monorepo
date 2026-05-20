@@ -33,6 +33,17 @@ function readRequired(filePath) {
   return read(filePath);
 }
 
+function readJsonRequired(filePath) {
+  const content = readRequired(filePath);
+  if (!content) return null;
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    fail(`${filePath}: invalid JSON (${error.message})`);
+    return null;
+  }
+}
+
 function normalizeSkillContent(filePath, content) {
   if (!filePath.endsWith("forensic-report/SKILL.md")) return content;
   return content
@@ -219,21 +230,58 @@ if (
   );
 }
 
-const codexHooks = readRequired(".codex/hooks.json");
+function sessionEndCommands(settings, filePath) {
+  const entries = settings?.hooks?.SessionEnd;
+  if (!Array.isArray(entries)) {
+    fail(`${filePath}: expected hooks.SessionEnd array`);
+    return [];
+  }
+  return entries.flatMap((entry) =>
+    Array.isArray(entry?.hooks)
+      ? entry.hooks
+          .filter((hook) => hook?.type === "command")
+          .map((hook) => hook.command)
+          .filter((command) => typeof command === "string")
+      : [],
+  );
+}
+
+const codexHooks = readJsonRequired(".codex/hooks.json");
 if (codexHooks) {
-  if (codexHooks.includes("/Users/")) {
+  const commands = sessionEndCommands(codexHooks, ".codex/hooks.json");
+  if (commands.some((command) => command.includes("/Users/"))) {
+    fail(".codex/hooks.json: Codex hook command must not use /Users paths");
+  }
+  if (
+    !commands.some(
+      (command) =>
+        command.includes("git rev-parse --show-toplevel") &&
+        command.includes("scripts/agent-session-end-hook.sh"),
+    )
+  ) {
     fail(
-      ".codex/hooks.json: Codex hook commands must use repository-relative paths",
+      ".codex/hooks.json: expected SessionEnd command to resolve the repo root and run scripts/agent-session-end-hook.sh",
     );
   }
-  if (!codexHooks.includes("git rev-parse --show-toplevel")) {
+}
+
+const claudeSettings = readJsonRequired(".claude/settings.json");
+if (claudeSettings) {
+  const commands = sessionEndCommands(claudeSettings, ".claude/settings.json");
+  if (commands.some((command) => command.includes("/Users/"))) {
     fail(
-      ".codex/hooks.json: expected Codex hook command to resolve the repository root",
+      ".claude/settings.json: Claude hook command must not use /Users paths",
     );
   }
-  if (!codexHooks.includes("scripts/agent-session-end-hook.sh")) {
+  if (
+    !commands.some((command) =>
+      command.includes(
+        "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh",
+      ),
+    )
+  ) {
     fail(
-      ".codex/hooks.json: expected SessionEnd hook to run scripts/agent-session-end-hook.sh",
+      ".claude/settings.json: expected SessionEnd command to use ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh",
     );
   }
 }
