@@ -16,7 +16,7 @@ permissions: read-all
 
 jobs:
   notify:
-    name: Post Discord reminder
+    name: Post Slack notification
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -43,19 +43,24 @@ jobs:
               ;;
           esac
 
-      - name: Post to Discord thread
+      - name: Post to Slack #deploys
         env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          THREAD_ID: "1476243867832549489"
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: deploys
           NETWORK: ${{ steps.meta.outputs.network }}
           ENVIO_URL: ${{ steps.meta.outputs.envio_url }}
           COMMIT: ${{ github.sha }}
           ACTOR: ${{ github.actor }}
         run: |
           SHORT_SHA="${COMMIT:0:7}"
-          MESSAGE="🚀 **Envio indexer deploying — $NETWORK** (commit \`$SHORT_SHA\` by $ACTOR)\n\n📊 Track sync progress: $ENVIO_URL"
+          # Slack mrkdwn: *bold* (single asterisks), <url|text> for links,
+          # \n for newlines (interpreted inside JSON string).
+          MESSAGE="🚀 *Envio indexer deploying — $NETWORK* (commit \`$SHORT_SHA\` by $ACTOR)\n\n📊 Track sync progress: <$ENVIO_URL|$ENVIO_URL>"
 
-          curl -sf -X POST "https://discord.com/api/v10/channels/$THREAD_ID/messages" \
-            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"$MESSAGE\"}"
+          # Reuses the same xoxb-... Slack Bot User OAuth token that Grafana
+          # uses to post alerts (terraform var.slack_bot_token). Requires the
+          # bot to have been invited to #deploys with `/invite @Grafana Alerts`.
+          curl -sf -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"channel\": \"$SLACK_CHANNEL\", \"text\": \"$MESSAGE\"}"
