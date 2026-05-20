@@ -72,12 +72,14 @@ package-script refusal path. Docs-only changes run targeted Trunk checks against
 the changed docs paths instead of full-repo Trunk.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--fail-fast`, so the hook stops on the first failed mapped command instead of
-burning through the rest of the suite. For a push that intentionally changes
-package scripts or package-manager config, review the script/lifecycle diff
-first, then temporarily set
-`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
-push.
+`--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
+command instead of burning through the rest of the suite, and it reuses a
+recent successful manual gate run when the fetched base commit, mapped command
+plan, gate implementation, changed paths, and validated file content are
+unchanged. For a push that intentionally changes package scripts or
+package-manager config, review the script/lifecycle diff first, then
+temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
+config for that push.
 
 ## PR feedback sweep rule
 

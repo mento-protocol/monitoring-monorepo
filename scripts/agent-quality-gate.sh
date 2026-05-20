@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -20,6 +20,11 @@ Options:
                  alter lifecycle/package scripts before they execute.
   --fail-fast    With --run, stop after the first failed mapped command.
   --keep-going   With --run, continue after failures and report the total.
+  --skip-if-fresh
+                 With --run, skip execution when the previous successful run
+                 used the same base, changed paths, command plan, gate
+                 implementation, and validated file content. Intended for the
+                 pre-push hook only.
   -h, --help     Show this help.
 
 Environment:
@@ -39,6 +44,7 @@ head_ref="${AGENT_QUALITY_HEAD:-HEAD}"
 changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
+skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -89,6 +95,10 @@ while [[ $# -gt 0 ]]; do
       fail_fast="false"
       shift
       ;;
+    --skip-if-fresh)
+      skip_if_fresh="true"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -112,6 +122,8 @@ cd "$repo_root"
 # the system default (which sandboxed shells often cannot write to).
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
+success_stamp_file="$scratch_dir/last-success.stamp"
+success_stamp_ttl_seconds=900
 # Don't override TMPDIR under Claude Code's seatbelt — it blocks AF_UNIX
 # socket creation in repo paths, which breaks `terraform validate` (the
 # Grafana provider uses go-plugin grpc on a socket in TMPDIR). Trunk's
@@ -1004,6 +1016,107 @@ done < "$changed_paths_file"
 add_trunk_check_command
 sort_codegen_commands
 
+hash_stream() {
+  shasum -a 256 | awk '{ print $1 }'
+}
+
+hash_file() {
+  shasum -a 256 "$1" | awk '{ print $1 }'
+}
+
+ref_oid() {
+  local ref="$1"
+  git rev-parse --verify "${ref}^{commit}" 2>/dev/null || echo "__unresolved__:${ref}"
+}
+
+write_command_plan() {
+  local output_file="$1"
+  local entry
+  : > "$output_file"
+  for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
+    printf 'preflight\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+  done
+  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+    printf 'codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+  done
+  for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
+    printf 'post-codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+  done
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    printf 'quality\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+  done
+}
+
+implementation_signature() {
+  local path
+  for path in \
+    scripts/agent-quality-gate.sh \
+    scripts/agent-quality-gate.test.sh \
+    scripts/check-agent-quality-gate-package-scripts.sh \
+    .trunk/trunk.yaml; do
+    if [[ -f "$path" ]]; then
+      printf '%s %s\n' "$path" "$(hash_file "$path")"
+    else
+      printf '%s __missing__\n' "$path"
+    fi
+  done | hash_stream
+}
+
+validation_content_signature() {
+  local path
+
+  {
+    while IFS= read -r path; do
+      printf 'path %s\0' "$path"
+      if [[ -f "$path" ]]; then
+        printf 'file %s\0' "$(hash_file "$path")"
+      elif [[ -d "$path" ]]; then
+        printf 'directory\0'
+      elif [[ -e "$path" ]]; then
+        printf 'other\0'
+      else
+        printf 'deleted\0'
+      fi
+      git diff --no-ext-diff --summary "$base_ref" -- "$path" 2>/dev/null || true
+    done < "$changed_paths_file"
+  } | hash_stream
+}
+
+command_plan_file="$(make_tmpfile)"
+write_command_plan "$command_plan_file"
+
+base_oid="$(ref_oid "$base_ref")"
+changed_paths_hash="$(hash_file "$changed_paths_file")"
+command_plan_hash="$(hash_file "$command_plan_file")"
+implementation_hash="$(implementation_signature)"
+validated_content_hash="$(validation_content_signature)"
+
+stamp_line() {
+  printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
+    "$base_oid" \
+    "$changed_paths_hash" \
+    "$command_plan_hash" \
+    "$implementation_hash" \
+    "$validated_content_hash" \
+    "$package_script_risk_changed" \
+    "${allow_package_script_changes:-false}"
+}
+
+current_stamp="$(stamp_line)"
+
+is_fresh_success_stamp() {
+  local stamped_at
+  local stamped_value
+  local now
+  [[ -f "$success_stamp_file" ]] || return 1
+  stamped_at="$(sed -n '1s/^created_at=//p' "$success_stamp_file")"
+  stamped_value="$(sed -n '2s/^stamp=//p' "$success_stamp_file")"
+  [[ "$stamped_value" == "$current_stamp" ]] || return 1
+  [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1
+  now="$(date +%s)"
+  [[ $((now - stamped_at)) -le "$success_stamp_ttl_seconds" ]]
+}
+
 echo "Agent quality gate"
 echo
 echo "Base: ${base_ref}"
@@ -1048,6 +1161,13 @@ echo
 if [[ "$mode" == "dry-run" ]]; then
   echo "Dry run only. Re-run with --run to execute the mapped commands."
   exit 0
+fi
+
+if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
+  if [[ "$package_script_risk_changed" != true ]] && is_fresh_success_stamp; then
+    echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+    exit 0
+  fi
 fi
 
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
@@ -1194,3 +1314,7 @@ fi
 
 echo
 echo "All mapped commands passed."
+{
+  printf 'created_at=%s\n' "$(date +%s)"
+  printf 'stamp=%s\n' "$current_stamp"
+} > "$success_stamp_file"

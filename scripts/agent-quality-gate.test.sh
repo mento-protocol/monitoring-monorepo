@@ -752,6 +752,75 @@ assert_contains "- ok "
 assert_not_contains "expected fixture failure that should stay quiet"
 assert_not_contains "successful command noise that should stay quiet"
 
+fresh_stamp_repo="$(mktemp -d)"
+(
+  cd "$fresh_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> README.md
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+  git add README.md
+  git commit -qm "commit validated content"
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "fresh gate stamp did not skip duplicate run"
+)
+rm -rf "$fresh_stamp_repo"
+assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+stale_stamp_repo="$(mktemp -d)"
+(
+  cd "$stale_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> README.md
+  COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+  printf 'changed again\n' >> README.md
+  COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "fresh gate stamp was reused after worktree content changed"
+)
+rm -rf "$stale_stamp_repo"
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
 quiet_failure_repo="$(mktemp -d)"
 (
   cd "$quiet_failure_repo"
