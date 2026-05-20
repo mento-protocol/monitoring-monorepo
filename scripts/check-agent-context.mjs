@@ -136,7 +136,9 @@ const managedContextFiles = [
   ...walk(".agents/skills", (file) => file.endsWith("/SKILL.md"), {
     required: true,
   }),
-  ...walk(".agents/roles", (file) => file.endsWith(".md")),
+  ...walk(".agents/roles", (file) => file.endsWith(".md"), {
+    required: true,
+  }),
 ];
 
 for (const file of managedContextFiles) {
