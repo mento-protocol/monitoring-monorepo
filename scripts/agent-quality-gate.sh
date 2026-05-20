@@ -1016,12 +1016,23 @@ done < "$changed_paths_file"
 add_trunk_check_command
 sort_codegen_commands
 
+hash_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$@"
+  else
+    echo "Cannot compute sha256; please install sha256sum or shasum." >&2
+    return 127
+  fi
+}
+
 hash_stream() {
-  shasum -a 256 | awk '{ print $1 }'
+  hash_sha256 | awk '{ print $1 }'
 }
 
 hash_file() {
-  shasum -a 256 "$1" | awk '{ print $1 }'
+  hash_sha256 "$1" | awk '{ print $1 }'
 }
 
 ref_oid() {

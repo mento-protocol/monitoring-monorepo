@@ -105,6 +105,10 @@ assert_script_occurrences() {
 assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
+assert_script_occurrences 1 "command -v sha256sum"
+assert_script_occurrences 1 "command -v shasum"
+assert_script_occurrences 0 "shasum -a 256 | awk"
+assert_script_occurrences 0 'shasum -a 256 "$1"'
 
 validator_repo="$(mktemp -d)"
 (
@@ -820,6 +824,45 @@ STUB
 )
 rm -rf "$stale_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+sha256sum_repo="$(mktemp -d)"
+(
+  cd "$sha256sum_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > README.md
+  mkdir -p bin tools
+  cat > bin/sha256sum <<'STUB'
+#!/usr/bin/env bash
+counter_file="${SHA256SUM_COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+if [[ "$#" -eq 0 ]]; then
+  cat >/dev/null
+fi
+printf 'fixturehash  %s\n' "${1:--}"
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/sha256sum tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> README.md
+  SHA256SUM_COUNTER_FILE="$sha256sum_repo/sha256sum-count" \
+    PATH="$sha256sum_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
+  [[ -s "$sha256sum_repo/sha256sum-count" ]] ||
+    fail "gate did not use sha256sum when it was available"
+)
+rm -rf "$sha256sum_repo"
+assert_contains "+ ./tools/trunk check README.md"
 
 quiet_failure_repo="$(mktemp -d)"
 (
