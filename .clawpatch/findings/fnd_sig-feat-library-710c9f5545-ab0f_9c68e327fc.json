@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-710c9f5545-ab0f_9c68e327fc",
+  "featureId": "feat_library_710c9f5545",
+  "title": "Git-derived table cells are written without Markdown escaping",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "scripts/code-health-history.mjs",
+      "startLine": 217,
+      "endLine": 219,
+      "symbol": "fmtRow",
+      "quote": "function fmtRow(cols) {\n  return `| ${cols.join(\" | \")} |`;\n}"
+    },
+    {
+      "path": "scripts/code-health-history.mjs",
+      "startLine": 248,
+      "endLine": 257,
+      "symbol": "render",
+      "quote": "fmtRow([\n          i + 1,\n          row.score.toLocaleString(\"en-US\"),\n          row.commits,\n          row.loc,\n          `\\`${row.path}\\``,\n        ]),"
+    },
+    {
+      "path": "scripts/code-health-history.mjs",
+      "startLine": 303,
+      "endLine": 310,
+      "symbol": "render",
+      "quote": "fmtRow([\n          i + 1,\n          `${(row.share * 100).toFixed(0)}%`,\n          row.total,\n          row.loc,\n          row.topAuthor,\n          `\\`${row.path}\\``,\n        ]),"
+    }
+  ],
+  "reasoning": "The report renders Markdown tables by joining raw cell values with pipe separators. Several cells come directly from git history, including file paths and author names. Git permits paths and author names containing `|`, and those values will split the generated Markdown row into extra columns, corrupting the advisory report. Backticks around paths do not escape table separators in Markdown tables.",
+  "reproduction": null,
+  "recommendation": "Escape Markdown table metacharacters before joining cells, at minimum replacing `|` with `\\|` and normalizing newlines. Apply the helper to all cells in `fmtRow` so numeric and string callers share the same behavior.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests are included for `scripts/code-health-history.mjs`, and the feature metadata lists an empty tests array.",
+  "suggestedRegressionTest": "Add a script-level test or fixture that renders rows containing an author name and file path with `|`, then asserts the generated table still has the expected number of columns.",
+  "minimumFixScope": "Add Markdown table cell escaping in `scripts/code-health-history.mjs` and cover `fmtRow` or `render` with a focused regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by escaping Markdown table cells in code-health history rows and adding fmtRow pipe/newline regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:55.234Z"
+    }
+  ],
+  "signature": "sig_feat-library-710c9f5545_ab0f3c3aef",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:16:18.164Z",
+  "updatedAt": "2026-05-20T09:24:55.233Z"
+}

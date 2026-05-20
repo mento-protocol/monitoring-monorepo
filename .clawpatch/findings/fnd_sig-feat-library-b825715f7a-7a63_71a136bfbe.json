@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b825715f7a-7a63_71a136bfbe",
+  "featureId": "feat_library_b825715f7a",
+  "title": "OLS pool re-registration overwrites the prior OlsPool row",
+  "category": "data-loss",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/handlers/openLiquidityStrategy.ts",
+      "startLine": 11,
+      "endLine": 16,
+      "symbol": "makeOlsPoolId",
+      "quote": "One record per (pool, OLS contract) — re-registration creates a fresh record\n * instead of silently overwriting history.\n */\nfunction makeOlsPoolId(poolId: string, olsAddress: string): string {"
+    },
+    {
+      "path": "indexer-envio/src/handlers/openLiquidityStrategy.ts",
+      "startLine": 84,
+      "endLine": 116,
+      "symbol": "OpenLiquidityStrategy.PoolAdded handler",
+      "quote": "const olsPool: OlsPool = {\n      id: makeOlsPoolId(poolId, olsAddress),\n      chainId: event.chainId,"
+    },
+    {
+      "path": "indexer-envio/src/handlers/openLiquidityStrategy.ts",
+      "startLine": 215,
+      "endLine": 225,
+      "symbol": "OpenLiquidityStrategy.LiquidityMoved handler",
+      "quote": "context.OlsPool.set({\n      ...existing,\n      lastRebalance: blockTimestamp,\n      olsRebalanceCount: existing.olsRebalanceCount + 1,"
+    }
+  ],
+  "reasoning": "The file states that re-registration should create a fresh OlsPool record, but the row id only includes poolId and olsAddress. If the same pool is removed and later added again to the same OpenLiquidityStrategy contract, PoolAdded writes the same id and resets fields such as `addedAtBlock`, `addedAtTimestamp`, params, and `olsRebalanceCount` to zero, losing the previous lifecycle aggregate on the OlsPool row. The separate lifecycle event remains, but the claimed per-registration OlsPool history does not.",
+  "reproduction": null,
+  "recommendation": "Either include registration entropy such as the PoolAdded event id/block/logIndex in `OlsPool.id`, or update the comment and downstream contract to make `OlsPool` explicitly current-state-only while preserving historical per-registration aggregates elsewhere.",
+  "whyTestsDoNotAlreadyCoverThis": "The included context tests cover BiPoolManager and Broker behavior only; no OpenLiquidityStrategy test exercises PoolAdded, PoolRemoved, then PoolAdded again for the same pool and OLS address.",
+  "suggestedRegressionTest": "Add an OpenLiquidityStrategy handler test that processes PoolAdded, LiquidityMoved, PoolRemoved, then a second PoolAdded for the same pool/OLS and asserts either two distinct OlsPool ids exist or the documented current-state-only behavior is explicitly preserved.",
+  "minimumFixScope": "OpenLiquidityStrategy OlsPool id semantics plus any queries that assume one OlsPool row per registration.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "OlsPool IDs now include PoolAdded registration entropy and later updates resolve the latest active registration; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:51.391Z"
+    }
+  ],
+  "signature": "sig_feat-library-b825715f7a_7a634b74a9",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:30:30.572Z",
+  "updatedAt": "2026-05-20T09:43:51.390Z"
+}

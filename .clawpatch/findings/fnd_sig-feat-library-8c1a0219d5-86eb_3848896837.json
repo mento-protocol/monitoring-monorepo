@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-8c1a0219d5-86eb_3848896837",
+  "featureId": "feat_library_8c1a0219d5",
+  "title": "Count-error fallback can reuse totals from a previous pool",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
+      "startLine": 68,
+      "endLine": 72,
+      "symbol": "LiquidityTab",
+      "quote": "const lastKnownTotalRef = React.useRef(0);"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
+      "startLine": 69,
+      "endLine": 72,
+      "symbol": "SwapsTab",
+      "quote": "const total = countError ? lastKnownTotalRef.current : rawTotal;"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
+      "startLine": 71,
+      "endLine": 75,
+      "symbol": "OracleTab",
+      "quote": "const total = countError ? lastKnownTotalRef.current : rawTotal;"
+    },
+    {
+      "path": "ui-dashboard/src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
+      "startLine": 205,
+      "endLine": 211,
+      "symbol": "RebalancesTab",
+      "quote": "const total = countError ? lastKnownTotalRef.current : rawTotal;"
+    }
+  ],
+  "reasoning": "The last-known count cache is a component-level ref and is not keyed or reset by poolId. If the same tab component instance receives a new poolId after successfully loading a count for pool A, then the count request for pool B errors, the UI uses pool A's total for pool B. That can show stale pagination, clamp pages against the wrong total, and choose the wrong search fetch window during degraded count mode. The fallback is useful for transient errors on the same pool, but it needs to be scoped to the pool/query identity.",
+  "reproduction": "Render one of these tabs with poolId A and a successful count response of many rows, then rerender the same component instance with poolId B while the count hook returns countError. The computed total remains A's lastKnownTotalRef instead of resetting for B.",
+  "recommendation": "Store the fallback together with the poolId, or reset lastKnownTotalRef and rawPage when poolId changes. Only use the cached total when the cached key matches the current poolId and count query identity.",
+  "whyTestsDoNotAlreadyCoverThis": "The included reserves-tab test only verifies reserve chart/table ordering. It does not cover count-error degraded mode, rerendering with a different poolId, or the paginated tabs that use lastKnownTotalRef.",
+  "suggestedRegressionTest": "Add rerender tests for at least one count-backed tab: first return countData for pool A, then rerender with pool B and countError, and assert pagination/search warnings do not use A's total.",
+  "minimumFixScope": "Update the shared count-fallback pattern in LiquidityTab, SwapsTab, OracleTab, and RebalancesTab so cached totals are keyed by poolId or reset on poolId changes.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed count fallback by keying the last-known total to poolId through a shared hook across swaps, liquidity, oracle, and rebalances tabs.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:56.215Z"
+    }
+  ],
+  "signature": "sig_feat-library-8c1a0219d5_86ebfa5e3a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:17:57.786Z",
+  "updatedAt": "2026-05-20T09:24:56.214Z"
+}

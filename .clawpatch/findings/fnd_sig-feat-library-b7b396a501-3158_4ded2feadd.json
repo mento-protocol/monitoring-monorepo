@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b7b396a501-3158_4ded2feadd",
+  "featureId": "feat_library_b7b396a501",
+  "title": "Compound index audit treats independent field usages as proof a compound index is used",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "indexer-envio/scripts/auditSchemaIndexes.mjs",
+      "startLine": 269,
+      "endLine": 278,
+      "symbol": null,
+      "quote": "if (fieldUsages.every(Boolean)) { referencedCompound.push({ ...index, reasons: ... }); } else { candidateCompound.push(index); }"
+    }
+  ],
+  "reasoning": "A compound index is only useful for specific field combinations and ordering, but the audit marks it referenced when every indexed field appears somewhere in local usages. If field A is used in one query and field B is used in an unrelated query, the script reports the compound index as referenced even though no local query can use that compound index. This under-reports unused compound indexes and can leave schema/index bloat in place.",
+  "reproduction": "Create a schema compound index on fields [\"a\", \"b\"], add one query filtering only a and another query ordering only b, then run the audit. The compound index is classified as referenced even though no query uses the pair together.",
+  "recommendation": "Track per-query/per-call usage sets for where/order_by/distinct_on and only mark a compound index referenced when one usage site covers the relevant compound prefix or full field set according to the index semantics being audited.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are included for auditSchemaIndexes.mjs, and the current implementation has no fixture asserting compound-index classification behavior.",
+  "suggestedRegressionTest": "Add a fixture with separate single-field usages for both fields of a compound index and assert the audit still reports the compound index as a candidate or manual-review item.",
+  "minimumFixScope": "indexer-envio/scripts/auditSchemaIndexes.mjs compound usage extraction/classification, with fixture coverage for same-query versus separate-query usages.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Schema index audit now requires a compound index to be covered by one usage site rather than independent field usages; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:50.855Z"
+    }
+  ],
+  "signature": "sig_feat-library-b7b396a501_31580e207d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:30:13.916Z",
+  "updatedAt": "2026-05-20T09:43:50.854Z"
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b7b396a501-d8e3_ea3e61c1c6",
+  "featureId": "feat_library_b7b396a501",
+  "title": "NTT address generation silently succeeds with a partial manifest",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/scripts/generateNttAddresses.mjs",
+      "startLine": 67,
+      "endLine": 72,
+      "symbol": null,
+      "quote": "if (wormholeChainId === undefined) { console.warn(...); continue; }"
+    },
+    {
+      "path": "indexer-envio/scripts/generateNttAddresses.mjs",
+      "startLine": 81,
+      "endLine": 85,
+      "symbol": null,
+      "quote": "if (!tokenEntry) { console.warn(...); continue; }"
+    },
+    {
+      "path": "indexer-envio/scripts/generateNttAddresses.mjs",
+      "startLine": 110,
+      "endLine": 114,
+      "symbol": null,
+      "quote": "writeFileSync(outPath, JSON.stringify(output, null, 2) + \"\\n\");"
+    }
+  ],
+  "reasoning": "The generator is used to produce a committed runtime manifest for NTT manager/transceiver lookup. If a contracts bump adds helper entries for a chain without a Wormhole mapping, or a helper token cannot be resolved, the script only warns, skips those entries, writes config/nttAddresses.json, and exits successfully. That makes a partial manifest look like a valid regeneration, which can drop bridge indexing/system-address coverage until someone notices the warning in command output.",
+  "reproduction": "Add a NttDeployHelper entry under a namespace whose chainId is not present in WORMHOLE_CHAIN_ID, then run pnpm generate:ntt-addresses from indexer-envio. The command writes config/nttAddresses.json without the new helper and exits 0.",
+  "recommendation": "Accumulate skipped helper entries and exit non-zero after reporting them, unless the skip is explicitly allow-listed with a documented reason. Treat missing Wormhole chain IDs and missing token entries as generation failures.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are included for these scripts in the reviewed feature, and package.json exposes generate:ntt-addresses as a plain script with no validation wrapper.",
+  "suggestedRegressionTest": "Add a unit/integration test that feeds a fixture contracts.json plus deployment-namespaces.json containing an unmapped NttDeployHelper chain and asserts the generator exits non-zero without writing a partial manifest.",
+  "minimumFixScope": "indexer-envio/scripts/generateNttAddresses.mjs plus a focused script test or fixture-backed command test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "NTT generator now accumulates missing manifest gaps and fails closed unless explicitly allow-listed; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:50.585Z"
+    }
+  ],
+  "signature": "sig_feat-library-b7b396a501_d8e3d9a30e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:30:13.916Z",
+  "updatedAt": "2026-05-20T09:43:50.585Z"
+}

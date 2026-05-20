@@ -34,7 +34,7 @@ function readProjectSources() {
     }));
 }
 
-function addUsage(map, type, field, reason) {
+export function addUsage(map, type, field, reason) {
   if (!type || !field) return;
   const key = `${type}.${field}`;
   const reasons = map.get(key) ?? new Set();
@@ -42,7 +42,24 @@ function addUsage(map, type, field, reason) {
   map.set(key, reasons);
 }
 
-function findMatching(text, openIndex, openChar, closeChar) {
+function addUsageSite(sites, type, fields, reason) {
+  const filteredFields = Array.from(fields).filter(Boolean);
+  if (!type || filteredFields.length === 0) return;
+  sites.push({
+    type,
+    fields: new Set(filteredFields),
+    reasons: new Set([reason]),
+  });
+}
+
+function addUsageSet(usages, sites, type, fields, reason) {
+  for (const field of fields) {
+    addUsage(usages, type, field, reason);
+  }
+  addUsageSite(sites, type, fields, reason);
+}
+
+export function findMatching(text, openIndex, openChar, closeChar) {
   let depth = 0;
   for (let i = openIndex; i < text.length; i += 1) {
     const char = text[i];
@@ -53,7 +70,7 @@ function findMatching(text, openIndex, openChar, closeChar) {
   return -1;
 }
 
-function extractFieldsFromObject(body) {
+export function extractFieldsFromObject(body) {
   const fields = new Set();
   const regex = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g;
   for (const match of body.matchAll(regex)) {
@@ -67,7 +84,7 @@ function extractFieldsFromObject(body) {
   return fields;
 }
 
-function extractGraphqlArgument(callText, argumentName) {
+export function extractGraphqlArgument(callText, argumentName) {
   const start = callText.indexOf(`${argumentName}:`);
   if (start === -1) return null;
   const valueStart = start + argumentName.length + 1;
@@ -81,8 +98,9 @@ function extractGraphqlArgument(callText, argumentName) {
   return callText.slice(openIndex, closeIndex + 1);
 }
 
-function extractGraphqlUsages(sources, schemaTypes) {
+export function extractGraphqlUsages(sources, schemaTypes) {
   const usages = new Map();
+  const usageSites = [];
   const dynamicWhereTypes = new Set();
 
   for (const { text } of sources) {
@@ -101,35 +119,64 @@ function extractGraphqlUsages(sources, schemaTypes) {
           dynamicWhereTypes.add(type);
         }
 
-        for (const field of extractFieldsFromObject(
+        const callFields = new Set();
+        const callReasons = new Set();
+        const whereFields = extractFieldsFromObject(
           extractGraphqlArgument(callText, "where") ?? "",
-        )) {
-          addUsage(usages, type, field, "graphql:where");
-        }
-        for (const field of extractFieldsFromObject(
+        );
+        addUsageSet(usages, usageSites, type, whereFields, "graphql:where");
+        for (const field of whereFields) callFields.add(field);
+        if (whereFields.size > 0) callReasons.add("graphql:where");
+
+        const orderByFields = extractFieldsFromObject(
           extractGraphqlArgument(callText, "order_by") ?? "",
-        )) {
-          addUsage(usages, type, field, "graphql:order_by");
-        }
+        );
+        addUsageSet(
+          usages,
+          usageSites,
+          type,
+          orderByFields,
+          "graphql:order_by",
+        );
+        for (const field of orderByFields) callFields.add(field);
+        if (orderByFields.size > 0) callReasons.add("graphql:order_by");
 
         const distinct = /distinct_on\s*:\s*\[([^\]]+)\]/.exec(callText);
         if (distinct) {
-          for (const field of distinct[1]
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)) {
-            addUsage(usages, type, field, "graphql:distinct_on");
-          }
+          const distinctFields = new Set(
+            distinct[1]
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+          );
+          addUsageSet(
+            usages,
+            usageSites,
+            type,
+            distinctFields,
+            "graphql:distinct_on",
+          );
+          for (const field of distinctFields) callFields.add(field);
+          if (distinctFields.size > 0) callReasons.add("graphql:distinct_on");
+        }
+
+        if (callFields.size > 0) {
+          usageSites.push({
+            type,
+            fields: callFields,
+            reasons: callReasons,
+          });
         }
       }
     }
   }
 
-  return { usages, dynamicWhereTypes };
+  return { usages, usageSites, dynamicWhereTypes };
 }
 
-function extractDiscoveryTargetUsages(sources) {
+export function extractDiscoveryTargetUsages(sources) {
   const usages = new Map();
+  const usageSites = [];
   const objectRegex = /\{[^{}]*\}/g;
   const property = (body, name, pattern) =>
     new RegExp(`\\b${name}\\s*:\\s*"(${pattern})"`).exec(body)?.[1] ?? null;
@@ -145,27 +192,52 @@ function extractDiscoveryTargetUsages(sources) {
         "[A-Za-z_][A-Za-z0-9_]*",
       );
       if (!table || !field || !chainIdColumn) continue;
-      addUsage(usages, table, chainIdColumn, "dynamic-discovery:where");
-      addUsage(usages, table, field, "dynamic-discovery:distinct_order");
+      addUsageSet(
+        usages,
+        usageSites,
+        table,
+        new Set([chainIdColumn]),
+        "dynamic-discovery:where",
+      );
+      addUsageSet(
+        usages,
+        usageSites,
+        table,
+        new Set([field]),
+        "dynamic-discovery:distinct_order",
+      );
+      usageSites.push({
+        type: table,
+        fields: new Set([chainIdColumn, field]),
+        reasons: new Set([
+          "dynamic-discovery:where",
+          "dynamic-discovery:distinct_order",
+        ]),
+      });
     }
   }
 
-  return usages;
+  return { usages, usageSites };
 }
 
-function extractHandlerGetWhereUsages(sources) {
+export function extractHandlerGetWhereUsages(sources) {
   const usages = new Map();
+  const usageSites = [];
   const regex =
     /(?:context|args\.context|\([^)]*context[^)]*\))\.([A-Z][A-Za-z0-9_]*)\.getWhere\s*\(\s*\{([\s\S]*?)\}\s*\)/g;
   for (const { text } of sources) {
     for (const match of text.matchAll(regex)) {
       const entity = match[1];
-      for (const field of extractFieldsFromObject(match[2])) {
-        addUsage(usages, entity, field, "handler:getWhere");
-      }
+      addUsageSet(
+        usages,
+        usageSites,
+        entity,
+        extractFieldsFromObject(match[2]),
+        "handler:getWhere",
+      );
     }
   }
-  return usages;
+  return { usages, usageSites };
 }
 
 function mergeUsageMaps(...maps) {
@@ -180,8 +252,26 @@ function mergeUsageMaps(...maps) {
   return merged;
 }
 
-function parseSchemaIndexes() {
-  const schema = readFileSync(schemaPath, "utf8");
+function mergeUsageSites(...siteLists) {
+  return siteLists.flat();
+}
+
+function compoundIndexReferencedBySite(index, site) {
+  if (site.type !== index.type) return false;
+  if (index.fields.length === 1) return site.fields.has(index.fields[0]);
+
+  for (
+    let prefixLength = index.fields.length;
+    prefixLength >= 2;
+    prefixLength -= 1
+  ) {
+    const prefix = index.fields.slice(0, prefixLength);
+    if (prefix.every((field) => site.fields.has(field))) return true;
+  }
+  return false;
+}
+
+export function parseSchemaIndexes(schema = readFileSync(schemaPath, "utf8")) {
   const singleFieldIndexes = [];
   const compoundIndexes = [];
   const schemaTypes = new Set();
@@ -232,104 +322,150 @@ function parseSchemaIndexes() {
   return { singleFieldIndexes, compoundIndexes, schemaTypes };
 }
 
-const { singleFieldIndexes, compoundIndexes, schemaTypes } =
-  parseSchemaIndexes();
-const sources = readProjectSources();
-const { usages: graphqlUsages, dynamicWhereTypes } = extractGraphqlUsages(
-  sources,
-  schemaTypes,
-);
-const handlerUsages = extractHandlerGetWhereUsages(sources);
-const discoveryUsages = extractDiscoveryTargetUsages(sources);
-const usages = mergeUsageMaps(graphqlUsages, discoveryUsages, handlerUsages);
-
-const referenced = [];
-const candidates = [];
-const uncertain = [];
-for (const index of singleFieldIndexes) {
-  const key = `${index.type}.${index.field}`;
-  const reasons = usages.get(key);
-  if (reasons) {
-    referenced.push({ ...index, reasons: Array.from(reasons).sort() });
-  } else if (dynamicWhereTypes.has(index.type)) {
-    uncertain.push(index);
-  } else {
-    candidates.push(index);
-  }
-}
-
-const referencedCompound = [];
-const candidateCompound = [];
-const uncertainCompound = [];
-for (const index of compoundIndexes) {
-  if (dynamicWhereTypes.has(index.type)) {
-    uncertainCompound.push(index);
-    continue;
-  }
-  const fieldUsages = index.fields.map((field) =>
-    usages.get(`${index.type}.${field}`),
+export function analyzeSchemaIndexes({
+  schema = readFileSync(schemaPath, "utf8"),
+  sources = readProjectSources(),
+} = {}) {
+  const { singleFieldIndexes, compoundIndexes, schemaTypes } =
+    parseSchemaIndexes(schema);
+  const {
+    usages: graphqlUsages,
+    usageSites: graphqlUsageSites,
+    dynamicWhereTypes,
+  } = extractGraphqlUsages(sources, schemaTypes);
+  const { usages: handlerUsages, usageSites: handlerUsageSites } =
+    extractHandlerGetWhereUsages(sources);
+  const { usages: discoveryUsages, usageSites: discoveryUsageSites } =
+    extractDiscoveryTargetUsages(sources);
+  const usages = mergeUsageMaps(graphqlUsages, discoveryUsages, handlerUsages);
+  const usageSites = mergeUsageSites(
+    graphqlUsageSites,
+    discoveryUsageSites,
+    handlerUsageSites,
   );
-  if (fieldUsages.every(Boolean)) {
-    referencedCompound.push({
-      ...index,
-      reasons: fieldUsages.flatMap((reasons) => Array.from(reasons ?? [])),
-    });
-  } else {
-    candidateCompound.push(index);
+
+  const referenced = [];
+  const candidates = [];
+  const uncertain = [];
+  for (const index of singleFieldIndexes) {
+    const key = `${index.type}.${index.field}`;
+    const reasons = usages.get(key);
+    if (reasons) {
+      referenced.push({ ...index, reasons: Array.from(reasons).sort() });
+    } else if (dynamicWhereTypes.has(index.type)) {
+      uncertain.push(index);
+    } else {
+      candidates.push(index);
+    }
   }
-}
 
-console.log("Schema index audit");
-console.log(`schema: ${relative(repoRoot, schemaPath)}`);
-console.log(`source roots: ${sourceRoots.join(", ")}`);
-console.log(`types: ${schemaTypes.size}`);
-console.log(`single-field @index directives: ${singleFieldIndexes.length}`);
-console.log(`compound @index directives: ${compoundIndexes.length}`);
-console.log(`referenced single-field indexes: ${referenced.length}`);
-console.log(`manual-review dynamic-$where indexes: ${uncertain.length}`);
-console.log(`candidate unused single-field indexes: ${candidates.length}`);
-console.log(`referenced compound indexes: ${referencedCompound.length}`);
-console.log(
-  `manual-review dynamic compound indexes: ${uncertainCompound.length}`,
-);
-console.log(`candidate unused compound indexes: ${candidateCompound.length}`);
-
-if (candidates.length > 0) {
-  console.log("\nCandidates not referenced by local getWhere or GraphQL args:");
-  for (const { type, field, line } of candidates) {
-    console.log(
-      `- ${type}.${field} (${relative(repoRoot, schemaPath)}:${line})`,
+  const referencedCompound = [];
+  const candidateCompound = [];
+  const uncertainCompound = [];
+  for (const index of compoundIndexes) {
+    if (dynamicWhereTypes.has(index.type)) {
+      uncertainCompound.push(index);
+      continue;
+    }
+    const matchingSites = usageSites.filter((site) =>
+      compoundIndexReferencedBySite(index, site),
     );
+    if (matchingSites.length > 0) {
+      referencedCompound.push({
+        ...index,
+        reasons: Array.from(
+          new Set(matchingSites.flatMap((site) => Array.from(site.reasons))),
+        ).sort(),
+      });
+    } else {
+      candidateCompound.push(index);
+    }
   }
+
+  return {
+    singleFieldIndexes,
+    compoundIndexes,
+    schemaTypes,
+    referenced,
+    candidates,
+    uncertain,
+    referencedCompound,
+    candidateCompound,
+    uncertainCompound,
+  };
 }
 
-if (candidateCompound.length > 0) {
+export function main() {
+  const {
+    singleFieldIndexes,
+    compoundIndexes,
+    schemaTypes,
+    referenced,
+    candidates,
+    uncertain,
+    referencedCompound,
+    candidateCompound,
+    uncertainCompound,
+  } = analyzeSchemaIndexes();
+
+  console.log("Schema index audit");
+  console.log(`schema: ${relative(repoRoot, schemaPath)}`);
+  console.log(`source roots: ${sourceRoots.join(", ")}`);
+  console.log(`types: ${schemaTypes.size}`);
+  console.log(`single-field @index directives: ${singleFieldIndexes.length}`);
+  console.log(`compound @index directives: ${compoundIndexes.length}`);
+  console.log(`referenced single-field indexes: ${referenced.length}`);
+  console.log(`manual-review dynamic-$where indexes: ${uncertain.length}`);
+  console.log(`candidate unused single-field indexes: ${candidates.length}`);
+  console.log(`referenced compound indexes: ${referencedCompound.length}`);
   console.log(
-    "\nCompound candidates not fully referenced by local getWhere or GraphQL args:",
+    `manual-review dynamic compound indexes: ${uncertainCompound.length}`,
   );
-  for (const { type, fields, line } of candidateCompound) {
+  console.log(`candidate unused compound indexes: ${candidateCompound.length}`);
+
+  if (candidates.length > 0) {
     console.log(
-      `- ${type}(${fields.join(", ")}) (${relative(repoRoot, schemaPath)}:${line})`,
+      "\nCandidates not referenced by local getWhere or GraphQL args:",
     );
+    for (const { type, field, line } of candidates) {
+      console.log(
+        `- ${type}.${field} (${relative(repoRoot, schemaPath)}:${line})`,
+      );
+    }
+  }
+
+  if (candidateCompound.length > 0) {
+    console.log(
+      "\nCompound candidates not fully referenced by one local getWhere or GraphQL arg site:",
+    );
+    for (const { type, fields, line } of candidateCompound) {
+      console.log(
+        `- ${type}(${fields.join(", ")}) (${relative(repoRoot, schemaPath)}:${line})`,
+      );
+    }
+  }
+
+  if (uncertain.length > 0) {
+    console.log("\nManual review required; entity is queried through $where:");
+    for (const { type, field, line } of uncertain) {
+      console.log(
+        `- ${type}.${field} (${relative(repoRoot, schemaPath)}:${line})`,
+      );
+    }
+  }
+
+  if (uncertainCompound.length > 0) {
+    console.log(
+      "\nManual review required; compound entity uses dynamic queries:",
+    );
+    for (const { type, fields, line } of uncertainCompound) {
+      console.log(
+        `- ${type}(${fields.join(", ")}) (${relative(repoRoot, schemaPath)}:${line})`,
+      );
+    }
   }
 }
 
-if (uncertain.length > 0) {
-  console.log("\nManual review required; entity is queried through $where:");
-  for (const { type, field, line } of uncertain) {
-    console.log(
-      `- ${type}.${field} (${relative(repoRoot, schemaPath)}:${line})`,
-    );
-  }
-}
-
-if (uncertainCompound.length > 0) {
-  console.log(
-    "\nManual review required; compound entity uses dynamic queries:",
-  );
-  for (const { type, fields, line } of uncertainCompound) {
-    console.log(
-      `- ${type}(${fields.join(", ")}) (${relative(repoRoot, schemaPath)}:${line})`,
-    );
-  }
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
 }

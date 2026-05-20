@@ -2,18 +2,29 @@
 // OpenLiquidityStrategy event handlers
 // ---------------------------------------------------------------------------
 
-import type { OlsLifecycleEvent, OlsLiquidityEvent, OlsPool } from "envio";
+import type {
+  EvmOnEventContext,
+  OlsLifecycleEvent,
+  OlsLiquidityEvent,
+  OlsPool,
+} from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 
 /**
- * OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}".
- * One record per (pool, OLS contract) — re-registration creates a fresh record
- * instead of silently overwriting history.
+ * OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}-{registrationId}".
+ * One record per PoolAdded registration — re-registration creates a fresh
+ * record instead of silently overwriting history.
  */
-function makeOlsPoolId(poolId: string, olsAddress: string): string {
-  return `${poolId}-${olsAddress}`;
+function makeOlsPoolId(
+  poolId: string,
+  olsAddress: string,
+  registrationId: string,
+): string {
+  return `${poolId}-${olsAddress}-${registrationId}`;
 }
+
+type OlsPoolContext = Pick<EvmOnEventContext, "OlsPool">;
 
 function placeholderOlsPool(args: {
   id: string;
@@ -46,15 +57,18 @@ function placeholderOlsPool(args: {
 }
 
 async function getOrCreateOlsPool(args: {
-  context: { OlsPool: { get: (id: string) => Promise<OlsPool | undefined> } };
+  context: OlsPoolContext;
   chainId: number;
   poolId: string;
   olsAddress: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): Promise<OlsPool> {
-  const id = makeOlsPoolId(args.poolId, args.olsAddress);
-  const existing = await args.context.OlsPool.get(id);
+  const existing = await getLatestActiveOlsPool(args.context, {
+    poolId: args.poolId,
+    olsAddress: args.olsAddress,
+  });
+  const id = makeOlsPoolId(args.poolId, args.olsAddress, "backfill");
   return (
     existing ??
     placeholderOlsPool({
@@ -66,6 +80,37 @@ async function getOrCreateOlsPool(args: {
       blockTimestamp: args.blockTimestamp,
     })
   );
+}
+
+async function getActiveOlsPools(
+  context: OlsPoolContext,
+  args: { poolId: string; olsAddress: string },
+): Promise<OlsPool[]> {
+  const rows = await context.OlsPool.getWhere({
+    poolId: { _eq: args.poolId },
+  });
+  return rows.filter(
+    (row) => row.olsAddress === args.olsAddress && row.isActive,
+  );
+}
+
+function latestOlsPool(rows: readonly OlsPool[]): OlsPool | undefined {
+  return [...rows].sort((a, b) => {
+    if (a.addedAtBlock !== b.addedAtBlock) {
+      return a.addedAtBlock > b.addedAtBlock ? -1 : 1;
+    }
+    if (a.addedAtTimestamp !== b.addedAtTimestamp) {
+      return a.addedAtTimestamp > b.addedAtTimestamp ? -1 : 1;
+    }
+    return b.id.localeCompare(a.id);
+  })[0];
+}
+
+async function getLatestActiveOlsPool(
+  context: OlsPoolContext,
+  args: { poolId: string; olsAddress: string },
+): Promise<OlsPool | undefined> {
+  return latestOlsPool(await getActiveOlsPools(context, args));
 }
 
 // ---------------------------------------------------------------------------
@@ -81,9 +126,24 @@ indexer.onEvent(
     const p = event.params.params;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    const activePools = await getActiveOlsPools(context, {
+      poolId,
+      olsAddress,
+    });
+
+    if (context.isPreload) return;
+
+    for (const activePool of activePools) {
+      context.OlsPool.set({
+        ...activePool,
+        isActive: false,
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      });
+    }
 
     const olsPool: OlsPool = {
-      id: makeOlsPoolId(poolId, olsAddress),
+      id: makeOlsPoolId(poolId, olsAddress, id),
       chainId: event.chainId,
       poolId,
       olsAddress,
@@ -135,6 +195,11 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    if (context.isPreload) {
+      await getLatestActiveOlsPool(context, { poolId, olsAddress });
+      return;
+    }
+
     const existing = await getOrCreateOlsPool({
       context,
       chainId: event.chainId,
@@ -180,6 +245,11 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    if (context.isPreload) {
+      await getLatestActiveOlsPool(context, { poolId, olsAddress });
+      return;
+    }
+
     const existing = await getOrCreateOlsPool({
       context,
       chainId: event.chainId,
@@ -223,6 +293,11 @@ indexer.onEvent(
     const olsAddress = asAddress(event.srcAddress);
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    if (context.isPreload) {
+      await getLatestActiveOlsPool(context, { poolId, olsAddress });
+      return;
+    }
 
     // Update lastRebalance + counter on OlsPool, even if indexing started
     // after the historical PoolAdded event.

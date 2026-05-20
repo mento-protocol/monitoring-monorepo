@@ -37,6 +37,7 @@ import type { Pool, RebalanceEvent } from "@/lib/types";
 import React, { useMemo } from "react";
 import { MIN_REWARD_SAMPLE_SIZE } from "../_lib/constants";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
+import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 import {
   BOUNDARY_TOOLTIP,
   EFFECTIVENESS_TOOLTIP,
@@ -205,10 +206,8 @@ export function RebalancesTab({
   const { data: countData, error: countError } = useGQL<{
     RebalanceEvent: { id: string }[];
   }>(POOL_REBALANCES_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
-  const lastKnownTotalRef = React.useRef(0);
   const rawTotal = countData?.RebalanceEvent?.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1;

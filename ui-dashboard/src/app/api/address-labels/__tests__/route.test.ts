@@ -189,6 +189,19 @@ describe("PUT /api/address-labels", () => {
     expect(entry.tags).toEqual(["whale"]);
   });
 
+  it("rejects empty name with only reserved server-provenance tags", async () => {
+    const res = await PUT(
+      jsonReq({
+        address: VALID_ADDR,
+        name: "   ",
+        tags: ["arkham", " MiniPay ", "ARKHAM"],
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(getLabel).not.toHaveBeenCalled();
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
   it("dedupes tags case-insensitively, preserving first-occurrence casing", async () => {
     const res = await PUT(
       jsonReq({

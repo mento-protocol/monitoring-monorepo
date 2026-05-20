@@ -43,11 +43,28 @@
     "workspace"
   ],
   "trustBoundaries": [],
-  "status": "pending",
+  "status": "reviewed",
   "lock": null,
   "findingIds": [],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T085309-0ba02e",
+      "kind": "review-error",
+      "summary": "codex provider failed: WARNING: proceeding, even though we could not update PATH: Operation not permitted (os error 1)\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T08:53:09.734Z"
+    },
+    {
+      "runId": "20260520T085318-5544ae",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T08:53:48.735Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T08:53:48.735Z"
 }

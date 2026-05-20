@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-fdbe43718e-8dfc_2dbd6d9143",
+  "featureId": "feat_library_fdbe43718e",
+  "title": "MiniPay sync cursor can move backwards under overlapping runs",
+  "category": "concurrency",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/minipay/sync/route.ts",
+      "startLine": 67,
+      "endLine": 87,
+      "symbol": "GET",
+      "quote": "const fromBlock = await getLastSyncedBlock();"
+    },
+    {
+      "path": "ui-dashboard/src/app/api/minipay/sync/route.ts",
+      "startLine": 86,
+      "endLine": 87,
+      "symbol": "GET",
+      "quote": "await setLastSyncedBlock(maxBlock);"
+    }
+  ],
+  "reasoning": "The sync reads the cursor once, streams and writes Dune pages, then unconditionally writes its observed maxBlock if it is greater than that run's fromBlock. If two invocations overlap, both can start from the same old cursor; a slower invocation with a lower observed maxBlock can finish after a newer invocation and overwrite the newer higher cursor. SADD makes duplicate address writes idempotent, so this is not data loss, but it can cause repeated Dune re-pulls and noisy long-running cron work after manual or retried invocations overlap.",
+  "reproduction": "Start two sync requests from the same stored lastBlock. Let request B observe and persist maxBlock=250 first, then let request A, which observed maxBlock=200, finish later. A passes maxBlock > fromBlock and writes 200, regressing the cursor from 250 to 200.",
+  "recommendation": "Make cursor advancement monotonic in Redis, for example by using a compare-and-set/Lua-style update that only writes when the stored cursor is lower than the candidate maxBlock, or re-read the cursor before set and skip if it has already advanced beyond this run's maxBlock.",
+  "whyTestsDoNotAlreadyCoverThis": "The included API tests exercise adjacent address-label, Arkham, and Hasura routes, but there are no MiniPay sync route tests or concurrency tests around cursor advancement.",
+  "suggestedRegressionTest": "Mock getLastSyncedBlock/setLastSyncedBlock or the Redis helper so two GET handlers overlap, persist a higher cursor first, then assert the later lower-max run does not regress the stored cursor.",
+  "minimumFixScope": "ui-dashboard/src/app/api/minipay/sync/route.ts plus the MiniPay cursor helper if Redis needs an atomic monotonic update primitive.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "MiniPay sync now advances cursor through a monotonic re-read-before-set helper; stale candidates are skipped with helper and route regressions.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:00:10.826Z"
+    }
+  ],
+  "signature": "sig_feat-library-fdbe43718e_8dfc64591c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T095728-c4f112",
+  "createdAt": "2026-05-20T09:58:39.944Z",
+  "updatedAt": "2026-05-20T10:00:10.826Z"
+}

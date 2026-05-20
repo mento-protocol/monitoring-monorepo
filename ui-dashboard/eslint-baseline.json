@@ -37,23 +37,16 @@
   {
     "file": "src/app/address-book/AddressBookClient.tsx",
     "ruleId": "complexity",
-    "message": "Function 'AddressBookPage' has a complexity of 26. Maximum allowed is 15.",
-    "line": 33,
+    "message": "Function 'AddressBookPage' has a complexity of 22. Maximum allowed is 15.",
+    "line": 80,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
   },
   {
     "file": "src/app/address-book/AddressBookClient.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'AddressBookPage' has too many lines (332). Maximum allowed is 100.",
-    "line": 33,
+    "message": "Function 'AddressBookPage' has too many lines (330). Maximum allowed is 100.",
+    "line": 80,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export default function AddressBookPage(props: AddressBookPageProps) { | const { canEdit: userCanEdi"
-  },
-  {
-    "file": "src/app/api/address-labels/import/route.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'POST' has a complexity of 18. Maximum allowed is 15.",
-    "line": 32,
-    "linePreview": "*/ | export async function POST(req: NextRequest): Promise<NextResponse> { | const session = await getAuthSession();"
   },
   {
     "file": "src/app/api/address-labels/route.ts",
@@ -79,22 +72,22 @@
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "complexity",
-    "message": "Function 'BridgeFlowsContent' has a complexity of 44. Maximum allowed is 15.",
-    "line": 56,
+    "message": "Function 'BridgeFlowsContent' has a complexity of 43. Maximum allowed is 15.",
+    "line": 72,
     "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeFlowsContent' has too many lines (194). Maximum allowed is 100.",
-    "line": 56,
+    "message": "Function 'BridgeFlowsContent' has too many lines (191). Maximum allowed is 100.",
+    "line": 72,
     "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
     "file": "src/app/bridge-flows/_components/bridge-flows-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 56,
+    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
+    "line": 72,
     "linePreview": " | function BridgeFlowsContent() { | // Page + status filter are URL-backed so users can refresh, share, or"
   },
   {
@@ -366,15 +359,15 @@
   {
     "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'LiquidityTab' has a complexity of 36. Maximum allowed is 15.",
-    "line": 39,
+    "message": "Function 'LiquidityTab' has a complexity of 34. Maximum allowed is 15.",
+    "line": 43,
     "linePreview": " | export function LiquidityTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/liquidity-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LiquidityTab' has too many lines (191). Maximum allowed is 100.",
-    "line": 39,
+    "message": "Function 'LiquidityTab' has too many lines (189). Maximum allowed is 100.",
+    "line": 43,
     "linePreview": " | export function LiquidityTab({ | poolId,"
   },
   {
@@ -388,20 +381,20 @@
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15.",
-    "line": 31,
+    "line": 40,
     "linePreview": " | export function LpsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'LpsTab' has too many lines (250). Maximum allowed is 100.",
-    "line": 31,
+    "message": "Function 'LpsTab' has too many lines (249). Maximum allowed is 100.",
+    "line": 40,
     "linePreview": " | export function LpsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'OracleTab' has a complexity of 31. Maximum allowed is 15.",
+    "message": "Function 'OracleTab' has a complexity of 29. Maximum allowed is 15.",
     "line": 46,
     "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
   },
@@ -415,22 +408,22 @@
   {
     "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleTab' has too many lines (147). Maximum allowed is 100.",
+    "message": "Function 'OracleTab' has too many lines (145). Maximum allowed is 100.",
     "line": 46,
     "linePreview": " | export function OracleTab(props: OracleTabProps) { | const { poolId, pool, search, onSearchChange } = props;"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'RebalancesTab' has a complexity of 28. Maximum allowed is 15.",
-    "line": 177,
+    "message": "Function 'RebalancesTab' has a complexity of 26. Maximum allowed is 15.",
+    "line": 181,
     "linePreview": " | export function RebalancesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/rebalances-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'RebalancesTab' has too many lines (271). Maximum allowed is 100.",
-    "line": 177,
+    "message": "Function 'RebalancesTab' has too many lines (269). Maximum allowed is 100.",
+    "line": 181,
     "linePreview": " | export function RebalancesTab({ | poolId,"
   },
   {
@@ -457,15 +450,15 @@
   {
     "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
     "ruleId": "complexity",
-    "message": "Function 'SwapsTab' has a complexity of 44. Maximum allowed is 15.",
-    "line": 40,
+    "message": "Function 'SwapsTab' has a complexity of 41. Maximum allowed is 15.",
+    "line": 44,
     "linePreview": " | export function SwapsTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/swaps-tab.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'SwapsTab' has too many lines (245). Maximum allowed is 100.",
-    "line": 40,
+    "message": "Function 'SwapsTab' has too many lines (228). Maximum allowed is 100.",
+    "line": 44,
     "linePreview": " | export function SwapsTab({ | poolId,"
   },
   {

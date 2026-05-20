@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-9fdd8510dd-59a7_6eb40b9519",
+  "featureId": "feat_library_9fdd8510dd",
+  "title": "Rebalance deltas include unrelated earlier same-block reserve changes",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "indexer-envio/src/handlers/fpmm/state-sync.ts",
+      "startLine": 305,
+      "endLine": 322,
+      "symbol": "FPMM.Rebalanced handler",
+      "quote": "`preReserves` is sampled at `blockNumber - 1`"
+    },
+    {
+      "path": "indexer-envio/src/handlers/fpmm/state-sync.ts",
+      "startLine": 471,
+      "endLine": 479,
+      "symbol": "FPMM.Rebalanced handler",
+      "quote": "const amount0Delta = preReserves ? pool.reserves0 - preReserves.reserve0 : 0n;"
+    }
+  ],
+  "reasoning": "The handler computes a rebalance's token deltas by subtracting reserves from the previous block from the post-rebalance pool reserves. If the same pool had any swap, mint/burn, or other reserve-changing transaction earlier in the same block, those changes are also included in `amount0Delta`/`amount1Delta`, inflating `notionalUsd` and `rewardUsd` for the RebalanceEvent. The event is block/log scoped, but the baseline is only block scoped.",
+  "reproduction": null,
+  "recommendation": "Capture the pre-rebalance reserves from the in-batch Pool state before the first UpdateReserves belonging to the rebalance transaction, for example with a tx-scoped scratch entity keyed by chainId/poolId/txHash, and have the Rebalanced handler consume that instead of `blockNumber - 1`. Keep the RPC path only as an explicit unknown fallback.",
+  "whyTestsDoNotAlreadyCoverThis": "The reviewed feature declares no linked tests, and the handler comments/tests exercise the simple case where the prior-block reserves equal the actual pre-rebalance reserves. They do not cover an earlier same-block reserve update before the rebalance transaction.",
+  "suggestedRegressionTest": "Add an indexer handler test that processes an UpdateReserves for the same pool earlier in block N, then the two UpdateReserves plus Rebalanced for a rebalance later in block N, and asserts RebalanceEvent amount deltas only reflect the rebalance transaction, not the earlier same-block update.",
+  "minimumFixScope": "indexer-envio/src/handlers/fpmm/state-sync.ts plus any schema/test support needed for a tx-scoped pre-rebalance reserve scratch record.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Rebalanced now uses same-tx pre-UpdateReserves scratch for deltas with RPC previous-block only as fallback; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:43:50.325Z"
+    }
+  ],
+  "signature": "sig_feat-library-9fdd8510dd_59a7770f40",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T092843-0eb58e",
+  "createdAt": "2026-05-20T09:29:53.558Z",
+  "updatedAt": "2026-05-20T09:43:50.325Z"
+}

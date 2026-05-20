@@ -123,6 +123,21 @@ describe("deriveBridgeStatus", () => {
     ).toBe("STUCK");
   });
 
+  it("ignores epoch sentTimestamp and falls back to firstSeenAt", () => {
+    const now = 1_700_100_000;
+    const firstSeenRecently = now - 2 * 60 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "SENT",
+          sentTimestamp: "0",
+          firstSeenAt: String(firstSeenRecently),
+        },
+        now,
+      ),
+    ).toBe("SENT");
+  });
+
   it("ages PENDING via firstSeenAt past threshold", () => {
     const now = 1_700_100_000;
     const firstSeenLongAgo = now - 30 * 60 * 60;

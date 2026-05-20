@@ -12,7 +12,7 @@ vi.mock("@/lib/minipay", () => ({
   addToMiniPaySet: vi.fn(),
   getMiniPaySetSize: vi.fn(),
   getLastSyncedBlock: vi.fn(),
-  setLastSyncedBlock: vi.fn(),
+  advanceLastSyncedBlock: vi.fn(),
 }));
 
 vi.mock("@sentry/nextjs", () => ({
@@ -27,14 +27,14 @@ import {
   fetchMiniPayUsers,
   getLastSyncedBlock,
   getMiniPaySetSize,
-  setLastSyncedBlock,
+  advanceLastSyncedBlock,
 } from "@/lib/minipay";
 
 const mockFetch = vi.mocked(fetchMiniPayUsers);
 const mockAdd = vi.mocked(addToMiniPaySet);
 const mockSize = vi.mocked(getMiniPaySetSize);
 const mockGetCursor = vi.mocked(getLastSyncedBlock);
-const mockSetCursor = vi.mocked(setLastSyncedBlock);
+const mockAdvanceCursor = vi.mocked(advanceLastSyncedBlock);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,10 +93,10 @@ describe("GET /api/minipay/sync — happy path", () => {
 
     // Critical ordering: SADD must run before cursor write.
     const addOrder = mockAdd.mock.invocationCallOrder[0]!;
-    const setOrder = mockSetCursor.mock.invocationCallOrder[0]!;
+    const setOrder = mockAdvanceCursor.mock.invocationCallOrder[0]!;
     expect(addOrder).toBeLessThan(setOrder);
 
-    expect(mockSetCursor).toHaveBeenCalledWith(BigInt(500));
+    expect(mockAdvanceCursor).toHaveBeenCalledWith(BigInt(500));
   });
 
   it("does NOT advance cursor when SADD throws (regression: data loss)", async () => {
@@ -108,7 +108,7 @@ describe("GET /api/minipay/sync — happy path", () => {
 
     const res = await GET(makeReq("cron-secret"));
     expect(res.status).toBe(500);
-    expect(mockSetCursor).not.toHaveBeenCalled();
+    expect(mockAdvanceCursor).not.toHaveBeenCalled();
   });
 
   it("does NOT advance cursor when Dune returns no rows past cursor", async () => {
@@ -119,7 +119,7 @@ describe("GET /api/minipay/sync — happy path", () => {
 
     const res = await GET(makeReq("cron-secret"));
     expect(res.status).toBe(200);
-    expect(mockSetCursor).not.toHaveBeenCalled();
+    expect(mockAdvanceCursor).not.toHaveBeenCalled();
   });
 
   it("SADDs each page incrementally (memory-bounded streaming)", async () => {
@@ -145,7 +145,7 @@ describe("GET /api/minipay/sync — happy path", () => {
     expect(mockAdd).toHaveBeenNthCalledWith(2, ["0xc"]);
     expect(mockAdd).toHaveBeenNthCalledWith(3, ["0xd", "0xe"]);
     // Cursor advances to the highest maxBlock seen across all pages.
-    expect(mockSetCursor).toHaveBeenCalledWith(BigInt(300));
+    expect(mockAdvanceCursor).toHaveBeenCalledWith(BigInt(300));
   });
 
   it("preserves earlier-page SADDs when a later page throws — cursor unchanged", async () => {
@@ -164,7 +164,7 @@ describe("GET /api/minipay/sync — happy path", () => {
     // re-pulls page 1 (idempotent SADD) and retries page 2.
     expect(mockAdd).toHaveBeenCalledTimes(1);
     expect(mockAdd).toHaveBeenCalledWith(["0xa"]);
-    expect(mockSetCursor).not.toHaveBeenCalled();
+    expect(mockAdvanceCursor).not.toHaveBeenCalled();
   });
 
   it("returns DuneAuthError as 502", async () => {

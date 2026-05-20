@@ -28,9 +28,10 @@ import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
 import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
+import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
 type OracleTabProps = {
   poolId: string;
@@ -69,10 +70,8 @@ export function OracleTab(props: OracleTabProps) {
     offset: 0,
   });
   // Preserve last known total on count error so pagination stays visible.
-  const lastKnownTotalRef = useRef(0);
   const rawTotal = countData?.OracleSnapshot?.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   // Clamp page to valid range once total is known, so a stale page

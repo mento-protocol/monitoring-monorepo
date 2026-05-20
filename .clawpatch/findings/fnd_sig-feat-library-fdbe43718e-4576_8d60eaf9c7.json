@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-fdbe43718e-4576_8d60eaf9c7",
+  "featureId": "feat_library_fdbe43718e",
+  "title": "MiniPay cron routes have no direct route coverage",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/api/minipay/sync/route.ts",
+      "startLine": 49,
+      "endLine": 120,
+      "symbol": "GET",
+      "quote": null
+    },
+    {
+      "path": "ui-dashboard/src/app/api/minipay/tag/route.ts",
+      "startLine": 76,
+      "endLine": 177,
+      "symbol": "GET",
+      "quote": null
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/__tests__/route.test.ts",
+      "startLine": 89,
+      "endLine": 143,
+      "symbol": "GET /api/arkham/enrich",
+      "quote": null
+    },
+    {
+      "path": "ui-dashboard/src/app/api/arkham/__tests__/route.test.ts",
+      "startLine": 340,
+      "endLine": 416,
+      "symbol": "GET /api/arkham/enrich",
+      "quote": null
+    }
+  ],
+  "reasoning": "The new MiniPay routes carry several production-sensitive contracts: bearer-only cron auth, missing-env failures, Dune auth mapping, cursor advancement after successful page writes, dryRun skipping writes, limit handling, existing-label filtering, and empty-set no-op behavior. The supplied tests cover analogous Arkham cron auth/config/pipeline behavior, but none import or exercise either MiniPay route, so regressions in these cron-only paths would not be caught by the linked route suites.",
+  "reproduction": null,
+  "recommendation": "Add dedicated Vitest route tests for /api/minipay/sync and /api/minipay/tag following the Arkham cron route test shape: mock requireCronAuth/minipay helpers/discovery/labels/Sentry, then assert auth/config errors, happy-path bodies, dryRun behavior, no writes on empty set, and cursor advancement only after successful page writes.",
+  "whyTestsDoNotAlreadyCoverThis": "All included tests target address-labels, address-reports, Arkham, and local Hasura routes. None of them import ui-dashboard/src/app/api/minipay/sync/route.ts or ui-dashboard/src/app/api/minipay/tag/route.ts.",
+  "suggestedRegressionTest": "Create ui-dashboard/src/app/api/minipay/__tests__/route.test.ts with separate describe blocks for sync and tag; include a sync test where addToMiniPaySet rejects mid-stream and setLastSyncedBlock is not called, and a tag dryRun test where importLabels is not called but wouldWrite is returned.",
+  "minimumFixScope": "Add MiniPay route tests under ui-dashboard/src/app/api/minipay/**/__tests__ or a shared minipay route test file; no production code change is required for this finding.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "MiniPay sync/tag route tests now cover cron auth/config/happy/no-op paths; focused route tests pass.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T10:00:10.536Z"
+    }
+  ],
+  "signature": "sig_feat-library-fdbe43718e_457650ea24",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T095728-c4f112",
+  "createdAt": "2026-05-20T09:58:39.944Z",
+  "updatedAt": "2026-05-20T10:00:10.535Z"
+}

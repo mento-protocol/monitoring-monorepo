@@ -566,6 +566,14 @@ describe("POST /api/address-labels/import — CSV", () => {
     expect(arg[validAddress.toLowerCase()].tags).toEqual(["whale", "defi"]);
   });
 
+  it("rejects oversized CSV without a Content-Length header", async () => {
+    const req = csvReq(`address,name,tags\n${"x".repeat(4 * 1024 * 1024)}`);
+    expect(req.headers.get("content-length")).toBeNull();
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
   it("ignores the legacy chainId column (back-compat)", async () => {
     const csv = `address,name,tags,chainId\n${validAddress},Alice,,42220\n${addr2},Bob,,1`;
     const res = await POST(csvReq(csv));

@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
@@ -44,6 +37,23 @@ import type {
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
+
+type LastKnownTotal = {
+  key: string;
+  total: number;
+};
+
+function updateLastKnownTotal(
+  ref: { current: LastKnownTotal },
+  key: string,
+  rawTotal: number,
+): number {
+  if (ref.current.key !== key) {
+    ref.current = { key, total: 0 };
+  }
+  if (rawTotal > 0) ref.current.total = rawTotal;
+  return ref.current.total;
+}
 
 export function BridgeFlowsPageClient() {
   return (
@@ -115,22 +125,19 @@ function BridgeFlowsContent() {
       limit: ENVIO_MAX_ROWS,
     },
   );
-  const lastKnownTotalRef = useRef(0);
-  // Reset the preserved-last-known denominator whenever the filter changes —
-  // otherwise a transient count error on a new filter surfaces the previous
-  // filter's total (e.g. "91 total" for a narrower filter that really has 3
-  // matches).
   const statusKey = selectedStatus ?? "all";
-  useEffect(() => {
-    lastKnownTotalRef.current = 0;
-  }, [statusKey]);
+  const lastKnownTotalRef = useRef({ key: statusKey, total: 0 });
   const rawTotal = countResult.data?.BridgeTransfer.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const lastKnownTotal = updateLastKnownTotal(
+    lastKnownTotalRef,
+    statusKey,
+    rawTotal,
+  );
   // On count error, fall back to the preserved value but gate `totalCapped`
   // on that same preserved value — otherwise a transient error with a stale
   // ref of 0 could claim rawTotal < ENVIO_MAX_ROWS while the banner reads
   // off whatever last-known count we held.
-  const total = countResult.error ? lastKnownTotalRef.current : rawTotal;
+  const total = countResult.error ? lastKnownTotal : rawTotal;
   const totalCapped = !countResult.error && rawTotal >= ENVIO_MAX_ROWS;
 
   // Clamp the active page against totalPages — guards against stale URL

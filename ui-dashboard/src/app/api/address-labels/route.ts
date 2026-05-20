@@ -64,17 +64,13 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   }
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
-  const parsedTags = Array.isArray(tags)
-    ? tags.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+  const trimmedTags = Array.isArray(tags)
+    ? tags.flatMap((t) => {
+        if (typeof t !== "string") return [];
+        const trimmed = t.trim();
+        return trimmed ? [trimmed] : [];
+      })
     : [];
-
-  // Relaxed validation: at least one of name or tags must be non-empty
-  if (!trimmedName && parsedTags.length === 0) {
-    return NextResponse.json(
-      { error: "At least one of name or tags must be provided" },
-      { status: 400 },
-    );
-  }
 
   // DoS guards: cap input sizes
   if (trimmedName.length > 200) {
@@ -91,13 +87,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       { status: 400 },
     );
   }
-  if (parsedTags.length > 20) {
-    return NextResponse.json(
-      { error: "tags must have 20 items or fewer" },
-      { status: 400 },
-    );
-  }
-  const longTag = parsedTags.find((t) => t.trim().length > 50);
+  const longTag = trimmedTags.find((t) => t.length > 50);
   if (longTag) {
     return NextResponse.json(
       { error: "each tag must be 50 characters or fewer" },
@@ -108,15 +98,29 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   // Deduplicate tags case-insensitively (preserve first-occurrence casing)
   // and strip reserved server-provenance tags.
   const seenTags = new Set<string>();
-  const deduplicatedTags = parsedTags
-    .map((t) => t.trim())
-    .filter((t) => {
-      const key = t.toLowerCase();
-      if (RESERVED_SOURCE_TAGS.has(key)) return false;
-      if (seenTags.has(key)) return false;
-      seenTags.add(key);
-      return true;
-    });
+  const deduplicatedTags = trimmedTags.filter((t) => {
+    const key = t.toLowerCase();
+    if (RESERVED_SOURCE_TAGS.has(key)) return false;
+    if (seenTags.has(key)) return false;
+    seenTags.add(key);
+    return true;
+  });
+
+  if (deduplicatedTags.length > 20) {
+    return NextResponse.json(
+      { error: "tags must have 20 items or fewer" },
+      { status: 400 },
+    );
+  }
+
+  // Relaxed validation: at least one of name or normalized user tags must be
+  // non-empty. Reserved source tags do not count as user-provided labels.
+  if (!trimmedName && deduplicatedTags.length === 0) {
+    return NextResponse.json(
+      { error: "At least one of name or tags must be provided" },
+      { status: 400 },
+    );
+  }
 
   try {
     // Read only the prior entry, not the entire hash — `getLabel` does an

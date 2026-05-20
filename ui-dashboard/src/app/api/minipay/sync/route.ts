@@ -4,10 +4,10 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import {
   DuneAuthError,
   addToMiniPaySet,
+  advanceLastSyncedBlock,
   fetchMiniPayUsers,
   getLastSyncedBlock,
   getMiniPaySetSize,
-  setLastSyncedBlock,
 } from "@/lib/minipay";
 
 // `nodejs` runtime needed for fetch + setTimeout pacing in the Dune client.
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         if (maxBlock > fromBlock) {
-          await setLastSyncedBlock(maxBlock);
+          await advanceLastSyncedBlock(maxBlock);
         }
 
         const total = await getMiniPaySetSize();

@@ -8,7 +8,7 @@
 // detected separately via a Pool lookup on `event.params.trader` (which is
 // `msg.sender` to Broker, == VirtualPool address in this case).
 
-import type { BrokerSwapEvent } from "envio";
+import type { BrokerSwapEvent, EvmOnEventContext, Pool } from "envio";
 import { indexer } from "../indexer.js";
 import {
   eventId,
@@ -58,6 +58,27 @@ function classifyBrokerEntryPoint(chainId: number, txTo: string): string {
   return classifyAggregator(chainId, txTo);
 }
 
+async function maybeHealBrokerCallerPool(
+  context: EvmOnEventContext,
+  pool: Pool | undefined,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<Pool | undefined> {
+  if (!pool) return undefined;
+  return selfHealWrappedExchangeId(context, pool, blockNumber, blockTimestamp);
+}
+
+async function preloadBrokerSwapInputs(args: {
+  context: EvmOnEventContext;
+  exchangeSnapshotId: string;
+  brokerCallerPoolId: string;
+}): Promise<void> {
+  await Promise.all([
+    args.context.BrokerExchangeDailySnapshot.get(args.exchangeSnapshotId),
+    args.context.Pool.get(args.brokerCallerPoolId),
+  ]);
+}
+
 indexer.onEvent(
   { contract: "Broker", event: "Swap" },
   async ({ event, context }) => {
@@ -94,6 +115,16 @@ indexer.onEvent(
     ]);
     const tokenInMeta = tokenInMetaResult ?? UNKNOWN_FEE_TOKEN_META;
     const tokenOutMeta = tokenOutMetaResult ?? UNKNOWN_FEE_TOKEN_META;
+    const dayTs = dayBucket(blockTimestamp);
+    const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
+    const brokerCallerPoolId = makePoolId(event.chainId, brokerCaller);
+
+    if (context.isPreload)
+      return preloadBrokerSwapInputs({
+        context,
+        exchangeSnapshotId,
+        brokerCallerPoolId,
+      });
 
     // computeSwapUsdWei is built around the FPMM `(token0, token1,
     // amount{0,1}{In,Out})` shape. Broker.Swap is single-direction (only
@@ -112,14 +143,11 @@ indexer.onEvent(
       amount1Out: event.params.amountOut,
     });
 
-    const dayTs = dayBucket(blockTimestamp);
-
-    const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
     let brokerCallerPool: Awaited<ReturnType<typeof context.Pool.get>>;
     const [existingExchangeSnapshot, initialBrokerCallerPool] =
       await Promise.all([
         context.BrokerExchangeDailySnapshot.get(exchangeSnapshotId),
-        context.Pool.get(makePoolId(event.chainId, brokerCaller)),
+        context.Pool.get(brokerCallerPoolId),
       ]);
     brokerCallerPool = initialBrokerCallerPool;
     context.BrokerExchangeDailySnapshot.set({
@@ -161,14 +189,12 @@ indexer.onEvent(
     // Delegate fully to `selfHealWrappedExchangeId` — its internal gate
     // (round 7 codex #3) checks both token presence AND exchange-row
     // seed before short-circuiting.
-    if (brokerCallerPool) {
-      brokerCallerPool = await selfHealWrappedExchangeId(
-        context,
-        brokerCallerPool,
-        blockNumber,
-        blockTimestamp,
-      );
-    }
+    brokerCallerPool = await maybeHealBrokerCallerPool(
+      context,
+      brokerCallerPool,
+      blockNumber,
+      blockTimestamp,
+    );
     const brokerCallerIsVirtualPool = brokerCallerPool
       ? isVirtualPool(brokerCallerPool)
       : false;

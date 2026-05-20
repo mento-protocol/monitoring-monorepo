@@ -31,21 +31,21 @@
     "file": "src/deviationBreach.ts",
     "ruleId": "complexity",
     "message": "Async function 'recordBreachTransition' has a complexity of 26. Maximum allowed is 15.",
-    "line": 102,
+    "line": 166,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
     "file": "src/deviationBreach.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'recordBreachTransition' has too many lines (131). Maximum allowed is 80.",
-    "line": 102,
+    "message": "Async function 'recordBreachTransition' has too many lines (112). Maximum allowed is 80.",
+    "line": 166,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
     "file": "src/deviationBreach.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 32 to the 18 allowed.",
-    "line": 102,
+    "line": 166,
     "linePreview": "*/ | export async function recordBreachTransition( | context: BreachContext,"
   },
   {
@@ -85,16 +85,9 @@
   },
   {
     "file": "src/handlers/fpmm/state-sync.ts",
-    "ruleId": "complexity",
-    "message": "Async arrow function has a complexity of 26. Maximum allowed is 25.",
-    "line": 257,
-    "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
-  },
-  {
-    "file": "src/handlers/fpmm/state-sync.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async arrow function has too many lines (179). Maximum allowed is 150.",
-    "line": 257,
+    "message": "Async arrow function has too many lines (176). Maximum allowed is 150.",
+    "line": 264,
     "linePreview": "{ contract: \"FPMM\", event: \"Rebalanced\" }, | async ({ event, context }) => { | const id = eventId(event.chainId, event.block.number, event.logIndex);"
   },
   {

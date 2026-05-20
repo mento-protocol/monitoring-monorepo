@@ -32,16 +32,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, "..");
 
-const contractsJson = JSON.parse(
-  readFileSync(
-    resolve(REPO, "node_modules/@mento-protocol/contracts/contracts.json"),
-    "utf8",
-  ),
-);
-const namespaces = JSON.parse(
-  readFileSync(resolve(REPO, "config/deployment-namespaces.json"), "utf8"),
-);
-
 // Wormhole chain ID per EVM chain ID. Extend when adding new chains.
 // See https://docs.wormhole.com/wormhole/reference/constants
 const WORMHOLE_CHAIN_ID = {
@@ -52,89 +42,185 @@ const WORMHOLE_CHAIN_ID = {
 
 const HELPER_PREFIX = "NttDeployHelper"; // "NttDeployHelperUSDm" etc.
 
+// Known intentional gaps in the contracts manifest. Keep empty by default so
+// newly partial NTT manifests fail closed.
+const ALLOWED_MISSING_MANIFEST_GAPS = new Set([
+  // Testnet manifests include bridge helper entries, but Wormhole testnet
+  // chain IDs are not part of the committed mainnet NTT address config.
+  "wormhole-chain-id:10143",
+  "wormhole-chain-id:11142220",
+]);
+
 /** Extract `{USDm|GBPm|EURm|...}` from a helper entry name. */
-function symbolFromHelperName(name) {
+export function symbolFromHelperName(name) {
   return name.slice(HELPER_PREFIX.length);
 }
 
-const output = { $generated: true, entries: [] };
-
-for (const [chainIdStr, ns] of Object.entries(namespaces)) {
-  const chainId = Number(chainIdStr);
-  const entries = contractsJson[chainIdStr]?.[ns];
-  if (!entries) continue;
-
-  const wormholeChainId = WORMHOLE_CHAIN_ID[chainId];
-  if (wormholeChainId === undefined) {
-    console.warn(
-      `[generateNttAddresses] no Wormhole chain id mapped for EVM chain ${chainId} — skipping`,
-    );
-    continue;
+function gapKey(gap) {
+  if (gap.kind === "wormhole-chain-id") {
+    return `wormhole-chain-id:${gap.chainId}`;
   }
+  return `token-entry:${gap.chainId}:${gap.tokenSymbol}`;
+}
 
-  for (const [name, info] of Object.entries(entries)) {
-    if (!name.startsWith(HELPER_PREFIX)) continue;
-    if (info.type !== "contract" || !info.address) continue;
+function isAllowedGap(gap, allowedGaps) {
+  return allowedGaps.has(gapKey(gap));
+}
 
-    const symbol = symbolFromHelperName(name);
-    const tokenEntry = entries[symbol] ?? entries[`${symbol}Spoke`];
-    if (!tokenEntry) {
-      console.warn(
-        `[generateNttAddresses] no token entry for ${symbol} on chain ${chainId} — skipping`,
-      );
+function formatGap(gap) {
+  if (gap.kind === "wormhole-chain-id") {
+    return `missing Wormhole chain id for EVM chain ${gap.chainId} (${gap.namespace})`;
+  }
+  return `missing token entry for ${gap.tokenSymbol} on chain ${gap.chainId} (${gap.namespace})`;
+}
+
+export function generateNttAddressManifest({
+  contractsJson,
+  namespaces,
+  wormholeChainIds = WORMHOLE_CHAIN_ID,
+  allowedMissingManifestGaps = ALLOWED_MISSING_MANIFEST_GAPS,
+}) {
+  const output = { $generated: true, entries: [] };
+  const failures = [];
+  const skipped = [];
+
+  for (const [chainIdStr, ns] of Object.entries(namespaces)) {
+    const chainId = Number(chainIdStr);
+    const entries = contractsJson[chainIdStr]?.[ns];
+    if (!entries) continue;
+
+    const wormholeChainId = wormholeChainIds[chainId];
+    if (wormholeChainId === undefined) {
+      const gap = {
+        kind: "wormhole-chain-id",
+        chainId,
+        namespace: ns,
+      };
+      if (isAllowedGap(gap, allowedMissingManifestGaps)) {
+        skipped.push(gap);
+        continue;
+      }
+      failures.push(gap);
       continue;
     }
 
-    const helper = info.address;
-    const nttManagerProxy = getContractAddress({ from: helper, nonce: 2n });
-    const transceiverProxy = getContractAddress({ from: helper, nonce: 4n });
+    for (const [name, info] of Object.entries(entries)) {
+      if (!name.startsWith(HELPER_PREFIX)) continue;
+      if (info.type !== "contract" || !info.address) continue;
 
-    output.entries.push({
-      chainId,
-      wormholeChainId,
-      tokenSymbol: symbol,
-      tokenAddress: tokenEntry.address.toLowerCase(),
-      tokenDecimals: tokenEntry.decimals ?? 18,
-      helper: helper.toLowerCase(),
-      nttManagerProxy: nttManagerProxy.toLowerCase(),
-      transceiverProxy: transceiverProxy.toLowerCase(),
-    });
+      const symbol = symbolFromHelperName(name);
+      const tokenEntry = entries[symbol] ?? entries[`${symbol}Spoke`];
+      if (!tokenEntry) {
+        const gap = {
+          kind: "token-entry",
+          chainId,
+          namespace: ns,
+          tokenSymbol: symbol,
+        };
+        if (isAllowedGap(gap, allowedMissingManifestGaps)) {
+          skipped.push(gap);
+          continue;
+        }
+        failures.push(gap);
+        continue;
+      }
+
+      const helper = info.address;
+      const nttManagerProxy = getContractAddress({ from: helper, nonce: 2n });
+      const transceiverProxy = getContractAddress({ from: helper, nonce: 4n });
+
+      output.entries.push({
+        chainId,
+        wormholeChainId,
+        tokenSymbol: symbol,
+        tokenAddress: tokenEntry.address.toLowerCase(),
+        tokenDecimals: tokenEntry.decimals ?? 18,
+        helper: helper.toLowerCase(),
+        nttManagerProxy: nttManagerProxy.toLowerCase(),
+        transceiverProxy: transceiverProxy.toLowerCase(),
+      });
+    }
+  }
+
+  output.entries.sort((a, b) => {
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.tokenSymbol.localeCompare(b.tokenSymbol);
+  });
+
+  return { output, failures, skipped };
+}
+
+function readDefaultInputs() {
+  return {
+    contractsJson: JSON.parse(
+      readFileSync(
+        resolve(REPO, "node_modules/@mento-protocol/contracts/contracts.json"),
+        "utf8",
+      ),
+    ),
+    namespaces: JSON.parse(
+      readFileSync(resolve(REPO, "config/deployment-namespaces.json"), "utf8"),
+    ),
+  };
+}
+
+function printYamlSnippet(entries) {
+  console.log(
+    "\nPaste these into config.multichain.mainnet.yaml under each network's contracts:",
+  );
+  const byChain = {};
+  for (const e of entries) {
+    byChain[e.chainId] = byChain[e.chainId] ?? [];
+    byChain[e.chainId].push(e);
+  }
+  for (const [chainId, list] of Object.entries(byChain)) {
+    console.log(`\n  # chain ${chainId}`);
+    console.log("  - name: WormholeNttManager");
+    console.log("    address:");
+    for (const e of list)
+      console.log(`      - ${e.nttManagerProxy} # ${e.tokenSymbol}`);
+    console.log("  - name: WormholeTransceiver");
+    console.log("    address:");
+    for (const e of list)
+      console.log(`      - ${e.transceiverProxy} # ${e.tokenSymbol}`);
   }
 }
 
-output.entries.sort((a, b) => {
-  if (a.chainId !== b.chainId) return a.chainId - b.chainId;
-  return a.tokenSymbol.localeCompare(b.tokenSymbol);
-});
+export function main() {
+  const { output, failures, skipped } =
+    generateNttAddressManifest(readDefaultInputs());
 
-const outPath = resolve(REPO, "config/nttAddresses.json");
-writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");
+  for (const gap of skipped) {
+    console.warn(`[generateNttAddresses] allow-listed ${formatGap(gap)}`);
+  }
 
-console.log(
-  `[generateNttAddresses] wrote ${output.entries.length} entries to ${outPath}`,
-);
-for (const e of output.entries) {
+  if (failures.length > 0) {
+    console.error("[generateNttAddresses] manifest is incomplete:");
+    for (const gap of failures) {
+      console.error(`  - ${formatGap(gap)}`);
+    }
+    console.error(
+      "[generateNttAddresses] refusing to write partial config/nttAddresses.json",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const outPath = resolve(REPO, "config/nttAddresses.json");
+  writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");
+
   console.log(
-    `  chain=${e.chainId} ${e.tokenSymbol.padEnd(6)} helper=${e.helper} manager=${e.nttManagerProxy} transceiver=${e.transceiverProxy}`,
+    `[generateNttAddresses] wrote ${output.entries.length} entries to ${outPath}`,
   );
+  for (const e of output.entries) {
+    console.log(
+      `  chain=${e.chainId} ${e.tokenSymbol.padEnd(6)} helper=${e.helper} manager=${e.nttManagerProxy} transceiver=${e.transceiverProxy}`,
+    );
+  }
+
+  printYamlSnippet(output.entries);
 }
 
-console.log(
-  "\nPaste these into config.multichain.mainnet.yaml under each network's contracts:",
-);
-const byChain = {};
-for (const e of output.entries) {
-  byChain[e.chainId] = byChain[e.chainId] ?? [];
-  byChain[e.chainId].push(e);
-}
-for (const [chainId, list] of Object.entries(byChain)) {
-  console.log(`\n  # chain ${chainId}`);
-  console.log("  - name: WormholeNttManager");
-  console.log("    address:");
-  for (const e of list)
-    console.log(`      - ${e.nttManagerProxy} # ${e.tokenSymbol}`);
-  console.log("  - name: WormholeTransceiver");
-  console.log("    address:");
-  for (const e of list)
-    console.log(`      - ${e.transceiverProxy} # ${e.tokenSymbol}`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
 }

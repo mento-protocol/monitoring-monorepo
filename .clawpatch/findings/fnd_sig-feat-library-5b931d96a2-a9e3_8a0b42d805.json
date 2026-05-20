@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-5b931d96a2-a9e3_8a0b42d805",
+  "featureId": "feat_library_5b931d96a2",
+  "title": "Primary leaderboard queries can hang without an abort deadline",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page-client.tsx",
+      "startLine": 93,
+      "endLine": 100,
+      "symbol": "LeaderboardClient",
+      "quote": "const tradersResult = useGQL<{ TraderDailySnapshot: TraderDailyRow[] }>(\n    venue === \"v3\" ? TRADER_DAILY_TOP : null,\n    {\n      afterTimestamp: cutoff,\n      isSystemAddressIn,\n      limit: ENVIO_MAX_ROWS,\n    },\n    { schema: TraderDailyTopSchema },\n  );"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page-client.tsx",
+      "startLine": 122,
+      "endLine": 135,
+      "symbol": "LeaderboardClient",
+      "quote": "const v2TradersResult = useGQL<{\n    BrokerTraderDailySnapshot: BrokerTraderDailyRow[];\n  }>(\n    venue === \"v2\" ? BROKER_TRADER_DAILY_TOP : null,\n    { afterTimestamp: cutoff, isSystemAddressIn, limit: ENVIO_MAX_ROWS },\n    { schema: BrokerTraderDailyTopSchema },\n  );\n  const v2AggregatorsResult = useGQL<{\n    BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];\n  }>(\n    venue === \"v2\" ? BROKER_AGGREGATOR_DAILY_TOP : null,\n    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },\n    { schema: BrokerAggregatorDailyTopSchema },\n  );"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page-client.tsx",
+      "startLine": 116,
+      "endLine": 120,
+      "symbol": "LeaderboardClient",
+      "quote": "const v3AggregatorsResult = useGQL<V3AggregatorsData>(\n    venue === \"v3\" ? aggregatorDailyTopQuery(showSystem) : null,\n    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },\n    { timeoutMs: 8_000, schema: AggregatorDailyTopSchema },\n  );"
+    },
+    {
+      "path": "ui-dashboard/src/app/leaderboard/page-client.tsx",
+      "startLine": 272,
+      "endLine": 291,
+      "symbol": "LeaderboardClient",
+      "quote": "const tableIsLoading =\n    venue === \"v3\"\n      ? tradersResult.isLoading || poolsResult.isLoading\n      : v2TradersResult.isLoading;\n  const tableHasError =\n    venue === \"v3\" ? !!tradersResult.error : !!v2TradersResult.error;"
+    }
+  ],
+  "reasoning": "The primary trader and v2 aggregator polling queries pass only schema options, unlike the v3 aggregator query which supplies timeoutMs: 8_000. If Hasura or the network wedges a request, these SWR fetches have no explicit abort deadline, so the active table/chart loading state can remain stuck until the underlying fetch stack times out, and retries may not happen on the intended polling cadence. This violates the repository's Hasura polling contract and creates worse degraded-mode behavior for the primary leaderboard path than for the isolated aggregator path.",
+  "reproduction": "Simulate a Hasura endpoint that accepts the connection but never responds, then load /leaderboard on v3 or v2. The affected useGQL request has no AbortSignal timeout, so the table loading state is tied to the hung request instead of failing open after 8 seconds and retrying.",
+  "recommendation": "Pass timeoutMs: 8_000 to the TraderDailyTop, BrokerTraderDailyTop, BrokerAggregatorDailyTop, and PoolsForLeaderboard useGQL calls where appropriate, or make useGQL enforce the repository default timeout for polling queries and only allow explicit opt-out when justified.",
+  "whyTestsDoNotAlreadyCoverThis": "The included leaderboard tests cover child sections and the paginated pool-volume hook, including its shared abort deadline, but they do not render LeaderboardClient with mocked useGQL and assert the options passed to each query.",
+  "suggestedRegressionTest": "Add a LeaderboardClient wiring test that mocks useGQL, renders the page for v3 and v2 URL states, and asserts every active polling query receives timeoutMs: 8_000 together with its schema.",
+  "minimumFixScope": "ui-dashboard/src/app/leaderboard/page-client.tsx query option objects, plus a focused LeaderboardClient wiring test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed by adding timeoutMs: 8000 to primary leaderboard polling queries and a useGQL wiring regression.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:15:12.202Z"
+    }
+  ],
+  "signature": "sig_feat-library-5b931d96a2_a9e34f47dc",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T090450-644cb6",
+  "createdAt": "2026-05-20T09:06:38.668Z",
+  "updatedAt": "2026-05-20T09:15:12.201Z"
+}

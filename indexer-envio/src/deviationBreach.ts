@@ -27,6 +27,9 @@ import { tradingSecondsInRange } from "./healthScore.js";
 export type BreachContext = {
   DeviationThresholdBreach: {
     get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
+    getWhere?: (where: {
+      poolId: { _eq: string };
+    }) => Promise<DeviationThresholdBreach[]>;
     set: (entity: DeviationThresholdBreach) => void;
   };
 };
@@ -81,12 +84,73 @@ export type BreachTrigger = {
   strategy?: string | undefined;
 };
 
-/** Deterministic id for the currently-open breach of a pool. Keyed on the
- * rising-edge timestamp (which is stored on the Pool as
- * `deviationBreachStartedAt`), so we can always look up the open row
- * without needing a separate "active-id" pointer field. */
-export function openBreachId(poolId: string, startedAt: bigint): string {
-  return `${poolId}-${startedAt}`;
+/** Deterministic id for a breach row. The legacy two-argument form is kept
+ * for old rows/tests; new rows include block+tx entropy because a pool can
+ * exit and re-enter breach multiple times in distinct events that share the
+ * same block timestamp. */
+export function openBreachId(
+  poolId: string,
+  startedAt: bigint,
+  eventEntropy?: { blockNumber: bigint; txHash: string },
+): string {
+  const base = `${poolId}-${startedAt}`;
+  if (!eventEntropy) return base;
+  return `${base}-${eventEntropy.blockNumber}-${eventEntropy.txHash.toLowerCase()}`;
+}
+
+async function getOpenBreach(
+  context: BreachContext,
+  poolId: string,
+  startedAt: bigint,
+): Promise<DeviationThresholdBreach | undefined> {
+  if (context.DeviationThresholdBreach.getWhere) {
+    const rows = await context.DeviationThresholdBreach.getWhere({
+      poolId: { _eq: poolId },
+    });
+    return rows.find(
+      (row) => row.startedAt === startedAt && row.endedAt === undefined,
+    );
+  }
+  return context.DeviationThresholdBreach.get(openBreachId(poolId, startedAt));
+}
+
+function buildOpenBreachRow({
+  next,
+  poolId,
+  trigger,
+  startedAt,
+  startedByEvent,
+  rebalanceCountDuring,
+}: {
+  next: Pool;
+  poolId: string;
+  trigger: BreachTrigger;
+  startedAt: bigint;
+  startedByEvent: BreachEventCategory;
+  rebalanceCountDuring: number;
+}): DeviationThresholdBreach {
+  return {
+    id: openBreachId(poolId, startedAt, trigger),
+    chainId: next.chainId,
+    poolId,
+    startedAt,
+    startedAtBlock: trigger.blockNumber,
+    endedAt: undefined,
+    endedAtBlock: undefined,
+    durationSeconds: undefined,
+    criticalDurationSeconds: undefined,
+    entryPriceDifference: next.priceDifference,
+    entryRebalanceThreshold: breachEntryThreshold(next),
+    peakPriceDifference: next.priceDifference,
+    peakAt: trigger.blockTimestamp,
+    peakAtBlock: trigger.blockNumber,
+    startedByEvent,
+    startedByTxHash: trigger.txHash,
+    endedByEvent: undefined,
+    endedByTxHash: undefined,
+    endedByStrategy: undefined,
+    rebalanceCountDuring,
+  };
 }
 
 /** Inspect the transition between `prev` and `next` pool states and write
@@ -126,56 +190,30 @@ export async function recordBreachTransition(
 
   // Rising edge ------------------------------------------------------------
   if (!wasBreached && isBreached) {
-    const row: DeviationThresholdBreach = {
-      id: openBreachId(poolId, trigger.blockTimestamp),
-      chainId: next.chainId,
-      poolId,
-      startedAt: trigger.blockTimestamp,
-      startedAtBlock: trigger.blockNumber,
-      endedAt: undefined,
-      endedAtBlock: undefined,
-      durationSeconds: undefined,
-      criticalDurationSeconds: undefined,
-      entryPriceDifference: next.priceDifference,
-      // Persist the EFFECTIVE threshold the breach predicate was scored
-      // against (`isInDeviationBreach` reads `effectiveThreshold(pool)`).
-      // For an asymmetric pool currently on its zero-threshold side
-      // (`above=300, below=0` with reserves picking the below side, or
-      // mirrored), `next.rebalanceThreshold === 0` while the predicate
-      // scored against the 10000-bps fallback — capturing the raw 0
-      // would let the heal at line ~270 swap it to the OPPOSITE side's
-      // active threshold (300) once reserves flip, retroactively
-      // re-scoring `peakPriceDifference` and `criticalDurationSeconds`
-      // against a threshold that wasn't in force when the breach opened.
-      // `breachEntryThreshold` also gates the 1e12 never-rebalance
-      // sentinel out of this `Int!`-typed write — never-rebalance pools
-      // can't reach this code path anyway (`isInDeviationBreach`
-      // short-circuits them), but keep the conversion defensive.
-      entryRebalanceThreshold: breachEntryThreshold(next),
-      peakPriceDifference: next.priceDifference,
-      peakAt: trigger.blockTimestamp,
-      peakAtBlock: trigger.blockNumber,
-      startedByEvent: category,
-      startedByTxHash: trigger.txHash,
-      endedByEvent: undefined,
-      endedByTxHash: undefined,
-      endedByStrategy: undefined,
-      // A rebalance transaction that ALSO crossed the threshold upward is
-      // extremely unlikely (rebalances typically reduce priceDifference),
-      // but count it if it happens — it's still an attempt observed.
-      rebalanceCountDuring: isRebalance ? 1 : 0,
-    };
-    context.DeviationThresholdBreach.set(row);
+    context.DeviationThresholdBreach.set(
+      buildOpenBreachRow({
+        next,
+        poolId,
+        trigger,
+        startedAt: trigger.blockTimestamp,
+        startedByEvent: category,
+        rebalanceCountDuring: isRebalance ? 1 : 0,
+      }),
+    );
     return {};
   }
 
   // Falling edge -----------------------------------------------------------
   if (wasBreached && !isBreached) {
     if (!prev) return {};
-    // The row's id is keyed on the rising-edge anchor, which lives on
-    // `prev.deviationBreachStartedAt` by construction.
-    const openId = openBreachId(poolId, prev.deviationBreachStartedAt);
-    const open = await context.DeviationThresholdBreach.get(openId);
+    // The open row is keyed by rising-edge timestamp plus event entropy for
+    // new rows, so recover it through the `(poolId, startedAt)` index rather
+    // than reconstructing an id from the timestamp alone.
+    const open = await getOpenBreach(
+      context,
+      poolId,
+      prev.deviationBreachStartedAt,
+    );
     if (!open) {
       // Self-heal case: `nextDeviationBreachStartedAt` adopted the anchor
       // from a partial-restore state (prev was breached with 0n anchor).
@@ -250,38 +288,27 @@ export async function recordBreachTransition(
   // Continuing breach ------------------------------------------------------
   // wasBreached && isBreached — maybe bump peak or rebalance count.
   if (!prev) return {};
-  const openId = openBreachId(poolId, prev.deviationBreachStartedAt);
-  const open = await context.DeviationThresholdBreach.get(openId);
+  const open = await getOpenBreach(
+    context,
+    poolId,
+    prev.deviationBreachStartedAt,
+  );
   if (!open) {
     // Self-heal case: `nextDeviationBreachStartedAt` adopted the current
     // block as the anchor for a breach that was already in progress
     // before tracking began. Bootstrap an entity row now so the eventual
     // falling edge has something to close. `startedByEvent` is marked
     // "unknown" because the original trigger is lost.
-    context.DeviationThresholdBreach.set({
-      id: openBreachId(poolId, next.deviationBreachStartedAt),
-      chainId: next.chainId,
-      poolId,
-      startedAt: next.deviationBreachStartedAt,
-      startedAtBlock: trigger.blockNumber,
-      endedAt: undefined,
-      endedAtBlock: undefined,
-      durationSeconds: undefined,
-      criticalDurationSeconds: undefined,
-      entryPriceDifference: next.priceDifference,
-      // See rising-edge case above for `breachEntryThreshold` rationale —
-      // identical reasoning applies to the bootstrap path.
-      entryRebalanceThreshold: breachEntryThreshold(next),
-      peakPriceDifference: next.priceDifference,
-      peakAt: trigger.blockTimestamp,
-      peakAtBlock: trigger.blockNumber,
-      startedByEvent: "unknown",
-      startedByTxHash: trigger.txHash,
-      endedByEvent: undefined,
-      endedByTxHash: undefined,
-      endedByStrategy: undefined,
-      rebalanceCountDuring: isRebalance ? 1 : 0,
-    });
+    context.DeviationThresholdBreach.set(
+      buildOpenBreachRow({
+        next,
+        poolId,
+        trigger,
+        startedAt: next.deviationBreachStartedAt,
+        startedByEvent: "unknown",
+        rebalanceCountDuring: isRebalance ? 1 : 0,
+      }),
+    );
     return {};
   }
   const peakBumped = next.priceDifference > open.peakPriceDifference;

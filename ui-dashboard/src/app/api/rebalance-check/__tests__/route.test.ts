@@ -81,6 +81,7 @@ async function loadRoute(): Promise<{
 
 beforeEach(() => {
   mockCheckRebalanceStatus.mockReset();
+  vi.restoreAllMocks();
 });
 
 describe("GET /api/rebalance-check — validation", () => {
@@ -365,6 +366,29 @@ describe("GET /api/rebalance-check — retry behavior", () => {
     // URLs, provider wording) stay in server logs only. See route.ts.
     expect(await res.json()).toEqual({ error: "Upstream RPC error" });
     expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts RPC URLs from server logs on upstream errors", async () => {
+    const { GET } = await loadRoute();
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCheckRebalanceStatus.mockRejectedValueOnce(
+      new Error(`provider failed at ${MOCK_RPC_URL}`),
+    );
+
+    const res = await GET(
+      new NextRequest(
+        buildUrl({
+          network: MOCK_NETWORK_ID,
+          pool: POOL,
+          strategy: STRATEGY,
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(502);
+    const logged = consoleSpy.mock.calls.flat().map(String).join(" ");
+    expect(logged).not.toContain(MOCK_RPC_URL);
+    expect(logged).toContain("[RPC_URL]");
   });
 
   it("does not cache failed calls (next call re-invokes checkRebalanceStatus)", async () => {

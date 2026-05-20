@@ -88,11 +88,23 @@
     "project-root:indexer-envio"
   ],
   "trustBoundaries": [],
-  "status": "pending",
+  "status": "fixed",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-b825715f7a-96e9_e815a0ade2",
+    "fnd_sig-feat-library-b825715f7a-7a63_71a136bfbe"
+  ],
   "patchAttemptIds": [],
-  "analysisHistory": [],
+  "analysisHistory": [
+    {
+      "runId": "20260520T092843-0eb58e",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "createdAt": "2026-05-20T09:30:30.573Z"
+    }
+  ],
   "createdAt": "2026-05-17T11:26:44.015Z",
-  "updatedAt": "2026-05-17T11:26:44.015Z"
+  "updatedAt": "2026-05-20T09:43:51.416Z"
 }

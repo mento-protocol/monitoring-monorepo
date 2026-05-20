@@ -35,6 +35,7 @@ import type { LiquidityEvent, Pool, PoolSnapshot } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
+import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
 export function LiquidityTab({
   poolId,
@@ -65,10 +66,8 @@ export function LiquidityTab({
   const { data: countData, error: countError } = useGQL<{
     LiquidityEvent: { id: string }[];
   }>(POOL_LIQUIDITY_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
-  const lastKnownTotalRef = React.useRef(0);
   const rawTotal = countData?.LiquidityEvent?.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1;

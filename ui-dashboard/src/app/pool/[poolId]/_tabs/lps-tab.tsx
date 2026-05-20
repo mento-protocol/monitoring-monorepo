@@ -17,6 +17,15 @@ import type { LiquidityPosition, Pool } from "@/lib/types";
 import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
 
+const POOL_LP_POSITIONS_CAP = 1000;
+
+type RankedLpPosition = {
+  address: string;
+  netLiquidity: bigint;
+  lastUpdatedTimestamp: string;
+  rank: number;
+};
+
 function isLiquidityPositionSchemaError(error: Error | undefined) {
   if (!error) return false;
   const msg = error.message.toLowerCase();
@@ -41,7 +50,7 @@ export function LpsTab({
   search: string;
   onSearchChange: (value: string) => void;
 }) {
-  const isFpmmPool = pool ? isFpmm(pool) : null;
+  const isFpmmPool = getFpmmPoolState(pool);
   const shouldSkip = isFpmmPool === false;
   const { getName, getTags } = useAddressLabels();
   const { network } = useNetwork();
@@ -63,21 +72,20 @@ export function LpsTab({
   } = useGQL<{
     LiquidityPosition: LiquidityPosition[];
   }>(shouldSkip ? null : POOL_LP_POSITIONS, { poolId });
+  const indexedRows = indexedData?.LiquidityPosition ?? [];
 
   const positions = useMemo(() => {
-    const filtered = (indexedData?.LiquidityPosition ?? []).flatMap(
-      (position) => {
-        const netLiquidity = BigInt(position.netLiquidity);
-        if (netLiquidity <= BigInt(0)) return [];
-        return [
-          {
-            address: position.address,
-            netLiquidity,
-            lastUpdatedTimestamp: position.lastUpdatedTimestamp,
-          },
-        ];
-      },
-    );
+    const filtered = indexedRows.flatMap((position) => {
+      const netLiquidity = BigInt(position.netLiquidity);
+      if (netLiquidity <= BigInt(0)) return [];
+      return [
+        {
+          address: position.address,
+          netLiquidity,
+          lastUpdatedTimestamp: position.lastUpdatedTimestamp,
+        },
+      ];
+    });
     // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
     // ES2017 with no polyfill — keep the spread+sort form (codex P2).
     // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
@@ -88,7 +96,7 @@ export function LpsTab({
           ? -1
           : 1,
     );
-  }, [indexedData]);
+  }, [indexedRows]);
 
   const totalLiquidity = useMemo(
     () =>
@@ -117,13 +125,12 @@ export function LpsTab({
     return <EmptyBox message="No active LP positions for this pool." />;
 
   const rankedPositions = positions.map((p, i) => ({ ...p, rank: i + 1 }));
-  const filteredPositions = query
-    ? rankedPositions.filter((p) =>
-        matchesRowSearch(query, [
-          ...addressSearchTerms(p.address, getName, getTags),
-        ]),
-      )
-    : rankedPositions;
+  const filteredPositions = filterLpPositions(
+    rankedPositions,
+    query,
+    getName,
+    getTags,
+  );
 
   const isSearching = query.length > 0;
   const lpTotal = filteredPositions.length;
@@ -174,6 +181,7 @@ export function LpsTab({
         placeholder="Search LPs by address, name, or tag..."
         ariaLabel="Search LPs"
       />
+      <LpPositionsCapNotice rowCount={indexedRows.length} />
       {filteredPositions.length === 0 ? (
         <EmptyBox message="No LPs match your search." />
       ) : (
@@ -304,4 +312,32 @@ export function LpsTab({
       )}
     </>
   );
+}
+
+function LpPositionsCapNotice({ rowCount }: { rowCount: number }) {
+  if (rowCount < POOL_LP_POSITIONS_CAP) return null;
+  return (
+    <p className="text-xs text-slate-500">
+      Showing first {POOL_LP_POSITIONS_CAP.toLocaleString()} LP positions by net
+      liquidity. Search and totals are limited to this loaded set.
+    </p>
+  );
+}
+
+function filterLpPositions(
+  positions: RankedLpPosition[],
+  query: string,
+  getName: (address: string | null, chainId?: number) => string,
+  getTags: (address: string | null) => string[],
+): RankedLpPosition[] {
+  if (!query) return positions;
+  return positions.filter((position) =>
+    matchesRowSearch(query, [
+      ...addressSearchTerms(position.address, getName, getTags),
+    ]),
+  );
+}
+
+function getFpmmPoolState(pool: Pool | null): boolean | null {
+  return pool ? isFpmm(pool) : null;
 }

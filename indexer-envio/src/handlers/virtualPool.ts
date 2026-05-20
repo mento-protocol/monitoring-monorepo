@@ -11,7 +11,12 @@ import type {
 } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
-import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool.js";
+import {
+  preloadPoolCache,
+  upsertPool,
+  upsertSnapshot,
+  DEFAULT_ORACLE_FIELDS,
+} from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
 import { tokenDecimalsScalingEffect } from "../rpc/effects.js";
@@ -155,6 +160,11 @@ indexer.onEvent(
     const poolId = makePoolId(event.chainId, event.srcAddress);
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    if (context.isPreload) {
+      await preloadPoolCache(context, poolId);
+      return;
+    }
 
     const volume0 =
       event.params.amount0In > event.params.amount0Out

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-8200516c17-b6e2_fa2e3c6768",
+  "featureId": "feat_library_8200516c17",
+  "title": "Address-book loading skeleton has fewer columns than the real table",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/app/address-book/loading.tsx",
+      "startLine": 3,
+      "endLine": 11,
+      "symbol": "AddressBookLoading",
+      "quote": "// cols=8 must stay in sync with the real address-book table ... <TableSkeleton rows={10} cols={8} />"
+    },
+    {
+      "path": "ui-dashboard/src/app/address-book/AddressBookClient.tsx",
+      "startLine": 290,
+      "endLine": 318,
+      "symbol": "AddressBookPage",
+      "quote": "<th ...>Chain</th> ... <th ...>Actions</th>"
+    }
+  ],
+  "reasoning": "The skeleton explicitly says its column count must match the real address-book table, but it renders 8 columns while the table has 10 headers: Chain, Address, Name, Tags, Notes, Source, Visibility, Created at, Updated at, and Actions. This causes the route-level loading UI to reserve a different table shape than the loaded page, creating avoidable layout shift and stale guidance for future changes.",
+  "reproduction": "Load `/address-book` slowly enough to see the Next.js `loading.tsx` fallback; the skeleton renders 8 header/cell blocks, then the loaded table swaps to 10 columns.",
+  "recommendation": "Update `AddressBookLoading` to pass `cols={10}` and refresh the explanatory comment to match the current table headers.",
+  "whyTestsDoNotAlreadyCoverThis": "The included address-book tests render `page.tsx` and `AddressBookClient`, but none import or assert `loading.tsx`, so the skeleton/table column contract is untested.",
+  "suggestedRegressionTest": "Add a small server-render test for `AddressBookLoading` that counts skeleton header/cell placeholders or snapshots the `TableSkeleton` props against the current table column count.",
+  "minimumFixScope": "`ui-dashboard/src/app/address-book/loading.tsx` and an optional loading fallback test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Fixed AddressBookLoading to render the current 10-column table skeleton and updated loading-state coverage.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:24:55.860Z"
+    }
+  ],
+  "signature": "sig_feat-library-8200516c17_b6e23f44a1",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T091538-c2fdac",
+  "createdAt": "2026-05-20T09:17:20.165Z",
+  "updatedAt": "2026-05-20T09:24:55.860Z"
+}

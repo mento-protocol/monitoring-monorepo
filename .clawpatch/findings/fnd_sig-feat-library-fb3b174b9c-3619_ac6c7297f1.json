@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-fb3b174b9c-3619_ac6c7297f1",
+  "featureId": "feat_library_fb3b174b9c",
+  "title": "Bridge status treats epoch sentinel timestamps as immediately stuck",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "ui-dashboard/src/lib/bridge-status.ts",
+      "startLine": 59,
+      "endLine": 62,
+      "symbol": "deriveBridgeStatus",
+      "quote": "const raw = transfer.sentTimestamp ?? transfer.firstSeenAt ?? null;"
+    },
+    {
+      "path": "ui-dashboard/src/lib/bridge-status.ts",
+      "startLine": 202,
+      "endLine": 213,
+      "symbol": "transferDeliveryDurationSec",
+      "quote": "if (sent === 0 || delivered === 0) return null;"
+    }
+  ],
+  "reasoning": "The same module documents and handles a literal \"0\" timestamp as an epoch sentinel in delivery-duration calculations, but deriveBridgeStatus uses nullish coalescing, so sentTimestamp: \"0\" wins over a valid recent firstSeenAt. For any in-flight transfer with this pre-indexed/race sentinel, Number(\"0\") makes nowSeconds - ts exceed 24h and the UI overlays STUCK immediately, even when the row was first seen moments ago. That creates false operational alerts on the bridge monitor.",
+  "reproduction": null,
+  "recommendation": "In deriveBridgeStatus, parse sentTimestamp and ignore it when it is missing, non-finite, or exactly 0; then fall back to firstSeenAt before applying the stuck threshold. Keep terminal statuses unchanged.",
+  "whyTestsDoNotAlreadyCoverThis": "The bridge-status tests cover missing/null sentTimestamp fallback and cover the \"0\" sentinel only in transferDeliveryDurationSec. They do not exercise deriveBridgeStatus with sentTimestamp: \"0\" and a recent firstSeenAt.",
+  "suggestedRegressionTest": "Add a deriveBridgeStatus test where status is SENT or PENDING, sentTimestamp is \"0\", firstSeenAt is now - 2h, and the expected status remains the raw in-flight status rather than STUCK.",
+  "minimumFixScope": "ui-dashboard/src/lib/bridge-status.ts plus the bridge-status unit test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Bridge status now ignores epoch/invalid sentTimestamp and falls back to firstSeenAt before stuck classification; regression added.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-05-20T09:56:30.921Z"
+    }
+  ],
+  "signature": "sig_feat-library-fb3b174b9c_3619131e6c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260520T094452-b00fff",
+  "createdAt": "2026-05-20T09:46:23.193Z",
+  "updatedAt": "2026-05-20T09:56:30.920Z"
+}

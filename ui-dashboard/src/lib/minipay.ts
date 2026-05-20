@@ -370,6 +370,13 @@ export async function setLastSyncedBlock(block: bigint): Promise<void> {
   await getRedis().set(LAST_BLOCK_KEY, block.toString());
 }
 
+export async function advanceLastSyncedBlock(block: bigint): Promise<boolean> {
+  const current = await getLastSyncedBlock();
+  if (current >= block) return false;
+  await setLastSyncedBlock(block);
+  return true;
+}
+
 // ── Entry shape ──────────────────────────────────────────────────────────────
 
 /**
