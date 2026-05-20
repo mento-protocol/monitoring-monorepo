@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { relativeTime } from "@/lib/format";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
 import {
@@ -12,10 +13,16 @@ export function CdpMarketCard({
   collateral,
   instance,
   aggregates,
+  ops24h,
+  ops24hCapped,
+  ops24hLoading,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
   aggregates: CdpAggregates;
+  ops24h: number;
+  ops24hCapped: boolean;
+  ops24hLoading: boolean;
 }) {
   const health = deriveCdpHealth(collateral, instance, aggregates);
   return (
@@ -28,7 +35,12 @@ export function CdpMarketCard({
           <h2 className="text-xl font-semibold text-white">
             {collateral.symbol}
           </h2>
-          <p className="text-sm text-slate-400">USDm-backed CDP market</p>
+          <CardActivitySubtitle
+            lastEventTimestamp={instance?.lastEventTimestamp}
+            ops24h={ops24h}
+            ops24hCapped={ops24hCapped}
+            ops24hLoading={ops24hLoading}
+          />
         </div>
         <CdpHealthBadge health={health} />
       </div>
@@ -59,6 +71,28 @@ export function CdpMarketCard({
         />
       </div>
     </Link>
+  );
+}
+
+function CardActivitySubtitle({
+  lastEventTimestamp,
+  ops24h,
+  ops24hCapped,
+  ops24hLoading,
+}: {
+  lastEventTimestamp: string | undefined;
+  ops24h: number;
+  ops24hCapped: boolean;
+  ops24hLoading: boolean;
+}) {
+  const lastActivity = lastEventTimestamp
+    ? relativeTime(lastEventTimestamp)
+    : "—";
+  const opsLabel = ops24hLoading ? "—" : `${ops24hCapped ? "≥" : ""}${ops24h}`;
+  return (
+    <p className="text-sm text-slate-400">
+      Last activity {lastActivity} · {opsLabel} ops in 24h
+    </p>
   );
 }
 

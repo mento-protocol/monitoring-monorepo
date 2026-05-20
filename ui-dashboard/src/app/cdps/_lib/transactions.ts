@@ -7,6 +7,11 @@ import type {
   CdpTroveOperationEventRow,
 } from "./types";
 
+/** Per-kind fetch cap for the cross-CDP transactions query. Shared between
+ *  the overview table and the page-level fetch that derives per-market
+ *  24h activity counts for the market cards. */
+export const CDP_OVERVIEW_PER_KIND_FETCH_LIMIT = 250;
+
 export type CdpTransactionsResponse = {
   LiquidationEvent: CdpLiquidationEventRow[];
   RedemptionEvent: CdpRedemptionEventRow[];
@@ -42,7 +47,7 @@ export const BADGE_LABELS: Record<BadgeKind, string> = {
   liquidation: "Liquidation",
   userRedemption: "Redemption",
   rebalanceRedemption: "Rebalance Redemption",
-  spRebalance: "SP Rebalance",
+  spRebalance: "Rebalance",
   troveOpen: "Open Trove",
   troveClose: "Close Trove",
   troveAdjust: "Adjust Trove",

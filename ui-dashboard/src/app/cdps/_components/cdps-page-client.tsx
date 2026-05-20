@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
-import { CDP_MARKETS } from "@/lib/queries";
+import { ALL_CDP_TRANSACTIONS, CDP_MARKETS } from "@/lib/queries";
 import {
   CDP_TROVES_LIST_LIMIT,
   type CdpCollateral,
@@ -16,8 +16,15 @@ import {
   isOpenTroveStatus,
   type CdpAggregates,
 } from "../_lib/health";
+import {
+  CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  type CdpTransactionsResponse,
+  mergeTransactionRows,
+} from "../_lib/transactions";
 import { CdpAllTransactionsTable } from "./cdp-all-transactions-table";
 import { CdpMarketCard } from "./cdp-market-card";
+
+const ONE_DAY_SECONDS = 86_400;
 
 type CdpMarketsResponse = {
   LiquityCollateral: CdpCollateral[];
@@ -25,12 +32,56 @@ type CdpMarketsResponse = {
   Trove: CdpTroveListRow[];
 };
 
+/** Per-market 24h ops count + cap flag, derived from the chain-scoped
+ *  overview transactions fetch. Shares the SWR cache with the table
+ *  mounted below so we don't double-fetch. */
+function useOps24hByInstance(chainId: number) {
+  const transactions = useGQL<CdpTransactionsResponse>(
+    chainId === 42220 ? ALL_CDP_TRANSACTIONS : null,
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
+  );
+  const txData = transactions.data;
+  return useMemo(() => {
+    const merged = mergeTransactionRows(
+      txData,
+      CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+    );
+    const cutoff = Math.floor(Date.now() / 1000) - ONE_DAY_SECONDS;
+    const counts = new Map<string, number>();
+    for (const row of merged.rows) {
+      if (!row.instanceId) continue;
+      if (Number(row.timestamp) < cutoff) continue;
+      counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
+    }
+    // The 24h count is only at risk when the per-kind cap was hit AND the
+    // oldest fetched row is still inside the 24h window — that's when the
+    // cap could have chopped off additional rows within the same window.
+    // If the oldest fetched row is older than the cutoff, every 24h row
+    // is already in `merged.rows` and the counts are exact.
+    const oldestRow = merged.rows.at(-1);
+    const undercountPossible =
+      merged.capped &&
+      oldestRow != null &&
+      Number(oldestRow.timestamp) >= cutoff;
+    return {
+      ops24hByInstance: counts,
+      txCapped: undercountPossible,
+      isLoading: transactions.isLoading,
+    };
+  }, [txData, transactions.isLoading]);
+}
+
 export function CdpsPageClient() {
   const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<CdpMarketsResponse>(
     network.chainId === 42220 ? CDP_MARKETS : null,
     { chainId: network.chainId },
   );
+  const {
+    ops24hByInstance,
+    txCapped,
+    isLoading: txLoading,
+  } = useOps24hByInstance(network.chainId);
 
   const liquityInstances = data?.LiquityInstance;
   const troves = data?.Trove;
@@ -108,6 +159,9 @@ export function CdpsPageClient() {
               aggregatesByCollateral,
               queryTruncated,
             )}
+            ops24h={ops24hByInstance.get(collateral.id) ?? 0}
+            ops24hCapped={txCapped}
+            ops24hLoading={txLoading}
           />
         ))}
       </div>

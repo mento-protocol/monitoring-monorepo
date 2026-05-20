@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -12,18 +12,24 @@ import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
+  CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  type BadgeKind,
   amountsFor,
   badgeKindFor,
   mergeTransactionRows,
   type CdpTransactionsResponse,
 } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
+import {
+  CdpTxMarketFilter,
+  CdpTxTypeFilter,
+  TX_FILTER_TYPE_ORDER,
+} from "./cdp-tx-filters";
 
 // 100 across all markets is the user-visible cap. We fetch a larger
 // per-kind cap and merge so the latest 100 across kinds is accurate even
 // when one kind dominates (e.g. trove ops far outnumber liquidations).
 const MAX_ROWS = 100;
-const PER_KIND_FETCH_LIMIT = 250;
 
 interface CollateralSummary {
   id: string;
@@ -40,13 +46,12 @@ export function CdpAllTransactionsTable({
 }) {
   const { data, error, isLoading } = useGQL<CdpTransactionsResponse>(
     ALL_CDP_TRANSACTIONS,
-    { chainId, limit: PER_KIND_FETCH_LIMIT },
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
   const { rows, capped } = useMemo(
-    () => mergeTransactionRows(data, PER_KIND_FETCH_LIMIT),
+    () => mergeTransactionRows(data, CDP_OVERVIEW_PER_KIND_FETCH_LIMIT),
     [data],
   );
-  const visibleRows = rows.slice(0, MAX_ROWS);
 
   const symbolByInstance = useMemo(() => {
     const m = new Map<string, { symbol: string; chainId: number }>();
@@ -67,11 +72,12 @@ export function CdpAllTransactionsTable({
         />
       ) : isLoading ? (
         <Skeleton rows={6} />
-      ) : visibleRows.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyBox message="No CDP transactions indexed yet." />
       ) : (
         <OverviewBody
-          rows={visibleRows}
+          rows={rows}
+          collaterals={collaterals}
           symbolByInstance={symbolByInstance}
           capped={capped}
         />
@@ -82,15 +88,43 @@ export function CdpAllTransactionsTable({
 
 function OverviewBody({
   rows,
+  collaterals,
   symbolByInstance,
   capped,
 }: {
   rows: CdpTransactionRow[];
+  collaterals: CollateralSummary[];
   symbolByInstance: Map<string, { symbol: string; chainId: number }>;
   capped: boolean;
 }) {
+  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
+  const [marketFilter, setMarketFilter] = useState<string | null>(null);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
+      if (marketFilter != null && row.instanceId !== marketFilter) return false;
+      return true;
+    });
+  }, [rows, typeFilter, marketFilter]);
+
+  const visibleRows = filteredRows.slice(0, MAX_ROWS);
+  const filtersActive = typeFilter != null || marketFilter != null;
+
   return (
     <>
+      <div className="mb-3 space-y-2">
+        <CdpTxTypeFilter
+          options={TX_FILTER_TYPE_ORDER}
+          selected={typeFilter}
+          onChange={setTypeFilter}
+        />
+        <CdpTxMarketFilter
+          options={collaterals}
+          selected={marketFilter}
+          onChange={setMarketFilter}
+        />
+      </div>
       <Table>
         <thead>
           <Row>
@@ -109,27 +143,42 @@ function OverviewBody({
           </Row>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <OverviewRow
-              key={`${row.kind}-${row.id}`}
-              row={row}
-              market={
-                row.instanceId
-                  ? symbolByInstance.get(row.instanceId)
-                  : undefined
-              }
-            />
-          ))}
+          {visibleRows.length === 0 ? (
+            <Row>
+              <td
+                colSpan={7}
+                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+              >
+                No transactions match the active filters.
+              </td>
+            </Row>
+          ) : (
+            visibleRows.map((row) => (
+              <OverviewRow
+                key={`${row.kind}-${row.id}`}
+                row={row}
+                market={
+                  row.instanceId
+                    ? symbolByInstance.get(row.instanceId)
+                    : undefined
+                }
+              />
+            ))
+          )}
         </tbody>
       </Table>
-      <p className="px-1 pt-2 text-xs text-slate-500">
-        Showing the most recent {rows.length.toLocaleString()} transactions
-        across all CDP markets.
-      </p>
+      {visibleRows.length > 0 && (
+        <p className="px-1 pt-2 text-xs text-slate-500">
+          {filtersActive
+            ? `Showing ${visibleRows.length.toLocaleString()} of ${filteredRows.length.toLocaleString()} matching transactions.`
+            : `Showing the most recent ${visibleRows.length.toLocaleString()} transactions across all CDP markets.`}
+        </p>
+      )}
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Showing the most recent {PER_KIND_FETCH_LIMIT.toLocaleString()}{" "}
-          entries per event type — older history may exist beyond this range.
+          Showing the most recent{" "}
+          {CDP_OVERVIEW_PER_KIND_FETCH_LIMIT.toLocaleString()} entries per event
+          type — older history may exist beyond this range.
         </p>
       )}
     </>

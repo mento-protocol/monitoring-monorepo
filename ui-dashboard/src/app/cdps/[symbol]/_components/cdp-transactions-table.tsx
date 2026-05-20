@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -13,12 +13,17 @@ import { formatTokenAmount } from "../../_lib/format";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
+  type BadgeKind,
   amountsFor,
   badgeKindFor,
   mergeTransactionRows,
   type CdpTransactionsResponse,
 } from "../../_lib/transactions";
 import type { CdpTransactionRow } from "../../_lib/types";
+import {
+  CdpTxTypeFilter,
+  TX_FILTER_TYPE_ORDER,
+} from "../../_components/cdp-tx-filters";
 
 const PAGE_SIZE = 20;
 
@@ -74,13 +79,33 @@ function TransactionsBody({
   capped: boolean;
 }) {
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
+
+  const filteredRows = useMemo(() => {
+    if (typeFilter == null) return rows;
+    return rows.filter((row) => badgeKindFor(row) === typeFilter);
+  }, [rows, typeFilter]);
+
+  // Reset to page 1 when the filter narrows the view so users don't land on
+  // an empty page N after a previously valid pagination.
+  useEffect(() => {
+    setPage(1);
+  }, [typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const clampedPage = Math.max(1, Math.min(page, totalPages));
   const start = (clampedPage - 1) * PAGE_SIZE;
-  const visibleRows = rows.slice(start, start + PAGE_SIZE);
+  const visibleRows = filteredRows.slice(start, start + PAGE_SIZE);
 
   return (
     <>
+      <div className="mb-3">
+        <CdpTxTypeFilter
+          options={TX_FILTER_TYPE_ORDER}
+          selected={typeFilter}
+          onChange={setTypeFilter}
+        />
+      </div>
       <Table>
         <thead>
           <Row>
@@ -98,20 +123,31 @@ function TransactionsBody({
           </Row>
         </thead>
         <tbody>
-          {visibleRows.map((row) => (
-            <TransactionRow
-              key={`${row.kind}-${row.id}`}
-              row={row}
-              chainId={chainId}
-              symbol={symbol}
-            />
-          ))}
+          {visibleRows.length === 0 ? (
+            <Row>
+              <td
+                colSpan={6}
+                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+              >
+                No transactions match the active filter.
+              </td>
+            </Row>
+          ) : (
+            visibleRows.map((row) => (
+              <TransactionRow
+                key={`${row.kind}-${row.id}`}
+                row={row}
+                chainId={chainId}
+                symbol={symbol}
+              />
+            ))
+          )}
         </tbody>
       </Table>
       <Pagination
         page={clampedPage}
         pageSize={PAGE_SIZE}
-        total={rows.length}
+        total={filteredRows.length}
         onPageChange={setPage}
       />
       {capped && (

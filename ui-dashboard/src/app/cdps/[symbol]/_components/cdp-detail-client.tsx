@@ -306,9 +306,6 @@ function DetailHeader({
         <h1 className="mt-1 text-2xl font-semibold text-white">
           {collateral.symbol} CDP Market
         </h1>
-        <p className="mt-1 text-sm text-slate-400">
-          USDm collateral, debt denominated in {collateral.symbol}.
-        </p>
       </div>
       <div className="flex flex-col items-end gap-1">
         <CdpHealthBadge health={health} />
