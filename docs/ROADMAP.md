@@ -86,20 +86,22 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Live alert rules** (Terraform-managed in `aegis/terraform/grafana-alerts/`):
 
-| Alert Group      | What it monitors                                        | Channels                           |
-| ---------------- | ------------------------------------------------------- | ---------------------------------- |
-| Oracle Relayers  | Stale price feeds, low CELO balance for relayer wallets | Discord + Splunk On-Call (mainnet) |
-| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                        | Discord                            |
-| Trading Modes    | Circuit breakers tripped (trading halted per rate feed) | Discord                            |
-| Trading Limits   | L0/L1/LG utilization >90%                               | Discord + Splunk On-Call (L1/LG)   |
-| Aegis Service    | RPC failures, data staleness                            | Discord + Splunk On-Call           |
+| Alert Group      | What it monitors                                        | Channels                                                                   |
+| ---------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low CELO balance for relayer wallets | Slack #alerts-oracles + #alerts-critical/Splunk (page, celo)               |
+| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                        | Slack #alerts-reserve                                                      |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed) | Slack #alerts-critical/Splunk (page, celo); #alerts-testnet (celo-sepolia) |
+| Trading Limits   | L0/L1/LG utilization >90%                               | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)            |
+| Aegis Service    | RPC failures, data staleness                            | Slack #alerts-infra; #alerts-critical/Splunk (page)                        |
+
+Currently dual-routed alongside the legacy Discord channels during the migration soak window; the cutover PR removes the Discord side once parity is verified.
 
 **Infrastructure:**
 
 - Aegis NestJS app on GCP App Engine (`mento-monitoring`)
 - Grafana Agent on GCP App Engine → pushes to Grafana Cloud (`clabsmento.grafana.net`)
-- 8 Discord webhook contact points + Splunk On-Call for on-call escalation
-- Weekend mute timings for FX rate feeds (Fri 22:00 — Sun 22:00 UTC)
+- Slack contact points (6) + Splunk On-Call for on-call escalation, Discord webhooks retained during dual-route soak
+- Weekend mute timings for FX rate feeds (Fri 21:00 — Sun 21:00 UTC) preserved on every Slack page/warning route
 
 ---
 
@@ -165,7 +167,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 ### Alerting Backlog
 
-- [ ] **Migrate Aegis v2 alerts to Slack** — currently Discord; unify after v3 channel pair soaks
+- [ ] **Cut over Aegis v2 alerts to Slack-only** — dual-route soak window in progress on this PR; cutover PR removes Discord side once parity is verified
 
 ### Infrastructure Backlog
 
@@ -221,18 +223,18 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
                        Notifications
                              │
                 ┌────────────┴──────────────────────┐
-                │ Discord (Aegis v2)                │
-                │ Splunk On-Call                    │
+                │ Splunk On-Call (page severity)    │
                 │ Slack #alerts-critical            │
                 │ Slack #alerts-oracles / -pools /  │
                 │       -infra / -reserve / -testnet│
+                │ Discord (Aegis v2, soak window)   │
                 └───────────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events into Postgres → Hasura exposes GraphQL → Next.js dashboard renders
-2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → exposes `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
+2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → exposes `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Slack `#alerts-critical` + per-domain warning channels + Splunk On-Call (page severity); Discord dual-route stays live during the migration soak window
 3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → exports `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`)
 
 ## Key Files

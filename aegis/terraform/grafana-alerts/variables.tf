@@ -125,7 +125,7 @@ variable "slack_channel_reserve" {
 }
 
 variable "slack_channel_infra" {
-  description = "Slack channel for infrastructure warning alerts (aegis service, metrics-bridge, indexer) and the root catch-all."
+  description = "Slack channel for infrastructure warning alerts (aegis service, metrics-bridge, indexer). The root catch-all moves here in the cutover PR; during the dual-route window it still lands in Discord #alerts-catch-all."
   type        = string
   default     = "#alerts-infra"
 }
