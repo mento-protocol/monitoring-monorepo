@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
+import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
 import { formatUSD } from "@/lib/format";
 import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
@@ -100,7 +101,7 @@ function RevenueContent() {
             hasError={anyNetworkError || anyFeesError}
             format={formatUSD}
             totalPrefix={feesApprox ? "≈ " : ""}
-            href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
+            href={`https://debank.com/profile/${PROTOCOL_FEE_RECIPIENT_ADDRESS}`}
             subtitle={
               anyFeesTruncated
                 ? "Approximate — full history exceeds pagination cap"

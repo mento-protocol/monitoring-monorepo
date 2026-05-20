@@ -40,6 +40,10 @@
     "./units": {
       "types": "./dist/units.d.ts",
       "default": "./dist/units.js"
+    },
+    "./protocol-fee": {
+      "types": "./dist/protocol-fee.d.ts",
+      "default": "./dist/protocol-fee.js"
     }
   },
   "scripts": {

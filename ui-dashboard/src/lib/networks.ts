@@ -6,6 +6,7 @@ import {
   chainTokenSymbols,
   chainAddressLabels,
 } from "@mento-protocol/monitoring-config/tokens";
+import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
 import { clientEnv } from "@/env";
 
 // Semantic aliases over the shared chain ID → namespace map.
@@ -124,7 +125,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
-      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
+      [PROTOCOL_FEE_RECIPIENT_ADDRESS]: "Yield Split",
     },
   }),
   "celo-mainnet": makeNetwork({
@@ -141,7 +142,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
-      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
+      [PROTOCOL_FEE_RECIPIENT_ADDRESS]: "Yield Split",
     },
   }),
   "monad-mainnet": makeNetwork({
