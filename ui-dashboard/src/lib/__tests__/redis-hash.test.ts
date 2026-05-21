@@ -210,7 +210,9 @@ describe("replaceRedisHashes", () => {
 
     // intel_deep's DEL + HSETs must precede labels' EVAL.
     expect(callOrder[0]).toBe("del:intel_deep");
-    const intelHsetCount = callOrder.filter((c) => c === "hset:intel_deep").length;
+    const intelHsetCount = callOrder.filter(
+      (c) => c === "hset:intel_deep",
+    ).length;
     expect(intelHsetCount).toBeGreaterThanOrEqual(1);
     // labels EVAL is the last call.
     expect(callOrder[callOrder.length - 1]).toBe("eval:labels");
