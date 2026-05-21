@@ -208,10 +208,29 @@ export function findTopLevelBotReviewComments(reviews = []) {
     }));
 }
 
-export function hasCodexApprovalReaction(reactions = []) {
+function parseTimestamp(value) {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function currentHeadCommittedAt(pr) {
+  const headCommit =
+    pr.commits?.find((commit) => commit.oid === pr.headRefOid) ??
+    pr.commits?.at?.(-1);
+  return parseTimestamp(headCommit?.committedDate);
+}
+
+export function hasCodexApprovalReaction(
+  reactions = [],
+  headCommittedAt = null,
+) {
   return reactions.some(
     (reaction) =>
-      reaction.content === "+1" && reaction.user?.login === BOT_APPROVER,
+      reaction.content === "+1" &&
+      reaction.user?.login === BOT_APPROVER &&
+      (headCommittedAt === null ||
+        parseTimestamp(reaction.created_at ?? reaction.createdAt) >=
+          headCommittedAt),
   );
 }
 
@@ -222,6 +241,7 @@ export function summarizeReadyState({
   reviewComments = [],
   reviewThreads = [],
   requiredStatusContexts = [],
+  requiredStatusContextsError = null,
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
@@ -235,7 +255,11 @@ export function summarizeReadyState({
     ...findTopLevelBotComments(issueComments),
     ...findTopLevelBotReviewComments(pr.reviews ?? []),
   ];
-  const codexApprovalReaction = hasCodexApprovalReaction(reactions);
+  const headCommittedAt = currentHeadCommittedAt(pr);
+  const codexApprovalReaction = hasCodexApprovalReaction(
+    reactions,
+    headCommittedAt,
+  );
 
   const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";
   const reviewDecision = normalizeStatusValue(pr.reviewDecision);
@@ -272,6 +296,26 @@ export function summarizeReadyState({
       kind: "review",
       name: "Changes requested",
       state: pr.reviewDecision,
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  if (reviewDecision === "REVIEW_REQUIRED") {
+    requiredBlockers.push({
+      kind: "review",
+      name: "Review required",
+      state: pr.reviewDecision,
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  if (requiredStatusContextsError !== null) {
+    requiredBlockers.push({
+      kind: "branch-protection",
+      name: "Required status contexts unavailable",
+      state: requiredStatusContextsError,
       required: true,
       url: pr.url,
     });
@@ -358,6 +402,10 @@ export function summarizeReadyState({
       baseRefName: pr.baseRefName,
       mergeable: pr.mergeable ?? null,
       reviewDecision: pr.reviewDecision ?? null,
+      headCommittedAt:
+        headCommittedAt === null
+          ? null
+          : new Date(headCommittedAt).toISOString(),
     },
     statusChecks,
     requiredStatusContexts,

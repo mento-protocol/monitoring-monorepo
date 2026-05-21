@@ -58,6 +58,12 @@ const basePr = {
   isDraft: false,
   headRefName: "chore/pr-ready-state",
   headRefOid: "abc123",
+  commits: [
+    {
+      oid: "abc123",
+      committedDate: "2026-05-21T13:22:23Z",
+    },
+  ],
   baseRefName: "main",
   mergeable: "MERGEABLE",
   reviewDecision: "APPROVED",
@@ -250,12 +256,16 @@ test("filters top-level review bodies down to bots with body text", () => {
 
 test("requires chatgpt-codex-connector +1 reaction exactly", () => {
   assert(
-    hasCodexApprovalReaction([
-      {
-        content: "+1",
-        user: { login: "chatgpt-codex-connector[bot]" },
-      },
-    ]),
+    hasCodexApprovalReaction(
+      [
+        {
+          content: "+1",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+      Date.parse("2026-05-21T13:22:23Z"),
+    ),
     "expected codex bot +1 to pass",
   );
   assert(
@@ -264,6 +274,77 @@ test("requires chatgpt-codex-connector +1 reaction exactly", () => {
       { content: "+1", user: { login: "other[bot]" } },
     ]),
     "expected wrong reaction or wrong bot to fail",
+  );
+});
+
+test("rejects stale chatgpt-codex-connector reaction from before the head commit", () => {
+  assert(
+    !hasCodexApprovalReaction(
+      [
+        {
+          content: "+1",
+          created_at: "2026-05-21T13:21:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+      Date.parse("2026-05-21T13:22:23Z"),
+    ),
+    "expected stale codex bot +1 to fail",
+  );
+});
+
+test("blocks ready state when required review is still pending", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      reviewDecision: "REVIEW_REQUIRED",
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assert(
+    summary.required.blockers.some(
+      (blocker) =>
+        blocker.kind === "review" && blocker.state === "REVIEW_REQUIRED",
+    ),
+    "expected REVIEW_REQUIRED blocker",
+  );
+});
+
+test("fails closed when required status contexts cannot be fetched", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContextsError: "HTTP 403: Resource not accessible",
+  });
+
+  assertEqual(summary.ready, false);
+  assert(
+    summary.required.blockers.some(
+      (blocker) => blocker.kind === "branch-protection",
+    ),
+    "expected branch-protection blocker",
   );
 });
 
@@ -279,7 +360,11 @@ test("summarizes not-ready state when blockers remain", () => {
       ],
     },
     reactions: [
-      { content: "+1", user: { login: "chatgpt-codex-connector[bot]" } },
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
     ],
     reviewComments: [
       {
@@ -316,7 +401,11 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
       ],
     },
     reactions: [
-      { content: "+1", user: { login: "chatgpt-codex-connector[bot]" } },
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
     ],
     reviewComments: [
       { id: 10, body: "root", path: "a.ts", line: 1 },

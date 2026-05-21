@@ -26,9 +26,16 @@ Required blockers:
 
 - Required check runs or status contexts that are failing, pending, queued, or
   missing from the branch-protection rollup.
-- Required GitHub review state, including requested changes.
+- Branch-protection context lookup failures caused by unreadable or
+  unauthorized protection data; the probe fails closed rather than guessing
+  required-vs-optional status. GitHub's `Branch not protected (HTTP 404)`
+  response means no required-context data is available and uses the fallback
+  split.
+- Required GitHub review state, including requested changes or required review
+  still pending.
 - Unreplied review comments that repo policy requires agents to answer.
-- The Codex PR-description approval gate for the current head.
+- The Codex PR-description approval gate for the current head. The bot `+1`
+  reaction must be created at or after the head commit timestamp.
 
 Optional signals:
 
@@ -68,6 +75,7 @@ Expected top-level fields:
     "isDraft": false,
     "headRefName": "chore/pr-ready-state",
     "headRefOid": "abcdef1",
+    "headCommittedAt": "2026-05-21T13:22:23.000Z",
     "baseRefName": "main",
     "mergeable": "MERGEABLE",
     "reviewDecision": "APPROVED"

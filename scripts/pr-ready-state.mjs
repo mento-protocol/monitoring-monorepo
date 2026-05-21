@@ -42,20 +42,33 @@ function ghApiJsonPages(args) {
   return parsed.flatMap((page) => (Array.isArray(page) ? page : [page]));
 }
 
-function ghApiJsonOptional(args, fallback) {
+function ghApiJsonResult(args) {
   const result = spawnSync("gh", ["api", ...args], {
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
   });
 
-  if (result.status !== 0 || result.error) {
-    return fallback;
+  if (result.error) {
+    return { ok: false, error: result.error.message };
+  }
+
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      error: result.stderr.trim() || `exit ${result.status}`,
+    };
   }
 
   try {
-    return result.stdout.trim() ? JSON.parse(result.stdout) : fallback;
-  } catch {
-    return fallback;
+    return {
+      ok: true,
+      value: result.stdout.trim() ? JSON.parse(result.stdout) : null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -131,13 +144,29 @@ async function fetchReviewThreads({ owner, name, number }) {
 }
 
 function fetchRequiredStatusContexts({ owner, name, baseRef }) {
-  const contexts = ghApiJsonOptional(
-    [
-      `repos/${owner}/${name}/branches/${baseRef}/protection/required_status_checks/contexts`,
-    ],
-    [],
-  );
-  return Array.isArray(contexts) ? contexts : [];
+  const encodedBaseRef = encodeURIComponent(baseRef);
+  const result = ghApiJsonResult([
+    `repos/${owner}/${name}/branches/${encodedBaseRef}/protection/required_status_checks/contexts`,
+  ]);
+
+  if (!result.ok) {
+    if (result.error.includes("Branch not protected (HTTP 404)")) {
+      return {
+        contexts: [],
+        error: null,
+      };
+    }
+
+    return {
+      contexts: [],
+      error: result.error,
+    };
+  }
+
+  return {
+    contexts: Array.isArray(result.value) ? result.value : [],
+    error: null,
+  };
 }
 
 async function fetchReadyState({ prArg, repoArg }) {
@@ -155,6 +184,7 @@ async function fetchReadyState({ prArg, repoArg }) {
     "--json",
     [
       "baseRefName",
+      "commits",
       "headRefName",
       "headRefOid",
       "isDraft",
@@ -197,7 +227,8 @@ async function fetchReadyState({ prArg, repoArg }) {
     reactions,
     reviewComments,
     reviewThreads,
-    requiredStatusContexts,
+    requiredStatusContexts: requiredStatusContexts.contexts,
+    requiredStatusContextsError: requiredStatusContexts.error,
   });
 }
 
