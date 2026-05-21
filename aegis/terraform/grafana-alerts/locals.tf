@@ -85,9 +85,11 @@ locals {
   # from this single source of truth so alertname→service mapping stays in one place.
   alert_types = {
     oracle_stale_price = {
+      # One alert name per chain (e.g. "Oldest Report Expired [Monad]"),
+      # generated from the chains registry so the rule names always match a
+      # dispatcher branch.
       names = [
-        "Oldest Report Expired [Celo-Sepolia]",
-        "Oldest Report Expired [Celo]"
+        for k, c in local.chains : "Oldest Report Expired [${c.title}]"
       ],
       title_template             = "discord.oracle_stale_price_alert_title",
       message_template           = "discord.oracle_stale_price_alert_message",
@@ -124,9 +126,11 @@ locals {
       victorops_message_template = "victorops.reserve_balance_alert_message"
     },
     trading_halted = {
+      # One alert name per chain (e.g. "Trading Mode Alert [Monad]"), generated
+      # from the chains registry so the rule names always match a dispatcher
+      # branch.
       names = [
-        "Trading Mode Alert [Celo-Sepolia]",
-        "Trading Mode Alert [Celo]"
+        for k, c in local.chains : "Trading Mode Alert [${c.title}]"
       ],
       title_template             = "discord.trading_mode_alert_title",
       message_template           = "discord.trading_mode_alert_message",
