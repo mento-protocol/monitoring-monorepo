@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { SWRResponse } from "swr";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import {
   BASE_NETWORK,
@@ -20,6 +21,15 @@ import {
 // Mock hooks that have side effects / SWR dependency
 vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
+}));
+
+// `useGQL` (Traders tile) is wired through SWR + useNetwork; without a mock
+// the call throws "useNetwork must be used within <NetworkProvider>" at
+// render time, blanking the markup. Mock with a stable default and override
+// per-test via `vi.mocked(useGQL).mockReturnValueOnce(...)` for the new
+// homepage Traders tile coverage below.
+vi.mock("@/lib/graphql", () => ({
+  useGQL: vi.fn(),
 }));
 
 // GlobalPoolsTable has complex deps — stub it, but capture props for assertions
@@ -39,6 +49,7 @@ vi.mock("@/components/global-pools-table", () => ({
 }));
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { useGQL } from "@/lib/graphql";
 import * as volumeModule from "@/lib/volume";
 import { buildSnapshotWindows } from "@/lib/volume";
 // Import from page-client (not page.tsx): page.tsx is now an async Server
@@ -77,6 +88,17 @@ function render(networkData: NetworkData[], isLoading = false): string {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedProps = null;
+  // Default `useGQL` mock for the Traders tile — empty payload so existing
+  // tests get a deterministic `0` Traders count without touching their setup.
+  // Tests that exercise the Traders tile specifically override via
+  // `mockReturnValueOnce` / `mockReturnValue` directly.
+  vi.mocked(useGQL).mockReturnValue({
+    data: { LeaderboardWindowSnapshot: [] },
+    error: undefined,
+    isLoading: false,
+    isValidating: false,
+    mutate: vi.fn(),
+  } as unknown as SWRResponse);
 });
 
 // Loading state
@@ -710,5 +732,84 @@ describe("GlobalPage — Volume chart wiring", () => {
     ]);
 
     expect(html.split("· partial data").length - 1).toBe(1);
+  });
+});
+
+// Traders tile — sources its count from the isolated
+// LEADERBOARD_WINDOW_TRADERS_LATEST query. Cross-chain Set-deduplication
+// (a wallet active on multiple chains counts once) is the load-bearing
+// invariant for this tile; the existing `uniqueTraders` field on the hero
+// snapshot can't satisfy it because naïve summing double-counts.
+
+describe("GlobalPage — Traders tile", () => {
+  it("counts cross-chain overlapping addresses once (Set-deduplicates)", () => {
+    // Two chains each contribute 3 traders with 2 overlaps (case-insensitive).
+    // Expected unique count = |{A, B, C, D}| = 4.
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: "1778803200",
+            windowTraders: [
+              "0xAAAA000000000000000000000000000000000001",
+              "0xBBBB000000000000000000000000000000000002",
+              "0xCCCC000000000000000000000000000000000003",
+            ],
+          },
+          {
+            chainId: 143,
+            snapshotDay: "1778803200",
+            windowTraders: [
+              // First two overlap with Celo (mixed case on purpose — the page
+              // lowercases before dedupe).
+              "0xaaaa000000000000000000000000000000000001",
+              "0xbbbb000000000000000000000000000000000002",
+              "0xDDDD000000000000000000000000000000000004",
+            ],
+          },
+        ],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    expect(html).toContain("Traders");
+    // Angle-bracket match guards against Tailwind class digits.
+    expect(html).toContain(">4<");
+  });
+
+  it("renders N/A when the Traders query errors", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: new Error("Hasura schema-drift: field not found"),
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    expect(html).toContain("Traders");
+    expect(html).toContain("N/A");
+  });
+
+  it("renders 0 when every chain returns an empty windowTraders array", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          { chainId: 42220, snapshotDay: "1778803200", windowTraders: [] },
+          { chainId: 143, snapshotDay: "1778803200", windowTraders: [] },
+        ],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    expect(html).toContain("Traders");
+    expect(html).toContain(">0<");
+    expect(html).not.toContain(">N/A<");
   });
 });
