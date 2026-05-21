@@ -83,6 +83,12 @@ package-manager config, review the script/lifecycle diff first, then
 temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
 config for that push.
 
+Package-local gate tasks for `lint`, `typecheck`, `test`, and `knip` run
+through Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
+Remote caching is disabled in `turbo.json`. High-risk or cross-layer commands
+stay outside Turbo, including codegen, install, dep-cruiser, React Doctor,
+dashboard build/size/browser checks, mutation baselines, and Terraform.
+
 ## PR feedback sweep rule
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
