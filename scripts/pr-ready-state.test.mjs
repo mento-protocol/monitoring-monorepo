@@ -18,6 +18,7 @@ import { formatHuman } from "./pr-ready-state-format.mjs";
 import {
   parseArgs,
   repoFromPullRequestUrl,
+  requiredStatusContextsFromProtection,
   requiredStatusContextsFromRules,
   splitRepo,
   workflowPathsFromRules,
@@ -162,6 +163,32 @@ test("extracts required status contexts from branch rulesets", () => {
         },
       },
     ]),
+    [
+      { context: "ci", integrationId: null },
+      { context: "Vercel", integrationId: null },
+    ],
+  );
+});
+
+test("extracts app-bound required status contexts from branch protection details", () => {
+  assertDeepEqual(
+    requiredStatusContextsFromProtection({
+      contexts: ["ci", "Code Quality"],
+      checks: [
+        { context: "ci", app_id: 15368 },
+        { context: "Code Quality", app_id: 15368 },
+      ],
+    }),
+    [
+      { context: "ci", integrationId: 15368 },
+      { context: "Code Quality", integrationId: 15368 },
+    ],
+  );
+});
+
+test("falls back to bare branch protection contexts when check details are absent", () => {
+  assertDeepEqual(
+    requiredStatusContextsFromProtection({ contexts: ["ci", "Vercel"] }),
     [
       { context: "ci", integrationId: null },
       { context: "Vercel", integrationId: null },
@@ -356,6 +383,28 @@ test("does not satisfy integration-bound required checks with unknown app source
   );
 });
 
+test("does not collapse duplicate required contexts from different app sources", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [
+      {
+        name: "ci",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        appId: 15368,
+      },
+    ],
+    [
+      { context: "ci", integrationId: 15368 },
+      { context: "ci", integrationId: 999 },
+    ],
+  );
+
+  assertDeepEqual(
+    split.required.map((check) => `${check.name}:${check.state}`),
+    ["ci:pass", "ci:pending"],
+  );
+});
+
 test("finds unresolved review threads and keeps useful location metadata", () => {
   const unresolved = findUnresolvedReviewThreads([
     {
@@ -449,6 +498,92 @@ test("ignores self-authored root review comments", () => {
   );
 });
 
+test("requires root review comment replies from an allowed agent author", () => {
+  const unreplied = findUnrepliedRootReviewComments(
+    [
+      {
+        id: 10,
+        body: "root with reviewer self-reply",
+        path: "a.ts",
+        line: 1,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 11,
+        in_reply_to_id: 10,
+        body: "reviewer follow-up",
+        user: { login: "reviewer" },
+      },
+      {
+        id: 12,
+        body: "root with author reply",
+        path: "b.ts",
+        line: 2,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 13,
+        in_reply_to_id: 12,
+        body: "fixed",
+        user: { login: "chapati23" },
+      },
+    ],
+    [],
+    ["chapati23"],
+  );
+
+  assertDeepEqual(
+    unreplied.map((comment) => comment.id),
+    [10],
+  );
+});
+
+test("summarize ready state ignores self-authored roots but not reviewer self-replies", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    reviewComments: [
+      {
+        id: 10,
+        body: "agent note",
+        path: "a.ts",
+        line: 1,
+        user: { login: "chapati23" },
+      },
+      {
+        id: 11,
+        body: "root with reviewer self-reply",
+        path: "b.ts",
+        line: 2,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 12,
+        in_reply_to_id: 11,
+        body: "reviewer follow-up",
+        user: { login: "reviewer" },
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertDeepEqual(
+    summary.unrepliedRootReviewComments.map((comment) => comment.id),
+    [11],
+  );
+});
+
 test("filters top-level issue comments down to bots", () => {
   const bots = findTopLevelBotComments([
     { id: 1, body: "human", user: { login: "alice", type: "User" } },
@@ -528,6 +663,54 @@ test("rejects stale chatgpt-codex-connector reaction from before the head update
     ),
     "expected stale codex bot +1 to fail",
   );
+});
+
+test("falls back to pull request updatedAt when head update time is unavailable", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headUpdatedAt: null,
+      headPushedAt: null,
+      updatedAt: "2026-05-21T13:25:00Z",
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:25:01Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+  });
+
+  assert(summary.codexApprovalReaction, "expected updatedAt fallback to pass");
+  assertEqual(summary.pr.headUpdatedAt, "2026-05-21T13:25:00.000Z");
+});
+
+test("still fails closed when no head freshness timestamp is available", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headUpdatedAt: null,
+      headPushedAt: null,
+      updatedAt: null,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:25:01Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+  });
+
+  assertEqual(summary.codexApprovalReaction, false);
+  assertEqual(summary.pr.headUpdatedAt, null);
 });
 
 test("blocks ready state when required review is still pending", () => {
@@ -645,8 +828,19 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
       },
     ],
     reviewComments: [
-      { id: 10, body: "root", path: "a.ts", line: 1 },
-      { id: 11, in_reply_to_id: 10, body: "reply" },
+      {
+        id: 10,
+        body: "root",
+        path: "a.ts",
+        line: 1,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 11,
+        in_reply_to_id: 10,
+        body: "reply",
+        user: { login: "chapati23" },
+      },
     ],
     reviewThreads: [{ id: "thread-1", isResolved: true }],
   });

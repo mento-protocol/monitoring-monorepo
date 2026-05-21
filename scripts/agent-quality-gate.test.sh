@@ -517,6 +517,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
@@ -560,6 +561,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -602,6 +604,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -1536,6 +1539,12 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint bas
 # Editing the test file itself should also run the test.
 run_gate "scripts/eslint-baseline-diff.test.mjs"
 assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper test changed)"
+
+run_gate "scripts/lockfile-lint.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+run_gate "scripts/lockfile-lint.test.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"

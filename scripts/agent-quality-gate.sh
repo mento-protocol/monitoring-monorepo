@@ -548,6 +548,7 @@ add_root_tooling_package_script_checks() {
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
   add_command "node scripts/agent-prewarm.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/lockfile-lint.test.mjs" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -1010,6 +1011,9 @@ while IFS= read -r path; do
           ;;
         scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
+          ;;
+        scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
+          add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package

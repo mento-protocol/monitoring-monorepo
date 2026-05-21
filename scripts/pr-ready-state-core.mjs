@@ -101,6 +101,10 @@ function requiredContextIntegrationId(context) {
   return value === null || value === undefined ? null : Number(value);
 }
 
+function requiredContextIdentity(context) {
+  return `${requiredContextName(context)}\0${requiredContextIntegrationId(context) ?? ""}`;
+}
+
 function checkAppId(check) {
   const value =
     check.appId ??
@@ -153,7 +157,7 @@ export function splitRequiredAndOptionalChecks(
       seenRequiredContexts.add(
         matchedRequiredContext === undefined
           ? name
-          : requiredContextName(matchedRequiredContext),
+          : requiredContextIdentity(matchedRequiredContext),
       );
     }
     const item = checkToItem(check, { required: isRequired });
@@ -166,7 +170,7 @@ export function splitRequiredAndOptionalChecks(
 
   for (const context of requiredStatusContexts) {
     const name = requiredContextName(context);
-    if (!seenRequiredContexts.has(name)) {
+    if (!seenRequiredContexts.has(requiredContextIdentity(context))) {
       required.push({
         kind: "check",
         name,
@@ -205,11 +209,23 @@ export function findUnresolvedReviewThreads(reviewThreads = []) {
 export function findUnrepliedRootReviewComments(
   reviewComments = [],
   ignoredAuthors = [],
+  allowedReplyAuthors = null,
 ) {
+  const allowedReplyAuthorSet =
+    allowedReplyAuthors === null
+      ? null
+      : new Set(allowedReplyAuthors.filter(Boolean));
   const repliedRootIds = new Set(
     reviewComments
-      .map((comment) => comment.in_reply_to_id)
-      .filter((id) => id !== undefined && id !== null),
+      .filter((comment) => {
+        const rootId = comment.in_reply_to_id;
+        if (rootId === undefined || rootId === null) return false;
+        return (
+          allowedReplyAuthorSet === null ||
+          allowedReplyAuthorSet.has(comment.user?.login)
+        );
+      })
+      .map((comment) => comment.in_reply_to_id),
   );
   const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
 
@@ -274,7 +290,7 @@ function parseTimestamp(value) {
 }
 
 function currentHeadUpdatedAt(pr) {
-  return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
+  return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt ?? pr.updatedAt);
 }
 
 export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
@@ -309,6 +325,7 @@ export function summarizeReadyState({
   const unrepliedRootReviewComments = findUnrepliedRootReviewComments(
     reviewComments,
     [pr.author?.login],
+    [pr.author?.login, BOT_APPROVER],
   );
   const topLevelBotComments = [
     ...findTopLevelBotComments(issueComments),

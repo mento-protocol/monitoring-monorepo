@@ -201,6 +201,27 @@ export function requiredStatusContextsFromRules(
   return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
 }
 
+export function requiredStatusContextsFromProtection(protection) {
+  if (Array.isArray(protection)) return protection;
+
+  const byKey = new Map();
+  for (const check of protection?.checks ?? []) {
+    addRequiredContext(
+      byKey,
+      check.context,
+      check.app_id ?? check.appId ?? null,
+    );
+  }
+
+  if (byKey.size === 0) {
+    for (const context of protection?.contexts ?? []) {
+      addRequiredContext(byKey, context);
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
+}
+
 export function splitRepo(repoValue) {
   const parts = String(repoValue).split("/").filter(Boolean);
   const name = parts.pop();
@@ -415,7 +436,7 @@ function fetchReviewThreads({ repo, number }) {
 function fetchRequiredStatusContexts({ repo, baseRef }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
   const result = ghApiJsonResult(repo, [
-    `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks/contexts`,
+    `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks`,
   ]);
 
   if (!result.ok) {
@@ -451,7 +472,7 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
   }
 
   return {
-    contexts: Array.isArray(result.value) ? result.value : [],
+    contexts: requiredStatusContextsFromProtection(result.value),
     error: null,
   };
 }
@@ -475,6 +496,7 @@ function fetchReadyState({ prArg, repoArg }) {
       "reviews",
       "statusCheckRollup",
       "title",
+      "updatedAt",
       "url",
     ].join(","),
   ];
