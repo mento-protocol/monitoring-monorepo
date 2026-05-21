@@ -111,18 +111,6 @@ resource "vercel_project_environment_variable" "redis_token" {
   sensitive  = true
 }
 
-# Blob token is provisioned outside Terraform (no vercel_blob_store resource
-# exists in the Vercel provider). Run `vercel blob create-store` once and add
-# the resulting token to terraform.tfvars as `blob_read_write_token`.
-resource "vercel_project_environment_variable" "blob_token" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "BLOB_READ_WRITE_TOKEN"
-  value      = var.blob_read_write_token
-  target     = ["production"]
-  sensitive  = true
-}
-
 # ── Auth Environment Variables ────────────────────────────────────────────
 #
 # SECURITY POSTURE — shared prod/preview AUTH_* values are intentional.
