@@ -9,7 +9,10 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { summarizeReadyState } from "./pr-ready-state-core.mjs";
+import {
+  checkDisplayName,
+  summarizeReadyState,
+} from "./pr-ready-state-core.mjs";
 import { formatHuman } from "./pr-ready-state-format.mjs";
 
 function runGh(args) {
@@ -308,20 +311,9 @@ function fetchWorkflowNameByPath(repo) {
   return byPath;
 }
 
-function statusCheckName(check) {
-  return (
-    check.name ??
-    check.context ??
-    check.workflowName ??
-    check.app?.name ??
-    check.__typename ??
-    "unknown check"
-  );
-}
-
 function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   return statusCheckRollup.map((check) => {
-    const source = sourceMap.get(statusCheckName(check));
+    const source = sourceMap.get(checkDisplayName(check));
     return source ? { ...check, ...source } : check;
   });
 }

@@ -33,7 +33,7 @@ function normalizeStatusValue(value) {
     .toUpperCase();
 }
 
-function checkDisplayName(check) {
+export function checkDisplayName(check) {
   return (
     check.name ??
     check.context ??
