@@ -4,6 +4,7 @@ packages:
   - ui-dashboard
   - metrics-bridge
   - aegis
+  - alerts/infra/onchain-event-handler
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:

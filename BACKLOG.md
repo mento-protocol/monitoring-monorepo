@@ -248,3 +248,15 @@ Eliminates the static-token rotation pain that took ~1 hour to root-cause on 202
 - [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Also drop `vercel_project_environment_variable.blob_token` from `terraform/main.tf` (and the `blob_token` variable + tfvars entry).
 - [ ] Optional: trigger a cron-style restore against the latest backup blob to confirm OIDC works for `get()` too.
 - [ ] Closes the "lost development scope" loose end above (no static token → no scope to lose).
+
+## Alerts integration follow-ups (post mento-protocol/alerts vendor)
+
+After the integration PR lands (Discord-only event delivery + Sentry → Discord bridge vendored into `alerts/infra/`), these clean up the remaining drift between the imported stack and the monorepo's Slack-first direction.
+
+- [ ] **Terraform state mv (apply step)** — execute `terraform state mv module.discord_channel_manager module.discord_channels` and `terraform state mv module.sentry_alerts module.sentry_bridge` in `alerts/infra/` against the live GCS state (`prefix=alerts`). Plan must show 0 changes after. Gate this behind explicit user approval before running.
+- [ ] **State backend prefix unification** — migrate `alerts/rules/` from `prefix=monorepo-alerts` → `prefix=alerts-rules` and `alerts/infra/` from `prefix=alerts` → `prefix=alerts-infra` via `terraform init -migrate-state`. Separate PR, after the integration soaks. Mismatched prefixes work fine; this is cosmetic consistency.
+- [ ] **Slack adapter for `alerts/infra/onchain-event-handler`** — add `src/notifier.ts` interface, split current `src/discord.ts` into `src/discord.ts` + `src/slack.ts`, route by env. Add a parallel `alerts/infra/channels/slack-channels/` Terraform module. Matches the Slack-first stance of v3 alerts and the in-flight Aegis Discord→Slack cutover.
+- [ ] **Sentry → Slack retire bridge** — once Slack adapter exists, retire `alerts/infra/channels/sentry-bridge/` Discord routing in favor of Sentry's native Slack integration (already wired per Sentry project setup). Drop the auto-created Discord channels + `sentry_issue_alert` resources from Terraform; archive the channels.
+- [ ] **Aegis v2 alerts consolidation** — after Aegis Discord→Slack cutover lands (currently in flight in `aegis/terraform/grafana-alerts/`), evaluate moving Aegis grafana-alerts into `alerts/rules-v2/` (sibling of `alerts/rules/`). Deferred until the cutover completes to avoid merge conflicts.
+- [ ] **Archive `mento-protocol/alerts` on GitHub** — once the integration is verified stable (Cloud Function still healthy, QuickNode webhooks still delivering), archive the source repo. History stays reachable but the source of truth is unambiguous.
+- [ ] **CI deploy for `alerts/infra/`** — add a deploy job (OIDC/WIF to GCP) to `.github/workflows/infra.yml` that runs `terraform apply` for `alerts/infra/` on merge to main with manual approval. Today the workflow only validates; applies still happen from laptops. Match the `metrics-bridge.yml` pattern.

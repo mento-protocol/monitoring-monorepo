@@ -1,0 +1,13 @@
+{
+  "name": "alerts-scripts",
+  "version": "1.0.0",
+  "description": "Utility scripts for Mento Alerts infrastructure",
+  "scripts": {
+    "check-discord-permissions": "tsx check-discord-permissions.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,80 @@
+#####################
+# Sentry Configuration
+#####################
+
+# Sentry auth token (from https://sentry.io/settings/account/api/auth-tokens/)
+# Required scopes: project:read, project:write, team:read, org:read, alerts:write
+sentry_auth_token = "your-sentry-token"
+
+# Sentry organization slug (from URL: https://[slug].sentry.io)
+sentry_organization_slug = "mento-labs"
+
+# Sentry team slug
+sentry_team_slug = "mento-labs"
+
+#####################
+# Discord Configuration
+#####################
+
+# Discord bot token (from Discord Developer Portal)
+# Required permissions: Administrator
+discord_bot_token = "your-bot-token"
+
+# Discord server ID (right-click server with Developer Mode enabled and copy ID)
+# Must be a 17-20 digit snowflake ID
+discord_server_id = "1234567890123456789"
+
+# Discord server name as it appears in Sentry integrations
+discord_server_name = "Mento"
+
+# Discord category ID where alert channels will be created (right-click category and copy ID)
+# Must be a 17-20 digit snowflake ID
+discord_category_id = "1234567890123456789"
+
+# Discord role ID for the Sentry integration (right-click Sentry role and copy ID)
+# Must be a 17-20 digit snowflake ID
+discord_sentry_role_id = "1234567890123456789"
+
+#####################
+# Google Cloud Configuration
+#####################
+# The project-factory module will automatically create ONE GCP project
+# that handles alerts for ALL chains centrally
+# Module: https://github.com/terraform-google-modules/terraform-google-project-factory
+
+# Project name (project ID will be: {project_name}-{random-suffix})
+# Must be 6-30 characters, lowercase letters, numbers, and hyphens
+project_name = "mento-alerts"
+
+# GCP organization ID
+org_id = "123456789012"
+
+# Billing account ID (required)
+# Format: XXXXXX-XXXXXX-XXXXXX
+billing_account = "01ABCD-2EFGH3-4IJKL5"
+
+# Google Cloud region for resources
+region = "europe-west-1"
+
+#####################
+# QuickNode Configuration
+#####################
+
+# QuickNode API key for webhook creation (from QuickNode dashboard)
+# Get this from: https://dashboard.quicknode.com/api-keys
+quicknode_api_key = "your-quicknode-api-key"
+
+# Secret for verifying QuickNode webhook signatures
+# IMPORTANT: Generate a secure random string with at least 32 characters
+# Example generation: openssl rand -hex 32
+quicknode_signing_secret = "your-secure-random-secret-min-32-chars"
+
+# Note: Each multisig specifies its own QuickNode network (see multisigs below)
+
+#####################
+# Optional Settings
+#####################
+
+# Enable debug mode for REST API provider (shows API requests/responses)
+# Useful for troubleshooting Discord/QuickNode API issues
+# debug_mode = true

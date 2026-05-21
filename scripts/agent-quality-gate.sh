@@ -937,10 +937,30 @@ while IFS= read -r path; do
       add_surface "tooling"
       add_command "pnpm agent:quality-gate:test" "turbo task config changed"
       ;;
+	    alerts/rules/*)
+	      add_surface "alerts-rules"
+	      add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+	      ;;
+	    alerts/infra/onchain-event-handler/*)
+	      add_surface "alerts-infra"
+	      case "$path" in
+	        alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts)
+	          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
+	          ;;
+	        alerts/infra/onchain-event-handler/main.tf|alerts/infra/onchain-event-handler/*.tf)
+	          add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+	          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+	          ;;
+	      esac
+	      ;;
+	    alerts/infra/*)
+	      add_surface "alerts-infra"
+	      add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+	      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+	      ;;
 	    terraform/*)
 	      add_surface "terraform"
 	      add_terraform_validate_commands "terraform" "Terraform changed"
-      add_terraform_validate_commands "terraform/alerts" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
     cloudbuild.yaml)
