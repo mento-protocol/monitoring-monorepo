@@ -145,12 +145,49 @@ function workflowPath(workflow) {
   );
 }
 
-function flattenRules(rules = []) {
+function workflowRepoPath(workflow, rule, fallbackRepoPath = null) {
+  const explicitRepo =
+    workflow.repository_full_name ??
+    workflow.repositoryFullName ??
+    workflow.repository?.full_name ??
+    workflow.repository?.fullName ??
+    workflow.repository_name ??
+    workflow.repositoryName ??
+    null;
+  if (explicitRepo && String(explicitRepo).includes("/")) {
+    return String(explicitRepo);
+  }
+
+  if (
+    rule?.ruleset_source_type === "Repository" &&
+    rule?.ruleset_source &&
+    String(rule.ruleset_source).includes("/")
+  ) {
+    return String(rule.ruleset_source);
+  }
+
+  return fallbackRepoPath;
+}
+
+function workflowLookupKey(repoPathValue, path) {
+  return repoPathValue && path ? `${repoPathValue}\0${path}` : null;
+}
+
+function flattenRules(rules = [], inherited = {}) {
   const flattened = [];
   for (const rule of rules) {
     if (!rule || typeof rule !== "object") continue;
-    if (rule.type) flattened.push(rule);
-    flattened.push(...flattenRules(rule.rules ?? []));
+    const current = {
+      ...inherited,
+      ...rule,
+    };
+    if (rule.type) flattened.push(current);
+    flattened.push(
+      ...flattenRules(rule.rules ?? [], {
+        ruleset_source: current.ruleset_source,
+        ruleset_source_type: current.ruleset_source_type,
+      }),
+    );
   }
   return flattened;
 }
@@ -169,12 +206,37 @@ export function workflowPathsFromRules(rules = []) {
   return [...paths].sort((a, b) => a.localeCompare(b));
 }
 
-function requiredWorkflowContext(workflow, workflowNameByPath) {
+function workflowRepoPathsFromRules(rules = [], fallbackRepoPath = null) {
+  const repoPaths = new Set();
+  for (const rule of flattenRules(rules)) {
+    if (rule.type !== "workflows") continue;
+
+    for (const workflow of rule.parameters?.workflows ?? []) {
+      const path = workflowPath(workflow);
+      const repoPathValue = workflowRepoPath(workflow, rule, fallbackRepoPath);
+      if (path && repoPathValue) repoPaths.add(repoPathValue);
+    }
+  }
+
+  return [...repoPaths].sort((a, b) => a.localeCompare(b));
+}
+
+function requiredWorkflowContext(
+  workflow,
+  rule,
+  workflowNameByPath,
+  fallbackRepoPath = null,
+) {
   const path = workflowPath(workflow);
+  const repoPathValue = workflowRepoPath(workflow, rule, fallbackRepoPath);
+  const keyedName = workflowNameByPath.get(
+    workflowLookupKey(repoPathValue, path),
+  );
   return (
     workflow.name ??
     workflow.workflow_name ??
     workflow.workflowName ??
+    keyedName ??
     (path ? workflowNameByPath.get(path) : null) ??
     null
   );
@@ -182,7 +244,7 @@ function requiredWorkflowContext(workflow, workflowNameByPath) {
 
 export function requiredStatusContextsFromRules(
   rules = [],
-  { workflowNameByPath = new Map() } = {},
+  { workflowNameByPath = new Map(), fallbackRepoPath = null } = {},
 ) {
   const byKey = new Map();
   for (const rule of flattenRules(rules)) {
@@ -201,7 +263,12 @@ export function requiredStatusContextsFromRules(
       for (const workflow of rule.parameters?.workflows ?? []) {
         addRequiredContext(
           byKey,
-          requiredWorkflowContext(workflow, workflowNameByPath),
+          requiredWorkflowContext(
+            workflow,
+            rule,
+            workflowNameByPath,
+            fallbackRepoPath,
+          ),
           workflow.integration_id ?? workflow.integrationId ?? null,
         );
       }
@@ -213,14 +280,21 @@ export function requiredStatusContextsFromRules(
 
 export function requiredStatusContextsFromRulesResult(
   rules = [],
-  { workflowNameByPath = new Map(), workflowNameLookupError = null } = {},
+  {
+    workflowNameByPath = new Map(),
+    workflowNameLookupError = null,
+    fallbackRepoPath = null,
+  } = {},
 ) {
   if (workflowPathsFromRules(rules).length > 0 && workflowNameLookupError) {
     return { contexts: [], error: workflowNameLookupError };
   }
 
   return {
-    contexts: requiredStatusContextsFromRules(rules, { workflowNameByPath }),
+    contexts: requiredStatusContextsFromRules(rules, {
+      workflowNameByPath,
+      fallbackRepoPath,
+    }),
     error: null,
   };
 }
@@ -276,6 +350,11 @@ function repoPath(repo) {
   return `${repo.owner}/${repo.name}`;
 }
 
+function repoFromPath(path, host = null) {
+  const { owner, name } = splitRepo(path);
+  return { owner, name, host };
+}
+
 function appIdFromAvatarUrl(url) {
   const match = String(url ?? "").match(/\/in\/(\d+)/);
   return match ? Number(match[1]) : null;
@@ -316,7 +395,11 @@ function fetchStatusSourceMap({ repo, headSha }) {
           observedAt,
           checkRun.created_at ?? checkRun.started_at,
         );
-        if (checkRun.name && checkRun.app?.id) {
+        if (
+          checkRun.name &&
+          checkRun.app?.id &&
+          !sourceMap.has(checkRun.name)
+        ) {
           sourceMap.set(checkRun.name, { appId: Number(checkRun.app.id) });
         }
       }
@@ -329,7 +412,7 @@ function fetchStatusSourceMap({ repo, headSha }) {
       const appId =
         appIdFromAvatarUrl(status.avatar_url) ??
         appIdFromAvatarUrl(status.creator?.avatar_url);
-      if (status.context && appId !== null) {
+      if (status.context && appId !== null && !sourceMap.has(status.context)) {
         sourceMap.set(status.context, { appId });
       }
     }
@@ -338,7 +421,7 @@ function fetchStatusSourceMap({ repo, headSha }) {
   return { sourceMap, observedAt };
 }
 
-function fetchWorkflowNameByPath(repo) {
+function fetchWorkflowNameByPath(repo, pathKey = repoPath(repo)) {
   const result = ghApiJsonPagesResult(repo, [
     `repos/${repoPath(repo)}/actions/workflows?per_page=100`,
   ]);
@@ -348,6 +431,7 @@ function fetchWorkflowNameByPath(repo) {
   for (const page of result.value ?? []) {
     for (const workflow of page.workflows ?? []) {
       if (workflow.path && workflow.name) {
+        byPath.set(workflowLookupKey(pathKey, workflow.path), workflow.name);
         byPath.set(workflow.path, workflow.name);
       }
     }
@@ -356,8 +440,38 @@ function fetchWorkflowNameByPath(repo) {
   return { byPath, error: null };
 }
 
-function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
+function fetchWorkflowNamesForRules(repo, rules) {
+  const fallbackRepoPath = repoPath(repo);
+  const byPath = new Map();
+
+  for (const sourcePath of workflowRepoPathsFromRules(
+    rules,
+    fallbackRepoPath,
+  )) {
+    const sourceRepo = repoFromPath(sourcePath, repo.host);
+    const result = fetchWorkflowNameByPath(sourceRepo, sourcePath);
+    if (result.error) return { byPath: new Map(), error: result.error };
+    for (const [key, value] of result.byPath.entries()) {
+      byPath.set(key, value);
+    }
+  }
+
+  return { byPath, error: null };
+}
+
+function rollupAppId(check) {
+  const value =
+    check.appId ??
+    check.app_id ??
+    check.app?.id ??
+    check.app?.databaseId ??
+    null;
+  return value === null || value === undefined ? null : Number(value);
+}
+
+export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   return statusCheckRollup.map((check) => {
+    if (rollupAppId(check) !== null) return check;
     const source = sourceMap.get(checkDisplayName(check));
     return source ? { ...check, ...source } : check;
   });
@@ -450,12 +564,13 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
 
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
-        ? fetchWorkflowNameByPath(repo)
+        ? fetchWorkflowNamesForRules(repo, rulesResult.value ?? [])
         : { byPath: new Map(), error: null };
 
       return requiredStatusContextsFromRulesResult(rulesResult.value ?? [], {
         workflowNameByPath: workflowNameByPath.byPath,
         workflowNameLookupError: workflowNameByPath.error,
+        fallbackRepoPath: repoPath(repo),
       });
     }
 

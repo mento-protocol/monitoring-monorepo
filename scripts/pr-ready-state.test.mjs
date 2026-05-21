@@ -16,6 +16,7 @@ import {
 } from "./pr-ready-state-core.mjs";
 import { formatHuman } from "./pr-ready-state-format.mjs";
 import {
+  annotateStatusCheckSources,
   parseArgs,
   repoFromPullRequestUrl,
   requiredStatusContextsFromProtection,
@@ -105,6 +106,7 @@ test("classifies checks by GitHub status and conclusion", () => {
   assertEqual(classifyCheck({ conclusion: "FAILURE" }), "fail");
   assertEqual(classifyCheck({ status: "QUEUED", conclusion: null }), "pending");
   assertEqual(classifyCheck({ conclusion: "NEUTRAL" }), "skipped");
+  assertEqual(classifyCheck({ conclusion: "STALE" }), "fail");
   assertEqual(classifyCheck({}), "pending");
 });
 
@@ -275,6 +277,34 @@ test("extracts required workflow contexts from nested branch rulesets", () => {
   );
 });
 
+test("resolves required workflow contexts from the ruleset source repo", () => {
+  const rulesets = [
+    {
+      ruleset_source: "mento-protocol/shared-workflows",
+      ruleset_source_type: "Repository",
+      rules: [
+        {
+          type: "workflows",
+          parameters: {
+            workflows: [{ path: ".github/workflows/ci.yml" }],
+          },
+        },
+      ],
+    },
+  ];
+  const workflowNameByPath = new Map([
+    ["mento-protocol/shared-workflows\0.github/workflows/ci.yml", "ci"],
+  ]);
+
+  assertDeepEqual(
+    requiredStatusContextsFromRules(rulesets, {
+      workflowNameByPath,
+      fallbackRepoPath: "mento-protocol/monitoring-monorepo",
+    }),
+    [{ context: "ci", integrationId: null }],
+  );
+});
+
 test("fails closed when workflow-name lookup fails for workflow rules", () => {
   const result = requiredStatusContextsFromRulesResult(
     [
@@ -303,6 +333,26 @@ test("skips workflow rules when no workflow check name can be resolved", () => {
     ]),
     [],
   );
+});
+
+test("does not overwrite check-run app identity with status source annotation", () => {
+  const checks = [
+    {
+      name: "ci",
+      app: { id: 15368 },
+      conclusion: "SUCCESS",
+      status: "COMPLETED",
+    },
+    { context: "ci", state: "SUCCESS" },
+  ];
+  const annotated = annotateStatusCheckSources(
+    checks,
+    new Map([["ci", { appId: 8329 }]]),
+  );
+
+  assertEqual(annotated[0].app.id, 15368);
+  assertEqual(annotated[0].appId, undefined);
+  assertEqual(annotated[1].appId, 8329);
 });
 
 test("groups status check rollup into stable pass/fail/pending/skipped buckets", () => {

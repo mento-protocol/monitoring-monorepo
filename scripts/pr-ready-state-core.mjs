@@ -14,6 +14,7 @@ const FAIL_VALUES = new Set([
   "FAIL",
   "FAILED",
   "FAILURE",
+  "STALE",
   "STARTUP_FAILURE",
   "TIMED_OUT",
 ]);
@@ -25,7 +26,7 @@ const PENDING_VALUES = new Set([
   "REQUESTED",
   "WAITING",
 ]);
-const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED", "STALE"]);
+const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED"]);
 
 function normalizeStatusValue(value) {
   return String(value ?? "")
