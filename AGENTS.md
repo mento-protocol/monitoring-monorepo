@@ -68,8 +68,10 @@ execute until you review package scripts/lifecycle hooks and pass
 edit limited to `scripts.agent:quality-gate` or
 `scripts.agent:quality-gate:test`; the gate treats that as tooling-only and runs
 an entrypoint validator plus the gate regression tests instead of the
-package-script refusal path. Docs-only changes run targeted Trunk checks against
-the changed docs paths instead of full-repo Trunk.
+package-script refusal path. Existing changed paths run targeted Trunk checks
+for faster local iteration. Deleted paths, Trunk/tooling changes, and
+package-manager or package-manifest changes still run full-repo Trunk locally.
+CI also runs a required full-repo Trunk check on every PR.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
@@ -269,7 +271,7 @@ Before pushing any cross-layer or stateful UI change, also read and apply:
 **Common traps:**
 
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
-- `trunk check <file>` only checks the specified files — always use `--all` to match what CI runs
+- `trunk check <file>` only checks the specified files. That is fine for the path-aware local agent gate, but use `--all` when you need to manually reproduce CI's full-repo Trunk job.
 - If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first
 
 For package-specific workflows (promoting a deployment, adding a contract to the indexer, dashboard chart wiring, infrastructure changes), see the relevant package's `AGENTS.md` — they own the procedural detail.

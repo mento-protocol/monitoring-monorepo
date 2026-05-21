@@ -568,11 +568,24 @@ add_terraform_validate_commands() {
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
 
-docs_targeted_trunk_command() {
+trunk_requires_full_scan() {
+  local path
+  while IFS= read -r path; do
+    [[ -e "$path" ]] || return 0
+    case "$path" in
+      .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|.node-version|*/package.json)
+        return 0
+        ;;
+    esac
+  done < "$changed_paths_file"
+
+  return 1
+}
+
+targeted_trunk_command() {
   local path
   local args=()
   while IFS= read -r path; do
-    [[ -e "$path" ]] || return 1
     args+=("$(quote_path "$path")")
   done < "$changed_paths_file"
 
@@ -581,15 +594,13 @@ docs_targeted_trunk_command() {
 }
 
 add_trunk_check_command() {
-  if [[ ${#surfaces[@]} -eq 1 && "${surfaces[0]}" == "docs" ]]; then
-    local trunk_command
-    if trunk_command="$(docs_targeted_trunk_command)"; then
-      prepend_command "$trunk_command" "docs-only changes should pass targeted Trunk checks"
-    else
-      prepend_command "./tools/trunk check --all" "docs-only changes include deleted paths; full Trunk avoids missing-path failures"
-    fi
+  local trunk_command
+  if trunk_requires_full_scan; then
+    prepend_command "./tools/trunk check --all" "changed paths require full-repo Trunk checks"
+  elif trunk_command="$(targeted_trunk_command)"; then
+    prepend_command "$trunk_command" "changed existing paths should pass targeted Trunk checks"
   else
-    prepend_command "./tools/trunk check --all" "changed files should pass the same full-repo Trunk scope as CI"
+    prepend_command "./tools/trunk check --all" "changed paths could not be mapped to targeted Trunk checks"
   fi
 }
 
