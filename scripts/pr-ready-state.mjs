@@ -166,6 +166,10 @@ function workflowRepoPath(workflow, rule, fallbackRepoPath = null) {
     return String(rule.ruleset_source);
   }
 
+  if (rule?.ruleset_source_type) {
+    return null;
+  }
+
   return fallbackRepoPath;
 }
 
@@ -221,6 +225,26 @@ function workflowRepoPathsFromRules(rules = [], fallbackRepoPath = null) {
   return [...repoPaths].sort((a, b) => a.localeCompare(b));
 }
 
+function unresolvedWorkflowSourcesFromRules(
+  rules = [],
+  fallbackRepoPath = null,
+) {
+  const unresolved = [];
+  for (const rule of flattenRules(rules)) {
+    if (rule.type !== "workflows") continue;
+
+    for (const workflow of rule.parameters?.workflows ?? []) {
+      const path = workflowPath(workflow);
+      if (!path) continue;
+      if (workflowRepoPath(workflow, rule, fallbackRepoPath) === null) {
+        unresolved.push(path);
+      }
+    }
+  }
+
+  return unresolved;
+}
+
 function requiredWorkflowContext(
   workflow,
   rule,
@@ -242,9 +266,34 @@ function requiredWorkflowContext(
   );
 }
 
+function requiredWorkflowJobContexts({
+  workflow,
+  rule,
+  workflowNameByPath,
+  fallbackRepoPath,
+  statusCheckRollup,
+}) {
+  const workflowName = requiredWorkflowContext(
+    workflow,
+    rule,
+    workflowNameByPath,
+    fallbackRepoPath,
+  );
+  if (!workflowName) return [];
+
+  const matchingJobNames = statusCheckRollup
+    .filter((check) => check.workflowName === workflowName)
+    .map(checkDisplayName);
+  return matchingJobNames.length > 0 ? matchingJobNames : [workflowName];
+}
+
 export function requiredStatusContextsFromRules(
   rules = [],
-  { workflowNameByPath = new Map(), fallbackRepoPath = null } = {},
+  {
+    workflowNameByPath = new Map(),
+    fallbackRepoPath = null,
+    statusCheckRollup = [],
+  } = {},
 ) {
   const byKey = new Map();
   for (const rule of flattenRules(rules)) {
@@ -261,16 +310,19 @@ export function requiredStatusContextsFromRules(
 
     if (rule.type === "workflows") {
       for (const workflow of rule.parameters?.workflows ?? []) {
-        addRequiredContext(
-          byKey,
-          requiredWorkflowContext(
-            workflow,
-            rule,
-            workflowNameByPath,
-            fallbackRepoPath,
-          ),
-          workflow.integration_id ?? workflow.integrationId ?? null,
-        );
+        for (const context of requiredWorkflowJobContexts({
+          workflow,
+          rule,
+          workflowNameByPath,
+          fallbackRepoPath,
+          statusCheckRollup,
+        })) {
+          addRequiredContext(
+            byKey,
+            context,
+            workflow.integration_id ?? workflow.integrationId ?? null,
+          );
+        }
       }
     }
   }
@@ -284,8 +336,20 @@ export function requiredStatusContextsFromRulesResult(
     workflowNameByPath = new Map(),
     workflowNameLookupError = null,
     fallbackRepoPath = null,
+    statusCheckRollup = [],
   } = {},
 ) {
+  const unresolvedSources =
+    fallbackRepoPath === null
+      ? []
+      : unresolvedWorkflowSourcesFromRules(rules, fallbackRepoPath);
+  if (unresolvedSources.length > 0) {
+    return {
+      contexts: [],
+      error: `Unable to resolve source repository for required workflow(s): ${unresolvedSources.join(", ")}`,
+    };
+  }
+
   if (workflowPathsFromRules(rules).length > 0 && workflowNameLookupError) {
     return { contexts: [], error: workflowNameLookupError };
   }
@@ -294,6 +358,7 @@ export function requiredStatusContextsFromRulesResult(
     contexts: requiredStatusContextsFromRules(rules, {
       workflowNameByPath,
       fallbackRepoPath,
+      statusCheckRollup,
     }),
     error: null,
   };
@@ -443,6 +508,17 @@ function fetchWorkflowNameByPath(repo, pathKey = repoPath(repo)) {
 function fetchWorkflowNamesForRules(repo, rules) {
   const fallbackRepoPath = repoPath(repo);
   const byPath = new Map();
+  const unresolvedSources = unresolvedWorkflowSourcesFromRules(
+    rules,
+    fallbackRepoPath,
+  );
+
+  if (unresolvedSources.length > 0) {
+    return {
+      byPath: new Map(),
+      error: `Unable to resolve source repository for required workflow(s): ${unresolvedSources.join(", ")}`,
+    };
+  }
 
   for (const sourcePath of workflowRepoPathsFromRules(
     rules,
@@ -543,7 +619,11 @@ function fetchReviewThreads({ repo, number }) {
   }
 }
 
-function fetchRequiredStatusContexts({ repo, baseRef }) {
+function fetchRequiredStatusContexts({
+  repo,
+  baseRef,
+  statusCheckRollup = [],
+}) {
   const encodedBaseRef = encodeURIComponent(baseRef);
   const result = ghApiJsonResult(repo, [
     `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks`,
@@ -571,6 +651,7 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
         workflowNameByPath: workflowNameByPath.byPath,
         workflowNameLookupError: workflowNameByPath.error,
         fallbackRepoPath: repoPath(repo),
+        statusCheckRollup,
       });
     }
 
@@ -653,6 +734,7 @@ function fetchReadyState({ prArg, repoArg }) {
   const requiredStatusContexts = fetchRequiredStatusContexts({
     repo,
     baseRef: pr.baseRefName,
+    statusCheckRollup: annotatedPr.statusCheckRollup ?? [],
   });
 
   return summarizeReadyState({

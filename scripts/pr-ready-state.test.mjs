@@ -305,6 +305,68 @@ test("resolves required workflow contexts from the ruleset source repo", () => {
   );
 });
 
+test("derives required workflow contexts from emitted job check names", () => {
+  const rulesets = [
+    {
+      ruleset_source: "mento-protocol/shared-workflows",
+      ruleset_source_type: "Repository",
+      rules: [
+        {
+          type: "workflows",
+          parameters: {
+            workflows: [{ path: ".github/workflows/ci.yml" }],
+          },
+        },
+      ],
+    },
+  ];
+  const workflowNameByPath = new Map([
+    ["mento-protocol/shared-workflows\0.github/workflows/ci.yml", "CI"],
+  ]);
+
+  assertDeepEqual(
+    requiredStatusContextsFromRules(rulesets, {
+      workflowNameByPath,
+      fallbackRepoPath: "mento-protocol/monitoring-monorepo",
+      statusCheckRollup: [
+        { name: "lint", workflowName: "CI" },
+        { name: "test", workflowName: "CI" },
+        { name: "docs", workflowName: "Docs" },
+      ],
+    }),
+    [
+      { context: "lint", integrationId: null },
+      { context: "test", integrationId: null },
+    ],
+  );
+});
+
+test("fails closed when a required workflow source repository is unresolved", () => {
+  const result = requiredStatusContextsFromRulesResult(
+    [
+      {
+        ruleset_source: "mento-protocol",
+        ruleset_source_type: "Organization",
+        rules: [
+          {
+            type: "workflows",
+            parameters: {
+              workflows: [{ path: ".github/workflows/ci.yml" }],
+            },
+          },
+        ],
+      },
+    ],
+    { fallbackRepoPath: "mento-protocol/monitoring-monorepo" },
+  );
+
+  assertEqual(
+    result.error,
+    "Unable to resolve source repository for required workflow(s): .github/workflows/ci.yml",
+  );
+  assertDeepEqual(result.contexts, []);
+});
+
 test("fails closed when workflow-name lookup fails for workflow rules", () => {
   const result = requiredStatusContextsFromRulesResult(
     [
