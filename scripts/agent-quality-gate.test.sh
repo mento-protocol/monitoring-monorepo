@@ -86,6 +86,12 @@ assert_not_contains() {
   fi
 }
 
+assert_not_contains_mapped() {
+  local unexpected="$1"
+  unexpected="$(normalize_expected_command "$unexpected")"
+  assert_not_contains "$unexpected"
+}
+
 run_context_check_expect_failure() {
   set +e
   node scripts/check-agent-context.mjs > "$output_file" 2>&1
@@ -239,6 +245,7 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-workspace.yaml'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
+assert_turbo_task_has_env "build" "VERCEL_ENV"
 assert_turbo_task_has_input "size-limit" ".next/**"
 node - <<'NODE' ||
 const fs = require("node:fs");
@@ -269,6 +276,7 @@ assert_turbo_task_has_env "test:browser" "CI"
 assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
+assert_turbo_task_has_env "test:browser" "VERCEL_ENV"
 assert_turbo_task_absent "test:browser:update-snapshots"
 
 printf 'scratch\n' > "$untracked_skill_artifact"
@@ -406,7 +414,7 @@ assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package
 # ui-dashboard job runs the full suite anyway. Direct ui-dashboard/*
 # changes still trigger it via the per-package dispatch.
 assert_not_contains "playwright install chromium (package manager config changed)"
-assert_not_contains "test:browser (package manager config changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
@@ -496,7 +504,7 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script 
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 # Workspace-wide triggers skip the dashboard playwright suite — see the
 # matching `assert_not_contains` block above .npmrc for the rationale.
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
@@ -532,7 +540,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 mixed_package_script_repo="$(mktemp -d)"
 (
@@ -570,7 +578,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -737,17 +745,17 @@ assert_occurrences 1 "- pnpm dashboard:size-limit (ui-dashboard bundle inputs ch
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
-assert_not_contains "- pnpm dashboard:build"
+assert_not_contains_mapped "- pnpm dashboard:build"
 
 run_gate "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
-assert_not_contains "- pnpm dashboard:build"
-assert_not_contains "- pnpm dashboard:size-limit"
+assert_not_contains_mapped "- pnpm dashboard:build"
+assert_not_contains_mapped "- pnpm dashboard:size-limit"
 
 run_gate "ui-dashboard/playwright.config.ts"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
-assert_not_contains "- pnpm dashboard:build"
-assert_not_contains "- pnpm dashboard:size-limit"
+assert_not_contains_mapped "- pnpm dashboard:build"
+assert_not_contains_mapped "- pnpm dashboard:size-limit"
 
 run_gate "ui-dashboard/postcss.config.mjs"
 assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
@@ -850,7 +858,7 @@ run_gate "ui-dashboard/scripts/vercel-ignore-build.sh"
 assert_contains "- bash -n ui-dashboard/scripts/vercel-ignore-build.sh (shell script changed)"
 assert_contains "- bash ui-dashboard/scripts/vercel-ignore-build.test.sh (Vercel ignore build script changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
-assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
 run_gate "terraform/main.tf"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
@@ -882,7 +890,7 @@ assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-on
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
 assert_not_contains "playwright install chromium (central CI workflow changed)"
-assert_not_contains "test:browser (central CI workflow changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (central CI workflow changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (central CI workflow changed)" \
@@ -943,7 +951,7 @@ assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboar
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
-assert_not_contains "test:browser (shared-config exports feed the dashboard bundle)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"

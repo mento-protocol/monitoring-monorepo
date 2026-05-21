@@ -82,6 +82,7 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/turbo.json"
       ],
+      "env": ["VERCEL_ENV"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
     "size-limit": {
@@ -142,6 +143,7 @@
       "env": [
         "PLAYWRIGHT_NEXT_PORT",
         "PLAYWRIGHT_FIXTURE_PORT",
+        "VERCEL_ENV",
         "CI",
         "NEXT_TELEMETRY_DISABLED",
         "NEXT_PUBLIC_HASURA_URL",

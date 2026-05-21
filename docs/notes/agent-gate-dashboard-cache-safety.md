@@ -63,6 +63,11 @@ Dashboard build and size-limit inputs:
 - `.github/workflows/size-limit.yml`
 - the cache runner/config files introduced by the Turbo worker PR
 
+Dashboard build environment key:
+
+- `VERCEL_ENV`, because `next.config.ts` mirrors it into
+  `NEXT_PUBLIC_VERCEL_ENV`
+
 Browser-test inputs:
 
 - dashboard source/runtime config inputs above, because Playwright starts
@@ -84,6 +89,7 @@ Browser-test environment key:
 - `NEXT_TELEMETRY_DISABLED`
 - `NEXT_PUBLIC_HASURA_URL`
 - `NEXT_PUBLIC_BROWSER_TEST_FIXTURES`
+- `VERCEL_ENV`
 
 The Playwright config overrides the Hasura fixture env for its own web server,
 but include the public env names anyway so a future config simplification cannot
