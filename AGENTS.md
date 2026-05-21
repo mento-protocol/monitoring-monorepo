@@ -134,6 +134,12 @@ status rollup, so do not block all-clear on Cursor unless its check or review is
 required by branch protection for that PR. See `docs/notes/pr-ready-state.md`
 for the expected CLI fields and Claude/Codex workflow contract.
 
+Codex re-reviews new pushes automatically. Do not post `@codex review` as a
+routine post-push step, and never post duplicate review requests while a
+current-head Codex request has a reaction or review in flight. Use one manual
+request only as a fallback when the current head has no Codex signal after the
+normal automatic-review window.
+
 ## Review-loop discipline
 
 Treat code review as a batch-boundary verifier, not as the inner edit loop. When a reviewer finds one instance of a hazard, audit the sibling surfaces before pushing: adjacent commands, package-manager files, workflow paths, deploy scripts, shared helpers, parallel components, docs, and tests that encode the same rule.

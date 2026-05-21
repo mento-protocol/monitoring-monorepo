@@ -163,3 +163,9 @@ Field expectations:
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay
 outside the readiness decision.
+
+Codex re-reviews new pushes automatically. Do not post `@codex review` as a
+routine post-push action, and never post duplicate review requests while an
+existing current-head request has a Codex reaction or review in flight. A manual
+`@codex review` is only a fallback when the current head has no Codex signal
+after the normal automatic-review window.
