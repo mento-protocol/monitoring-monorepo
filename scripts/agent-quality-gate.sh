@@ -256,6 +256,25 @@ add_command() {
   fi
 }
 
+turbo_local_cache_command() {
+  local package_name="$1"
+  local task_name="$2"
+  printf 'pnpm exec turbo run %s --filter=%s --cache=local:rw' "$task_name" "$package_name"
+}
+
+add_turbo_package_task() {
+  local package_name="$1"
+  local task_name="$2"
+  local reason="$3"
+  add_command "$(turbo_local_cache_command "$package_name" "$task_name")" "$reason"
+}
+
+add_turbo_dashboard_task() {
+  local task_name="$1"
+  local reason="$2"
+  add_turbo_package_task "@mento-protocol/ui-dashboard" "$task_name" "$reason"
+}
+
 prepend_command() {
   local command="$1"
   local reason="$2"
@@ -431,13 +450,13 @@ add_package_quality_commands() {
     # cheap.
     add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck/lint)"
   fi
-  add_command "pnpm --filter ${package_name} lint" "$reason"
-  add_command "pnpm --filter ${package_name} typecheck" "$reason"
+  add_turbo_package_task "$package_name" "lint" "$reason"
+  add_turbo_package_task "$package_name" "typecheck" "$reason"
   if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
     add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
   fi
-  add_command "pnpm --filter ${package_name} test" "$reason"
-  add_command "pnpm --filter ${package_name} knip" "$reason (knip: unused files/deps/exports)"
+  add_turbo_package_task "$package_name" "test" "$reason"
+  add_turbo_package_task "$package_name" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
   add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
 }
@@ -446,7 +465,7 @@ add_dashboard_quality_commands() {
   local reason="$1"
   add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
   add_command "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium" "$reason"
-  add_command "pnpm --filter @mento-protocol/ui-dashboard test:browser" "$reason"
+  add_turbo_dashboard_task "test:browser" "$reason"
 }
 
 add_ui_react_doctor_full_score() {
@@ -466,8 +485,8 @@ add_ui_mutation_baseline() {
 
 add_ui_size_limit() {
   local reason="$1"
-  add_command "pnpm dashboard:build" "$reason"
-  add_command "pnpm dashboard:size-limit" "$reason"
+  add_turbo_dashboard_task "build" "$reason"
+  add_turbo_dashboard_task "size-limit" "$reason"
 }
 
 add_bridge_mutation_baseline() {
@@ -477,10 +496,10 @@ add_bridge_mutation_baseline() {
 
 add_aegis_quality_commands() {
   local reason="$1"
-  add_command "pnpm --filter @mento-protocol/aegis typecheck" "$reason"
+  add_turbo_package_task "@mento-protocol/aegis" "typecheck" "$reason"
   add_command "pnpm --filter @mento-protocol/aegis build" "$reason"
-  add_command "pnpm --filter @mento-protocol/aegis lint" "$reason"
-  add_command "pnpm --filter @mento-protocol/aegis knip" "$reason (knip: unused files/deps/exports)"
+  add_turbo_package_task "@mento-protocol/aegis" "lint" "$reason"
+  add_turbo_package_task "@mento-protocol/aegis" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm --filter @mento-protocol/aegis test:cov" "$reason"
   add_command "cd aegis && forge test" "$reason"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
@@ -690,19 +709,19 @@ while IFS= read -r path; do
       add_checklist "docs/pr-checklists/code-health.md" "knip config changed"
       case "$path" in
         shared-config/knip.json)
-          add_command "pnpm --filter @mento-protocol/monitoring-config knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/monitoring-config" "knip" "knip config changed"
           ;;
         ui-dashboard/knip.json)
-          add_command "pnpm --filter @mento-protocol/ui-dashboard knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/ui-dashboard" "knip" "knip config changed"
           ;;
         indexer-envio/knip.json)
-          add_command "pnpm --filter @mento-protocol/indexer-envio knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/indexer-envio" "knip" "knip config changed"
           ;;
         metrics-bridge/knip.json)
-          add_command "pnpm --filter @mento-protocol/metrics-bridge knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/metrics-bridge" "knip" "knip config changed"
           ;;
         aegis/knip.json)
-          add_command "pnpm --filter @mento-protocol/aegis knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/aegis" "knip" "knip config changed"
           ;;
       esac
       ;;
@@ -739,17 +758,12 @@ while IFS= read -r path; do
       # Any change under ui-dashboard/ that can affect the client build
       # (src files, root config files like postcss/sentry-shared/next/tsconfig)
       # re-runs the build + size-limit check locally before opening a PR.
-      # The narrower set (script files, playwright config, knip config, etc.)
-      # doesn't affect the bundle and is excluded.
+      # Browser fixtures and other nested .mjs files are deliberately excluded:
+      # they can invalidate browser-test cache entries without forcing an
+      # unrelated dashboard build cache miss.
       case "$path" in
-        ui-dashboard/src/*|ui-dashboard/*.ts|ui-dashboard/*.mjs|ui-dashboard/*.cjs|ui-dashboard/*.js|ui-dashboard/*.json)
-          # But skip pure-test files and playwright config — they don't ship.
-          case "$path" in
-            ui-dashboard/playwright.config.ts|ui-dashboard/vitest.config.ts|ui-dashboard/vitest.mutation.config.ts|ui-dashboard/stryker.config.mjs|ui-dashboard/knip.json|ui-dashboard/react-doctor.config.json|ui-dashboard/eslint.config.mjs|ui-dashboard/eslint-baseline.json) ;;
-            *)
-              add_ui_size_limit "ui-dashboard bundle inputs changed"
-              ;;
-          esac
+        ui-dashboard/src/*|ui-dashboard/package.json|ui-dashboard/next.config.*|ui-dashboard/postcss.config.*|ui-dashboard/sentry.*.config.*|ui-dashboard/sentry.shared.ts|ui-dashboard/tsconfig*.json|ui-dashboard/.size-limit.cjs|ui-dashboard/vercel.json|ui-dashboard/.env.production.local.example)
+          add_ui_size_limit "ui-dashboard bundle inputs changed"
           ;;
       esac
       case "$path" in
@@ -919,6 +933,10 @@ while IFS= read -r path; do
 	      add_surface "tooling"
 	      add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
 	      ;;
+    turbo.json)
+      add_surface "tooling"
+      add_command "pnpm agent:quality-gate:test" "turbo task config changed"
+      ;;
 	    terraform/*)
 	      add_surface "terraform"
 	      add_terraform_validate_commands "terraform" "Terraform changed"
@@ -1078,6 +1096,7 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
+    turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
       printf '%s %s\n' "$path" "$(hash_file "$path")"

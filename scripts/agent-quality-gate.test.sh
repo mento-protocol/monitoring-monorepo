@@ -64,6 +64,7 @@ run_gate_expect_failure() {
 
 assert_contains() {
   local expected="$1"
+  expected="$(normalize_expected_command "$expected")"
   grep -Fq -- "$expected" "$output_file" ||
     fail "expected output to contain: $expected"
 }
@@ -72,6 +73,7 @@ assert_occurrences() {
   local expected_count="$1"
   local expected="$2"
   local actual_count
+  expected="$(normalize_expected_command "$expected")"
   actual_count="$(awk -v expected="$expected" 'index($0, expected) { count++ } END { print count + 0 }' "$output_file")"
   [[ "$actual_count" == "$expected_count" ]] ||
     fail "expected $expected_count occurrence(s) of '$expected', found $actual_count"
@@ -82,6 +84,12 @@ assert_not_contains() {
   if grep -Fq -- "$unexpected" "$output_file"; then
     fail "expected output not to contain: $unexpected"
   fi
+}
+
+assert_not_contains_mapped() {
+  local unexpected="$1"
+  unexpected="$(normalize_expected_command "$unexpected")"
+  assert_not_contains "$unexpected"
 }
 
 run_context_check_expect_failure() {
@@ -96,7 +104,102 @@ run_context_check_expect_failure() {
 
 line_number() {
   local needle="$1"
+  needle="$(normalize_expected_command "$needle")"
   grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
+}
+
+normalize_expected_command() {
+  local expected="$1"
+  local package_name
+  local task_name
+
+  case "$expected" in
+    *"pnpm dashboard:build"*)
+      expected="${expected/pnpm dashboard:build/pnpm exec turbo run build --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
+      ;;
+    *"pnpm dashboard:size-limit"*)
+      expected="${expected/pnpm dashboard:size-limit/pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
+      ;;
+    *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
+      package_name="${expected#*pnpm --filter }"
+      package_name="${package_name%% *}"
+      task_name="${expected#*pnpm --filter ${package_name} }"
+      task_name="${task_name%% *}"
+      case "$task_name" in
+        lint|typecheck|test|test:browser|knip)
+          expected="${expected/pnpm --filter ${package_name} ${task_name}/pnpm exec turbo run ${task_name} --filter=${package_name} --cache=local:rw}"
+          ;;
+      esac
+      ;;
+  esac
+
+  printf '%s\n' "$expected"
+}
+
+assert_turbo_task_has_input() {
+  local task_name="$1"
+  local expected_input="$2"
+
+  node - "$task_name" "$expected_input" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName, expectedInput] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const inputs = config.tasks?.[taskName]?.inputs ?? [];
+if (!inputs.includes(expectedInput)) {
+  console.error(`missing input ${expectedInput} for turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task $task_name to include input: $expected_input"
+}
+
+assert_turbo_task_lacks_input() {
+  local task_name="$1"
+  local unexpected_input="$2"
+
+  node - "$task_name" "$unexpected_input" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName, unexpectedInput] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const inputs = config.tasks?.[taskName]?.inputs ?? [];
+if (inputs.includes(unexpectedInput)) {
+  console.error(`unexpected input ${unexpectedInput} for turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task $task_name not to include input: $unexpected_input"
+}
+
+assert_turbo_task_has_env() {
+  local task_name="$1"
+  local expected_env="$2"
+
+  node - "$task_name" "$expected_env" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName, expectedEnv] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const env = config.tasks?.[taskName]?.env ?? [];
+if (!env.includes(expectedEnv)) {
+  console.error(`missing env ${expectedEnv} for turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task $task_name to include env: $expected_env"
+}
+
+assert_turbo_task_absent() {
+  local task_name="$1"
+
+  node - "$task_name" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+if (Object.prototype.hasOwnProperty.call(config.tasks ?? {}, taskName)) {
+  console.error(`unexpected turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task to be absent: $task_name"
 }
 
 assert_order() {
@@ -130,6 +233,51 @@ assert_script_occurrences 1 "command -v sha256sum"
 assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
 assert_script_occurrences 0 'shasum -a 256 "$1"'
+
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/*.json'
+assert_turbo_task_has_input "build" "postcss.config.*"
+assert_turbo_task_has_input "build" "next.config.*"
+assert_turbo_task_has_input "build" "sentry.shared.ts"
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/package.json'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-lock.yaml'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-workspace.yaml'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
+assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
+assert_turbo_task_has_env "build" "VERCEL_ENV"
+assert_turbo_task_has_input "size-limit" ".next/**"
+node - <<'NODE' ||
+const fs = require("node:fs");
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const dependsOn = config.tasks?.["size-limit"]?.dependsOn ?? [];
+if (!dependsOn.includes("build")) {
+  console.error("size-limit must depend on build because it reads .next output");
+  process.exit(1);
+}
+NODE
+  fail "expected turbo size-limit task to depend on build"
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/src/**'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/*.json'
+assert_turbo_task_has_input "test:browser" "playwright.config.ts"
+assert_turbo_task_has_input "test:browser" "sentry.shared.ts"
+assert_turbo_task_has_input "test:browser" "scripts/run-browser-tests.mjs"
+assert_turbo_task_has_input "test:browser" "tests/browser/**"
+assert_turbo_task_lacks_input "test:browser" ".size-limit.cjs"
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/package.json'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/pnpm-lock.yaml'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/pnpm-workspace.yaml'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/.npmrc'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/.node-version'
+assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/turbo.json'
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_PORT"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FIXTURE_PORT"
+assert_turbo_task_has_env "test:browser" "CI"
+assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
+assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"
+assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
+assert_turbo_task_has_env "test:browser" "VERCEL_ENV"
+assert_turbo_task_absent "test:browser:update-snapshots"
 
 printf 'scratch\n' > "$untracked_skill_artifact"
 node scripts/check-agent-context.mjs > "$output_file"
@@ -219,6 +367,11 @@ run_gate "metrics-bridge/src/main.ts"
 assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bridge --cache=local:rw (metrics-bridge changed)"
+# `assert_contains` normalizes legacy package-task expectations to the Turbo
+# command shape; keep a direct negative assertion so the old command cannot be
+# emitted alongside the cached one unnoticed.
+assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests or lockfile changed."
@@ -261,7 +414,7 @@ assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package
 # ui-dashboard job runs the full suite anyway. Direct ui-dashboard/*
 # changes still trigger it via the per-package dispatch.
 assert_not_contains "playwright install chromium (package manager config changed)"
-assert_not_contains "test:browser (package manager config changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
@@ -351,7 +504,7 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script 
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 # Workspace-wide triggers skip the dashboard playwright suite — see the
 # matching `assert_not_contains` block above .npmrc for the rationale.
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
@@ -387,7 +540,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 mixed_package_script_repo="$(mktemp -d)"
 (
@@ -425,7 +578,7 @@ assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
-assert_not_contains "test:browser (root package script changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -583,10 +736,42 @@ assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashb
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+assert_occurrences 1 "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+assert_occurrences 1 "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_occurrences 1 "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
+assert_not_contains_mapped "- pnpm dashboard:build"
+
+run_gate "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+assert_not_contains_mapped "- pnpm dashboard:build"
+assert_not_contains_mapped "- pnpm dashboard:size-limit"
+
+run_gate "ui-dashboard/playwright.config.ts"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+assert_not_contains_mapped "- pnpm dashboard:build"
+assert_not_contains_mapped "- pnpm dashboard:size-limit"
+
+run_gate "ui-dashboard/postcss.config.mjs"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+
+run_gate "ui-dashboard/next.config.ts"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+
+run_gate "ui-dashboard/sentry.shared.ts"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+
+run_gate "ui-dashboard/src/instrumentation-client.ts"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/src/lib/weekend.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
@@ -673,7 +858,7 @@ run_gate "ui-dashboard/scripts/vercel-ignore-build.sh"
 assert_contains "- bash -n ui-dashboard/scripts/vercel-ignore-build.sh (shell script changed)"
 assert_contains "- bash ui-dashboard/scripts/vercel-ignore-build.test.sh (Vercel ignore build script changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
-assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
 run_gate "terraform/main.tf"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
@@ -705,7 +890,7 @@ assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-on
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
 assert_not_contains "playwright install chromium (central CI workflow changed)"
-assert_not_contains "test:browser (central CI workflow changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (central CI workflow changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (central CI workflow changed)" \
@@ -758,6 +943,15 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio typecheck (shared-config vendored indexer fixture changed)"
+assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboard bundle)"
+assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+
+run_gate "shared-config/src/chains.ts"
+assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboard bundle)"
+assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+# The cache key includes shared-config inputs for browser tests, but the local
+# gate still does not broaden shared-config-only edits into Playwright runs.
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
@@ -787,6 +981,10 @@ run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+run_gate "turbo.json"
+assert_contains "- tooling"
+assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (
