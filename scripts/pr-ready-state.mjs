@@ -36,14 +36,23 @@ function ghJson(args) {
   return stdout.trim() ? JSON.parse(stdout) : null;
 }
 
-function ghApiJsonPages(args) {
-  const parsed = ghJson(["api", ...args, "--paginate", "--slurp"]);
+function ghApiArgs(repo, args) {
+  const ghArgs = ["api"];
+  if (repo.host) {
+    ghArgs.push("--hostname", repo.host);
+  }
+  ghArgs.push(...args);
+  return ghArgs;
+}
+
+function ghApiJsonPages(repo, args) {
+  const parsed = ghJson([...ghApiArgs(repo, args), "--paginate", "--slurp"]);
   if (!Array.isArray(parsed)) return [];
   return parsed.flatMap((page) => (Array.isArray(page) ? page : [page]));
 }
 
-function ghApiJsonResult(args) {
-  const result = spawnSync("gh", ["api", ...args], {
+function ghApiJsonResult(repo, args) {
+  const result = spawnSync("gh", ghApiArgs(repo, args), {
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
   });
@@ -72,15 +81,37 @@ function ghApiJsonResult(args) {
   }
 }
 
-function splitRepo(nameWithOwner) {
-  const [owner, name] = String(nameWithOwner).split("/");
+export function splitRepo(repoValue) {
+  const parts = String(repoValue).split("/").filter(Boolean);
+  const name = parts.pop();
+  const owner = parts.pop();
   if (!owner || !name) {
-    throw new Error(`Unable to parse repository name: ${nameWithOwner}`);
+    throw new Error(`Unable to parse repository name: ${repoValue}`);
   }
-  return { owner, name };
+  const host = parts.length > 0 ? parts.join("/") : null;
+  return { owner, name, host };
 }
 
-async function fetchReviewThreads({ owner, name, number }) {
+export function repoFromPullRequestUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const [owner, name] = parsed.pathname.split("/").filter(Boolean);
+    if (!owner || !name) return null;
+    return {
+      owner,
+      name,
+      host: parsed.hostname === "github.com" ? null : parsed.hostname,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function repoPath(repo) {
+  return `${repo.owner}/${repo.name}`;
+}
+
+async function fetchReviewThreads({ repo, number }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -117,18 +148,17 @@ async function fetchReviewThreads({ owner, name, number }) {
   const threads = [];
   let cursor = null;
   for (;;) {
-    const args = [
-      "api",
+    const args = ghApiArgs(repo, [
       "graphql",
       "-f",
-      `owner=${owner}`,
+      `owner=${repo.owner}`,
       "-f",
-      `name=${name}`,
+      `name=${repo.name}`,
       "-F",
       `number=${number}`,
       "-f",
       `query=${query}`,
-    ];
+    ]);
     if (cursor !== null) {
       args.push("-f", `cursor=${cursor}`);
     }
@@ -143,10 +173,10 @@ async function fetchReviewThreads({ owner, name, number }) {
   }
 }
 
-function fetchRequiredStatusContexts({ owner, name, baseRef }) {
+function fetchRequiredStatusContexts({ repo, baseRef }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
-  const result = ghApiJsonResult([
-    `repos/${owner}/${name}/branches/${encodedBaseRef}/protection/required_status_checks/contexts`,
+  const result = ghApiJsonResult(repo, [
+    `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks/contexts`,
   ]);
 
   if (!result.ok) {
@@ -170,19 +200,13 @@ function fetchRequiredStatusContexts({ owner, name, baseRef }) {
 }
 
 async function fetchReadyState({ prArg, repoArg }) {
-  const repoInfo = repoArg
-    ? { nameWithOwner: repoArg }
-    : ghJson(["repo", "view", "--json", "nameWithOwner"]);
-  const nameWithOwner = repoInfo?.nameWithOwner;
-  const { owner, name } = splitRepo(nameWithOwner);
-  const repoPath = `${owner}/${name}`;
-
-  const pr = ghJson([
+  const prViewArgs = [
     "pr",
     "view",
     prArg,
     "--json",
     [
+      "author",
       "baseRefName",
       "commits",
       "headRefName",
@@ -196,28 +220,36 @@ async function fetchReadyState({ prArg, repoArg }) {
       "title",
       "url",
     ].join(","),
-  ]);
+  ];
+
+  if (repoArg) {
+    prViewArgs.push("--repo", repoArg);
+  }
+
+  const pr = ghJson(prViewArgs);
 
   const number = pr?.number;
   if (!number) {
     throw new Error(`Unable to resolve pull request: ${prArg}`);
   }
 
-  const issueComments = ghApiJsonPages([
-    `repos/${repoPath}/issues/${number}/comments`,
+  const repo = repoFromPullRequestUrl(pr.url) ?? splitRepo(repoArg);
+  const path = repoPath(repo);
+
+  const issueComments = ghApiJsonPages(repo, [
+    `repos/${path}/issues/${number}/comments`,
   ]);
-  const reactions = ghApiJsonPages([
+  const reactions = ghApiJsonPages(repo, [
     "-H",
     "Accept: application/vnd.github+json",
-    `repos/${repoPath}/issues/${number}/reactions`,
+    `repos/${path}/issues/${number}/reactions`,
   ]);
-  const reviewComments = ghApiJsonPages([
-    `repos/${repoPath}/pulls/${number}/comments`,
+  const reviewComments = ghApiJsonPages(repo, [
+    `repos/${path}/pulls/${number}/comments`,
   ]);
-  const reviewThreads = await fetchReviewThreads({ owner, name, number });
+  const reviewThreads = await fetchReviewThreads({ repo, number });
   const requiredStatusContexts = fetchRequiredStatusContexts({
-    owner,
-    name,
+    repo,
     baseRef: pr.baseRefName,
   });
 
@@ -233,7 +265,7 @@ async function fetchReadyState({ prArg, repoArg }) {
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <owner/name>] [--json]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <owner/name>] [--json]\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <owner/name>] [--json]\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n`;
 }
 
 function parseArgs(argv) {

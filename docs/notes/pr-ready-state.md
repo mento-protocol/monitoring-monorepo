@@ -60,7 +60,7 @@ Claude and Codex babysitters should always pass `--json`.
 Suggested invocation:
 
 ```bash
-pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <owner/name>] [--json]
+pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json]
 ```
 
 Expected top-level fields:

@@ -15,6 +15,7 @@ import {
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
 import { formatHuman } from "./pr-ready-state-format.mjs";
+import { repoFromPullRequestUrl, splitRepo } from "./pr-ready-state.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -55,6 +56,7 @@ const basePr = {
   number: 123,
   url: "https://github.com/mento-protocol/monitoring-monorepo/pull/123",
   title: "Tighten PR readiness checks",
+  author: { login: "chapati23" },
   isDraft: false,
   headRefName: "chore/pr-ready-state",
   headRefOid: "abc123",
@@ -81,6 +83,30 @@ test("classifies checks by GitHub status and conclusion", () => {
   assertEqual(classifyCheck({ status: "QUEUED", conclusion: null }), "pending");
   assertEqual(classifyCheck({ conclusion: "NEUTRAL" }), "skipped");
   assertEqual(classifyCheck({}), "pending");
+});
+
+test("parses host-qualified repo arguments from the rightmost owner and name", () => {
+  assertDeepEqual(splitRepo("mento-protocol/monitoring-monorepo"), {
+    owner: "mento-protocol",
+    name: "monitoring-monorepo",
+    host: null,
+  });
+  assertDeepEqual(splitRepo("github.example.com/org/repo"), {
+    owner: "org",
+    name: "repo",
+    host: "github.example.com",
+  });
+});
+
+test("resolves API repo identity from pull request URL", () => {
+  assertDeepEqual(
+    repoFromPullRequestUrl("https://github.example.com/org/repo/pull/123"),
+    {
+      owner: "org",
+      name: "repo",
+      host: "github.example.com",
+    },
+  );
 });
 
 test("groups status check rollup into stable pass/fail/pending/skipped buckets", () => {
@@ -210,6 +236,33 @@ test("finds root review comments with no direct replies", () => {
       body: "root without reply",
     },
   ]);
+});
+
+test("ignores self-authored root review comments", () => {
+  const unreplied = findUnrepliedRootReviewComments(
+    [
+      {
+        id: 12,
+        body: "author note",
+        path: "b.ts",
+        original_line: 5,
+        user: { login: "chapati23" },
+      },
+      {
+        id: 13,
+        body: "reviewer note",
+        path: "b.ts",
+        original_line: 6,
+        user: { login: "reviewer" },
+      },
+    ],
+    ["chapati23"],
+  );
+
+  assertDeepEqual(
+    unreplied.map((comment) => comment.id),
+    [13],
+  );
 });
 
 test("filters top-level issue comments down to bots", () => {

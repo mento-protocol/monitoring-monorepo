@@ -147,18 +147,23 @@ export function findUnresolvedReviewThreads(reviewThreads = []) {
     });
 }
 
-export function findUnrepliedRootReviewComments(reviewComments = []) {
+export function findUnrepliedRootReviewComments(
+  reviewComments = [],
+  ignoredAuthors = [],
+) {
   const repliedRootIds = new Set(
     reviewComments
       .map((comment) => comment.in_reply_to_id)
       .filter((id) => id !== undefined && id !== null),
   );
+  const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
 
   return reviewComments
     .filter(
       (comment) =>
         comment.in_reply_to_id === undefined || comment.in_reply_to_id === null,
     )
+    .filter((comment) => !ignoredAuthorSet.has(comment.user?.login))
     .filter((comment) => !repliedRootIds.has(comment.id))
     .map((comment) => ({
       id: comment.id,
@@ -249,8 +254,10 @@ export function summarizeReadyState({
     requiredStatusContexts,
   );
   const unresolvedReviewThreads = findUnresolvedReviewThreads(reviewThreads);
-  const unrepliedRootReviewComments =
-    findUnrepliedRootReviewComments(reviewComments);
+  const unrepliedRootReviewComments = findUnrepliedRootReviewComments(
+    reviewComments,
+    [pr.author?.login],
+  );
   const topLevelBotComments = [
     ...findTopLevelBotComments(issueComments),
     ...findTopLevelBotReviewComments(pr.reviews ?? []),
