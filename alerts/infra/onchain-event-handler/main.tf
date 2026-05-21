@@ -163,6 +163,16 @@ data "archive_file" "function_source" {
     ".env",
     ".env.*",
     ".project_vars_cache",
+    # Dev-only files: shipping these to the production zip leaks
+    # internal gcloud/TF invocations + the canonical webhook fixture.
+    "scripts",
+    "scripts/**",
+    "vitest.config.ts",
+    "eslint.config.mjs",
+    "knip.json",
+    ".prettierrc.json",
+    ".prettierignore",
+    ".gcloudignore",
     "function-source.zip" # Exclude the zip file itself
   ]
   output_file_mode = "0644"

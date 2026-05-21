@@ -19,6 +19,12 @@ variable "safe_abi" {
   type        = any
 }
 
+variable "debug_mode" {
+  description = "Enable per-resource debug on the restapi provider. Leaves the QuickNode API key + signing secret in TF_LOG=DEBUG output; keep false in CI."
+  type        = bool
+  default     = false
+}
+
 variable "quicknode_network_name" {
   description = "QuickNode network identifier (e.g., 'celo-mainnet', 'ethereum-mainnet'). Must be a valid QuickNode network name."
   type        = string

@@ -137,6 +137,7 @@ module "onchain_event_listeners" {
   quicknode_network_name   = each.value[keys(each.value)[0]].quicknode_network_name # All multisigs in group have same network
   quicknode_api_key        = var.quicknode_api_key
   quicknode_signing_secret = var.quicknode_signing_secret
+  debug_mode               = var.debug_mode
 
   depends_on = [module.onchain_event_handler]
 }

@@ -377,7 +377,13 @@ export async function getTransactionExecutor(
 
     const publicClient = createPublicClient({
       chain: viemChain,
-      transport: http(chainConfig.rpcEndpoint),
+      transport: http(chainConfig.rpcEndpoint, {
+        // 5s matches verifyBlockHashOnChain. Without a timeout, a stalled
+        // public RPC node hangs the Cloud Function until Cloud Functions
+        // kills the request (~60s), QuickNode 5xx's, and retries the whole
+        // batch → duplicate Discord deliveries for events that already fired.
+        timeout: 5000,
+      }),
     });
 
     const tx = await publicClient.getTransaction({

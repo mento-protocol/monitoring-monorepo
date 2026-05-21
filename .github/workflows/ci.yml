@@ -442,10 +442,12 @@ jobs:
           cp package-lock.json /tmp/committed-lock.json
           rm -rf node_modules package-lock.json
           npm install --package-lock-only --no-audit --no-fund --ignore-scripts
-          diff -q /tmp/committed-lock.json package-lock.json || {
+          if ! diff -q /tmp/committed-lock.json package-lock.json > /dev/null; then
             echo "::error::package-lock.json is out of sync with package.json. Regenerate with: cd alerts/infra/onchain-event-handler && rm -rf node_modules package-lock.json && npm install --package-lock-only"
+            echo "--- diff (first 40 lines) ---"
+            diff --unified=0 /tmp/committed-lock.json package-lock.json | head -40 || true
             exit 1
-          }
+          fi
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

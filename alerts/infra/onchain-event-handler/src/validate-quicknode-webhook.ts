@@ -76,6 +76,10 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
 
   // Verify signature
   if (!verifyQuickNodeSignature(secret, payload, nonce, timestamp, signature)) {
+    // Don't log payload contents here — auth-failure log is reachable by
+    // anyone who knows the function URL, so logging an attacker-controlled
+    // 200-byte preview is a log-injection / cost-amplification path. The
+    // boolean/length fields below are enough to diagnose real client bugs.
     logger.error("Invalid webhook signature", {
       hasSecret: !!secret,
       hasNonce: !!nonce,
@@ -84,7 +88,6 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
       signatureLength: signature?.length,
       secretLength: secret?.length,
       payloadLength: payload.length,
-      payloadPreview: payload.substring(0, 200),
       usingRawBody: !!rawBody,
     });
     return {

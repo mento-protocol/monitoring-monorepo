@@ -106,8 +106,10 @@ resource "restapi_object" "multisig_webhook" {
 
   id_attribute = "id"
 
-  # Enable debug mode to see API responses
-  debug = true
+  # Per-resource debug is route-gated: defaults to false to avoid leaking the
+  # QuickNode API key + signing_secret in TF_LOG=DEBUG transcripts. Flip
+  # var.debug_mode at the root only when actively debugging.
+  debug = var.debug_mode
 
   lifecycle {
     # QuickNode doesn't support updates - force replacement for ANY change
