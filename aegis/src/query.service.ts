@@ -70,12 +70,6 @@ export class QueryService {
     }
 
     const vars = chain.vars;
-    const address = chain.contracts[metric.source.contract];
-    if (!address) {
-      throw new Error(
-        `Unknown contract ${metric.source.contract} on chain ${metric.chain}`,
-      );
-    }
     const contractName = metric.source.contract;
     const functionName = metric.source.functionAbi.name;
     if (!functionName) {
@@ -96,12 +90,15 @@ export class QueryService {
       chain: metric.chain,
     });
     try {
-      const data: unknown = await client.readContract({
-        address: address as Address,
-        abi: [abi],
-        functionName,
-        args,
-      });
+      const data: unknown =
+        contractName === 'Native'
+          ? await client.getBalance({ address: args[0] as Address })
+          : await client.readContract({
+              address: chain.contracts[contractName] as Address,
+              abi: [abi],
+              functionName,
+              args,
+            });
       const value = metric.parse(data, contractName, functionName);
       timer({ status: 'success' });
       return value;

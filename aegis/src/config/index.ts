@@ -17,8 +17,8 @@ export const ChainConfig = z
     id: z.string(),
     label: z.string(),
     httpRpcUrl: z.string(),
-    contracts: z.record(z.string(), z.string()),
-    vars: z.record(z.string(), z.string()),
+    contracts: z.record(z.string(), z.string()).default({}),
+    vars: z.record(z.string(), z.string()).default({}),
   })
   .brand('ChainConfig');
 export type ChainConfig = z.infer<typeof ChainConfig>;
@@ -71,6 +71,9 @@ export default () => {
 
   config.metrics.forEach((metric) => {
     const { contract } = metric.source;
+    // `Native` is a synthetic contract that maps to the chain's native token
+    // balance via eth_getBalance — it doesn't need to be declared in contracts.
+    if (contract === 'Native') return;
     const chains = metric.chains === 'all' ? allChains : metric.chains;
     chains.forEach((chainId) => {
       if (!chainId) {

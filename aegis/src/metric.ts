@@ -204,6 +204,9 @@ export class Metric {
         return Number(parsed);
 
       case 'CELOToken.balanceOf':
+      case 'Native.balanceOf':
+        // Native handles non-ERC20 native gas tokens (e.g. MON, ETH) fetched via
+        // eth_getBalance. Like CELO (which is ERC20-compatible), they use 18 decimals.
         const celoDecimals = 1e18;
         const celoBalanceInWei = output as bigint;
         const celoBalanceInEther = celoBalanceInWei / BigInt(celoDecimals);

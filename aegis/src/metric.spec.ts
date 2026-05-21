@@ -231,6 +231,28 @@ describe('Metric.parse', () => {
     });
   });
 
+  describe('Native.balanceOf()', () => {
+    it('should parse wei into whole units using 18 decimals', () => {
+      const oneHundredTokens = BigInt('100000000000000000000'); // 100 * 1e18
+      const result = metric.parse(oneHundredTokens, 'Native', 'balanceOf');
+      expect(result).toBe(100);
+    });
+
+    it('should floor sub-unit balances to zero', () => {
+      const dust = BigInt('123456789012345678'); // ~0.12 token
+      const result = metric.parse(dust, 'Native', 'balanceOf');
+      expect(result).toBe(0);
+    });
+
+    it('should throw when balance overflows safe integer range', () => {
+      const huge =
+        BigInt(Number.MAX_SAFE_INTEGER + 1) * BigInt('1000000000000000000');
+      expect(() => metric.parse(huge, 'Native', 'balanceOf')).toThrow(
+        /too large to be a safe integer/,
+      );
+    });
+  });
+
   it('should throw an error for unknown function', () => {
     const metricName = `TestContract.unknownFunction`;
     const funcName = 'unknownFunction';

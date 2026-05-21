@@ -3,6 +3,7 @@ global:
     Reserve: '0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9'
     # Relayer Signer Wallets
     RelayerSignerAUDUSD: '0x6fa93B73F00f9c61f726bCE15f327686de05b696'
+    RelayerSignerAUSDUSD: '0xBF8a08d7DeC72efF538B48Ee332dd4eE938e0b1f'
     RelayerSignerBRLUSD: '0x7a82bfDeC85bF54B240065CdC20A811BF56528C8'
     RelayerSignerCADUSD: '0x857ad1CeE80c3e72f2d8e558B773E63dAB8185fe'
     RelayerSignerCELOAUD: '0x2821d073C30876187198f573Bf544200ff95bf7e'
@@ -29,6 +30,7 @@ global:
     RelayerSignerKESUSD: '0x3c05004b74e0fa466B24ca19929ee662d5BbEc45'
     RelayerSignerNGNUSD: '0xbfA9203552e9b02035034befDFE012aC5029B4F9'
     RelayerSignerPHPUSD: '0xb2cE6fa691b58Ff4fadBd610a8e09427d2918025'
+    RelayerSignerUSDCUSD: '0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3'
     RelayerSignerUSDTUSD: '0x36a5C808e25AF0F5e406Eaa831d1749542378794'
     RelayerSignerXOFUSD: '0x2C5dB0140b6B25CA6a37304198095B23E2604dF2'
     RelayerSignerZARUSD: '0xc0342D31Cc875f3dC85E3Ab352e60698444197AE'
@@ -140,6 +142,14 @@ chains:
       CUSD_EXOF_POOL_CUSD_LIMIT: '0xc9664df358594c5eaf2f410ac52c0ac83ced532d7c33d18ae1d6f12069c57e51'
       CUSD_EXOF_POOL_EXOF_LIMIT: '0xc9664df358594c5eaf2f410ac088df12f17eb8e9b8361f4dfdf9ec658f86cc73'
 
+  - id: monad
+    label: monad
+    httpRpcUrl: https://rpc.monad.xyz
+
+  - id: monadTestnet
+    label: monad-testnet
+    httpRpcUrl: https://testnet-rpc.monad.xyz
+
   - id: celoSepolia
     label: celo-sepolia
     httpRpcUrl: https://forno.celo-sepolia.celo-testnet.org
@@ -196,7 +206,7 @@ metrics:
   - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: all
+    chains: [celo, celoSepolia]
     variants:
       # collateral/stable
       - [EUROCEUR] # axlEUROC/cEUR
@@ -379,7 +389,7 @@ metrics:
   - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: all
+    chains: [celo, celoSepolia]
     variants:
       # collateral/stable
       - [EUROCEUR] # axlEUROC/cEUR
@@ -495,6 +505,21 @@ metrics:
       - [RelayerSignerUSDTUSD]
       - [RelayerSignerXOFUSD]
       - [RelayerSignerZARUSD]
+
+  # Native gas-token balance for non-ERC20 native tokens (e.g. MON on Monad).
+  # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
+  - source: Native.balanceOf(address owner)(uint256)
+    schedule: 0 * * * * *
+    type: gauge
+    chains: [monad, monadTestnet]
+    variants:
+      - [RelayerSignerAUSDUSD]
+      - [RelayerSignerEURUSD]
+      - [RelayerSignerGBPUSD]
+      - [RelayerSignerUSDCUSD]
+      - [RelayerSignerUSDTUSD]
+      - [RelayerSignerCHFUSD]
+      - [RelayerSignerJPYUSD]
 
   # Does the reserve have enough USDC for swap operations?
   - source: USDC.balanceOf(address owner)(uint256)
