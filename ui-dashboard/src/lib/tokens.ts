@@ -8,7 +8,7 @@ import { truncateAddress, parseWei } from "./format";
 export const USDM_SYMBOLS = new Set(["USDm"]);
 
 /** Tokens treated as $1.00 for USD conversion. Keep in sync with
- *  `usd_pegged_symbols_regex_part` in `terraform/alerts/main.tf`. */
+ *  `usd_pegged_symbols_regex_part` in `alerts/rules/main.tf`. */
 const USD_PEGGED_SYMBOLS = new Set([
   "cUSD",
   "USDC",

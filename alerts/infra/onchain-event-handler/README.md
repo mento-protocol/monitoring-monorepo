@@ -36,8 +36,8 @@ module "onchain_event_handler" {
       address        = multisig.address
       name           = multisig.name
       chain          = multisig.chain
-      alerts_webhook = module.discord_channel_manager.webhook_urls.alerts
-      events_webhook = module.discord_channel_manager.webhook_urls.events
+      alerts_webhook = module.discord_channels.webhook_urls.alerts
+      events_webhook = module.discord_channels.webhook_urls.events
     }
   }
 }

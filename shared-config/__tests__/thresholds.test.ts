@@ -6,7 +6,7 @@ import {
 
 // These constants are referenced from indexer handlers, the metrics-bridge
 // probe, the dashboard, AND mirrored as HCL literals in
-// `terraform/alerts/rules-fpmms.tf`. Any value change is a coordinated edit
+// `alerts/rules/rules-fpmms.tf`. Any value change is a coordinated edit
 // across packages — the test exists to make that intent explicit so a casual
 // edit here trips CI.
 describe("deviation thresholds", () => {

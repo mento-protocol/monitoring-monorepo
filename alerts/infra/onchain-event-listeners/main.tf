@@ -37,14 +37,18 @@ resource "null_resource" "pause_webhook_before_update" {
   # Provisioner runs when resource is created/updated (when hash changes)
   provisioner "local-exec" {
     command = <<-EOT
-      # Get webhook ID from Terraform state - find the exact resource path
-      STATE_PATH=$(terraform state list | grep -E '\.multisig_webhook$' | grep -E 'onchain_event_listeners\[.*\]' | head -1)
-      
+      # Get webhook ID from Terraform state - scope strictly to THIS chain's
+      # module instance. The old grep was greedy (`head -1` across all
+      # `module.onchain_event_listeners[*]` entries) so rehashing one chain's
+      # webhook could yank another chain's webhook out of state on a
+      # multi-chain apply (Codex review, 2026-05-21).
+      STATE_PATH=$(terraform state list | grep -F 'module.onchain_event_listeners["${var.chain_key}"].restapi_object.multisig_webhook' | head -1)
+
       if [ -z "$STATE_PATH" ]; then
         echo "Webhook not found in state, skipping delete (first creation)"
         exit 0
       fi
-      
+
       WEBHOOK_ID=$(terraform state show "$STATE_PATH" 2>/dev/null | grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
       
       if [ -n "$WEBHOOK_ID" ] && [ "$WEBHOOK_ID" != "" ]; then

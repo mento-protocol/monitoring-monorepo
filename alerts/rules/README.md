@@ -1,11 +1,11 @@
-# terraform/alerts
+# alerts/rules
 
 Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
 
 ## Scope
 
 - **In this module:** `grafana_rule_group` resources for FPMM pool health, indexer health, and metrics-bridge liveness, organised into one Grafana folder per `service` label (`FPMMs`, `Indexer`, `Metrics Bridge`). Slack uses the normal critical/warning contact points plus resolve-disabled transition contact points for one-shot state-change notices.
-- **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
+- **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
 - **Folder convention:** one folder per `service` label (same pattern Aegis uses for `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
 
 ## State
@@ -23,12 +23,12 @@ Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6
 cp terraform.tfvars.example terraform.tfvars
 # Paste the Slack bot token and Grafana SA token into terraform.tfvars.
 
-pnpm alerts:init
-pnpm alerts:plan
-pnpm alerts:apply
+pnpm alerts:rules:init
+pnpm alerts:rules:plan
+pnpm alerts:rules:apply
 ```
 
-Both secrets live in `terraform/alerts/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place, both secrets.
+Both secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place, both secrets.
 
 ## Smoke test
 

@@ -61,6 +61,12 @@ export async function processEvents(
       try {
         return await processEvent(logEntry, txHashMap);
       } catch (error) {
+        // ChainDetectionError must propagate to index.ts so the response
+        // is HTTP 422 and QuickNode retries (Codex review, 2026-05-21).
+        // Swallowing it into `null` here would silently drop ambiguous
+        // multisig events.
+        if (error instanceof ChainDetectionError) throw error;
+
         logger.error("Error processing log", {
           error:
             error instanceof Error

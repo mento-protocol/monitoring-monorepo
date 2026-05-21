@@ -10,10 +10,11 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 ├── variables.tf            # Shared variable definitions
 ├── outputs.tf              # Aggregated outputs
 │
-├── sentry-alerts/          # Sentry JS error monitoring
+├── channels/
+│   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Discord bridge)
+│   └── discord-channels/   # Discord channels and webhooks
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
-├── onchain-event-handler/   # Cloud Function for processing webhooks
-└── discord-channel-manager/ # Discord channels and webhooks
+└── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
 ```
 
 ## 🏗️ Architecture
@@ -225,7 +226,7 @@ cd onchain-event-handler
 ### Destroy Resources
 
 ```bash
-terraform destroy -target=module.sentry_alerts  # Specific module
+terraform destroy -target=module.sentry_bridge  # Specific module
 terraform destroy  # Everything
 ```
 
@@ -269,8 +270,8 @@ This shows REST API requests/responses for troubleshooting.
 
 ### Module Documentation
 
-- [`sentry-alerts/README.md`](sentry-alerts/README.md) - Sentry module details
-- [`discord-channel-manager/README.md`](discord-channel-manager/README.md) - Discord infrastructure module
+- [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Discord bridge module
+- [`channels/discord-channels/README.md`](channels/discord-channels/README.md) - Discord channels + webhooks module
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
 

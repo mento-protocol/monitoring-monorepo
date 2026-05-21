@@ -4,6 +4,11 @@ variable "webhook_name" {
   default     = "safe-multisig-monitor"
 }
 
+variable "chain_key" {
+  description = "Key of this listener instance in the parent root's `module.onchain_event_listeners` for_each map (e.g. 'celo', 'ethereum'). Used to scope the local-exec state-rm so rehashing one chain's webhook can't yank another chain's webhook out of state (Codex review, 2026-05-21)."
+  type        = string
+}
+
 variable "quicknode_network_name" {
   description = "QuickNode network identifier (e.g., 'celo-mainnet', 'ethereum-mainnet'). Must be a valid QuickNode network name."
   type        = string

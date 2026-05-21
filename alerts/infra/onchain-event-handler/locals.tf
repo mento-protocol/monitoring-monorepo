@@ -2,17 +2,23 @@
 # This is more reliable than using the zip's SHA256 which includes metadata
 # Prepare environment variables dynamically from multisig webhooks
 locals {
-  # Source file hashing for stable deployments
-  source_files = fileset(path.module, "src/**")
+  # Source-file hashing for stable Cloud Function redeploys. `fileset` returns
+  # paths relative to the module dir, so they must be prefixed with
+  # ${path.module}/ before passing to filemd5 (which resolves against the TF
+  # working dir, not the module). Without the prefix, hashes silently return
+  # empty for src/** entries and the Cloud Function never redeploys on code
+  # changes (Codex review, 2026-05-21).
+  source_files_relative = fileset(path.module, "src/**")
+  source_files = [for f in local.source_files_relative : "${path.module}/${f}"]
   package_files = [
     "${path.module}/package.json",
     "${path.module}/package-lock.json",
     "${path.module}/tsconfig.json",
-    "${path.root}/safe-abi.json",
+    "${path.module}/safe-abi.json",
   ]
   # Create a hash of all source files and package files
   source_hash = md5(join("", [
-    for f in sort(concat(tolist(local.source_files), local.package_files)) :
+    for f in sort(concat(local.source_files, local.package_files)) :
     fileexists(f) ? filemd5(f) : ""
   ]))
 

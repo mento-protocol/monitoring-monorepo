@@ -114,7 +114,7 @@ export const STRATEGY_ABI_SOURCES = [
  * Slack mrkdwn through the alert body.
  *
  * INVARIANT — entries MUST be bare phrases (no trailing punctuation): the
- * Slack alert template at `terraform/alerts/main.tf` appends a "." when
+ * Slack alert template at `alerts/rules/main.tf` appends a "." when
  * rendering ("Rebalance Blocked: <reason_message>."). Trailing "." / "!" /
  * "—" here would render as double punctuation. The dashboard tooltip
  * (`ui-dashboard/src/components/pool-header/rebalance-status-value.tsx`)

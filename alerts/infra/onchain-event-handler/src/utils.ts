@@ -85,13 +85,18 @@ export function findChainForAddress(address: string): string | null {
   const normalizedAddress = address.toLowerCase();
   const knownChains = ["celo", "ethereum"];
 
-  for (const chain of knownChains) {
-    const compositeKey = `${normalizedAddress}:${chain}`;
-    if (MULTISIGS_BY_CHAIN[compositeKey]) {
-      return chain;
-    }
-  }
+  const matches = knownChains.filter(
+    (chain) => MULTISIGS_BY_CHAIN[`${normalizedAddress}:${chain}`],
+  );
 
+  // Unambiguous: exactly one chain has this multisig configured.
+  if (matches.length === 1) return matches[0];
+
+  // Ambiguous (configured on multiple chains) OR not configured at all:
+  // fail closed. Returning a best-guess silently misattributes events for
+  // multisigs deployed at the same address on multiple chains (Codex review,
+  // 2026-05-21). Caller (process-events.ts) throws ChainDetectionError on
+  // null which propagates to index.ts → HTTP 422.
   return null;
 }
 
@@ -144,14 +149,18 @@ export async function findChainFromBlockHash(
     }
   }
 
-  // If block hash verification failed for all chains, fall back to first possible chain
-  // This handles cases where RPC calls fail but we still want to process the event
-  logger.warn("Could not verify block hash on any chain, using first match", {
+  // Block hash verification failed on every candidate chain — fail closed
+  // rather than guessing. Silently picking possibleChains[0] misattributes
+  // events for multisigs configured at the same address on multiple chains
+  // (e.g. Mento Protocol Foundation, Reserve Ops). Caller throws
+  // ChainDetectionError on null → HTTP 422 → QuickNode retries
+  // (Codex review, 2026-05-21).
+  logger.warn("Could not verify block hash on any chain — failing closed", {
     blockHash,
     address,
     possibleChains,
   });
-  return possibleChains[0];
+  return null;
 }
 
 /**
@@ -323,23 +332,26 @@ export async function decodeEventData(
     symbol: chainConfig?.nativeToken.symbol || "",
   };
 
-  // Use registry pattern to get formatter
+  // Special-case SafeMultiSigTransaction first — it isn't in the registry
+  // because its formatter needs chainName. Previously this branch lived
+  // inside the `if (formatter)` block, which was dead code: getEventFormatter
+  // returned null for SafeMultiSigTransaction so the special-case never
+  // executed and the function returned [] (Codex review, 2026-05-21).
+  if (eventName === "SafeMultiSigTransaction") {
+    const { formatSafeMultiSigTransactionEvent } =
+      await import("./event-formatters/transaction-formatters");
+    return formatSafeMultiSigTransactionEvent(
+      log,
+      chainTokenConfig,
+      chainName,
+      txHash,
+    );
+  }
+
+  // Use registry pattern for all other events
   const { getEventFormatter } = await import("./event-formatters");
   const formatter = getEventFormatter(eventName);
-
   if (formatter) {
-    // Special handling for SafeMultiSigTransaction which needs chainName
-    if (eventName === "SafeMultiSigTransaction") {
-      const { formatSafeMultiSigTransactionEvent } =
-        await import("./event-formatters/transaction-formatters");
-      return formatSafeMultiSigTransactionEvent(
-        log,
-        chainTokenConfig,
-        chainName,
-        txHash,
-      );
-    }
-
     return formatter(log, chainTokenConfig, txHash);
   }
 

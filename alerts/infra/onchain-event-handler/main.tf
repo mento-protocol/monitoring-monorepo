@@ -111,21 +111,10 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-# Copy safe-abi.json from project root to function directory
-# This ensures the file is available for TypeScript compilation without duplication
-resource "null_resource" "copy_safe_abi" {
-  triggers = {
-    # Re-copy if the source file changes (based on content hash)
-    source_hash = filemd5("${path.root}/safe-abi.json")
-  }
-
-  provisioner "local-exec" {
-    command = "cp '${path.root}/safe-abi.json' '${path.module}/safe-abi.json'"
-  }
-}
-
-# Archive function source (Cloud Build will compile TypeScript)
-# Use a stable output path outside .terraform to avoid regeneration issues
+# Archive function source (Cloud Build will compile TypeScript).
+# safe-abi.json lives in this module's dir (committed), so it's included
+# automatically. excludes block also drops dev secrets (.env*) and
+# terraform-state-derived caches so they never leak into the GCS zip.
 data "archive_file" "function_source" {
   type        = "zip"
   source_dir  = path.module
@@ -136,18 +125,23 @@ data "archive_file" "function_source" {
     "*.test.ts",
     "*.test.js",
     "main.tf",
+    "local-dotenv-file.tf",
+    "locals.tf",
     "variables.tf",
     "outputs.tf",
+    "versions.tf",
     "README.md",
     ".terraform",
     "*.tfstate",
     "*.tfstate.backup",
+    "*.tfvars",
+    "*.tfvars.json",
+    ".env",
+    ".env.*",
+    ".project_vars_cache",
     "function-source.zip" # Exclude the zip file itself
   ]
   output_file_mode = "0644"
-
-  # Ensure the archive is created after the file is copied
-  depends_on = [null_resource.copy_safe_abi]
 }
 
 # Upload function source to bucket

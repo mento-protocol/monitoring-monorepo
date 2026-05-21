@@ -95,7 +95,7 @@ variable "splunk_on_call_alerts_webhook_url" {
 }
 
 variable "slack_bot_token" {
-  description = "Slack Bot User OAuth Token (xoxb-...) used by Grafana to post alerts. Same bot as the v3 alerts in terraform/alerts/."
+  description = "Slack Bot User OAuth Token (xoxb-...) used by Grafana to post alerts. Same bot as the v3 alerts in alerts/rules/."
   type        = string
   sensitive   = true
 }

@@ -12,8 +12,8 @@ Creates 2 shared channels with webhooks for all monitored multisigs:
 ## Usage
 
 ```hcl
-module "discord_channel_manager" {
-  source = "./discord-channel-manager"
+module "discord_channels" {
+  source = "./channels/discord-channels"
 
   providers = {
     restapi.discord = restapi.discord
@@ -76,8 +76,8 @@ module "onchain_event_handler" {
       address        = multisig.address
       name           = multisig.name
       chain          = multisig.chain
-      alerts_webhook = module.discord_channel_manager.webhook_urls.alerts
-      events_webhook = module.discord_channel_manager.webhook_urls.events
+      alerts_webhook = module.discord_channels.webhook_urls.alerts
+      events_webhook = module.discord_channels.webhook_urls.events
     }
   }
 }
