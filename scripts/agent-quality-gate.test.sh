@@ -245,6 +245,9 @@ assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed exist
 assert_not_contains "- ./tools/trunk check --all"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bridge --cache=local:rw (metrics-bridge changed)"
+# `assert_contains` normalizes legacy package-task expectations to the Turbo
+# command shape; keep a direct negative assertion so the old command cannot be
+# emitted alongside the cached one unnoticed.
 assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
@@ -814,6 +817,10 @@ run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+run_gate "turbo.json"
+assert_contains "- tooling"
+assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (

@@ -932,6 +932,10 @@ while IFS= read -r path; do
 	      add_surface "tooling"
 	      add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
 	      ;;
+    turbo.json)
+      add_surface "tooling"
+      add_command "pnpm agent:quality-gate:test" "turbo task config changed"
+      ;;
 	    terraform/*)
 	      add_surface "terraform"
 	      add_terraform_validate_commands "terraform" "Terraform changed"

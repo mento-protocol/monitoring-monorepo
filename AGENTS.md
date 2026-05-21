@@ -85,9 +85,11 @@ config for that push.
 
 Package-local gate tasks for `lint`, `typecheck`, `test`, and `knip` run
 through Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
-Remote caching is disabled in `turbo.json`. High-risk or cross-layer commands
-stay outside Turbo, including codegen, install, dep-cruiser, React Doctor,
-dashboard build/size/browser checks, mutation baselines, and Terraform.
+Remote caching is disabled in `turbo.json`. The Turbo config is only for the
+gate's explicit per-package `--filter` invocations; do not use it as a general
+workspace task orchestrator. High-risk or cross-layer commands stay outside
+Turbo, including codegen, install, dep-cruiser, React Doctor, dashboard
+build/size/browser checks, mutation baselines, and Terraform.
 
 ## PR feedback sweep rule
 
