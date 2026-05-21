@@ -95,6 +95,42 @@ agent sessions.
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
 
+### Agent PR Loop Speed Follow-Ups
+
+The PR #508 readiness-tooling session was slow mostly because agent review
+requests and readiness polling became part of the inner edit loop. Local gates
+were acceptable; repeated pushes plus duplicate `@codex review` requests caused
+most of the wall-clock churn.
+
+- [ ] Add `pnpm pr:ready-state --watch --compact` for babysitting. Output only
+      the current head SHA, mergeability, required blockers, pending required
+      checks, unresolved threads, unreplied review comments, and Codex
+      PR-description approval state. Keep `--json` for machine consumers, but
+      make the human watch path low-noise.
+- [ ] Track Codex review-request state in `pr:ready-state`: `missing`,
+      `requested`, `in_flight`, `stale`, and `approved`. Treat a current-head
+      `@codex review` comment with bot `eyes` reaction, a current-head Codex
+      review, or a current-head Codex top-level result as in-flight/signal so
+      agents do not post duplicate requests while waiting.
+- [ ] Add a regression test fixture for duplicate-review prevention: multiple
+      historical `@codex review` comments on old heads, one current-head request
+      in flight, and no PR-description thumbs-up yet. Expected result: not
+      ready, but fallback action is "wait", not "request review again".
+- [ ] Update `AGENTS.md` and Claude/Codex agent docs to make the loop explicit:
+      batch review fixes locally, audit sibling cases before pushing, run the
+      mapped local gate once per batch, then wait for automatic/current-head
+      review signal. Manual `@codex review` is a one-shot stale fallback, not a
+      post-push habit.
+- [ ] Add a short "PR babysitting speed discipline" checklist to the shared
+      readiness note: build a feedback ledger, avoid broad bot review as an
+      inner loop, cap manual Codex fallback to one per head, and only declare
+      all-clear from the compact readiness result.
+
+Acceptance: a follow-up PR can babysit a review-heavy branch without repeated
+manual Codex pings, without dumping huge readiness JSON on every poll, and
+without weakening the rule that all-clear requires a current-head Codex
+PR-description thumbs-up.
+
 ### CodeScene-Equivalent OSS Quality Checks — Remaining Follow-Ups
 
 The 5-PR rollout (#422/#423/#424/#425/#426) shipped knip, dependency-cruiser,
