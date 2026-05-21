@@ -109,19 +109,6 @@ variable "dune_api_key" {
   default     = ""
 }
 
-# ── Vercel Blob ───────────────────────────────────────────────────────────────
-
-variable "blob_read_write_token" {
-  description = <<-EOT
-    Vercel Blob read-write token for the address-labels backup store.
-    Required for daily backups to external storage (Vercel Blob, private access).
-    Provision once with: vercel blob create-store address-labels --scope mentolabs
-    Then copy the resulting token here.
-  EOT
-  type        = string
-  sensitive   = true
-}
-
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 
 variable "terraform_service_account" {
