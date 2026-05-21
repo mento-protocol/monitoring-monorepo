@@ -86,9 +86,13 @@ jobs:
             PROJECT CONVENTIONS — AGENTS.md and CLAUDE.md are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
 
   auto-review:
+    # Skip fork PRs — repo secrets (CLAUDE_CODE_OAUTH_TOKEN) are not passed to
+    # workflows triggered by `pull_request` events from forks, so the action
+    # would fail with an empty token. Same-repo PRs only.
     if: |
       github.event_name == 'pull_request' &&
-      github.event.pull_request.draft != true
+      github.event.pull_request.draft != true &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
