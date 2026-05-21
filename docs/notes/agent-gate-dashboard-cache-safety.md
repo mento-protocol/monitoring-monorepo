@@ -1,11 +1,12 @@
 # Agent Gate Dashboard Cache Safety
 
-Status: PR 3 groundwork, stacked on `chore/agent-gate-targeted-trunk`.
+Status: implemented by `chore/agent-gate-dashboard-turbo`.
 
 This note defines the conservative input surface and regression tests required
-before caching dashboard build or browser-test commands in the agent quality
-gate. Do not add this cache until the Turbo worker PR has established the repo's
-canonical local cache runner and command mapping shape.
+for caching dashboard build or browser-test commands in the agent quality gate.
+The Turbo worker PR established the repo's canonical local cache runner and
+command mapping shape; dashboard build, size-limit, and browser-test local
+agent-gate commands now use that runner with the input surface below.
 
 ## Scope
 
@@ -14,6 +15,10 @@ Candidate commands:
 - `pnpm dashboard:build`
 - `pnpm dashboard:size-limit` when it consumes the build output
 - `pnpm --filter @mento-protocol/ui-dashboard test:browser`
+
+`size-limit` depends on `build` in `turbo.json` because it reads `.next/`
+output. Other cached gate tasks intentionally avoid broad workspace dependency
+pipelines.
 
 Do not cache:
 
@@ -39,8 +44,7 @@ Dashboard build and size-limit inputs:
 - `ui-dashboard/postcss.config.*`
 - `ui-dashboard/tsconfig*.json`
 - `ui-dashboard/sentry.*.config.*`
-- `ui-dashboard/src/instrumentation*`
-- `ui-dashboard/src/middleware.*`
+- `ui-dashboard/sentry.shared.ts`
 - `ui-dashboard/.size-limit.cjs`
 - `ui-dashboard/vercel.json`
 - `ui-dashboard/.env.production.local.example`
@@ -59,9 +63,16 @@ Dashboard build and size-limit inputs:
 - `.github/workflows/size-limit.yml`
 - the cache runner/config files introduced by the Turbo worker PR
 
+Dashboard build environment key:
+
+- `VERCEL_ENV`, because `next.config.ts` mirrors it into
+  `NEXT_PUBLIC_VERCEL_ENV`
+
 Browser-test inputs:
 
-- every dashboard build input above, because Playwright starts `next dev`
+- dashboard source/runtime config inputs above, because Playwright starts
+  `next dev`; exclude `.size-limit.cjs` because browser tests do not read the
+  size-budget file
 - `ui-dashboard/playwright.config.ts`
 - `ui-dashboard/scripts/run-browser-tests.mjs`
 - `ui-dashboard/tests/browser/**`
@@ -78,6 +89,7 @@ Browser-test environment key:
 - `NEXT_TELEMETRY_DISABLED`
 - `NEXT_PUBLIC_HASURA_URL`
 - `NEXT_PUBLIC_BROWSER_TEST_FIXTURES`
+- `VERCEL_ENV`
 
 The Playwright config overrides the Hasura fixture env for its own web server,
 but include the public env names anyway so a future config simplification cannot
@@ -126,12 +138,13 @@ rewriting the quality-gate dispatcher.
 
 ## Command-Mapping Expectations
 
-Current agent-gate behavior on `chore/agent-gate-targeted-trunk`:
+Current agent-gate behavior:
 
 - Direct `ui-dashboard/*` changes map to dashboard package checks,
   Playwright Chromium install, browser tests, and React Doctor checks. The
-  intended build/size-limit routing is bundle-affecting paths only, but the
-  current shell glob also catches nested `*.mjs` paths such as browser fixtures.
+  build/size-limit routing is bundle-affecting paths only. Browser fixtures and
+  Playwright config invalidate browser-test cache entries without forcing an
+  unrelated dashboard build cache miss.
 - `shared-config/*` changes map to shared-config package checks, shared-config
   build, dashboard and metrics-bridge typechecks, plus dashboard build and
   size-limit.
