@@ -9,6 +9,7 @@ import { getAllIntelWealth } from "@/lib/intel-wealth";
 import { getAllIntelEntities } from "@/lib/intel-entities";
 import { getAllIntelEntityCps } from "@/lib/intel-entity-cps";
 import { requireCronAuth } from "@/lib/cron-auth";
+import { MAX_RESTORE_BLOB_BYTES } from "@/app/api/address-labels/restore/route";
 import {
   type BackupManifestV2,
   BACKUP_MANIFEST_VERSION,
@@ -115,6 +116,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             return { name, pathname, sizeBytes };
           }),
         );
+
+        // Per-blob oversize guard. The restore route refuses any single blob
+        // larger than MAX_RESTORE_BLOB_BYTES (16 MB), so a hash that grows
+        // past that cap would make every restore from this snapshot 413.
+        // Backup still succeeds and the raw blob is salvageable manually,
+        // but a Sentry warning surfaces the impending DR break before it
+        // matters.
+        for (const upload of hashUploads) {
+          if (upload.sizeBytes > MAX_RESTORE_BLOB_BYTES) {
+            Sentry.captureMessage(
+              `[backup] hash blob ${upload.name} ${upload.sizeBytes} bytes exceeds restore cap ${MAX_RESTORE_BLOB_BYTES} — disaster-recovery restore would reject this snapshot`,
+              {
+                level: "warning",
+                tags: { route: "address-labels/backup", hash: upload.name },
+              },
+            );
+          }
+        }
 
         const manifest: BackupManifestV2 = {
           version: BACKUP_MANIFEST_VERSION,

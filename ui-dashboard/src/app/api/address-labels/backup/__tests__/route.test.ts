@@ -5,6 +5,21 @@ import {
   BACKUP_MANIFEST_VERSION,
   HASH_BLOB_NAMES,
 } from "@/lib/address-labels/backup-format";
+import { MAX_RESTORE_BLOB_BYTES } from "@/app/api/address-labels/restore/route";
+
+vi.mock("@sentry/nextjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sentry/nextjs")>();
+  return {
+    ...actual,
+    captureException: vi.fn(),
+    captureMessage: vi.fn(),
+    // withMonitor must still execute the wrapped callback — the tests rely
+    // on the route's return value, not on the Sentry monitor side effects.
+    withMonitor: vi.fn(
+      async (_slug: string, cb: () => Promise<unknown>) => await cb(),
+    ),
+  };
+});
 
 vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
@@ -283,6 +298,40 @@ describe("GET /api/address-labels/backup", () => {
     await GET(req);
     const secondRunPaths = mockPut.mock.calls.map((c) => c[0]);
     expect(secondRunPaths).toEqual(firstRunPaths);
+  });
+
+  it("fires a Sentry warning when any single hash blob exceeds the restore cap", async () => {
+    // Regression test: a hash whose serialised JSON crosses
+    // MAX_RESTORE_BLOB_BYTES would make every restore from that snapshot
+    // 413 — backup still succeeds (raw blob is salvageable) but the
+    // captureMessage warning makes the impending DR break visible.
+    const Sentry = await import("@sentry/nextjs");
+    const captureMessage = vi.mocked(Sentry.captureMessage);
+
+    // Build a record whose JSON-serialised form exceeds the cap.
+    const oneMb = "x".repeat(1024 * 1024);
+    const fatRecords: Record<string, string> = {};
+    for (let i = 0; i < MAX_RESTORE_BLOB_BYTES / (1024 * 1024) + 2; i++) {
+      fatRecords[`field${i}`] = oneMb;
+    }
+    const { getAllIntelDeep } = await import("@/lib/intel-deep");
+    (getAllIntelDeep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      fatRecords,
+    );
+
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+
+    const warningCall = captureMessage.mock.calls.find((args) =>
+      String(args[0]).includes("intelDeep"),
+    );
+    expect(warningCall).toBeDefined();
+    expect(warningCall![0]).toMatch(/exceeds restore cap/);
+    expect(warningCall![1]).toMatchObject({ level: "warning" });
   });
 
   it("returns 500 when CRON_SECRET is not set in production", async () => {
