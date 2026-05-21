@@ -163,10 +163,57 @@ describe("replaceRedisHashes", () => {
     await expect(
       replaceRedisHashes(redis, [{ key: "intel_deep", fields }]),
     ).rejects.toThrow(
-      /chunked write for intel_deep[\s\S]*may be in a partial state[\s\S]*upstash 500/,
+      /chunked write for intel_deep[\s\S]*partial intra-hash state possible[\s\S]*upstash 500/,
     );
     // DEL ran (replace mode), then HSET threw before completing
     expect(redis.del).toHaveBeenCalledWith("intel_deep");
+  });
+
+  it("preserves input order across EVAL + chunked dispatch", async () => {
+    // Regression test for the partition-reorder issue: the old code put ALL
+    // EVAL-eligible hashes first then ALL oversized. If the input ordered an
+    // oversized hash BEFORE an eval-eligible one, the eval-eligible would
+    // commit first; a failure during the chunked write then left a mixed
+    // state worse than necessary (eval-eligible committed despite preceding
+    // failure on the conceptually-earlier hash).
+    //
+    // Now we walk input once: an oversized hash flushes any pending EVAL
+    // batch then dispatches chunked; following eval-eligible hashes start
+    // a new EVAL batch. Order is preserved → failure halts on the earliest-
+    // input hash that hadn't committed.
+    const redis = makeMockRedis();
+    const oneMb = "f".repeat(1024 * 1024);
+    const oversizedFields = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [`0x${i}`, oneMb]),
+    );
+
+    // Track call order across both client methods so we can prove EVAL
+    // landed AFTER the chunked dispatch finished.
+    const callOrder: string[] = [];
+    redis.del.mockImplementation(async (key: string) => {
+      callOrder.push(`del:${key}`);
+      return 1;
+    });
+    redis.hset.mockImplementation(async (key: string) => {
+      callOrder.push(`hset:${key}`);
+      return 1;
+    });
+    redis.eval.mockImplementation(async (_script, keys) => {
+      callOrder.push(`eval:${(keys as string[]).join(",")}`);
+      return 1;
+    });
+
+    await replaceRedisHashes(redis, [
+      { key: "intel_deep", fields: oversizedFields }, // oversized, FIRST in input
+      { key: "labels", fields: { "0xaaa": "label" } }, // eval-eligible, second
+    ]);
+
+    // intel_deep's DEL + HSETs must precede labels' EVAL.
+    expect(callOrder[0]).toBe("del:intel_deep");
+    const intelHsetCount = callOrder.filter((c) => c === "hset:intel_deep").length;
+    expect(intelHsetCount).toBeGreaterThanOrEqual(1);
+    // labels EVAL is the last call.
+    expect(callOrder[callOrder.length - 1]).toBe("eval:labels");
   });
 
   it("throws cleanly when a single field exceeds the HSET command cap (no partial write)", async () => {

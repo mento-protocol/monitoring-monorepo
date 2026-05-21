@@ -105,36 +105,51 @@ function payloadBytesFor(
 }
 
 /**
- * Greedy-pack EVAL-eligible replacements into sub-batches each fitting under
- * the Upstash request cap, in the input order. Oversized single hashes are
- * dispatched separately via chunked HSET and do not pass through here —
- * callers partition before invoking this.
- *
- * The input order matters: callers should list "must stay atomic together"
- * hashes adjacent at the front (e.g. labels + reports). When their combined
- * payload fits one sub-batch, they swap together; the larger intel hashes
- * each get their own sub-batch.
+ * Build an order-preserving dispatch plan from the input replacements.
+ * Walks input once: an oversized single hash flushes the current EVAL batch
+ * then dispatches as chunked; an EVAL-eligible hash extends the current
+ * batch as long as the batch still fits under the cap, else flushes + starts
+ * a new batch. The resulting plan preserves input order — so a failure mid-
+ * dispatch always halts on the earliest-input replacement that hadn't yet
+ * committed, giving operators a predictable resume point.
  */
-function packIntoBatches(
+type HashDispatchUnit =
+  | { kind: "eval"; batch: RedisHashReplacement[] }
+  | { kind: "chunked"; replacement: RedisHashReplacement };
+
+function planHashDispatch(
   script: string,
   replacements: RedisHashReplacement[],
-): RedisHashReplacement[][] {
-  const batches: RedisHashReplacement[][] = [];
-  let current: RedisHashReplacement[] = [];
+): HashDispatchUnit[] {
+  const plan: HashDispatchUnit[] = [];
+  let currentBatch: RedisHashReplacement[] = [];
+
+  const flushBatch = (): void => {
+    if (currentBatch.length > 0) {
+      plan.push({ kind: "eval", batch: currentBatch });
+      currentBatch = [];
+    }
+  };
+
   for (const replacement of replacements) {
-    const candidate = [...current, replacement];
+    if (payloadBytesFor(script, [replacement]) > MAX_REDIS_HASH_REPLACE_BYTES) {
+      flushBatch();
+      plan.push({ kind: "chunked", replacement });
+      continue;
+    }
+    const candidate = [...currentBatch, replacement];
     if (
-      current.length > 0 &&
+      currentBatch.length > 0 &&
       payloadBytesFor(script, candidate) > MAX_REDIS_HASH_REPLACE_BYTES
     ) {
-      batches.push(current);
-      current = [replacement];
+      flushBatch();
+      currentBatch = [replacement];
     } else {
-      current = candidate;
+      currentBatch = candidate;
     }
   }
-  if (current.length > 0) batches.push(current);
-  return batches;
+  flushBatch();
+  return plan;
 }
 
 async function evalHashWriteScript(
@@ -154,62 +169,35 @@ async function evalHashWriteScript(
     return;
   }
 
-  // Partition: EVAL-eligible hashes (single-hash payload fits the cap) vs
-  // oversized hashes (single-hash payload exceeds the cap). EVAL-eligible go
-  // through greedy-packed sub-batches; oversized fall back to chunked DEL+HSET
-  // (replace) or chunked HSET (merge), which loses intra-hash atomicity for
-  // that specific hash but is the only path that fits.
-  const evalEligible: RedisHashReplacement[] = [];
-  const oversized: RedisHashReplacement[] = [];
-  for (const replacement of replacements) {
-    if (payloadBytesFor(script, [replacement]) > MAX_REDIS_HASH_REPLACE_BYTES) {
-      oversized.push(replacement);
-    } else {
-      evalEligible.push(replacement);
-    }
-  }
-
-  // EVAL-eligible sub-batches. Sequential dispatch — once we've exceeded the
-  // single-script cap, no ordering preserves cross-batch atomicity, but firing
-  // them concurrently is worse: a late batch failing while early ones already
-  // committed leaves Redis in an unpredictable partial state. Serializing
-  // halts at a known boundary on failure (batches 1..i applied, i+1..N
-  // untouched).
-  const batches = packIntoBatches(script, evalEligible);
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const keys = batch.map((r) => r.key);
-    const argv = flattenHashReplacements(batch);
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop
-      await runEvalScript(redis, script, keys, argv);
-    } catch (err) {
-      throw new Error(
-        `Redis hash ${operation} failed at EVAL sub-batch ${i + 1}/${batches.length} ` +
-          `(keys=[${keys.join(", ")}]); sub-batches 1..${i} already committed. ` +
-          `Original: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
-    }
-  }
-
-  // Oversized: dispatch each via chunked DEL+HSET (replace) or chunked HSET
-  // (merge). Cross-hash atomicity was already broken when we partitioned;
-  // intra-hash atomicity is also broken inside chunkedHashWrite (a partial
-  // chunk-flush leaves the hash with some-but-not-all fields). This is
-  // acceptable for DR restore — a rare event where a brief partial state
-  // beats not being able to restore at all.
+  // Walk in input order, mixing EVAL batches and chunked dispatches as the
+  // hash sizes dictate. Sequential dispatch — once we've exceeded the single-
+  // script cap, no ordering preserves cross-batch atomicity, but firing
+  // concurrently is worse: a late dispatch failing while earlier ones
+  // already committed leaves Redis in an unpredictable partial state.
+  // Serializing halts at a known boundary; preserving input order means the
+  // halt point is the earliest-input replacement that hadn't yet committed.
+  const plan = planHashDispatch(script, replacements);
   const replaceFirst = operation === "replacement";
-  for (let i = 0; i < oversized.length; i++) {
-    const replacement = oversized[i];
+  for (let i = 0; i < plan.length; i++) {
+    const unit = plan[i];
     try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop
-      await chunkedHashWrite(redis, replacement, { replaceFirst });
+      if (unit.kind === "eval") {
+        const keys = unit.batch.map((r) => r.key);
+        const argv = flattenHashReplacements(unit.batch);
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        await runEvalScript(redis, script, keys, argv);
+      } else {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop
+        await chunkedHashWrite(redis, unit.replacement, { replaceFirst });
+      }
     } catch (err) {
+      const description =
+        unit.kind === "eval"
+          ? `EVAL sub-batch keys=[${unit.batch.map((r) => r.key).join(", ")}]`
+          : `chunked write for ${unit.replacement.key} (oversized; partial intra-hash state possible)`;
       throw new Error(
-        `Redis hash ${operation} failed during chunked write for ${replacement.key} ` +
-          `(oversized hash ${i + 1}/${oversized.length}); ` +
-          `prior batches + prior oversized hashes already committed; this hash may be in a partial state. ` +
+        `Redis hash ${operation} failed at dispatch unit ${i + 1}/${plan.length} ` +
+          `(${description}); units 1..${i} already committed. ` +
           `Original: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );

@@ -68,17 +68,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // 32 MB restore-side blob cap stops biting. Restore reads the
         // manifest first, then fetches the referenced hash blobs in parallel.
         //
-        // Pathnames are deterministic per-day (`addRandomSuffix: false`) so
-        // the manifest path is predictable and a re-run overwrites the same
-        // blobs cleanly. Two backup runs colliding on the same day could in
-        // principle interleave per-hash writes before the manifest lands and
-        // produce a torn snapshot (known trade-off, deferred): Vercel cron only
-        // fires once per `0 3 * * *` slot so the daily path is not at risk;
-        // an operator manually curling /backup during the scheduled run is
-        // the only way to trigger it, and that's a known operator hazard.
-        // If we ever want true atomicity, the fix is `addRandomSuffix: true`
-        // on the hash blobs (manifest still deterministic, points at the
-        // random pathnames) — left out here to avoid blob-storage churn.
+        // Hash blobs use `addRandomSuffix: true` so each run writes unique
+        // pathnames — a retry after a partial upload failure cannot overwrite
+        // the prior run's blobs and produce a torn snapshot mid-`Promise.all`.
+        // The manifest stays at a deterministic per-day path so restore has
+        // a single known entry point; it points at the actual pathnames each
+        // `put()` returned. Old per-run hash blobs that aren't referenced by
+        // the latest manifest become orphans — collectable by a cleanup job
+        // later (cheap relative to the safety win).
         const hashRecords: Record<SnapshotHashName, Record<string, unknown>> = {
           labels,
           reports,
@@ -95,25 +92,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // the resolved pathnames + sizes).
         const hashUploads = await Promise.all(
           HASH_BLOB_NAMES.map(async (name) => {
-            const pathname = hashBlobPathname(date, name);
+            const pathnamePrefix = hashBlobPathname(date, name);
             const serialized = JSON.stringify(hashRecords[name], null, 2);
             const sizeBytes = Buffer.byteLength(serialized, "utf8");
-            await put(pathname, serialized, {
+            const result = await put(pathnamePrefix, serialized, {
               access: "private",
               contentType: "application/json",
-              addRandomSuffix: false,
-              // Deterministic per-day pathnames + retry semantics: a failed
-              // run can leave a subset of hash blobs already on disk, and the
-              // next retry has to overwrite them to land a fresh manifest.
-              // Without allowOverwrite the SDK errors on the second put() to
-              // the same pathname.
-              allowOverwrite: true,
+              // Unique pathname per run; manifest references result.pathname.
+              addRandomSuffix: true,
               // Fail fast if the Blob API hangs — otherwise a single stuck
               // upload would block the whole cron until the 5min maxDuration
               // budget elapses.
               abortSignal: AbortSignal.timeout(30_000),
             });
-            return { name, pathname, sizeBytes };
+            return { name, pathname: result.pathname, sizeBytes };
           }),
         );
 

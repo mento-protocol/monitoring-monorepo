@@ -186,7 +186,10 @@ describe("GET /api/address-labels/backup", () => {
     // 7 hash blobs + 1 manifest = 8 put() calls
     expect(mockPut).toHaveBeenCalledTimes(8);
 
-    // Every blob pathname follows the v2 per-day prefix convention
+    // Every blob pathname follows the v2 per-day prefix convention.
+    // Hash blobs use addRandomSuffix: true so each run writes unique paths
+    // (no torn snapshots on retry); the manifest stays at a deterministic
+    // per-day path so restore has a single known entry point.
     for (const call of mockPut.mock.calls) {
       const [pathname, , opts] = call as [
         string,
@@ -197,7 +200,12 @@ describe("GET /api/address-labels/backup", () => {
         /^address-labels-backup-\d{4}-\d{2}-\d{2}\/(labels|reports|intelDeep|intelTransfers|intelWealth|intelEntities|intelEntityCps|manifest)\.json$/,
       );
       expect(opts.access).toBe("private");
-      expect(opts.addRandomSuffix).toBe(false);
+      if (pathname.endsWith("/manifest.json")) {
+        expect(opts.addRandomSuffix).toBe(false);
+        expect(opts.allowOverwrite).toBe(true);
+      } else {
+        expect(opts.addRandomSuffix).toBe(true);
+      }
     }
 
     // Every named hash blob landed
@@ -287,17 +295,24 @@ describe("GET /api/address-labels/backup", () => {
     );
   });
 
-  it("overwrites same-day backup (deterministic pathnames)", async () => {
+  it("manifest pathname is deterministic across same-day runs (restore entry point stays stable)", async () => {
+    // Hash blobs use addRandomSuffix: true so each run writes unique paths
+    // (real Vercel appends a random token; our mock returns input unchanged
+    // so the test can't directly observe the suffix). What MUST stay stable
+    // is the manifest pathname — restore looks it up by per-day prefix.
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
       headers: { Authorization: "Bearer test-cron-secret" },
     });
-    await GET(req);
-    const firstRunPaths = mockPut.mock.calls.map((c) => c[0]);
+    const res1 = await GET(req);
+    const { pathname: manifest1 } = await res1.json();
     mockPut.mockClear();
-    await GET(req);
-    const secondRunPaths = mockPut.mock.calls.map((c) => c[0]);
-    expect(secondRunPaths).toEqual(firstRunPaths);
+    const res2 = await GET(req);
+    const { pathname: manifest2 } = await res2.json();
+    expect(manifest1).toBe(manifest2);
+    expect(manifest1).toMatch(
+      /^address-labels-backup-\d{4}-\d{2}-\d{2}\/manifest\.json$/,
+    );
   });
 
   it("fires a Sentry warning when any single hash blob exceeds the restore cap", async () => {
