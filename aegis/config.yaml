@@ -145,10 +145,34 @@ chains:
   - id: monad
     label: monad
     httpRpcUrl: https://rpc.monad.xyz
+    contracts:
+      SortedOracles: '0x6f92C745346057a61b259579256159458a0a6A92'
+      BreakerBox: '0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722'
+    vars:
+      # Monad rate feeds (same IDs on monad mainnet and testnet)
+      USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
+      AUSDUSD: '0xf47172cE00522Cc7dB02109634A92CE866a15FCC'
+      USDTUSD: '0xAc414205651F4a62B614b6BE9e5318a182C33EB0'
+      GBPUSD: '0xEA4103A6A122fbe2cDb07A80d4d293be07bb29Fa'
+      EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
+      JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
+      CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
 
   - id: monadTestnet
     label: monad-testnet
     httpRpcUrl: https://testnet-rpc.monad.xyz
+    contracts:
+      SortedOracles: '0x85ed9ac57827132B8F60938F3165BC139E1F53cd'
+      BreakerBox: '0x88869E30609D2C0E4032463D713328C6f541878e'
+    vars:
+      # Monad rate feeds (same IDs on monad mainnet and testnet)
+      USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
+      AUSDUSD: '0xf47172cE00522Cc7dB02109634A92CE866a15FCC'
+      USDTUSD: '0xAc414205651F4a62B614b6BE9e5318a182C33EB0'
+      GBPUSD: '0xEA4103A6A122fbe2cDb07A80d4d293be07bb29Fa'
+      EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
+      JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
+      CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
 
   - id: celoSepolia
     label: celo-sepolia
@@ -430,6 +454,35 @@ metrics:
       - [CELOPHP]
       - [CELOXOF]
       - [CELOZAR]
+
+  # Monad rate feed freshness. Monad SortedOracles reports its own (smaller) set
+  # of feeds, so this is a separate entry from the Celo one above.
+  - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [monad, monadTestnet]
+    variants:
+      - [USDCUSD]
+      - [AUSDUSD]
+      - [USDTUSD]
+      - [GBPUSD]
+      - [EURUSD]
+      - [JPYUSD]
+      - [CHFUSD]
+
+  # Monad rate feed trading modes (BreakerBox), for the Monad feed set.
+  - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [monad, monadTestnet]
+    variants:
+      - [USDCUSD]
+      - [AUSDUSD]
+      - [USDTUSD]
+      - [GBPUSD]
+      - [EURUSD]
+      - [JPYUSD]
+      - [CHFUSD]
 
   # Checks if wallets or contracts of interest have enough CELO to pay for transactions
   - source: CELOToken.balanceOf(address owner)(uint256)

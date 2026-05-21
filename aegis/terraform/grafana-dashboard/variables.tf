@@ -47,10 +47,6 @@ locals {
     }
   }
 
-  # Chains carrying the full Mento contract suite — rate-feed-freshness panels
-  # only apply here (Monad has no SortedOracles).
-  celo_chains = { for k, c in local.chains : k => c if c.metric == "CELOToken_balanceOf" }
-
   prometheus_datasource_uid = "grafanacloud-prom"
   common_panel_config = {
     datasource = {

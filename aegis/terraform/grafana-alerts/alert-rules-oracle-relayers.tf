@@ -4,8 +4,7 @@ resource "grafana_rule_group" "oracle_relayers" {
   interval_seconds = 120
 
   dynamic "rule" {
-    # Stale-price alerts apply only to chains with SortedOracles (Celo).
-    for_each = local.celo_chains
+    for_each = local.chains
 
     content {
       name           = "Oldest Report Expired [${rule.value.title}]"

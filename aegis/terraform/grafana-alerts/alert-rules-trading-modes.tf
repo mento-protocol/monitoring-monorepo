@@ -4,8 +4,7 @@ resource "grafana_rule_group" "trading_modes" {
   interval_seconds = 120
 
   dynamic "rule" {
-    # Trading-mode alerts read BreakerBox, which only exists on Celo chains.
-    for_each = local.celo_chains
+    for_each = local.chains
 
     content {
       name           = "Trading Mode Alert [${rule.value.title}]"
