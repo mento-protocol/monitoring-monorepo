@@ -65,14 +65,22 @@ export function hashBlobPathname(
   return `address-labels-backup-${dateISO}/${hash}.json`;
 }
 
-/** Type guard for the v2 manifest shape (used by restore). */
+/**
+ * Type guard for the v2 manifest shape (used by restore). Enforces that the
+ * manifest lists EXACTLY the expected 7 hash names, each appearing once.
+ * A manifest that's missing a hash or has duplicates would assemble into
+ * a partial snapshot — and in replace mode `handleSnapshot` only writes
+ * fields present in the snapshot, so an omitted hash leaves Redis with the
+ * pre-restore state for that hash. That silently defeats the route's
+ * "restore is all-or-nothing per hash" invariant (codex P2).
+ */
 export function isBackupManifestV2(value: unknown): value is BackupManifestV2 {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   if (obj.version !== BACKUP_MANIFEST_VERSION) return false;
   if (typeof obj.exportedAt !== "string") return false;
   if (!Array.isArray(obj.hashes)) return false;
-  return obj.hashes.every((entry) => {
+  const everyEntryWellShaped = obj.hashes.every((entry) => {
     if (typeof entry !== "object" || entry === null) return false;
     const e = entry as Record<string, unknown>;
     return (
@@ -83,4 +91,16 @@ export function isBackupManifestV2(value: unknown): value is BackupManifestV2 {
       Number.isFinite(e.sizeBytes)
     );
   });
+  if (!everyEntryWellShaped) return false;
+  // Exactly one entry per expected name. Cardinality check first (must equal
+  // the expected count); uniqueness follows from cardinality + name coverage.
+  if (obj.hashes.length !== HASH_BLOB_NAMES.length) return false;
+  const seenNames = new Set(
+    obj.hashes.map((e) => (e as { name: string }).name),
+  );
+  if (seenNames.size !== HASH_BLOB_NAMES.length) return false;
+  for (const expected of HASH_BLOB_NAMES) {
+    if (!seenNames.has(expected)) return false;
+  }
+  return true;
 }

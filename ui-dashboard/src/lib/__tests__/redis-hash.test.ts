@@ -183,6 +183,58 @@ describe("replaceRedisHashes", () => {
       /Single field huge on hash intel_deep[\s\S]*cannot split further/,
     );
   });
+
+  it("pre-scans single-field budget BEFORE the DEL fires (no data loss on validation failure)", async () => {
+    // Regression test for the cursor-Medium bug: in replace mode the
+    // single-field-too-big guard used to throw AFTER del() ran, wiping the
+    // hash and then failing — leaving the operator with an empty hash and
+    // no replacement data. The validation must happen before any mutation.
+    const redis = makeMockRedis();
+    const oneHuge = "x".repeat(MAX_REDIS_HASH_REPLACE_BYTES);
+    await expect(
+      replaceRedisHashes(redis, [
+        // Mix of fits + oversized — the oversized one must trip validation
+        // BEFORE the DEL on intel_deep happens.
+        {
+          key: "intel_deep",
+          fields: { ok: "small", huge: oneHuge },
+        },
+      ]),
+    ).rejects.toThrow(/Single field huge on hash intel_deep/);
+    expect(redis.del).not.toHaveBeenCalled();
+    expect(redis.hset).not.toHaveBeenCalled();
+  });
+
+  it("sizes HSET chunks by JSON-encoded bytes (accounts for escaping)", async () => {
+    // Regression test for the codex-P1 bug: previous heuristic summed raw
+    // UTF-8 bytes, but Upstash REST sends HSET as a JSON array where every
+    // quote/backslash in field+value gets escaped. A value with many quotes
+    // can almost double in wire size; an under-estimated chunk goes past
+    // the server cap and (in replace mode) leaves the hash partial.
+    //
+    // Build a value full of quote characters so the escaped form is ~2×
+    // raw, then verify the planner splits it across multiple HSETs instead
+    // of cramming it into one over-cap call.
+    const redis = makeMockRedis();
+    const quoteHeavy1Mb = '"'.repeat(1024 * 1024); // 1 MB raw, ~2 MB JSON-escaped
+    const fields = Object.fromEntries(
+      Array.from({ length: 6 }, (_, i) => [`f${i}`, quoteHeavy1Mb]),
+    );
+    // 6 fields × 1 MB raw = 6 MB raw. With JSON escaping ≈ 12 MB. Old
+    // heuristic would dispatch as one HSET; new heuristic splits into
+    // multiple HSETs each under the cap.
+    await replaceRedisHashes(redis, [{ key: "intel_deep", fields }]);
+    expect(redis.del).toHaveBeenCalledWith("intel_deep");
+    expect(redis.hset.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // All 6 fields landed
+    const writtenFields = new Set<string>();
+    for (const call of redis.hset.mock.calls) {
+      for (const k of Object.keys(call[1] as Record<string, string>)) {
+        writtenFields.add(k);
+      }
+    }
+    expect(writtenFields.size).toBe(6);
+  });
 });
 
 describe("mergeRedisHashes", () => {

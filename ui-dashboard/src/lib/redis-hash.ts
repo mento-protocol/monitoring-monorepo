@@ -218,24 +218,27 @@ async function evalHashWriteScript(
 }
 
 /**
- * Approximate Upstash REST wire bytes for an `HSET key f1 v1 f2 v2 ...`
- * command. We over-estimate slightly so the chunk planner never picks a
- * command that the server then rejects for being one byte over the cap —
- * `HSET_CHUNK_HEADROOM_BYTES` is additionally subtracted from the cap at
- * the call site.
+ * Exact Upstash REST wire bytes for an `HSET key f1 v1 f2 v2 ...` command —
+ * compute the actual JSON encoding length per item rather than approximating
+ * raw UTF-8 byte sums. The raw approximation underestimates because Upstash
+ * REST encodes the command as a JSON array, escaping every quote/backslash/
+ * control character in field names and values. Restored intel records are
+ * JSON-encoded strings full of quotes, so the gap is often large enough to
+ * push a "fits" chunk past the server cap and fail at runtime — replace mode
+ * has already issued DEL by then, leaving the hash partial (codex P1).
+ *
+ * Uses `JSON.stringify` per item to get the true encoded length (handles
+ * non-ASCII via UTF-8). Plus per-item 1-byte separator (`,`) and 2-byte array
+ * brackets. `HSET_CHUNK_HEADROOM_BYTES` is still subtracted at the call site
+ * as a guard against any remaining envelope discrepancy.
  */
 function hsetCommandBytes(key: string, pairs: Array<[string, string]>): number {
-  // Envelope: `["HSET","<key>", ...pairs]`. Per-pair envelope is roughly
-  // `,"<field>","<value>"` ≈ 6 bytes of JSON syntax plus the field+value
-  // UTF-8 byte lengths.
-  const ENVELOPE_BYTES = 12;
-  const PER_PAIR_ENVELOPE_BYTES = 6;
-  let bytes = ENVELOPE_BYTES + Buffer.byteLength(key, "utf8") + 2;
+  let bytes = 2; // `[` + `]`
+  bytes += Buffer.byteLength(JSON.stringify("HSET"), "utf8");
+  bytes += 1 + Buffer.byteLength(JSON.stringify(key), "utf8"); // `,"key"`
   for (const [field, value] of pairs) {
-    bytes +=
-      PER_PAIR_ENVELOPE_BYTES +
-      Buffer.byteLength(field, "utf8") +
-      Buffer.byteLength(value, "utf8");
+    bytes += 1 + Buffer.byteLength(JSON.stringify(field), "utf8");
+    bytes += 1 + Buffer.byteLength(JSON.stringify(value), "utf8");
   }
   return bytes;
 }
@@ -262,32 +265,42 @@ async function chunkedHashWrite(
   options: { replaceFirst: boolean },
 ): Promise<void> {
   const { key, fields } = replacement;
+  const entries = Object.entries(fields);
+
+  // Pre-scan every field BEFORE any side effect. Single-field-too-big in
+  // replace mode used to throw AFTER the DEL ran, leaving the hash empty
+  // and unrecoverable (cursor Medium). The check now uses the same
+  // `cap - headroom` budget the chunk planner uses, so a field at the
+  // wire-size edge gets the same safety margin (codex P2).
+  const chunkByteCap = MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES;
+  for (const [field, value] of entries) {
+    if (hsetCommandBytes(key, [[field, value]]) > chunkByteCap) {
+      throw new Error(
+        `Single field ${field} on hash ${key} produces an HSET command above ${chunkByteCap} bytes ` +
+          `(cap ${MAX_REDIS_HASH_REPLACE_BYTES}, headroom ${HSET_CHUNK_HEADROOM_BYTES}); ` +
+          `cannot split further at the field level.`,
+      );
+    }
+  }
 
   if (options.replaceFirst) {
     await redis.del(key);
   }
-
-  const entries = Object.entries(fields);
   if (entries.length === 0) return;
 
-  const chunkByteCap = MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES;
   let chunk: Array<[string, string]> = [];
   let chunkBytes = hsetCommandBytes(key, []);
 
   for (const [field, value] of entries) {
+    // Per-pair contribution to the next chunk: re-measure as JSON-encoded
+    // bytes (not raw UTF-8) so the planner stays aligned with the actual
+    // wire payload Upstash sees — every quote/backslash in `field` and
+    // `value` gets escaped on the way out.
     const entryBytes =
-      Buffer.byteLength(field, "utf8") + Buffer.byteLength(value, "utf8") + 6;
-
-    // Field+value alone exceeding the cap is unrecoverable — a single HSET
-    // pair can't be split further. Fail fast with a clear message.
-    if (
-      hsetCommandBytes(key, [[field, value]]) > MAX_REDIS_HASH_REPLACE_BYTES
-    ) {
-      throw new Error(
-        `Single field ${field} on hash ${key} produces an HSET command above ${MAX_REDIS_HASH_REPLACE_BYTES} bytes; ` +
-          `cannot split further at the field level.`,
-      );
-    }
+      1 +
+      Buffer.byteLength(JSON.stringify(field), "utf8") +
+      1 +
+      Buffer.byteLength(JSON.stringify(value), "utf8");
 
     if (chunk.length > 0 && chunkBytes + entryBytes > chunkByteCap) {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop

@@ -66,6 +66,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // single blob under ~10 MB (largest is intel_deep at ~7 MB) so the
         // 32 MB restore-side blob cap stops biting. Restore reads the
         // manifest first, then fetches the referenced hash blobs in parallel.
+        //
+        // Pathnames are deterministic per-day (`addRandomSuffix: false`) so
+        // the manifest path is predictable and a re-run overwrites the same
+        // blobs cleanly. Two backup runs colliding on the same day could in
+        // principle interleave per-hash writes before the manifest lands and
+        // produce a torn snapshot (codex P2 #6, deferred): Vercel cron only
+        // fires once per `0 3 * * *` slot so the daily path is not at risk;
+        // an operator manually curling /backup during the scheduled run is
+        // the only way to trigger it, and that's a known operator hazard.
+        // If we ever want true atomicity, the fix is `addRandomSuffix: true`
+        // on the hash blobs (manifest still deterministic, points at the
+        // random pathnames) — left out here to avoid blob-storage churn.
         const hashRecords: Record<SnapshotHashName, Record<string, unknown>> = {
           labels,
           reports,
@@ -89,6 +101,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               access: "private",
               contentType: "application/json",
               addRandomSuffix: false,
+              // Fail fast if the Blob API hangs — otherwise a single stuck
+              // upload would block the whole cron until the 5min maxDuration
+              // budget elapses (cursor Low).
+              abortSignal: AbortSignal.timeout(30_000),
             });
             return { name, pathname, sizeBytes };
           }),
@@ -105,6 +121,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           access: "private",
           contentType: "application/json",
           addRandomSuffix: false,
+          abortSignal: AbortSignal.timeout(30_000),
         });
 
         return NextResponse.json({
