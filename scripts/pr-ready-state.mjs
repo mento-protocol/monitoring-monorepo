@@ -111,7 +111,7 @@ function repoPath(repo) {
   return `${repo.owner}/${repo.name}`;
 }
 
-async function fetchReviewThreads({ repo, number }) {
+function fetchReviewThreads({ repo, number }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -199,7 +199,7 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
   };
 }
 
-async function fetchReadyState({ prArg, repoArg }) {
+function fetchReadyState({ prArg, repoArg }) {
   const prViewArgs = [
     "pr",
     "view",
@@ -247,7 +247,7 @@ async function fetchReadyState({ prArg, repoArg }) {
   const reviewComments = ghApiJsonPages(repo, [
     `repos/${path}/pulls/${number}/comments`,
   ]);
-  const reviewThreads = await fetchReviewThreads({ repo, number });
+  const reviewThreads = fetchReviewThreads({ repo, number });
   const requiredStatusContexts = fetchRequiredStatusContexts({
     repo,
     baseRef: pr.baseRefName,
@@ -293,10 +293,10 @@ function parseArgs(argv) {
   return { json, prArg, repoArg };
 }
 
-async function main() {
+function main() {
   try {
     const { json, prArg, repoArg } = parseArgs(process.argv.slice(2));
-    const summary = await fetchReadyState({ prArg, repoArg });
+    const summary = fetchReadyState({ prArg, repoArg });
     process.stdout.write(
       json ? `${JSON.stringify(summary, null, 2)}\n` : formatHuman(summary),
     );
@@ -308,5 +308,5 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await main();
+  main();
 }
