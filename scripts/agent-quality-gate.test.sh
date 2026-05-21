@@ -203,7 +203,7 @@ rm -rf "$validator_repo"
 assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agent-quality-gate.sh"'
 
 run_gate "ui-dashboard/package.json"
-assert_contains "- ./tools/trunk check --all (changed files should pass the same full-repo Trunk scope as CI)"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
@@ -214,6 +214,11 @@ assert_order \
 assert_order \
   "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)" \
   "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+
+run_gate "metrics-bridge/src/main.ts"
+assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed existing paths should pass targeted Trunk checks)"
+assert_not_contains "- ./tools/trunk check --all"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests or lockfile changed."
@@ -234,14 +239,17 @@ assert_contains "dependency install scripts"
 run_gate_expect_failure "indexer-envio/.npmrc"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure "pnpmfile.cjs"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure ".pnpmfile.cjs"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
@@ -1093,13 +1101,13 @@ scripts/agent-quality-gate.sh \
   --base origin/test \
   > "$output_file"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
+assert_contains "- ./tools/trunk check docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 
 run_gate "docs/deployment.md"
 assert_contains "Detected surfaces:"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check docs/deployment.md (docs-only changes should pass targeted Trunk checks)"
+assert_contains "- ./tools/trunk check docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 
 run_gate "docs/pr-checklists/recurring-review-patterns.md"
@@ -1148,7 +1156,7 @@ restore_hook_configs
 
 run_gate "docs/deleted.md"
 assert_contains "- docs"
-assert_contains "- ./tools/trunk check --all (docs-only changes include deleted paths; full Trunk avoids missing-path failures)"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- ./tools/trunk check docs/deleted.md"
 
 # Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
