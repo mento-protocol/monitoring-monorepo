@@ -28,9 +28,10 @@ Required blockers:
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
   unauthorized protection data; the probe fails closed rather than guessing
-  required-vs-optional status. GitHub's `Branch not protected (HTTP 404)`
-  response means no required-context data is available and uses the fallback
-  split.
+  required-vs-optional status. If the classic branch-protection endpoint returns
+  GitHub's `Branch not protected (HTTP 404)` response, the probe reads active
+  branch rulesets and derives required status contexts from any
+  `required_status_checks` rule before using the fallback split.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer.

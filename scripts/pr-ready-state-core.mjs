@@ -108,17 +108,33 @@ export function splitRequiredAndOptionalChecks(
   const hasRequiredContextData = requiredContextSet.size > 0;
   const required = [];
   const optional = [];
+  const seenRequiredContexts = new Set();
 
   for (const check of statusCheckRollup) {
     const name = checkDisplayName(check);
     const isRequired = hasRequiredContextData
       ? requiredContextSet.has(name)
       : !isOptionalCheckName(name);
+    if (isRequired) {
+      seenRequiredContexts.add(name);
+    }
     const item = checkToItem(check, { required: isRequired });
     if (isRequired) {
       required.push(item);
     } else {
       optional.push(item);
+    }
+  }
+
+  for (const context of requiredContextSet) {
+    if (!seenRequiredContexts.has(context)) {
+      required.push({
+        kind: "check",
+        name: context,
+        state: "pending",
+        required: true,
+        url: null,
+      });
     }
   }
 

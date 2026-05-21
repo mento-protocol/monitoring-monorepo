@@ -15,7 +15,12 @@ import {
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
 import { formatHuman } from "./pr-ready-state-format.mjs";
-import { repoFromPullRequestUrl, splitRepo } from "./pr-ready-state.mjs";
+import {
+  parseArgs,
+  repoFromPullRequestUrl,
+  requiredStatusContextsFromRules,
+  splitRepo,
+} from "./pr-ready-state.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -50,6 +55,20 @@ function assertDeepEqual(actual, expected) {
   if (actualJson !== expectedJson) {
     throw new Error(`expected ${expectedJson}, got ${actualJson}`);
   }
+}
+
+function assertThrows(fn, expectedMessage) {
+  try {
+    fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    assert(
+      msg.includes(expectedMessage),
+      `expected error to include ${JSON.stringify(expectedMessage)}, got ${JSON.stringify(msg)}`,
+    );
+    return;
+  }
+  throw new Error("expected function to throw");
 }
 
 const basePr = {
@@ -106,6 +125,42 @@ test("resolves API repo identity from pull request URL", () => {
       name: "repo",
       host: "github.example.com",
     },
+  );
+});
+
+test("parses explicit help without requiring a PR argument", () => {
+  assertDeepEqual(parseArgs(["--help"]), {
+    help: true,
+    json: false,
+    prArg: null,
+    repoArg: null,
+  });
+});
+
+test("rejects missing flag values at the CLI boundary", () => {
+  assertThrows(
+    () => parseArgs(["--repo", "--pr", "123"]),
+    "--repo requires a value",
+  );
+  assertThrows(() => parseArgs(["--pr"]), "--pr requires a value");
+});
+
+test("extracts required status contexts from branch rulesets", () => {
+  assertDeepEqual(
+    requiredStatusContextsFromRules([
+      { type: "deletion" },
+      {
+        type: "required_status_checks",
+        parameters: {
+          required_status_checks: [
+            { context: "ci" },
+            { context: "Vercel" },
+            { context: "ci" },
+          ],
+        },
+      },
+    ]),
+    ["ci", "Vercel"],
   );
 });
 
@@ -169,6 +224,18 @@ test("honors branch-protection required status contexts when available", () => {
       required: ["Cursor Bugbot:pending"],
       optional: ["advisory:pending"],
     },
+  );
+});
+
+test("marks missing required status contexts as pending blockers", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" }],
+    ["ci", "Vercel"],
+  );
+
+  assertDeepEqual(
+    split.required.map((check) => `${check.name}:${check.state}`),
+    ["ci:pass", "Vercel:pending"],
   );
 });
 

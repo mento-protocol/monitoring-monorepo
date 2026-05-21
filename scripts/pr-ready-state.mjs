@@ -81,6 +81,18 @@ function ghApiJsonResult(repo, args) {
   }
 }
 
+export function requiredStatusContextsFromRules(rules = []) {
+  return [
+    ...new Set(
+      rules
+        .filter((rule) => rule.type === "required_status_checks")
+        .flatMap((rule) => rule.parameters?.required_status_checks ?? [])
+        .map((check) => check.context)
+        .filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
 export function splitRepo(repoValue) {
   const parts = String(repoValue).split("/").filter(Boolean);
   const name = parts.pop();
@@ -181,8 +193,19 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
 
   if (!result.ok) {
     if (result.error.includes("Branch not protected (HTTP 404)")) {
+      const rulesResult = ghApiJsonResult(repo, [
+        `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
+      ]);
+
+      if (!rulesResult.ok) {
+        return {
+          contexts: [],
+          error: rulesResult.error,
+        };
+      }
+
       return {
-        contexts: [],
+        contexts: requiredStatusContextsFromRules(rulesResult.value ?? []),
         error: null,
       };
     }
@@ -265,24 +288,30 @@ function fetchReadyState({ prArg, repoArg }) {
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n`;
 }
 
-function parseArgs(argv) {
+function readFlagValue(rest, flag) {
+  const flagIndex = rest.indexOf(flag);
+  if (flagIndex < 0) return undefined;
+
+  const value = rest[flagIndex + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${flag} requires a value\n${usage()}`);
+  }
+
+  rest.splice(flagIndex, 2);
+  return value;
+}
+
+export function parseArgs(argv) {
+  const help = argv.includes("--help") || argv.includes("-h");
+  if (help) return { help: true, json: false, prArg: null, repoArg: null };
+
   const json = argv.includes("--json");
   const rest = argv.filter((arg) => arg !== "--json");
-  const repoFlagIndex = rest.indexOf("--repo");
-  let repoArg;
-  if (repoFlagIndex >= 0) {
-    repoArg = rest[repoFlagIndex + 1];
-    rest.splice(repoFlagIndex, 2);
-  }
-  const prFlagIndex = rest.indexOf("--pr");
-  let prArg;
-  if (prFlagIndex >= 0) {
-    prArg = rest[prFlagIndex + 1];
-    rest.splice(prFlagIndex, 2);
-  }
+  const repoArg = readFlagValue(rest, "--repo");
+  let prArg = readFlagValue(rest, "--pr");
   if (!prArg) {
     prArg = rest[0];
     rest.splice(0, 1);
@@ -295,7 +324,11 @@ function parseArgs(argv) {
 
 function main() {
   try {
-    const { json, prArg, repoArg } = parseArgs(process.argv.slice(2));
+    const { help, json, prArg, repoArg } = parseArgs(process.argv.slice(2));
+    if (help) {
+      process.stdout.write(usage());
+      return;
+    }
     const summary = fetchReadyState({ prArg, repoArg });
     process.stdout.write(
       json ? `${JSON.stringify(summary, null, 2)}\n` : formatHuman(summary),
