@@ -30,7 +30,12 @@ What's left:
 
 - [ ] **Deploy the indexer code** (`/deploy-indexer`). Schema added required
       fields, so this requires a full resync — codegen + redeploy + sync
-      from genesis. No way to forward-only this.
+      from genesis. No way to forward-only this. Side effect: the same
+      resync also relabels historical `BrokerAggregatorDailySnapshot` rows
+      where `aggregator == "mento-router-v2"` was wrongly applied to v3
+      router (`0x4861840…`) traffic — they'll be re-tagged as
+      `"mento-router-v3"`, and traffic via the actual v2 router
+      (`0xBE7293…`) will switch from `"unknown"` to `"mento-router-v2"`.
 - [ ] **Promote to prod** after resync completes and Hasura schema reflects
       the new fields.
 - [ ] **Delete the dashboard `systemDebt` workaround** in
