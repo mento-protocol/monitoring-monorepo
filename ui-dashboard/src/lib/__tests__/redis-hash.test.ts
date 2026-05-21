@@ -185,7 +185,7 @@ describe("replaceRedisHashes", () => {
   });
 
   it("pre-scans single-field budget BEFORE the DEL fires (no data loss on validation failure)", async () => {
-    // Regression test for the cursor-Medium bug: in replace mode the
+    // Regression test for an earlier bug: in replace mode the
     // single-field-too-big guard used to throw AFTER del() ran, wiping the
     // hash and then failing — leaving the operator with an empty hash and
     // no replacement data. The validation must happen before any mutation.
@@ -206,7 +206,7 @@ describe("replaceRedisHashes", () => {
   });
 
   it("sizes HSET chunks by JSON-encoded bytes (accounts for escaping)", async () => {
-    // Regression test for the codex-P1 bug: previous heuristic summed raw
+    // Regression test for an earlier sizing bug: previous heuristic summed raw
     // UTF-8 bytes, but Upstash REST sends HSET as a JSON array where every
     // quote/backslash in field+value gets escaped. A value with many quotes
     // can almost double in wire size; an under-estimated chunk goes past

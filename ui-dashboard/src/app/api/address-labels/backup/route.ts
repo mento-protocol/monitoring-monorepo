@@ -71,7 +71,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // the manifest path is predictable and a re-run overwrites the same
         // blobs cleanly. Two backup runs colliding on the same day could in
         // principle interleave per-hash writes before the manifest lands and
-        // produce a torn snapshot (codex P2 #6, deferred): Vercel cron only
+        // produce a torn snapshot (known trade-off, deferred): Vercel cron only
         // fires once per `0 3 * * *` slot so the daily path is not at risk;
         // an operator manually curling /backup during the scheduled run is
         // the only way to trigger it, and that's a known operator hazard.
@@ -103,7 +103,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               addRandomSuffix: false,
               // Fail fast if the Blob API hangs — otherwise a single stuck
               // upload would block the whole cron until the 5min maxDuration
-              // budget elapses (cursor Low).
+              // budget elapses.
               abortSignal: AbortSignal.timeout(30_000),
             });
             return { name, pathname, sizeBytes };

@@ -72,7 +72,7 @@ export function hashBlobPathname(
  * a partial snapshot — and in replace mode `handleSnapshot` only writes
  * fields present in the snapshot, so an omitted hash leaves Redis with the
  * pre-restore state for that hash. That silently defeats the route's
- * "restore is all-or-nothing per hash" invariant (codex P2).
+ * "restore is all-or-nothing per hash" invariant.
  */
 export function isBackupManifestV2(value: unknown): value is BackupManifestV2 {
   if (typeof value !== "object" || value === null) return false;

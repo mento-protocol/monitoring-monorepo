@@ -101,7 +101,7 @@ describe("isBackupManifestV2 — per-entry shape checks", () => {
   });
 });
 
-describe("isBackupManifestV2 — cardinality + uniqueness (codex P2)", () => {
+describe("isBackupManifestV2 — cardinality + uniqueness", () => {
   it("rejects a manifest missing a required hash", () => {
     // Drop `reports` — assembled snapshot would omit it and replace-mode
     // restore would leave Redis with the pre-restore reports hash intact,

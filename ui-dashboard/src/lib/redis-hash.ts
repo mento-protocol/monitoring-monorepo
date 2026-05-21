@@ -225,7 +225,7 @@ async function evalHashWriteScript(
  * control character in field names and values. Restored intel records are
  * JSON-encoded strings full of quotes, so the gap is often large enough to
  * push a "fits" chunk past the server cap and fail at runtime — replace mode
- * has already issued DEL by then, leaving the hash partial (codex P1).
+ * has already issued DEL by then, leaving the hash partial.
  *
  * Uses `JSON.stringify` per item to get the true encoded length (handles
  * non-ASCII via UTF-8). Plus per-item 1-byte separator (`,`) and 2-byte array
@@ -269,9 +269,9 @@ async function chunkedHashWrite(
 
   // Pre-scan every field BEFORE any side effect. Single-field-too-big in
   // replace mode used to throw AFTER the DEL ran, leaving the hash empty
-  // and unrecoverable (cursor Medium). The check now uses the same
-  // `cap - headroom` budget the chunk planner uses, so a field at the
-  // wire-size edge gets the same safety margin (codex P2).
+  // and unrecoverable. The check now uses the same `cap - headroom` budget
+  // the chunk planner uses, so a field at the wire-size edge gets the same
+  // safety margin.
   const chunkByteCap = MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES;
   for (const [field, value] of entries) {
     if (hsetCommandBytes(key, [[field, value]]) > chunkByteCap) {
