@@ -9,9 +9,9 @@ locals {
 
   # Y-position management
   trading_mode_y_start              = 0
-  trading_mode_height               = 13 # 1 (row) + 12 (panel)
+  trading_mode_height               = 25 # 1 (row) + 24 (4 chains, 2 rows of 12)
   oracle_relayer_y_start            = local.trading_mode_y_start + local.trading_mode_height
-  oracle_relayer_height             = 37 # 1 (row) + 20 (freshness) + 16 (balances: 4 chains, 2 rows of 8)
+  oracle_relayer_height             = 57 # 1 (row) + 40 (freshness: 4 chains, 2 rows of 20) + 16 (balances: 4 chains, 2 rows of 8)
   reserve_y_start                   = local.oracle_relayer_y_start + local.oracle_relayer_height
   reserve_height                    = 17 # 1 (row) + 16 (panel)
   stable_token_supply_y_start       = local.reserve_y_start + local.reserve_height
@@ -30,12 +30,13 @@ locals {
       }
     ],
     flatten([
-      for i, chain in keys(local.celo_chains) : [
+      for i, chain in keys(local.chains) : [
         merge(local.common_panel_config, local.state_timeline_config, {
           id          = local.trading_mode_id_start + 1 + i
           title       = "Rate Feed Trading Mode [${chain}]"
           description = "Rate feed trading mode for each active rate feed. If != 0, it means the trading is halted for that pair."
-          gridPos     = { x = i * 12, y = local.trading_mode_y_start + 1, h = 12, w = 24 / length(local.celo_chains) }
+          # Two panels per row; new row every 2 chains.
+          gridPos = { x = (i % 2) * 12, y = local.trading_mode_y_start + 1 + floor(i / 2) * 12, h = 12, w = 12 }
           fieldConfig = {
             defaults = merge(local.state_timeline_config.fieldConfig.defaults, {
               decimals = 0

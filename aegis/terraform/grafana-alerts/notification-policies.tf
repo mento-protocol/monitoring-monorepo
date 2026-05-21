@@ -96,10 +96,11 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Weekend-mute companion policies for the FX feeds that don't receive new
-    # data on weekends. Only Celo chains have FX rate feeds, so this is scoped
-    # to local.celo_chains.
+    # data on weekends. Iterates all chains; the rateFeed matcher (not the chain)
+    # selects the weekend-disabled feeds, so chains without them simply match
+    # nothing.
     dynamic "policy" {
-      for_each = local.celo_chains
+      for_each = local.chains
       content {
         # Apply the mute timing to the policy
         mute_timings = [grafana_mute_timing.weekend_mute.name]
@@ -353,9 +354,9 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Oracle Relayer warning alerts → #alerts-oracles (prod chains, weekend FX, muted).
-    # Only Celo chains have FX feeds, so the weekend-mute companion is celo-scoped.
+    # The rateFeed matcher selects weekend-disabled feeds; chains without them match nothing.
     dynamic "policy" {
-      for_each = { for k, c in local.celo_chains : k => c if c.env == "prod" }
+      for_each = local.prod_chains
       content {
         contact_point = grafana_contact_point.slack_alerts_oracles.name
         mute_timings  = [grafana_mute_timing.weekend_mute.name]
@@ -417,9 +418,9 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Oracle Relayer alerts → #alerts-testnet (staging chains, weekend FX, muted).
-    # Only Celo chains have FX feeds, so the weekend-mute companion is celo-scoped.
+    # The rateFeed matcher selects weekend-disabled feeds; chains without them match nothing.
     dynamic "policy" {
-      for_each = { for k, c in local.celo_chains : k => c if c.env == "staging" }
+      for_each = local.staging_chains
       content {
         contact_point = grafana_contact_point.slack_alerts_testnet.name
         mute_timings  = [grafana_mute_timing.weekend_mute.name]

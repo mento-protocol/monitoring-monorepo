@@ -9,12 +9,13 @@ locals {
       }
     ],
     flatten([
-      for i, chain in keys(local.celo_chains) : [
+      for i, chain in keys(local.chains) : [
         merge(local.common_panel_config, local.state_timeline_config, {
           id          = local.oracle_relayer_id_start + 1 + i
           title       = "Rate Feed Freshness [${chain}]"
           description = "Shows if the oldest report in SortedOracles is expired for each relayed rate feed. 1 means expired, 0 means not expired."
-          gridPos     = { x = i * 12, y = local.oracle_relayer_y_start + 1, h = 20, w = 24 / length(local.celo_chains) }
+          # Two panels per row; new row every 2 chains.
+          gridPos = { x = (i % 2) * 12, y = local.oracle_relayer_y_start + 1 + floor(i / 2) * 20, h = 20, w = 12 }
           fieldConfig = {
             defaults = merge(local.state_timeline_config.fieldConfig.defaults, {
               decimals = 0
@@ -38,14 +39,15 @@ locals {
     ]),
     [
       for i, chain in keys(local.chains) : merge(local.common_panel_config, {
-        id          = local.oracle_relayer_id_start + 1 + length(local.celo_chains) + i
+        id          = local.oracle_relayer_id_start + 1 + length(local.chains) + i
         type        = "timeseries"
         title       = "${local.chains[chain].symbol} Balances of Relayer Signers [${local.chains[chain].title}]"
         description = "${local.chains[chain].symbol} balance of relayer signers on ${chain}. Red line indicates danger threshold."
-        # Two panels per row; new row every 2 chains.
+        # Two panels per row; new row every 2 chains. Sits below the freshness
+        # panels (header + 2 rows of 20).
         gridPos = {
           x = (i % 2) * 12,
-          y = local.oracle_relayer_y_start + 21 + floor(i / 2) * 8,
+          y = local.oracle_relayer_y_start + 41 + floor(i / 2) * 8,
           h = 8,
           w = 12
         }

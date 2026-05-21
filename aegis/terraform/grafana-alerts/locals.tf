@@ -1,10 +1,11 @@
 # For shared local values that are used across multiple resources
 # See https://www.terraform.io/docs/language/values/locals.html
 locals {
-  # Per-chain registry driving relayer-signer balance alerts (and, where the
-  # metric is CELOToken_balanceOf, the Celo-only stale-price alert). Keyed by
-  # the Prometheus `chain` label aegis publishes. To add an EVM chain (e.g.
-  # polygon mainnet/testnet) add an entry here — no other edits needed.
+  # Per-chain registry driving relayer-signer balance alerts. Stale-price and
+  # trading-mode alerts iterate this same map (every chain runs SortedOracles +
+  # BreakerBox; they differ only in which rateFeed IDs they register, handled by
+  # the metric `variants` in config.yaml). Keyed by the Prometheus `chain` label
+  # aegis publishes. To add an EVM chain add an entry here — no other edits needed.
   #
   #   title     → human label used in alert names / Discord copy (e.g. "Monad")
   #   env       → "prod" | "staging"; drives severity + notification routing
@@ -50,17 +51,14 @@ locals {
     }
   }
 
-  # Chains carrying the full Mento contract suite (SortedOracles/BreakerBox).
-  # Stale-price + rate-feed-freshness alerts only apply here — Monad has no
-  # SortedOracles, so it's excluded.
-  celo_chains = { for k, c in local.chains : k => c if c.metric == "CELOToken_balanceOf" }
-
   # Chains split by environment, used to fan out Slack notification routes
   # (prod chains → #alerts-oracles, staging chains → #alerts-testnet).
   prod_chains    = { for k, c in local.chains : k => c if c.env == "prod" }
   staging_chains = { for k, c in local.chains : k => c if c.env == "staging" }
 
-  # Weekend-disabled feeds that don't receive updates during market closing hours
+  # Weekend-disabled feeds that don't receive updates during market closing
+  # hours (FX markets are closed on weekends). Matched against the `rateFeed`
+  # label across all chains, so the same feed name is muted wherever it appears.
   weekend_disabled_feeds = [
     "PHPUSD",
     "COPUSD",
@@ -69,7 +67,12 @@ locals {
     "CELOCOP",
     "CELOGHS",
     "CELOXOF",
-    "EURXOF"
+    "EURXOF",
+    # FX majors — closed on weekends on every chain that lists them
+    "GBPUSD",
+    "EURUSD",
+    "JPYUSD",
+    "CHFUSD"
   ]
 
   # Create a regex pattern for the weekend-disabled feeds
