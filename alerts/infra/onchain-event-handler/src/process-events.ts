@@ -55,18 +55,16 @@ export async function processEvents(
     return true;
   });
 
-  // Process all events in parallel
+  // Process events in parallel. Per-event errors (including
+  // ChainDetectionError) are logged and the event is dropped from results;
+  // the batch's other events still process and Discord-fire normally.
+  // Returning a 422 to QuickNode would cause it to retry the whole batch,
+  // duplicating the Discord deliveries that already succeeded.
   const results = await Promise.all(
     logsToProcess.map(async (logEntry) => {
       try {
         return await processEvent(logEntry, txHashMap);
       } catch (error) {
-        // ChainDetectionError must propagate to index.ts so the response
-        // is HTTP 422 and QuickNode retries (Codex review, 2026-05-21).
-        // Swallowing it into `null` here would silently drop ambiguous
-        // multisig events.
-        if (error instanceof ChainDetectionError) throw error;
-
         logger.error("Error processing log", {
           error:
             error instanceof Error
@@ -78,8 +76,8 @@ export async function processEvents(
               : String(error),
           transactionHash: logEntry.transactionHash,
           eventName: logEntry.name,
+          chainDetectionFailure: error instanceof ChainDetectionError,
         });
-        // Return null for failed events
         return null;
       }
     }),

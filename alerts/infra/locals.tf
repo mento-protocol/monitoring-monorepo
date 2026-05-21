@@ -23,5 +23,9 @@ locals {
       if v.chain == chain
     }
   }
+
+  # Decoded Safe ABI, read once at the root and passed to consumers as a
+  # variable so submodules don't reach into each other's source trees.
+  safe_abi = jsondecode(file("${path.module}/onchain-event-handler/safe-abi.json"))
 }
 

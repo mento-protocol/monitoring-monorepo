@@ -133,6 +133,7 @@ module "onchain_event_listeners" {
   multisig_addresses       = [for k, v in each.value : v.address]
   webhook_name             = "safe-multisig-monitor-${each.key}"
   chain_key                = each.key
+  safe_abi                 = local.safe_abi
   quicknode_network_name   = each.value[keys(each.value)[0]].quicknode_network_name # All multisigs in group have same network
   quicknode_api_key        = var.quicknode_api_key
   quicknode_signing_secret = var.quicknode_signing_secret

@@ -61,10 +61,14 @@ export async function formatApproveHashEvent(
 ): Promise<DiscordEmbedField[]> {
   const fields: DiscordEmbedField[] = [];
 
-  if (log.hash && typeof log.hash === "string") {
+  // ABI field name is `approvedHash` (per safe-abi.json); QuickNode passes
+  // through the ABI input name on decoded logs. Reading `log.hash` would
+  // always be undefined and the embed would drop the field silently.
+  const approvedHash = log.approvedHash ?? log.hash;
+  if (approvedHash && typeof approvedHash === "string") {
     fields.push({
       name: "Hash",
-      value: log.hash,
+      value: approvedHash,
       inline: false,
     });
   }

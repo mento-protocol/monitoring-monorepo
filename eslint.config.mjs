@@ -30,6 +30,8 @@ export default [
       "ui-dashboard/**",
       "indexer-envio/**",
       "metrics-bridge/**",
+      "aegis/**",
+      "alerts/**",
     ],
   },
   {

@@ -2,6 +2,5 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": ["src/index.ts"],
   "project": ["src/**/*.ts", "!src/**/*.test.ts"],
-  "ignore": ["safe-abi.d.ts", "src/safe-abi.d.ts"],
-  "ignoreDependencies": ["@types/keccak", "rimraf", "nodemon"]
+  "ignoreBinaries": ["terraform"]
 }

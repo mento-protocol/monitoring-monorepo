@@ -5,10 +5,9 @@ locals {
   # The filter function checks if logs match any of our multisig addresses
   # and any of our event signatures (topic0)
   # Includes error handling to prevent webhook failures
-  # Load ABI from the handler module (canonical location: bundled with the
-  # Cloud Function source so the runtime + the QuickNode-side filter share
-  # one file).
-  safe_abi = jsondecode(file("${path.root}/onchain-event-handler/safe-abi.json"))
+  # ABI is injected by the parent root (single read of the canonical file
+  # at alerts/infra/onchain-event-handler/safe-abi.json).
+  safe_abi = var.safe_abi
 
   # Generate ABI comment block for QuickNode template metadata
   # Format: /*\ntemplate: evmAbiFilter\nabi: [<JSON>]\ncontracts: <addresses>\n*/

@@ -5,8 +5,18 @@ variable "webhook_name" {
 }
 
 variable "chain_key" {
-  description = "Key of this listener instance in the parent root's `module.onchain_event_listeners` for_each map (e.g. 'celo', 'ethereum'). Used to scope the local-exec state-rm so rehashing one chain's webhook can't yank another chain's webhook out of state (Codex review, 2026-05-21)."
+  description = "Key of this listener's for_each entry (e.g. 'celo', 'ethereum'). Scopes the state-rm provisioner to this chain only."
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.chain_key))
+    error_message = "chain_key must be lowercase alphanumeric/hyphens; it gets interpolated into a shell command."
+  }
+}
+
+variable "safe_abi" {
+  description = "Decoded Gnosis Safe ABI. Passed in by the parent root so this module doesn't reach into the handler module's source tree to read the file."
+  type        = any
 }
 
 variable "quicknode_network_name" {

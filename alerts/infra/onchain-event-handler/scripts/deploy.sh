@@ -160,19 +160,14 @@ create_env_vars_file() {
 	echo "${env_file}"
 }
 
-# Ensure safe-abi.json exists in module directory
+# safe-abi.json is committed in the module directory — assert it's present
+# rather than copying from a parent dir.
 ensure_safe_abi() {
 	if [[ -f "${MODULE_DIR}/safe-abi.json" ]]; then
 		return 0
 	fi
 
-	if [[ -f "${ROOT_DIR}/safe-abi.json" ]]; then
-		info "Copying safe-abi.json from project root..."
-		cp "${ROOT_DIR}/safe-abi.json" "${MODULE_DIR}/safe-abi.json"
-		return 0
-	fi
-
-	error "safe-abi.json not found in project root: ${ROOT_DIR}/safe-abi.json"
+	error "safe-abi.json missing from module directory: ${MODULE_DIR}/safe-abi.json"
 	return 1
 }
 

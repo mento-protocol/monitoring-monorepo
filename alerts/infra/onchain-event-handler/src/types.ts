@@ -44,4 +44,3 @@ export interface ProcessedEvent {
 export type EventSignature = string;
 export type EventName = string;
 export type MultisigKey = string;
-export type MultisigAddress = string;

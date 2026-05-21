@@ -92,11 +92,8 @@ export function findChainForAddress(address: string): string | null {
   // Unambiguous: exactly one chain has this multisig configured.
   if (matches.length === 1) return matches[0];
 
-  // Ambiguous (configured on multiple chains) OR not configured at all:
-  // fail closed. Returning a best-guess silently misattributes events for
-  // multisigs deployed at the same address on multiple chains (Codex review,
-  // 2026-05-21). Caller (process-events.ts) throws ChainDetectionError on
-  // null which propagates to index.ts → HTTP 422.
+  // Ambiguous (multiple chains) or unknown (zero chains): return null so the
+  // caller raises ChainDetectionError instead of silently misattributing.
   return null;
 }
 
@@ -149,12 +146,10 @@ export async function findChainFromBlockHash(
     }
   }
 
-  // Block hash verification failed on every candidate chain — fail closed
-  // rather than guessing. Silently picking possibleChains[0] misattributes
-  // events for multisigs configured at the same address on multiple chains
-  // (e.g. Mento Protocol Foundation, Reserve Ops). Caller throws
-  // ChainDetectionError on null → HTTP 422 → QuickNode retries
-  // (Codex review, 2026-05-21).
+  // Block hash didn't verify on any candidate chain. Fail closed so the
+  // caller can drop the event rather than misattribute it to an arbitrary
+  // chain (multisigs configured at the same address on celo+ethereum
+  // would otherwise produce silent cross-chain mislabels).
   logger.warn("Could not verify block hash on any chain — failing closed", {
     blockHash,
     address,
@@ -332,11 +327,9 @@ export async function decodeEventData(
     symbol: chainConfig?.nativeToken.symbol || "",
   };
 
-  // Special-case SafeMultiSigTransaction first — it isn't in the registry
-  // because its formatter needs chainName. Previously this branch lived
-  // inside the `if (formatter)` block, which was dead code: getEventFormatter
-  // returned null for SafeMultiSigTransaction so the special-case never
-  // executed and the function returned [] (Codex review, 2026-05-21).
+  // SafeMultiSigTransaction isn't in EVENT_FORMATTERS because its formatter
+  // takes an extra chainName argument. Dispatch it before the registry
+  // lookup so it doesn't fall through to the empty-fields default.
   if (eventName === "SafeMultiSigTransaction") {
     const { formatSafeMultiSigTransactionEvent } =
       await import("./event-formatters/transaction-formatters");

@@ -106,4 +106,4 @@ The script will automatically read from `terraform.tfvars` and check both server
 
 - [`onchain-event-listeners`](../onchain-event-listeners/README.md) - QuickNode webhook configuration
 - [`onchain-event-handler`](../onchain-event-handler/README.md) - Processes webhooks and routes to Discord
-- [`sentry-alerts`](../sentry-alerts/README.md) - Application error monitoring
+- [`sentry-bridge`](../sentry-bridge/README.md) — Sentry → Discord bridge (application error monitoring)
