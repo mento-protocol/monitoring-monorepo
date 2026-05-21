@@ -9,6 +9,14 @@ on:
     types: [submitted]
   issues:
     types: [opened]
+  # Auto-review fires on PR open and on draft → ready transitions only, not on
+  # every push (synchronize). After the first review, follow-up reviews are
+  # opt-in via `@claude review` in a comment — keeps quota usage predictable
+  # and avoids reviewing the same PR head twice when /ship runs cleanup commits.
+  pull_request:
+    types: [opened, ready_for_review]
+    paths-ignore:
+      - "**/*.md"
 
 permissions: read-all
 
@@ -60,3 +68,55 @@ jobs:
       - uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            If this invocation is a code review (initial review, re-review, "review the changes", "check the diff"), use hybrid output:
+
+            INLINE COMMENTS — use `mcp__github_inline_comment__create_inline_comment` for findings tied to specific lines: correctness bugs, security issues, performance problems, AGENTS.md / CLAUDE.md violations, concrete actionable suggestions. One inline per finding, on the most relevant line. Be surgical — only inline when the suggestion really applies at that exact span. Skip [P3] nits as inline.
+
+            STICKY SUMMARY — post ONE sticky PR comment containing:
+              - Overall verdict (LGTM / needs-changes / needs-discussion)
+              - Cross-cutting concerns (architecture, test strategy, missing scenarios)
+              - A NUMBERED roll-up of EVERY finding (inline + summary-only) so downstream tooling can enumerate them
+
+            SEVERITY tag every finding: [P1] correctness/security/breaking, [P2] quality/perf/maintainability, [P3] suggestion/style.
+
+            Otherwise (the user asked a specific question or for a fix/refactor/explain), follow their instruction directly — no review framing needed.
+
+            PROJECT CONVENTIONS — AGENTS.md and CLAUDE.md are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
+
+  auto-review:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: claude-auto-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1.0.123
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          track_progress: true
+          prompt: |
+            Review this PR using hybrid output:
+
+            INLINE COMMENTS — use `mcp__github_inline_comment__create_inline_comment` for findings tied to specific lines: correctness bugs, security issues, performance problems, AGENTS.md / CLAUDE.md violations, concrete actionable suggestions. One inline per finding, on the most relevant line. Be surgical — only inline when the suggestion really applies at that exact span. Skip [P3] nits as inline.
+
+            STICKY SUMMARY — post ONE sticky PR comment containing:
+              - Overall verdict (LGTM / needs-changes / needs-discussion)
+              - Cross-cutting concerns (architecture, test strategy, missing scenarios)
+              - A NUMBERED roll-up of EVERY finding (inline + summary-only) so downstream tooling can enumerate them
+
+            SEVERITY tag every finding: [P1] correctness/security/breaking, [P2] quality/perf/maintainability, [P3] suggestion/style.
+
+            PROJECT CONVENTIONS — AGENTS.md and CLAUDE.md are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
