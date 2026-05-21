@@ -244,10 +244,12 @@ assert_contains "- ./tools/trunk check --all (changed paths require full-repo Tr
 run_gate_expect_failure "pnpmfile.cjs"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure ".pnpmfile.cjs"
 assert_contains "Refusing to run because package manifests or lockfile changed."
 assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
