@@ -84,9 +84,29 @@ expect_build "PR dashboard changes build from origin/main" \
   VERCEL_GIT_PULL_REQUEST_ID=408 \
   VERCEL_GIT_PREVIOUS_SHA="$main_sha"
 
+# First push of a branch can race ahead of GitHub's PR registration — Vercel
+# then ships neither VERCEL_GIT_PULL_REQUEST_ID nor VERCEL_GIT_PREVIOUS_SHA.
+# The branch fallback uses VERCEL_GIT_COMMIT_REF + origin/main to decide.
+expect_build "branch first push with dashboard change builds against origin/main" \
+  VERCEL_GIT_COMMIT_REF=dashboard-pr
+assert_output_contains "Dashboard-affecting changes detected on branch dashboard-pr vs main"
+
+git switch docs-only >/dev/null 2>&1
+expect_skip "branch first push with docs-only change skips against origin/main" \
+  VERCEL_GIT_COMMIT_REF=docs-only
+assert_output_contains "No dashboard-affecting changes on branch docs-only vs main"
+
+expect_build "branch fallback only triggers on non-main commit ref" \
+  VERCEL_GIT_COMMIT_REF=main
+assert_output_contains "No VERCEL_GIT_PREVIOUS_SHA; building dashboard."
+
 git update-ref -d refs/remotes/origin/main
 expect_build "PR falls back to build when origin/main is unavailable" \
   VERCEL_GIT_PULL_REQUEST_ID=409
 assert_output_contains "Could not resolve origin/main for PR #409; building dashboard."
+
+expect_build "branch fallback falls back to build when origin/main is unavailable" \
+  VERCEL_GIT_COMMIT_REF=docs-only
+assert_output_contains "Could not resolve origin/main for branch docs-only; building dashboard."
 
 echo "vercel-ignore-build tests passed"
