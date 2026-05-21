@@ -150,6 +150,51 @@
         "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
       ],
       "outputs": []
+    },
+    "react-doctor:diff": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "package.json",
+        "react-doctor.config.json",
+        "next.config.*",
+        "tsconfig*.json",
+        "sentry.*.config.*",
+        "sentry.shared.ts",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/scripts/check-react-doctor-diff.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "env": ["REACT_DOCTOR_BASE_REF", "REACT_DOCTOR_BASE_CACHE_KEY"],
+      "outputs": []
+    },
+    "react-doctor:score": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "package.json",
+        "react-doctor.config.json",
+        "next.config.*",
+        "tsconfig*.json",
+        "sentry.*.config.*",
+        "sentry.shared.ts",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/scripts/check-react-doctor-score.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": []
     }
   }
 }

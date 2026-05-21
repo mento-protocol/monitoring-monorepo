@@ -324,6 +324,11 @@ quote_path() {
   printf "%q" "$1"
 }
 
+ref_oid() {
+  local ref="$1"
+  git rev-parse --verify "${ref}^{commit}" 2>/dev/null || echo "__unresolved__:${ref}"
+}
+
 json_change_paths() {
   local path="$1"
   local base_file
@@ -391,8 +396,8 @@ NODE
 classify_root_package_json_changes() {
   local change
   local saw_change=false
-  local saw_agent_gate_script=false
-  local saw_non_agent_script=false
+  local saw_tooling_script=false
+  local saw_non_tooling_script=false
   local saw_non_script=false
 
   while IFS= read -r change; do
@@ -403,14 +408,14 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:context-check)
-        saw_agent_gate_script=true
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test)
+        saw_tooling_script=true
         ;;
       /scripts)
-        saw_non_agent_script=true
+        saw_non_tooling_script=true
         ;;
       /scripts/*)
-        saw_non_agent_script=true
+        saw_non_tooling_script=true
         ;;
       *)
         saw_non_script=true
@@ -420,9 +425,9 @@ classify_root_package_json_changes() {
 
   if [[ "$saw_change" != true ]]; then
     echo "workspace"
-  elif [[ "$saw_agent_gate_script" == true && "$saw_non_agent_script" != true && "$saw_non_script" != true ]]; then
-    echo "agent-quality-gate-scripts"
-  elif [[ "$saw_agent_gate_script" == true || "$saw_non_agent_script" == true ]]; then
+  elif [[ "$saw_tooling_script" == true && "$saw_non_tooling_script" != true && "$saw_non_script" != true ]]; then
+    echo "root-tooling-scripts"
+  elif [[ "$saw_tooling_script" == true || "$saw_non_tooling_script" == true ]]; then
     echo "package-scripts"
   else
     echo "workspace"
@@ -470,12 +475,12 @@ add_dashboard_quality_commands() {
 
 add_ui_react_doctor_full_score() {
   local reason="$1"
-  add_command "bash scripts/check-react-doctor-score.sh" "$reason"
+  add_turbo_dashboard_task "react-doctor:score" "$reason"
 }
 
 add_ui_react_doctor_diff() {
   local reason="$1"
-  add_command "bash scripts/check-react-doctor-diff.sh $(quote_path "$base_ref")" "$reason"
+  add_command "REACT_DOCTOR_BASE_REF=$(quote_path "$base_ref") REACT_DOCTOR_BASE_CACHE_KEY=$(quote_path "$(ref_oid "$base_ref")") $(turbo_local_cache_command "@mento-protocol/ui-dashboard" "react-doctor:diff")" "$reason"
 }
 
 add_ui_mutation_baseline() {
@@ -537,10 +542,12 @@ add_workspace_quality_commands() {
   add_aegis_quality_commands "$reason"
 }
 
-add_agent_quality_gate_package_script_checks() {
+add_root_tooling_package_script_checks() {
   local reason="$1"
   add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
+  add_command "node scripts/agent-prewarm.test.mjs" "$reason"
+  add_command "node scripts/pr-ready-state.test.mjs" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -670,15 +677,15 @@ while IFS= read -r path; do
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
       case "$root_package_json_class" in
-        agent-quality-gate-scripts)
+        root-tooling-scripts)
           add_surface "tooling"
-          add_agent_quality_gate_package_script_checks "root package agent quality gate script changed"
+          add_root_tooling_package_script_checks "root package tooling script changed"
           ;;
         package-scripts)
           package_script_risk_changed=true
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "root package script changed"
-          add_agent_quality_gate_package_script_checks "root package script changed"
+          add_root_tooling_package_script_checks "root package script changed"
           add_workspace_quality_commands "root package script changed"
           ;;
         *)
@@ -998,6 +1005,12 @@ while IFS= read -r path; do
         scripts/check-agent-context.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
           ;;
+        scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
+          add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
+          ;;
+        scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
+          add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
+          ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
           # baseline drift. Re-run every package's lint to exercise the
@@ -1020,7 +1033,7 @@ while IFS= read -r path; do
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
       case "$root_package_json_class" in
-        agent-quality-gate-scripts)
+        root-tooling-scripts)
           ;;
         package-scripts)
           ;;
@@ -1065,11 +1078,6 @@ hash_stream() {
 
 hash_file() {
   hash_sha256 "$1" | awk '{ print $1 }'
-}
-
-ref_oid() {
-  local ref="$1"
-  git rev-parse --verify "${ref}^{commit}" 2>/dev/null || echo "__unresolved__:${ref}"
 }
 
 write_command_plan() {

@@ -1,0 +1,369 @@
+export const BOT_APPROVER = "chatgpt-codex-connector[bot]";
+const OPTIONAL_CHECK_NAMES = new Set([
+  "Core Web Vitals + accessibility (ui-dashboard)",
+  "Cursor Bugbot",
+  "GraphQL schema diff",
+  "jscpd",
+]);
+
+const PASS_VALUES = new Set(["SUCCESS", "PASSED", "PASS"]);
+const FAIL_VALUES = new Set([
+  "ACTION_REQUIRED",
+  "CANCELLED",
+  "ERROR",
+  "FAIL",
+  "FAILED",
+  "FAILURE",
+  "STARTUP_FAILURE",
+  "TIMED_OUT",
+]);
+const PENDING_VALUES = new Set([
+  "EXPECTED",
+  "IN_PROGRESS",
+  "PENDING",
+  "QUEUED",
+  "REQUESTED",
+  "WAITING",
+]);
+const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED", "STALE"]);
+
+function normalizeStatusValue(value) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+function checkDisplayName(check) {
+  return (
+    check.name ??
+    check.context ??
+    check.workflowName ??
+    check.app?.name ??
+    check.__typename ??
+    "unknown check"
+  );
+}
+
+function isOptionalCheckName(name) {
+  return OPTIONAL_CHECK_NAMES.has(name);
+}
+
+export function classifyCheck(check) {
+  const values = [
+    check.conclusion,
+    check.state,
+    check.status,
+    check.rollupStatus,
+  ].map(normalizeStatusValue);
+
+  if (values.some((value) => FAIL_VALUES.has(value))) return "fail";
+  if (values.some((value) => PENDING_VALUES.has(value))) return "pending";
+  if (values.some((value) => SKIPPED_VALUES.has(value))) return "skipped";
+  if (values.some((value) => PASS_VALUES.has(value))) return "pass";
+
+  return "pending";
+}
+
+export function groupStatusChecks(statusCheckRollup = []) {
+  const grouped = {
+    pass: [],
+    fail: [],
+    pending: [],
+    skipped: [],
+  };
+
+  for (const check of statusCheckRollup) {
+    const group = classifyCheck(check);
+    grouped[group].push({
+      name: checkDisplayName(check),
+      status: check.status ?? check.state ?? null,
+      conclusion: check.conclusion ?? null,
+      detailsUrl: check.detailsUrl ?? check.targetUrl ?? null,
+    });
+  }
+
+  for (const checks of Object.values(grouped)) {
+    checks.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return grouped;
+}
+
+function checkToItem(check, { required }) {
+  const state = classifyCheck(check);
+  return {
+    kind: "check",
+    name: checkDisplayName(check),
+    state,
+    required,
+    url: check.detailsUrl ?? check.targetUrl ?? null,
+  };
+}
+
+export function splitRequiredAndOptionalChecks(
+  statusCheckRollup = [],
+  requiredStatusContexts = [],
+) {
+  const requiredContextSet = new Set(requiredStatusContexts);
+  const hasRequiredContextData = requiredContextSet.size > 0;
+  const required = [];
+  const optional = [];
+
+  for (const check of statusCheckRollup) {
+    const name = checkDisplayName(check);
+    const isRequired = hasRequiredContextData
+      ? requiredContextSet.has(name)
+      : !isOptionalCheckName(name);
+    const item = checkToItem(check, { required: isRequired });
+    if (isRequired) {
+      required.push(item);
+    } else {
+      optional.push(item);
+    }
+  }
+
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  required.sort(byName);
+  optional.sort(byName);
+
+  return { required, optional };
+}
+
+export function findUnresolvedReviewThreads(reviewThreads = []) {
+  return reviewThreads
+    .filter((thread) => thread.isResolved === false)
+    .map((thread) => {
+      const firstComment = thread.comments?.nodes?.[0] ?? thread.comments?.[0];
+      return {
+        id: thread.id,
+        path: thread.path ?? null,
+        line: thread.line ?? thread.startLine ?? null,
+        isOutdated: Boolean(thread.isOutdated),
+        author:
+          firstComment?.author?.login ?? firstComment?.user?.login ?? null,
+        url: firstComment?.url ?? null,
+        body: firstComment?.body ?? "",
+      };
+    });
+}
+
+export function findUnrepliedRootReviewComments(reviewComments = []) {
+  const repliedRootIds = new Set(
+    reviewComments
+      .map((comment) => comment.in_reply_to_id)
+      .filter((id) => id !== undefined && id !== null),
+  );
+
+  return reviewComments
+    .filter(
+      (comment) =>
+        comment.in_reply_to_id === undefined || comment.in_reply_to_id === null,
+    )
+    .filter((comment) => !repliedRootIds.has(comment.id))
+    .map((comment) => ({
+      id: comment.id,
+      path: comment.path ?? null,
+      line: comment.line ?? comment.original_line ?? null,
+      author: comment.user?.login ?? null,
+      url: comment.html_url ?? comment.url ?? null,
+      body: comment.body ?? "",
+    }));
+}
+
+export function findTopLevelBotComments(issueComments = []) {
+  return issueComments
+    .filter((comment) => {
+      const user = comment.user ?? {};
+      const login = user.login ?? "";
+      return user.type === "Bot" || login.endsWith("[bot]");
+    })
+    .map((comment) => ({
+      id: comment.id,
+      author: comment.user?.login ?? null,
+      url: comment.html_url ?? comment.url ?? null,
+      createdAt: comment.created_at ?? null,
+      updatedAt: comment.updated_at ?? null,
+      body: comment.body ?? "",
+    }));
+}
+
+export function findTopLevelBotReviewComments(reviews = []) {
+  return reviews
+    .filter((review) => {
+      const author = review.author ?? {};
+      const login = author.login ?? "";
+      return (
+        (author.type === "Bot" || login.endsWith("[bot]")) &&
+        String(review.body ?? "").trim() !== ""
+      );
+    })
+    .map((review) => ({
+      id: review.id ?? null,
+      author: review.author?.login ?? null,
+      url: review.url ?? null,
+      createdAt: review.submittedAt ?? null,
+      updatedAt: null,
+      state: review.state ?? null,
+      body: review.body ?? "",
+    }));
+}
+
+export function hasCodexApprovalReaction(reactions = []) {
+  return reactions.some(
+    (reaction) =>
+      reaction.content === "+1" && reaction.user?.login === BOT_APPROVER,
+  );
+}
+
+export function summarizeReadyState({
+  pr,
+  issueComments = [],
+  reactions = [],
+  reviewComments = [],
+  reviewThreads = [],
+  requiredStatusContexts = [],
+}) {
+  const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
+  const splitChecks = splitRequiredAndOptionalChecks(
+    pr.statusCheckRollup ?? [],
+    requiredStatusContexts,
+  );
+  const unresolvedReviewThreads = findUnresolvedReviewThreads(reviewThreads);
+  const unrepliedRootReviewComments =
+    findUnrepliedRootReviewComments(reviewComments);
+  const topLevelBotComments = [
+    ...findTopLevelBotComments(issueComments),
+    ...findTopLevelBotReviewComments(pr.reviews ?? []),
+  ];
+  const codexApprovalReaction = hasCodexApprovalReaction(reactions);
+
+  const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";
+  const reviewDecision = normalizeStatusValue(pr.reviewDecision);
+  const requiredCheckBlockers = splitChecks.required.filter((check) =>
+    ["fail", "pending"].includes(check.state),
+  );
+  const optionalItems = splitChecks.optional.filter((check) =>
+    ["fail", "pending"].includes(check.state),
+  );
+  const requiredBlockers = [];
+
+  if (pr.isDraft) {
+    requiredBlockers.push({
+      kind: "draft",
+      name: "Pull request is draft",
+      state: "draft",
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  if (!mergeable) {
+    requiredBlockers.push({
+      kind: "mergeability",
+      name: "Pull request is not mergeable",
+      state: pr.mergeable ?? "UNKNOWN",
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  if (reviewDecision === "CHANGES_REQUESTED") {
+    requiredBlockers.push({
+      kind: "review",
+      name: "Changes requested",
+      state: pr.reviewDecision,
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  requiredBlockers.push(...requiredCheckBlockers);
+
+  for (const thread of unresolvedReviewThreads) {
+    requiredBlockers.push({
+      kind: "review-thread",
+      name: thread.path ?? thread.id ?? "unresolved review thread",
+      state: thread.isOutdated ? "unresolved-outdated" : "unresolved",
+      required: true,
+      url: thread.url,
+    });
+  }
+
+  for (const comment of unrepliedRootReviewComments) {
+    requiredBlockers.push({
+      kind: "review-comment",
+      name: `unreplied root comment ${comment.id}`,
+      state: "unreplied",
+      required: true,
+      url: comment.url,
+    });
+  }
+
+  const gates = {
+    codexDescriptionApproval: {
+      ready: codexApprovalReaction,
+      required: true,
+      state: codexApprovalReaction ? "present" : "missing",
+    },
+    reviewCommentReplies: {
+      ready: unrepliedRootReviewComments.length === 0,
+      required: true,
+      unrepliedCount: unrepliedRootReviewComments.length,
+    },
+    reviewThreads: {
+      ready: unresolvedReviewThreads.length === 0,
+      required: true,
+      unresolvedCount: unresolvedReviewThreads.length,
+    },
+  };
+
+  if (!codexApprovalReaction) {
+    requiredBlockers.push({
+      kind: "gate",
+      name: "Codex PR-description approval",
+      state: "missing",
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  const required = {
+    ready: requiredBlockers.length === 0,
+    blockers: requiredBlockers,
+  };
+  const optional = {
+    ready: optionalItems.length === 0,
+    items: optionalItems,
+  };
+  const ready = required.ready;
+  const summary = ready
+    ? optional.items.length > 0
+      ? `Required gates are clear; ${optional.items.length} optional signal(s) still need attention.`
+      : "Required gates are clear."
+    : `${required.blockers.length} required blocker(s) remain.`;
+
+  return {
+    ready,
+    required,
+    optional,
+    gates,
+    summary,
+    pr: {
+      number: pr.number,
+      url: pr.url,
+      title: pr.title,
+      isDraft: Boolean(pr.isDraft),
+      headRefName: pr.headRefName,
+      headRefOid: pr.headRefOid,
+      baseRefName: pr.baseRefName,
+      mergeable: pr.mergeable ?? null,
+      reviewDecision: pr.reviewDecision ?? null,
+    },
+    statusChecks,
+    requiredStatusContexts,
+    unresolvedReviewThreads,
+    unrepliedRootReviewComments,
+    topLevelBotComments,
+    codexApprovalReaction,
+  };
+}
