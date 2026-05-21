@@ -257,9 +257,18 @@ function isCodexSessionEndCommand(command) {
 }
 
 function isClaudeSessionEndCommand(command) {
-  return /^bash\s+["']\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh["'](?:\s|$)/.test(
-    command,
+  const scriptPath =
+    /["']\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh["']/;
+  const directInvocation = new RegExp(
+    String.raw`^bash\s+${scriptPath.source}(?:\s|$)`,
   );
+  // Also accept a presence-guarded form: `if [ -f "${CLAUDE_PROJECT_DIR}/...sh" ]; then bash "${CLAUDE_PROJECT_DIR}/...sh"; fi`
+  // This lets a Claude session that outlives a deleted worktree skip the hook silently
+  // without swallowing real failures from the script when it does exist.
+  const guardedInvocation = new RegExp(
+    String.raw`^if\s+\[\s+-f\s+${scriptPath.source}\s+\]\s*;\s*then\s+bash\s+${scriptPath.source}\s*;\s*fi\s*$`,
+  );
+  return directInvocation.test(command) || guardedInvocation.test(command);
 }
 
 const codexHooks = readJsonRequired(".codex/hooks.json");
