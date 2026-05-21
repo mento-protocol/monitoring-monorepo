@@ -5,3 +5,7 @@ reason = "Affects diff@7.0.0 (jsdiff) — no fix available, this is already the 
 [[IgnoredVulns]]
 id = "GHSA-5c6j-r48x-rmvq"
 reason = "Affects serialize-javascript@6.0.2 — no fix available, this is already the latest version"
+
+[[IgnoredVulns]]
+id = "GHSA-vpq2-c234-7xj6"
+reason = "Affects @tootallnate/once — deprecated transitive dep of @google-cloud/functions-framework via http-proxy-agent; no patched version published. Reachable only through HTTP proxy code paths not exercised by the Safe-event webhook handler (no outbound HTTP proxy use). Re-evaluate when @google-cloud/functions-framework drops the agent-base@5 chain."

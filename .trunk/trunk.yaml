@@ -36,6 +36,11 @@ lint:
       paths:
         - indexer-envio/pnpm-lock.yaml
         - pnpm-lock.yaml
+        # Per-package npm lockfile committed for Cloud Build's `npm ci`. Vulns
+        # surface against the workspace pnpm-lock.yaml (already ignored above);
+        # scanning this derived artifact would just double-report transitive
+        # findings with no fix path.
+        - alerts/infra/onchain-event-handler/package-lock.json
     - linters: [checkov]
       paths:
         - terraform/main.tf
