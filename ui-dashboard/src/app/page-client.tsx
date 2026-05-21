@@ -17,7 +17,6 @@ import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 import {
   VolumeOverTimeChart,
   buildDailyVolumeSeries,
-  type DailyVolumeSeriesResult,
 } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { useGQL } from "@/lib/graphql";
@@ -178,8 +177,7 @@ function GlobalContent({
     let hasSuccessfulLpResult = false;
     const unpricedSymbolSet = new Set<string>();
     let totalUnresolvedCount = 0;
-    const volumeSeries: DailyVolumeSeriesResult =
-      buildDailyVolumeSeries(networkData);
+    const volumeSeries = buildDailyVolumeSeries(networkData);
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
@@ -286,7 +284,13 @@ function GlobalContent({
       unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
       totalUnresolvedCount,
     };
-  }, [networkData, anyNetworkError, anyFeesError, anyLpError]);
+  }, [
+    networkData,
+    anyNetworkError,
+    anySnapshots7dError,
+    anyFeesError,
+    anyLpError,
+  ]);
 
   const failedNetworks = networkData.filter((net) => net.error !== null);
 
