@@ -812,4 +812,25 @@ describe("GlobalPage — Traders tile", () => {
     expect(html).toContain(">0<");
     expect(html).not.toContain(">N/A<");
   });
+
+  // Per AGENTS.md "Loading vs zero vs empty" — a `data === undefined &&
+  // !error` SWR slice must NOT render a happy-path zero. Without an
+  // explicit `isLoading: true` mock, the prior tests don't exercise
+  // this branch and a regression that swallowed the loading sentinel
+  // would silently ship `0` instead of `…`. We isolate the Traders
+  // tile via its label + the adjacent value markup so the LPs / Swaps
+  // tiles (which also render `0` against the empty fixture) don't
+  // bleed into the assertion.
+  it("renders '…' while the Traders query is loading", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isLoading: true,
+      isValidating: true,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
 });

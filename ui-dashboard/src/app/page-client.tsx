@@ -452,6 +452,13 @@ function TradersTile() {
       // keeps a fresh-after-rollover read without burning the Envio
       // "small" tier quota for a multi-KB address list on every poll.
       refreshInterval: 5 * 60_000,
+      // Required by docs/pr-checklists/swr-polling-hasura.md §1 — without
+      // a request-level timeout, a wedged TCP connection would hold the
+      // poll open for the full 5min interval. 30s is conservative for
+      // the long interval (the canonical 8s example pairs with a 10s
+      // poll); the trader address list is small enough that 30s never
+      // legitimately times out on healthy Hasura.
+      timeoutMs: 30_000,
     },
   );
   const count = useMemo(() => {

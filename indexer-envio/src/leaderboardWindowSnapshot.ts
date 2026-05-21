@@ -216,7 +216,12 @@ export function buildLeaderboardWindowSnapshot(
     totalSwapCountIncludingSystem += a.swapCount;
     firstDayVolumeUsdWeiIncludingSystem += a.firstDayVolumeUsdWei;
     firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
-    windowTradersIncludingSystem.push(a.trader);
+    // Explicit lowercase pins the schema's "Sorted lowercase" invariant
+    // at this layer rather than implicitly relying on upstream handlers
+    // (TraderDailySnapshot.trader is set from `tx.from` via the
+    // lowercased `asAddress` helper today, but the indexer is the right
+    // boundary to enforce the invariant the schema documents).
+    windowTradersIncludingSystem.push(a.trader.toLowerCase());
     if (!a.activeOutsideFirstDay) {
       firstDayExclusiveUniqueTradersIncludingSystem += 1;
       firstDayExclusiveTradersIncludingSystem.push(a.trader);
@@ -227,7 +232,7 @@ export function buildLeaderboardWindowSnapshot(
       nonSystemCount += 1;
       firstDayVolumeUsdWei += a.firstDayVolumeUsdWei;
       firstDaySwapCount += a.firstDaySwapCount;
-      windowTraders.push(a.trader);
+      windowTraders.push(a.trader.toLowerCase());
       if (!a.activeOutsideFirstDay) {
         firstDayExclusiveUniqueTraders += 1;
         firstDayExclusiveTraders.push(a.trader);
