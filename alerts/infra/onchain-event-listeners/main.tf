@@ -34,9 +34,14 @@ resource "null_resource" "pause_webhook_before_update" {
   # Run before Terraform tries to update the webhook
   # This deletes the old webhook and removes it from state, forcing recreation
 
-  # Provisioner runs when resource is created/updated (when hash changes)
+  # Provisioner runs when resource is created/updated (when hash changes).
+  # Explicit bash interpreter so the Bash-only constructs below (BASH_SOURCE,
+  # `set -o pipefail`) work even when the parent shell is /bin/sh (e.g. dash).
   provisioner "local-exec" {
-    command = <<-EOT
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+
       # Scope state lookup strictly to THIS chain's module instance so
       # rehashing one chain's webhook can't yank a sibling chain's webhook
       # out of state (the original greedy `head -1` did exactly that).
@@ -48,15 +53,18 @@ resource "null_resource" "pause_webhook_before_update" {
       fi
 
       WEBHOOK_ID=$(terraform state show "$STATE_PATH" 2>/dev/null | grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
-      
+
       if [ -n "$WEBHOOK_ID" ] && [ "$WEBHOOK_ID" != "" ]; then
         echo "Pausing and deleting old webhook $WEBHOOK_ID to force recreation..."
-        
-        # Use reusable script for webhook management
-        SCRIPT_DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")/.." && pwd)"
-        "$${SCRIPT_DIR}/scripts/manage-quicknode-webhook.sh" pause-and-delete "$WEBHOOK_ID" "${var.quicknode_api_key}"
-        
-        # Remove from Terraform state so Terraform will create instead of update
+
+        # Helper script lives in the module's sibling scripts/ dir. Resolve
+        # via TF interpolation rather than $BASH_SOURCE since the heredoc is
+        # passed as a -c string, where BASH_SOURCE[0] is empty.
+        "${path.module}/../scripts/manage-quicknode-webhook.sh" pause-and-delete "$WEBHOOK_ID" "${var.quicknode_api_key}"
+
+        # Remove from Terraform state so Terraform will create instead of
+        # update. `set -o pipefail` above ensures a failing `state rm` is
+        # not masked by `head` exiting successfully.
         echo "Removing webhook from Terraform state..."
         terraform state rm -lock=false "$STATE_PATH" 2>&1 | head -5
         echo "Webhook removed from state - Terraform will create a new one"

@@ -41,6 +41,7 @@ jobs:
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
       aegis: ${{ steps.filter.outputs.aegis }}
+      alerts: ${{ steps.filter.outputs.alerts }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
     steps:
@@ -111,6 +112,16 @@ jobs:
               - .gitmodules
               - .github/workflows/ci.yml
               - .github/workflows/aegis-app-engine.yml
+              - .github/actions/pnpm-install/**
+            alerts:
+              - alerts/infra/onchain-event-handler/**
+              - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
             # Code-health policy files. A PR that touches ONLY the dep-cruiser
             # rules or a package's knip config would otherwise leave all four
@@ -398,6 +409,46 @@ jobs:
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
+  alerts:
+    name: Quality Checks (alerts-onchain-event-handler)
+    needs: changes
+    if: needs.changes.outputs.alerts == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck
+      - name: Lint
+        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler lint
+      - name: Knip
+        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler knip
+      - name: Test
+        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler test
+      # Cloud Build's `npm ci` consumes alerts/infra/onchain-event-handler/
+      # package-lock.json for prod deploys. The package is ALSO a pnpm
+      # workspace member, so a dev bumping deps via `pnpm install` only
+      # updates the root pnpm-lock.yaml — the per-pkg npm lockfile silently
+      # drifts and Cloud Build keeps deploying old deps. This step
+      # regenerates the npm lockfile in-place and fails if it differs from
+      # the committed copy.
+      - name: Verify package-lock.json is in sync
+        working-directory: alerts/infra/onchain-event-handler
+        run: |
+          cp package-lock.json /tmp/committed-lock.json
+          rm -rf node_modules package-lock.json
+          npm install --package-lock-only --no-audit --no-fund --ignore-scripts
+          diff -q /tmp/committed-lock.json package-lock.json || {
+            echo "::error::package-lock.json is out of sync with package.json. Regenerate with: cd alerts/infra/onchain-event-handler && rm -rf node_modules package-lock.json && npm install --package-lock-only"
+            exit 1
+          }
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
   aegis:
     name: Quality Checks (aegis)
     needs: changes
@@ -516,7 +567,7 @@ jobs:
 
   ci:
     name: ci
-    needs: [changes, shared, ui, indexer, bridge, aegis, deps, scripts]
+    needs: [changes, shared, ui, indexer, bridge, aegis, alerts, deps, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -527,6 +578,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,aegis,deps,scripts
+          allowed-skips: shared,ui,indexer,bridge,aegis,alerts,deps,scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

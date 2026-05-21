@@ -46,6 +46,23 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
       secret     = google_secret_manager_secret.quicknode_signing_secret.secret_id
       version    = "latest"
     }
+
+    # Discord webhook URLs are credentials too: anyone with `gcloud functions
+    # describe` on the project could otherwise read them and post arbitrary
+    # messages to the monitored channels. Keep them in Secret Manager next
+    # to QUICKNODE_SIGNING_SECRET.
+    secret_environment_variables {
+      key        = "DISCORD_WEBHOOK_ALERTS"
+      project_id = var.project_id
+      secret     = google_secret_manager_secret.discord_webhook_alerts.secret_id
+      version    = "latest"
+    }
+    secret_environment_variables {
+      key        = "DISCORD_WEBHOOK_EVENTS"
+      project_id = var.project_id
+      secret     = google_secret_manager_secret.discord_webhook_events.secret_id
+      version    = "latest"
+    }
   }
 
   lifecycle {
@@ -65,12 +82,16 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     # Force redeploy when secret version changes or source code changes
     replace_triggered_by = [
       google_secret_manager_secret_version.quicknode_signing_secret,
+      google_secret_manager_secret_version.discord_webhook_alerts,
+      google_secret_manager_secret_version.discord_webhook_events,
       google_storage_bucket_object.function_source
     ]
   }
 
   depends_on = [
-    google_secret_manager_secret_version.quicknode_signing_secret
+    google_secret_manager_secret_version.quicknode_signing_secret,
+    google_secret_manager_secret_version.discord_webhook_alerts,
+    google_secret_manager_secret_version.discord_webhook_events
   ]
 
   timeouts {
@@ -254,6 +275,49 @@ resource "google_secret_manager_secret_version" "quicknode_signing_secret" {
   secret_data = var.quicknode_signing_secret
 
   # Force Cloud Function to redeploy when secret changes by including secret hash in lifecycle
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Discord webhook URLs (alerts + events channels). Stored as Secret Manager
+# secrets rather than plaintext env vars so they aren't visible to anyone
+# with `gcloud functions describe` on the project.
+resource "google_secret_manager_secret" "discord_webhook_alerts" {
+  project   = var.project_id
+  secret_id = "${var.secret_name}-discord-alerts"
+
+  replication {
+    auto {}
+  }
+
+  labels = var.common_labels
+}
+
+resource "google_secret_manager_secret_version" "discord_webhook_alerts" {
+  secret      = google_secret_manager_secret.discord_webhook_alerts.id
+  secret_data = local.shared_webhook_urls.alerts
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "google_secret_manager_secret" "discord_webhook_events" {
+  project   = var.project_id
+  secret_id = "${var.secret_name}-discord-events"
+
+  replication {
+    auto {}
+  }
+
+  labels = var.common_labels
+}
+
+resource "google_secret_manager_secret_version" "discord_webhook_events" {
+  secret      = google_secret_manager_secret.discord_webhook_events.id
+  secret_data = local.shared_webhook_urls.events
+
   lifecycle {
     create_before_destroy = true
   }

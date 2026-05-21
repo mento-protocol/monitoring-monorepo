@@ -89,7 +89,12 @@ set_project_id() {
 	if [[ ! -f "${MODULE_DIR}/.env" ]]; then
 		echo "GCP_PROJECT_ID=${project_id}" >"${MODULE_DIR}/.env"
 	else
-		sed -i '' "s/^GCP_PROJECT_ID=.*/GCP_PROJECT_ID=${project_id}/" "${MODULE_DIR}/.env"
+		# Portable in-place edit: BSD sed (macOS) requires `-i ''` and GNU sed
+		# (Linux CI runners) rejects that form. Write through a tmpfile so the
+		# script works under both.
+		_tmp="${MODULE_DIR}/.env.tmp.$$"
+		sed "s/^GCP_PROJECT_ID=.*/GCP_PROJECT_ID=${project_id}/" "${MODULE_DIR}/.env" >"${_tmp}"
+		mv "${_tmp}" "${MODULE_DIR}/.env"
 	fi
 }
 

@@ -14,11 +14,19 @@ locals {
     "${path.module}/tsconfig.json",
     "${path.module}/safe-abi.json",
   ]
-  # Create a hash of all source files and package files
-  source_hash = md5(join("", [
-    for f in sort(concat(local.source_files, local.package_files)) :
-    fileexists(f) ? filemd5(f) : ""
-  ]))
+  # Include multisig config in the hash so adding/removing a Safe address
+  # forces a full Cloud Function redeploy with the new MULTISIG_CONFIG env
+  # var. Without this, ignore_changes on environment_variables (workaround
+  # for the Google provider sensitive-env-var bug) would leave the running
+  # function with stale config indefinitely.
+  multisig_config_hash = md5(jsonencode(local.multisig_config_for_json))
+  source_hash = md5(join("", concat(
+    [
+      for f in sort(concat(local.source_files, local.package_files)) :
+      fileexists(f) ? filemd5(f) : ""
+    ],
+    [local.multisig_config_hash],
+  )))
 
   # Extract non-sensitive values from multisig_webhooks to avoid provider bug
   # The entire var.multisig_webhooks is marked sensitive, so we extract values first
@@ -56,16 +64,15 @@ locals {
   # Get list of unique chains for logging
   chains = distinct([for k, v in local.multisig_webhooks_nonsensitive : v.chain])
 
-  # Combine with base environment variables (excluding secret)
+  # Combine with base environment variables (excluding secrets — the
+  # QUICKNODE_SIGNING_SECRET + DISCORD_WEBHOOK_* env vars are injected via
+  # service_config.secret_environment_variables in main.tf, not here).
   all_env_vars = merge(
     {
       # JSON-encoded multisig config for easy lookup in the function
       MULTISIG_CONFIG = jsonencode(local.multisig_config_for_json)
       # Comma-separated list of supported chains
       SUPPORTED_CHAINS = join(",", local.chains)
-      # Shared webhook URLs (all multisigs use the same webhooks)
-      DISCORD_WEBHOOK_ALERTS = local.shared_webhook_urls.alerts
-      DISCORD_WEBHOOK_EVENTS = local.shared_webhook_urls.events
     },
     local.multisig_env_vars
   )

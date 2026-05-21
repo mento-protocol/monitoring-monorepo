@@ -922,9 +922,6 @@ while IFS= read -r path; do
         .github/workflows/lighthouse.yml)
           add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI workflow changed"
           ;;
-        .github/workflows/alerts-handler.yml)
-          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts handler CI workflow changed"
-          ;;
         .github/actions/pnpm-install/*)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"

@@ -23,11 +23,17 @@ interface RequestWithRawBody extends Request {
  */
 export function checkPayloadSize(req: Request): PayloadSizeCheck {
   const rawBody = (req as RequestWithRawBody).rawBody;
+  // JSON.stringify(undefined) returns undefined (not the string "undefined"),
+  // so .length throws on a missing body. Treat missing/empty as size 0.
+  const stringified =
+    typeof req.body === "string"
+      ? req.body
+      : req.body === undefined
+        ? ""
+        : (JSON.stringify(req.body) ?? "");
   const payloadSize = rawBody
     ? rawBody.length
-    : typeof req.body === "string"
-      ? Buffer.byteLength(req.body, "utf8")
-      : JSON.stringify(req.body).length;
+    : Buffer.byteLength(stringified, "utf8");
 
   return {
     valid: payloadSize <= MAX_PAYLOAD_SIZE_BYTES,

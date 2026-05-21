@@ -61,11 +61,17 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
   if (rawBody) {
     // Use raw body if available (as string)
     payload = rawBody.toString("utf8");
+  } else if (typeof req.body === "string") {
+    payload = req.body;
+  } else if (req.body === undefined) {
+    // Missing body: stay a string so downstream .length / .substring calls
+    // don't throw and the request gets the intended 401 signature rejection
+    // (not a 500 from a TypeError).
+    payload = "";
   } else {
-    // Fallback: reconstruct JSON
-    // Check if body is already a string, otherwise stringify it
-    payload =
-      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    // JSON.stringify can return undefined for symbols/functions; coerce to
+    // empty string in that case.
+    payload = JSON.stringify(req.body) ?? "";
   }
 
   // Verify signature
