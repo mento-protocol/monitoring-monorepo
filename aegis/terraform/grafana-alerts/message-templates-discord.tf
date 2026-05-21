@@ -38,8 +38,8 @@ resource "grafana_message_template" "discord" {
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
 **[Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }}](https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}) — {{ .Annotations.currentBalance }} {{ .Labels.token }} left**
 - Top up the [relayer wallet](https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}) to keep the relayer running
-{{ if eq .Labels.token "CELO" }}- Run the [relayer refill script](https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 CELO from the dev wallet
-- Get the dev wallet private key from the Eng vault in 1Password{{ end }}
+- Run the [relayer refill script](https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 {{ .Labels.token }} from the dev wallet
+- Get the dev wallet private key from the Eng vault in 1Password
 {{ end }}
 {{ range .Alerts.Resolved }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
