@@ -26,6 +26,7 @@ import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
 import { MAX_RESTORE_BLOB_BYTES, POST } from "../route";
+import { BACKUP_MANIFEST_VERSION } from "@/lib/address-labels/backup-format";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGet = vi.mocked(get);
@@ -78,13 +79,49 @@ beforeEach(() => {
   );
 });
 
-describe("POST /api/address-labels/restore", () => {
+describe("POST /api/address-labels/restore — common auth + pathname rejects", () => {
   it("requires bearer or workspace-session auth", async () => {
     const res = await POST(req());
     expect(res.status).toBe(401);
     expect(mockGet).not.toHaveBeenCalled();
   });
 
+  it("allows a workspace session and lowercases the restore actor email", async () => {
+    mockGetAuthSession.mockResolvedValue({
+      user: { email: "Alice@MentoLabs.xyz" },
+      expires: "2026-12-31T00:00:00.000Z",
+    });
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    expect(mockHandleSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ importerEmail: "alice@mentolabs.xyz" }),
+    );
+  });
+
+  it("rejects unsupported pathnames before touching Blob", async () => {
+    const res = await POST(
+      req("../secret.json", { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("rejects a per-hash pathname directly (no partial restore via individual hash blob)", async () => {
+    // v2 individual hash blobs live under the per-day prefix but only the
+    // manifest is an allowed entry point. Restoring a single hash blob
+    // would skip the other 6 and leave Redis in a partial state.
+    const res = await POST(
+      req("address-labels-backup-2026-05-21/labels.json", {
+        authorization: "Bearer secret",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/address-labels/restore — v1 legacy monolithic blob", () => {
   it("restores a private Blob snapshot with preserved report metadata under cron auth", async () => {
     const snapshot = {
       exportedAt: "2026-05-11T00:00:00.000Z",
@@ -125,27 +162,6 @@ describe("POST /api/address-labels/restore", () => {
     );
   });
 
-  it("allows a workspace session and lowercases the restore actor email", async () => {
-    mockGetAuthSession.mockResolvedValue({
-      user: { email: "Alice@MentoLabs.xyz" },
-      expires: "2026-12-31T00:00:00.000Z",
-    });
-    const res = await POST(req());
-    expect(res.status).toBe(200);
-    expect(mockHandleSnapshot).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ importerEmail: "alice@mentolabs.xyz" }),
-    );
-  });
-
-  it("rejects unsupported pathnames before touching Blob", async () => {
-    const res = await POST(
-      req("../secret.json", { authorization: "Bearer secret" }),
-    );
-    expect(res.status).toBe(400);
-    expect(mockGet).not.toHaveBeenCalled();
-  });
-
   it("returns 404 when the Blob SDK cannot find the snapshot", async () => {
     mockGet.mockResolvedValueOnce(null);
     const res = await POST(
@@ -157,28 +173,15 @@ describe("POST /api/address-labels/restore", () => {
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 
-  it("rejects an oversized Blob before reading the stream", async () => {
-    mockGet.mockResolvedValueOnce(
-      blobResult({ addresses: {} }, RESTORE_LIMIT + 1) as Awaited<
-        ReturnType<typeof get>
-      >,
-    );
-    const res = await POST(
-      req("address-labels-backup-2026-05-11.json", {
-        authorization: "Bearer secret",
-      }),
-    );
-    expect(res.status).toBe(413);
-    expect(mockHandleSnapshot).not.toHaveBeenCalled();
-  });
-
   it("rejects an oversized Blob without draining the stream when metadata size is unavailable", async () => {
     let pulled = 0;
     let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulled += 1;
-        controller.enqueue(new Uint8Array(RESTORE_LIMIT + 1));
+        // Legacy blobs use the higher 32 MB cap, so push something definitely
+        // bigger than that.
+        controller.enqueue(new Uint8Array(33 * 1024 * 1024));
       },
       cancel() {
         cancelled = true;
@@ -241,5 +244,188 @@ describe("POST /api/address-labels/restore", () => {
       tags: { route: "address-labels/restore" },
     });
     consoleError.mockRestore();
+  });
+});
+
+describe("POST /api/address-labels/restore — v2 manifest", () => {
+  const date = "2026-05-21";
+  const manifestPath = `address-labels-backup-${date}/manifest.json`;
+  const manifest = {
+    version: BACKUP_MANIFEST_VERSION,
+    exportedAt: "2026-05-21T03:00:00.000Z",
+    hashes: [
+      {
+        name: "labels",
+        pathname: `address-labels-backup-${date}/labels.json`,
+        sizeBytes: 100,
+      },
+      {
+        name: "reports",
+        pathname: `address-labels-backup-${date}/reports.json`,
+        sizeBytes: 50,
+      },
+      {
+        name: "intelDeep",
+        pathname: `address-labels-backup-${date}/intelDeep.json`,
+        sizeBytes: 20,
+      },
+      {
+        name: "intelTransfers",
+        pathname: `address-labels-backup-${date}/intelTransfers.json`,
+        sizeBytes: 20,
+      },
+      {
+        name: "intelWealth",
+        pathname: `address-labels-backup-${date}/intelWealth.json`,
+        sizeBytes: 20,
+      },
+      {
+        name: "intelEntities",
+        pathname: `address-labels-backup-${date}/intelEntities.json`,
+        sizeBytes: 20,
+      },
+      {
+        name: "intelEntityCps",
+        pathname: `address-labels-backup-${date}/intelEntityCps.json`,
+        sizeBytes: 20,
+      },
+    ],
+  };
+  const labelRecords = {
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      name: "Test",
+      tags: [],
+      updatedAt: "2026-01-01T00:00:00Z",
+    },
+  };
+  const reportRecords = {
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      body: "Report",
+      authorEmail: "alice@mentolabs.xyz",
+      createdAt: "2026-04-01T00:00:00Z",
+      updatedAt: "2026-04-30T00:00:00Z",
+      version: 1,
+    },
+  };
+
+  /**
+   * Sequence the per-blob get() responses: manifest first, then each hash
+   * blob in the order the manifest lists them. The route fetches hashes in
+   * parallel via Promise.all, so we mock by call order — Promise.all
+   * preserves resolution order for the array values, but the network calls
+   * fan out concurrently.
+   */
+  function mockManifestSequence(): void {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(labelRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      // intelDeep, intelTransfers, intelWealth, intelEntities, intelEntityCps
+      // — empty maps are valid (the source hash had no records yet).
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+  }
+
+  it("fetches manifest, fetches each hash blob, assembles the snapshot, then hands off to handleSnapshot", async () => {
+    mockManifestSequence();
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(200);
+    // manifest + 7 hash blobs = 8 get() calls
+    expect(mockGet).toHaveBeenCalledTimes(8);
+    expect(mockGet.mock.calls[0]?.[0]).toBe(manifestPath);
+
+    // Assembled snapshot passed to handleSnapshot
+    expect(mockHandleSnapshot).toHaveBeenCalledOnce();
+    const [snapshotArg, options] = mockHandleSnapshot.mock.calls[0]!;
+    expect(snapshotArg.exportedAt).toBe(manifest.exportedAt);
+    expect(snapshotArg.addresses).toEqual(labelRecords);
+    expect(snapshotArg.reports).toEqual(reportRecords);
+    expect(snapshotArg.intelDeep).toEqual({});
+    expect(options.writeMode).toBe("replace");
+    expect(options.reportMetadataMode).toBe("preserve");
+  });
+
+  it("rejects a manifest blob with the wrong version field", async () => {
+    const badManifest = { ...manifest, version: "v3-future" };
+    mockGet.mockResolvedValueOnce(
+      blobResult(badManifest) as Awaited<ReturnType<typeof get>>,
+    );
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects a manifest blob that is not JSON", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult("not-json") as Awaited<ReturnType<typeof get>>,
+    );
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects when a referenced hash blob is missing", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    // First hash blob fetch returns null — Blob SDK miss
+    mockGet.mockResolvedValueOnce(null);
+    // Fill out the other 6 so Promise.all doesn't throw on unmet mocks
+    for (let i = 0; i < 6; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(404);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects when a hash blob contains invalid JSON", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult("{not-json") as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 6; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized manifest blob", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest, RESTORE_LIMIT + 1) as Awaited<
+        ReturnType<typeof get>
+      >,
+    );
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+    expect(res.status).toBe(413);
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 });

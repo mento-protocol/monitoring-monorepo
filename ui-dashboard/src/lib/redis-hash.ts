@@ -3,11 +3,21 @@ import type { Redis } from "@upstash/redis";
 // Upstash REST rejects requests around 10 MB. Keep the per-script payload
 // below that ceiling. Cross-hash atomic restores fall back to greedy-packed
 // sub-batches when the combined payload would exceed this budget — see
-// evalHashWriteScript.
+// evalHashWriteScript. Single hashes exceeding the cap fall back to chunked
+// DEL+HSET dispatch (replace) or chunked HSET dispatch (merge); see
+// chunkedHashWrite.
 export const MAX_REDIS_HASH_REPLACE_BYTES = 8 * 1024 * 1024;
 export const REDIS_HSET_FIELD_CHUNK_SIZE = 500;
 
-type RedisEvalClient = Pick<Redis, "eval">;
+// Headroom subtracted from MAX_REDIS_HASH_REPLACE_BYTES when packing chunked
+// HSET commands. Covers our approximation error in `hsetCommandBytes` (we
+// estimate JSON envelope overhead per pair; actual Upstash wire format can
+// vary by a few bytes). 1 KB is overkill for the worst-case fence-post; the
+// alternative — over-shoot and have one HSET command get rejected — is far
+// worse than slightly more chunks.
+const HSET_CHUNK_HEADROOM_BYTES = 1024;
+
+type RedisHashWriteClient = Pick<Redis, "eval" | "del" | "hset">;
 
 export type RedisHashReplacement = {
   key: string;
@@ -60,7 +70,7 @@ return 1
 `;
 
 export async function replaceRedisHashes(
-  redis: RedisEvalClient,
+  redis: RedisHashWriteClient,
   replacements: RedisHashReplacement[],
 ): Promise<void> {
   await evalHashWriteScript(
@@ -72,7 +82,7 @@ export async function replaceRedisHashes(
 }
 
 export async function mergeRedisHashes(
-  redis: RedisEvalClient,
+  redis: RedisHashWriteClient,
   replacements: RedisHashReplacement[],
 ): Promise<void> {
   await evalHashWriteScript(
@@ -95,40 +105,23 @@ function payloadBytesFor(
 }
 
 /**
- * Bytes the trusted-restore EVAL would send to Upstash for a single hash.
- * Use this for backup-time preflight sizing — the wire payload is meaningfully
- * larger than `JSON.stringify(records)` because each record value gets a
- * second JSON encode inside the Redis HSET argv, plus the script + key array.
- */
-export function restoreReplacePayloadBytes(
-  replacement: RedisHashReplacement,
-): number {
-  return payloadBytesFor(REPLACE_HASHES_SCRIPT, [replacement]);
-}
-
-/**
- * Greedy-pack the replacements into sub-batches each fitting under the
- * Upstash request cap, in the input order. Throws (without issuing any
- * round-trip) if any single replacement exceeds the cap.
+ * Greedy-pack EVAL-eligible replacements into sub-batches each fitting under
+ * the Upstash request cap, in the input order. Oversized single hashes are
+ * dispatched separately via chunked HSET and do not pass through here —
+ * callers partition before invoking this.
  *
  * The input order matters: callers should list "must stay atomic together"
  * hashes adjacent at the front (e.g. labels + reports). When their combined
- * payload fits one sub-batch, they swap together; the larger Arkham hashes
+ * payload fits one sub-batch, they swap together; the larger intel hashes
  * each get their own sub-batch.
  */
 function packIntoBatches(
   script: string,
   replacements: RedisHashReplacement[],
-  operation: "replacement" | "merge",
 ): RedisHashReplacement[][] {
   const batches: RedisHashReplacement[][] = [];
   let current: RedisHashReplacement[] = [];
   for (const replacement of replacements) {
-    if (payloadBytesFor(script, [replacement]) > MAX_REDIS_HASH_REPLACE_BYTES) {
-      throw new Error(
-        `Redis hash ${operation} payload for ${replacement.key} exceeds ${MAX_REDIS_HASH_REPLACE_BYTES} bytes`,
-      );
-    }
     const candidate = [...current, replacement];
     if (
       current.length > 0 &&
@@ -145,7 +138,7 @@ function packIntoBatches(
 }
 
 async function evalHashWriteScript(
-  redis: RedisEvalClient,
+  redis: RedisHashWriteClient,
   script: string,
   replacements: RedisHashReplacement[],
   operation: "replacement" | "merge",
@@ -161,20 +154,28 @@ async function evalHashWriteScript(
     return;
   }
 
-  // Fallback: pack into sub-batches that each fit under the cap. Greedy-pack
-  // preserves locality for callers that order related hashes adjacent (e.g.
-  // labels + reports at the front stay together inside a single sub-batch
-  // even when the broader payload has to be split). Validation runs BEFORE
-  // any round-trip so an oversized single hash fails fast without partial
-  // writes (codex P1).
-  const batches = packIntoBatches(script, replacements, operation);
+  // Partition: EVAL-eligible hashes (single-hash payload fits the cap) vs
+  // oversized hashes (single-hash payload exceeds the cap). EVAL-eligible go
+  // through greedy-packed sub-batches; oversized fall back to chunked DEL+HSET
+  // (replace) or chunked HSET (merge), which loses intra-hash atomicity for
+  // that specific hash but is the only path that fits.
+  const evalEligible: RedisHashReplacement[] = [];
+  const oversized: RedisHashReplacement[] = [];
+  for (const replacement of replacements) {
+    if (payloadBytesFor(script, [replacement]) > MAX_REDIS_HASH_REPLACE_BYTES) {
+      oversized.push(replacement);
+    } else {
+      evalEligible.push(replacement);
+    }
+  }
 
-  // Sequential dispatch. Once we've exceeded the single-script cap, no
-  // ordering preserves cross-batch atomicity — but firing them concurrently
-  // is worse: a late batch failing while early ones already committed leaves
-  // Redis in an unpredictable partial state. Serializing halts the sequence
-  // at a known boundary on failure (batches 1..i applied, i+1..N untouched),
-  // so an operator can re-run the restore with a deterministic resume point.
+  // EVAL-eligible sub-batches. Sequential dispatch — once we've exceeded the
+  // single-script cap, no ordering preserves cross-batch atomicity, but firing
+  // them concurrently is worse: a late batch failing while early ones already
+  // committed leaves Redis in an unpredictable partial state. Serializing
+  // halts at a known boundary on failure (batches 1..i applied, i+1..N
+  // untouched).
+  const batches = packIntoBatches(script, evalEligible);
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
     const keys = batch.map((r) => r.key);
@@ -183,12 +184,32 @@ async function evalHashWriteScript(
       // react-doctor-disable-next-line react-doctor/async-await-in-loop
       await runEvalScript(redis, script, keys, argv);
     } catch (err) {
-      // Decorate so operators can tell from the error which sub-batches
-      // committed (1..i) versus which key-set was being applied when the
-      // dispatch broke (batches i+1..N are still in their prior state).
       throw new Error(
-        `Redis hash ${operation} failed at sub-batch ${i + 1}/${batches.length} ` +
+        `Redis hash ${operation} failed at EVAL sub-batch ${i + 1}/${batches.length} ` +
           `(keys=[${keys.join(", ")}]); sub-batches 1..${i} already committed. ` +
+          `Original: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+  }
+
+  // Oversized: dispatch each via chunked DEL+HSET (replace) or chunked HSET
+  // (merge). Cross-hash atomicity was already broken when we partitioned;
+  // intra-hash atomicity is also broken inside chunkedHashWrite (a partial
+  // chunk-flush leaves the hash with some-but-not-all fields). This is
+  // acceptable for DR restore — a rare event where a brief partial state
+  // beats not being able to restore at all.
+  const replaceFirst = operation === "replacement";
+  for (let i = 0; i < oversized.length; i++) {
+    const replacement = oversized[i];
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      await chunkedHashWrite(redis, replacement, { replaceFirst });
+    } catch (err) {
+      throw new Error(
+        `Redis hash ${operation} failed during chunked write for ${replacement.key} ` +
+          `(oversized hash ${i + 1}/${oversized.length}); ` +
+          `prior batches + prior oversized hashes already committed; this hash may be in a partial state. ` +
           `Original: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );
@@ -196,8 +217,94 @@ async function evalHashWriteScript(
   }
 }
 
+/**
+ * Approximate Upstash REST wire bytes for an `HSET key f1 v1 f2 v2 ...`
+ * command. We over-estimate slightly so the chunk planner never picks a
+ * command that the server then rejects for being one byte over the cap —
+ * `HSET_CHUNK_HEADROOM_BYTES` is additionally subtracted from the cap at
+ * the call site.
+ */
+function hsetCommandBytes(key: string, pairs: Array<[string, string]>): number {
+  // Envelope: `["HSET","<key>", ...pairs]`. Per-pair envelope is roughly
+  // `,"<field>","<value>"` ≈ 6 bytes of JSON syntax plus the field+value
+  // UTF-8 byte lengths.
+  const ENVELOPE_BYTES = 12;
+  const PER_PAIR_ENVELOPE_BYTES = 6;
+  let bytes = ENVELOPE_BYTES + Buffer.byteLength(key, "utf8") + 2;
+  for (const [field, value] of pairs) {
+    bytes +=
+      PER_PAIR_ENVELOPE_BYTES +
+      Buffer.byteLength(field, "utf8") +
+      Buffer.byteLength(value, "utf8");
+  }
+  return bytes;
+}
+
+/**
+ * Dispatch a single oversized hash via chunked HSET commands. For replace
+ * mode (`replaceFirst: true`), issues a DEL first so the hash is fully
+ * cleared before any fields are written. For merge mode (`replaceFirst:
+ * false`), skips the DEL.
+ *
+ * Each HSET batch is sized to stay under
+ * `MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES`. Sequential
+ * dispatch so a failure halts at a known boundary instead of leaving an
+ * arbitrary subset of fields written.
+ *
+ * Intra-hash atomicity is lost: a failure mid-sequence (after DEL but before
+ * the final HSET) leaves the hash partially populated. For disaster-recovery
+ * restore — a rare event — accepting partial state beats not being able to
+ * restore at all.
+ */
+async function chunkedHashWrite(
+  redis: RedisHashWriteClient,
+  replacement: RedisHashReplacement,
+  options: { replaceFirst: boolean },
+): Promise<void> {
+  const { key, fields } = replacement;
+
+  if (options.replaceFirst) {
+    await redis.del(key);
+  }
+
+  const entries = Object.entries(fields);
+  if (entries.length === 0) return;
+
+  const chunkByteCap = MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES;
+  let chunk: Array<[string, string]> = [];
+  let chunkBytes = hsetCommandBytes(key, []);
+
+  for (const [field, value] of entries) {
+    const entryBytes =
+      Buffer.byteLength(field, "utf8") + Buffer.byteLength(value, "utf8") + 6;
+
+    // Field+value alone exceeding the cap is unrecoverable — a single HSET
+    // pair can't be split further. Fail fast with a clear message.
+    if (
+      hsetCommandBytes(key, [[field, value]]) > MAX_REDIS_HASH_REPLACE_BYTES
+    ) {
+      throw new Error(
+        `Single field ${field} on hash ${key} produces an HSET command above ${MAX_REDIS_HASH_REPLACE_BYTES} bytes; ` +
+          `cannot split further at the field level.`,
+      );
+    }
+
+    if (chunk.length > 0 && chunkBytes + entryBytes > chunkByteCap) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      await redis.hset(key, Object.fromEntries(chunk));
+      chunk = [];
+      chunkBytes = hsetCommandBytes(key, []);
+    }
+    chunk.push([field, value]);
+    chunkBytes += entryBytes;
+  }
+  if (chunk.length > 0) {
+    await redis.hset(key, Object.fromEntries(chunk));
+  }
+}
+
 async function runEvalScript(
-  redis: RedisEvalClient,
+  redis: RedisHashWriteClient,
   script: string,
   keys: string[],
   argv: string[],
