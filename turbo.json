@@ -1,0 +1,155 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "remoteCache": {
+    "enabled": false
+  },
+  "globalDependencies": [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    ".npmrc",
+    ".node-version",
+    "eslint.config.mjs"
+  ],
+  "globalEnv": ["CI", "NODE_ENV"],
+  "tasks": {
+    "lint": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "package.json",
+        "eslint.config.*",
+        "eslint-baseline.json",
+        "$TURBO_ROOT$/scripts/eslint-baseline-diff.mjs"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "package.json",
+        "tsconfig*.json",
+        "nest-cli.json",
+        "$TURBO_ROOT$/tsconfig*.json"
+      ],
+      "outputs": []
+    },
+    "test": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "package.json",
+        "vitest.config.*",
+        "jest.config.*",
+        "tsconfig*.json"
+      ],
+      "outputs": []
+    },
+    "knip": {
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$", "package.json", "knip.json"],
+      "outputs": []
+    },
+    "build": {
+      "cache": true,
+      "inputs": [
+        "src/**",
+        "public/**",
+        "package.json",
+        "next.config.*",
+        "postcss.config.*",
+        "tsconfig*.json",
+        "sentry.*.config.*",
+        "sentry.shared.ts",
+        ".size-limit.cjs",
+        "vercel.json",
+        ".env.production.local.example",
+        "$TURBO_ROOT$/shared-config/src/**",
+        "$TURBO_ROOT$/shared-config/*.json",
+        "$TURBO_ROOT$/shared-config/package.json",
+        "$TURBO_ROOT$/shared-config/tsconfig*.json",
+        "$TURBO_ROOT$/shared-config/dist/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/.github/actions/pnpm-install/**",
+        "$TURBO_ROOT$/.github/workflows/size-limit.yml",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "env": ["VERCEL_ENV"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    },
+    "size-limit": {
+      "cache": true,
+      "dependsOn": ["build"],
+      "inputs": [
+        ".next/**",
+        "!.next/cache/**",
+        ".size-limit.cjs",
+        "package.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/.github/workflows/size-limit.yml",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "outputs": []
+    },
+    "test:browser": {
+      "cache": true,
+      "inputs": [
+        "src/**",
+        "public/**",
+        "package.json",
+        "next.config.*",
+        "postcss.config.*",
+        "tsconfig*.json",
+        "sentry.*.config.*",
+        "sentry.shared.ts",
+        "vercel.json",
+        ".env.production.local.example",
+        "playwright.config.ts",
+        "scripts/run-browser-tests.mjs",
+        "tests/browser/**",
+        "next-env.d.ts",
+        "$TURBO_ROOT$/shared-config/src/**",
+        "$TURBO_ROOT$/shared-config/*.json",
+        "$TURBO_ROOT$/shared-config/package.json",
+        "$TURBO_ROOT$/shared-config/tsconfig*.json",
+        "$TURBO_ROOT$/shared-config/dist/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/.github/actions/pnpm-install/**",
+        "$TURBO_ROOT$/.github/workflows/ci.yml",
+        "$TURBO_ROOT$/.github/workflows/size-limit.yml",
+        "$TURBO_ROOT$/.github/workflows/update-snapshots.yml",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
+        "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "env": [
+        "PLAYWRIGHT_NEXT_PORT",
+        "PLAYWRIGHT_FIXTURE_PORT",
+        "VERCEL_ENV",
+        "CI",
+        "NEXT_TELEMETRY_DISABLED",
+        "NEXT_PUBLIC_HASURA_URL",
+        "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
+      ],
+      "outputs": []
+    }
+  }
+}

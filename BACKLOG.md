@@ -218,6 +218,33 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-- [ ] **`BLOB_READ_WRITE_TOKEN` lost `preview` + `development` scopes** during the unrelated root-stack apply on 2026-05-20. Fix is a one-line `target = ["production", "preview", "development"]` change in `terraform/main.tf:117` + one more destroy/recreate cycle on the env var. Risk: rotates the production token again briefly — schedule for a quiet window. If preview/dev BLOB callers haven't broken in the meantime, no urgency.
+- [ ] **`BLOB_READ_WRITE_TOKEN` lost `development` scope** during the unrelated root-stack apply on 2026-05-20. Production + preview were restored on 2026-05-21 via Vercel-API-driven store-project reconnect (after the broken token caused the daily address-labels-backup cron to fail; see [ANALYTICS-MENTO-ORG-G](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-G)). Development is still missing — fix is `target = ["production", "preview", "development"]` in `terraform/main.tf:117` (currently `["production", "preview"]`) on next quiet-window apply. Out of band by the OIDC upgrade item below — if OIDC lands first, this becomes moot (no static token).
 - [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
 - [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
+
+## address-labels backup: per-hash blob splits
+
+Daily backup snapshot crossed both restore-path caps on 2026-05-21 (Sentry [ANALYTICS-MENTO-ORG-19](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-19) / [ANALYTICS-MENTO-ORG-18](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-18)): total snapshot 33.8 MB > `MAX_RESTORE_BLOB_BYTES` (32 MB) and `intel_deep` EVAL payload 8.78 MB > `MAX_REDIS_HASH_REPLACE_BYTES` (8 MB, Upstash Lua EVAL ceiling). Backup itself still succeeds and the raw blob is salvageable manually, but disaster-recovery restore would reject it. Code comment at `ui-dashboard/src/app/api/address-labels/backup/route.ts:11` already prescribes the right fix ("the cron should switch to per-hash blob splits").
+
+Plan — single PR, additive on restore side:
+
+- [ ] **Backup route** (`backup/route.ts`): replace the single `address-labels-backup-YYYY-MM-DD.json` write with parallel per-hash blobs under `address-labels-backup-YYYY-MM-DD/<hash>.json` (one per `labels`, `reports`, `intelDeep`, `intelTransfers`, `intelWealth`, `intelEntities`, `intelEntityCps`) plus a `manifest.json` listing `{exportedAt, hashes: [{name, pathname, size, sha256}]}`. All 8 blobs uploaded via `Promise.all`. No single blob crosses ~10 MB → both caps stop biting.
+- [ ] **Restore route** (`restore/route.ts`): detect manifest vs legacy blob shape (filename pattern or JSON probe of first chunk); manifest path fetches each referenced hash blob in parallel and runs `replaceRedisHashes` per hash (preserves per-hash atomicity, drops cross-hash atomicity which the per-hash route already gave up). Keep the legacy monolithic-blob path for back-compat — restoring older snapshots stays possible. Bump `MAX_RESTORE_BLOB_BYTES` to 16 MB per blob (well under any platform limit).
+- [ ] Update `isAllowedRestorePathname` to accept the new `address-labels-backup-YYYY-MM-DD/(<hash>|manifest).json` pattern alongside the existing patterns.
+- [ ] `flagOversizeBackup` stays as a safety net; warnings should never fire under the new shape.
+- [ ] Tests: extend `backup/__tests__/route.test.ts` to assert 8 blobs + manifest get written; add a restore test that consumes a manifest blob; keep an existing legacy-blob restore test.
+- [ ] Optional follow-up: 30-day rolling cleanup of old monolithic blobs once new format has soaked for ~1 week.
+
+## Upgrade `@vercel/blob` to ^2.4.0 + switch to OIDC tokens
+
+Eliminates the static-token rotation pain that took ~1 hour to root-cause on 2026-05-21 (terraform apply on 2026-05-20 silently wrote a broken `BLOB_READ_WRITE_TOKEN`; first scheduled cron at 03:00 UTC hit `BlobStoreNotFoundError`; rotation required Vercel-API surgery on store-project connections). With OIDC the SDK auto-fetches a short-lived (~1h) project-scoped token from Vercel's identity issuer at runtime — no env var to rotate or accidentally clobber.
+
+- [ ] Bump `@vercel/blob` from `^2.3.1` to latest `^2.4.x` in `ui-dashboard/package.json` (OIDC support landed in 2.4).
+- [ ] Verify both call sites — `backup/route.ts:89` (`put`) and `restore/route.ts:51` (`get`) — still type-check and behave. OIDC is transparent to consumers; SDK fetches OIDC token when `BLOB_READ_WRITE_TOKEN` is absent.
+- [ ] `pnpm test` — both route tests mock `@vercel/blob`, should pass unchanged.
+- [ ] Ship via normal worktree + `/ship` flow.
+- [ ] After prod deploy READY: Vercel dashboard → Storage → `address-labels-backup` → click **Upgrade to OIDC** banner.
+- [ ] Verify cron: `curl -H "Authorization: Bearer $CRON_SECRET" https://monitoring.mento.org/api/address-labels/backup` → expect 200.
+- [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Also drop `vercel_project_environment_variable.blob_token` from `terraform/main.tf` (and the `blob_token` variable + tfvars entry).
+- [ ] Optional: trigger a cron-style restore against the latest backup blob to confirm OIDC works for `get()` too.
+- [ ] Closes the "lost development scope" loose end above (no static token → no scope to lose).
