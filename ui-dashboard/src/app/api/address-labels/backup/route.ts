@@ -110,53 +110,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           }),
         );
 
-        // Backup-time preflight: two distinct restore-failure modes to flag.
-        //
-        // 1. Per-blob oversize: the restore route refuses any single blob
-        //    > MAX_RESTORE_BLOB_BYTES (16 MB), so a hash that grows past that
-        //    cap makes every restore from this snapshot 413.
-        // 2. Per-field unsplittable: even a sub-16MB blob can deterministically
-        //    fail restore if any single field/value pair exceeds the chunked-
-        //    HSET budget — restore's chunkedHashWrite throws before any write.
-        //
-        // Backup still succeeds in either case (the raw blob is salvageable
-        // manually), but a Sentry warning surfaces the impending DR break
-        // before someone tries to restore.
-        for (const upload of hashUploads) {
-          if (upload.sizeBytes > MAX_RESTORE_BLOB_BYTES) {
-            Sentry.captureMessage(
-              `[backup] hash blob ${upload.name} ${upload.sizeBytes} bytes exceeds restore cap ${MAX_RESTORE_BLOB_BYTES} — disaster-recovery restore would reject this snapshot`,
-              {
-                level: "warning",
-                tags: { route: "address-labels/backup", hash: upload.name },
-              },
-            );
-          }
-          // Build the wire-format fields the same way restore will: every
-          // value JSON-encoded once for HSET. Approximates the per-field check
-          // chunkedHashWrite uses; off by a few bytes from per-hash key naming
-          // but the headroom in MAX_REDIS_HASH_REPLACE_BYTES absorbs that.
-          const wireFields: Record<string, string> = {};
-          for (const [field, value] of Object.entries(
-            hashRecords[upload.name],
-          )) {
-            wireFields[field.toLowerCase()] = JSON.stringify(value);
-          }
-          const unsplittable = findUnchunkableField(upload.name, wireFields);
-          if (unsplittable) {
-            Sentry.captureMessage(
-              `[backup] hash ${upload.name} has unsplittable field ${unsplittable.field} (${unsplittable.bytes} bytes > chunked-HSET cap) — disaster-recovery restore would fail on this hash`,
-              {
-                level: "warning",
-                tags: {
-                  route: "address-labels/backup",
-                  hash: upload.name,
-                  field: unsplittable.field,
-                },
-              },
-            );
-          }
-        }
+        flagRestoreBreakingSnapshot(hashUploads, hashRecords);
 
         const manifest: BackupManifestV2 = {
           version: BACKUP_MANIFEST_VERSION,
@@ -201,5 +155,62 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     Sentry.captureException(err, { tags: { route: "address-labels/backup" } });
     console.error("[backup]", err);
     return NextResponse.json({ error: "Backup failed" }, { status: 500 });
+  }
+}
+
+/**
+ * Backup-time preflight: two distinct restore-failure modes to flag.
+ *
+ * 1. Per-blob oversize: the restore route refuses any single blob
+ *    > MAX_RESTORE_BLOB_BYTES (16 MB), so a hash that grows past that
+ *    cap makes every restore from this snapshot 413.
+ * 2. Per-field unsplittable: even a sub-16MB blob can deterministically
+ *    fail restore if any single field/value pair exceeds the chunked-
+ *    HSET budget — restore's chunkedHashWrite throws before any write.
+ *
+ * Backup still succeeds in either case (the raw blob is salvageable
+ * manually), but a Sentry warning surfaces the impending DR break before
+ * someone tries to restore.
+ */
+function flagRestoreBreakingSnapshot(
+  hashUploads: Array<{
+    name: SnapshotHashName;
+    pathname: string;
+    sizeBytes: number;
+  }>,
+  hashRecords: Record<SnapshotHashName, Record<string, unknown>>,
+): void {
+  for (const upload of hashUploads) {
+    if (upload.sizeBytes > MAX_RESTORE_BLOB_BYTES) {
+      Sentry.captureMessage(
+        `[backup] hash blob ${upload.name} ${upload.sizeBytes} bytes exceeds restore cap ${MAX_RESTORE_BLOB_BYTES} — disaster-recovery restore would reject this snapshot`,
+        {
+          level: "warning",
+          tags: { route: "address-labels/backup", hash: upload.name },
+        },
+      );
+    }
+    // Build the wire-format fields the same way restore will: every value
+    // JSON-encoded once for HSET. Approximates the per-field check
+    // chunkedHashWrite uses; off by a few bytes from per-hash key naming
+    // but the headroom in MAX_REDIS_HASH_REPLACE_BYTES absorbs that.
+    const wireFields: Record<string, string> = {};
+    for (const [field, value] of Object.entries(hashRecords[upload.name])) {
+      wireFields[field.toLowerCase()] = JSON.stringify(value);
+    }
+    const unsplittable = findUnchunkableField(upload.name, wireFields);
+    if (unsplittable) {
+      Sentry.captureMessage(
+        `[backup] hash ${upload.name} has unsplittable field ${unsplittable.field} (${unsplittable.bytes} bytes > chunked-HSET cap) — disaster-recovery restore would fail on this hash`,
+        {
+          level: "warning",
+          tags: {
+            route: "address-labels/backup",
+            hash: upload.name,
+            field: unsplittable.field,
+          },
+        },
+      );
+    }
   }
 }
