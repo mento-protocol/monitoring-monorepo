@@ -182,11 +182,25 @@ const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
   direct: "Broker",
   lifi: "LI.FI Router",
   "mento-router-v2": "Mento Router v2",
+  "mento-router-v3": "Mento Router v3",
   openocean: "OpenOcean Router",
   squid: "Squid Router",
   system: "Mento system",
   unknown: "Unknown router",
 };
+
+/** Aggregator names that are Mento-first-party entry points (Broker, native
+ *  routers, system contracts). Used by the leaderboard to render these with
+ *  a neutral pill instead of the indigo "third-party aggregator" pill.
+ *  Co-located with `BROKER_VIA_DISPLAY_NAMES` so adding a new first-party
+ *  label is a single-place edit. */
+export const FIRST_PARTY_BROKER_VIAS: ReadonlySet<string> = new Set([
+  "system",
+  "direct",
+  "broker",
+  "mento-router-v2",
+  "mento-router-v3",
+]);
 
 // ─── Aggregations ─────────────────────────────────────────────────────────
 

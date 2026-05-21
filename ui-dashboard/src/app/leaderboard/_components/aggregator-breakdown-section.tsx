@@ -15,7 +15,12 @@ import {
 } from "@/components/time-series-chart-card";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
-import { brokerViaDisplayName, cmpBigInt, weiToUsd } from "@/lib/leaderboard";
+import {
+  brokerViaDisplayName,
+  cmpBigInt,
+  FIRST_PARTY_BROKER_VIAS,
+  weiToUsd,
+} from "@/lib/leaderboard";
 import type { AggregatorWindowRow } from "@/lib/leaderboard-aggregators";
 import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
 import { TableSectionTitle } from "./table-section-title";
@@ -295,12 +300,7 @@ function aggregatorLabelClass(name: string): string {
   if (name.startsWith("cluster-")) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 font-mono text-[11px] text-slate-300";
   }
-  if (
-    name === "system" ||
-    name === "direct" ||
-    name === "broker" ||
-    name === "mento-router-v2"
-  ) {
+  if (FIRST_PARTY_BROKER_VIAS.has(name)) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300";
   }
   return "rounded bg-indigo-900/30 px-1.5 py-0.5 text-[11px] font-medium text-indigo-200";

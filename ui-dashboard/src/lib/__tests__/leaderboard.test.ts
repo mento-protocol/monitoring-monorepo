@@ -1189,6 +1189,7 @@ describe("v2 trader Via marker helpers", () => {
     expect(brokerViaDisplayName("broker")).toBe("Broker");
     expect(brokerViaDisplayName("direct")).toBe("Broker");
     expect(brokerViaDisplayName("mento-router-v2")).toBe("Mento Router v2");
+    expect(brokerViaDisplayName("mento-router-v3")).toBe("Mento Router v3");
     expect(brokerViaDisplayName("squid")).toBe("Squid Router");
     expect(brokerViaDisplayName("openocean")).toBe("OpenOcean Router");
     expect(brokerViaDisplayName("unknown")).toBe("Unknown router");

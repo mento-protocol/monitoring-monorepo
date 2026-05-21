@@ -162,12 +162,14 @@ describe("AggregatorBreakdownSection", () => {
       aggregators: [
         row({ aggregator: "broker" }),
         row({ aggregator: "mento-router-v2" }),
+        row({ aggregator: "mento-router-v3" }),
       ],
     });
 
     expect(aggregatorNames(handle.container)).toEqual([
       "Broker",
       "Mento Router v2",
+      "Mento Router v3",
     ]);
   });
 
