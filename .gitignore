@@ -8,6 +8,7 @@ test-results/
 .env.sepolia
 .env.production.local
 .next/
+.turbo/
 dist/
 *.tsbuildinfo
 .DS_Store

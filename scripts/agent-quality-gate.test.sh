@@ -64,6 +64,7 @@ run_gate_expect_failure() {
 
 assert_contains() {
   local expected="$1"
+  expected="$(normalize_expected_command "$expected")"
   grep -Fq -- "$expected" "$output_file" ||
     fail "expected output to contain: $expected"
 }
@@ -72,6 +73,7 @@ assert_occurrences() {
   local expected_count="$1"
   local expected="$2"
   local actual_count
+  expected="$(normalize_expected_command "$expected")"
   actual_count="$(awk -v expected="$expected" 'index($0, expected) { count++ } END { print count + 0 }' "$output_file")"
   [[ "$actual_count" == "$expected_count" ]] ||
     fail "expected $expected_count occurrence(s) of '$expected', found $actual_count"
@@ -96,7 +98,30 @@ run_context_check_expect_failure() {
 
 line_number() {
   local needle="$1"
+  needle="$(normalize_expected_command "$needle")"
   grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
+}
+
+normalize_expected_command() {
+  local expected="$1"
+  local package_name
+  local task_name
+
+  case "$expected" in
+    *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
+      package_name="${expected#*pnpm --filter }"
+      package_name="${package_name%% *}"
+      task_name="${expected#*pnpm --filter ${package_name} }"
+      task_name="${task_name%% *}"
+      case "$task_name" in
+        lint|typecheck|test|knip)
+          expected="${expected/pnpm --filter ${package_name} ${task_name}/pnpm exec turbo run ${task_name} --filter=${package_name} --cache=local:rw}"
+          ;;
+      esac
+      ;;
+  esac
+
+  printf '%s\n' "$expected"
 }
 
 assert_order() {
@@ -219,6 +244,11 @@ run_gate "metrics-bridge/src/main.ts"
 assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bridge --cache=local:rw (metrics-bridge changed)"
+# `assert_contains` normalizes legacy package-task expectations to the Turbo
+# command shape; keep a direct negative assertion so the old command cannot be
+# emitted alongside the cached one unnoticed.
+assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests or lockfile changed."
@@ -787,6 +817,10 @@ run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+run_gate "turbo.json"
+assert_contains "- tooling"
+assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (
