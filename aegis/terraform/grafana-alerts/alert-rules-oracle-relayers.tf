@@ -4,8 +4,6 @@ resource "grafana_rule_group" "oracle_relayers" {
   interval_seconds = 120
 
   dynamic "rule" {
-    # Every chain runs SortedOracles; the feeds monitored per chain are set by
-    # the metric `variants` in config.yaml.
     for_each = local.chains
 
     content {

@@ -68,7 +68,6 @@ locals {
     "CELOGHS",
     "CELOXOF",
     "EURXOF",
-    # FX majors — closed on weekends on every chain that lists them
     "GBPUSD",
     "EURUSD",
     "JPYUSD",
