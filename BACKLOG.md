@@ -222,6 +222,10 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 - [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
 - [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
 
+## Slack low-balance alert: paragraph break between grouped alerts
+
+When Grafana groups multiple Low-balance firings into one Slack message (e.g. 4 relayer wallets at once), the per-alert blocks render with no blank line between them — title → 3 bullets → next title → 3 bullets — which reads as one wall of text. Fix in `aegis/terraform/grafana-alerts/message-templates-slack.tf`: add a single blank line inside the `range .Alerts.Firing` body of `slack.oracle_relayer_low_balance_alert_message` (right before `{{ end -}}`) so each iteration emits a trailing `\n\n` and Slack mrkdwn shows a paragraph break. Depends on PR #506 (`feat/monad`) merging first, since the renamed token-generic template is introduced there.
+
 ## address-labels backup: per-hash blob splits
 
 Daily backup snapshot crossed both restore-path caps on 2026-05-21 (Sentry [ANALYTICS-MENTO-ORG-19](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-19) / [ANALYTICS-MENTO-ORG-18](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-18)): total snapshot 33.8 MB > `MAX_RESTORE_BLOB_BYTES` (32 MB) and `intel_deep` EVAL payload 8.78 MB > `MAX_REDIS_HASH_REPLACE_BYTES` (8 MB, Upstash Lua EVAL ceiling). Backup itself still succeeds and the raw blob is salvageable manually, but disaster-recovery restore would reject it. Code comment at `ui-dashboard/src/app/api/address-labels/backup/route.ts:11` already prescribes the right fix ("the cron should switch to per-hash blob splits").
