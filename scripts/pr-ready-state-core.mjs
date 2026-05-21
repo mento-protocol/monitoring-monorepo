@@ -290,7 +290,7 @@ function parseTimestamp(value) {
 }
 
 function currentHeadUpdatedAt(pr) {
-  return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt ?? pr.updatedAt);
+  return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
 
 export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {

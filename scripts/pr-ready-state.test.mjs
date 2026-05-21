@@ -20,6 +20,7 @@ import {
   repoFromPullRequestUrl,
   requiredStatusContextsFromProtection,
   requiredStatusContextsFromRules,
+  requiredStatusContextsFromRulesResult,
   splitRepo,
   workflowPathsFromRules,
 } from "./pr-ready-state.mjs";
@@ -170,6 +171,32 @@ test("extracts required status contexts from branch rulesets", () => {
   );
 });
 
+test("extracts required status contexts from nested branch rulesets", () => {
+  const rulesets = [
+    {
+      id: 1,
+      name: "required checks",
+      rules: [
+        { type: "deletion" },
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [
+              { context: "ci", integration_id: 15368 },
+              { context: "Vercel", integration_id: 8329 },
+            ],
+          },
+        },
+      ],
+    },
+  ];
+
+  assertDeepEqual(requiredStatusContextsFromRules(rulesets), [
+    { context: "ci", integrationId: 15368 },
+    { context: "Vercel", integrationId: 8329 },
+  ]);
+});
+
 test("extracts app-bound required status contexts from branch protection details", () => {
   assertDeepEqual(
     requiredStatusContextsFromProtection({
@@ -221,6 +248,47 @@ test("extracts required workflow contexts from branch rulesets", () => {
       { context: "Code Quality", integrationId: null },
     ],
   );
+});
+
+test("extracts required workflow contexts from nested branch rulesets", () => {
+  const rulesets = [
+    {
+      id: 1,
+      rules: [
+        {
+          type: "workflows",
+          parameters: {
+            workflows: [{ path: ".github/workflows/ci.yml" }],
+          },
+        },
+      ],
+    },
+  ];
+  const workflowNameByPath = new Map([[".github/workflows/ci.yml", "ci"]]);
+
+  assertDeepEqual(workflowPathsFromRules(rulesets), [
+    ".github/workflows/ci.yml",
+  ]);
+  assertDeepEqual(
+    requiredStatusContextsFromRules(rulesets, { workflowNameByPath }),
+    [{ context: "ci", integrationId: null }],
+  );
+});
+
+test("fails closed when workflow-name lookup fails for workflow rules", () => {
+  const result = requiredStatusContextsFromRulesResult(
+    [
+      {
+        type: "workflows",
+        parameters: {
+          workflows: [{ path: ".github/workflows/ci.yml" }],
+        },
+      },
+    ],
+    { workflowNameLookupError: "HTTP 403" },
+  );
+
+  assertDeepEqual(result, { contexts: [], error: "HTTP 403" });
 });
 
 test("skips workflow rules when no workflow check name can be resolved", () => {
@@ -665,7 +733,7 @@ test("rejects stale chatgpt-codex-connector reaction from before the head update
   );
 });
 
-test("falls back to pull request updatedAt when head update time is unavailable", () => {
+test("does not use pull request updatedAt as head freshness fallback", () => {
   const summary = summarizeReadyState({
     pr: {
       ...basePr,
@@ -685,8 +753,8 @@ test("falls back to pull request updatedAt when head update time is unavailable"
     ],
   });
 
-  assert(summary.codexApprovalReaction, "expected updatedAt fallback to pass");
-  assertEqual(summary.pr.headUpdatedAt, "2026-05-21T13:25:00.000Z");
+  assertEqual(summary.codexApprovalReaction, false);
+  assertEqual(summary.pr.headUpdatedAt, null);
 });
 
 test("still fails closed when no head freshness timestamp is available", () => {

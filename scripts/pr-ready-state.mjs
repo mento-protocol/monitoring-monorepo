@@ -145,9 +145,19 @@ function workflowPath(workflow) {
   );
 }
 
+function flattenRules(rules = []) {
+  const flattened = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== "object") continue;
+    if (rule.type) flattened.push(rule);
+    flattened.push(...flattenRules(rule.rules ?? []));
+  }
+  return flattened;
+}
+
 export function workflowPathsFromRules(rules = []) {
   const paths = new Set();
-  for (const rule of rules) {
+  for (const rule of flattenRules(rules)) {
     if (rule.type !== "workflows") continue;
 
     for (const workflow of rule.parameters?.workflows ?? []) {
@@ -175,7 +185,7 @@ export function requiredStatusContextsFromRules(
   { workflowNameByPath = new Map() } = {},
 ) {
   const byKey = new Map();
-  for (const rule of rules) {
+  for (const rule of flattenRules(rules)) {
     if (rule.type === "required_status_checks") {
       for (const check of rule.parameters?.required_status_checks ?? []) {
         addRequiredContext(
@@ -199,6 +209,20 @@ export function requiredStatusContextsFromRules(
   }
 
   return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
+}
+
+export function requiredStatusContextsFromRulesResult(
+  rules = [],
+  { workflowNameByPath = new Map(), workflowNameLookupError = null } = {},
+) {
+  if (workflowPathsFromRules(rules).length > 0 && workflowNameLookupError) {
+    return { contexts: [], error: workflowNameLookupError };
+  }
+
+  return {
+    contexts: requiredStatusContextsFromRules(rules, { workflowNameByPath }),
+    error: null,
+  };
 }
 
 export function requiredStatusContextsFromProtection(protection) {
@@ -319,7 +343,7 @@ function fetchWorkflowNameByPath(repo) {
     `repos/${repoPath(repo)}/actions/workflows?per_page=100`,
   ]);
   const byPath = new Map();
-  if (!result.ok) return byPath;
+  if (!result.ok) return { byPath, error: result.error };
 
   for (const page of result.value ?? []) {
     for (const workflow of page.workflows ?? []) {
@@ -329,7 +353,7 @@ function fetchWorkflowNameByPath(repo) {
     }
   }
 
-  return byPath;
+  return { byPath, error: null };
 }
 
 function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
@@ -339,36 +363,8 @@ function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-function fetchHeadPushedAt({ repo, headSha }) {
-  const query = `
-    query($owner: String!, $name: String!, $oid: GitObjectID!) {
-      repository(owner: $owner, name: $name) {
-        object(oid: $oid) {
-          ... on Commit {
-            pushedDate
-          }
-        }
-      }
-    }
-  `;
-  const result = ghApiJsonResult(repo, [
-    "graphql",
-    "-f",
-    `owner=${repo.owner}`,
-    "-f",
-    `name=${repo.name}`,
-    "-f",
-    `oid=${headSha}`,
-    "-f",
-    `query=${query}`,
-  ]);
-  if (!result.ok) return null;
-
-  return result.value?.data?.repository?.object?.pushedDate ?? null;
-}
-
-function fetchHeadUpdatedAt({ repo, headSha, observedAt }) {
-  return fetchHeadPushedAt({ repo, headSha }) ?? observedAt ?? null;
+function fetchHeadUpdatedAt({ observedAt }) {
+  return observedAt ?? null;
 }
 
 function fetchReviewThreads({ repo, number }) {
@@ -455,14 +451,12 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
         ? fetchWorkflowNameByPath(repo)
-        : new Map();
+        : { byPath: new Map(), error: null };
 
-      return {
-        contexts: requiredStatusContextsFromRules(rulesResult.value ?? [], {
-          workflowNameByPath,
-        }),
-        error: null,
-      };
+      return requiredStatusContextsFromRulesResult(rulesResult.value ?? [], {
+        workflowNameByPath: workflowNameByPath.byPath,
+        workflowNameLookupError: workflowNameByPath.error,
+      });
     }
 
     return {
@@ -496,7 +490,6 @@ function fetchReadyState({ prArg, repoArg }) {
       "reviews",
       "statusCheckRollup",
       "title",
-      "updatedAt",
       "url",
     ].join(","),
   ];
@@ -519,8 +512,6 @@ function fetchReadyState({ prArg, repoArg }) {
     headSha: pr.headRefOid,
   });
   const headUpdatedAt = fetchHeadUpdatedAt({
-    repo,
-    headSha: pr.headRefOid,
     observedAt,
   });
   const annotatedPr = {
