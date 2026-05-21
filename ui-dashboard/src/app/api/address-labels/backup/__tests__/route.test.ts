@@ -349,6 +349,40 @@ describe("GET /api/address-labels/backup", () => {
     expect(warningCall![1]).toMatchObject({ level: "warning" });
   });
 
+  it("fires a Sentry warning when any single field's wire size exceeds the chunked-HSET cap", async () => {
+    // Regression test: a sub-16MB blob can still deterministically fail
+    // restore if one field/value pair exceeds the chunked-HSET budget.
+    // chunkedHashWrite pre-scans + throws on the first unsplittable field
+    // before any write — backup needs to warn at preflight time.
+    const Sentry = await import("@sentry/nextjs");
+    const captureMessage = vi.mocked(Sentry.captureMessage);
+
+    // Single field whose JSON-encoded value exceeds the chunk cap. Other
+    // fields are tiny, so the blob itself fits under 16 MB and the per-blob
+    // check wouldn't fire — only the per-field guard catches this.
+    const huge = "Q".repeat(8 * 1024 * 1024 + 1024);
+    const fatFields: Record<string, string> = { onefatfield: huge };
+    const { getAllIntelDeep } = await import("@/lib/intel-deep");
+    (getAllIntelDeep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      fatFields,
+    );
+
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+
+    const warningCall = captureMessage.mock.calls.find((args) =>
+      String(args[0]).includes("unsplittable field"),
+    );
+    expect(warningCall).toBeDefined();
+    expect(warningCall![0]).toMatch(/onefatfield/);
+    expect(warningCall![0]).toMatch(/chunked-HSET cap/);
+    expect(warningCall![1]).toMatchObject({ level: "warning" });
+  });
+
   it("returns 500 when CRON_SECRET is not set in production", async () => {
     vi.stubEnv("CRON_SECRET", "");
     const req = new NextRequest("http://localhost/api/address-labels/backup", {

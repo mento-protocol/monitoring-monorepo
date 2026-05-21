@@ -313,6 +313,29 @@ async function runEvalScript(
   return redis.eval(script, keys, argv);
 }
 
+/**
+ * Find the first field/value pair on a hash whose single-pair HSET command
+ * would exceed the chunked-dispatch budget (`MAX_REDIS_HASH_REPLACE_BYTES`
+ * minus headroom). Returns `null` when every pair fits.
+ *
+ * Used by the backup route as a preflight: chunked HSET in the restore path
+ * throws on the first unsplittable field, so a hash whose blob fits under
+ * the restore cap can still deterministically fail to restore if one
+ * field/value pair is too big. Catch it at backup time so operators know
+ * before relying on the snapshot.
+ */
+export function findUnchunkableField(
+  key: string,
+  fields: Record<string, string>,
+): { field: string; bytes: number } | null {
+  const chunkByteCap = MAX_REDIS_HASH_REPLACE_BYTES - HSET_CHUNK_HEADROOM_BYTES;
+  for (const [field, value] of Object.entries(fields)) {
+    const bytes = hsetCommandBytes(key, [[field, value]]);
+    if (bytes > chunkByteCap) return { field, bytes };
+  }
+  return null;
+}
+
 export function flattenHashReplacements(
   replacements: RedisHashReplacement[],
 ): string[] {
