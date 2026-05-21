@@ -277,7 +277,6 @@ const LeaderboardWindowTradersRowSchema = z.object({
   chainId: z.number(),
   snapshotDay: z.string(),
   windowTraders: z.array(z.string()),
-  windowTradersIncludingSystem: z.array(z.string()),
 });
 
 export const LeaderboardWindowTradersLatestSchema = z.object({

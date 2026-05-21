@@ -423,12 +423,11 @@ describe("LeaderboardWindowFirstDayLatestSchema smoke test", () => {
 });
 
 describe("LeaderboardWindowTradersLatestSchema smoke test", () => {
-  it("accepts a row with both v3 trader address arrays", () => {
+  it("accepts a row with the v3 trader address array", () => {
     const row = {
       chainId: 42220,
       snapshotDay: "100",
       windowTraders: ["0xaaa", "0xbbb"],
-      windowTradersIncludingSystem: ["0xaaa", "0xbbb", "0xccc"],
     };
     expect(
       LeaderboardWindowTradersLatestSchema.safeParse({
@@ -442,7 +441,6 @@ describe("LeaderboardWindowTradersLatestSchema smoke test", () => {
       chainId: 143,
       snapshotDay: "100",
       windowTraders: [],
-      windowTradersIncludingSystem: [],
     };
     expect(
       LeaderboardWindowTradersLatestSchema.safeParse({
@@ -456,7 +454,6 @@ describe("LeaderboardWindowTradersLatestSchema smoke test", () => {
       chainId: 42220,
       snapshotDay: "100",
       windowTraders: ["0xaaa", 42],
-      windowTradersIncludingSystem: [],
     };
     expect(
       LeaderboardWindowTradersLatestSchema.safeParse({

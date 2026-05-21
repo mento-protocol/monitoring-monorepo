@@ -456,7 +456,6 @@ export const LEADERBOARD_WINDOW_TRADERS_LATEST = /* GraphQL */ `
       chainId
       snapshotDay
       windowTraders
-      windowTradersIncludingSystem
     }
   }
 `;

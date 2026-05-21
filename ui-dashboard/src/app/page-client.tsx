@@ -112,7 +112,15 @@ function GlobalContent({
   const tradersGql = useGQL<LeaderboardWindowTradersLatest>(
     LEADERBOARD_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
-    { schema: LeaderboardWindowTradersLatestSchema },
+    {
+      schema: LeaderboardWindowTradersLatestSchema,
+      // The "all" window snapshot only rolls over at the per-chain UTC-midnight
+      // heartbeat (see indexer-envio/src/leaderboardWindowFlush.ts), so the
+      // default 30s polling cadence is wildly over-cadenced for this tile.
+      // 5min keeps a fresh-after-rollover read without burning the Envio
+      // "small" tier quota for a multi-KB address list on every poll.
+      refreshInterval: 5 * 60_000,
+    },
   );
   const totalUniqueTraders = useMemo(() => {
     if (tradersGql.error) return null;

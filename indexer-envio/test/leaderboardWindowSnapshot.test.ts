@@ -172,15 +172,18 @@ describe("buildLeaderboardWindowSnapshot", () => {
     // satisfy `length === <count>` for both system-filter branches —
     // this is the invariant the homepage Traders tile relies on for
     // cross-chain Set-deduplication.
+    //
+    // Input deliberately reversed so the deepEqual on the sorted output
+    // is a real sort assertion, not a no-op identity check.
     const snap = buildLeaderboardWindowSnapshot({
       chainId: CHAIN,
       windowKey: "all",
       snapshotDay: DAY_2026_05_07,
       windowStartDay: 0n,
       aggregates: [
-        agg({ trader: TRADER_A, isSystemAddress: false }),
-        agg({ trader: TRADER_B, isSystemAddress: false }),
         agg({ trader: TRADER_C, isSystemAddress: true }),
+        agg({ trader: TRADER_B, isSystemAddress: false }),
+        agg({ trader: TRADER_A, isSystemAddress: false }),
       ],
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
@@ -190,7 +193,7 @@ describe("buildLeaderboardWindowSnapshot", () => {
       snap.windowTradersIncludingSystem.length,
       snap.uniqueTradersIncludingSystem,
     );
-    // Deterministic order — addresses are sorted ascending.
+    // Deterministic order — addresses are sorted ascending (input was reversed).
     assert.deepEqual(snap.windowTraders, [TRADER_A, TRADER_B]);
     assert.deepEqual(snap.windowTradersIncludingSystem, [
       TRADER_A,

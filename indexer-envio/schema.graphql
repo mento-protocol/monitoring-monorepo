@@ -756,10 +756,18 @@ type LeaderboardWindowSnapshot
   # dashboard cross-chain-dedupe via a `Set<string>` union (used by the
   # homepage "Traders" tile, where naively summing `uniqueTraders` across
   # chains would double-count wallets active on multiple chains). Sorted
-  # lowercase. For the `all` windowKey this grows monotonically; at
-  # current Mento scale (~250 v3 traders across all chains) the array
-  # adds <10KB per snapshot row, with multi-decade headroom before the
-  # GraphQL response becomes large.
+  # lowercase.
+  #
+  # Semantics by windowKey:
+  #   - `all`        — every trader that has ever swapped on this chain
+  #                    (grows monotonically; one entry per distinct EOA).
+  #   - `7d|30d|90d` — traders active anywhere in the rolling window.
+  #   - `24h`        — empty by construction (the 24h snapshot range is
+  #                    `[snapshotDay+1, snapshotDay]`, see windowStartDay).
+  #
+  # At current Mento scale (~250 v3 traders across all chains) the `all`
+  # array adds <10KB per snapshot row, with multi-decade headroom before
+  # the GraphQL response becomes large.
   windowTraders: [String!]!
   windowTradersIncludingSystem: [String!]!
   blockNumber: BigInt!
