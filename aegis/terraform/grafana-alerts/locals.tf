@@ -21,7 +21,7 @@ locals {
       env       = "prod"
       metric    = "CELOToken_balanceOf"
       symbol    = "CELO"
-      threshold = 5
+      threshold = 10
       explorer  = "celoscan.io"
     }
     "celo-sepolia" = {
@@ -29,7 +29,7 @@ locals {
       env       = "staging"
       metric    = "CELOToken_balanceOf"
       symbol    = "CELO"
-      threshold = 5
+      threshold = 10
       explorer  = "sepolia.celoscan.io"
     }
     "monad" = {
