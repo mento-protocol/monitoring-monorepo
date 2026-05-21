@@ -119,11 +119,14 @@ data "archive_file" "function_source" {
   type        = "zip"
   source_dir  = path.module
   output_path = "${path.module}/function-source.zip"
+  # Terraform's archive provider uses doublestar matching: a single `*` does
+  # NOT cross `/`. Use `**/` prefixes to drop test files + state artifacts
+  # nested in subdirs (src/**, etc.).
   excludes = [
     "node_modules",
     ".git",
-    "*.test.ts",
-    "*.test.js",
+    "**/*.test.ts",
+    "**/*.test.js",
     "main.tf",
     "local-dotenv-file.tf",
     "locals.tf",
@@ -132,10 +135,10 @@ data "archive_file" "function_source" {
     "versions.tf",
     "README.md",
     ".terraform",
-    "*.tfstate",
-    "*.tfstate.backup",
-    "*.tfvars",
-    "*.tfvars.json",
+    "**/*.tfstate",
+    "**/*.tfstate.backup",
+    "**/*.tfvars",
+    "**/*.tfvars.json",
     ".env",
     ".env.*",
     ".project_vars_cache",
