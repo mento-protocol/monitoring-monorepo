@@ -81,16 +81,121 @@ function ghApiJsonResult(repo, args) {
   }
 }
 
-export function requiredStatusContextsFromRules(rules = []) {
-  return [
-    ...new Set(
-      rules
-        .filter((rule) => rule.type === "required_status_checks")
-        .flatMap((rule) => rule.parameters?.required_status_checks ?? [])
-        .map((check) => check.context)
-        .filter(Boolean),
-    ),
-  ].sort((a, b) => a.localeCompare(b));
+function ghApiJsonPagesResult(repo, args) {
+  const result = spawnSync(
+    "gh",
+    [...ghApiArgs(repo, args), "--paginate", "--slurp"],
+    {
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+
+  if (result.error) {
+    return { ok: false, error: result.error.message };
+  }
+
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      error: result.stderr.trim() || `exit ${result.status}`,
+    };
+  }
+
+  try {
+    const parsed = result.stdout.trim() ? JSON.parse(result.stdout) : [];
+    return {
+      ok: true,
+      value: Array.isArray(parsed)
+        ? parsed.flatMap((page) => (Array.isArray(page) ? page : [page]))
+        : [],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function addRequiredContext(byKey, context, integrationId = null) {
+  if (!context) return;
+  const normalizedIntegrationId =
+    integrationId === null || integrationId === undefined
+      ? null
+      : Number(integrationId);
+  const key = `${context}\0${normalizedIntegrationId ?? ""}`;
+  byKey.set(key, {
+    context,
+    integrationId: normalizedIntegrationId,
+  });
+}
+
+function workflowPath(workflow) {
+  return (
+    workflow.path ??
+    workflow.workflow_path ??
+    workflow.workflowPath ??
+    workflow.file_path ??
+    workflow.filePath ??
+    null
+  );
+}
+
+export function workflowPathsFromRules(rules = []) {
+  const paths = new Set();
+  for (const rule of rules) {
+    if (rule.type !== "workflows") continue;
+
+    for (const workflow of rule.parameters?.workflows ?? []) {
+      const path = workflowPath(workflow);
+      if (path) paths.add(path);
+    }
+  }
+
+  return [...paths].sort((a, b) => a.localeCompare(b));
+}
+
+function requiredWorkflowContext(workflow, workflowNameByPath) {
+  const path = workflowPath(workflow);
+  return (
+    workflow.name ??
+    workflow.workflow_name ??
+    workflow.workflowName ??
+    (path ? workflowNameByPath.get(path) : null) ??
+    null
+  );
+}
+
+export function requiredStatusContextsFromRules(
+  rules = [],
+  { workflowNameByPath = new Map() } = {},
+) {
+  const byKey = new Map();
+  for (const rule of rules) {
+    if (rule.type === "required_status_checks") {
+      for (const check of rule.parameters?.required_status_checks ?? []) {
+        addRequiredContext(
+          byKey,
+          check.context,
+          check.integration_id ?? check.integrationId ?? null,
+        );
+      }
+      continue;
+    }
+
+    if (rule.type === "workflows") {
+      for (const workflow of rule.parameters?.workflows ?? []) {
+        addRequiredContext(
+          byKey,
+          requiredWorkflowContext(workflow, workflowNameByPath),
+          workflow.integration_id ?? workflow.integrationId ?? null,
+        );
+      }
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
 }
 
 export function splitRepo(repoValue) {
@@ -121,6 +226,136 @@ export function repoFromPullRequestUrl(url) {
 
 function repoPath(repo) {
   return `${repo.owner}/${repo.name}`;
+}
+
+function appIdFromAvatarUrl(url) {
+  const match = String(url ?? "").match(/\/in\/(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function latestStatusByContext(statuses = []) {
+  const latest = new Map();
+  for (const status of statuses) {
+    if (!latest.has(status.context)) {
+      latest.set(status.context, status);
+    }
+  }
+  return latest;
+}
+
+function minIsoTimestamp(current, candidate) {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return Date.parse(candidate) < Date.parse(current) ? candidate : current;
+}
+
+function fetchStatusSourceMap({ repo, headSha }) {
+  const path = repoPath(repo);
+  const checkRunsResult = ghApiJsonPagesResult(repo, [
+    `repos/${path}/commits/${headSha}/check-runs`,
+  ]);
+  const statusesResult = ghApiJsonPagesResult(repo, [
+    `repos/${path}/commits/${headSha}/statuses`,
+  ]);
+
+  const sourceMap = new Map();
+  let observedAt = null;
+
+  if (checkRunsResult.ok) {
+    for (const page of checkRunsResult.value ?? []) {
+      for (const checkRun of page.check_runs ?? []) {
+        observedAt = minIsoTimestamp(
+          observedAt,
+          checkRun.created_at ?? checkRun.started_at,
+        );
+        if (checkRun.name && checkRun.app?.id) {
+          sourceMap.set(checkRun.name, { appId: Number(checkRun.app.id) });
+        }
+      }
+    }
+  }
+
+  if (statusesResult.ok) {
+    for (const status of latestStatusByContext(statusesResult.value).values()) {
+      observedAt = minIsoTimestamp(observedAt, status.created_at);
+      const appId =
+        appIdFromAvatarUrl(status.avatar_url) ??
+        appIdFromAvatarUrl(status.creator?.avatar_url);
+      if (status.context && appId !== null) {
+        sourceMap.set(status.context, { appId });
+      }
+    }
+  }
+
+  return { sourceMap, observedAt };
+}
+
+function fetchWorkflowNameByPath(repo) {
+  const result = ghApiJsonPagesResult(repo, [
+    `repos/${repoPath(repo)}/actions/workflows?per_page=100`,
+  ]);
+  const byPath = new Map();
+  if (!result.ok) return byPath;
+
+  for (const page of result.value ?? []) {
+    for (const workflow of page.workflows ?? []) {
+      if (workflow.path && workflow.name) {
+        byPath.set(workflow.path, workflow.name);
+      }
+    }
+  }
+
+  return byPath;
+}
+
+function statusCheckName(check) {
+  return (
+    check.name ??
+    check.context ??
+    check.workflowName ??
+    check.app?.name ??
+    check.__typename ??
+    "unknown check"
+  );
+}
+
+function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
+  return statusCheckRollup.map((check) => {
+    const source = sourceMap.get(statusCheckName(check));
+    return source ? { ...check, ...source } : check;
+  });
+}
+
+function fetchHeadPushedAt({ repo, headSha }) {
+  const query = `
+    query($owner: String!, $name: String!, $oid: GitObjectID!) {
+      repository(owner: $owner, name: $name) {
+        object(oid: $oid) {
+          ... on Commit {
+            pushedDate
+          }
+        }
+      }
+    }
+  `;
+  const result = ghApiJsonResult(repo, [
+    "graphql",
+    "-f",
+    `owner=${repo.owner}`,
+    "-f",
+    `name=${repo.name}`,
+    "-f",
+    `oid=${headSha}`,
+    "-f",
+    `query=${query}`,
+  ]);
+  if (!result.ok) return null;
+
+  return result.value?.data?.repository?.object?.pushedDate ?? null;
+}
+
+function fetchHeadUpdatedAt({ repo, headSha, observedAt }) {
+  return fetchHeadPushedAt({ repo, headSha }) ?? observedAt ?? null;
 }
 
 function fetchReviewThreads({ repo, number }) {
@@ -193,7 +428,7 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
 
   if (!result.ok) {
     if (result.error.includes("Branch not protected (HTTP 404)")) {
-      const rulesResult = ghApiJsonResult(repo, [
+      const rulesResult = ghApiJsonPagesResult(repo, [
         `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
       ]);
 
@@ -204,8 +439,15 @@ function fetchRequiredStatusContexts({ repo, baseRef }) {
         };
       }
 
+      const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
+        .length
+        ? fetchWorkflowNameByPath(repo)
+        : new Map();
+
       return {
-        contexts: requiredStatusContextsFromRules(rulesResult.value ?? []),
+        contexts: requiredStatusContextsFromRules(rulesResult.value ?? [], {
+          workflowNameByPath,
+        }),
         error: null,
       };
     }
@@ -258,6 +500,23 @@ function fetchReadyState({ prArg, repoArg }) {
 
   const repo = repoFromPullRequestUrl(pr.url) ?? splitRepo(repoArg);
   const path = repoPath(repo);
+  const { sourceMap, observedAt } = fetchStatusSourceMap({
+    repo,
+    headSha: pr.headRefOid,
+  });
+  const headUpdatedAt = fetchHeadUpdatedAt({
+    repo,
+    headSha: pr.headRefOid,
+    observedAt,
+  });
+  const annotatedPr = {
+    ...pr,
+    headUpdatedAt,
+    statusCheckRollup: annotateStatusCheckSources(
+      pr.statusCheckRollup ?? [],
+      sourceMap,
+    ),
+  };
 
   const issueComments = ghApiJsonPages(repo, [
     `repos/${path}/issues/${number}/comments`,
@@ -277,13 +536,14 @@ function fetchReadyState({ prArg, repoArg }) {
   });
 
   return summarizeReadyState({
-    pr,
+    pr: annotatedPr,
     issueComments,
     reactions,
     reviewComments,
     reviewThreads,
     requiredStatusContexts: requiredStatusContexts.contexts,
     requiredStatusContextsError: requiredStatusContexts.error,
+    requiredStatusContextsAvailable: requiredStatusContexts.error === null,
   });
 }
 

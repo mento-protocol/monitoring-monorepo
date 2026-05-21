@@ -31,12 +31,15 @@ Required blockers:
   required-vs-optional status. If the classic branch-protection endpoint returns
   GitHub's `Branch not protected (HTTP 404)` response, the probe reads active
   branch rulesets and derives required status contexts from any
-  `required_status_checks` rule before using the fallback split.
+  `required_status_checks` and named `workflows` rule before using the fallback
+  split.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer.
 - The Codex PR-description approval gate for the current head. The bot `+1`
-  reaction must be created at or after the head commit timestamp.
+  reaction must be created at or after the current-head update lower bound:
+  the head commit's GitHub push timestamp when available, otherwise the first
+  current-head check/status observation timestamp.
 
 Optional signals:
 
@@ -76,7 +79,7 @@ Expected top-level fields:
     "isDraft": false,
     "headRefName": "chore/pr-ready-state",
     "headRefOid": "abcdef1",
-    "headCommittedAt": "2026-05-21T13:22:23.000Z",
+    "headUpdatedAt": "2026-05-21T13:22:23.000Z",
     "baseRefName": "main",
     "mergeable": "MERGEABLE",
     "reviewDecision": "APPROVED"
@@ -117,6 +120,12 @@ Expected top-level fields:
       "unrepliedCount": 0
     }
   },
+  "requiredStatusContexts": [
+    {
+      "context": "ci",
+      "integrationId": 15368
+    }
+  ],
   "summary": "Required check trunk is still pending; Cursor Bugbot is advisory and still pending."
 }
 ```
@@ -133,6 +142,12 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
+- `requiredStatusContexts[]`: required check contexts from classic branch
+  protection or branch rulesets. Ruleset-derived entries include status-check
+  rules and required-workflow rules when their check names are present in the
+  ruleset or resolvable from local workflow metadata. Entries preserve
+  `integrationId` so a same-name check from the wrong GitHub App does not
+  satisfy readiness.
 - `summary`: one concise human-readable sentence suitable for a babysitter
   status update.
 

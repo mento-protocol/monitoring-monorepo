@@ -85,7 +85,10 @@ commands, use:
 pnpm agent:prewarm --base origin/main
 ```
 
-It is a no-op when the gate maps no relevant Turbo commands.
+It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
+gate, prewarm refuses to execute Turbo-backed package scripts when package
+manifests, lockfiles, `.npmrc`, or pnpmfile changed unless you first review the
+script/lifecycle diff and pass `--allow-package-script-changes`.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped

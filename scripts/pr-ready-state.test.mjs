@@ -20,6 +20,7 @@ import {
   repoFromPullRequestUrl,
   requiredStatusContextsFromRules,
   splitRepo,
+  workflowPathsFromRules,
 } from "./pr-ready-state.mjs";
 
 let passed = 0;
@@ -79,6 +80,7 @@ const basePr = {
   isDraft: false,
   headRefName: "chore/pr-ready-state",
   headRefOid: "abc123",
+  headUpdatedAt: "2026-05-21T13:22:23Z",
   commits: [
     {
       oid: "abc123",
@@ -160,7 +162,51 @@ test("extracts required status contexts from branch rulesets", () => {
         },
       },
     ]),
-    ["ci", "Vercel"],
+    [
+      { context: "ci", integrationId: null },
+      { context: "Vercel", integrationId: null },
+    ],
+  );
+});
+
+test("extracts required workflow contexts from branch rulesets", () => {
+  const rules = [
+    {
+      type: "workflows",
+      parameters: {
+        workflows: [
+          { path: ".github/workflows/ci.yml" },
+          { path: ".github/workflows/quality.yml", name: "Code Quality" },
+        ],
+      },
+    },
+  ];
+  const workflowNameByPath = new Map([[".github/workflows/ci.yml", "ci"]]);
+
+  assertDeepEqual(workflowPathsFromRules(rules), [
+    ".github/workflows/ci.yml",
+    ".github/workflows/quality.yml",
+  ]);
+  assertDeepEqual(
+    requiredStatusContextsFromRules(rules, { workflowNameByPath }),
+    [
+      { context: "ci", integrationId: null },
+      { context: "Code Quality", integrationId: null },
+    ],
+  );
+});
+
+test("skips workflow rules when no workflow check name can be resolved", () => {
+  assertDeepEqual(
+    requiredStatusContextsFromRules([
+      {
+        type: "workflows",
+        parameters: {
+          workflows: [{ path: ".github/workflows/unknown.yml" }],
+        },
+      },
+    ]),
+    [],
   );
 });
 
@@ -236,6 +282,77 @@ test("marks missing required status contexts as pending blockers", () => {
   assertDeepEqual(
     split.required.map((check) => `${check.name}:${check.state}`),
     ["ci:pass", "Vercel:pending"],
+  );
+});
+
+test("treats an empty required status context list as authoritative when available", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [{ name: "ci", status: "IN_PROGRESS", conclusion: null }],
+    [],
+    { requiredStatusContextsAvailable: true },
+  );
+
+  assertDeepEqual(
+    {
+      required: split.required.map((check) => check.name),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      required: [],
+      optional: ["ci:pending"],
+    },
+  );
+});
+
+test("requires matching integration id when required checks specify an app source", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [
+      {
+        name: "ci",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        appId: 999,
+      },
+      {
+        name: "Code Quality",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        appId: 15368,
+      },
+    ],
+    [
+      { context: "ci", integrationId: 15368 },
+      { context: "Code Quality", integrationId: 15368 },
+    ],
+  );
+
+  assertDeepEqual(
+    {
+      required: split.required.map((check) => `${check.name}:${check.state}`),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      required: ["ci:pending", "Code Quality:pass"],
+      optional: ["ci:pass"],
+    },
+  );
+});
+
+test("does not satisfy integration-bound required checks with unknown app source", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [{ name: "ci", status: "COMPLETED", conclusion: "SUCCESS" }],
+    [{ context: "ci", integrationId: 15368 }],
+  );
+
+  assertDeepEqual(
+    {
+      required: split.required.map((check) => `${check.name}:${check.state}`),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      required: ["ci:pending"],
+      optional: ["ci:pass"],
+    },
   );
 });
 
@@ -397,7 +514,7 @@ test("requires chatgpt-codex-connector +1 reaction exactly", () => {
   );
 });
 
-test("rejects stale chatgpt-codex-connector reaction from before the head commit", () => {
+test("rejects stale chatgpt-codex-connector reaction from before the head update", () => {
   assert(
     !hasCodexApprovalReaction(
       [

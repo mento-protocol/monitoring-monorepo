@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { extractTurboPrewarmCommands } from "./agent-prewarm.mjs";
+import {
+  extractTurboPrewarmCommands,
+  hasPackageScriptRisk,
+} from "./agent-prewarm.mjs";
 
 const gateOutput = `Agent quality gate
 
@@ -33,6 +36,32 @@ Mapped safe local commands:
 Dry run only.
 `),
   [],
+);
+
+assert.equal(
+  hasPackageScriptRisk(`Agent quality gate
+
+Changed paths:
+- package.json
+- ui-dashboard/src/app/page.tsx
+
+Mapped safe local commands:
+- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --cache=local:rw (ui-dashboard changed)
+`),
+  true,
+);
+
+assert.equal(
+  hasPackageScriptRisk(`Agent quality gate
+
+Changed paths:
+- docs/notes/pr-ready-state.md
+- scripts/pr-ready-state.mjs
+
+Mapped safe local commands:
+- pnpm pr:ready-state:test (PR ready-state helper changed)
+`),
+  false,
 );
 
 console.log("agent prewarm tests passed");

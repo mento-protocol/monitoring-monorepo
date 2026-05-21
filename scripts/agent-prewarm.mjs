@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run]
+const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run] [--allow-package-script-changes]
 
 Prewarm Turbo's local cache for the Turbo-backed commands already mapped by
 the agent quality gate. The helper only runs commands shaped as:
@@ -18,6 +18,9 @@ Options:
   --changed-paths-file <file>
                  Read changed paths from a newline-delimited file instead of git.
   --dry-run      Print the Turbo commands without running them.
+  --allow-package-script-changes
+                 With run mode, acknowledge package manifest/script changes
+                 before executing Turbo-backed package scripts.
   -h, --help     Show this help.
 `;
 
@@ -45,9 +48,43 @@ export function extractTurboPrewarmCommands(gateOutput) {
   return commands;
 }
 
+export function hasPackageScriptRisk(gateOutput) {
+  let inChangedPaths = false;
+
+  for (const line of gateOutput.split(/\r?\n/)) {
+    if (line === "Changed paths:") {
+      inChangedPaths = true;
+      continue;
+    }
+
+    if (!inChangedPaths) continue;
+    if (line.trim() === "") break;
+
+    const match = line.match(/^- (.+)$/);
+    if (!match) continue;
+
+    const path = match[1];
+    if (
+      path === "package.json" ||
+      path.endsWith("/package.json") ||
+      path === "pnpm-lock.yaml" ||
+      path === "pnpm-workspace.yaml" ||
+      path === "pnpmfile.cjs" ||
+      path === ".pnpmfile.cjs" ||
+      path === ".npmrc" ||
+      path.endsWith("/.npmrc")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function parseArgs(argv) {
   const forwardedArgs = [];
   let mode = "run";
+  let allowPackageScriptChanges = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -66,15 +103,18 @@ function parseArgs(argv) {
       case "--dry-run":
         mode = "dry-run";
         break;
+      case "--allow-package-script-changes":
+        allowPackageScriptChanges = true;
+        break;
       case "-h":
       case "--help":
-        return { help: true, mode, forwardedArgs };
+        return { help: true, mode, forwardedArgs, allowPackageScriptChanges };
       default:
         throw new Error(`unknown argument: ${arg}`);
     }
   }
 
-  return { help: false, mode, forwardedArgs };
+  return { help: false, mode, forwardedArgs, allowPackageScriptChanges };
 }
 
 function runGate(forwardedArgs) {
@@ -119,6 +159,7 @@ function main() {
   }
 
   const commands = extractTurboPrewarmCommands(gateResult.stdout ?? "");
+  const packageScriptRisk = hasPackageScriptRisk(gateResult.stdout ?? "");
 
   console.log("Agent prewarm");
   console.log();
@@ -141,6 +182,16 @@ function main() {
       "Dry run only. Re-run without --dry-run to execute the Turbo commands.",
     );
     return 0;
+  }
+
+  if (packageScriptRisk && !parsed.allowPackageScriptChanges) {
+    console.error(
+      "Refusing to prewarm because package manifests or lockfile changed.",
+    );
+    console.error(
+      "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe.",
+    );
+    return 2;
   }
 
   let failures = 0;

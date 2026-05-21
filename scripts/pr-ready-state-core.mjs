@@ -89,6 +89,38 @@ export function groupStatusChecks(statusCheckRollup = []) {
   return grouped;
 }
 
+function requiredContextName(context) {
+  return typeof context === "string" ? context : context.context;
+}
+
+function requiredContextIntegrationId(context) {
+  const value =
+    typeof context === "string"
+      ? null
+      : (context.integrationId ?? context.integration_id ?? null);
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function checkAppId(check) {
+  const value =
+    check.appId ??
+    check.app_id ??
+    check.app?.id ??
+    check.app?.databaseId ??
+    null;
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function checkMatchesRequiredContext(check, context) {
+  if (checkDisplayName(check) !== requiredContextName(context)) return false;
+
+  const requiredIntegrationId = requiredContextIntegrationId(context);
+  if (requiredIntegrationId === null) return true;
+
+  const appId = checkAppId(check);
+  return appId !== null && appId === requiredIntegrationId;
+}
+
 function checkToItem(check, { required }) {
   const state = classifyCheck(check);
   return {
@@ -103,20 +135,26 @@ function checkToItem(check, { required }) {
 export function splitRequiredAndOptionalChecks(
   statusCheckRollup = [],
   requiredStatusContexts = [],
+  { requiredStatusContextsAvailable = requiredStatusContexts.length > 0 } = {},
 ) {
-  const requiredContextSet = new Set(requiredStatusContexts);
-  const hasRequiredContextData = requiredContextSet.size > 0;
   const required = [];
   const optional = [];
   const seenRequiredContexts = new Set();
 
   for (const check of statusCheckRollup) {
     const name = checkDisplayName(check);
-    const isRequired = hasRequiredContextData
-      ? requiredContextSet.has(name)
+    const matchedRequiredContext = requiredStatusContexts.find((context) =>
+      checkMatchesRequiredContext(check, context),
+    );
+    const isRequired = requiredStatusContextsAvailable
+      ? matchedRequiredContext !== undefined
       : !isOptionalCheckName(name);
     if (isRequired) {
-      seenRequiredContexts.add(name);
+      seenRequiredContexts.add(
+        matchedRequiredContext === undefined
+          ? name
+          : requiredContextName(matchedRequiredContext),
+      );
     }
     const item = checkToItem(check, { required: isRequired });
     if (isRequired) {
@@ -126,11 +164,12 @@ export function splitRequiredAndOptionalChecks(
     }
   }
 
-  for (const context of requiredContextSet) {
-    if (!seenRequiredContexts.has(context)) {
+  for (const context of requiredStatusContexts) {
+    const name = requiredContextName(context);
+    if (!seenRequiredContexts.has(name)) {
       required.push({
         kind: "check",
-        name: context,
+        name,
         state: "pending",
         required: true,
         url: null,
@@ -234,24 +273,19 @@ function parseTimestamp(value) {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
-function currentHeadCommittedAt(pr) {
-  const headCommit =
-    pr.commits?.find((commit) => commit.oid === pr.headRefOid) ??
-    pr.commits?.at?.(-1);
-  return parseTimestamp(headCommit?.committedDate);
+function currentHeadUpdatedAt(pr) {
+  return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
 
-export function hasCodexApprovalReaction(
-  reactions = [],
-  headCommittedAt = null,
-) {
+export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
+  if (headUpdatedAt === null) return false;
+
   return reactions.some(
     (reaction) =>
       reaction.content === "+1" &&
       reaction.user?.login === BOT_APPROVER &&
-      (headCommittedAt === null ||
-        parseTimestamp(reaction.created_at ?? reaction.createdAt) >=
-          headCommittedAt),
+      parseTimestamp(reaction.created_at ?? reaction.createdAt) >=
+        headUpdatedAt,
   );
 }
 
@@ -263,11 +297,13 @@ export function summarizeReadyState({
   reviewThreads = [],
   requiredStatusContexts = [],
   requiredStatusContextsError = null,
+  requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
     pr.statusCheckRollup ?? [],
     requiredStatusContexts,
+    { requiredStatusContextsAvailable },
   );
   const unresolvedReviewThreads = findUnresolvedReviewThreads(reviewThreads);
   const unrepliedRootReviewComments = findUnrepliedRootReviewComments(
@@ -278,10 +314,10 @@ export function summarizeReadyState({
     ...findTopLevelBotComments(issueComments),
     ...findTopLevelBotReviewComments(pr.reviews ?? []),
   ];
-  const headCommittedAt = currentHeadCommittedAt(pr);
+  const headUpdatedAt = currentHeadUpdatedAt(pr);
   const codexApprovalReaction = hasCodexApprovalReaction(
     reactions,
-    headCommittedAt,
+    headUpdatedAt,
   );
 
   const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";
@@ -425,10 +461,8 @@ export function summarizeReadyState({
       baseRefName: pr.baseRefName,
       mergeable: pr.mergeable ?? null,
       reviewDecision: pr.reviewDecision ?? null,
-      headCommittedAt:
-        headCommittedAt === null
-          ? null
-          : new Date(headCommittedAt).toISOString(),
+      headUpdatedAt:
+        headUpdatedAt === null ? null : new Date(headUpdatedAt).toISOString(),
     },
     statusChecks,
     requiredStatusContexts,
