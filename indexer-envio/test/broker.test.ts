@@ -261,10 +261,10 @@ describe("Broker.Swap handler", () => {
       "legacy Router direct-to-Broker swaps should remain in the v2 daily series",
     );
     const routeRow = mockDb.entities.BrokerAggregatorDailySnapshot.get(
-      `${CHAIN_CELO}-mento-router-v2-${dayTs}`,
+      `${CHAIN_CELO}-mento-router-v3-${dayTs}`,
     ) as { aggregator: string; lastSeenAggregatorAddress: string } | undefined;
-    assert.isOk(routeRow, "Mento Router v2 route row missing");
-    assert.equal(routeRow!.aggregator, "mento-router-v2");
+    assert.isOk(routeRow, "Mento Router v3 route row missing");
+    assert.equal(routeRow!.aggregator, "mento-router-v3");
     assert.equal(routeRow!.lastSeenAggregatorAddress, V3_ROUTER.toLowerCase());
   });
 
@@ -609,7 +609,14 @@ describe("Broker.Swap handler", () => {
     // un-registered router, so the negative assertion checks all aggregator
     // names that could plausibly land here.
     const allAggregatorRowsEmpty = (
-      ["unknown", "broker", "mento-router-v2", "direct", "system"] as const
+      [
+        "unknown",
+        "broker",
+        "mento-router-v2",
+        "mento-router-v3",
+        "direct",
+        "system",
+      ] as const
     ).every(
       (name) =>
         !mockDb.entities.BrokerAggregatorDailySnapshot.get(

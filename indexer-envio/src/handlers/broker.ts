@@ -53,7 +53,11 @@ function classifyBrokerEntryPoint(chainId: number, txTo: string): string {
     lower === contractAddress(chainId, "Router") ||
     lower === contractAddress(chainId, "Routerv300")
   ) {
-    return "mento-router-v2";
+    // `@mento-protocol/contracts` registers `Router` and `Routerv300` at the
+    // same address (the v3 router, 0x4861840…). The earlier MentoRouter
+    // (0xBE7293…) is NOT in the package — it's labeled `mento-router-v2` via
+    // an aggregators.json entry and resolved through the fallback below.
+    return "mento-router-v3";
   }
   return classifyAggregator(chainId, txTo);
 }

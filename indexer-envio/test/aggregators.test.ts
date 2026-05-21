@@ -90,15 +90,22 @@ describe("classifyAggregator", () => {
 });
 
 describe("_aggregatorAddressesForChain", () => {
-  it("Celo has 5 verified aggregators (incl. OpenOcean executor) + 16 cluster-7dc08ec28f299c06 contracts", () => {
+  it("Celo has 5 verified aggregators (incl. OpenOcean executor) + 1 mento-router-v2 + 16 cluster-7dc08ec28f299c06 contracts", () => {
     const map = _aggregatorAddressesForChain(CHAIN_CELO);
-    assert.equal(map.size, 21);
+    assert.equal(map.size, 22);
     assert.equal(map.get(SQUID_CELO), "squid");
     // OpenOcean per-leg executor classifies under the same `openocean` name
     // as the user-facing Exchange Proxy that delegates to it.
     assert.equal(
       map.get("0xdec876911cbe9428265af0d12132c52ee8642a99"),
       "openocean",
+    );
+    // Original MentoRouter on Celo — verified contract, not in
+    // @mento-protocol/contracts, so we register it here so v2 broker traffic
+    // via this address gets a labeled row instead of landing in `unknown`.
+    assert.equal(
+      map.get("0xbe729350f8cdfc19db6866e8579841188ee57f67"),
+      "mento-router-v2",
     );
   });
 
