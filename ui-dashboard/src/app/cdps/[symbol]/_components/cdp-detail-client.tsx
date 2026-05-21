@@ -26,11 +26,7 @@ import {
   type CdpTrove,
   type CdpTroveListRow,
 } from "../../_lib/types";
-import {
-  cdpSymbolSlug,
-  formatAggregateAmount,
-  formatTokenAmount,
-} from "../../_lib/format";
+import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
 import { CdpStabilityPoolTvlChart } from "./cdp-stability-pool-tvl-chart";
@@ -106,8 +102,9 @@ function CdpDetailState({
   collateral: CdpCollateral | undefined;
   network: Network;
 }) {
-  // aggregateTroves runs a BigInt sum across up to 500 troves; memoize so
-  // the 30s SWR refresh doesn't recompute when neither input changed.
+  // aggregateTroves loops over up to 500 trove rows to produce the borrower
+  // count; memoize so the 30s SWR refresh doesn't recompute when neither
+  // input changed. systemDebt/systemColl come from `LiquityInstance` directly.
   const aggregates = useMemo(
     () =>
       collateral == null
@@ -176,10 +173,10 @@ function buildContentProps({
   };
 }
 
-// For aggregates, use the chain-wide markets-list query (up to 500 troves)
-// filtered to this collateral, NOT the 50-row detail query — that one
-// exists only for the recent-activity table and would understate System
-// Debt / Open Troves for any market with >50 open troves.
+// For the borrower count, use the chain-wide markets-list query (up to 500
+// troves) filtered to this collateral, NOT the 50-row detail query — that
+// one exists only for the recent-activity table and would understate the
+// open-trove count for any market with >50 open troves.
 function aggregatesFromChainTroves(
   collateralId: string,
   allChainTroves: CdpTroveListRow[] | undefined,
@@ -216,21 +213,12 @@ function CdpDetailContent({
 }) {
   return (
     <div className="space-y-8">
-      <DetailHeader
-        collateral={collateral}
-        instance={instance}
-        aggregates={aggregates}
-      />
+      <DetailHeader collateral={collateral} instance={instance} />
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile
           label="Total Supply (System Debt)"
-          value={formatAggregateAmount(
-            aggregates.totalDebt,
-            collateral.symbol,
-            aggregates.truncated,
-          )}
-          subtitle={aggregates.truncated ? "Trove list truncated" : undefined}
+          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
         />
         <Tile
           label="System Collateral"
@@ -248,9 +236,18 @@ function CdpDetailContent({
               ? "—"
               : `${aggregates.truncated ? "≥" : ""}${aggregates.openTroveCount}`
           }
-          subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
+          subtitle={
+            aggregates.truncated
+              ? "Trove list truncated"
+              : `Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`
+          }
         />
       </section>
+
+      <RedemptionsSection
+        instance={instance}
+        symbol={collateral.symbol}
+      />
 
       <CdpStabilityPoolTvlChart
         snapshots={snapshots}
@@ -287,13 +284,11 @@ function CdpDetailContent({
 function DetailHeader({
   collateral,
   instance,
-  aggregates,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
-  aggregates: ReturnType<typeof aggregateTroves>;
 }) {
-  const health = deriveCdpHealth(collateral, instance, aggregates);
+  const health = deriveCdpHealth(collateral, instance);
   return (
     <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -314,6 +309,49 @@ function DetailHeader({
         </span>
       </div>
     </header>
+  );
+}
+
+/** Total / User / Rebalance redemption KPI tiles. The indexer (post-commit
+ * 026c629) tracks the rebalance subset separately via `tx.to ==
+ * cdpLiquidityStrategy`; user-driven = total − rebalance. */
+function RedemptionsSection({
+  instance,
+  symbol,
+}: {
+  instance: CdpInstance | undefined;
+  symbol: string;
+}) {
+  const totalCount = instance?.redemptionCountCum ?? 0;
+  const rebalanceCount = instance?.rebalanceRedemptionCountCum ?? 0;
+  const userCount = Math.max(0, totalCount - rebalanceCount);
+  const totalDebt = instance?.redemptionDebtCum ?? null;
+  const rebalanceDebt = instance?.rebalanceRedemptionDebtCum ?? null;
+  const userDebt =
+    totalDebt != null && rebalanceDebt != null
+      ? (BigInt(totalDebt) - BigInt(rebalanceDebt)).toString()
+      : null;
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-white mb-3">Redemptions</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Tile
+          label="Total Redemptions"
+          value={formatTokenAmount(totalDebt, symbol)}
+          subtitle={`${totalCount.toLocaleString()} event${totalCount === 1 ? "" : "s"}`}
+        />
+        <Tile
+          label="User Redemptions"
+          value={formatTokenAmount(userDebt, symbol)}
+          subtitle={`${userCount.toLocaleString()} event${userCount === 1 ? "" : "s"}`}
+        />
+        <Tile
+          label="Rebalance Redemptions"
+          value={formatTokenAmount(rebalanceDebt, symbol)}
+          subtitle={`${rebalanceCount.toLocaleString()} event${rebalanceCount === 1 ? "" : "s"}`}
+        />
+      </div>
+    </section>
   );
 }
 

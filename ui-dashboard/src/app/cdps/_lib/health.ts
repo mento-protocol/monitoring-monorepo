@@ -21,11 +21,10 @@ export type CdpHealth = {
 
 export type CdpAggregates = {
   openTroveCount: number;
-  totalDebt: bigint;
-  totalColl: bigint;
-  /** true when the upstream trove query hit its row cap — totals/count are
-   * floors, not the real population. Renders refuse to compute SP coverage
-   * (health → "unknown") and tiles show `≥` prefixes. */
+  /** true when the upstream trove query hit its row cap — `openTroveCount`
+   * is a floor, not the real population. The borrower-count tile prefixes
+   * `≥` to signal undercounting. systemDebt/systemColl come from
+   * `LiquityInstance` directly so health derivation is unaffected. */
   truncated: boolean;
 };
 
@@ -41,15 +40,14 @@ export function isOpenTroveStatus(
 
 const EMPTY_AGGREGATES: CdpAggregates = {
   openTroveCount: 0,
-  totalDebt: BigInt(0),
-  totalColl: BigInt(0),
   truncated: false,
 };
 
 /** List-page lookup: returns the per-collateral aggregate, or an empty
  * aggregate that preserves the chain-wide query's truncation flag. The
  * truncated propagation is load-bearing — without it, a collateral whose
- * troves were entirely pushed past the row cap renders as healthy/no-debt. */
+ * troves were entirely pushed past the row cap renders as 0 open troves
+ * instead of `≥ 0`. */
 export function aggregatesForCollateral(
   collateralId: string,
   aggregatesByCollateral: ReadonlyMap<string, CdpAggregates>,
@@ -64,22 +62,15 @@ export function aggregatesForCollateral(
 }
 
 export function aggregateTroves(
-  troves: readonly Pick<CdpTroveListRow, "status" | "debt" | "coll">[],
+  troves: readonly Pick<CdpTroveListRow, "status">[],
   options: { truncated?: boolean } = {},
 ): CdpAggregates {
   let openTroveCount = 0;
-  let totalDebt = BigInt(0);
-  let totalColl = BigInt(0);
   for (const trove of troves) {
-    if (!isOpenTroveStatus(trove.status)) continue;
-    openTroveCount += 1;
-    totalDebt += BigInt(trove.debt);
-    totalColl += BigInt(trove.coll);
+    if (isOpenTroveStatus(trove.status)) openTroveCount += 1;
   }
   return {
     openTroveCount,
-    totalDebt,
-    totalColl,
     truncated: options.truncated ?? false,
   };
 }
@@ -96,16 +87,14 @@ export function aggregateTroves(
  * the reasons list. SP-empty + outstanding debt is critical regardless of
  * whether MCR/CCR are loaded.
  *
- * Truncation: when `aggregates.truncated`, the trove query hit its row cap
- * so `totalDebt` is a FLOOR. SP-empty + any visible debt is still
- * definitively critical (unseen debt only keeps coverage at 0%). For
- * non-zero SP we can't reason about ratios under truncation, so we fall
- * through to `unknown`.
+ * `instance.systemDebt` is the delta-tracked sum of open-trove debts
+ * maintained by `applySystemDebtDelta` in the indexer (commit 026c629), so
+ * coverage ratios are computed straight from indexed state without the
+ * client-side trove-list aggregation we used to do.
  */
 export function deriveCdpHealth(
   collateral: CdpCollateral,
   instance: CdpInstance | undefined,
-  aggregates: CdpAggregates,
 ): CdpHealth {
   if (instance?.isShutDown) {
     return {
@@ -122,29 +111,15 @@ export function deriveCdpHealth(
     };
   }
 
-  const debt = aggregates.totalDebt;
+  const debt = BigInt(instance.systemDebt);
   const spDeposits = BigInt(instance.spDeposits);
 
-  // SP-empty + any visible debt: always critical. Runs before the
-  // truncation short-circuit because unseen debt can only make coverage
-  // worse, never better, so the verdict can't flip away from critical.
   if (debt > BigInt(0) && spDeposits === BigInt(0)) {
     const reasons = ["Stability Pool is empty — no liquidation buffer"];
-    if (aggregates.truncated) {
-      reasons.push("Trove list truncated at row cap — debt is a floor");
-    }
     if (!collateral.systemParamsLoaded) {
       reasons.push("System params not yet loaded");
     }
     return { state: "critical", label: "Critical", reasons };
-  }
-
-  if (aggregates.truncated) {
-    return {
-      state: "unknown",
-      label: "Unknown",
-      reasons: ["Trove list truncated at row cap — totals are floors"],
-    };
   }
 
   const reasons: string[] = [];
