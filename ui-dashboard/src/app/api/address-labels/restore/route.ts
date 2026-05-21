@@ -3,13 +3,37 @@ import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
 import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
+import {
+  type BackupManifestV2,
+  isBackupManifestV2,
+  type SnapshotHashName,
+} from "@/lib/address-labels/backup-format";
+import type { AddressLabelsSnapshot } from "@/lib/address-labels";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-// 32 MB blob cap — comfortably above the current ~19 MB daily backup (labels +
-// reports + 5 Arkham hashes). The per-script request cap stays at 8 MB per
-// hash: `replaceRedisHashes` splits oversized payloads into per-hash scripts.
-export const MAX_RESTORE_BLOB_BYTES = 32 * 1024 * 1024;
+// Per-blob byte cap. With v2 per-hash blob splits no single blob crosses
+// ~10 MB, so 16 MB is comfortable headroom; v1 monolithic blobs ran up to
+// the older 32 MB cap before the per-hash format landed — we keep the
+// higher cap for legacy-blob restore paths only.
+export const MAX_RESTORE_BLOB_BYTES = 16 * 1024 * 1024;
+const MAX_LEGACY_BLOB_BYTES = 32 * 1024 * 1024;
+
+// Mapping from v2 manifest `name` to the AddressLabelsSnapshot field name.
+// `labels` slots into `addresses` (snapshot type predates the per-hash split
+// rename); the other six are 1:1.
+const SNAPSHOT_FIELD_BY_HASH_NAME: Record<
+  SnapshotHashName,
+  keyof AddressLabelsSnapshot
+> = {
+  labels: "addresses",
+  reports: "reports",
+  intelDeep: "intelDeep",
+  intelTransfers: "intelTransfers",
+  intelWealth: "intelWealth",
+  intelEntities: "intelEntities",
+  intelEntityCps: "intelEntityCps",
+};
 
 type RestoreActor =
   | { kind: "cron"; importerEmail: "restore@cron" }
@@ -48,65 +72,176 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   try {
-    const result = await get(pathname, {
-      access: "private",
-      useCache: false,
-      abortSignal: AbortSignal.timeout(30_000),
-    });
-    if (result?.statusCode !== 200 || !result.stream) {
-      return NextResponse.json(
-        { error: "Snapshot not found" },
-        { status: 404 },
-      );
-    }
-    if (
-      result.blob.size !== null &&
-      result.blob.size > MAX_RESTORE_BLOB_BYTES
-    ) {
-      return NextResponse.json(
-        { error: "Snapshot is too large to restore safely" },
-        { status: 413 },
-      );
+    // v2 path: a manifest reference. Fetch manifest, then fetch each hash
+    // blob in parallel and assemble the snapshot in memory before handing
+    // off to handleSnapshot (which expects an AddressLabelsSnapshot shape).
+    if (isManifestPathname(pathname)) {
+      const assembled = await assembleSnapshotFromManifest(pathname);
+      if (assembled instanceof Response) return assembled;
+      return await handleSnapshot(assembled, restoreSnapshotOptions(auth));
     }
 
-    const text = await readBoundedUtf8(result.stream, MAX_RESTORE_BLOB_BYTES);
-    if (text === null) {
-      return NextResponse.json(
-        { error: "Snapshot is too large to restore safely" },
-        { status: 413 },
-      );
-    }
-
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      return NextResponse.json(
-        { error: "Snapshot blob does not contain valid JSON" },
-        { status: 400 },
-      );
-    }
-    if (!isSnapshot(body)) {
-      return NextResponse.json(
-        { error: "Blob is not an address-label snapshot" },
-        { status: 400 },
-      );
-    }
-
-    return await handleSnapshot(body, {
-      importerEmail: auth.importerEmail,
-      // Workspace sessions get the same trusted-restore mode as cron because
-      // this route only reads allowlisted first-party private Blob snapshots.
-      reportMetadataMode: "preserve",
-      labelProvenanceMode: "preserve",
-      writeMode: "replace",
-      errorTag: "address-labels/restore",
-    });
+    // v1 legacy path: monolithic blob containing the full snapshot.
+    return await restoreLegacyMonolithicBlob(pathname, auth);
   } catch (err) {
     Sentry.captureException(err, { tags: { route: "address-labels/restore" } });
     console.error("[address-labels/restore]", err);
     return NextResponse.json({ error: "Restore failed" }, { status: 500 });
   }
+}
+
+function restoreSnapshotOptions(auth: {
+  importerEmail: string;
+}): Parameters<typeof handleSnapshot>[1] {
+  return {
+    importerEmail: auth.importerEmail,
+    // Workspace sessions get the same trusted-restore mode as cron because
+    // this route only reads allowlisted first-party private Blob snapshots.
+    reportMetadataMode: "preserve",
+    labelProvenanceMode: "preserve",
+    writeMode: "replace",
+    errorTag: "address-labels/restore",
+  };
+}
+
+function isManifestPathname(pathname: string): boolean {
+  return /^address-labels-backup-\d{4}-\d{2}-\d{2}\/manifest\.json$/.test(
+    pathname,
+  );
+}
+
+/**
+ * Fetch + parse the manifest, then fetch each referenced hash blob in
+ * parallel and inline them into a single in-memory AddressLabelsSnapshot.
+ * Returns a Response on any pre-snapshot failure (404, oversized blob,
+ * malformed JSON), or the assembled snapshot ready for handleSnapshot.
+ */
+async function assembleSnapshotFromManifest(
+  manifestPathname: string,
+): Promise<AddressLabelsSnapshot | Response> {
+  const manifestBlob = await fetchPrivateBlobText(
+    manifestPathname,
+    MAX_RESTORE_BLOB_BYTES,
+  );
+  if (manifestBlob instanceof Response) return manifestBlob;
+
+  let manifestParsed: unknown;
+  try {
+    manifestParsed = JSON.parse(manifestBlob);
+  } catch {
+    return NextResponse.json(
+      { error: "Manifest blob does not contain valid JSON" },
+      { status: 400 },
+    );
+  }
+  if (!isBackupManifestV2(manifestParsed)) {
+    return NextResponse.json(
+      { error: "Manifest blob is not a v2 backup manifest" },
+      { status: 400 },
+    );
+  }
+  const manifest: BackupManifestV2 = manifestParsed;
+
+  // Fetch every hash blob in parallel. Each fetch enforces its own size cap.
+  const hashFetches = await Promise.all(
+    manifest.hashes.map(async (entry) => {
+      const text = await fetchPrivateBlobText(
+        entry.pathname,
+        MAX_RESTORE_BLOB_BYTES,
+      );
+      return { entry, text };
+    }),
+  );
+
+  const snapshot: AddressLabelsSnapshot = { exportedAt: manifest.exportedAt };
+  for (const { entry, text } of hashFetches) {
+    if (text instanceof Response) return text;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return NextResponse.json(
+        { error: `Hash blob ${entry.pathname} does not contain valid JSON` },
+        { status: 400 },
+      );
+    }
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return NextResponse.json(
+        { error: `Hash blob ${entry.pathname} is not a record map` },
+        { status: 400 },
+      );
+    }
+    const field = SNAPSHOT_FIELD_BY_HASH_NAME[entry.name];
+    // Re-cast through `as never` because the field's value type differs per
+    // SnapshotHashName but the manifest schema guarantees the parsed value
+    // matches that field's record shape (HGETALL → JSON → HGETALL roundtrip).
+    (snapshot as Record<string, unknown>)[field] = parsed;
+  }
+  return snapshot;
+}
+
+async function restoreLegacyMonolithicBlob(
+  pathname: string,
+  auth: { importerEmail: string },
+): Promise<Response> {
+  const text = await fetchPrivateBlobText(pathname, MAX_LEGACY_BLOB_BYTES);
+  if (text instanceof Response) return text;
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return NextResponse.json(
+      { error: "Snapshot blob does not contain valid JSON" },
+      { status: 400 },
+    );
+  }
+  if (!isSnapshot(body)) {
+    return NextResponse.json(
+      { error: "Blob is not an address-label snapshot" },
+      { status: 400 },
+    );
+  }
+  return await handleSnapshot(body, restoreSnapshotOptions(auth));
+}
+
+/**
+ * Fetch a private Blob and read its body as UTF-8, enforcing a byte cap.
+ * Returns the decoded string on success, or a NextResponse describing the
+ * failure (404 not found, 413 too large, etc.). Consolidates the get/size/
+ * read/cancel boilerplate used by both v1 and v2 paths.
+ */
+async function fetchPrivateBlobText(
+  pathname: string,
+  maxBytes: number,
+): Promise<string | Response> {
+  const result = await get(pathname, {
+    access: "private",
+    useCache: false,
+    abortSignal: AbortSignal.timeout(30_000),
+  });
+  if (result?.statusCode !== 200 || !result.stream) {
+    return NextResponse.json({ error: "Snapshot not found" }, { status: 404 });
+  }
+  if (result.blob.size !== null && result.blob.size > maxBytes) {
+    return NextResponse.json(
+      { error: "Snapshot is too large to restore safely" },
+      { status: 413 },
+    );
+  }
+
+  const text = await readBoundedUtf8(result.stream, maxBytes);
+  if (text === null) {
+    return NextResponse.json(
+      { error: "Snapshot is too large to restore safely" },
+      { status: 413 },
+    );
+  }
+  return text;
 }
 
 async function requireRestoreAuth(
@@ -133,7 +268,13 @@ async function requireRestoreAuth(
 function isAllowedRestorePathname(pathname: string): boolean {
   if (pathname.includes("..") || pathname.startsWith("/")) return false;
   return (
+    // v2 manifest (current)
+    /^address-labels-backup-\d{4}-\d{2}-\d{2}\/manifest\.json$/.test(
+      pathname,
+    ) ||
+    // v1 monolithic blob (legacy, restore-only)
     /^address-labels-backup-\d{4}-\d{2}-\d{2}\.json$/.test(pathname) ||
+    // pre-migrate flat snapshots (historic)
     /^address-labels-pre-migrate-flat-\d{4}-\d{2}-\d{2}[\w-]*\.json$/.test(
       pathname,
     )
