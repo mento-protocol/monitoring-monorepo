@@ -261,6 +261,7 @@ retained as a backward-compat fallback for entries written before the
 | Tag across all EVM chains                | `/intelligence/address_enriched/{a}/all`     | Standard         |
 | Lookup an entity by slug                 | `/intelligence/entity/{slug}`                | Standard         |
 | Find addresses Mento interacts with most | `/counterparties/address/{mentoPool}`        | **Heavy (1/s)**  |
+| Fetch transfer history for an address    | `/transfers?base={address}&limit=N`          | **Heavy (1/s)**  |
 | Stream new whale-tier transfers          | `wss://api.arkm.com/ws/transfers`            | WebSocket quotas |
 | Manage personal labels                   | `/user/labels` (GET/POST/PUT/DELETE)         | Standard         |
 | Verify chain support                     | `/chains`                                    | Standard         |

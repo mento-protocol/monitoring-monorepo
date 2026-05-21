@@ -2,6 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
     "scripts/*.{mjs,ts}",
+    "scripts/intel-marathon/*.mjs",
     "vitest.mutation.config.ts",
     "tests/**/*.test.{ts,tsx}",
     "tests/browser/fixtures/hasura-fixture-server.mjs"

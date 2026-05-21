@@ -10,6 +10,7 @@ import {
   hasAmbiguousContractMatches,
 } from "../../_lib/address-book-rows";
 import { AddressDetailHeader } from "./address-detail-header";
+import { IntelPanels } from "./intel-panels";
 
 // Intentional react-doctor suppression: label panel, report panel, and
 // pending-ledger ownership are coupled on this detail page. Split only with a
@@ -26,7 +27,6 @@ export function AddressDetailPageClient({ address }: { address: string }) {
     isReportMutationPending,
   } = useAddressLabels();
   const { hasReport } = useAddressReportsIndex();
-
   const [formSaving, setFormSaving] = useState(false);
   const [formDeleting, setFormDeleting] = useState(false);
   const latchedFormSuffixRef = useRef<string>("");
@@ -174,8 +174,7 @@ export function AddressDetailPageClient({ address }: { address: string }) {
     prevAddressRef.current = address;
     if (formSaving) setFormSaving(false);
     if (formDeleting) setFormDeleting(false);
-    savingOwnerRef.current = null;
-    deletingOwnerRef.current = null;
+    savingOwnerRef.current = deletingOwnerRef.current = null;
     latchedFormSuffixRef.current = "";
   }
 
@@ -356,6 +355,8 @@ export function AddressDetailPageClient({ address }: { address: string }) {
           />
         </section>
       </div>
+
+      <IntelPanels key={address} address={address} />
     </div>
   );
 }

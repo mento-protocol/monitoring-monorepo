@@ -1,9 +1,17 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
-export function Table({ children }: { children: ReactNode }) {
+export function Table({
+  children,
+  "aria-label": ariaLabel,
+}: {
+  children: ReactNode;
+  "aria-label"?: string;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-800">
-      <table className="w-full text-sm">{children}</table>
+      <table className="w-full text-sm" aria-label={ariaLabel}>
+        {children}
+      </table>
     </div>
   );
 }

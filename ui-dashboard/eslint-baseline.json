@@ -24,14 +24,14 @@
     "file": "src/app/address-book/[address]/_components/address-detail-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressDetailPageClient' has a complexity of 26. Maximum allowed is 15.",
-    "line": 18,
+    "line": 19,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
   },
   {
     "file": "src/app/address-book/[address]/_components/address-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'AddressDetailPageClient' has too many lines (215). Maximum allowed is 100.",
-    "line": 18,
+    "line": 19,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function AddressDetailPageClient({ address }: { address: string }) { | const {"
   },
   {
@@ -206,28 +206,28 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 145,
+    "line": 146,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'GlobalContent' has a complexity of 21. Maximum allowed is 15.",
-    "line": 88,
+    "line": 89,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'GlobalContent' has too many lines (269). Maximum allowed is 100.",
-    "line": 88,
+    "line": 89,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 145,
+    "line": 146,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
@@ -388,21 +388,21 @@
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
-    "line": 40,
+    "line": 41,
     "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'RevenueContent' has too many lines (135). Maximum allowed is 100.",
-    "line": 19,
+    "line": 20,
     "linePreview": " | function RevenueContent() { | // Slim fees-only fetch. `useAllNetworksData` would pull paginated daily"
   },
   {
     "file": "src/app/revenue/_components/revenue-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
-    "line": 40,
+    "line": 41,
     "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
   },
   {
@@ -747,20 +747,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
     "line": 363,
     "linePreview": "/** Split a single CSV line respecting double-quoted fields. */ | export function splitCsvLine( | line: string,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "complexity",
-    "message": "Function 'validateSnapshotReports' has a complexity of 26. Maximum allowed is 15.",
-    "line": 239,
-    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
-  },
-  {
-    "file": "src/lib/address-labels/snapshot.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 239,
-    "linePreview": "*/ | export function validateSnapshotReports( | raw: unknown,"
   },
   {
     "file": "src/lib/address-reports-shared.ts",

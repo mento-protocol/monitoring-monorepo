@@ -378,4 +378,18 @@ describe("body-size guard", () => {
     expect(res.status).toBe(413);
     expect(upsertReport).not.toHaveBeenCalled();
   });
+
+  it("PUT 500s when upsertReport throws", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("redis down"),
+    );
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify({ address: VALID_ADDR, body: "report body" }),
+      }),
+    );
+    expect(res.status).toBe(500);
+  });
 });

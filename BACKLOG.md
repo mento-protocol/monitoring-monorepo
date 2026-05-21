@@ -171,6 +171,17 @@ after skipping blanks and comments. Refresh before starting a split.
 - [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
 - [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely.
 
+## Intel marathon follow-ups (deferred from PR #488)
+
+One item deferred from the May 2026 marathon PR review.
+
+1. **URL-state for paginated UI surfaces** — `IntelTransfers` and
+   `EntitySearch` keep `page` (and `EntitySearch`'s `query`) in
+   `useState` only. Refresh / back-forward / bookmark-share all lose the
+   current view. Internal-only tool so low priority, but the existing
+   stateful-data UI checklist (`docs/pr-checklists/stateful-data-ui.md`)
+   already covers the URL-as-state idiom.
+
 ## Discord → Slack alert migration: cutover + cleanup
 
 Phase 1 (setup + dual-route) shipped in PRs #485 and #494. Both Aegis and v3 alert stacks are live in Grafana Cloud; every Aegis alert fires both Discord (legacy) and Slack (new) during the soak window. Splunk On-Call routing for `severity=page` is preserved and now also fires for prod trading-modes (newly-escalated). Weekend FX mute timing extended to every new Slack route.

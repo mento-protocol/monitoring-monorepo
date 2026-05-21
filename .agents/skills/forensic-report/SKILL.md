@@ -29,7 +29,7 @@ If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"),
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "Codex"` so the editor can distinguish skill-produced from hand-typed reports.
+2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
 
 ## Output template
 
@@ -65,9 +65,58 @@ Also pull any existing label so the H1 nickname matches what's in the address bo
 commands: [["HGET", "labels", "<addrLower>"]];
 ```
 
+### Step 1.5 — Check Upstash caches first
+
+Before making any live Arkham API calls, check the five caches populated by the 2026-05 extraction marathon. The API key expires ~2026-05-23; after that, cache is the only option.
+
+```js
+// All five caches live in the same address-labels database.
+// database_id: c687bf0d-f61f-498e-879a-016de335b4ce
+
+// 1. Full enrichment (multi-chain address_enriched + counterparties)
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "intel_deep", "<addrLower>"]],
+});
+
+// 2. Transfer history (transfers?base=<addr>&limit=1000)
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "intel_transfers", "<addrLower>"]],
+});
+
+// 3. Wealth snapshot (balances + portfolio 0d/30d/90d/180d)
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "intel_wealth", "<addrLower>"]],
+});
+```
+
+**If all three hit:** use the cached data for Steps 2–5 and skip the live Arkham API calls entirely.
+
+**If the API key is still valid AND the cached entry is older than ~7 days**, you MAY refresh with a live call; otherwise prefer cache.
+
+**Entity cache path:** if `intel_deep` returns an entity slug (look for `arkhamEntity.id` or a similar slug field in the payload), check the entity-level caches too:
+
+```js
+// 4. Entity profile (fetched from /intelligence/entity/{slug})
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "intel_entities", "<entitySlug>"]],
+});
+
+// 5. Entity counterparties (/counterparties/entity/{slug})
+mcp__upstash__redis_database_run_redis_commands({
+  database_id: "c687bf0d-f61f-498e-879a-016de335b4ce",
+  commands: [["HGET", "intel_entity_cps", "<entitySlug>"]],
+});
+```
+
+Cache sizes (as of 2026-05-20): `intel_deep` 529 entries, `intel_transfers` 60, `intel_wealth` 80, `intel_entities` 161, `intel_entity_cps` 161.
+
 ### Step 2 — Cast of characters (Arkham + funder graph)
 
-Use the `arkham` skill (project-scoped). Arkham doesn't cover Celo or Monad, so the play is:
+Use the `arkham` skill (project-scoped). If Step 1.5 returned cache hits, use that data directly — skip the live `address_enriched/all` call for those addresses. Arkham doesn't cover Celo or Monad, so the play is:
 
 1. Run `address_enriched/all` on the target address — gets every chain Arkham DOES cover. Often returns zero hits for a Celo-native contract; that's a signal, not a failure.
 2. Walk inbound funders on the target chain. Two pitfalls to handle explicitly:
@@ -185,7 +234,7 @@ const partial = {
   body,
   ...(title ? { title: title.slice(0, 200) } : {}),
   authorEmail: AUTHOR_EMAIL, // from git config user.email at runtime
-  source: "Codex", // already in the AddressReport enum
+  source: "claude", // already in the AddressReport enum
 };
 ```
 
@@ -257,7 +306,7 @@ The address-book index endpoint reads from the same hash on every request, so th
 
 - `body`: required, non-empty, ≤ 50,000 characters (50KB)
 - `title`: optional, ≤ 200 characters, dropped if empty after trim
-- `source`: always set `"Codex"` from this skill; the API also accepts other provenance values
+- `source`: always set `"claude"` from this skill; the API also accepts other provenance values
 - `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
 
 These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.

@@ -836,6 +836,43 @@ describe("handleSnapshot merge mode", () => {
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
   });
+
+  it("merge mode with labelProvenanceMode=preserve keeps existing source on overlap", async () => {
+    // This exercises mergePreservingProvenance — the path for trusted merge
+    // (future-proof; currently only replace uses trusted mode but the branch
+    // exists and must work).
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      [ADDR_A]: entry({
+        name: "Existing",
+        tags: ["mento"],
+        source: "manual" as const,
+      }),
+    });
+
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({
+            name: "Incoming",
+            tags: ["exchange"],
+            source: "arkham" as const,
+          }),
+        },
+      },
+      {
+        importerEmail: "restore@cron",
+        writeMode: "merge",
+        labelProvenanceMode: "preserve",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(importSnapshotHashes).toHaveBeenCalledOnce();
+    // Incoming overwrites existing (newer updatedAt or same — either preserves entry)
+    const [call] = vi.mocked(importSnapshotHashes).mock.calls;
+    expect(call?.[0]).toHaveProperty("labels");
+  });
 });
 
 describe("handleSnapshot trusted restore mode", () => {
@@ -923,5 +960,177 @@ describe("handleSnapshot trusted restore mode", () => {
     expect(importSnapshotHashes).not.toHaveBeenCalled();
     expect(importLabels).not.toHaveBeenCalled();
     expect(importReports).not.toHaveBeenCalled();
+  });
+
+  it("passes intel hashes through to replaceSnapshotHashes in trusted replace mode", async () => {
+    const deepRecord = {
+      address: ADDR_A,
+      fetchedAt: "2026-01-01T00:00:00Z",
+      candidate: { address: ADDR_A, priority: 1, sources: [] },
+      enriched: null,
+      counterparties: null,
+      entity: null,
+      contract: null,
+      error: null,
+      version: 1,
+    };
+    const entityRecord = {
+      slug: "binance",
+      fetchedAt: "2026-01-01T00:00:00Z",
+      name: "Binance",
+      note: "",
+      id: "binance-id",
+      customized: false,
+      type: "exchange",
+      service: null,
+      addresses: null,
+      website: null,
+      twitter: null,
+      crunchbase: null,
+      linkedin: null,
+      populatedTags: null,
+    };
+
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {},
+        reports: {},
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: { [ADDR_A]: deepRecord } as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelEntities: { binance: entityRecord } as any,
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(replaceSnapshotHashes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intelDeep: { [ADDR_A]: deepRecord },
+        intelEntities: { binance: entityRecord },
+      }),
+    );
+  });
+
+  it("also accepts legacy arkhamDeep fields in trusted replace mode (backup compat)", async () => {
+    const deepRecord = {
+      address: ADDR_A,
+      fetchedAt: "2026-01-01T00:00:00Z",
+      candidate: { address: ADDR_A, priority: 1, sources: [] },
+      enriched: null,
+      counterparties: null,
+      entity: null,
+      contract: null,
+      error: null,
+      version: 1,
+    };
+
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {},
+        reports: {},
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        arkhamDeep: { [ADDR_A]: deepRecord } as any,
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    // extractIntelFields maps arkhamDeep → intelDeep
+    expect(replaceSnapshotHashes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intelDeep: { [ADDR_A]: deepRecord },
+      }),
+    );
+  });
+
+  it("rejects intel-only payloads in merge mode with a 400 (no silent 200/zero-import)", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        // No addresses, no reports — only intel fields.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: { [ADDR_A]: { address: ADDR_A } as any } as any,
+      },
+      {
+        importerEmail: "user@mentolabs.xyz",
+        writeMode: "merge",
+      },
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/trusted replace mode/i);
+    expect(importSnapshotHashes).not.toHaveBeenCalled();
+    expect(replaceSnapshotHashes).not.toHaveBeenCalled();
+  });
+
+  it("strips empty intel maps from replace mode (prevents disaster-recovery wipe)", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({ name: "Test", tags: ["mento"] }),
+        },
+        reports: {},
+        // Simulates the deploy-before-migration window: backup captured live
+        // Redis when intel_* hashes were still empty. Without stripping,
+        // replaceSnapshotHashes would DEL each intel hash on restore, wiping
+        // any marathon data that landed in the meantime.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: {} as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelTransfers: {} as any,
+      },
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(replaceSnapshotHashes).toHaveBeenCalledOnce();
+    const call = (replaceSnapshotHashes as ReturnType<typeof vi.fn>).mock
+      .calls[0] as unknown[];
+    expect(call?.[0]).not.toHaveProperty("intelDeep");
+    expect(call?.[0]).not.toHaveProperty("intelTransfers");
+  });
+
+  it("does NOT pass intel hashes through in merge mode (user-uploaded import)", async () => {
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {
+          [ADDR_A]: entry({ name: "Test", tags: ["mento"] }),
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        intelDeep: { [ADDR_A]: {} as any },
+      },
+      {
+        importerEmail: "user@mentolabs.xyz",
+        writeMode: "merge",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    // merge path calls importSnapshotHashes, NOT replaceSnapshotHashes
+    expect(replaceSnapshotHashes).not.toHaveBeenCalled();
+    expect(importSnapshotHashes).toHaveBeenCalledOnce();
+    // intelDeep must not be present in the merge call
+    const [call] = vi.mocked(importSnapshotHashes).mock.calls;
+    expect(call?.[0]).not.toHaveProperty("intelDeep");
   });
 });

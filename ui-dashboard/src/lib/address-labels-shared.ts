@@ -4,6 +4,11 @@
  */
 
 import type { AddressReport } from "./address-reports-shared";
+import type { IntelDeepRecord } from "./intel-deep";
+import type { IntelTransfersRecord } from "./intel-transfers";
+import type { IntelWealthRecord } from "./intel-wealth";
+import type { IntelEntityRecord } from "./intel-entities";
+import type { IntelEntityCpsRecord } from "./intel-entity-cps";
 
 // Types
 
@@ -56,6 +61,18 @@ export type AddressLabelsSnapshot = {
    * with snapshots predating PR #339; new daily backups always include it
    * (possibly as an empty record when no reports exist yet). */
   reports?: Record<string, AddressReport>;
+  // 5 intel marathon hashes (canonical names) — see scripts/intel-marathon/
+  intelDeep?: Record<string, IntelDeepRecord>;
+  intelTransfers?: Record<string, IntelTransfersRecord>;
+  intelWealth?: Record<string, IntelWealthRecord>;
+  intelEntities?: Record<string, IntelEntityRecord>;
+  intelEntityCps?: Record<string, IntelEntityCpsRecord>;
+  // Legacy field names (read-only for backup restore compat — do not write)
+  arkhamDeep?: Record<string, IntelDeepRecord>;
+  arkhamTransfers?: Record<string, IntelTransfersRecord>;
+  arkhamWealth?: Record<string, IntelWealthRecord>;
+  arkhamEntities?: Record<string, IntelEntityRecord>;
+  arkhamEntityCps?: Record<string, IntelEntityCpsRecord>;
 };
 
 /** Tally of newly-imported labels returned by the import API. */

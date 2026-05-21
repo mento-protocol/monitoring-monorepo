@@ -122,15 +122,25 @@ function parseLabelPayload(body: AddressLabelsSnapshot): LabelParseResult {
 async function applyReplace(
   merged: Record<string, AddressEntry>,
   reportsToImport: Record<string, AddressReport>,
-  flags: { hasLabelPayload: boolean; hasReportPayload: boolean },
+  arkham: IntelSnapshotFields,
+  flags: {
+    hasLabelPayload: boolean;
+    hasReportPayload: boolean;
+    hasArkhamPayload: boolean;
+  },
 ): Promise<number> {
   const finalLabels = flags.hasLabelPayload
     ? sanitizeAndFilter(merged)
     : undefined;
-  if (flags.hasLabelPayload || flags.hasReportPayload) {
+  if (
+    flags.hasLabelPayload ||
+    flags.hasReportPayload ||
+    flags.hasArkhamPayload
+  ) {
     await replaceSnapshotHashes({
       ...(finalLabels !== undefined ? { labels: finalLabels } : {}),
       ...(flags.hasReportPayload ? { reports: reportsToImport } : {}),
+      ...arkham,
     });
   }
   return finalLabels ? Object.keys(finalLabels).length : 0;
@@ -185,13 +195,41 @@ export async function handleSnapshot(
   const writeMode = options.writeMode ?? "merge";
   const hasReportPayload = body.reports !== undefined;
 
-  // No-op short-circuit for merge mode with empty payload. Replace mode with
-  // an explicit empty payload still goes through so callers can intentionally
-  // clear a hash.
+  // Intel hashes restore only via the trusted (replace) path; user-uploaded
+  // imports go through the merge path which ignores them.
+  const arkhamExtract =
+    writeMode === "replace"
+      ? extractIntelFields(body)
+      : { fields: {}, hasArkhamPayload: false };
+
+  // Surface intel-only payloads in merge mode as a 400 rather than the
+  // misleading 200/zero-import response: `isSnapshot` accepts intel/legacy
+  // fields so the trusted /restore route can re-upload a partial intel corpus,
+  // but the user-facing /import path is label-oriented and silently drops the
+  // intel payload. Operators uploading an intel-only blob to /import would
+  // otherwise see "ok: true" with zero rows written and assume success.
   if (
-    Object.keys(merged).length === 0 &&
-    importedReports === 0 &&
-    !(writeMode === "replace" && (hasLabelPayload || hasReportPayload))
+    writeMode === "merge" &&
+    isIntelOnlyPayload(body, hasLabelPayload, hasReportPayload)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Intel hash fields are only accepted in trusted replace mode (cron restore); upload via /api/address-labels/restore or include `addresses` / `reports` in the snapshot.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (
+    isNoOpEmptyPayload({
+      merged,
+      importedReports,
+      writeMode,
+      hasLabelPayload,
+      hasReportPayload,
+      hasArkhamPayload: arkhamExtract.hasArkhamPayload,
+    })
   ) {
     return NextResponse.json({
       ok: true,
@@ -200,17 +238,16 @@ export async function handleSnapshot(
   }
 
   try {
-    const importedAddresses =
-      writeMode === "replace"
-        ? await applyReplace(merged, reportsToImport, {
-            hasLabelPayload,
-            hasReportPayload,
-          })
-        : await applyMerge(
-            merged,
-            reportsToImport,
-            options.labelProvenanceMode ?? "strip",
-          );
+    const importedAddresses = await dispatchWrite({
+      writeMode,
+      merged,
+      reportsToImport,
+      arkhamFields: arkhamExtract.fields,
+      hasLabelPayload,
+      hasReportPayload,
+      hasArkhamPayload: arkhamExtract.hasArkhamPayload,
+      labelProvenanceMode: options.labelProvenanceMode ?? "strip",
+    });
     return NextResponse.json({
       ok: true,
       imported: { addresses: importedAddresses, reports: importedReports },
@@ -218,6 +255,50 @@ export async function handleSnapshot(
   } catch (err) {
     return serverError(err, options.errorTag);
   }
+}
+
+function isNoOpEmptyPayload(args: {
+  merged: Record<string, AddressEntry>;
+  importedReports: number;
+  writeMode: SnapshotWriteMode;
+  hasLabelPayload: boolean;
+  hasReportPayload: boolean;
+  hasArkhamPayload: boolean;
+}): boolean {
+  // Replace mode with an explicit empty payload still goes through so callers
+  // can intentionally clear a hash.
+  const replaceWantsWrite =
+    args.writeMode === "replace" &&
+    (args.hasLabelPayload || args.hasReportPayload || args.hasArkhamPayload);
+  return (
+    Object.keys(args.merged).length === 0 &&
+    args.importedReports === 0 &&
+    !replaceWantsWrite
+  );
+}
+
+async function dispatchWrite(args: {
+  writeMode: SnapshotWriteMode;
+  merged: Record<string, AddressEntry>;
+  reportsToImport: Record<string, AddressReport>;
+  arkhamFields: IntelSnapshotFields;
+  hasLabelPayload: boolean;
+  hasReportPayload: boolean;
+  hasArkhamPayload: boolean;
+  labelProvenanceMode: SnapshotLabelProvenanceMode;
+}): Promise<number> {
+  if (args.writeMode === "replace") {
+    return applyReplace(args.merged, args.reportsToImport, args.arkhamFields, {
+      hasLabelPayload: args.hasLabelPayload,
+      hasReportPayload: args.hasReportPayload,
+      hasArkhamPayload: args.hasArkhamPayload,
+    });
+  }
+  return applyMerge(
+    args.merged,
+    args.reportsToImport,
+    args.labelProvenanceMode,
+  );
 }
 
 /**
@@ -253,79 +334,155 @@ export function validateSnapshotReports(
   for (const [addr, payload] of Object.entries(
     raw as Record<string, unknown>,
   )) {
-    if (!isValidAddress(addr)) {
-      return { error: `Invalid report address: ${addr}` };
-    }
-    if (
-      typeof payload !== "object" ||
-      payload === null ||
-      Array.isArray(payload)
-    ) {
-      return { error: `Invalid report payload for ${addr}` };
-    }
-    const p = payload as Record<string, unknown>;
-    if (typeof p.body !== "string" || p.body.trim() === "") {
-      return { error: `Report for ${addr} has an empty or non-string body` };
-    }
-    if (p.body.length > MAX_REPORT_BODY_LENGTH) {
-      return {
-        error: `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`,
-      };
-    }
-    let title: string | undefined;
-    if (p.title !== undefined && p.title !== null) {
-      if (typeof p.title !== "string") {
-        return { error: `Report for ${addr} title is not a string` };
-      }
-      if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
-        return {
-          error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
-        };
-      }
-      // Match `sanitizeReportInput`: trim + drop if empty.
-      const trimmed = p.title.trim();
-      if (trimmed) title = trimmed;
-    }
-
-    if (mode === "preserve") {
-      if (
-        p.authorEmail !== undefined &&
-        p.authorEmail !== null &&
-        (typeof p.authorEmail !== "string" || !/@/.test(p.authorEmail))
-      ) {
-        return { error: `Report for ${addr} has invalid authorEmail` };
-      }
-      const restored = upgradeReport(p);
-      result[addr.toLowerCase()] = {
-        ...restored,
-        body: p.body,
-        ...(title ? { title } : {}),
-      };
-      continue;
-    }
-
-    // Re-stamp server-controlled metadata. Importer's email + `"import"`
-    // source identifies the restore round; `version: 1` resets the monotonic
-    // counter (any subsequent live edit will bump from 1 → 2).
-    result[addr.toLowerCase()] = {
-      body: p.body,
-      ...(title ? { title } : {}),
-      authorEmail: options.importerEmail,
-      source: "import",
-      createdAt: now,
-      updatedAt: now,
-      version: 1,
-    };
+    const entry = validateSingleReportEntry(addr, payload, {
+      importerEmail: options.importerEmail,
+      mode,
+      now,
+    });
+    if ("error" in entry) return { error: entry.error };
+    result[addr.toLowerCase()] = entry.report;
   }
   return { reports: result };
 }
 
+function validateSingleReportEntry(
+  addr: string,
+  payload: unknown,
+  ctx: { importerEmail: string; mode: SnapshotReportMetadataMode; now: string },
+): { report: AddressReport } | { error: string } {
+  if (!isValidAddress(addr)) {
+    return { error: `Invalid report address: ${addr}` };
+  }
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    return { error: `Invalid report payload for ${addr}` };
+  }
+  const p = payload as Record<string, unknown>;
+
+  const bodyErr = checkReportBody(addr, p);
+  if (bodyErr) return { error: bodyErr };
+
+  const titleResult = extractReportTitle(addr, p);
+  if ("error" in titleResult) return { error: titleResult.error };
+
+  if (ctx.mode === "preserve") {
+    const authorErr = checkAuthorEmail(addr, p);
+    if (authorErr) return { error: authorErr };
+    const restored = upgradeReport(p);
+    return {
+      report: {
+        ...restored,
+        body: p.body as string,
+        ...(titleResult.title ? { title: titleResult.title } : {}),
+      },
+    };
+  }
+
+  // Re-stamp server-controlled metadata. Importer's email + `"import"`
+  // source identifies the restore round; `version: 1` resets the monotonic
+  // counter (any subsequent live edit will bump from 1 → 2).
+  return {
+    report: {
+      body: p.body as string,
+      ...(titleResult.title ? { title: titleResult.title } : {}),
+      authorEmail: ctx.importerEmail,
+      source: "import",
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+      version: 1,
+    },
+  };
+}
+
+function checkReportBody(
+  addr: string,
+  p: Record<string, unknown>,
+): string | null {
+  if (typeof p.body !== "string" || p.body.trim() === "") {
+    return `Report for ${addr} has an empty or non-string body`;
+  }
+  if (p.body.length > MAX_REPORT_BODY_LENGTH) {
+    return `Report for ${addr} body exceeds ${MAX_REPORT_BODY_LENGTH} characters`;
+  }
+  return null;
+}
+
+function extractReportTitle(
+  addr: string,
+  p: Record<string, unknown>,
+): { title?: string } | { error: string } {
+  if (p.title === undefined || p.title === null) return {};
+  if (typeof p.title !== "string") {
+    return { error: `Report for ${addr} title is not a string` };
+  }
+  if (p.title.length > MAX_REPORT_TITLE_LENGTH) {
+    return {
+      error: `Report for ${addr} title exceeds ${MAX_REPORT_TITLE_LENGTH} characters`,
+    };
+  }
+  // Match `sanitizeReportInput`: trim + drop if empty.
+  const trimmed = p.title.trim();
+  return trimmed ? { title: trimmed } : {};
+}
+
+function checkAuthorEmail(
+  addr: string,
+  p: Record<string, unknown>,
+): string | null {
+  if (p.authorEmail === undefined || p.authorEmail === null) return null;
+  if (typeof p.authorEmail !== "string" || !/@/.test(p.authorEmail)) {
+    return `Report for ${addr} has invalid authorEmail`;
+  }
+  return null;
+}
+
+function isIntelOnlyPayload(
+  body: AddressLabelsSnapshot,
+  hasLabelPayload: boolean,
+  hasReportPayload: boolean,
+): boolean {
+  if (hasLabelPayload || hasReportPayload) return false;
+  const obj = body as Record<string, unknown>;
+  return (
+    INTEL_SNAPSHOT_KEYS.some((k) => obj[k] !== undefined) ||
+    ARKHAM_LEGACY_SNAPSHOT_KEYS.some((k) => obj[k] !== undefined)
+  );
+}
+
+const INTEL_SNAPSHOT_KEYS = [
+  "intelDeep",
+  "intelTransfers",
+  "intelWealth",
+  "intelEntities",
+  "intelEntityCps",
+] as const;
+
+// Legacy field names — read-only, accepted on restore for backup compat.
+const ARKHAM_LEGACY_SNAPSHOT_KEYS = [
+  "arkhamDeep",
+  "arkhamTransfers",
+  "arkhamWealth",
+  "arkhamEntities",
+  "arkhamEntityCps",
+] as const;
+
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
   if (typeof v !== "object" || v === null) return false;
-  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`.
+  // A snapshot has at least one of `addresses`, `global`, `chains`, `reports`,
+  // or any intel/legacy marathon hash fields — the latter let partial
+  // disaster-recovery restores (re-uploading just the intel corpus) succeed
+  // instead of returning the misleading "not an address-label snapshot" 400.
   const obj = v as Record<string, unknown>;
   return (
-    "addresses" in obj || "global" in obj || "chains" in obj || "reports" in obj
+    "addresses" in obj ||
+    "global" in obj ||
+    "chains" in obj ||
+    "reports" in obj ||
+    INTEL_SNAPSHOT_KEYS.some((key) => key in obj) ||
+    ARKHAM_LEGACY_SNAPSHOT_KEYS.some((key) => key in obj)
   );
 }
 
@@ -348,6 +505,48 @@ export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
       return hasName || hasTags;
     },
   );
+}
+
+type IntelSnapshotFields = {
+  intelDeep?: AddressLabelsSnapshot["intelDeep"];
+  intelTransfers?: AddressLabelsSnapshot["intelTransfers"];
+  intelWealth?: AddressLabelsSnapshot["intelWealth"];
+  intelEntities?: AddressLabelsSnapshot["intelEntities"];
+  intelEntityCps?: AddressLabelsSnapshot["intelEntityCps"];
+};
+
+/**
+ * Extract intel hashes from a snapshot body for pass-through to the restore
+ * writer. Trusted (cron-restore) mode only — no sanitization; the cron wrote
+ * exactly what it read out of Redis. Accepts both new (`intelDeep`) and legacy
+ * (`arkhamDeep`) field names so older Blob backups can still be restored.
+ *
+ * Empty `{}` maps are stripped alongside `undefined`: a backup captured while
+ * Redis was empty (e.g. between deploy and the rename migration) would otherwise
+ * route into the trusted-replace path and DEL the live intel hashes, wiping
+ * the marathon corpus on disaster-recovery restore.
+ */
+function extractIntelFields(body: AddressLabelsSnapshot): {
+  fields: IntelSnapshotFields;
+  hasArkhamPayload: boolean;
+} {
+  const fields: IntelSnapshotFields = {};
+  // Prefer new names; fall back to legacy names for older backups.
+  fields.intelDeep = body.intelDeep ?? body.arkhamDeep;
+  fields.intelTransfers = body.intelTransfers ?? body.arkhamTransfers;
+  fields.intelWealth = body.intelWealth ?? body.arkhamWealth;
+  fields.intelEntities = body.intelEntities ?? body.arkhamEntities;
+  fields.intelEntityCps = body.intelEntityCps ?? body.arkhamEntityCps;
+  for (const k of Object.keys(fields) as Array<keyof IntelSnapshotFields>) {
+    const v = fields[k];
+    if (
+      v === undefined ||
+      (typeof v === "object" && v !== null && Object.keys(v).length === 0)
+    ) {
+      delete fields[k];
+    }
+  }
+  return { fields, hasArkhamPayload: Object.keys(fields).length > 0 };
 }
 
 function mergePreservingProvenance(
