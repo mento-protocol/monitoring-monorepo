@@ -1,6 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../route";
+import {
+  BACKUP_MANIFEST_VERSION,
+  HASH_BLOB_NAMES,
+} from "@/lib/address-labels/backup-format";
+import { MAX_RESTORE_BLOB_BYTES } from "@/app/api/address-labels/restore/route";
+
+vi.mock("@sentry/nextjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sentry/nextjs")>();
+  return {
+    ...actual,
+    captureException: vi.fn(),
+    captureMessage: vi.fn(),
+    // withMonitor must still execute the wrapped callback — the tests rely
+    // on the route's return value, not on the Sentry monitor side effects.
+    withMonitor: vi.fn(
+      async (_slug: string, cb: () => Promise<unknown>) => await cb(),
+    ),
+  };
+});
 
 vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
@@ -31,10 +50,14 @@ vi.mock("@/lib/address-reports", () => ({
   }),
 }));
 
-const mockPut = vi.fn().mockResolvedValue({
-  pathname: "address-labels-backup-2026-03-24.json",
-  url: "https://blob.vercel-storage.com/address-labels-backup-2026-03-24.json",
-});
+// `put` returns whatever the SDK normally returns; the route only reads
+// `.pathname` from us so a tiny stub is fine.
+const mockPut = vi.fn().mockImplementation((pathname: string) =>
+  Promise.resolve({
+    pathname,
+    url: `https://blob.vercel-storage.com/${pathname}`,
+  }),
+);
 
 vi.mock("@vercel/blob", () => ({
   put: (...args: unknown[]) => mockPut(...args),
@@ -82,6 +105,33 @@ beforeEach(() => {
   });
 });
 
+/**
+ * Helper: pull the per-blob put() calls into a name → content map for assertion.
+ * Excludes the manifest blob so tests can compare each hash blob's body.
+ */
+function hashBlobContents(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const call of mockPut.mock.calls) {
+    const [pathname, content] = call as [string, string];
+    if (pathname.endsWith("/manifest.json")) continue;
+    const fileName = pathname.split("/").pop() ?? pathname;
+    const name = fileName.replace(/\.json$/, "");
+    out[name] = content;
+  }
+  return out;
+}
+
+function manifestBody(): { pathname: string; content: string } {
+  const manifestCall = mockPut.mock.calls.find(([p]) =>
+    String(p).endsWith("/manifest.json"),
+  );
+  if (!manifestCall) throw new Error("No manifest blob was written");
+  return {
+    pathname: manifestCall[0] as string,
+    content: manifestCall[1] as string,
+  };
+}
+
 describe("GET /api/address-labels/backup", () => {
   it("accepts requests with valid CRON_SECRET bearer token", async () => {
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
@@ -125,45 +175,97 @@ describe("GET /api/address-labels/backup", () => {
     expect(res.status).toBe(401);
   });
 
-  it("stores backup as private Vercel Blob in flat snapshot format", async () => {
+  it("writes 7 hash blobs + manifest under date prefix (v2 per-hash splits)", async () => {
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
       headers: { Authorization: "Bearer test-cron-secret" },
     });
-    await GET(req);
+    const res = await GET(req);
+    expect(res.status).toBe(200);
 
-    expect(mockPut).toHaveBeenCalledTimes(1);
-    const [filename, content, opts] = mockPut.mock.calls[0];
-    expect(filename).toMatch(/^address-labels-backup-\d{4}-\d{2}-\d{2}\.json$/);
-    expect(opts.access).toBe("private");
-    expect(opts.addRandomSuffix).toBe(false);
+    // 7 hash blobs + 1 manifest = 8 put() calls
+    expect(mockPut).toHaveBeenCalledTimes(8);
 
-    const stored = JSON.parse(content as string);
-    expect(stored).toHaveProperty("exportedAt");
-    expect(stored).toHaveProperty("addresses");
-    expect(stored.addresses["0xggg"].name).toBe("Cross-chain");
-    expect(stored.addresses["0xabc"].name).toBe("Test");
-    // Legacy snapshot fields no longer emitted.
-    expect(stored.global).toBeUndefined();
-    expect(stored.chains).toBeUndefined();
+    // Every blob pathname follows the v2 per-day prefix convention.
+    // Hash blobs use addRandomSuffix: true so each run writes unique paths
+    // (no torn snapshots on retry); the manifest stays at a deterministic
+    // per-day path so restore has a single known entry point.
+    for (const call of mockPut.mock.calls) {
+      const [pathname, , opts] = call as [
+        string,
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(pathname).toMatch(
+        /^address-labels-backup-\d{4}-\d{2}-\d{2}\/(labels|reports|intelDeep|intelTransfers|intelWealth|intelEntities|intelEntityCps|manifest)\.json$/,
+      );
+      expect(opts.access).toBe("private");
+      if (pathname.endsWith("/manifest.json")) {
+        expect(opts.addRandomSuffix).toBe(false);
+        expect(opts.allowOverwrite).toBe(true);
+      } else {
+        expect(opts.addRandomSuffix).toBe(true);
+      }
+    }
+
+    // Every named hash blob landed
+    const hashContents = hashBlobContents();
+    for (const name of HASH_BLOB_NAMES) {
+      expect(hashContents).toHaveProperty(name);
+    }
   });
 
-  it("embeds forensic reports under the `reports` key alongside addresses", async () => {
-    // Restore parity: a Redis flush would otherwise lose every forensic
-    // report in the same Upstash instance. The wire-format key is `reports`
-    // (NOT `addressReports`) — keep this assertion exact, matching the
-    // import path's expected shape.
+  it("manifest blob lists every hash with pathname + sizeBytes", async () => {
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
       headers: { Authorization: "Bearer test-cron-secret" },
     });
     await GET(req);
 
-    const [, content] = mockPut.mock.calls[0];
-    const stored = JSON.parse(content as string);
-    expect(stored).toHaveProperty("reports");
-    expect(stored.reports).not.toHaveProperty("addressReports");
-    expect(stored.reports["0xabc"]).toEqual({
+    const { content } = manifestBody();
+    const manifest = JSON.parse(content);
+    expect(manifest.version).toBe(BACKUP_MANIFEST_VERSION);
+    expect(typeof manifest.exportedAt).toBe("string");
+    expect(manifest.hashes).toHaveLength(HASH_BLOB_NAMES.length);
+    for (const entry of manifest.hashes) {
+      expect(HASH_BLOB_NAMES).toContain(entry.name);
+      expect(typeof entry.pathname).toBe("string");
+      expect(typeof entry.sizeBytes).toBe("number");
+      expect(entry.sizeBytes).toBeGreaterThan(0);
+    }
+  });
+
+  it("labels blob holds the address records (not the snapshot envelope)", async () => {
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await GET(req);
+
+    const stored = JSON.parse(hashBlobContents().labels);
+    expect(stored["0xggg"].name).toBe("Cross-chain");
+    expect(stored["0xabc"].name).toBe("Test");
+    // The per-hash blob is just the records map; no `addresses` /
+    // `exportedAt` / `reports` envelope (those live in the manifest and in
+    // the other per-hash blobs).
+    expect(stored).not.toHaveProperty("addresses");
+    expect(stored).not.toHaveProperty("exportedAt");
+    expect(stored).not.toHaveProperty("reports");
+  });
+
+  it("reports blob holds forensic reports verbatim", async () => {
+    // Restore parity: a Redis flush would otherwise lose every forensic
+    // report in the same Upstash instance. The per-hash split puts each
+    // hash type in its own blob, but the records are the same JSON shape
+    // the import path consumes.
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await GET(req);
+
+    const stored = JSON.parse(hashBlobContents().reports);
+    expect(stored["0xabc"]).toEqual({
       body: "Suspected MEV operator. See thread.",
       title: "Investigation",
       authorEmail: "alice@mentolabs.xyz",
@@ -174,10 +276,9 @@ describe("GET /api/address-labels/backup", () => {
     });
   });
 
-  it("emits an empty `reports` object when no reports exist (not omitted)", async () => {
-    // Always-present key keeps the wire format stable for restore tooling
-    // — a downstream tool checking `snapshot.reports` shouldn't have to
-    // distinguish "not yet backfilled" from "no reports yet".
+  it("emits an empty reports blob when no reports exist (not omitted)", async () => {
+    // Always-present blob keeps the manifest shape stable for restore
+    // tooling — every manifest lists all 7 hashes, even when one is empty.
     (getAllReports as ReturnType<typeof vi.fn>).mockResolvedValue({});
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
@@ -185,21 +286,101 @@ describe("GET /api/address-labels/backup", () => {
     });
     await GET(req);
 
-    const [, content] = mockPut.mock.calls[0];
-    const stored = JSON.parse(content as string);
-    expect(stored.reports).toEqual({});
+    const reportsBlob = JSON.parse(hashBlobContents().reports);
+    expect(reportsBlob).toEqual({});
+    // Manifest still includes the reports entry.
+    const manifest = JSON.parse(manifestBody().content);
+    expect(manifest.hashes.map((h: { name: string }) => h.name)).toContain(
+      "reports",
+    );
   });
 
-  it("overwrites same-day backup (deterministic filename)", async () => {
+  it("manifest pathname is deterministic across same-day runs (restore entry point stays stable)", async () => {
+    // Hash blobs use addRandomSuffix: true so each run writes unique paths
+    // (real Vercel appends a random token; our mock returns input unchanged
+    // so the test can't directly observe the suffix). What MUST stay stable
+    // is the manifest pathname — restore looks it up by per-day prefix.
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "GET",
       headers: { Authorization: "Bearer test-cron-secret" },
     });
-    await GET(req);
-    await GET(req);
-    const name1 = mockPut.mock.calls[0][0] as string;
-    const name2 = mockPut.mock.calls[1][0] as string;
-    expect(name1).toBe(name2);
+    const res1 = await GET(req);
+    const { pathname: manifest1 } = await res1.json();
+    mockPut.mockClear();
+    const res2 = await GET(req);
+    const { pathname: manifest2 } = await res2.json();
+    expect(manifest1).toBe(manifest2);
+    expect(manifest1).toMatch(
+      /^address-labels-backup-\d{4}-\d{2}-\d{2}\/manifest\.json$/,
+    );
+  });
+
+  it("fires a Sentry warning when any single hash blob exceeds the restore cap", async () => {
+    // Regression test: a hash whose serialised JSON crosses
+    // MAX_RESTORE_BLOB_BYTES would make every restore from that snapshot
+    // 413 — backup still succeeds (raw blob is salvageable) but the
+    // captureMessage warning makes the impending DR break visible.
+    const Sentry = await import("@sentry/nextjs");
+    const captureMessage = vi.mocked(Sentry.captureMessage);
+
+    // Build a record whose JSON-serialised form exceeds the cap.
+    const oneMb = "x".repeat(1024 * 1024);
+    const fatRecords: Record<string, string> = {};
+    for (let i = 0; i < MAX_RESTORE_BLOB_BYTES / (1024 * 1024) + 2; i++) {
+      fatRecords[`field${i}`] = oneMb;
+    }
+    const { getAllIntelDeep } = await import("@/lib/intel-deep");
+    (getAllIntelDeep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      fatRecords,
+    );
+
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+
+    const warningCall = captureMessage.mock.calls.find((args) =>
+      String(args[0]).includes("intelDeep"),
+    );
+    expect(warningCall).toBeDefined();
+    expect(warningCall![0]).toMatch(/exceeds restore cap/);
+    expect(warningCall![1]).toMatchObject({ level: "warning" });
+  });
+
+  it("fires a Sentry warning when any single field's wire size exceeds the chunked-HSET cap", async () => {
+    // Regression test: a sub-16MB blob can still deterministically fail
+    // restore if one field/value pair exceeds the chunked-HSET budget.
+    // chunkedHashWrite pre-scans + throws on the first unsplittable field
+    // before any write — backup needs to warn at preflight time.
+    const Sentry = await import("@sentry/nextjs");
+    const captureMessage = vi.mocked(Sentry.captureMessage);
+
+    // Single field whose JSON-encoded value exceeds the chunk cap. Other
+    // fields are tiny, so the blob itself fits under 16 MB and the per-blob
+    // check wouldn't fire — only the per-field guard catches this.
+    const huge = "Q".repeat(8 * 1024 * 1024 + 1024);
+    const fatFields: Record<string, string> = { onefatfield: huge };
+    const { getAllIntelDeep } = await import("@/lib/intel-deep");
+    (getAllIntelDeep as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      fatFields,
+    );
+
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+
+    const warningCall = captureMessage.mock.calls.find((args) =>
+      String(args[0]).includes("unsplittable field"),
+    );
+    expect(warningCall).toBeDefined();
+    expect(warningCall![0]).toMatch(/onefatfield/);
+    expect(warningCall![0]).toMatch(/chunked-HSET cap/);
+    expect(warningCall![1]).toMatchObject({ level: "warning" });
   });
 
   it("returns 500 when CRON_SECRET is not set in production", async () => {
