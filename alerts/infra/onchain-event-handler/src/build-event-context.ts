@@ -20,18 +20,25 @@ export function buildEventContext(
   const hasSafeMultiSigTx = new Set<string>();
 
   for (const log of logs) {
+    // Payload-level validation only guarantees `result` is an array, so each
+    // log's `transactionHash` could be missing or a non-string. Skip those
+    // entries here so a malformed batch entry can't throw a TypeError before
+    // per-log validation runs.
+    if (typeof log.transactionHash !== "string") continue;
+    const txHashLower = log.transactionHash.toLowerCase();
+
     // Build txHashMap from ExecutionSuccess events (needed for SafeMultiSigTransaction)
     if (
       log.name === "ExecutionSuccess" &&
       log.txHash &&
       typeof log.txHash === "string"
     ) {
-      txHashMap.set(log.transactionHash.toLowerCase(), log.txHash);
+      txHashMap.set(txHashLower, log.txHash);
     }
 
     // Track which transactions have SafeMultiSigTransaction events
     if (log.name === "SafeMultiSigTransaction") {
-      hasSafeMultiSigTx.add(log.transactionHash.toLowerCase());
+      hasSafeMultiSigTx.add(txHashLower);
     }
   }
 

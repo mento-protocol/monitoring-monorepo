@@ -45,7 +45,10 @@ resource "null_resource" "pause_webhook_before_update" {
       # Scope state lookup strictly to THIS chain's module instance so
       # rehashing one chain's webhook can't yank a sibling chain's webhook
       # out of state (the original greedy `head -1` did exactly that).
-      STATE_PATH=$(terraform state list | grep -F 'module.onchain_event_listeners["${var.chain_key}"].restapi_object.multisig_webhook' | head -1)
+      # The trailing `|| true` keeps the no-match case (grep returns 1) from
+      # tripping pipefail on first-create runs — we explicitly handle the
+      # empty STATE_PATH branch below.
+      STATE_PATH=$(terraform state list | grep -F 'module.onchain_event_listeners["${var.chain_key}"].restapi_object.multisig_webhook' | head -1 || true)
 
       if [ -z "$STATE_PATH" ]; then
         echo "Webhook not found in state, skipping delete (first creation)"
