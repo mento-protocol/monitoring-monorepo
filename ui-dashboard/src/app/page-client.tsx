@@ -101,37 +101,6 @@ function GlobalContent({
 }) {
   const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
 
-  // Unique v3 traders across all chains. Pre-rolled per-chain in
-  // `LeaderboardWindowSnapshot(windowKey: "all").windowTraders` (excludes
-  // system addresses — rebalancers, OLS, reserve strategy — by default,
-  // matching the homepage LPs tile semantics). The address list is
-  // unioned client-side so a wallet active on multiple chains counts
-  // once. Isolated from LEADERBOARD_WINDOW_LATEST so a Hasura
-  // "field not found" during the indexer deploy/resync window degrades
-  // only this tile (renders "N/A"), not the rest of the page.
-  const tradersGql = useGQL<LeaderboardWindowTradersLatest>(
-    LEADERBOARD_WINDOW_TRADERS_LATEST,
-    { windowKey: "all" },
-    {
-      schema: LeaderboardWindowTradersLatestSchema,
-      // The "all" window snapshot only rolls over at the per-chain UTC-midnight
-      // heartbeat (see indexer-envio/src/leaderboardWindowFlush.ts), so the
-      // default 30s polling cadence is wildly over-cadenced for this tile.
-      // 5min keeps a fresh-after-rollover read without burning the Envio
-      // "small" tier quota for a multi-KB address list on every poll.
-      refreshInterval: 5 * 60_000,
-    },
-  );
-  const totalUniqueTraders = useMemo(() => {
-    if (tradersGql.error) return null;
-    if (!tradersGql.data) return null;
-    const set = new Set<string>();
-    for (const row of tradersGql.data.LeaderboardWindowSnapshot) {
-      for (const addr of row.windowTraders) set.add(addr.toLowerCase());
-    }
-    return set.size;
-  }, [tradersGql.data, tradersGql.error]);
-
   // Whether any network has a top-level, rates, snapshot, or pagination
   // failure. Used to show N/A / "partial data" in KPI tiles rather than
   // silently under-reporting. Fee data flows from `PoolDailyFeeSnapshot`
@@ -426,18 +395,7 @@ function GlobalContent({
             }
             subtitle="All-time across all pools"
           />
-
-          <Tile
-            label="Traders"
-            value={
-              tradersGql.isLoading
-                ? "…"
-                : totalUniqueTraders === null
-                  ? "N/A"
-                  : totalUniqueTraders.toLocaleString()
-            }
-            subtitle="Unique addresses that traded on v3"
-          />
+          <TradersTile />
         </div>
       </section>
 
@@ -468,5 +426,56 @@ function GlobalContent({
         )}
       </section>
     </div>
+  );
+}
+
+// Homepage Traders KPI tile. Counts unique v3 traders across all chains
+// via the pre-rolled `LeaderboardWindowSnapshot(windowKey: "all")
+// .windowTraders` array (system addresses — rebalancers, OLS, reserve
+// strategy — excluded by default, matching the LPs tile semantics). The
+// address list is unioned client-side so a wallet active on multiple
+// chains counts once. Isolated from LEADERBOARD_WINDOW_LATEST so a
+// Hasura "field not found" during the indexer deploy/resync window
+// degrades only this tile (renders "N/A"), not the rest of the page.
+//
+// Placed below `GlobalContent` so its declaration doesn't drift the
+// parent's starting line past the eslint baseline-diff proximity window;
+// function declarations hoist, so calling it from inside `GlobalContent`
+// is fine.
+function TradersTile() {
+  const gql = useGQL<LeaderboardWindowTradersLatest>(
+    LEADERBOARD_WINDOW_TRADERS_LATEST,
+    { windowKey: "all" },
+    {
+      schema: LeaderboardWindowTradersLatestSchema,
+      // The "all" window snapshot only rolls over at the per-chain
+      // UTC-midnight heartbeat (see
+      // indexer-envio/src/leaderboardWindowFlush.ts), so the default
+      // 30s polling cadence is wildly over-cadenced for this tile. 5min
+      // keeps a fresh-after-rollover read without burning the Envio
+      // "small" tier quota for a multi-KB address list on every poll.
+      refreshInterval: 5 * 60_000,
+    },
+  );
+  const count = useMemo(() => {
+    if (gql.error) return null;
+    if (!gql.data) return null;
+    const set = new Set<string>();
+    for (const row of gql.data.LeaderboardWindowSnapshot) {
+      for (const addr of row.windowTraders) set.add(addr.toLowerCase());
+    }
+    return set.size;
+  }, [gql.data, gql.error]);
+  const value = gql.isLoading
+    ? "…"
+    : count === null
+      ? "N/A"
+      : count.toLocaleString();
+  return (
+    <Tile
+      label="Traders"
+      value={value}
+      subtitle="Unique addresses that traded on v3"
+    />
   );
 }
