@@ -61,33 +61,27 @@ EOT
 resource "grafana_message_template" "slack_reserve_balance_alert_title" {
   name     = "Slack: Reserve Balance Alert Title"
   template = <<-EOT
-  {{ define "slack.reserve_balance_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
-  {{ end -}}
-  EOT
+{{ define "slack.reserve_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
+EOT
 }
 
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
   name     = "Slack: Reserve Balance Alert Message"
   template = <<-EOT
-  {{ define "slack.reserve_balance_alert_message" }}
-  {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-  {{ range .Alerts.Firing -}}
-  {{ $token := .Labels.token -}}
-  {{ $reserveAddress := .Labels.ownerValue -}}
-*🚨 FIRING: Low {{ $token }} balance — {{ .Annotations.currentBalance }} left*
-Please top up the {{ $token }} balance of the <https://celoscan.io/address/{{ $reserveAddress }}|{{ .Labels.owner }}> above the alert threshold of {{ .Annotations.threshold }} {{ $token }}
-{{ if .GeneratorURL -}}<{{ .GeneratorURL }}|Grafana Alert Link ->>{{- end }}
-  {{ end -}}
-  {{ range .Alerts.Resolved -}}
-  {{ $token := .Labels.token -}}
-  {{ $reserveAddress := .Labels.ownerValue -}}
-*✅ RESOLVED: Sufficient {{ $token }} balance restored for the <https://celoscan.io/address/{{ $reserveAddress }}|{{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
-  {{ end -}}
-  {{ end -}}
-  EOT
+{{ define "slack.reserve_balance_alert_message" }}
+{{ range .Alerts.Firing -}}
+{{ $token := .Labels.token -}}
+{{ $reserveAddress := .Labels.ownerValue -}}
+*<https://celoscan.io/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
+- Top up the {{ .Labels.owner }} above the alert threshold of {{ .Annotations.threshold }} {{ $token }}
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+{{ $token := .Labels.token -}}
+{{ $reserveAddress := .Labels.ownerValue -}}
+*<https://celoscan.io/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
+{{ end -}}
+{{ end }}
+EOT
 }
 
 resource "grafana_message_template" "slack_trading_mode_alert_title" {
