@@ -11,9 +11,11 @@ import {
 } from "./utils";
 
 /**
- * Error thrown when chain cannot be determined from webhook payload
+ * Error thrown when chain cannot be determined from webhook payload.
+ * Local to this module — the outer handler in index.ts doesn't catch it
+ * (the per-event try/catch below logs+drops it instead of re-throwing).
  */
-export class ChainDetectionError extends Error {
+class ChainDetectionError extends Error {
   constructor(
     message: string,
     public readonly address: string,

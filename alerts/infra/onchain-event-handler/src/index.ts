@@ -3,7 +3,7 @@ import { buildEventContext } from "./build-event-context";
 import { checkPayloadSize } from "./check-payload-size";
 import { handleHealthCheck } from "./health-check";
 import { logger } from "./logger";
-import { ChainDetectionError, processEvents } from "./process-events";
+import { processEvents } from "./process-events";
 import { validatePayload } from "./validate-payload";
 import { validateQuickNodeWebhook } from "./validate-quicknode-webhook";
 
@@ -86,27 +86,9 @@ export const processQuicknodeWebhook = async (
       total: webhookData.length,
     });
   } catch (error) {
-    // Handle chain detection errors with a specific HTTP status code
-    if (error instanceof ChainDetectionError) {
-      logger.error("Chain detection failed", {
-        error: error.message,
-        address: error.address,
-        blockHash: error.blockHash,
-        transactionHash: error.transactionHash,
-      });
-      res.status(422).json({
-        error: "Unprocessable Entity",
-        message: error.message,
-        details: {
-          address: error.address,
-          blockHash: error.blockHash,
-          transactionHash: error.transactionHash,
-        },
-      });
-      return;
-    }
-
-    // Handle other errors as internal server errors
+    // ChainDetectionError is handled (logged + dropped) inside processEvents'
+    // per-event catch — see the design note there. Only unexpected outer
+    // failures (payload parsing exceptions, etc.) reach this branch.
     logger.error("Webhook processing error", {
       error:
         error instanceof Error
