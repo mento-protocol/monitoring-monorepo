@@ -286,15 +286,8 @@ function GlobalContent({
       unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
       totalUnresolvedCount,
     };
-  }, [
-    networkData,
-    anyNetworkError,
-    anySnapshots7dError,
-    anyFeesError,
-    anyLpError,
-  ]);
+  }, [networkData, anyNetworkError, anyFeesError, anyLpError]);
 
-  // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
 
   const feesApprox =

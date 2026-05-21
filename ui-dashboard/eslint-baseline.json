@@ -219,8 +219,8 @@
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'GlobalContent' has too many lines (270). Maximum allowed is 100.",
-    "line": 97,
+    "message": "Function 'GlobalContent' has too many lines (269). Maximum allowed is 100.",
+    "line": 89,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
