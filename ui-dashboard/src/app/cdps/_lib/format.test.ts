@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  cdpSymbolSlug,
-  formatSignedWei,
-  formatTokenAmount,
-} from "./format";
+import { cdpSymbolSlug, formatSignedWei, formatTokenAmount } from "./format";
 
 describe("CDP format helpers", () => {
   it("treats only the -1 sentinel as unknown token amount", () => {

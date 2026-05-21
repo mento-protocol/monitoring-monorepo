@@ -244,10 +244,7 @@ function CdpDetailContent({
         />
       </section>
 
-      <RedemptionsSection
-        instance={instance}
-        symbol={collateral.symbol}
-      />
+      <RedemptionsSection instance={instance} symbol={collateral.symbol} />
 
       <CdpStabilityPoolTvlChart
         snapshots={snapshots}
