@@ -301,6 +301,8 @@ NODE
   fail "expected ui-dashboard React Doctor package scripts to use root wrappers"
 assert_turbo_task_has_input "react-doctor:diff" "react-doctor.config.json"
 assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/scripts/check-react-doctor-diff.sh'
+assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
+assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
 assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/package.json'
 assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/pnpm-lock.yaml'
 assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/pnpm-workspace.yaml'
@@ -311,6 +313,8 @@ assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_REF"
 assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_CACHE_KEY"
 assert_turbo_task_has_input "react-doctor:score" "react-doctor.config.json"
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/scripts/check-react-doctor-score.sh'
+assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
+assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/package.json'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/pnpm-lock.yaml'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/pnpm-workspace.yaml'
