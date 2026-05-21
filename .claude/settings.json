@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh\""
+            "command": "[ -f \"${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh\" ] && bash \"${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh\" || true"
           }
         ]
       }
