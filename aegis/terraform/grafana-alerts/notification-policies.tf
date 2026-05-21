@@ -62,120 +62,72 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Oracle Relayer Alerts [Celo-Sepolia]
-    policy {
-      contact_point = grafana_contact_point.discord_channel_oracle_relayers_staging.name
+    # Oracle Relayer Alerts (Discord) — one policy per chain, routed by env:
+    # prod chains → #prod-oracle-relayers, staging chains → #stg-oracle-relayers.
+    # Adding a chain to local.chains adds its route automatically. The
+    # `rateFeed !~` matcher excludes weekend-disabled FX feeds; balance alerts
+    # carry no rateFeed label so they always pass it.
+    dynamic "policy" {
+      for_each = local.chains
+      content {
+        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_oracle_relayers_prod.name : grafana_contact_point.discord_channel_oracle_relayers_staging.name
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        # Exclude the weekend-disabled feeds
+        matcher {
+          label = "rateFeed"
+          match = "!~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      # Exclude the weekend-disabled feeds
-      matcher {
-        label = "rateFeed"
-        match = "!~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
     }
 
-    # Mute notifications on weekends for FX feeds that don't receive new data on weekends [Sepolia]
-    policy {
-      # Apply the mute timing to the policy
-      mute_timings = [grafana_mute_timing.weekend_mute.name]
+    # Weekend-mute companion policies for the FX feeds that don't receive new
+    # data on weekends. Only Celo chains have FX rate feeds, so this is scoped
+    # to local.celo_chains.
+    dynamic "policy" {
+      for_each = local.celo_chains
+      content {
+        # Apply the mute timing to the policy
+        mute_timings = [grafana_mute_timing.weekend_mute.name]
 
-      # Use the same contact point as the Sepolia Oracle Relayer policy
-      contact_point = grafana_contact_point.discord_channel_oracle_relayers_staging.name
+        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_oracle_relayers_prod.name : grafana_contact_point.discord_channel_oracle_relayers_staging.name
 
-      # Only apply this policy to the weekend-disabled feeds
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "rateFeed"
+          match = "=~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        # continue=true so the parallel Slack routes also fire for
+        # weekend-muted FX feeds — they share the same mute_timing.
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "=~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      # continue=true so the parallel Slack routes also fire for
-      # weekend-muted FX feeds — they share the same mute_timing.
-      continue = true
-    }
-
-    # Oracle Relayer Alerts [Celo Mainnet]
-    policy {
-      contact_point = grafana_contact_point.discord_channel_oracle_relayers_prod.name
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
-      }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      # Exclude the weekend-disabled feeds
-      matcher {
-        label = "rateFeed"
-        match = "!~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
-    }
-
-    # Mute notifications on weekends for FX feeds that don't receive new data on weekends
-    policy {
-      # Apply the mute timing to the policy
-      mute_timings = [grafana_mute_timing.weekend_mute.name]
-
-      # Use the same contact point as the main Oracle Relayer policy
-      contact_point = grafana_contact_point.discord_channel_oracle_relayers_prod.name
-
-      # Only apply this policy to the weekend-disabled feeds
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
-      }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "=~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      # continue=true so the parallel Slack routes also fire for
-      # weekend-muted FX feeds — they share the same mute_timing.
-      continue = true
     }
 
     # Reserve Alerts
@@ -366,118 +318,132 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Oracle Relayer warning alerts → #alerts-oracles (celo prod, non-weekend FX)
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_oracles.name
+    # Oracle Relayer warning alerts → #alerts-oracles (prod chains, non-weekend FX)
+    dynamic "policy" {
+      for_each = local.prod_chains
+      content {
+        contact_point = grafana_contact_point.slack_alerts_oracles.name
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "severity"
+          match = "!="
+          value = "page"
+        }
+
+        matcher {
+          label = "rateFeed"
+          match = "!~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      matcher {
-        label = "severity"
-        match = "!="
-        value = "page"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "!~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
     }
 
-    # Oracle Relayer warning alerts → #alerts-oracles (celo prod, weekend FX, muted)
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_oracles.name
-      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+    # Oracle Relayer warning alerts → #alerts-oracles (prod chains, weekend FX, muted).
+    # Only Celo chains have FX feeds, so the weekend-mute companion is celo-scoped.
+    dynamic "policy" {
+      for_each = { for k, c in local.celo_chains : k => c if c.env == "prod" }
+      content {
+        contact_point = grafana_contact_point.slack_alerts_oracles.name
+        mute_timings  = [grafana_mute_timing.weekend_mute.name]
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "severity"
+          match = "!="
+          value = "page"
+        }
+
+        matcher {
+          label = "rateFeed"
+          match = "=~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      matcher {
-        label = "severity"
-        match = "!="
-        value = "page"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "=~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
     }
 
-    # Oracle Relayer alerts → #alerts-testnet (celo-sepolia, non-weekend FX, any severity)
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_testnet.name
+    # Oracle Relayer alerts → #alerts-testnet (staging chains, non-weekend FX, any severity)
+    dynamic "policy" {
+      for_each = local.staging_chains
+      content {
+        contact_point = grafana_contact_point.slack_alerts_testnet.name
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "rateFeed"
+          match = "!~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "!~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
     }
 
-    # Oracle Relayer alerts → #alerts-testnet (celo-sepolia, weekend FX, muted)
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_testnet.name
-      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+    # Oracle Relayer alerts → #alerts-testnet (staging chains, weekend FX, muted).
+    # Only Celo chains have FX feeds, so the weekend-mute companion is celo-scoped.
+    dynamic "policy" {
+      for_each = { for k, c in local.celo_chains : k => c if c.env == "staging" }
+      content {
+        contact_point = grafana_contact_point.slack_alerts_testnet.name
+        mute_timings  = [grafana_mute_timing.weekend_mute.name]
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "oracle-relayers"
+        matcher {
+          label = "service"
+          match = "="
+          value = "oracle-relayers"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "rateFeed"
+          match = "=~"
+          value = local.weekend_disabled_feeds_pattern
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      matcher {
-        label = "rateFeed"
-        match = "=~"
-        value = local.weekend_disabled_feeds_pattern
-      }
-
-      continue = true
     }
 
     # Reserve alerts → #alerts-reserve

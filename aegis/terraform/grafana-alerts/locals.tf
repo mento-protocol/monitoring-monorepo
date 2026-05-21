@@ -1,7 +1,64 @@
 # For shared local values that are used across multiple resources
 # See https://www.terraform.io/docs/language/values/locals.html
 locals {
-  chains = ["celo", "celo-sepolia"]
+  # Per-chain registry driving relayer-signer balance alerts (and, where the
+  # metric is CELOToken_balanceOf, the Celo-only stale-price alert). Keyed by
+  # the Prometheus `chain` label aegis publishes. To add an EVM chain (e.g.
+  # polygon mainnet/testnet) add an entry here — no other edits needed.
+  #
+  #   title     → human label used in alert names / Discord copy (e.g. "Monad")
+  #   env       → "prod" | "staging"; drives severity + notification routing
+  #               (prod → warning + prod channels, staging → info + staging)
+  #   metric    → Prometheus metric for the native gas token balance
+  #               ("CELOToken_balanceOf" for Celo, "Native_balanceOf" for chains
+  #               whose gas token isn't ERC20-compatible, e.g. MON)
+  #   symbol    → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
+  #   threshold → low-balance alert threshold, in whole tokens
+  #   explorer  → block-explorer host for address links in alert copy
+  chains = {
+    "celo" = {
+      title     = "Celo"
+      env       = "prod"
+      metric    = "CELOToken_balanceOf"
+      symbol    = "CELO"
+      threshold = 5
+      explorer  = "celoscan.io"
+    }
+    "celo-sepolia" = {
+      title     = "Celo-Sepolia"
+      env       = "staging"
+      metric    = "CELOToken_balanceOf"
+      symbol    = "CELO"
+      threshold = 5
+      explorer  = "sepolia.celoscan.io"
+    }
+    "monad" = {
+      title     = "Monad"
+      env       = "prod"
+      metric    = "Native_balanceOf"
+      symbol    = "MON"
+      threshold = 50
+      explorer  = "monadscan.com"
+    }
+    "monad-testnet" = {
+      title     = "Monad-Testnet"
+      env       = "staging"
+      metric    = "Native_balanceOf"
+      symbol    = "MON"
+      threshold = 50
+      explorer  = "testnet.monadscan.com"
+    }
+  }
+
+  # Chains carrying the full Mento contract suite (SortedOracles/BreakerBox).
+  # Stale-price + rate-feed-freshness alerts only apply here — Monad has no
+  # SortedOracles, so it's excluded.
+  celo_chains = { for k, c in local.chains : k => c if c.metric == "CELOToken_balanceOf" }
+
+  # Chains split by environment, used to fan out Slack notification routes
+  # (prod chains → #alerts-oracles, staging chains → #alerts-testnet).
+  prod_chains    = { for k, c in local.chains : k => c if c.env == "prod" }
+  staging_chains = { for k, c in local.chains : k => c if c.env == "staging" }
 
   # Weekend-disabled feeds that don't receive updates during market closing hours
   weekend_disabled_feeds = [
@@ -37,17 +94,19 @@ locals {
       victorops_title_template   = "victorops.oracle_stale_price_alert_title",
       victorops_message_template = "victorops.oracle_stale_price_alert_message"
     },
-    oracle_relayer_low_celo_balance = {
+    oracle_relayer_low_balance = {
+      # One alert name per chain, e.g. "Low CELO Balance [Celo]",
+      # "Low MON Balance [Monad]". Generated from the chains registry so a new
+      # chain's alert routes through this dispatcher automatically.
       names = [
-        "Low CELO Balance [Celo-Sepolia]",
-        "Low CELO Balance [Celo]"
+        for k, c in local.chains : "Low ${c.symbol} Balance [${c.title}]"
       ],
-      title_template             = "discord.oracle_relayer_low_celo_balance_alert_title",
-      message_template           = "discord.oracle_relayer_low_celo_balance_alert_message",
-      slack_title_template       = "slack.oracle_relayer_low_celo_balance_alert_title",
-      slack_message_template     = "slack.oracle_relayer_low_celo_balance_alert_message",
-      victorops_title_template   = "victorops.oracle_relayer_low_celo_balance_alert_title",
-      victorops_message_template = "victorops.oracle_relayer_low_celo_balance_alert_message"
+      title_template             = "discord.oracle_relayer_low_balance_alert_title",
+      message_template           = "discord.oracle_relayer_low_balance_alert_message",
+      slack_title_template       = "slack.oracle_relayer_low_balance_alert_title",
+      slack_message_template     = "slack.oracle_relayer_low_balance_alert_message",
+      victorops_title_template   = "victorops.oracle_relayer_low_balance_alert_title",
+      victorops_message_template = "victorops.oracle_relayer_low_balance_alert_message"
     },
     low_reserve_balance = {
       names = [
