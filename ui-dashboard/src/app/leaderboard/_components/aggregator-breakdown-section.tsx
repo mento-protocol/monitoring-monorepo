@@ -299,7 +299,8 @@ function aggregatorLabelClass(name: string): string {
     name === "system" ||
     name === "direct" ||
     name === "broker" ||
-    name === "mento-router-v2"
+    name === "mento-router-v2" ||
+    name === "mento-router-v3"
   ) {
     return "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300";
   }

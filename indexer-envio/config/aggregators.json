@@ -10,6 +10,11 @@
     }
   },
   "42220": {
+    "0xbe729350f8cdfc19db6866e8579841188ee57f67": {
+      "name": "mento-router-v2",
+      "source": "https://celoscan.io/address/0xBE729350F8CdFC19DB6866e8579841188eE57f67",
+      "$note": "Original verified MentoRouter on Celo (deployed 2024-05-29). Not in @mento-protocol/contracts — that package only ships the active deployment (Routerv300 at 0x4861840…). Lives here because we still see traffic via this address from the legacy Mento UI / older SDK builds; without this entry it'd land in the v2 leaderboard's `unknown` bucket."
+    },
     "0xce16f69375520ab01377ce7b88f5ba8c48f8d666": {
       "name": "squid",
       "source": "https://docs.squidrouter.com/additional-resources/contracts"

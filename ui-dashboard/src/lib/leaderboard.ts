@@ -182,6 +182,7 @@ const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
   direct: "Broker",
   lifi: "LI.FI Router",
   "mento-router-v2": "Mento Router v2",
+  "mento-router-v3": "Mento Router v3",
   openocean: "OpenOcean Router",
   squid: "Squid Router",
   system: "Mento system",
