@@ -5,9 +5,13 @@ locals {
   # fileset() returns paths relative to path.module; filemd5() resolves against
   # the TF working dir. Prefix each entry with ${path.module}/ so the hash
   # actually reflects src/** changes (otherwise Cloud Function never redeploys
-  # on code edits).
-  source_files_relative = fileset(path.module, "src/**")
-  source_files          = [for f in local.source_files_relative : "${path.module}/${f}"]
+  # on code edits). Excludes mirror archive_file.excludes so a test-only edit
+  # doesn't flip the hash and force an identical-zip redeploy.
+  source_files_relative = [
+    for f in fileset(path.module, "src/**") :
+    f if !can(regex("\\.test\\.(ts|js)$", f))
+  ]
+  source_files = [for f in local.source_files_relative : "${path.module}/${f}"]
   package_files = [
     "${path.module}/package.json",
     "${path.module}/package-lock.json",

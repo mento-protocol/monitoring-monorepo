@@ -433,21 +433,15 @@ jobs:
       # package-lock.json for prod deploys. The package is ALSO a pnpm
       # workspace member, so a dev bumping deps via `pnpm install` only
       # updates the root pnpm-lock.yaml — the per-pkg npm lockfile silently
-      # drifts and Cloud Build keeps deploying old deps. This step
-      # regenerates the npm lockfile in-place and fails if it differs from
-      # the committed copy.
+      # drifts and Cloud Build keeps deploying old deps.
+      #
+      # `npm ci --dry-run` validates that package.json and package-lock.json
+      # are consistent without re-resolving to whatever's latest on the
+      # registry. (A regenerate-and-diff approach would fail every time a
+      # transitive patch version was published between commit and CI run.)
       - name: Verify package-lock.json is in sync
         working-directory: alerts/infra/onchain-event-handler
-        run: |
-          cp package-lock.json /tmp/committed-lock.json
-          rm -rf node_modules package-lock.json
-          npm install --package-lock-only --no-audit --no-fund --ignore-scripts
-          if ! diff -q /tmp/committed-lock.json package-lock.json > /dev/null; then
-            echo "::error::package-lock.json is out of sync with package.json. Regenerate with: cd alerts/infra/onchain-event-handler && rm -rf node_modules package-lock.json && npm install --package-lock-only"
-            echo "--- diff (first 40 lines) ---"
-            diff --unified=0 /tmp/committed-lock.json package-lock.json | head -40 || true
-            exit 1
-          fi
+        run: npm ci --dry-run --ignore-scripts --no-audit --no-fund
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
