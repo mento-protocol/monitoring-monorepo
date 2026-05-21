@@ -144,42 +144,27 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Trading Mode Alerts [Celo-Sepolia]
-    policy {
-      contact_point = grafana_contact_point.discord_channel_trading_modes_staging.name
+    # Trading Mode Alerts (Discord) — one policy per chain, routed by env:
+    # staging chains → stg-trading-modes, prod chains → prod-trading-modes.
+    dynamic "policy" {
+      for_each = local.chains
+      content {
+        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_trading_modes_prod.name : grafana_contact_point.discord_channel_trading_modes_staging.name
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "exchanges"
+        matcher {
+          label = "service"
+          match = "="
+          value = "exchanges"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      continue = true
-    }
-
-    # Trading Mode Alerts [Celo Mainnet]
-    policy {
-      contact_point = grafana_contact_point.discord_channel_trading_modes_prod.name
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "exchanges"
-      }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      continue = true
     }
 
     # Aegis Service Alerts - Splunk On-Call
@@ -460,75 +445,84 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Trading-modes prod page alerts → Splunk On-Call.
+    # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
     # A prod circuit-breaker engagement is pager-grade — see the
     # severity=page label in alert-rules-trading-modes.tf.
-    policy {
-      contact_point = grafana_contact_point.splunk_on_call.name
+    dynamic "policy" {
+      for_each = local.prod_chains
+      content {
+        contact_point = grafana_contact_point.splunk_on_call.name
 
-      matcher {
-        label = "severity"
-        match = "="
-        value = "page"
+        matcher {
+          label = "severity"
+          match = "="
+          value = "page"
+        }
+
+        matcher {
+          label = "service"
+          match = "="
+          value = "exchanges"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "exchanges"
-      }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      continue = true
     }
 
-    # Trading-modes prod page alerts → #alerts-critical
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_critical.name
+    # Trading-modes prod page alerts → #alerts-critical (one per prod chain)
+    dynamic "policy" {
+      for_each = local.prod_chains
+      content {
+        contact_point = grafana_contact_point.slack_alerts_critical.name
 
-      matcher {
-        label = "severity"
-        match = "="
-        value = "page"
+        matcher {
+          label = "severity"
+          match = "="
+          value = "page"
+        }
+
+        matcher {
+          label = "service"
+          match = "="
+          value = "exchanges"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "exchanges"
-      }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo"
-      }
-
-      continue = true
     }
 
-    # Trading-modes alerts → #alerts-testnet (celo-sepolia, any severity)
-    policy {
-      contact_point = grafana_contact_point.slack_alerts_testnet.name
+    # Trading-modes alerts → #alerts-testnet (staging chains, any severity)
+    dynamic "policy" {
+      for_each = local.staging_chains
+      content {
+        contact_point = grafana_contact_point.slack_alerts_testnet.name
 
-      matcher {
-        label = "service"
-        match = "="
-        value = "exchanges"
+        matcher {
+          label = "service"
+          match = "="
+          value = "exchanges"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        continue = true
       }
-
-      matcher {
-        label = "chain"
-        match = "="
-        value = "celo-sepolia"
-      }
-
-      continue = true
     }
 
     # Aegis service page alerts → #alerts-critical (parallel to existing Splunk policy)
