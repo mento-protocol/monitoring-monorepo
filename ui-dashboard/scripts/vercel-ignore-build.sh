@@ -30,7 +30,7 @@ skip_or_build_from_base() {
   exit 1
 }
 
-resolve_pr_base_sha() {
+resolve_main_merge_base() {
   local production_ref="origin/main"
 
   if ! git cat-file -e "${production_ref}^{commit}" 2>/dev/null; then
@@ -41,7 +41,7 @@ resolve_pr_base_sha() {
 }
 
 if [[ -n "$pull_request_id" ]]; then
-  if pr_base_sha="$(resolve_pr_base_sha)"; then
+  if pr_base_sha="$(resolve_main_merge_base)"; then
     skip_or_build_from_base \
       "$pr_base_sha" \
       "No dashboard-affecting changes in PR #${pull_request_id}; skipping build." \
@@ -59,7 +59,7 @@ if [[ -z "$base_sha" ]]; then
   # ships neither VERCEL_GIT_PULL_REQUEST_ID nor VERCEL_GIT_PREVIOUS_SHA. Fall back
   # to diffing against origin/main when we know we're on a non-main branch.
   if [[ -n "$commit_ref" && "$commit_ref" != "main" ]]; then
-    if branch_base_sha="$(resolve_pr_base_sha)"; then
+    if branch_base_sha="$(resolve_main_merge_base)"; then
       skip_or_build_from_base \
         "$branch_base_sha" \
         "No dashboard-affecting changes on branch ${commit_ref} vs main; skipping build." \
