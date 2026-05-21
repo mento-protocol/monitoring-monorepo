@@ -33,11 +33,7 @@ EOT
 resource "grafana_message_template" "slack_oracle_relayer_low_celo_balance_alert_title" {
   name     = "Slack: Low CELO Balance Alert Title"
   template = <<-EOT
-{{ define "slack.oracle_relayer_low_celo_balance_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] Low CELO Balance Alert
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.owner }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.owner }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ end }}
+{{ define "slack.oracle_relayer_low_celo_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
 }
 
@@ -46,18 +42,17 @@ resource "grafana_message_template" "slack_oracle_relayer_low_celo_balance_alert
   name     = "Slack: Low CELO Balance Alert Message"
   template = <<-EOT
 {{ define "slack.oracle_relayer_low_celo_balance_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-*🚨 FIRING: Low CELO balance for {{ .Labels.owner }} on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} CELO left*
-- Please top up the {{ .Labels.owner }} wallet to ensure continued operation of the relayer
-- You can do this by running the <https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts|refill script> in the oracle-relayer repo
-- Or alternatively, send 50 CELO to the {{ .Labels.owner }} (<https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}|{{ .Labels.ownerValue }}>) on {{ .Labels.chain | title }} from our Deployer wallet
-- You can get the deployer wallet's private key by running `npm run secrets:get` in the <https://github.com/mento-protocol/mento-deployment/blob/main/bin/get-secrets.sh|mento-deployment> repo
-{{ end }}
-{{ range .Alerts.Resolved }}
-*✅ RESOLVED: Sufficient CELO balance restored for <https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}|{{ .Labels.owner }}> on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} CELO*
-
-{{ end }}
+{{ range .Alerts.Firing -}}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner -}}
+*<https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}|Low CELO balance for {{ $pair }} Relayer on {{ .Labels.chain | title }}> — {{ .Annotations.currentBalance }} CELO left*
+- Top up the <https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}|relayer wallet> to keep the relayer running
+- Run the <https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts|relayer refill script>, or send 50 CELO from the dev wallet
+- Get the dev wallet private key from the Eng vault in 1Password
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner -}}
+*<https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}|Sufficient CELO balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }}> — {{ .Annotations.currentBalance }} CELO*
+{{ end -}}
 {{ end }}
 EOT
 }
