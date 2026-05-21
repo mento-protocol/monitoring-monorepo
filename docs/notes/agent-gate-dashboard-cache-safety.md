@@ -44,6 +44,7 @@ Dashboard build and size-limit inputs:
 - `ui-dashboard/postcss.config.*`
 - `ui-dashboard/tsconfig*.json`
 - `ui-dashboard/sentry.*.config.*`
+- `ui-dashboard/sentry.shared.ts`
 - `ui-dashboard/.size-limit.cjs`
 - `ui-dashboard/vercel.json`
 - `ui-dashboard/.env.production.local.example`

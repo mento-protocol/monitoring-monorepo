@@ -232,6 +232,7 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "build" "postcss.config.*"
 assert_turbo_task_has_input "build" "next.config.*"
+assert_turbo_task_has_input "build" "sentry.shared.ts"
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/package.json'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-lock.yaml'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-workspace.yaml'
@@ -252,6 +253,7 @@ NODE
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "test:browser" "playwright.config.ts"
+assert_turbo_task_has_input "test:browser" "sentry.shared.ts"
 assert_turbo_task_has_input "test:browser" "scripts/run-browser-tests.mjs"
 assert_turbo_task_has_input "test:browser" "tests/browser/**"
 assert_turbo_task_lacks_input "test:browser" ".size-limit.cjs"
@@ -752,6 +754,10 @@ assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/next.config.ts"
+assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+
+run_gate "ui-dashboard/sentry.shared.ts"
 assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 

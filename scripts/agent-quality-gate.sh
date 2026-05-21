@@ -762,7 +762,7 @@ while IFS= read -r path; do
       # they can invalidate browser-test cache entries without forcing an
       # unrelated dashboard build cache miss.
       case "$path" in
-        ui-dashboard/src/*|ui-dashboard/package.json|ui-dashboard/next.config.*|ui-dashboard/postcss.config.*|ui-dashboard/sentry.*.config.*|ui-dashboard/tsconfig*.json|ui-dashboard/.size-limit.cjs|ui-dashboard/vercel.json|ui-dashboard/.env.production.local.example)
+        ui-dashboard/src/*|ui-dashboard/package.json|ui-dashboard/next.config.*|ui-dashboard/postcss.config.*|ui-dashboard/sentry.*.config.*|ui-dashboard/sentry.shared.ts|ui-dashboard/tsconfig*.json|ui-dashboard/.size-limit.cjs|ui-dashboard/vercel.json|ui-dashboard/.env.production.local.example)
           add_ui_size_limit "ui-dashboard bundle inputs changed"
           ;;
       esac
