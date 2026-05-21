@@ -573,7 +573,7 @@ trunk_requires_full_scan() {
   while IFS= read -r path; do
     [[ -e "$path" ]] || return 0
     case "$path" in
-      .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|.node-version|*/package.json)
+      .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|*/.npmrc|.node-version|*/package.json)
         return 0
         ;;
     esac
