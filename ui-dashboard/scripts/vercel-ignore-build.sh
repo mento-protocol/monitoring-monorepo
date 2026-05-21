@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Last manual redeploy nudge: 2026-05-21 — force-rebuild after Vercel Blob token rotation.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
