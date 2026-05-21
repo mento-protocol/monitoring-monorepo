@@ -83,13 +83,18 @@ package-manager config, review the script/lifecycle diff first, then
 temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
 config for that push.
 
-Package-local gate tasks for `lint`, `typecheck`, `test`, and `knip` run
-through Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
+Package-local gate tasks for `lint`, `typecheck`, `test`, `knip`, dashboard
+build, dashboard size-limit, and local dashboard browser tests run through
+Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
 Remote caching is disabled in `turbo.json`. The Turbo config is only for the
 gate's explicit per-package `--filter` invocations; do not use it as a general
-workspace task orchestrator. High-risk or cross-layer commands stay outside
-Turbo, including codegen, install, dep-cruiser, React Doctor, dashboard
-build/size/browser checks, mutation baselines, and Terraform.
+workspace task orchestrator. Dashboard build/browser cache keys explicitly
+include `shared-config`, package-manager, workflow, and browser-test env
+inputs; CI still runs browser tests normally and remains the Linux snapshot
+authority. The only task dependency is `size-limit -> build`, because
+size-limit reads `.next/` output. High-risk or cross-layer commands stay
+outside Turbo, including codegen, install, dep-cruiser, React Doctor, mutation
+baselines, and Terraform.
 
 ## PR feedback sweep rule
 

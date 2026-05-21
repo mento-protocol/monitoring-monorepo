@@ -269,6 +269,12 @@ add_turbo_package_task() {
   add_command "$(turbo_local_cache_command "$package_name" "$task_name")" "$reason"
 }
 
+add_turbo_dashboard_task() {
+  local task_name="$1"
+  local reason="$2"
+  add_turbo_package_task "@mento-protocol/ui-dashboard" "$task_name" "$reason"
+}
+
 prepend_command() {
   local command="$1"
   local reason="$2"
@@ -459,7 +465,7 @@ add_dashboard_quality_commands() {
   local reason="$1"
   add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
   add_command "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium" "$reason"
-  add_command "pnpm --filter @mento-protocol/ui-dashboard test:browser" "$reason"
+  add_turbo_dashboard_task "test:browser" "$reason"
 }
 
 add_ui_react_doctor_full_score() {
@@ -479,8 +485,8 @@ add_ui_mutation_baseline() {
 
 add_ui_size_limit() {
   local reason="$1"
-  add_command "pnpm dashboard:build" "$reason"
-  add_command "pnpm dashboard:size-limit" "$reason"
+  add_turbo_dashboard_task "build" "$reason"
+  add_turbo_dashboard_task "size-limit" "$reason"
 }
 
 add_bridge_mutation_baseline() {
@@ -752,17 +758,12 @@ while IFS= read -r path; do
       # Any change under ui-dashboard/ that can affect the client build
       # (src files, root config files like postcss/sentry-shared/next/tsconfig)
       # re-runs the build + size-limit check locally before opening a PR.
-      # The narrower set (script files, playwright config, knip config, etc.)
-      # doesn't affect the bundle and is excluded.
+      # Browser fixtures and other nested .mjs files are deliberately excluded:
+      # they can invalidate browser-test cache entries without forcing an
+      # unrelated dashboard build cache miss.
       case "$path" in
-        ui-dashboard/src/*|ui-dashboard/*.ts|ui-dashboard/*.mjs|ui-dashboard/*.cjs|ui-dashboard/*.js|ui-dashboard/*.json)
-          # But skip pure-test files and playwright config — they don't ship.
-          case "$path" in
-            ui-dashboard/playwright.config.ts|ui-dashboard/vitest.config.ts|ui-dashboard/vitest.mutation.config.ts|ui-dashboard/stryker.config.mjs|ui-dashboard/knip.json|ui-dashboard/react-doctor.config.json|ui-dashboard/eslint.config.mjs|ui-dashboard/eslint-baseline.json) ;;
-            *)
-              add_ui_size_limit "ui-dashboard bundle inputs changed"
-              ;;
-          esac
+        ui-dashboard/src/*|ui-dashboard/package.json|ui-dashboard/next.config.*|ui-dashboard/postcss.config.*|ui-dashboard/sentry.*.config.*|ui-dashboard/tsconfig*.json|ui-dashboard/.size-limit.cjs|ui-dashboard/vercel.json|ui-dashboard/.env.production.local.example)
+          add_ui_size_limit "ui-dashboard bundle inputs changed"
           ;;
       esac
       case "$path" in

@@ -1,11 +1,12 @@
 # Agent Gate Dashboard Cache Safety
 
-Status: PR 3 groundwork, stacked on `chore/agent-gate-targeted-trunk`.
+Status: implemented by `chore/agent-gate-dashboard-turbo`.
 
 This note defines the conservative input surface and regression tests required
-before caching dashboard build or browser-test commands in the agent quality
-gate. Do not add this cache until the Turbo worker PR has established the repo's
-canonical local cache runner and command mapping shape.
+for caching dashboard build or browser-test commands in the agent quality gate.
+The Turbo worker PR established the repo's canonical local cache runner and
+command mapping shape; dashboard build, size-limit, and browser-test local
+agent-gate commands now use that runner with the input surface below.
 
 ## Scope
 
@@ -14,6 +15,10 @@ Candidate commands:
 - `pnpm dashboard:build`
 - `pnpm dashboard:size-limit` when it consumes the build output
 - `pnpm --filter @mento-protocol/ui-dashboard test:browser`
+
+`size-limit` depends on `build` in `turbo.json` because it reads `.next/`
+output. Other cached gate tasks intentionally avoid broad workspace dependency
+pipelines.
 
 Do not cache:
 
@@ -126,12 +131,13 @@ rewriting the quality-gate dispatcher.
 
 ## Command-Mapping Expectations
 
-Current agent-gate behavior on `chore/agent-gate-targeted-trunk`:
+Current agent-gate behavior:
 
 - Direct `ui-dashboard/*` changes map to dashboard package checks,
   Playwright Chromium install, browser tests, and React Doctor checks. The
-  intended build/size-limit routing is bundle-affecting paths only, but the
-  current shell glob also catches nested `*.mjs` paths such as browser fixtures.
+  build/size-limit routing is bundle-affecting paths only. Browser fixtures and
+  Playwright config invalidate browser-test cache entries without forcing an
+  unrelated dashboard build cache miss.
 - `shared-config/*` changes map to shared-config package checks, shared-config
   build, dashboard and metrics-bridge typechecks, plus dashboard build and
   size-limit.
