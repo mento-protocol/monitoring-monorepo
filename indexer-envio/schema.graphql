@@ -752,6 +752,16 @@ type LeaderboardWindowSnapshot
   firstDayExclusiveUniqueTradersIncludingSystem: Int!
   firstDayExclusiveTraders: [String!]!
   firstDayExclusiveTradersIncludingSystem: [String!]!
+  # Full list of distinct trader addresses in the window — lets the
+  # dashboard cross-chain-dedupe via a `Set<string>` union (used by the
+  # homepage "Traders" tile, where naively summing `uniqueTraders` across
+  # chains would double-count wallets active on multiple chains). Sorted
+  # lowercase. For the `all` windowKey this grows monotonically; at
+  # current Mento scale (~250 v3 traders across all chains) the array
+  # adds <10KB per snapshot row, with multi-decade headroom before the
+  # GraphQL response becomes large.
+  windowTraders: [String!]!
+  windowTradersIncludingSystem: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -781,6 +791,11 @@ type BrokerLeaderboardWindowSnapshot
   firstDayExclusiveUniqueTradersIncludingSystem: Int!
   firstDayExclusiveTraders: [String!]!
   firstDayExclusiveTradersIncludingSystem: [String!]!
+  # See LeaderboardWindowSnapshot.windowTraders for semantics. Kept in
+  # symmetry so the shared `buildLeaderboardWindowSnapshot` returns a
+  # single shape that satisfies both entity types.
+  windowTraders: [String!]!
+  windowTradersIncludingSystem: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }

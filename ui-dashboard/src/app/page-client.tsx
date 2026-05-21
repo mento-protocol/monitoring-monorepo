@@ -20,6 +20,14 @@ import {
   type DailyVolumeSeriesResult,
 } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
+import { useGQL } from "@/lib/graphql";
+import { LEADERBOARD_WINDOW_TRADERS_LATEST } from "@/lib/queries/leaderboard";
+import { LeaderboardWindowTradersLatestSchema } from "@/lib/queries/leaderboard-schemas";
+import type { z } from "zod";
+
+type LeaderboardWindowTradersLatest = z.infer<
+  typeof LeaderboardWindowTradersLatestSchema
+>;
 
 export default function GlobalPage({
   initialNetworkData,
@@ -92,6 +100,29 @@ function GlobalContent({
   initialNetworkData?: NetworkData[];
 }) {
   const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
+
+  // Unique v3 traders across all chains. Pre-rolled per-chain in
+  // `LeaderboardWindowSnapshot(windowKey: "all").windowTraders` (excludes
+  // system addresses — rebalancers, OLS, reserve strategy — by default,
+  // matching the homepage LPs tile semantics). The address list is
+  // unioned client-side so a wallet active on multiple chains counts
+  // once. Isolated from LEADERBOARD_WINDOW_LATEST so a Hasura
+  // "field not found" during the indexer deploy/resync window degrades
+  // only this tile (renders "N/A"), not the rest of the page.
+  const tradersGql = useGQL<LeaderboardWindowTradersLatest>(
+    LEADERBOARD_WINDOW_TRADERS_LATEST,
+    { windowKey: "all" },
+    { schema: LeaderboardWindowTradersLatestSchema },
+  );
+  const totalUniqueTraders = useMemo(() => {
+    if (tradersGql.error) return null;
+    if (!tradersGql.data) return null;
+    const set = new Set<string>();
+    for (const row of tradersGql.data.LeaderboardWindowSnapshot) {
+      for (const addr of row.windowTraders) set.add(addr.toLowerCase());
+    }
+    return set.size;
+  }, [tradersGql.data, tradersGql.error]);
 
   // Whether any network has a top-level, rates, snapshot, or pagination
   // failure. Used to show N/A / "partial data" in KPI tiles rather than
@@ -333,7 +364,7 @@ function GlobalContent({
       </div>
 
       <section>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <BreakdownTile
             label="Swap Fees"
             total={aggregated.totalFeesAllTime}
@@ -386,6 +417,18 @@ function GlobalContent({
                   : aggregated.totalSwapsAllTime.toLocaleString()
             }
             subtitle="All-time across all pools"
+          />
+
+          <Tile
+            label="Traders"
+            value={
+              tradersGql.isLoading
+                ? "…"
+                : totalUniqueTraders === null
+                  ? "N/A"
+                  : totalUniqueTraders.toLocaleString()
+            }
+            subtitle="Unique addresses that traded on v3"
           />
         </div>
       </section>
