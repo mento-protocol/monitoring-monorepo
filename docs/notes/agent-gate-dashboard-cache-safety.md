@@ -44,8 +44,6 @@ Dashboard build and size-limit inputs:
 - `ui-dashboard/postcss.config.*`
 - `ui-dashboard/tsconfig*.json`
 - `ui-dashboard/sentry.*.config.*`
-- `ui-dashboard/src/instrumentation*`
-- `ui-dashboard/src/middleware.*`
 - `ui-dashboard/.size-limit.cjs`
 - `ui-dashboard/vercel.json`
 - `ui-dashboard/.env.production.local.example`
@@ -66,7 +64,9 @@ Dashboard build and size-limit inputs:
 
 Browser-test inputs:
 
-- every dashboard build input above, because Playwright starts `next dev`
+- dashboard source/runtime config inputs above, because Playwright starts
+  `next dev`; exclude `.size-limit.cjs` because browser tests do not read the
+  size-budget file
 - `ui-dashboard/playwright.config.ts`
 - `ui-dashboard/scripts/run-browser-tests.mjs`
 - `ui-dashboard/tests/browser/**`

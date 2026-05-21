@@ -147,6 +147,23 @@ NODE
     fail "expected turbo task $task_name to include input: $expected_input"
 }
 
+assert_turbo_task_lacks_input() {
+  local task_name="$1"
+  local unexpected_input="$2"
+
+  node - "$task_name" "$unexpected_input" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName, unexpectedInput] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const inputs = config.tasks?.[taskName]?.inputs ?? [];
+if (inputs.includes(unexpectedInput)) {
+  console.error(`unexpected input ${unexpectedInput} for turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task $task_name not to include input: $unexpected_input"
+}
+
 assert_turbo_task_has_env() {
   local task_name="$1"
   local expected_env="$2"
@@ -215,7 +232,6 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "build" "postcss.config.*"
 assert_turbo_task_has_input "build" "next.config.*"
-assert_turbo_task_has_input "build" "src/instrumentation*"
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/package.json'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-lock.yaml'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/pnpm-workspace.yaml'
@@ -238,6 +254,7 @@ assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "test:browser" "playwright.config.ts"
 assert_turbo_task_has_input "test:browser" "scripts/run-browser-tests.mjs"
 assert_turbo_task_has_input "test:browser" "tests/browser/**"
+assert_turbo_task_lacks_input "test:browser" ".size-limit.cjs"
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/package.json'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/pnpm-lock.yaml'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/pnpm-workspace.yaml'
@@ -711,9 +728,9 @@ assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright in
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
 assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
-assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
-assert_not_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
-assert_not_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+assert_occurrences 1 "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
+assert_occurrences 1 "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
+assert_occurrences 1 "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
