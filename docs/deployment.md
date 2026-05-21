@@ -225,12 +225,21 @@ envio
 The dashboard project intentionally skips builds when no dashboard-affecting
 files changed. The skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`;
 it watches `ui-dashboard/`, `shared-config/`, and workspace dependency metadata.
-For PR preview deployments, Vercel provides `VERCEL_GIT_PULL_REQUEST_ID`, and
-the script diffs from the merge base with `origin/main`. For branch and
-production deployments, it keeps the resource-saving behavior based on
-`VERCEL_GIT_PREVIOUS_SHA`. If a dashboard-affecting change was skipped, check
-that the relevant base commit is present in the shallow clone. To force a
-deploy:
+The script tries three anchors in order:
+
+1. **PR preview deployments** — Vercel provides `VERCEL_GIT_PULL_REQUEST_ID`,
+   and the script diffs from the merge base with `origin/main`.
+2. **First-push branch fallback** — when Vercel ships neither
+   `VERCEL_GIT_PULL_REQUEST_ID` nor `VERCEL_GIT_PREVIOUS_SHA` (which happens
+   when `git push` outruns `gh pr create`), the script falls back to the
+   merge base with `origin/main` as long as `VERCEL_GIT_COMMIT_REF` points
+   at a non-`main` branch.
+3. **Subsequent branch / production deployments** — `VERCEL_GIT_PREVIOUS_SHA`
+   is set, so the script diffs from that SHA to keep the resource-saving
+   behavior.
+
+If a dashboard-affecting change was skipped, check that the relevant base
+commit is present in the shallow clone. To force a deploy:
 
 ```bash
 vercel deploy --prod --force
