@@ -4,40 +4,35 @@ Active work only. Remove items from this file once they ship or are closed.
 Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`,
 or tests.
 
-## CDP indexer: deploy + resync to land the schema/handler fixes
+## CDP dashboard cleanup (indexer side already shipped)
 
-Two indexer-side changes are in code waiting for a single resync to land:
+Indexer-side `systemDebt` delta-tracking and the rebalance-redemption split
+landed on prod at commit `026c629` (promoted 2026-05-20). Verified via
+introspection against `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`:
+`LiquityInstance.systemDebt` returns non-zero (cBRL 16.4M, cREAL 70K, GBPm
+314K), and `RedemptionEvent.isRebalance` + the `rebalanceRedemption{Count,
+Debt,Fee}Cum` buckets are populated (GBPm 367/368 rebalance-driven, JPYm
+13/13).
+
+Background on the indexer changes (kept here because the dashboard cleanup
+below assumes them):
 
 1. **`LiquityInstance.systemDebt` derivation** — `applySystemDebtDelta` in
    `indexer-envio/src/handlers/liquity/troves.ts` runs in every trove handler
    (`TroveOperation`, `TroveUpdated`, `BatchUpdated`, plus the loop in
-   `reclassifyTrovesForLoadedParams`). The pool-event summation in
-   `pools.ts:updatePoolGauge` no longer sets `systemDebt` (it would clobber
-   the delta-tracked value on the first DefaultPool event post-resync).
+   `reclassifyTrovesForLoadedParams`). `pools.ts:updatePoolGauge` no longer
+   sets `systemDebt` (it would clobber the delta-tracked value on the first
+   DefaultPool event).
 2. **Rebalance-redemption split** — PR #31 in `mento-protocol/bold` added
    `redeemCollateralRebalancing` which fires identical `Redemption` events
-   to user redemptions; on Celo today ALL 368 GBPm + 13 JPYm redemptions are
-   rebalance-driven. New schema fields on `LiquityInstance` /
-   `LiquityInstanceSnapshot` / `LiquityInstanceDailySnapshot`:
-   `rebalanceRedemption{Count,Debt,Fee}Cum` plus matching hour/day buckets,
-   and `RedemptionEvent.isRebalance: Boolean!`. Discriminator:
-   `event.transaction.to == cdpLiquidityStrategy` (single shared strategy
+   to user redemptions. Discriminator: `event.transaction.to ==
+cdpLiquidityStrategy` (single shared strategy
    `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` on Celo). Totals
    (`redemption*Cum`) still increment for every redemption — the rebalance
    subset is added on top, so user-driven = total − rebalance.
 
-What's left:
+What's left (dashboard only):
 
-- [ ] **Deploy the indexer code** (`/deploy-indexer`). Schema added required
-      fields, so this requires a full resync — codegen + redeploy + sync
-      from genesis. No way to forward-only this. Side effect: the same
-      resync also relabels historical `BrokerAggregatorDailySnapshot` rows
-      where `aggregator == "mento-router-v2"` was wrongly applied to v3
-      router (`0x4861840…`) traffic — they'll be re-tagged as
-      `"mento-router-v3"`, and traffic via the actual v2 router
-      (`0xBE7293…`) will switch from `"unknown"` to `"mento-router-v2"`.
-- [ ] **Promote to prod** after resync completes and Hasura schema reflects
-      the new fields.
 - [ ] **Delete the dashboard `systemDebt` workaround** in
       `ui-dashboard/src/app/cdps/_lib/health.ts` / `cdps-page-client.tsx` /
       `cdp-detail-client.tsx` / `lib/queries/liquity.ts`. Drop the `Trove {
@@ -47,10 +42,10 @@ id collateralId status debt coll }` selection from `CDP_MARKETS`, stop
       excludes zombies (that's a separate indexer-side gap; consider adding
       an `openTroveCount` field maintained alongside `activeTroveCount` in
       the same delta path).
-- [ ] **Surface rebalance vs user redemption split** in the dashboard once
-      Hasura returns the new fields. Existing UI shows nothing about
-      redemptions, but Total / Rebalance / User KPI tiles or a stacked
-      time-series in the CDP detail page would be the natural next surface.
+- [ ] **Surface rebalance vs user redemption split** in the dashboard.
+      Existing UI shows nothing about redemptions, but Total / Rebalance /
+      User KPI tiles or a stacked time-series in the CDP detail page would
+      be the natural next surface.
 - [ ] **Replace `formatTokenAmount`'s `-1` sentinel for signed values.**
       `ui-dashboard/src/app/cdps/_lib/format.ts` treats `-1` as the
       "unknown" sentinel for unsigned counters, but with the new signed
@@ -61,6 +56,16 @@ id collateralId status debt coll }` selection from `CDP_MARKETS`, stop
       `formatTokenAmount` (unsigned, keeps the sentinel) and
       `formatSignedWei` (signed, only guards `null`/`undefined`); migrate
       callers individually.
+
+## Indexer relabel: mento-router-v2 / -v3 (next /deploy-indexer)
+
+PR #513 (merged 2026-05-21) renamed the broker classifier's `mento-router-v2`
+label to `mento-router-v3` for v3 router (`0x4861840…`) traffic, and added
+the actual v2 router (`0xBE729350F8CdFC19DB6866e8579841188eE57f67`) to
+`aggregators.json` as `mento-router-v2`. Indexer prod is still on commit
+`026c629` (pre-rename), so existing `BrokerAggregatorDailySnapshot` rows
+keep the old labels until the next indexer deploy + resync. No action
+needed standalone — fold into the next `/deploy-indexer` cycle.
 
 ## CDP glue contracts: state mutations without events (NICE TO KNOW)
 
