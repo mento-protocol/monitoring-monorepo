@@ -87,6 +87,8 @@ config for that push.
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
 
+Hard stop: a PR is not all clear until `chatgpt-codex-connector[bot]` has left a 👍 reaction on the PR description for the current head. A Codex review comment on an older commit, elapsed grace time, green checks, or another actor's reaction does not satisfy this gate.
+
 ## Review-loop discipline
 
 Treat code review as a batch-boundary verifier, not as the inner edit loop. When a reviewer finds one instance of a hazard, audit the sibling surfaces before pushing: adjacent commands, package-manager files, workflow paths, deploy scripts, shared helpers, parallel components, docs, and tests that encode the same rule.
