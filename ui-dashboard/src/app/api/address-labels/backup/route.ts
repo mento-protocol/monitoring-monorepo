@@ -101,6 +101,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               access: "private",
               contentType: "application/json",
               addRandomSuffix: false,
+              // Deterministic per-day pathnames + retry semantics: a failed
+              // run can leave a subset of hash blobs already on disk, and the
+              // next retry has to overwrite them to land a fresh manifest.
+              // Without allowOverwrite the SDK errors on the second put() to
+              // the same pathname.
+              allowOverwrite: true,
               // Fail fast if the Blob API hangs — otherwise a single stuck
               // upload would block the whole cron until the 5min maxDuration
               // budget elapses.
@@ -121,6 +127,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           access: "private",
           contentType: "application/json",
           addRandomSuffix: false,
+          // Same rationale as the hash-blob put above — retries must
+          // overwrite the prior manifest at this pathname.
+          allowOverwrite: true,
           abortSignal: AbortSignal.timeout(30_000),
         });
 
