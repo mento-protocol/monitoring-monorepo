@@ -1,5 +1,8 @@
 terraform {
-  required_version = ">= 1.5"
+  # `>= 1.7` for the `removed { lifecycle { destroy = false } }` block used to
+  # drop `vercel_project_environment_variable.blob_token` from state without
+  # destroying the live env var.
+  required_version = ">= 1.7"
 
   backend "gcs" {
     bucket = "mento-terraform-tfstate-6ed6"
@@ -109,6 +112,22 @@ resource "vercel_project_environment_variable" "redis_token" {
   value      = upstash_redis_database.address_labels.rest_token
   target     = ["production", "preview"]
   sensitive  = true
+}
+
+# `BLOB_READ_WRITE_TOKEN` is now managed Vercel-side only (set via the
+# store-project integration after the 2026-05-21 incident; OIDC migration
+# will remove it from env vars entirely). Existing Terraform state referencing
+# `vercel_project_environment_variable.blob_token` is cleared via this
+# `removed` block — without it, `terraform apply` against state that still
+# tracks the resource would destroy the live env var and break the daily
+# address-labels-backup cron. `destroy = false` makes the state cleanup
+# explicit and non-destructive.
+removed {
+  from = vercel_project_environment_variable.blob_token
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # ── Auth Environment Variables ────────────────────────────────────────────
