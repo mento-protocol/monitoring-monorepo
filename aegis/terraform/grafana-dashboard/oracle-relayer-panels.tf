@@ -9,12 +9,12 @@ locals {
       }
     ],
     flatten([
-      for i, chain in local.chains : [
+      for i, chain in keys(local.celo_chains) : [
         merge(local.common_panel_config, local.state_timeline_config, {
           id          = local.oracle_relayer_id_start + 1 + i
           title       = "Rate Feed Freshness [${chain}]"
           description = "Shows if the oldest report in SortedOracles is expired for each relayed rate feed. 1 means expired, 0 means not expired."
-          gridPos     = { x = i * 12, y = local.oracle_relayer_y_start + 1, h = 20, w = 24 / length(local.chains) }
+          gridPos     = { x = i * 12, y = local.oracle_relayer_y_start + 1, h = 20, w = 24 / length(local.celo_chains) }
           fieldConfig = {
             defaults = merge(local.state_timeline_config.fieldConfig.defaults, {
               decimals = 0
@@ -37,14 +37,15 @@ locals {
       ]
     ]),
     [
-      for i, chain in local.chains : merge(local.common_panel_config, {
-        id          = local.oracle_relayer_id_start + 1 + length(local.chains) + i
+      for i, chain in keys(local.chains) : merge(local.common_panel_config, {
+        id          = local.oracle_relayer_id_start + 1 + length(local.celo_chains) + i
         type        = "timeseries"
-        title       = "CELO Balances of Relayer Signers [${chain}]"
-        description = "CELO balance of relayer signers on ${chain}. Red line indicates danger threshold."
+        title       = "${local.chains[chain].symbol} Balances of Relayer Signers [${local.chains[chain].title}]"
+        description = "${local.chains[chain].symbol} balance of relayer signers on ${chain}. Red line indicates danger threshold."
+        # Two panels per row; new row every 2 chains.
         gridPos = {
-          x = i * 12,
-          y = local.oracle_relayer_y_start + 21,
+          x = (i % 2) * 12,
+          y = local.oracle_relayer_y_start + 21 + floor(i / 2) * 8,
           h = 8,
           w = 12
         }
@@ -63,7 +64,7 @@ locals {
                 group = "A"
               }
               axisPlacement = "auto"
-              axisLabel     = "CELO Balance"
+              axisLabel     = "${local.chains[chain].symbol} Balance"
               axisColorMode = "text"
               scaleDistribution = {
                 type = "linear"
@@ -85,7 +86,7 @@ locals {
               mode = "absolute"
               steps = [
                 { color = "green", value = null },
-                { color = "red", value = 10 }
+                { color = "red", value = local.chains[chain].threshold }
               ]
             }
             unit = "locale"
@@ -102,7 +103,7 @@ locals {
           }
         }
         targets = [{
-          expr         = "CELOToken_balanceOf{chain=\"${chain}\", owner!=\"Reserve\"}"
+          expr         = "${local.chains[chain].metric}{chain=\"${chain}\", owner!=\"Reserve\"}"
           legendFormat = "{{owner}}" # This line is updated to use the 'owner' label
           refId        = chain
         }]

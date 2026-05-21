@@ -12,7 +12,45 @@ variable "aegis_folder" {
 }
 
 locals {
-  chains                    = ["celo", "celo-sepolia"]
+  # Per-chain registry driving the relayer-signer panels. Mirrors the registry
+  # in grafana-alerts/locals.tf (kept in sync by hand, as the chains list was).
+  # To add an EVM chain (e.g. polygon mainnet/testnet) add an entry here.
+  #
+  #   title     → panel title suffix, e.g. "CELO Balances ... [Celo]"
+  #   metric    → Prometheus metric for the native gas-token balance
+  #   symbol    → gas-token ticker shown in panel title + y-axis label
+  #   threshold → red danger-line drawn on the balance timeseries
+  chains = {
+    "celo" = {
+      title     = "Celo"
+      metric    = "CELOToken_balanceOf"
+      symbol    = "CELO"
+      threshold = 10
+    }
+    "celo-sepolia" = {
+      title     = "Celo-Sepolia"
+      metric    = "CELOToken_balanceOf"
+      symbol    = "CELO"
+      threshold = 10
+    }
+    "monad" = {
+      title     = "Monad"
+      metric    = "Native_balanceOf"
+      symbol    = "MON"
+      threshold = 50
+    }
+    "monad-testnet" = {
+      title     = "Monad-Testnet"
+      metric    = "Native_balanceOf"
+      symbol    = "MON"
+      threshold = 50
+    }
+  }
+
+  # Chains carrying the full Mento contract suite — rate-feed-freshness panels
+  # only apply here (Monad has no SortedOracles).
+  celo_chains = { for k, c in local.chains : k => c if c.metric == "CELOToken_balanceOf" }
+
   prometheus_datasource_uid = "grafanacloud-prom"
   common_panel_config = {
     datasource = {

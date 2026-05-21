@@ -31,29 +31,29 @@ RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Label
 EOT
 }
 
-resource "grafana_message_template" "victorops_oracle_relayer_low_celo_balance_alert_title" {
-  name     = "VictorOps: Low CELO Balance Alert Title"
+resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title" {
+  name     = "VictorOps: Low Relayer Balance Alert Title"
   template = <<-EOT
-{{ define "victorops.oracle_relayer_low_celo_balance_alert_title" }}Low CELO Balance{{ end }}
+{{ define "victorops.oracle_relayer_low_balance_alert_title" }}Low Relayer Balance{{ end }}
 EOT
 }
 
 
-resource "grafana_message_template" "victorops_oracle_relayer_low_celo_balance_alert_message" {
-  name     = "VictorOps: Low CELO Balance Alert Message"
+resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
+  name     = "VictorOps: Low Relayer Balance Alert Message"
   template = <<-EOT
-{{ define "victorops.oracle_relayer_low_celo_balance_alert_message" }}
+{{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
-Low CELO balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} CELO left
-Wallet: https://{{ if eq .Labels.chain "celo-sepolia" }}sepolia.{{ end }}celoscan.io/address/{{ .Labels.ownerValue }}
+Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left
+Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 - Top up the relayer wallet to keep the relayer running
-- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 CELO from the dev wallet
+- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 {{ .Labels.token }} from the dev wallet
 - Get the dev wallet private key from the Eng vault in 1Password
 {{ end }}
 {{ range .Alerts.Resolved }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
-Sufficient CELO balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} CELO
+Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
 EOT

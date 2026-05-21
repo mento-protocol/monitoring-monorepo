@@ -4,10 +4,11 @@ resource "grafana_rule_group" "oracle_relayers" {
   interval_seconds = 120
 
   dynamic "rule" {
-    for_each = local.chains
+    # Stale-price alerts apply only to chains with SortedOracles (Celo).
+    for_each = local.celo_chains
 
     content {
-      name           = "Oldest Report Expired [${title(rule.value)}]"
+      name           = "Oldest Report Expired [${rule.value.title}]"
       condition      = "isExpired"
       for            = "5m"
       exec_err_state = "Error"
@@ -19,7 +20,7 @@ resource "grafana_rule_group" "oracle_relayers" {
 
       labels = {
         service  = "oracle-relayers"
-        severity = rule.value == "celo" ? "page" : "warning"
+        severity = rule.value.env == "prod" ? "page" : "warning"
       }
 
       data {
@@ -33,7 +34,7 @@ resource "grafana_rule_group" "oracle_relayers" {
 
         model = jsonencode({
           refId   = "oldestReportStatus"
-          expr    = "SortedOracles_isOldestReportExpired_isExpired{chain=\"${rule.value}\"}"
+          expr    = "SortedOracles_isOldestReportExpired_isExpired{chain=\"${rule.key}\"}"
           instant = true
         })
       }
@@ -78,20 +79,24 @@ resource "grafana_rule_group" "oracle_relayers" {
     for_each = local.chains
 
     content {
-      name           = "Low CELO Balance [${title(rule.value)}]"
-      condition      = "lowerThan5CELO"
+      name           = "Low ${rule.value.symbol} Balance [${rule.value.title}]"
+      condition      = "belowThreshold"
       for            = "1m" // Alert if balance is low for at least 1 minutes
       exec_err_state = "Error"
       no_data_state  = "NoData"
 
       annotations = {
-        summary        = "Low CELO balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} CELO"
+        summary        = "Low ${rule.value.symbol} balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.symbol}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
       }
 
       labels = {
         service  = "oracle-relayers"
-        severity = rule.value == "celo" ? "warning" : "info"
+        severity = rule.value.env == "prod" ? "warning" : "info"
+        # Consumed by the Discord/Slack/VictorOps templates to render
+        # token-aware copy and per-chain explorer links.
+        token    = rule.value.symbol
+        explorer = rule.value.explorer
       }
 
       data {
@@ -103,8 +108,8 @@ resource "grafana_rule_group" "oracle_relayers" {
         }
         model = jsonencode({
           # NOTE: Grafana syntax is a bit confusing here in that 'expr' and 'expression' mean different things
-          # This is a Prometheus PromQL query that fetches the balance of the CELO token for all RelayerSigner accounts
-          expr  = "CELOToken_balanceOf{chain=\"${rule.value}\", owner=~\"^RelayerSigner.*\"}"
+          # PromQL query fetching the native gas-token balance for all RelayerSigner accounts on this chain
+          expr  = "${rule.value.metric}{chain=\"${rule.key}\", owner=~\"^RelayerSigner.*\"}"
           refId = "balanceOfRaw"
         })
       }
@@ -116,7 +121,7 @@ resource "grafana_rule_group" "oracle_relayers" {
           to   = 0
         }
         model = jsonencode({
-          # This is a Grafana expression that reduces the balance of the CELO token for all RelayerSigner accounts to a single value
+          # Reduce the per-owner balance series to a single value per alert instance
           expression = "balanceOfRaw",
           type       = "reduce",
           reducer    = "last",
@@ -124,7 +129,7 @@ resource "grafana_rule_group" "oracle_relayers" {
         })
       }
       data {
-        ref_id         = "lowerThan5CELO"
+        ref_id         = "belowThreshold"
         datasource_uid = "__expr__"
         relative_time_range {
           from = 0
@@ -133,11 +138,11 @@ resource "grafana_rule_group" "oracle_relayers" {
         model = jsonencode({
           type       = "threshold",
           expression = "balance",
-          refId      = "lowerThan5CELO"
+          refId      = "belowThreshold"
           conditions = [
             {
               evaluator = {
-                params = [5],
+                params = [rule.value.threshold],
                 type   = "lt",
               },
               operator = {

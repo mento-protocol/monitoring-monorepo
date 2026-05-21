@@ -4,10 +4,11 @@ resource "grafana_rule_group" "trading_modes" {
   interval_seconds = 120
 
   dynamic "rule" {
-    for_each = local.chains
+    # Trading-mode alerts read BreakerBox, which only exists on Celo chains.
+    for_each = local.celo_chains
 
     content {
-      name           = "Trading Mode Alert [${title(rule.value)}]"
+      name           = "Trading Mode Alert [${rule.value.title}]"
       condition      = "isTradingHalted"
       for            = "5m"
       exec_err_state = "Error"
@@ -22,7 +23,7 @@ resource "grafana_rule_group" "trading_modes" {
         # Prod trading-mode engagement halts trading on a pair — pager-grade.
         # Staging circuit-breakers fire often during testing and aren't
         # operational fires; keep them as warning so they route to #alerts-testnet.
-        severity = rule.value == "celo" ? "page" : "warning"
+        severity = rule.value.env == "prod" ? "page" : "warning"
       }
 
       data {
@@ -36,7 +37,7 @@ resource "grafana_rule_group" "trading_modes" {
 
         model = jsonencode({
           refId   = "tradingMode"
-          expr    = "BreakerBox_getRateFeedTradingMode{chain=\"${rule.value}\"}"
+          expr    = "BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}"
           instant = true
         })
       }
