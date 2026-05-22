@@ -103,7 +103,7 @@ export function StablesHeroChart({
       value: p.valueUsd,
     }));
     return { breakdown: breakdownEntries, totalSeries: totalUsd };
-  }, [snapshots, rates, range]);
+  }, [snapshots, latestPerToken, rates, range]);
 
   const headline =
     totalSeries.length > 0
