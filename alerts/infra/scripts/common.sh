@@ -119,20 +119,24 @@ read_tfvars_value() {
 		return
 	fi
 
+	# Exact-key match: `project_name` must not also match `project_name_suffix`.
+	# Require `=` (possibly preceded by whitespace) after the variable name.
+	local key_regex="^${var_name}[[:space:]]*="
+
 	# Try double quotes first
 	local value
-	value=$(grep "^${var_name}" "${tfvars_file}" | head -1 | sed 's/.*= *"\(.*\)".*/\1/' || true)
+	value=$(grep -E "${key_regex}" "${tfvars_file}" | head -1 | sed 's/.*= *"\(.*\)".*/\1/' || true)
 	value=${value:-""}
 
 	# If empty, try single quotes
 	if [[ -z ${value} ]]; then
-		value=$(grep "^${var_name}" "${tfvars_file}" | head -1 | sed "s/.*= *'\(.*\)'.*/\1/" || true)
+		value=$(grep -E "${key_regex}" "${tfvars_file}" | head -1 | sed "s/.*= *'\(.*\)'.*/\1/" || true)
 		value=${value:-""}
 	fi
 
 	# If still empty, try without quotes (for numbers, booleans)
 	if [[ -z ${value} ]]; then
-		value=$(grep "^${var_name}" "${tfvars_file}" | head -1 | sed 's/.*= *\(.*\)/\1/' | tr -d '[:space:]' || true)
+		value=$(grep -E "${key_regex}" "${tfvars_file}" | head -1 | sed 's/.*= *\(.*\)/\1/' | tr -d '[:space:]' || true)
 		value=${value:-""}
 	fi
 
