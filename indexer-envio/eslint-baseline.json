@@ -157,14 +157,14 @@
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Async function 'readContractWithBlockFallback' has too many parameters (6). Maximum allowed is 4.",
-    "line": 157,
+    "line": 190,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Method 'logRpcFailure' has too many parameters (5). Maximum allowed is 4.",
-    "line": 114,
+    "line": 147,
     "linePreview": "isRateLimitError: (err: unknown): boolean => isRateLimitError(err), | logRpcFailure: ( | chainId: number,"
   },
   {
