@@ -54,6 +54,21 @@ resource "google_service_account" "project_sa" {
 # Modules #
 ###########
 
+# Preserve existing state on the rename from the vendored upstream names
+# (`discord_channel_manager` / `sentry_alerts`) to the new names. Without
+# these `moved` blocks, `terraform plan` against a previously-applied state
+# would propose destroy+recreate of the Discord channels and Sentry alert
+# rules — a recreate would invalidate webhook URLs and lose Sentry alert
+# IDs. The `moved` blocks make the rename a no-op state migration.
+moved {
+  from = module.discord_channel_manager
+  to   = module.discord_channels
+}
+moved {
+  from = module.sentry_alerts
+  to   = module.sentry_bridge
+}
+
 # Create Discord channels and webhooks for alerts and events
 module "discord_channels" {
   source = "./channels/discord-channels"
