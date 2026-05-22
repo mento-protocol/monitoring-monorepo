@@ -53,26 +53,28 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
     };
   }
 
-  // Get payload as string (QuickNode signs the raw request body)
-  // Try to access rawBody first (if available from Express middleware)
-  // Otherwise reconstruct from parsed body
-  let payload: string;
+  // QuickNode signs the EXACT raw HTTP body bytes. `JSON.stringify(req.body)`
+  // can't reproduce them — any field reorder, whitespace difference, or
+  // float-precision diff in the parse-then-serialize roundtrip produces a
+  // different byte sequence and every signature check fails 401.
+  //
+  // Gen2 Cloud Functions populate `req.rawBody` reliably (functions-framework
+  // 4.x stashes the buffer before body-parser runs). If it's missing in
+  // production, that's a runtime/configuration bug — fail loudly with a 500
+  // rather than silently rejecting every legitimate webhook.
   const rawBody = (req as RequestWithRawBody).rawBody;
-  if (rawBody) {
-    // Use raw body if available (as string)
-    payload = rawBody.toString("utf8");
-  } else if (typeof req.body === "string") {
-    payload = req.body;
-  } else if (req.body === undefined) {
-    // Missing body: stay a string so downstream .length / .substring calls
-    // don't throw and the request gets the intended 401 signature rejection
-    // (not a 500 from a TypeError).
-    payload = "";
-  } else {
-    // JSON.stringify can return undefined for symbols/functions; coerce to
-    // empty string in that case.
-    payload = JSON.stringify(req.body) ?? "";
+  if (!rawBody) {
+    logger.error("rawBody missing from QuickNode webhook request", {
+      bodyType: typeof req.body,
+      contentType: req.headers["content-type"],
+    });
+    return {
+      valid: false,
+      status: 500,
+      message: "Server configuration error: rawBody unavailable",
+    };
   }
+  const payload = rawBody.toString("utf8");
 
   // Verify signature
   if (!verifyQuickNodeSignature(secret, payload, nonce, timestamp, signature)) {
