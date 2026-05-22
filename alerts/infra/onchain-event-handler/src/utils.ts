@@ -130,8 +130,8 @@ export async function findChainFromBlockHash(
     return null;
   }
 
-  // If address exists on multiple chains, verify block hash on each
-  // Check all possible chains in parallel for speed
+  // If address exists on multiple chains, verify block hash on each.
+  // Check all possible chains in parallel for speed.
   const verificationResults = await Promise.allSettled(
     possibleChains.map(async (chain) => {
       const exists = await verifyBlockHashOnChain(blockHash, chain);
@@ -139,22 +139,32 @@ export async function findChainFromBlockHash(
     }),
   );
 
-  // Find the chain where the block hash exists
-  for (const result of verificationResults) {
-    if (result.status === "fulfilled" && result.value.exists) {
-      return result.value.chain;
-    }
+  // Collect every chain on which the block hash verified. Fail closed both
+  // when zero chains match (the original behavior) AND when more than one
+  // chain matches — picking the first match in iteration order would
+  // mislabel events for any block hash that happens to exist on multiple
+  // chains (extremely rare but, since collisions would silently misroute,
+  // not worth a probabilistic bet).
+  const matched = verificationResults.flatMap((r) =>
+    r.status === "fulfilled" && r.value.exists ? [r.value.chain] : [],
+  );
+
+  if (matched.length === 1) {
+    return matched[0];
   }
 
-  // Block hash didn't verify on any candidate chain. Fail closed so the
-  // caller can drop the event rather than misattribute it to an arbitrary
-  // chain (multisigs configured at the same address on celo+ethereum
-  // would otherwise produce silent cross-chain mislabels).
-  logger.warn("Could not verify block hash on any chain — failing closed", {
-    blockHash,
-    address,
-    possibleChains,
-  });
+  if (matched.length === 0) {
+    logger.warn("Could not verify block hash on any chain — failing closed", {
+      blockHash,
+      address,
+      possibleChains,
+    });
+  } else {
+    logger.warn(
+      "Block hash verified on multiple chains — failing closed to avoid mislabel",
+      { blockHash, address, possibleChains, matched },
+    );
+  }
   return null;
 }
 

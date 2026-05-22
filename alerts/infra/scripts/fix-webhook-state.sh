@@ -107,8 +107,11 @@ while IFS= read -r resource; do
 
 	echo "  Webhook ID: ${WEBHOOK_ID}"
 
-	# Check if webhook exists in QuickNode
-	HTTP_CODE=$(curl -s -o /tmp/webhook_check.json -w "%{http_code}" \
+	# Check if webhook exists in QuickNode. Per-iteration tmpfile via mktemp
+	# so parallel script runs (or other helpers reusing /tmp) can't read
+	# each other's response body and produce the wrong existence verdict.
+	response_file=$(mktemp -t webhook_check.XXXXXX.json)
+	HTTP_CODE=$(curl -s -o "${response_file}" -w "%{http_code}" \
 		-H "x-api-key: ${QUICKNODE_API_KEY}" \
 		-H "accept: application/json" \
 		"https://api.quicknode.com/webhooks/rest/v1/webhooks/${WEBHOOK_ID}")
@@ -120,10 +123,10 @@ while IFS= read -r resource; do
 		MISSING_WEBHOOKS+=("${resource}")
 	else
 		warn "  ⚠ Unexpected response code: ${HTTP_CODE}"
-		cat /tmp/webhook_check.json 2>/dev/null || true
+		cat "${response_file}" 2>/dev/null || true
 	fi
 
-	rm -f /tmp/webhook_check.json
+	rm -f "${response_file}"
 	echo ""
 done <<<"${WEBHOOK_RESOURCES}"
 
