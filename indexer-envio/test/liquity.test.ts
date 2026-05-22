@@ -725,6 +725,48 @@ describe("Liquity CDP helpers", () => {
       );
       assert.equal(after, before);
     });
+
+    it("positive delta bumps mint buckets (day + cum), leaves burn untouched", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 500n },
+        { status: TROVE_STATUS.ACTIVE, debt: 800n },
+      );
+      assert.equal(next.systemDebtMintedDayBucket, 300n);
+      assert.equal(next.systemDebtMintedCum, 300n);
+      assert.equal(next.systemDebtBurnedDayBucket, 0n);
+      assert.equal(next.systemDebtBurnedCum, 0n);
+    });
+
+    it("negative delta bumps burn buckets (day + cum) with absolute value", () => {
+      const next = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 800n },
+        { status: TROVE_STATUS.CLOSED, debt: 0n },
+      );
+      assert.equal(next.systemDebtBurnedDayBucket, 800n);
+      assert.equal(next.systemDebtBurnedCum, 800n);
+      assert.equal(next.systemDebtMintedDayBucket, 0n);
+      assert.equal(next.systemDebtMintedCum, 0n);
+    });
+
+    it("mint then burn accumulate independently into the same instance", () => {
+      // First open: 0→1000 (mint 1000), then partial repay: 1000→700 (burn 300).
+      const opened = applySystemDebtDelta(
+        baseInstance(),
+        { status: TROVE_STATUS.ACTIVE, debt: 0n },
+        { status: TROVE_STATUS.ACTIVE, debt: 1000n },
+      );
+      const repaid = applySystemDebtDelta(
+        opened,
+        { status: TROVE_STATUS.ACTIVE, debt: 1000n },
+        { status: TROVE_STATUS.ACTIVE, debt: 700n },
+      );
+      assert.equal(repaid.systemDebtMintedDayBucket, 1000n);
+      assert.equal(repaid.systemDebtBurnedDayBucket, 300n);
+      // systemDebt: 1000 (base) + 1000 - 300 = 1700.
+      assert.equal(repaid.systemDebt, 1700n);
+    });
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {

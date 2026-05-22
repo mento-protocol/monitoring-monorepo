@@ -2,13 +2,18 @@ import type {
   LiquityInstance,
   LiquityInstanceDailySnapshot,
   LiquityInstanceSnapshot,
+  StableSupplyDailySnapshot,
 } from "envio";
 import { dayBucket, hourBucket } from "../../helpers.js";
+import { marketByCollateralId } from "./config.js";
 
 type SnapshotContext = {
   LiquityInstanceSnapshot: { set: (entity: LiquityInstanceSnapshot) => void };
   LiquityInstanceDailySnapshot: {
     set: (entity: LiquityInstanceDailySnapshot) => void;
+  };
+  StableSupplyDailySnapshot: {
+    set: (entity: StableSupplyDailySnapshot) => void;
   };
 };
 
@@ -45,6 +50,8 @@ const resetDayBuckets = (
   rebalanceRedemptionDebtDayBucket: 0n,
   spRebalanceCountDayBucket: 0,
   shortfallSubsidyDayBucket: 0n,
+  systemDebtMintedDayBucket: 0n,
+  systemDebtBurnedDayBucket: 0n,
   currentDayBucket: nextBucket,
 });
 
@@ -128,6 +135,34 @@ export function flushLiquitySnapshots(
       rebalanceRedemptionCountCum: instance.rebalanceRedemptionCountCum,
       blockNumber,
     });
+
+    // Write the V3_LIQUITY row of `StableSupplyDailySnapshot` so the
+    // /stables page sees GBPm/CHFm/JPYm alongside V2_RESERVE +
+    // V3_HUB_COLLATERAL. Source of truth for the symbol/address/
+    // decimals tuple is `LIQUITY_MARKETS` (config.ts), looked up by
+    // the instance's collateralId. If a future market is registered
+    // outside that list this snapshot is silently skipped — protocol
+    // invariant: every CDP market we index has a corresponding
+    // LIQUITY_MARKETS entry, so the skip path is unreachable in prod
+    // but defensive against a partial registration race.
+    const market = marketByCollateralId.get(instance.collateralId);
+    if (market) {
+      context.StableSupplyDailySnapshot.set({
+        id: `${instance.chainId}-${market.debtToken}-${instance.currentDayBucket}`,
+        chainId: instance.chainId,
+        tokenAddress: market.debtToken,
+        tokenSymbol: market.symbol,
+        source: "V3_LIQUITY",
+        tokenDecimals: 18,
+        timestamp: instance.currentDayBucket,
+        totalSupply: instance.systemDebt,
+        dailyMintAmount: instance.systemDebtMintedDayBucket,
+        dailyBurnAmount: instance.systemDebtBurnedDayBucket,
+        blockNumber,
+        updatedAtTimestamp: timestamp,
+      });
+    }
+
     next = resetDayBuckets(next, eventDay);
   }
   return next;

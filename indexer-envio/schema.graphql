@@ -1142,6 +1142,15 @@ type LiquityInstance {
   rebalanceRedemptionDebtDayBucket: BigInt!
   spRebalanceCountDayBucket: Int!
   shortfallSubsidyDayBucket: BigInt!
+  # Per-day mint/burn accumulators for V3 CDP debt. Updated by
+  # `applySystemDebtDelta`: positive delta = minted (open / adjust-
+  # borrow); negative delta = burned (close / repay / liquidate /
+  # redeem). Surfaced into `StableSupplyDailySnapshot.dailyMintAmount`
+  # / `dailyBurnAmount` on the V3_LIQUITY row at day rollover.
+  systemDebtMintedDayBucket: BigInt!
+  systemDebtBurnedDayBucket: BigInt!
+  systemDebtMintedCum: BigInt!
+  systemDebtBurnedCum: BigInt!
   currentDayBucket: BigInt!
   isShutDown: Boolean!
   shutDownAt: BigInt

@@ -10,6 +10,7 @@ import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import type {
   LiquityInstanceDailySnapshot,
   LiquityInstanceSnapshot,
+  StableSupplyDailySnapshot,
 } from "envio";
 
 type PoolGaugeContext = LiquityBootstrapContext & {
@@ -17,6 +18,9 @@ type PoolGaugeContext = LiquityBootstrapContext & {
   LiquityInstanceSnapshot: { set: (entity: LiquityInstanceSnapshot) => void };
   LiquityInstanceDailySnapshot: {
     set: (entity: LiquityInstanceDailySnapshot) => void;
+  };
+  StableSupplyDailySnapshot: {
+    set: (entity: StableSupplyDailySnapshot) => void;
   };
 };
 
