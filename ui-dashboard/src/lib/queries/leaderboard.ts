@@ -440,6 +440,26 @@ export const BROKER_LEADERBOARD_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
   }
 `;
 
+// Isolated address-list slice for the homepage Traders tile. Lets the UI
+// cross-chain-dedupe via a `Set<string>` instead of naive-summing
+// `uniqueTraders` (which double-counts wallets active on multiple chains).
+// Kept separate from LEADERBOARD_WINDOW_LATEST for the same schema-lag
+// reason as LEADERBOARD_WINDOW_FIRSTDAY_LATEST.
+export const LEADERBOARD_WINDOW_TRADERS_LATEST = /* GraphQL */ `
+  query LeaderboardWindowTradersLatest($windowKey: String!) {
+    LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      windowTraders
+    }
+  }
+`;
+
 // Isolated bounded overlap query for exact hero unique-trader counts.
 // The caller passes an `_or` where clause scoped to the active yesterday/today
 // partial traders and each chain's retained snapshot range. The query is

@@ -264,6 +264,26 @@ export const BrokerLeaderboardWindowFirstDayLatestSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// LEADERBOARD_WINDOW_TRADERS_LATEST
+// ---------------------------------------------------------------------------
+// Isolated address-list query for the homepage Traders tile. Separated
+// from LEADERBOARD_WINDOW_LATEST so a hosted Hasura "field not found"
+// error during the indexer deploy+resync window degrades ONLY the
+// Traders tile (which falls back to N/A) instead of taking down every
+// pre-rolled KPI that depends on the parent query. Same pattern as
+// LEADERBOARD_WINDOW_FIRSTDAY_LATEST.
+
+const LeaderboardWindowTradersRowSchema = z.object({
+  chainId: z.number(),
+  snapshotDay: z.string(),
+  windowTraders: z.array(z.string()),
+});
+
+export const LeaderboardWindowTradersLatestSchema = z.object({
+  LeaderboardWindowSnapshot: z.array(LeaderboardWindowTradersRowSchema),
+});
+
+// ---------------------------------------------------------------------------
 // LEADERBOARD_PARTIAL_OVERLAP_TRADERS / BROKER_LEADERBOARD_PARTIAL_OVERLAP_TRADERS
 // ---------------------------------------------------------------------------
 

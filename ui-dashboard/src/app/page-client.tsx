@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
@@ -17,9 +17,25 @@ import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 import {
   VolumeOverTimeChart,
   buildDailyVolumeSeries,
-  type DailyVolumeSeriesResult,
 } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
+import { useGQL } from "@/lib/graphql";
+import {
+  LEADERBOARD_TODAY_TRADERS,
+  LEADERBOARD_WINDOW_TRADERS_LATEST,
+} from "@/lib/queries/leaderboard";
+import {
+  LeaderboardTodayTradersSchema,
+  LeaderboardWindowTradersLatestSchema,
+} from "@/lib/queries/leaderboard-schemas";
+import type { z } from "zod";
+
+type LeaderboardWindowTradersLatest = z.infer<
+  typeof LeaderboardWindowTradersLatestSchema
+>;
+type LeaderboardTodayTraders = z.infer<typeof LeaderboardTodayTradersSchema>;
+
+const SECONDS_PER_DAY = 86_400;
 
 export default function GlobalPage({
   initialNetworkData,
@@ -170,8 +186,7 @@ function GlobalContent({
     let hasSuccessfulLpResult = false;
     const unpricedSymbolSet = new Set<string>();
     let totalUnresolvedCount = 0;
-    const volumeSeries: DailyVolumeSeriesResult =
-      buildDailyVolumeSeries(networkData);
+    const volumeSeries = buildDailyVolumeSeries(networkData);
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
@@ -286,7 +301,6 @@ function GlobalContent({
     anyLpError,
   ]);
 
-  // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
 
   const feesApprox =
@@ -333,7 +347,7 @@ function GlobalContent({
       </div>
 
       <section>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <BreakdownTile
             label="Swap Fees"
             total={aggregated.totalFeesAllTime}
@@ -387,6 +401,7 @@ function GlobalContent({
             }
             subtitle="All-time across all pools"
           />
+          <TradersTile isLoading={isLoading} networkData={networkData} />
         </div>
       </section>
 
@@ -418,4 +433,216 @@ function GlobalContent({
       </section>
     </div>
   );
+}
+
+// Homepage Traders KPI tile. Counts unique v3 traders across all chains
+// via the pre-rolled `LeaderboardWindowSnapshot(windowKey: "all")
+// .windowTraders` array (system addresses — rebalancers, OLS, reserve
+// strategy — excluded by default, matching the LPs tile semantics). The
+// address list is unioned client-side so a wallet active on multiple
+// chains counts once. Isolated from LEADERBOARD_WINDOW_LATEST so a
+// Hasura "field not found" during the indexer deploy/resync window
+// degrades only this tile (renders "N/A"), not the rest of the page.
+//
+// Placed below `GlobalContent` so its declaration doesn't drift the
+// parent's starting line past the eslint baseline-diff proximity window;
+// function declarations hoist, so calling it from inside `GlobalContent`
+// is fine.
+function TradersTile({
+  isLoading,
+  networkData,
+}: {
+  isLoading: boolean;
+  networkData: NetworkData[];
+}) {
+  const snapshotGql = useGQL<LeaderboardWindowTradersLatest>(
+    LEADERBOARD_WINDOW_TRADERS_LATEST,
+    { windowKey: "all" },
+    {
+      schema: LeaderboardWindowTradersLatestSchema,
+      // The "all" window snapshot only rolls over at the per-chain
+      // UTC-midnight heartbeat (see
+      // indexer-envio/src/leaderboardWindowFlush.ts), so the default
+      // 30s polling cadence is wildly over-cadenced for this tile. 5min
+      // keeps a fresh-after-rollover read without burning the Envio
+      // "small" tier quota for a multi-KB address list on every poll.
+      refreshInterval: 5 * 60_000,
+      // Required by docs/pr-checklists/swr-polling-hasura.md §1 — without
+      // a request-level timeout, a wedged TCP connection would hold the
+      // poll open for the full 5min interval. 30s is conservative for
+      // the long interval (the canonical 8s example pairs with a 10s
+      // poll); the trader address list is small enough that 30s never
+      // legitimately times out on healthy Hasura.
+      timeoutMs: 30_000,
+    },
+  );
+  // Today's traders aren't yet in the closed-day snapshot (the heartbeat
+  // only flushes at the next UTC midnight on the first swap of the new
+  // day), so without this merge a wallet whose first-ever v3 swap is
+  // today would silently drop out of the all-time count for up to 24h.
+  // Mirrors the leaderboard hero's today-partial union in
+  // `useHeroRollup` (`mergeHeroSnapshot`). `useUtcDayKey` resets the
+  // today-partial query window at each UTC rollover (see hook
+  // definition below for the polling rationale).
+  const utcDayKey = useUtcDayKey();
+  const todayMidnight = utcDayKey * SECONDS_PER_DAY;
+  const todayGql = useGQL<LeaderboardTodayTraders>(
+    LEADERBOARD_TODAY_TRADERS,
+    { todayMidnight, isSystemAddressIn: [false] },
+    {
+      schema: LeaderboardTodayTradersSchema,
+      refreshInterval: 5 * 60_000,
+      timeoutMs: 30_000,
+    },
+  );
+  // Three distinct partial-data states surface as the same `≈` badge,
+  // but each carries a distinct subtitle reason so the user can tell
+  // them apart:
+  //
+  //   - `hasMissingOrStaleChain`: a configured chain either has no
+  //     `LeaderboardWindowSnapshot` row at all (heartbeat hasn't fired
+  //     yet) OR its row's `snapshotDay` lags behind yesterday's UTC
+  //     midnight. In either case, closed days for that chain are
+  //     absent from `windowTraders` (capped at snapshotDay or empty
+  //     entirely) and the today-partial query (timestamp >=
+  //     todayMidnight). The count understates by the missing chain or
+  //     missing-day deltas.
+  //   - `todayPartialMissing`: the today-partial query errored, so any
+  //     wallet whose first-ever v3 swap is today is silently dropped
+  //     from the union. The closed-day count is still trustworthy on
+  //     its own, but the "all-time" framing isn't.
+  //
+  // The `count === null` branch ALSO covers snapshot returned-but-empty
+  // (no chains have any data yet — e.g. fresh indexer, schema-lag
+  // returning the shape with zero rows). `0` would otherwise read as a
+  // real metric (LP tile uses the same null-fallback pattern).
+  const yesterdayMidnight = (utcDayKey - 1) * SECONDS_PER_DAY;
+  const expectedChainIds = useMemo(
+    () => new Set(networkData.map((n) => n.network.chainId)),
+    [networkData],
+  );
+  // Both queries are scoped to chains the dashboard knows about — Hasura
+  // may return rows for additional chains the indexer covers (e.g. an
+  // experimental chain not yet wired into `useAllNetworksData`), and
+  // including those would inflate the count vs the LPs/Swaps tiles AND
+  // can spuriously flip the stale-chain badge on data the dashboard
+  // doesn't otherwise display. `scopedSnapshotRows` and the
+  // `expectedChainIds.has(row.chainId)` filter in the today-partial
+  // loop pin both halves to the configured network set.
+  const scopedSnapshotRows = useMemo(
+    () =>
+      (snapshotGql.data?.LeaderboardWindowSnapshot ?? []).filter((r) =>
+        expectedChainIds.has(r.chainId),
+      ),
+    [snapshotGql.data, expectedChainIds],
+  );
+  const hasMissingOrStaleChain = useMemo(() => {
+    const returnedChainIds = new Set(scopedSnapshotRows.map((r) => r.chainId));
+    for (const id of expectedChainIds) {
+      if (!returnedChainIds.has(id)) return true;
+    }
+    return scopedSnapshotRows.some(
+      (row) => Number(row.snapshotDay) < yesterdayMidnight,
+    );
+  }, [scopedSnapshotRows, expectedChainIds, yesterdayMidnight]);
+  const todayPartialMissing = todayGql.error !== undefined;
+  // `partialReason` is null when the count is complete. When set it
+  // selects both the `≈` prefix and the matching subtitle copy. Chain
+  // coverage wins over today-error when both fire (the chain gap is
+  // strictly worse — entire closed days missing, not just today's
+  // first-time traders).
+  const partialReason: "chain" | "today" | null = hasMissingOrStaleChain
+    ? "chain"
+    : todayPartialMissing
+      ? "today"
+      : null;
+  const count = useMemo(() => {
+    if (snapshotGql.error) return null;
+    if (!snapshotGql.data) return null;
+    if (scopedSnapshotRows.length === 0) return null;
+    const set = new Set<string>();
+    for (const row of scopedSnapshotRows) {
+      for (const addr of row.windowTraders) set.add(addr.toLowerCase());
+    }
+    // Today's partial merge — only when the query has settled with
+    // data. If it's still loading we render the closed-day count alone
+    // and the snapshot is the load-bearing data (no degradation
+    // signal). If it errored, we still skip the merge but flag
+    // `todayPartialMissing` above so the tile renders with "≈ N" +
+    // "Approximate — today's partial unavailable". Network-scoped to
+    // expected chain IDs for the same reason as the snapshot half.
+    if (todayGql.data) {
+      for (const row of todayGql.data.TraderDailySnapshot) {
+        if (!expectedChainIds.has(row.chainId)) continue;
+        set.add(row.trader.toLowerCase());
+      }
+    }
+    return set.size;
+  }, [
+    snapshotGql.data,
+    snapshotGql.error,
+    scopedSnapshotRows,
+    todayGql.data,
+    expectedChainIds,
+  ]);
+  // `isLoading` (from `useAllNetworksData`) folds the page-level fetch
+  // race into the tile's loading sentinel: the snapshot query is a
+  // single Hasura request and routinely finishes BEFORE the per-network
+  // fan-out behind `useAllNetworksData`. Without this, the tile would
+  // flip to a confirmed number while the sibling KPI tiles still
+  // render "…" — UX-confusing, especially on the empty-data race
+  // where a transient "0" would read as a real count.
+  // The today-partial is also part of the "is the count complete"
+  // signal — if it's still loading (vs settled or errored), the count
+  // is the snapshot-only subtotal and any wallet whose first-ever v3
+  // trade is today is missing. Stay on "…" until BOTH halves have
+  // settled (either with data or with an error — the error branch is
+  // handled below by `partialReason`).
+  let value: string;
+  if (isLoading || snapshotGql.isLoading || todayGql.isLoading) value = "…";
+  else if (count === null) value = "N/A";
+  else
+    value =
+      partialReason === null
+        ? count.toLocaleString()
+        : `≈ ${count.toLocaleString()}`;
+  // When `count === null` the value is "N/A" or "…"; the canonical
+  // subtitle is correct (no partial number to qualify) regardless of
+  // whether the today-partial errored.
+  let subtitle: string;
+  if (count === null || partialReason === null) {
+    subtitle = "Unique addresses that traded on v3";
+  } else if (partialReason === "chain") {
+    subtitle = "Approximate — chain snapshot catching up";
+  } else {
+    subtitle = "Approximate — today's partial unavailable";
+  }
+  return <Tile label="Traders" value={value} subtitle={subtitle} />;
+}
+
+// Minute-polled UTC-day ticker. Returns an integer day-since-epoch
+// that flips at UTC midnight, so any `useMemo` / `useGQL` variables
+// keyed on it (`todayMidnight`, the today-partial query window)
+// reset every day. Mirrors the leaderboard hero's pattern in
+// `_lib/url-state.ts:useLeaderboardUrlState` — `setTimeout` to
+// midnight isn't reliable because backgrounded tabs throttle timers,
+// so we poll. Without this, a wallboard tab left open across
+// midnight would keep querying `TraderDailySnapshot` from the
+// original day forever and eventually hit the `limit: 1000`
+// truncation as the slice grew multi-day.
+function useUtcDayKey(): number {
+  const [key, setKey] = useState<number>(() =>
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = window.setInterval(() => {
+      setKey((prev) => {
+        const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
+        return next === prev ? prev : next;
+      });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return key;
 }

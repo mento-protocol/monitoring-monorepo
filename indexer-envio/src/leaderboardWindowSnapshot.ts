@@ -209,11 +209,19 @@ export function buildLeaderboardWindowSnapshot(
   let firstDayExclusiveUniqueTradersIncludingSystem = 0;
   const firstDayExclusiveTraders: string[] = [];
   const firstDayExclusiveTradersIncludingSystem: string[] = [];
+  const windowTraders: string[] = [];
+  const windowTradersIncludingSystem: string[] = [];
   for (const a of args.aggregates) {
     totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
     totalSwapCountIncludingSystem += a.swapCount;
     firstDayVolumeUsdWeiIncludingSystem += a.firstDayVolumeUsdWei;
     firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
+    // Explicit lowercase pins the schema's "Sorted lowercase" invariant
+    // at this layer rather than implicitly relying on upstream handlers
+    // (TraderDailySnapshot.trader is set from `tx.from` via the
+    // lowercased `asAddress` helper today, but the indexer is the right
+    // boundary to enforce the invariant the schema documents).
+    windowTradersIncludingSystem.push(a.trader.toLowerCase());
     if (!a.activeOutsideFirstDay) {
       firstDayExclusiveUniqueTradersIncludingSystem += 1;
       firstDayExclusiveTradersIncludingSystem.push(a.trader);
@@ -224,6 +232,7 @@ export function buildLeaderboardWindowSnapshot(
       nonSystemCount += 1;
       firstDayVolumeUsdWei += a.firstDayVolumeUsdWei;
       firstDaySwapCount += a.firstDaySwapCount;
+      windowTraders.push(a.trader.toLowerCase());
       if (!a.activeOutsideFirstDay) {
         firstDayExclusiveUniqueTraders += 1;
         firstDayExclusiveTraders.push(a.trader);
@@ -232,6 +241,8 @@ export function buildLeaderboardWindowSnapshot(
   }
   firstDayExclusiveTraders.sort();
   firstDayExclusiveTradersIncludingSystem.sort();
+  windowTraders.sort();
+  windowTradersIncludingSystem.sort();
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
     chainId: args.chainId,
@@ -252,6 +263,8 @@ export function buildLeaderboardWindowSnapshot(
     firstDayExclusiveUniqueTradersIncludingSystem,
     firstDayExclusiveTraders,
     firstDayExclusiveTradersIncludingSystem,
+    windowTraders,
+    windowTradersIncludingSystem,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };

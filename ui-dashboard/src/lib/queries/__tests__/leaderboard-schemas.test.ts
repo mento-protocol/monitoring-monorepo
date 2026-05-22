@@ -21,6 +21,7 @@ import {
   LeaderboardTodayTradersSchema,
   LeaderboardWindowFirstDayLatestSchema,
   LeaderboardWindowLatestSchema,
+  LeaderboardWindowTradersLatestSchema,
   LeaderboardYesterdayTradersSchema,
   PoolDailyVolumeSchema,
   PoolsForLeaderboardSchema,
@@ -418,6 +419,47 @@ describe("LeaderboardWindowFirstDayLatestSchema smoke test", () => {
         BrokerLeaderboardWindowSnapshot: [row],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("LeaderboardWindowTradersLatestSchema smoke test", () => {
+  it("accepts a row with the v3 trader address array", () => {
+    const row = {
+      chainId: 42220,
+      snapshotDay: "100",
+      windowTraders: ["0xaaa", "0xbbb"],
+    };
+    expect(
+      LeaderboardWindowTradersLatestSchema.safeParse({
+        LeaderboardWindowSnapshot: [row],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts an empty array (no v3 swaps yet on this chain)", () => {
+    const row = {
+      chainId: 143,
+      snapshotDay: "100",
+      windowTraders: [],
+    };
+    expect(
+      LeaderboardWindowTradersLatestSchema.safeParse({
+        LeaderboardWindowSnapshot: [row],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a non-string entry in windowTraders", () => {
+    const row = {
+      chainId: 42220,
+      snapshotDay: "100",
+      windowTraders: ["0xaaa", 42],
+    };
+    expect(
+      LeaderboardWindowTradersLatestSchema.safeParse({
+        LeaderboardWindowSnapshot: [row],
+      }).success,
+    ).toBe(false);
   });
 });
 
