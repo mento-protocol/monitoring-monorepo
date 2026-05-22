@@ -77,6 +77,25 @@ describe("v2Stables/config — registry derivation", () => {
     }
   });
 
+  it("every V2_STABLES entry exposes `decimals` (denormalized to V2StableSupplyChangeEvent.tokenDecimals)", () => {
+    // The Transfer handler writes `info.decimals` to every supply-change
+    // event row; the UI changes-table reads it instead of hardcoding 18.
+    // A missing/non-integer decimals would silently render with NaN,
+    // turning every row's amount into the literal string "NaN". Catch
+    // it at module-load via this registry-shape assertion.
+    for (const s of V2_STABLES) {
+      assert.equal(
+        typeof s.decimals,
+        "number",
+        `${s.symbol} (${s.address}) missing decimals — would corrupt V2StableSupplyChangeEvent.tokenDecimals`,
+      );
+      assert.ok(
+        Number.isInteger(s.decimals) && s.decimals >= 0 && s.decimals <= 30,
+        `${s.symbol} has implausible decimals=${s.decimals}`,
+      );
+    }
+  });
+
   it("V2 cUSD-USDm and V3 hub USDm are tracked as separate rows", () => {
     const v2Cusd = findV2StableByAddress(42220, V2_CUSD_USDM_ADDRESS);
     const v3Hub = findV2StableByAddress(42220, V3_HUB_USDM_ADDRESS);

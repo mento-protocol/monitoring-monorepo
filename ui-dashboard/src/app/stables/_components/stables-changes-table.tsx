@@ -108,11 +108,7 @@ function SupplyChangeRow({
   const absAmount = event.amount.startsWith("-")
     ? event.amount.slice(1)
     : event.amount;
-  // Token decimals aren't on the V2StableSupplyChangeEvent row — every V2
-  // stable in the registry today is 18 decimals (verified in config.ts).
-  // Hardcoding 18 keeps the table fast; a per-row decimals join can land
-  // when a non-18-decimal Mento stable ships.
-  const formatted = formatWei(absAmount, 18, 2);
+  const formatted = formatWei(absAmount, event.tokenDecimals, 2);
   return (
     <tr className="border-t border-slate-800/70">
       <td

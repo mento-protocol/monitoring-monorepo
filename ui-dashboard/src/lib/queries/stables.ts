@@ -94,6 +94,7 @@ export const STABLES_V2_CHANGES = `
       chainId
       tokenAddress
       tokenSymbol
+      tokenDecimals
       source
       kind
       counterparty
