@@ -30,11 +30,17 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
   }
 
   service_config {
-    available_memory               = "${var.memory_mb}M"
-    timeout_seconds                = var.timeout_seconds
-    max_instance_count             = var.max_instances
-    min_instance_count             = var.min_instances
-    service_account_email          = var.project_service_account_email
+    available_memory   = "${var.memory_mb}M"
+    timeout_seconds    = var.timeout_seconds
+    max_instance_count = var.max_instances
+    min_instance_count = var.min_instances
+    # Dedicated runtime SA, separate from the Cloud Build SA. The build SA
+    # carries `roles/cloudbuild.builds.builder` + GCS source bucket read —
+    # if the public HTTP function were compromised with that identity, an
+    # attacker could trigger Cloud Builds and modify build configs. The
+    # runtime SA only gets `roles/secretmanager.secretAccessor` on the three
+    # secrets it needs to read.
+    service_account_email          = google_service_account.function_runtime.email
     environment_variables          = local.all_env_vars
     ingress_settings               = "ALLOW_ALL"
     all_traffic_on_latest_revision = true
@@ -91,7 +97,14 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
   depends_on = [
     google_secret_manager_secret_version.quicknode_signing_secret,
     google_secret_manager_secret_version.discord_webhook_alerts,
-    google_secret_manager_secret_version.discord_webhook_events
+    google_secret_manager_secret_version.discord_webhook_events,
+    # IAM grants for the Cloud Build SA must propagate before the function's
+    # build step kicks off, otherwise the build can race ahead and fail
+    # even though the IAM resources are in the same plan.
+    google_project_iam_member.cloudbuild_builder,
+    google_storage_bucket_iam_member.cloud_build_storage_access,
+    # Runtime SA needs Secret Manager access before the function boots.
+    google_project_iam_member.runtime_secret_accessor,
   ]
 
   timeouts {
@@ -333,9 +346,19 @@ resource "google_secret_manager_secret_version" "discord_webhook_events" {
   }
 }
 
-# Grant Cloud Function service account access to read the secret
-resource "google_project_iam_member" "secret_accessor" {
+# Dedicated runtime SA for the Cloud Function. Separated from the Cloud
+# Build SA so a runtime compromise (via the public HTTP endpoint, defended
+# in-code by HMAC) can't leverage Cloud Build privileges.
+resource "google_service_account" "function_runtime" {
+  project      = var.project_id
+  account_id   = "onchain-handler-runtime"
+  display_name = "Onchain Event Handler Runtime"
+  description  = "Runtime identity for the onchain-event-handler Cloud Function. Read-only on Secret Manager; no Cloud Build access."
+}
+
+# Grant the runtime SA Secret Manager access (the only privilege it needs).
+resource "google_project_iam_member" "runtime_secret_accessor" {
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${var.project_service_account_email}"
+  member  = "serviceAccount:${google_service_account.function_runtime.email}"
 }

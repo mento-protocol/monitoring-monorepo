@@ -140,9 +140,15 @@ resource "restapi_object" "multisig_webhook" {
 # Ensure null_resource destroy provisioner runs before restapi_object is destroyed
 # This allows the webhook to be paused before deletion
 resource "null_resource" "pause_webhook_on_destroy" {
+  # destroy-time provisioners can only reference `self`, so the API key has
+  # to ride along in triggers — Terraform's `${var.foo}` interpolation isn't
+  # allowed inside `when = destroy`. Without this the destroy block fell
+  # through to the "QUICKNODE_API_KEY env var not set" skip branch on every
+  # workflow that uses tfvars instead of shell env (the documented setup).
   triggers = {
     webhook_id  = restapi_object.multisig_webhook.id
     script_path = "${path.root}/scripts/manage-quicknode-webhook.sh"
+    api_key     = var.quicknode_api_key
   }
 
   lifecycle {
@@ -174,13 +180,18 @@ resource "null_resource" "pause_webhook_on_destroy" {
       
       if [ -n "$WEBHOOK_ID" ] && [ "$WEBHOOK_ID" != "" ] && [ "$WEBHOOK_ID" != "null" ]; then
         echo "Pausing webhook $WEBHOOK_ID before deletion..."
-        
-        API_KEY="$QUICKNODE_API_KEY"
+
+        # API key captured into triggers at plan time so we don't depend on
+        # the shell environment (which is empty under the normal tfvars
+        # workflow). Empty value still falls through to the skip branch
+        # below — the script just gracefully no-ops if QUICKNODE_API_KEY
+        # is missing.
+        API_KEY="${self.triggers.api_key}"
         if [ -z "$API_KEY" ] || [ "$API_KEY" = "" ]; then
-          echo "Warning: QUICKNODE_API_KEY environment variable not set, skipping pause"
+          echo "Warning: QuickNode API key not configured in triggers, skipping pause"
           exit 0
         fi
-        
+
         "$$SCRIPT_PATH" pause "$WEBHOOK_ID" "$API_KEY" || true
       else
         echo "Could not determine webhook ID, skipping pause"
