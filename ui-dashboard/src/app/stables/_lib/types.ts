@@ -1,5 +1,4 @@
 import type { StableSupplySource, StableSupplyChangeKind } from "@/lib/stables";
-import type { RangeKey as LibRangeKey } from "@/lib/time-series";
 
 // Raw row shape returned by STABLES_DAILY_SNAPSHOTS / STABLES_LATEST_PER_TOKEN.
 // `totalSupply` / `dailyMintAmount` / `dailyBurnAmount` are token-native wei
@@ -57,8 +56,11 @@ export type TokenAgg = {
   netChange7dUsd: number | null;
 };
 
-// Re-export the canonical RangeKey from `@/lib/time-series` so callers can
-// import from a single place. `90d` is a valid range upstream — we currently
-// only surface 7d/30d/all in the /stables UI but accept the wider type so
-// the range pills can grow without a churn-only refactor.
-export type RangeKey = LibRangeKey;
+// Range vocabulary — matches `@/lib/time-series` `RangeKey` exactly. Earlier
+// PR2 pass-2 narrowed to `"7d" | "30d" | "all"` to catch the silently-
+// wrong `90d` cutoff math, then `rangeStartSeconds` was updated to handle
+// `90d` correctly (days-back = 89), so the narrow type is no longer
+// needed. Keeping the union in sync with the lib type avoids the
+// onRangeChange callback type mismatch when `TimeSeriesChartCard` (which
+// types its callback against the lib's RangeKey) calls into the page.
+export type RangeKey = "7d" | "30d" | "90d" | "all";

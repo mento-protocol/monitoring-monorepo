@@ -24,13 +24,10 @@ export type StableSupplyChangeKind =
   | "OTHER_MINT"
   | "OTHER_BURN";
 
-/**
- * Resolves an indexer-side symbol to the Mento brand display name. Today
- * the only mapping is cEUR → EURm (carried from `LEGACY_ALIASES_PUBLIC` in
- * tokens.ts) — V2 cUSD is already published as "USDm" by the contracts
- * package. Future renames land in `LEGACY_ALIASES_PUBLIC`, not here.
- */
-export function displaySymbol(indexerSymbol: string): string {
+// Internal helper — applies the v2→v3 legacy alias table. Today the only
+// mapping is cEUR → EURm (V2 cUSD is already brand-named "USDm" in the
+// contracts package). Future renames land in `LEGACY_ALIASES_PUBLIC`.
+function applyLegacyAlias(indexerSymbol: string): string {
   for (const [from, to] of LEGACY_ALIASES_PUBLIC) {
     if (indexerSymbol === from) return to;
   }
@@ -39,19 +36,23 @@ export function displaySymbol(indexerSymbol: string): string {
 
 /**
  * Legend-ready label distinguishing the two USDm contracts. Other tokens
- * pass through unchanged. The "· v3" suffix is short and avoids confusing
- * "USDm V3" (which would imply a v3-of-the-USDm-contract semantic).
+ * pass through (with v2→v3 legacy alias applied). The "· v3" suffix is
+ * short and avoids confusing "USDm V3" (which would imply a v3-of-the-
+ * USDm-contract semantic).
  */
 export function displayLabel(
   indexerSymbol: string,
   source: StableSupplySource,
 ): string {
-  const base = displaySymbol(indexerSymbol);
+  const base = applyLegacyAlias(indexerSymbol);
   if (base === "USDm" && source === "V3_HUB_COLLATERAL") return "USDm · v3";
   return base;
 }
 
-/** Coarse "is this a mint" predicate from the kind enum. */
+/** Discriminate a supply-change event into mint vs burn from its `kind`
+ *  enum. Authoritative source — the schema's signed `amount` is a
+ *  derived field, and a degenerate zero-value burn would render as "0"
+ *  (no leading minus), so don't rely on the sign character. */
 export function isMintKind(kind: StableSupplyChangeKind): boolean {
   return (
     kind === "RESERVE_MINT" || kind === "BRIDGE_MINT" || kind === "OTHER_MINT"

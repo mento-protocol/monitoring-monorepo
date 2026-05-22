@@ -33,6 +33,7 @@ function StablesContent(): React.JSX.Element {
     snapshots,
     error: snapshotsError,
     isLoading: snapshotsLoading,
+    capped: snapshotsCapped,
   } = useStablesDailySnapshots(range);
   const {
     events: changeEvents,
@@ -72,6 +73,7 @@ function StablesContent(): React.JSX.Element {
         onRangeChange={setRange}
         isLoading={isLoading}
         hasError={hasError}
+        capped={snapshotsCapped}
       />
 
       <StablesChangesTable

@@ -101,34 +101,7 @@ export const STABLES_V2_CHANGES = `
   }
 `;
 
-// V3 streams used to enrich the changes table for GBPm/CHFm/JPYm (deferred
-// fully in PR1 indexer; net-only via day-over-day totalSupply diff until
-// the V3 mint/burn breakdown follow-up lands). These queries are kept thin
-// so the merge step on the client doesn't pull source-specific bloat.
-export const STABLES_V3_TROVE_OPS = `
-  query StablesV3TroveOps(
-    $chainId: Int!
-    $sinceTimestamp: numeric!
-    $limit: Int!
-  ) {
-    TroveOperationEvent(
-      where: {
-        chainId: { _eq: $chainId }
-        timestamp: { _gte: $sinceTimestamp }
-      }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: $limit
-    ) {
-      id
-      instanceId
-      timestamp
-      owner
-      debtBefore
-      debtAfter
-      debtChange
-      operation
-      txHash
-      blockNumber
-    }
-  }
-`;
+// V3 Liquity per-tx streams (`TroveOperationEvent`, `RedemptionEvent`,
+// `LiquidationEvent`) will be merged into the changes table in PR2.5
+// once the V3 mint/burn breakdown lands on the indexer. They're not
+// declared here — add them alongside the consumer that needs them.

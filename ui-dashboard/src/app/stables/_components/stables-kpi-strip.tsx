@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel } from "@/lib/stables";
@@ -27,22 +28,35 @@ export function StablesKpiStrip({
   isLoading,
   hasError,
 }: Props): React.JSX.Element {
-  const rollup = rollupByToken(snapshots, rates);
-  const { biggestExpansion, biggestContraction } = winnersAndLosers7d(rollup);
+  // Memoize the rollup + derived totals. SWR polls at 30s; parent re-renders
+  // (range pill, hover state) shouldn't re-sort N=1000 snapshots each time.
+  const { rollup, biggestExpansion, biggestContraction } = useMemo(() => {
+    const r = rollupByToken(snapshots, rates);
+    const wl = winnersAndLosers7d(r);
+    return {
+      rollup: r,
+      biggestExpansion: wl.biggestExpansion,
+      biggestContraction: wl.biggestContraction,
+    };
+  }, [snapshots, rates]);
 
-  const totalUsd = latestPerToken.reduce<number | null>((acc, row) => {
-    const rate = rates.get(row.tokenSymbol);
-    if (rate == null) return acc;
-    const usd =
-      parseWei(BigInt(row.totalSupply).toString(), row.tokenDecimals) * rate;
-    return (acc ?? 0) + usd;
-  }, null);
+  const totalUsd = useMemo<number | null>(() => {
+    return latestPerToken.reduce<number | null>((acc, row) => {
+      const rate = rates.get(row.tokenSymbol);
+      if (rate == null) return acc;
+      const usd =
+        parseWei(BigInt(row.totalSupply).toString(), row.tokenDecimals) * rate;
+      return (acc ?? 0) + usd;
+    }, null);
+  }, [latestPerToken, rates]);
 
-  const totalNetChange7dUsd = Array.from(rollup.values()).reduce<number | null>(
-    (acc, agg) =>
-      agg.netChange7dUsd == null ? acc : (acc ?? 0) + agg.netChange7dUsd,
-    null,
-  );
+  const totalNetChange7dUsd = useMemo<number | null>(() => {
+    return Array.from(rollup.values()).reduce<number | null>(
+      (acc, agg) =>
+        agg.netChange7dUsd == null ? acc : (acc ?? 0) + agg.netChange7dUsd,
+      null,
+    );
+  }, [rollup]);
 
   return (
     <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

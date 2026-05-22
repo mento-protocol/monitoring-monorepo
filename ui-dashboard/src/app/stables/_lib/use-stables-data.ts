@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
 import {
   STABLES_DAILY_SNAPSHOTS,
@@ -14,11 +15,11 @@ import type {
   V2StableSupplyChangeEvent,
 } from "./types";
 
-const CELO_CHAIN_ID = 42220;
 // Hasura silently caps at 1000; we set explicit limits to be honest.
 const SNAPSHOT_PAGE_LIMIT = 1000;
 const CHANGES_PAGE_LIMIT = 200;
-// Numeric.MAX cursor — `_lt: <this>` returns the first page.
+// Numeric.MAX cursor (~year 2286 in Unix-seconds); `_lt: <this>` returns
+// the first page from the top of the desc-ordered snapshot table.
 const TS_CURSOR_INITIAL = "9999999999";
 
 type DailySnapshotsResult = {
@@ -33,11 +34,18 @@ type V2ChangesResult = {
  * Per-token latest supply snapshot (one row per token via distinct_on).
  * Powers the KPI strip "current outstanding" totals + sparkline grid
  * headlines. Lightweight (~16 rows).
+ *
+ * Defaults to the current network's `chainId` from `useNetwork()` —
+ * earlier hardcoded Celo (42220) which silently returned Celo data when
+ * the user switched to Monad (prod networks share one multichain Envio
+ * endpoint filtered server-side by `chainId`). V2 stables are Celo-only
+ * today, so Monad correctly returns empty.
  */
-export function useStablesLatestPerToken(chainId: number = CELO_CHAIN_ID) {
+export function useStablesLatestPerToken() {
+  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<LatestPerTokenResult>(
     STABLES_LATEST_PER_TOKEN,
-    { chainId },
+    { chainId: network.chainId },
   );
   const snapshots = useMemo(
     () => data?.StableSupplyDailySnapshot ?? [],
@@ -47,41 +55,44 @@ export function useStablesLatestPerToken(chainId: number = CELO_CHAIN_ID) {
 }
 
 /**
- * Daily snapshots over the requested range, single-page only for the v1
- * scope. The `1W` / `1M` ranges fit under the 1000-row cap; `All` is
- * deferred to a follow-up that adds keyset pagination via the
- * `beforeTimestamp` cursor below.
+ * Daily snapshots, single-page only for v1. Returns the FULL stream
+ * (no client-side range filter) so downstream rollups can pick a
+ * pre-window baseline — without one, `rollupByToken`'s 7d delta degrades
+ * to "first available row" and `buildTokenUsdTimeSeries` drops tokens
+ * whose only snapshot is older than the window. Range filtering happens
+ * in the aggregate helpers, which scope output series to the window
+ * while keeping the baseline reachable.
+ *
+ * `range` is accepted as a parameter to gate the `capped` warning: under
+ * `7d` / `30d` the 1000-row page comfortably covers ~16 tokens × ~30
+ * days. `all` may exceed and surface as `capped: true`; PR2.5 follow-up
+ * adds keyset pagination via the `beforeTimestamp` cursor.
  */
-export function useStablesDailySnapshots(
-  range: RangeKey,
-  chainId: number = CELO_CHAIN_ID,
-) {
-  const sinceSeconds = rangeStartSeconds(range);
-  // STABLES_DAILY_SNAPSHOTS takes `beforeTimestamp` as an upper bound (we
-  // page newest-first). For a bounded range query, we'd also need a lower
-  // bound — for v1 we just fetch the most recent N rows and rely on
-  // client-side filtering by the range cutoff.
+export function useStablesDailySnapshots(_range: RangeKey) {
+  // `_range` is accepted for API symmetry with `useStablesV2Changes` and
+  // to make it a typed-call-site for future range-aware where-clause
+  // filtering. The hook does NOT filter by range today (see header).
+  void _range;
+  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<DailySnapshotsResult>(
     STABLES_DAILY_SNAPSHOTS,
     {
-      chainId,
+      chainId: network.chainId,
       limit: SNAPSHOT_PAGE_LIMIT,
       beforeTimestamp: TS_CURSOR_INITIAL,
     },
   );
-  const snapshots = useMemo(() => {
-    const rows = data?.StableSupplyDailySnapshot ?? [];
-    if (range === "all") return rows;
-    return rows.filter((r) => Number(r.timestamp) >= sinceSeconds);
-  }, [data, range, sinceSeconds]);
+  const snapshots = useMemo(
+    () => data?.StableSupplyDailySnapshot ?? [],
+    [data],
+  );
   return {
     snapshots,
     error,
     isLoading,
-    // Flag downstream when the first page is full — the user might be seeing
-    // a truncated history. PR2 v1 doesn't paginate; PR2.5 follow-up will.
-    capped:
-      (data?.StableSupplyDailySnapshot.length ?? 0) === SNAPSHOT_PAGE_LIMIT,
+    // Flag for the chart's truncation chip — the user might be seeing a
+    // partial history if `All` range outruns the 1000-row page.
+    capped: snapshots.length === SNAPSHOT_PAGE_LIMIT,
   };
 }
 
@@ -90,16 +101,13 @@ export function useStablesDailySnapshots(
  * to the last 7d window (sufficient for the leaderboard; the table can
  * later add date-range pickers via the `sinceTimestamp` arg).
  */
-export function useStablesV2Changes(
-  range: RangeKey = "7d",
-  page: number = 0,
-  chainId: number = CELO_CHAIN_ID,
-) {
+export function useStablesV2Changes(range: RangeKey = "7d", page: number = 0) {
+  const { network } = useNetwork();
   const sinceTimestamp = rangeStartSeconds(range);
   const { data, error, isLoading } = useGQL<V2ChangesResult>(
     STABLES_V2_CHANGES,
     {
-      chainId,
+      chainId: network.chainId,
       sinceTimestamp,
       limit: CHANGES_PAGE_LIMIT,
       offset: page * CHANGES_PAGE_LIMIT,

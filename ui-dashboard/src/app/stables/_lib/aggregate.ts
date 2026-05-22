@@ -32,7 +32,13 @@ export function rollupByToken(
   return out;
 }
 
-function groupSnapshotsByTokenSource(
+/**
+ * Group snapshots by `{tokenAddress}|{source}`. Exported so the hero chart
+ * can reuse the same discriminator key — V2 cUSD-USDm and V3 hub USDm
+ * share the symbol "USDm" but live at distinct addresses, and the rollup
+ * + chart must group them identically.
+ */
+export function groupSnapshotsByTokenSource(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
 ): Map<string, StableSupplyDailySnapshot[]> {
   const grouped = new Map<string, StableSupplyDailySnapshot[]>();
@@ -116,13 +122,24 @@ export function rangeStartSeconds(
   if (range === "all") return 0;
   const dayStart =
     Math.floor(nowSeconds / SECONDS_PER_DAY_NUMBER) * SECONDS_PER_DAY_NUMBER;
-  const daysBack = range === "7d" ? 6 : 29;
+  // N-day rolling window keeps a fixed bucket count: dayStart - (N-1)*86400.
+  const daysBack = range === "7d" ? 6 : range === "30d" ? 29 : 89;
   return dayStart - daysBack * SECONDS_PER_DAY_NUMBER;
 }
 
-// Filter snapshots to the active range, then carry-forward totalSupply for
-// days that have no row (sparse-day semantics). Returns one (timestamp,
-// usdValue) point per UTC day in the window — feeds the stacked hero chart.
+// Builds one (timestamp, usdValue) point per UTC day across the active
+// range, forward-filling totalSupply across sparse days. Critical for the
+// stacked hero chart: ALL tokens emit a point per day, even days before
+// the token's first in-range snapshot — codex flagged that the previous
+// per-token start day caused a false ramp in the stacked total ("supply
+// growth" was an artifact of tokens entering the index at different days,
+// not real mint activity).
+//
+// Pre-window snapshots (rows whose timestamp < startTs) are used to seed
+// the baseline so a token with its only known snapshot 14 days ago still
+// contributes its supply across the 7d window. Tokens with no pre-window
+// data start at 0 — semantically correct (we don't know their pre-index
+// supply; treating as 0 is the most honest default).
 export function buildTokenUsdTimeSeries(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
   rates: OracleRateMap,
@@ -135,25 +152,29 @@ export function buildTokenUsdTimeSeries(
   if (rate == null) return [];
 
   const startTs = rangeStartSeconds(range, nowSeconds);
-  // Sort ASC; ignore rows before the window start.
-  const inRange = snapshots
-    .filter((r) => Number(r.timestamp) >= startTs)
-    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-  if (inRange.length === 0) return [];
+  // Sort ASC over the FULL set (including pre-window). Don't mutate the
+  // input — readonly inputs from upstream rollups would surprise-mutate.
+  const sorted = [...snapshots].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
 
   const dayStartNow =
     Math.floor(nowSeconds / SECONDS_PER_DAY_NUMBER) * SECONDS_PER_DAY_NUMBER;
-  const decimals = inRange[0].tokenDecimals;
-  const out: Array<{ timestamp: number; valueUsd: number }> = [];
+  const decimals = sorted[0].tokenDecimals;
+
+  // Walk pre-window rows to seed the baseline. The last row at or before
+  // startTs holds the supply we forward-fill from.
   let cursor = 0;
-  let lastSupply = BigInt(inRange[0].totalSupply);
-  for (
-    let d = Math.max(startTs, Number(inRange[0].timestamp));
-    d <= dayStartNow;
-    d += SECONDS_PER_DAY_NUMBER
-  ) {
-    while (cursor < inRange.length && Number(inRange[cursor].timestamp) <= d) {
-      lastSupply = BigInt(inRange[cursor].totalSupply);
+  let lastSupply = BigInt(0);
+  while (cursor < sorted.length && Number(sorted[cursor].timestamp) < startTs) {
+    lastSupply = BigInt(sorted[cursor].totalSupply);
+    cursor++;
+  }
+
+  const out: Array<{ timestamp: number; valueUsd: number }> = [];
+  for (let d = startTs; d <= dayStartNow; d += SECONDS_PER_DAY_NUMBER) {
+    while (cursor < sorted.length && Number(sorted[cursor].timestamp) <= d) {
+      lastSupply = BigInt(sorted[cursor].totalSupply);
       cursor++;
     }
     out.push({

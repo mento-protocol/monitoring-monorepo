@@ -7,7 +7,9 @@ import {
   relativeTime,
   truncateAddress,
 } from "@/lib/format";
-import { displayLabel, kindLabel } from "@/lib/stables";
+import { NETWORKS, networkIdForChainId } from "@/lib/networks";
+import { displayLabel, isMintKind, kindLabel } from "@/lib/stables";
+import { explorerTxUrl } from "@/lib/tokens";
 import type { V2StableSupplyChangeEvent } from "../_lib/types";
 
 const CELO_CHAIN_ID = 42220;
@@ -99,9 +101,12 @@ function SupplyChangeRow({
 }: {
   event: V2StableSupplyChangeEvent;
 }): React.JSX.Element {
-  const isMint = event.amount.startsWith("-") === false;
-  // `amount` arrives signed (+ mint / − burn). For display we strip the sign
-  // and color-code via the kind enum so the table reads at a glance.
+  // Discriminate via the `kind` enum (authoritative) rather than the
+  // leading minus sign on `amount` — a zero-value burn (rare, but legal)
+  // would have `amount: "0"` and parse as mint by sign alone.
+  const isMint = isMintKind(event.kind);
+  // For display we strip the sign and color-code via the kind. `amount`
+  // is signed token-native wei (+ for mint, − for burn).
   const absAmount = event.amount.startsWith("-")
     ? event.amount.slice(1)
     : event.amount;
@@ -137,8 +142,8 @@ function SupplyChangeRow({
           <AddressLink address={event.caller} chainId={CELO_CHAIN_ID} />
         )}
       </td>
-      <td className="py-3 font-mono text-xs text-slate-400">
-        {truncateAddress(event.txHash)}
+      <td className="py-3 font-mono text-xs">
+        <TxExplorerLink txHash={event.txHash} chainId={event.chainId} />
       </td>
     </tr>
   );
@@ -149,5 +154,35 @@ function Card({ children }: { children: React.ReactNode }): React.JSX.Element {
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       {children}
     </section>
+  );
+}
+
+function TxExplorerLink({
+  txHash,
+  chainId,
+}: {
+  txHash: string;
+  chainId: number;
+}): React.JSX.Element {
+  const networkId = networkIdForChainId(chainId);
+  const network = networkId ? NETWORKS[networkId] : null;
+  const short = truncateAddress(txHash);
+  if (!network) {
+    return (
+      <span className="text-slate-400" title={txHash}>
+        {short}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={explorerTxUrl(network, txHash)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={txHash}
+      className="text-slate-300 hover:text-indigo-300 transition-colors"
+    >
+      {short}
+    </a>
   );
 }

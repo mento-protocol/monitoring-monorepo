@@ -8,7 +8,11 @@ import { displayLabel } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import { tokenColor } from "@/lib/token-colors";
 import { stockWoWChangePct } from "@/lib/time-series";
-import { buildTokenUsdTimeSeries, sumTotalUsdSeries } from "../_lib/aggregate";
+import {
+  buildTokenUsdTimeSeries,
+  groupSnapshotsByTokenSource,
+  sumTotalUsdSeries,
+} from "../_lib/aggregate";
 import type { RangeKey, StableSupplyDailySnapshot } from "../_lib/types";
 
 type Props = {
@@ -18,6 +22,7 @@ type Props = {
   onRangeChange: (range: RangeKey) => void;
   isLoading: boolean;
   hasError: boolean;
+  capped: boolean;
 };
 
 /**
@@ -34,6 +39,7 @@ export function StablesHeroChart({
   onRangeChange,
   isLoading,
   hasError,
+  capped,
 }: Props): React.JSX.Element {
   // Group snapshots by `{tokenAddress}|{source}` so V2 cUSD-USDm and V3 hub
   // USDm get distinct stack slices (same symbol "USDm", different addresses).
@@ -41,16 +47,10 @@ export function StablesHeroChart({
     if (snapshots.length === 0) {
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
-    const grouped = new Map<string, StableSupplyDailySnapshot[]>();
-    for (const row of snapshots) {
-      const key = `${row.tokenAddress}|${row.source}`;
-      let arr = grouped.get(key);
-      if (!arr) {
-        arr = [];
-        grouped.set(key, arr);
-      }
-      arr.push(row);
-    }
+    // Shared discriminator with `_lib/aggregate.ts` so KPI strip and hero
+    // chart group V2 cUSD-USDm vs V3 hub USDm identically. Inline grouping
+    // here previously was duplication caught by review.
+    const grouped = groupSnapshotsByTokenSource(snapshots);
 
     const breakdownEntries: BreakdownSeries[] = [];
     const allSeries: Array<Array<{ timestamp: number; valueUsd: number }>> = [];
@@ -84,21 +84,29 @@ export function StablesHeroChart({
   const change = stockWoWChangePct(totalSeries);
 
   return (
-    <TimeSeriesChartCard
-      title="Mento stablecoin supply"
-      rangeAriaLabel="Mento stablecoin supply range"
-      series={totalSeries}
-      breakdown={breakdown}
-      breakdownMode="stacked"
-      range={range}
-      onRangeChange={onRangeChange}
-      headline={headline}
-      change={change}
-      changeLabel="vs. 7d ago"
-      isLoading={isLoading}
-      hasError={hasError}
-      hasSnapshotError={false}
-      emptyMessage="No stablecoin supply data yet for this chain."
-    />
+    <div className="space-y-2">
+      <TimeSeriesChartCard
+        title="Mento stablecoin supply"
+        rangeAriaLabel="Mento stablecoin supply range"
+        series={totalSeries}
+        breakdown={breakdown}
+        breakdownMode="stacked"
+        range={range}
+        onRangeChange={onRangeChange}
+        headline={headline}
+        change={change}
+        changeLabel="vs. 7d ago"
+        isLoading={isLoading}
+        hasError={hasError}
+        hasSnapshotError={false}
+        emptyMessage="No stablecoin supply data yet for this chain."
+      />
+      {capped ? (
+        <p className="text-xs text-amber-400" role="status">
+          Showing the most recent 1,000 snapshot rows — older history may be
+          truncated. Use the 1W or 1M range for a complete view.
+        </p>
+      ) : null}
+    </div>
   );
 }
