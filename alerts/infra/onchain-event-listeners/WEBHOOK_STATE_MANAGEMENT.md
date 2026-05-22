@@ -56,13 +56,13 @@ A new script [`scripts/fix-webhook-state.sh`](../scripts/fix-webhook-state.sh) h
 - Offers to remove orphaned webhooks from state
 - Provides guidance on next steps
 
-### 4. Debug Mode Enabled
+### 4. Debug Mode (opt-in)
 
 ```hcl
-debug = true
+debug = var.debug_mode  # default: false
 ```
 
-**Why:** Helps troubleshoot API communication issues by logging request/response details.
+**Why:** The QuickNode `restapi` provider's per-resource debug logging includes the full request/response — which means the `x-api-key` header and the `security_token` body field land in `TF_LOG=DEBUG` transcripts. We default to `false` and only flip `var.debug_mode = true` from the root when actively debugging. Don't enable in CI or share apply logs that ran with it on.
 
 ## How to Fix Current 404 Errors
 

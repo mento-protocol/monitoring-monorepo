@@ -113,7 +113,9 @@ parse_function_config_from_files() {
 
 	# Read numeric values from variables.tf and validate
 	memory_mb=$(read_tfvar_default_number "memory_mb" "256" "${vars_file}")
-	timeout_seconds=$(read_tfvar_default_number "timeout_seconds" "60" "${vars_file}")
+	# Keep fallback in sync with variables.tf default (bumped to 300s to give
+	# Promise.all batches headroom over the 60s old ceiling).
+	timeout_seconds=$(read_tfvar_default_number "timeout_seconds" "300" "${vars_file}")
 	max_instances=$(read_tfvar_default_number "max_instances" "10" "${vars_file}")
 	min_instances=$(read_tfvar_default_number "min_instances" "0" "${vars_file}")
 
@@ -122,7 +124,7 @@ parse_function_config_from_files() {
 
 	# Validate numeric values (using shared function from common.sh)
 	memory_mb=$(validate_non_negative_int "${memory_mb}" "256" "memory_mb")
-	timeout_seconds=$(validate_non_negative_int "${timeout_seconds}" "60" "timeout_seconds")
+	timeout_seconds=$(validate_non_negative_int "${timeout_seconds}" "300" "timeout_seconds")
 	max_instances=$(validate_non_negative_int "${max_instances}" "10" "max_instances")
 	min_instances=$(validate_non_negative_int "${min_instances}" "0" "min_instances")
 }
@@ -231,7 +233,7 @@ main() {
 	runtime=""
 	entry_point="processQuicknodeWebhook"
 	memory_mb="256"
-	timeout_seconds="60"
+	timeout_seconds="300"
 	max_instances="10"
 	min_instances="0"
 	secret_name=""
