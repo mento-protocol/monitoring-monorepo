@@ -495,6 +495,119 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.usedLatestFallback, false);
   });
 
+  // viem formats `ContractFunctionExecutionError` with a `\n` between
+  // sentences, not a single space. The previous literal-space anchor in
+  // ARCHIVE_DEPTH_RE silently failed to match production messages even
+  // though the unit tests above used a literal space and passed. Keep these
+  // two `\n`-separator cases so any future regex regression resurfaces
+  // immediately. Mirror the in-the-wild viem output exactly.
+  it("archive-depth: 'Invalid parameters were provided' with `\\n` separator (viem-formatted)", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
+  // Third QuickNode first-sentence variant observed 2026-05-22 against
+  // recent (non-archive) Celo blocks; broad provider rejection rather than
+  // pure archive-depth, but the recovery path is identical (try the
+  // secondary at the same block), so it's routed through ARCHIVE_DEPTH_RE.
+  it("archive-depth: 'Missing or invalid parameters' (QuickNode 2026-05-22 variant)", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Missing or invalid parameters.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
+  // The 'Missing or invalid parameters' variant fires on RECENT blocks
+  // during transient provider rejection — NOT genuine archive depth.
+  // Pinning the per-chain fallback horizon here would block fallback
+  // usage for ~all blocks below that height until process restart, masking
+  // a transient glitch as a permanent provider limit. Verify the broad
+  // routing pattern is decoupled from the horizon-poisoning subset.
+  it("archive-depth: 'Missing or invalid parameters' on BOTH primary and secondary does NOT poison the fallback horizon", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Missing or invalid parameters.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => {
+      throw new Error(
+        "Missing or invalid parameters.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        1_000n,
+        fallback,
+      ),
+    );
+    // Horizon must NOT have been pinned at the requested block — a deeper
+    // block must still be considered "likely available".
+    assert.equal(
+      fallbackLikelyHasBlock(TEST_CHAIN_ID, 999n),
+      true,
+      "transient provider rejection must not pin fallback horizon",
+    );
+  });
+
+  // Pair test: verify the OLD verified-archive-depth phrasing on both
+  // primary and secondary still pins the horizon. Guards against the
+  // regex split silently dropping the existing poisoning behavior.
+  it("archive-depth: 'Invalid parameters were provided' on BOTH primary and secondary STILL poisons the horizon", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        primary,
+        baseArgs,
+        500n,
+        fallback,
+      ),
+    );
+    assert.equal(
+      fallbackLikelyHasBlock(TEST_CHAIN_ID, 500n),
+      false,
+      "verified archive-depth signal must still pin fallback horizon",
+    );
+  });
+
   it("archive-depth: secondary also fails → throws (fail-closed)", async () => {
     // Pre-PR behaviour preserved: archive-depth + secondary failure
     // throws to the caller. We must NOT silently fall through to `latest`
