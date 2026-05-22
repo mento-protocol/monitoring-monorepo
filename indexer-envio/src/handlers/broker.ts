@@ -106,12 +106,18 @@ async function writeBrokerProducerRollups(args: {
   const aggregator = classifyBrokerEntryPoint(chainId, txTo);
   const aggDayId = `${chainId}-${aggregator}-${dayTs}`;
   const aggCallerMarkerId = `${chainId}-${aggregator}-${caller}-${dayTs}`;
-  const [existingCallerDay, existingAggCallerMarker, existingAggDay] =
-    await Promise.all([
-      context.BrokerTraderDailySnapshot.get(callerDayId),
-      context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
-      context.BrokerAggregatorDailySnapshot.get(aggDayId),
-    ]);
+  const traderRouterMarkerId = `${chainId}-${caller}-${txTo}-${dayTs}`;
+  const [
+    existingCallerDay,
+    existingAggCallerMarker,
+    existingAggDay,
+    existingTraderRouterMarker,
+  ] = await Promise.all([
+    context.BrokerTraderDailySnapshot.get(callerDayId),
+    context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
+    context.BrokerAggregatorDailySnapshot.get(aggDayId),
+    context.BrokerTraderRouterDayMarker.get(traderRouterMarkerId),
+  ]);
   context.BrokerTraderDailySnapshot.set({
     id: callerDayId,
     chainId,
@@ -128,6 +134,16 @@ async function writeBrokerProducerRollups(args: {
   const aggCallerFirstTouch = existingAggCallerMarker === undefined;
   if (aggCallerFirstTouch) {
     context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
+  }
+  if (existingTraderRouterMarker === undefined) {
+    context.BrokerTraderRouterDayMarker.set({
+      id: traderRouterMarkerId,
+      chainId,
+      caller,
+      txTo,
+      aggregator,
+      timestamp: dayTs,
+    });
   }
   context.BrokerAggregatorDailySnapshot.set({
     id: aggDayId,

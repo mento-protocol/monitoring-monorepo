@@ -8,7 +8,6 @@ import {
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   brokerViaDisplayName,
-  buildBrokerViaMarkerIds,
   buildHeroPartialOverlapQueryInput,
   computeFlow,
   mergeHeroSnapshot,
@@ -1067,121 +1066,145 @@ describe("v2 trader Via marker helpers", () => {
     vi.useRealTimers();
   });
 
-  it("builds exact marker ids for visible traders, route buckets, and UTC days", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
-    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
-    const result = buildBrokerViaMarkerIds(
-      [
-        {
-          chainId: 42220,
-          trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          swapCount: 1,
-          volumeUsdWei: BigInt(1),
-          isSystemAddress: false,
-          lastSeenTimestamp: cutoff,
-        },
-        {
-          chainId: 42220,
-          trader: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          swapCount: 1,
-          volumeUsdWei: BigInt(1),
-          isSystemAddress: false,
-          lastSeenTimestamp: cutoff,
-        },
-      ],
-      ["squid", "direct"],
-      cutoff,
-    );
+  it("groups marker rows by trader and surfaces one pill per distinct tx.to for non-cluster traders", () => {
+    const routes = aggregateBrokerViaByTrader([
+      {
+        id: "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0xrouter1-1778457600",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xROUTER1",
+        aggregator: "squid",
+        timestamp: "1778457600",
+      },
+      {
+        id: "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0xrouter1-1778544000",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xrouter1",
+        aggregator: "squid",
+        timestamp: "1778544000",
+      },
+      {
+        id: "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0xrouter2-1778544000",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xrouter2",
+        aggregator: "unknown",
+        timestamp: "1778544000",
+      },
+    ]);
 
-    expect(result).toEqual({
-      ids: [
-        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
-        "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
-        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778544000",
-        "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778630400",
-        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
-        "42220-direct-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
-        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778544000",
-        "42220-squid-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778630400",
-      ],
-      truncated: false,
+    const aRoutes = routes.get(
+      "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(aRoutes).toBeDefined();
+    expect(aRoutes!.map((route) => route.key)).toEqual([
+      // 2 active days for squid (via router1) outranks the 1 day for unknown,
+      // and the unique-tx.to grouping means the same address with different
+      // casings collapses into one row.
+      "0xrouter1",
+      "0xrouter2",
+    ]);
+    expect(aRoutes![0]).toMatchObject({
+      key: "0xrouter1",
+      aggregator: "squid",
+      txTo: "0xrouter1",
+      isCluster: false,
+      days: 2,
+      latestTimestamp: 1778544000,
+    });
+    expect(aRoutes![1]).toMatchObject({
+      txTo: "0xrouter2",
+      aggregator: "unknown",
+      isCluster: false,
+      days: 1,
     });
   });
 
-  it("does not build all-time marker ids because the query can exceed the row cap", () => {
-    expect(
-      buildBrokerViaMarkerIds(
-        [
-          {
-            chainId: 42220,
-            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            swapCount: 1,
-            volumeUsdWei: BigInt(1),
-            isSystemAddress: false,
-            lastSeenTimestamp: 1778457600,
-          },
-        ],
-        ["direct"],
-        0,
-      ),
-    ).toBeNull();
-  });
-
-  it("fails closed before allocating marker ids when the expansion exceeds the safety cap", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.UTC(2026, 4, 13, 12, 0, 0));
-    const cutoff = Date.UTC(2026, 4, 12, 0, 0, 0) / 1000;
-
-    expect(
-      buildBrokerViaMarkerIds(
-        [
-          {
-            chainId: 42220,
-            trader: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            swapCount: 1,
-            volumeUsdWei: BigInt(1),
-            isSystemAddress: false,
-            lastSeenTimestamp: cutoff,
-          },
-        ],
-        ["direct", "squid"],
-        cutoff,
-        { maxIds: 3 },
-      ),
-    ).toEqual({ ids: [], truncated: true });
-  });
-
-  it("aggregates parsed marker ids by trader and orders route labels deterministically", () => {
+  it("collapses cluster traders into a single pill so the 'one fleet' signal survives", () => {
+    // Cluster traders rotate across multiple contracts that already share one
+    // cluster label (operator-keyed by `aggregators.json` cluster expansion).
+    // The Via column must render one cluster pill, NOT N address pills — the
+    // cluster name is load-bearing context that an address pill would lose.
     const routes = aggregateBrokerViaByTrader([
       {
-        id: "42220-squid-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+        id: "x",
+        chainId: 42220,
+        caller: "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+        txTo: "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+        aggregator: "cluster-7dc08ec28f299c06",
+        timestamp: "1778457600",
       },
       {
-        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778371200",
+        id: "y",
+        chainId: 42220,
+        caller: "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+        txTo: "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
+        aggregator: "cluster-7dc08ec28f299c06",
+        timestamp: "1778544000",
       },
       {
-        id: "42220-direct-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1778457600",
+        id: "z",
+        chainId: 42220,
+        caller: "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+        txTo: "0x6f9fe2b0acf50874dcb49faefff62382381bf622",
+        aggregator: "cluster-7dc08ec28f299c06",
+        timestamp: "1778544000",
       },
-      {
-        id: "42220-openocean-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-1778457600",
-      },
-      { id: "malformed" },
     ]);
+    const clusterRoutes = routes.get(
+      "42220-0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+    );
+    expect(clusterRoutes).toHaveLength(1);
+    expect(clusterRoutes![0]).toMatchObject({
+      key: "cluster-7dc08ec28f299c06",
+      aggregator: "cluster-7dc08ec28f299c06",
+      txTo: null,
+      isCluster: true,
+      // Three marker rows but only 2 distinct day buckets (1778457600 + two
+      // rows at 1778544000) — `days` must count distinct days, not row count,
+      // or cluster traders' sort order is inflated relative to their actual
+      // active days.
+      days: 2,
+      latestTimestamp: 1778544000,
+    });
+  });
 
-    expect(
-      routes
-        .get("42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        ?.map((route) => route.aggregator),
-    ).toEqual(["direct", "squid"]);
-    expect(
-      routes.get("42220-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-    ).toEqual([
+  it("orders mixed cluster + address routes by active-day count then recency", () => {
+    const routes = aggregateBrokerViaByTrader([
+      // 2 cluster days
       {
-        aggregator: "openocean",
-        days: 1,
-        latestTimestamp: 1778457600,
+        id: "a",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xc1",
+        aggregator: "cluster-abc",
+        timestamp: "1778457600",
       },
+      {
+        id: "b",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xc2",
+        aggregator: "cluster-abc",
+        timestamp: "1778544000",
+      },
+      // 1 squid day
+      {
+        id: "c",
+        chainId: 42220,
+        caller: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        txTo: "0xsquid",
+        aggregator: "squid",
+        timestamp: "1778457600",
+      },
+    ]);
+    const aRoutes = routes.get(
+      "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(aRoutes!.map((route) => route.key)).toEqual([
+      "cluster-abc",
+      "0xsquid",
     ]);
   });
 

@@ -1,12 +1,9 @@
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
-import {
-  BROKER_VIA_MARKER_ID_LIMIT,
-  type BrokerAggregatorTraderDayMarkerRow,
-} from "@/lib/leaderboard";
-import { BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID } from "@/lib/queries/leaderboard-via";
+import type { BrokerTraderRouterMarkerRow } from "@/lib/leaderboard";
+import { BROKER_TRADER_ROUTER_DAY_MARKERS } from "@/lib/queries/leaderboard-via";
 
 type BrokerViaMarkerPage = {
-  BrokerAggregatorTraderDayMarker: BrokerAggregatorTraderDayMarkerRow[];
+  BrokerTraderRouterDayMarker: BrokerTraderRouterMarkerRow[];
 };
 
 type BrokerViaMarkerRequester = {
@@ -18,59 +15,79 @@ type BrokerViaMarkerRequester = {
 };
 
 export type BrokerViaMarkerPageResult = {
-  rows: BrokerAggregatorTraderDayMarkerRow[];
+  rows: BrokerTraderRouterMarkerRow[];
   truncated: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_CHUNK_SIZE = ENVIO_MAX_ROWS;
-const DEFAULT_MAX_IDS = BROKER_VIA_MARKER_ID_LIMIT;
+const DEFAULT_CALLER_CHUNK_SIZE = 10;
 const DEFAULT_CONCURRENCY = 8;
 
-export async function fetchBrokerViaMarkerIds(
+/**
+ * Fetch BrokerTraderRouterDayMarker rows for the visible top-N traders.
+ *
+ * Server-side filter is `caller _in [...]` + `timestamp _gte cutoff`; the
+ * matching `@index` entries on the entity make this much cheaper than the
+ * earlier id-cartesian shape (which exploded to ~120k ids for a 50-trader,
+ * 30-day window across ~80 known tx.to addresses). Callers are chunked so a
+ * single trader's marker volume can't blow the Hasura 1000-row response cap.
+ * A chunk that returns exactly `ENVIO_MAX_ROWS` rows is treated as truncated
+ * — top-50 / 30d analysis shows a worst case of ~780 markers/trader, so a
+ * chunk of 10 traders is safely under cap in practice.
+ */
+export async function fetchBrokerTraderRouterMarkers(
   client: BrokerViaMarkerRequester,
-  markerIds: readonly string[],
+  callers: readonly string[],
+  cutoff: number,
   options: {
     chunkSize?: number;
-    maxIds?: number;
     concurrency?: number;
     timeoutMs?: number;
   } = {},
 ): Promise<BrokerViaMarkerPageResult> {
-  const chunkSize = Math.max(
+  const callerChunkSize = Math.max(
     1,
-    Math.min(options.chunkSize ?? DEFAULT_CHUNK_SIZE, ENVIO_MAX_ROWS),
+    options.chunkSize ?? DEFAULT_CALLER_CHUNK_SIZE,
   );
-  const maxIds = options.maxIds ?? DEFAULT_MAX_IDS;
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const ids = [...new Set(markerIds)];
-  if (ids.length === 0) return { rows: [], truncated: false };
-  if (ids.length > maxIds) return { rows: [], truncated: true };
+  const uniqueCallers = [
+    ...new Set(callers.map((caller) => caller.toLowerCase())),
+  ];
+  if (uniqueCallers.length === 0 || cutoff <= 0) {
+    return { rows: [], truncated: false };
+  }
 
-  const rows: BrokerAggregatorTraderDayMarkerRow[] = [];
+  const rows: BrokerTraderRouterMarkerRow[] = [];
   const seen = new Set<string>();
+  let truncated = false;
   const signal = AbortSignal.timeout(timeoutMs);
 
   const chunks: string[][] = [];
-  for (let index = 0; index < ids.length; index += chunkSize) {
-    chunks.push(ids.slice(index, index + chunkSize));
+  for (let index = 0; index < uniqueCallers.length; index += callerChunkSize) {
+    chunks.push(uniqueCallers.slice(index, index + callerChunkSize));
   }
 
   for (let start = 0; start < chunks.length; start += concurrency) {
-    const batchChunks = chunks.slice(start, start + concurrency);
+    const batch = chunks.slice(start, start + concurrency);
     // react-doctor-disable-next-line react-doctor/async-await-in-loop
     const results = await Promise.all(
-      batchChunks.map((idsChunk) =>
+      batch.map((callerChunk) =>
         client.request<BrokerViaMarkerPage>({
-          document: BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID,
-          variables: { ids: idsChunk, limit: idsChunk.length },
+          document: BROKER_TRADER_ROUTER_DAY_MARKERS,
+          variables: {
+            callers: callerChunk,
+            afterTimestamp: cutoff,
+            limit: ENVIO_MAX_ROWS,
+          },
           signal,
         }),
       ),
     );
     for (const result of results) {
-      for (const row of result.BrokerAggregatorTraderDayMarker) {
+      const page = result.BrokerTraderRouterDayMarker;
+      if (page.length === ENVIO_MAX_ROWS) truncated = true;
+      for (const row of page) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
         rows.push(row);
@@ -78,5 +95,5 @@ export async function fetchBrokerViaMarkerIds(
     }
   }
 
-  return { rows, truncated: false };
+  return { rows, truncated };
 }
