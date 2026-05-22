@@ -15,6 +15,8 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "react-doctor": "react-doctor .",
+    "react-doctor:diff": "bash ../scripts/check-react-doctor-diff.sh \"${REACT_DOCTOR_BASE_REF:-origin/main}\"",
+    "react-doctor:score": "bash ../scripts/check-react-doctor-score.sh",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "size-limit": "size-limit"

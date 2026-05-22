@@ -120,6 +120,14 @@ normalize_expected_command() {
     *"pnpm dashboard:size-limit"*)
       expected="${expected/pnpm dashboard:size-limit/pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
+    *"bash scripts/check-react-doctor-score.sh"*)
+      expected="${expected/bash scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+      ;;
+    *"bash scripts/check-react-doctor-diff.sh "*)
+      local base_ref="${expected#*bash scripts/check-react-doctor-diff.sh }"
+      base_ref="${base_ref%% *}"
+      expected="${expected/bash scripts\/check-react-doctor-diff.sh ${base_ref}/REACT_DOCTOR_BASE_REF=${base_ref} REACT_DOCTOR_BASE_CACHE_KEY=__unresolved__:${base_ref} pnpm exec turbo run react-doctor:diff --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+      ;;
     *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
       package_name="${expected#*pnpm --filter }"
       package_name="${package_name%% *}"
@@ -278,6 +286,41 @@ assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
 assert_turbo_task_has_env "test:browser" "VERCEL_ENV"
 assert_turbo_task_absent "test:browser:update-snapshots"
+node - <<'NODE' ||
+const fs = require("node:fs");
+const pkg = JSON.parse(fs.readFileSync("ui-dashboard/package.json", "utf8"));
+if (pkg.scripts?.["react-doctor:diff"] !== 'bash ../scripts/check-react-doctor-diff.sh "${REACT_DOCTOR_BASE_REF:-origin/main}"') {
+  console.error("ui-dashboard react-doctor:diff must delegate to the root diff wrapper");
+  process.exit(1);
+}
+if (pkg.scripts?.["react-doctor:score"] !== "bash ../scripts/check-react-doctor-score.sh") {
+  console.error("ui-dashboard react-doctor:score must delegate to the root score wrapper");
+  process.exit(1);
+}
+NODE
+  fail "expected ui-dashboard React Doctor package scripts to use root wrappers"
+assert_turbo_task_has_input "react-doctor:diff" "react-doctor.config.json"
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/scripts/check-react-doctor-diff.sh'
+assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
+assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/package.json'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/pnpm-lock.yaml'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/pnpm-workspace.yaml'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/.npmrc'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/.node-version'
+assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/turbo.json'
+assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_REF"
+assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_CACHE_KEY"
+assert_turbo_task_has_input "react-doctor:score" "react-doctor.config.json"
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/scripts/check-react-doctor-score.sh'
+assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
+assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/package.json'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/pnpm-lock.yaml'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/pnpm-workspace.yaml'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.npmrc'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
+assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
 printf 'scratch\n' > "$untracked_skill_artifact"
 node scripts/check-agent-context.mjs > "$output_file"
@@ -337,7 +380,13 @@ validator_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "true",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs"
+    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:prewarm": "node scripts/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:ready-state": "node scripts/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
   }
 }
 JSON
@@ -446,7 +495,13 @@ package_json_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs"
+    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:prewarm": "node scripts/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:ready-state": "node scripts/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
   }
 }
 JSON
@@ -462,9 +517,98 @@ NODE
 )
 rm -rf "$package_json_repo"
 assert_contains "- tooling"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package agent quality gate script changed)"
-assert_contains "- bash scripts/agent-quality-gate.test.sh (root package agent quality gate script changed)"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
+assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
+assert_not_contains "- pnpm install --frozen-lockfile"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+
+lockfile_script_repo="$(mktemp -d)"
+(
+  cd "$lockfile_script_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:prewarm": "node scripts/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:ready-state": "node scripts/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts["lockfile:lint:test"] = "node scripts/lockfile-lint.test.mjs --fixture";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$lockfile_script_repo"
+assert_contains "- tooling"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
+assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_not_contains "- pnpm install --frozen-lockfile"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+
+pr_ready_state_script_repo="$(mktemp -d)"
+(
+  cd "$pr_ready_state_script_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:prewarm": "node scripts/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:ready-state": "node scripts/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts["pr:ready-state:test"] = "node scripts/pr-ready-state.test.mjs --fixture";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$pr_ready_state_script_repo"
+assert_contains "- tooling"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
+assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -1399,6 +1543,12 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint bas
 # Editing the test file itself should also run the test.
 run_gate "scripts/eslint-baseline-diff.test.mjs"
 assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper test changed)"
+
+run_gate "scripts/lockfile-lint.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+run_gate "scripts/lockfile-lint.test.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"

@@ -65,13 +65,30 @@ Terraform apply. If any package manifest, `pnpm-lock.yaml`,
 `pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
 execute until you review package scripts/lifecycle hooks and pass
 `--allow-package-script-changes`. The narrow exception is a root `package.json`
-edit limited to `scripts.agent:quality-gate` or
-`scripts.agent:quality-gate:test`; the gate treats that as tooling-only and runs
-an entrypoint validator plus the gate regression tests instead of the
-package-script refusal path. Existing changed paths run targeted Trunk checks
-for faster local iteration. Deleted paths, Trunk/tooling changes, and
-package-manager or package-manifest changes still run full-repo Trunk locally.
-CI also runs a required full-repo Trunk check on every PR.
+edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
+`scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
+`scripts.agent:prewarm:test`, `scripts.agent:context-check`,
+`scripts.pr:ready-state`, `scripts.pr:ready-state:test`,
+`scripts.lockfile:lint`, or `scripts.lockfile:lint:test`; the gate treats that
+as tooling-only and runs an entrypoint validator plus the gate/prewarm/PR-ready
+regression tests instead of the package-script refusal path. Existing changed
+paths run targeted Trunk checks for faster local iteration. Deleted paths,
+Trunk/tooling changes, and package-manager or package-manifest changes still run
+full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
+PR.
+
+To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
+same gate without running deploy, Terraform, mutation, codegen, or install
+commands, use:
+
+```bash
+pnpm agent:prewarm --base origin/main
+```
+
+It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
+gate, prewarm refuses to execute Turbo-backed package scripts when package
+manifests, lockfiles, `.npmrc`, or pnpmfile changed unless you first review the
+script/lifecycle diff and pass `--allow-package-script-changes`.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
@@ -84,23 +101,44 @@ temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
 config for that push.
 
 Package-local gate tasks for `lint`, `typecheck`, `test`, `knip`, dashboard
-build, dashboard size-limit, and local dashboard browser tests run through
-Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
-Remote caching is disabled in `turbo.json`. The Turbo config is only for the
-gate's explicit per-package `--filter` invocations; do not use it as a general
-workspace task orchestrator. Dashboard build/browser cache keys explicitly
-include `shared-config`, package-manager, workflow, and browser-test env
+build, dashboard size-limit, local dashboard browser tests, and dashboard React
+Doctor checks run through Turbo's local filesystem cache
+(`pnpm exec turbo run ... --cache=local:rw`). Remote caching is disabled in
+`turbo.json`. The Turbo config is only for the gate's explicit per-package
+`--filter` invocations; do not use it as a general workspace task orchestrator.
+Dashboard build/browser/React Doctor cache keys explicitly include
+`shared-config`, package-manager, workflow, wrapper-script, and relevant env
 inputs; CI still runs browser tests normally and remains the Linux snapshot
 authority. The only task dependency is `size-limit -> build`, because
 size-limit reads `.next/` output. High-risk or cross-layer commands stay
-outside Turbo, including codegen, install, dep-cruiser, React Doctor, mutation
-baselines, and Terraform.
+outside Turbo, including codegen, install, dep-cruiser, mutation baselines, and
+Terraform.
 
 ## PR feedback sweep rule
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
 
 Hard stop: a PR is not all clear until `chatgpt-codex-connector[bot]` has left a 👍 reaction on the PR description for the current head. A Codex review comment on an older commit, elapsed grace time, green checks, or another actor's reaction does not satisfy this gate.
+
+Before signaling all-clear, both Claude Code and Codex babysitting flows must
+run the shared readiness probe:
+
+```bash
+pnpm pr:ready-state --pr <number> --json
+```
+
+Use the command's required-only result as the readiness source of truth. The raw
+GitHub status rollup and required review gates decide readiness; advisory bot
+lag is reported separately. In particular, Cursor Bugbot can trail the current
+status rollup, so do not block all-clear on Cursor unless its check or review is
+required by branch protection for that PR. See `docs/notes/pr-ready-state.md`
+for the expected CLI fields and Claude/Codex workflow contract.
+
+Codex re-reviews new pushes automatically. Do not post `@codex review` as a
+routine post-push step, and never post duplicate review requests while a
+current-head Codex request has a reaction or review in flight. Use one manual
+request only as a fallback when the current head has no Codex signal after the
+normal automatic-review window.
 
 ## Review-loop discipline
 

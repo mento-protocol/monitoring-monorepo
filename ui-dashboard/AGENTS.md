@@ -50,6 +50,8 @@ pnpm lint    # Run ESLint
 pnpm test:browser  # Fixture-driven Playwright browser interaction tests
 pnpm test:mutation  # Targeted StrykerJS baseline for src/lib/weekend.ts
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
+pnpm react-doctor:score  # Full react-doctor score gate; must end at 100
+REACT_DOCTOR_BASE_REF=origin/main pnpm react-doctor:diff  # Diff gate used by the local agent quality gate
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
 
