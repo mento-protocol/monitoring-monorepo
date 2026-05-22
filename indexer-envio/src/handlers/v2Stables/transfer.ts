@@ -161,6 +161,7 @@ indexer.onEvent(
       chainId,
       tokenAddress,
       tokenSymbol: info.symbol,
+      tokenDecimals: info.decimals,
       source: info.source,
       kind,
       counterparty,

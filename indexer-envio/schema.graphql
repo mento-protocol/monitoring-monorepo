@@ -1846,6 +1846,11 @@ type V2StableSupplyChangeEvent
   chainId: Int! @index
   tokenAddress: String! @index
   tokenSymbol: String!
+  # Denormalized from V2_STABLES registry so the UI changes-table can
+  # render token amounts without hardcoding 18. Every V2 stable in the
+  # registry today is 18 decimals; surfacing the field per-row removes
+  # the hardcode and stays safe for any future non-18 Mento stable.
+  tokenDecimals: Int!
   source: StableSupplySource!
   kind: V2StableSupplyChangeKind!
   # The non-zero side of the Transfer:

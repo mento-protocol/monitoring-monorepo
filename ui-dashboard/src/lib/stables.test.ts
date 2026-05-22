@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatWei } from "./format";
 import {
   displayLabel,
   effectiveOracleRate,
@@ -75,6 +76,27 @@ describe("effectiveOracleRate", () => {
     // from 1.0 (e.g. depeg signal), we honor it rather than overriding.
     const rates = new Map([["USDm", 0.997]]);
     expect(effectiveOracleRate(rates, "USDm")).toBe(0.997);
+  });
+});
+
+describe("V2StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
+  // The changes table feeds `event.tokenDecimals` (denormalized from
+  // V2_STABLES.decimals indexer-side) into `formatWei`. Today every V2
+  // stable is 18-decimal; this test locks the contract for any future
+  // non-18 Mento stable (e.g. a 6-dp USDC-bridged variant). Without it,
+  // a regression that hardcoded 18 again would silently underrender
+  // by 10^N for non-18 stables — exactly the bug this denormalization
+  // exists to prevent.
+  it("formats 1 token at 18 decimals (current V2 stables)", () => {
+    expect(formatWei("1000000000000000000", 18, 2)).toBe("1.00");
+  });
+
+  it("formats 1.234567 token at 6 decimals (USDC-shaped fixture)", () => {
+    expect(formatWei("1234567", 6, 2)).toBe("1.23");
+  });
+
+  it("formats 0.5 token at 6 decimals", () => {
+    expect(formatWei("500000", 6, 2)).toBe("0.50");
   });
 });
 
