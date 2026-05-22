@@ -297,6 +297,18 @@ main() {
 	echo -e "  ${GREEN}Impersonating:${NC} ${terraform_service_account}"
 	echo ""
 
+	# Fail fast if the runtime SA wasn't resolved from state. Passing
+	# `--service-account=` (empty) to gcloud aborts with an opaque flag-
+	# parse error; a clear message here pushes the operator back to
+	# `pnpm alerts:infra:apply` (which creates the SA) rather than
+	# letting the deploy fall back to the project default SA, which
+	# wouldn't have Secret Manager access anyway.
+	if [[ -z ${service_account_email} ]]; then
+		error "Runtime service account not found in Terraform state."
+		error "Run 'pnpm alerts:infra:apply' first so module.onchain_event_handler.google_service_account.function_runtime exists."
+		exit 1
+	fi
+
 	# Build the gcloud deploy command as an array to properly handle special characters
 	# Cloud Build will automatically run `npm install` and `npm run build` when it detects package.json
 	# All parameters come from Terraform files (single source of truth)

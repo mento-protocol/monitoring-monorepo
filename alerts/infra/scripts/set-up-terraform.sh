@@ -49,23 +49,32 @@ check_gcloud_iam_permissions() {
 	printf ' \033[1m%s\033[0m\n\n' "${terraform_service_account}"
 
 	# Check if the user has access to the Terraform state via the Service Account Token Creator role.
-	# Token Creator can be granted EITHER project-wide (legacy) OR directly on the
+	# Token Creator can be granted EITHER project-wide OR directly on the
 	# target service account (recommended least-privilege). Check both before
-	# concluding the user is missing the role — otherwise the direct-grant
-	# case reports a false failure and the script tries to bind project-wide,
-	# which can fail for non-owners or over-broaden privileges.
+	# concluding the role is missing — otherwise the direct-grant case
+	# reports a false failure and the script tries to bind project-wide.
+	#
+	# IMPORTANT: only `roles/iam.serviceAccountTokenCreator` enables
+	# impersonation. `roles/iam.serviceAccountUser` is similar-sounding but
+	# does NOT mint access tokens, so accepting it here would let the
+	# preflight pass while subsequent impersonating terraform commands
+	# fail with permission errors.
+	#
+	# Member match is exact (==) not substring (contains), so principals
+	# like `deleted:user:alice@example.com?uid=...` that happen to contain
+	# the same email don't satisfy the check.
 	info "Checking if you have the 'Service Account Token Creator' role in the terraform seed project..."
 	user_account_to_check="$(gcloud config get-value account)"
 	local check_result project_result sa_result
 	project_result=$(gcloud projects get-iam-policy "${terraform_seed_project_id}" --format=json |
 		jq -r \
 			--arg MEMBER "user:${user_account_to_check}" \
-			'.bindings[] | select(.members[] | contains($MEMBER)) | select(.role == "roles/iam.serviceAccountTokenCreator" or .role == "roles/iam.serviceAccountUser") | .role')
+			'.bindings[] | select(.members[]? == $MEMBER) | select(.role == "roles/iam.serviceAccountTokenCreator") | .role')
 	sa_result=$(gcloud iam service-accounts get-iam-policy "${terraform_service_account}" \
 		--project="${terraform_seed_project_id}" --format=json 2>/dev/null |
 		jq -r \
 			--arg MEMBER "user:${user_account_to_check}" \
-			'.bindings[]? | select(.members[]? | contains($MEMBER)) | select(.role == "roles/iam.serviceAccountTokenCreator" or .role == "roles/iam.serviceAccountUser") | .role' \
+			'.bindings[]? | select(.members[]? == $MEMBER) | select(.role == "roles/iam.serviceAccountTokenCreator") | .role' \
 		|| echo "")
 	check_result="${project_result}
 ${sa_result}"
@@ -74,19 +83,32 @@ ${sa_result}"
 		info "Permission check passed: ${user_account_to_check} has the Service Account Token Creator role in the terraform seed project."
 		printf "\n"
 	else
-		# If not, try to give the user the Service Account Token Creator role
+		# If not, try to give the user the Service Account Token Creator role.
+		# Try the SA-scoped binding FIRST — it's the least-privilege fix and
+		# typically works for operators who have SA-IAM-write but not project-
+		# IAM-write. Fall back to the project-scoped binding only if the SA
+		# binding fails.
 		warn "Permission check failed: ${user_account_to_check} does not have the Service Account Token Creator role in the terraform seed project."
 		printf "\n"
-		info "Trying to give permission \"Service Account Token Creator\" role to ${user_account_to_check}"
-		if gcloud projects add-iam-policy-binding "${terraform_seed_project_id}" \
+		info "Trying to grant Service Account Token Creator on the target SA (${terraform_service_account}) to ${user_account_to_check}"
+		if gcloud iam service-accounts add-iam-policy-binding "${terraform_service_account}" \
+			--project="${terraform_seed_project_id}" \
 			--member="user:${user_account_to_check}" \
 			--role="roles/iam.serviceAccountTokenCreator"; then
-			info "Successfully added the Service Account Token Creator role to ${user_account_to_check}"
+			info "Successfully added the Service Account Token Creator role (SA-scoped) to ${user_account_to_check}"
 		else
-			error "Failed to add the Service Account Token Creator role to ${user_account_to_check}"
-			echo "You may have to ask a project owner of '${terraform_seed_project_id}' to add the role manually via the following command."
-			echo "gcloud projects add-iam-policy-binding \"${terraform_seed_project_id}\" --member=\"user:${user_account_to_check}\" --role=\"roles/iam.serviceAccountTokenCreator\""
-			exit 1
+			warn "SA-scoped binding failed; falling back to project-scoped binding."
+			if gcloud projects add-iam-policy-binding "${terraform_seed_project_id}" \
+				--member="user:${user_account_to_check}" \
+				--role="roles/iam.serviceAccountTokenCreator"; then
+				info "Successfully added the Service Account Token Creator role (project-scoped) to ${user_account_to_check}"
+			else
+				error "Failed to add the Service Account Token Creator role to ${user_account_to_check}"
+				echo "You may have to ask a project owner of '${terraform_seed_project_id}' to add the role manually via one of:"
+				echo "  gcloud iam service-accounts add-iam-policy-binding \"${terraform_service_account}\" --project=\"${terraform_seed_project_id}\" --member=\"user:${user_account_to_check}\" --role=\"roles/iam.serviceAccountTokenCreator\""
+				echo "  gcloud projects add-iam-policy-binding \"${terraform_seed_project_id}\" --member=\"user:${user_account_to_check}\" --role=\"roles/iam.serviceAccountTokenCreator\""
+				exit 1
+			fi
 		fi
 		printf "\n"
 	fi
