@@ -1161,7 +1161,11 @@ describe("v2 trader Via marker helpers", () => {
       aggregator: "cluster-7dc08ec28f299c06",
       txTo: null,
       isCluster: true,
-      days: 3,
+      // Three marker rows but only 2 distinct day buckets (1778457600 + two
+      // rows at 1778544000) — `days` must count distinct days, not row count,
+      // or cluster traders' sort order is inflated relative to their actual
+      // active days.
+      days: 2,
       latestTimestamp: 1778544000,
     });
   });

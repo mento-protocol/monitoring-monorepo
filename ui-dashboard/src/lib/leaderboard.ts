@@ -366,11 +366,23 @@ export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
  * label. Everything else groups by raw tx.to so the dashboard surfaces the
  * actual router instead of a generic `unknown` bucket. Ordered by active-day
  * count, then recency, then key for deterministic rendering.
+ *
+ * `days` counts DISTINCT day buckets — a cluster trader hitting 4 different
+ * contracts on the same day must show 1 day, not 4. The marker timestamp is
+ * already day-aligned (`ts / 86400 * 86400`), so the Set works directly.
  */
 export function aggregateBrokerViaByTrader(
   rows: readonly BrokerTraderRouterMarkerRow[],
 ): Map<string, BrokerTraderViaRoute[]> {
-  const byTrader = new Map<string, Map<string, BrokerTraderViaRoute>>();
+  type Acc = {
+    key: string;
+    aggregator: string;
+    txTo: string | null;
+    isCluster: boolean;
+    days: Set<number>;
+    latestTimestamp: number;
+  };
+  const byTrader = new Map<string, Map<string, Acc>>();
   for (const row of rows) {
     const caller = row.caller.toLowerCase();
     const txTo = row.txTo.toLowerCase();
@@ -380,12 +392,12 @@ export function aggregateBrokerViaByTrader(
     const timestamp = Number(row.timestamp);
     let routes = byTrader.get(traderKey);
     if (!routes) {
-      routes = new Map<string, BrokerTraderViaRoute>();
+      routes = new Map<string, Acc>();
       byTrader.set(traderKey, routes);
     }
     const existing = routes.get(routeKey);
     if (existing) {
-      existing.days += 1;
+      existing.days.add(timestamp);
       if (timestamp > existing.latestTimestamp) {
         existing.latestTimestamp = timestamp;
       }
@@ -395,7 +407,7 @@ export function aggregateBrokerViaByTrader(
         aggregator: row.aggregator,
         txTo: isCluster ? null : txTo,
         isCluster,
-        days: 1,
+        days: new Set([timestamp]),
         latestTimestamp: timestamp,
       });
     }
@@ -404,13 +416,22 @@ export function aggregateBrokerViaByTrader(
   return new Map(
     [...byTrader.entries()].map(([key, routes]) => [
       key,
-      [...routes.values()].sort((a, b) => {
-        if (b.days !== a.days) return b.days - a.days;
-        if (b.latestTimestamp !== a.latestTimestamp) {
-          return b.latestTimestamp - a.latestTimestamp;
-        }
-        return a.key.localeCompare(b.key);
-      }),
+      [...routes.values()]
+        .map((acc) => ({
+          key: acc.key,
+          aggregator: acc.aggregator,
+          txTo: acc.txTo,
+          isCluster: acc.isCluster,
+          days: acc.days.size,
+          latestTimestamp: acc.latestTimestamp,
+        }))
+        .sort((a, b) => {
+          if (b.days !== a.days) return b.days - a.days;
+          if (b.latestTimestamp !== a.latestTimestamp) {
+            return b.latestTimestamp - a.latestTimestamp;
+          }
+          return a.key.localeCompare(b.key);
+        }),
     ]),
   );
 }
