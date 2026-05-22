@@ -23,8 +23,14 @@ function main(stream) {
     for (const receipt of decodedReceipts) {
       if (receipt.decodedLogs && receipt.decodedLogs.length > 0) {
         for (const log of receipt.decodedLogs) {
+          // blockHash is required by findChainFromBlockHash in the handler
+          // to disambiguate multisigs deployed at the same address on
+          // multiple chains (e.g. Mento Protocol Foundation on celo+ethereum).
+          // Without it cross-chain events fall through to address-only lookup,
+          // which fail-closes on ambiguity → silent drop with no Discord.
           result.push({
             transactionHash: receipt.transactionHash,
+            blockHash: receipt.blockHash,
             ...log
           });
         }
