@@ -13,6 +13,7 @@ import {
   computeChartStartSeconds,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
+  unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import type { RangeKey, StableSupplyDailySnapshot } from "../_lib/types";
 
@@ -56,16 +57,7 @@ export function StablesHeroChart({
     if (snapshots.length === 0 && latestPerToken.length === 0) {
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
-    // Union the daily-snapshot stream with `latestPerToken` so tokens
-    // whose only known snapshot is older than the retained 1000-row page
-    // still contribute their last-known supply to the stacked total.
-    // De-dupe on (chainId, tokenAddress, source, timestamp) by row id —
-    // `latestPerToken` rows share the same id shape as `snapshots`, so
-    // a Map by id collapses duplicates correctly.
-    const byId = new Map<string, StableSupplyDailySnapshot>();
-    for (const r of snapshots) byId.set(r.id, r);
-    for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
-    const merged = Array.from(byId.values());
+    const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
     // Shared discriminator with `_lib/aggregate.ts` so KPI strip and hero
     // chart group V2 cUSD-USDm vs V3 hub USDm identically.
     const grouped = groupSnapshotsByTokenSource(merged);
