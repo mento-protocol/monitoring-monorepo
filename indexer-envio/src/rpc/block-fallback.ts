@@ -86,15 +86,11 @@ const BLOCK_NOT_AVAILABLE_RE =
 const ARCHIVE_DEPTH_RE =
   /querying historical state|(?:Invalid parameters were provided to the RPC method|Missing or invalid parameters)\.\s+Double check you have provided the correct parameters/i;
 
-/** Subset of `ARCHIVE_DEPTH_RE` that represents a GENUINE archive-depth
- * miss — the secondary's response shape says "this node lacks state at
- * the requested block". Only these patterns should poison the per-chain
- * fallback horizon via `recordFallbackArchiveMiss`. The broader routing
- * regex includes a third QuickNode variant (`Missing or invalid
- * parameters`) that fires on RECENT blocks during transient rejection;
- * recording a horizon there would block fallback usage for ~all blocks
- * below that height until process restart, masking a transient glitch
- * as a permanent provider limit. */
+/** Subset of `ARCHIVE_DEPTH_RE` for genuine archive-depth signals only —
+ * the patterns that fire when the node truly lacks state at the requested
+ * block. Gates `recordFallbackArchiveMiss` so the broader routing regex's
+ * `Missing or invalid parameters` variant (which fires on RECENT blocks)
+ * doesn't poison the per-chain fallback horizon. See comment block above. */
 const PROVEN_ARCHIVE_DEPTH_RE =
   /querying historical state|Invalid parameters were provided to the RPC method\.\s+Double check you have provided the correct parameters/i;
 
