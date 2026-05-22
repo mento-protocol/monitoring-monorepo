@@ -280,7 +280,7 @@ Eliminates the static-token rotation pain that took ~1 hour to root-cause on 202
 
 ## Alerts integration follow-ups
 
-- [ ] **Terraform state mv** — in `alerts/infra/` (`prefix=alerts`): `terraform state mv module.discord_channel_manager module.discord_channels` and `terraform state mv module.sentry_alerts module.sentry_bridge`. Plan must show 0 changes after. User-gated.
+- [x] ~~**Terraform state mv** — in `alerts/infra/` (`prefix=alerts`): `terraform state mv module.discord_channel_manager module.discord_channels` and `terraform state mv module.sentry_alerts module.sentry_bridge`. Plan must show 0 changes after. User-gated.~~ Superseded by `moved` blocks in `alerts/infra/main.tf` — Terraform handles the rename as a state migration on the next apply, no manual `state mv` needed.
 - [ ] **State backend prefix unification** — `alerts/rules/`: `monorepo-alerts` → `alerts-rules`; `alerts/infra/`: `alerts` → `alerts-infra`. Use `terraform init -migrate-state`. Separate PR.
 - [ ] **Slack adapter for `onchain-event-handler`** — split `src/discord.ts` into `src/{notifier,discord,slack}.ts`. Add `alerts/infra/channels/slack-channels/` parallel module. Route by env.
 - [ ] **Retire Sentry → Discord bridge** after Slack adapter — drop `channels/sentry-bridge/` Discord wiring; Sentry's native Slack integration is already configured.
