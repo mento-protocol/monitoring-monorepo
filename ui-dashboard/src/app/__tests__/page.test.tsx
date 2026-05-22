@@ -90,10 +90,15 @@ beforeEach(() => {
   capturedProps = null;
   // Default `useGQL` mock for the Traders tile — empty payload so existing
   // tests get a deterministic `0` Traders count without touching their setup.
-  // Tests that exercise the Traders tile specifically override via
+  // The single object carries both response shapes (the
+  // `LEADERBOARD_WINDOW_TRADERS_LATEST` snapshot and the
+  // `LEADERBOARD_TODAY_TRADERS` partial) because `useGQL` is mocked as a
+  // single function; the consumer picks the field it reads, so an object
+  // with both empty arrays satisfies both call sites without per-query
+  // dispatch. Tests that exercise the Traders tile specifically override via
   // `mockReturnValueOnce` / `mockReturnValue` directly.
   vi.mocked(useGQL).mockReturnValue({
-    data: { LeaderboardWindowSnapshot: [] },
+    data: { LeaderboardWindowSnapshot: [], TraderDailySnapshot: [] },
     error: undefined,
     isLoading: false,
     isValidating: false,
@@ -769,6 +774,7 @@ describe("GlobalPage — Traders tile", () => {
             ],
           },
         ],
+        TraderDailySnapshot: [],
       },
       error: undefined,
       isLoading: false,
@@ -801,6 +807,7 @@ describe("GlobalPage — Traders tile", () => {
           { chainId: 42220, snapshotDay: "1778803200", windowTraders: [] },
           { chainId: 143, snapshotDay: "1778803200", windowTraders: [] },
         ],
+        TraderDailySnapshot: [],
       },
       error: undefined,
       isLoading: false,
@@ -832,5 +839,41 @@ describe("GlobalPage — Traders tile", () => {
     const html = render([makeNetworkData({ pools: [], fees: null })]);
     const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
     expect(tradersMatch?.[1]).toBe("…");
+  });
+
+  // The closed-day snapshot only refreshes at the per-chain UTC-midnight
+  // heartbeat, so today's brand-new traders are missing without the
+  // today-partial union. This test pins the union: a trader present
+  // ONLY in `TraderDailySnapshot` (today's partial) but absent from
+  // every chain's `windowTraders` must still count, and a trader
+  // present in both must dedupe to one.
+  it("merges today's partial trader set on top of the closed-day snapshot", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: "1778803200",
+            windowTraders: [
+              "0xaaaa000000000000000000000000000000000001",
+              "0xbbbb000000000000000000000000000000000002",
+            ],
+          },
+        ],
+        TraderDailySnapshot: [
+          // Overlaps Celo's TRADER_B from the snapshot — should dedupe.
+          { trader: "0xBBBB000000000000000000000000000000000002" },
+          // Brand-new today (no snapshot row) — must still count.
+          { trader: "0xeeee000000000000000000000000000000000005" },
+        ],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("3");
   });
 });

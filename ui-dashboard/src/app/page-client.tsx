@@ -20,13 +20,22 @@ import {
 } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { useGQL } from "@/lib/graphql";
-import { LEADERBOARD_WINDOW_TRADERS_LATEST } from "@/lib/queries/leaderboard";
-import { LeaderboardWindowTradersLatestSchema } from "@/lib/queries/leaderboard-schemas";
+import {
+  LEADERBOARD_TODAY_TRADERS,
+  LEADERBOARD_WINDOW_TRADERS_LATEST,
+} from "@/lib/queries/leaderboard";
+import {
+  LeaderboardTodayTradersSchema,
+  LeaderboardWindowTradersLatestSchema,
+} from "@/lib/queries/leaderboard-schemas";
 import type { z } from "zod";
 
 type LeaderboardWindowTradersLatest = z.infer<
   typeof LeaderboardWindowTradersLatestSchema
 >;
+type LeaderboardTodayTraders = z.infer<typeof LeaderboardTodayTradersSchema>;
+
+const SECONDS_PER_DAY = 86_400;
 
 export default function GlobalPage({
   initialNetworkData,
@@ -440,7 +449,7 @@ function GlobalContent({
 // function declarations hoist, so calling it from inside `GlobalContent`
 // is fine.
 function TradersTile() {
-  const gql = useGQL<LeaderboardWindowTradersLatest>(
+  const snapshotGql = useGQL<LeaderboardWindowTradersLatest>(
     LEADERBOARD_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
     {
@@ -461,16 +470,48 @@ function TradersTile() {
       timeoutMs: 30_000,
     },
   );
+  // Today's traders aren't yet in the closed-day snapshot (the heartbeat
+  // only flushes at the next UTC midnight on the first swap of the new
+  // day), so without this merge a wallet whose first-ever v3 swap is
+  // today would silently drop out of the all-time count for up to 24h.
+  // Mirrors the leaderboard hero's today-partial union in
+  // `useHeroRollup` (`mergeHeroSnapshot`). `todayMidnight` is captured
+  // once at mount — at current Mento scale the UTC-midnight rollover
+  // edge case (tab left open past midnight) costs at most a few hours
+  // of slight overcount as today's set still includes "yesterday"
+  // until the next refresh picks up the advanced snapshot.
+  const todayMidnight = useMemo(
+    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
+    [],
+  );
+  const todayGql = useGQL<LeaderboardTodayTraders>(
+    LEADERBOARD_TODAY_TRADERS,
+    { todayMidnight, isSystemAddressIn: [false] },
+    {
+      schema: LeaderboardTodayTradersSchema,
+      refreshInterval: 5 * 60_000,
+      timeoutMs: 30_000,
+    },
+  );
   const count = useMemo(() => {
-    if (gql.error) return null;
-    if (!gql.data) return null;
+    if (snapshotGql.error) return null;
+    if (!snapshotGql.data) return null;
     const set = new Set<string>();
-    for (const row of gql.data.LeaderboardWindowSnapshot) {
+    for (const row of snapshotGql.data.LeaderboardWindowSnapshot) {
       for (const addr of row.windowTraders) set.add(addr.toLowerCase());
     }
+    // Today's partial merge — only when the query has settled with
+    // data. If it's still loading or errored we render the closed-day
+    // count alone rather than blocking the tile entirely; the snapshot
+    // half is the load-bearing data and degrades gracefully on its own.
+    if (todayGql.data) {
+      for (const row of todayGql.data.TraderDailySnapshot) {
+        set.add(row.trader.toLowerCase());
+      }
+    }
     return set.size;
-  }, [gql.data, gql.error]);
-  const value = gql.isLoading
+  }, [snapshotGql.data, snapshotGql.error, todayGql.data]);
+  const value = snapshotGql.isLoading
     ? "…"
     : count === null
       ? "N/A"
