@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { cdpSymbolSlug, formatSignedWei, formatTokenAmount } from "./format";
+import {
+  cdpSymbolSlug,
+  formatSignedWei,
+  formatTokenAmount,
+  redemptionEventSubtitle,
+} from "./format";
 
 describe("CDP format helpers", () => {
   it("treats only the -1 sentinel as unknown token amount", () => {
@@ -42,5 +47,22 @@ describe("formatSignedWei", () => {
   it("returns — only for null/undefined", () => {
     expect(formatSignedWei(null, "BOLD")).toBe("—");
     expect(formatSignedWei(undefined, "BOLD")).toBe("—");
+  });
+});
+
+describe("redemptionEventSubtitle", () => {
+  it("renders — when count is missing (unknown instance)", () => {
+    // Guards against the loading-state anti-pattern: when LiquityInstance has
+    // not been indexed yet (or is mid-write), the tile must NOT collapse to
+    // "0 events" — it must surface unknown.
+    expect(redemptionEventSubtitle(null)).toBe("—");
+    expect(redemptionEventSubtitle(undefined)).toBe("—");
+  });
+
+  it("pluralises events correctly", () => {
+    expect(redemptionEventSubtitle(0)).toBe("0 events");
+    expect(redemptionEventSubtitle(1)).toBe("1 event");
+    expect(redemptionEventSubtitle(2)).toBe("2 events");
+    expect(redemptionEventSubtitle(1_234)).toBe("1,234 events");
   });
 });

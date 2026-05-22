@@ -26,7 +26,11 @@ import {
   type CdpTrove,
   type CdpTroveListRow,
 } from "../../_lib/types";
-import { cdpSymbolSlug, formatTokenAmount } from "../../_lib/format";
+import {
+  cdpSymbolSlug,
+  formatTokenAmount,
+  redemptionEventSubtitle,
+} from "../../_lib/format";
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
 import { CdpStabilityPoolTvlChart } from "./cdp-stability-pool-tvl-chart";
@@ -319,15 +323,25 @@ function RedemptionsSection({
   instance: CdpInstance | undefined;
   symbol: string;
 }) {
-  const totalCount = instance?.redemptionCountCum ?? 0;
-  const rebalanceCount = instance?.rebalanceRedemptionCountCum ?? 0;
-  const userCount = Math.max(0, totalCount - rebalanceCount);
+  // When `instance` is undefined (no LiquityInstance row indexed yet for this
+  // collateral, or a transient query gap), every tile renders `—` for both
+  // amount and event-count — never a happy-path "0 events".
+  const totalCount = instance?.redemptionCountCum;
+  const rebalanceCount = instance?.rebalanceRedemptionCountCum;
+  const userCount =
+    totalCount != null && rebalanceCount != null
+      ? Math.max(0, totalCount - rebalanceCount)
+      : null;
   const totalDebt = instance?.redemptionDebtCum ?? null;
   const rebalanceDebt = instance?.rebalanceRedemptionDebtCum ?? null;
-  const userDebt =
-    totalDebt != null && rebalanceDebt != null
-      ? (BigInt(totalDebt) - BigInt(rebalanceDebt)).toString()
-      : null;
+  // Clamp the subtraction to 0 to mirror `userCount`'s Math.max(0, ...) —
+  // defensive consistency. The indexer writes both counters in a single
+  // LiquityInstance.set call so rebalance > total isn't a live race today.
+  let userDebt: string | null = null;
+  if (totalDebt != null && rebalanceDebt != null) {
+    const diff = BigInt(totalDebt) - BigInt(rebalanceDebt);
+    userDebt = diff < BigInt(0) ? "0" : diff.toString();
+  }
   return (
     <section>
       <h2 className="text-lg font-semibold text-white mb-3">Redemptions</h2>
@@ -335,17 +349,17 @@ function RedemptionsSection({
         <Tile
           label="Total Redemptions"
           value={formatTokenAmount(totalDebt, symbol)}
-          subtitle={`${totalCount.toLocaleString()} event${totalCount === 1 ? "" : "s"}`}
+          subtitle={redemptionEventSubtitle(totalCount)}
         />
         <Tile
           label="User Redemptions"
           value={formatTokenAmount(userDebt, symbol)}
-          subtitle={`${userCount.toLocaleString()} event${userCount === 1 ? "" : "s"}`}
+          subtitle={redemptionEventSubtitle(userCount)}
         />
         <Tile
           label="Rebalance Redemptions"
           value={formatTokenAmount(rebalanceDebt, symbol)}
-          subtitle={`${rebalanceCount.toLocaleString()} event${rebalanceCount === 1 ? "" : "s"}`}
+          subtitle={redemptionEventSubtitle(rebalanceCount)}
         />
       </div>
     </section>

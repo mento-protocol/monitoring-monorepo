@@ -34,3 +34,13 @@ export function formatSignedWei(
 export function cdpSymbolSlug(symbol: string): string {
   return symbol.toLowerCase();
 }
+
+/** Render a Redemptions-tile subtitle. `null`/`undefined` means the upstream
+ * instance is unknown (no `LiquityInstance` indexed yet, or a transient query
+ * gap) — render `—`, NOT a happy-path `0 events`. */
+export function redemptionEventSubtitle(
+  count: number | null | undefined,
+): string {
+  if (count == null) return "—";
+  return `${count.toLocaleString()} event${count === 1 ? "" : "s"}`;
+}

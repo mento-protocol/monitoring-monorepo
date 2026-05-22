@@ -44,10 +44,10 @@ const EMPTY_AGGREGATES: CdpAggregates = {
 };
 
 /** List-page lookup: returns the per-collateral aggregate, or an empty
- * aggregate that preserves the chain-wide query's truncation flag. The
- * truncated propagation is load-bearing — without it, a collateral whose
- * troves were entirely pushed past the row cap renders as 0 open troves
- * instead of `≥ 0`. */
+ * aggregate that preserves the chain-wide query's truncation flag. Propagating
+ * `truncated` is required so the Open Troves tile keeps its `≥` prefix when
+ * a collateral's troves were entirely pushed past the row cap — without it,
+ * such a collateral would render as `0 open troves` instead of `≥ 0`. */
 export function aggregatesForCollateral(
   collateralId: string,
   aggregatesByCollateral: ReadonlyMap<string, CdpAggregates>,
