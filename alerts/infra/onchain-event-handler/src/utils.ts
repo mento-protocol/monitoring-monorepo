@@ -7,6 +7,7 @@ import { celo, mainnet } from "viem/chains";
 import config from "./config";
 import {
   DEFAULT_TOKEN_DECIMALS,
+  KNOWN_CHAINS,
   MULTISIGS_BY_CHAIN,
   SECURITY_EVENTS,
   getChainConfig,
@@ -83,7 +84,7 @@ async function verifyBlockHashOnChain(
  */
 export function findChainForAddress(address: string): string | null {
   const normalizedAddress = address.toLowerCase();
-  const knownChains = ["celo", "ethereum"];
+  const knownChains = KNOWN_CHAINS;
 
   const matches = knownChains.filter(
     (chain) => MULTISIGS_BY_CHAIN[`${normalizedAddress}:${chain}`],
@@ -111,7 +112,7 @@ export async function findChainFromBlockHash(
   // First, try to find chains that have this address
   const possibleChains: string[] = [];
   const normalizedAddress = address.toLowerCase();
-  const knownChains = ["celo", "ethereum"];
+  const knownChains = KNOWN_CHAINS;
 
   for (const chain of knownChains) {
     const compositeKey = `${normalizedAddress}:${chain}`;

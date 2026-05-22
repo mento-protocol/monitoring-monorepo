@@ -175,6 +175,18 @@ export function getChainConfig(chainName: string): ChainConfig | null {
 }
 
 /**
+ * Chains the handler can route events from. Derived from CHAIN_CONFIGS so
+ * adding a new chain is a single source-of-truth edit (above) rather than
+ * grepping for hardcoded `["celo", "ethereum"]` lists across modules.
+ *
+ * Note: chains in `MULTISIG_CONFIG` env that aren't in this list will be
+ * unreachable at runtime — see findChainForAddress / findChainFromBlockHash.
+ */
+export const KNOWN_CHAINS: readonly string[] = Object.freeze(
+  Object.keys(CHAIN_CONFIGS),
+);
+
+/**
  * Color codes for Discord embeds
  */
 export const DISCORD_COLORS = {
