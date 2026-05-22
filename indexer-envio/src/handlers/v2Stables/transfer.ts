@@ -62,8 +62,14 @@ indexer.onEvent(
     // without writing rather than persist a half-typed row.
     if (!info) return;
 
-    const isMint = event.params.from === ZERO_ADDRESS;
-    const isBurn = event.params.to === ZERO_ADDRESS;
+    // Normalize via asAddress() for consistency with every other address
+    // comparison in the codebase. The zero address is case-invariant
+    // (all-zeros looks the same in any checksum scheme), so this happens
+    // to work without normalization — but the pattern keeps the
+    // comparison safe if the ZERO_ADDRESS constant ever changes shape
+    // and lets future copies of this snippet stay correct.
+    const isMint = asAddress(event.params.from) === ZERO_ADDRESS;
+    const isBurn = asAddress(event.params.to) === ZERO_ADDRESS;
     // `where` filter already enforces (from=0x0 OR to=0x0). A Transfer with
     // both ends zero would be an unsigned-balance reduction of zero — no
     // real ERC20 emits it, but skipping is harmless and keeps the delta

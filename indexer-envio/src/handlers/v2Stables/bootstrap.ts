@@ -111,6 +111,14 @@ export async function getOrCreateV2StableTokenSupply(
  * The preload's job is purely in-batch dedup: keeps 13 concurrent
  * `V2StableToken.Transfer` events on the same token from firing 13
  * separate RPC calls when their handlers run in parallel.
+ *
+ * Steady-state cost: O(1) per token — the first successful baseline call
+ * pins `supplyBaselineSeeded: true` and every subsequent preload returns
+ * early at the existing-supply check. For a token in PERSISTENT RPC
+ * failure, however, the entity stays unseeded and every Transfer-zero
+ * event's preload pass fires another archive call. Bounded by the
+ * chain's rate-limit budget (200/s per `v2StableTotalSupplyEffect`
+ * config). Worth knowing during outage triage.
  */
 export async function preloadV2StableTokenSupply(
   context: BootstrapContext,

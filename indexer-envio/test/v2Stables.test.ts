@@ -92,6 +92,11 @@ describe("v2Stables/config — registry derivation", () => {
   });
 });
 
+// Mainnet-only today. Testnet's V2StableToken block is empty
+// (`address: []`) — no addresses to validate. When testnet V2 stables get
+// wired in a follow-up PR, add a parallel `it("…testnet YAML")` assertion
+// here so the same drift protection covers both chains. Tracked as a
+// gentle reminder rather than blocking PR1.
 describe("v2Stables — YAML drift gate", () => {
   it("every V2_STABLES address appears under V2StableToken in mainnet YAML", () => {
     // Locate the V2StableToken block under the Celo (chain 42220) network.

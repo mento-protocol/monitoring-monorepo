@@ -1788,7 +1788,8 @@ enum V2StableSupplyChangeKind {
 # 12 V2 reserve-backed + V3 hub USDm collateral + 3 V3 Liquity debt tokens.
 type StableSupplyDailySnapshot
   @index(fields: ["chainId", "tokenSymbol", "timestamp"])
-  @index(fields: ["chainId", "source", "timestamp"]) {
+  @index(fields: ["chainId", "source", "timestamp"])
+  @index(fields: ["chainId", "tokenAddress", "timestamp"]) {
   id: ID! # "{chainId}-{tokenAddress}-{day}"
   chainId: Int! @index
   tokenAddress: String! @index
@@ -1803,6 +1804,11 @@ type StableSupplyDailySnapshot
   # fully + V3 net-only computed client-side from totalSupply diff).
   dailyMintAmount: BigInt!
   dailyBurnAmount: BigInt!
+  # blockNumber + updatedAtTimestamp anchor to the FIRST event of the
+  # NEXT day (the event that triggered the rolling flush), NOT the
+  # last event of the snapshotted day. Use `timestamp` (the UTC day
+  # bucket) for "supply on day X" queries — `blockNumber` is for
+  # debugging the flush-trigger only.
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }

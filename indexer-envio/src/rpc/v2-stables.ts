@@ -132,10 +132,10 @@ function isContractNotDeployedError(err: unknown): boolean {
 // can yield a different totalSupply if a mint/burn was rolled back. Fresh
 // reads on reindex are the only safe behavior.
 //
-// On RPC failure or `usedLatestFallback`, the fetcher returns null and we
-// set `context.cache = false` so even the success-shape envelope (`null`)
-// doesn't get cached. The handler treats null as "retry" — see
-// src/handlers/v2Stables/transfer.ts.
+// On RPC failure or `usedLatestFallback`, the fetcher returns null. The
+// handler treats null as "retry" — see src/handlers/v2Stables/transfer.ts.
+// (The outer `cache: false` already covers null results too; no
+// per-branch `context.cache = false` needed.)
 // ---------------------------------------------------------------------------
 export const v2StableTotalSupplyEffect = createEffect(
   {
@@ -152,10 +152,6 @@ export const v2StableTotalSupplyEffect = createEffect(
       input.blockNumber,
       context.log,
     );
-    if (result === null) {
-      context.cache = false;
-      return null;
-    }
     return result;
   },
 );
