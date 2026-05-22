@@ -22,8 +22,20 @@ export function validatePayload(req: Request): PayloadValidationResult {
     !webhookData.result ||
     !Array.isArray(webhookData.result)
   ) {
+    // Don't log req.body. Even though signature verification has already
+    // passed at this point, a malformed payload could still be large or
+    // contain sensitive multisig-event data that bloats Cloud Logging.
+    // The shape diagnostic below is enough to debug real producer bugs.
     logger.error("Invalid webhook payload: missing or invalid result array", {
-      body: req.body,
+      hasBody: req.body !== undefined,
+      bodyType: typeof req.body,
+      hasResult:
+        req.body !== null &&
+        typeof req.body === "object" &&
+        "result" in (req.body as object),
+      resultIsArray: Array.isArray(
+        (req.body as { result?: unknown } | undefined)?.result,
+      ),
     });
     return {
       valid: false,
