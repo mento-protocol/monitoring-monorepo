@@ -35,9 +35,9 @@ const getBrokerAddress = (chainId: number): string | null => {
   if (_brokerCache.has(chainId)) {
     return _brokerCache.get(chainId) ?? null;
   }
-  const addr = getContractAddress(chainId, "Broker") ?? null;
-  _brokerCache.set(chainId, addr?.toLowerCase() ?? null);
-  return _brokerCache.get(chainId) ?? null;
+  const lowered = getContractAddress(chainId, "Broker")?.toLowerCase() ?? null;
+  _brokerCache.set(chainId, lowered);
+  return lowered;
 };
 
 /**
@@ -55,7 +55,8 @@ export function classifyV2StableSupplyChangeKind(
   if (!txTo) return isMint ? "OTHER_MINT" : "OTHER_BURN";
   const lower = asAddress(txTo);
   const broker = getBrokerAddress(chainId);
-  if (broker && lower === broker) return isMint ? "RESERVE_MINT" : "RESERVE_BURN";
+  if (broker && lower === broker)
+    return isMint ? "RESERVE_MINT" : "RESERVE_BURN";
   if (nttBridgeAddressesForChain(chainId).has(lower)) {
     return isMint ? "BRIDGE_MINT" : "BRIDGE_BURN";
   }

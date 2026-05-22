@@ -15,7 +15,7 @@
 import type { EvmOnEventContext, V2StableTokenSupply } from "envio";
 import { dayBucket } from "../../helpers.js";
 import { findV2StableByAddress, makeV2StableSupplyId } from "./config.js";
-import { v2StableTotalSupplyEffect } from "../../rpc/v2-stables.js";
+import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
 
 // Use Envio's published context type so the effect caller, entity stores,
 // and isPreload predicate are correctly typed. The locally-narrowed
@@ -102,9 +102,15 @@ export async function getOrCreateV2StableTokenSupply(
 
 /**
  * Preload-mode helper. Pre-fetches the running entity and (if not yet seeded)
- * the RPC baseline so Envio can dedupe the effect call across batch peers.
- * Safe no-op when called multiple times for the same (chainId, tokenAddress)
- * within a batch — the in-batch effect dedup serves the second-onward callers.
+ * the RPC baseline so concurrent handler invocations in the same batch share
+ * the lookup. Safe no-op when called multiple times for the same
+ * (chainId, tokenAddress) within a batch.
+ *
+ * Note: `v2StableTotalSupplyEffect` is `cache: false` (Group C invariant —
+ * see `rpc/v2-stables.ts`), so the value is NOT persisted across batches.
+ * The preload's job is purely in-batch dedup: keeps 13 concurrent
+ * `V2StableToken.Transfer` events on the same token from firing 13
+ * separate RPC calls when their handlers run in parallel.
  */
 export async function preloadV2StableTokenSupply(
   context: BootstrapContext,

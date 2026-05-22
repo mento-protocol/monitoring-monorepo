@@ -28,7 +28,7 @@ import type { V2StableSupplyChangeEvent } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
-import { v2StableTotalSupplyEffect } from "../../rpc/v2-stables.js";
+import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
 import { isSystemAddress } from "../../system-addresses.js";
 import {
   getOrCreateV2StableTokenSupply,

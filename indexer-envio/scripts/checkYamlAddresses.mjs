@@ -123,7 +123,10 @@ const ALLOWLIST = new Map([
   // `@mento-protocol/contracts` republishes USDm at the V3 hub address.
   [
     "0x106cc9ff5a2c488780635be8afc07c68522b7ea5",
-    { chainId: 42220, reason: "V3 hub USDm — hand-typed, not in @mento-protocol/contracts" },
+    {
+      chainId: 42220,
+      reason: "V3 hub USDm — hand-typed, not in @mento-protocol/contracts",
+    },
   ],
 ]);
 

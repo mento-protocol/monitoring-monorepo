@@ -18,11 +18,7 @@
 import { createEffect, S } from "envio";
 import { ERC20_TOTAL_SUPPLY_ABI } from "../abis.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
-import {
-  getFallbackRpcClient,
-  getRpcClient,
-  logRpcFailure,
-} from "./client.js";
+import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 
 const _testTotalSupply = new Map<string, bigint | null>();
@@ -89,6 +85,22 @@ export async function fetchV2StableTotalSupply(
     if (usedLatestFallback) return null;
     return result as bigint;
   } catch (err) {
+    // viem stamps "returned no data" on a `ContractFunctionExecutionError`
+    // when the underlying eth_call returns `0x` — for ERC20 `totalSupply`
+    // specifically that can only mean the address has no bytecode at the
+    // queried block (every real ERC20 implements the function). For our 13
+    // V2 stables this is unreachable in practice (all deployed pre-
+    // `start_block`), but the safe-baseline path matters if a future
+    // stable is added to the registry at its deploy block: throwing here
+    // would halt ingestion forever because the retry hits the same pre-
+    // deployment block. Returning `0n` lets the handler seed the baseline
+    // correctly (token didn't exist → supply was 0).
+    if (isContractNotDeployedError(err)) {
+      log.info?.(
+        `[v2StableTotalSupply] ${tokenAddress} on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
+      );
+      return BigInt(0);
+    }
     logRpcFailure(
       chainId,
       "v2StableTotalSupply",
@@ -99,6 +111,15 @@ export async function fetchV2StableTotalSupply(
     );
     return null;
   }
+}
+
+// Mirrors `isUnsupportedGetterError` in pool-fees.ts. viem's
+// `ContractFunctionExecutionError` wraps the "returned no data" message when
+// the underlying call yields `0x`. For totalSupply on an ERC20 address this
+// can only mean the contract has no code at the queried block.
+function isContractNotDeployedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("returned no data");
 }
 
 // ---------------------------------------------------------------------------

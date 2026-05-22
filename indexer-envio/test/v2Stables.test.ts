@@ -12,6 +12,8 @@ import {
   classifyV2StableSupplyChangeKind,
 } from "../src/handlers/v2Stables/classifyKind.ts";
 import { flushV2StableDailySnapshot } from "../src/handlers/v2Stables/dailyFlush.ts";
+import { makeV2StableTokenSupply } from "../src/handlers/v2Stables/bootstrap.ts";
+import { V3_HUB_USDM_ADDRESS } from "../src/constants.ts";
 
 const MAINNET_CONFIG = readFileSync(
   new URL("../config.multichain.mainnet.yaml", import.meta.url),
@@ -37,7 +39,7 @@ const EXPECTED_V2_RESERVE_SYMBOLS = [
   "ZARm",
 ] as const;
 
-const V3_HUB_USDM_ADDRESS = "0x106cc9ff5a2c488780635be8afc07c68522b7ea5";
+// V3 hub USDm address is imported from constants.ts (single source of truth).
 const V2_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
 describe("v2Stables/config — registry derivation", () => {
@@ -94,7 +96,11 @@ describe("v2Stables — YAML drift gate", () => {
   it("every V2_STABLES address appears under V2StableToken in mainnet YAML", () => {
     // Locate the V2StableToken block under the Celo (chain 42220) network.
     const celoStart = MAINNET_CONFIG.indexOf("  - id: 42220");
-    assert.notEqual(celoStart, -1, "Celo chain block missing from mainnet YAML");
+    assert.notEqual(
+      celoStart,
+      -1,
+      "Celo chain block missing from mainnet YAML",
+    );
     const monadStart = MAINNET_CONFIG.indexOf("  - id: 143", celoStart);
     const celoBlock = MAINNET_CONFIG.slice(
       celoStart,
@@ -243,7 +249,12 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
     };
     const supply = mockSupply();
     const sameDay = supply.currentDayBucket + 3600n; // +1 hour, still same UTC day
-    const next = flushV2StableDailySnapshot(ctx, supply as never, sameDay, 60_700_001n);
+    const next = flushV2StableDailySnapshot(
+      ctx,
+      supply as never,
+      sameDay,
+      60_700_001n,
+    );
     assert.equal(saved.length, 0, "no snapshot should be flushed");
     assert.equal(next.mintedTodayBucket, supply.mintedTodayBucket);
     assert.equal(next.burnedTodayBucket, supply.burnedTodayBucket);
@@ -341,15 +352,110 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
   });
 });
 
+describe("makeV2StableTokenSupply — fresh row shape", () => {
+  it("returns supplyBaselineSeeded: false with zeroed accumulators", () => {
+    const row = makeV2StableTokenSupply({
+      chainId: 42220,
+      tokenAddress: V2_CUSD_USDM_ADDRESS,
+      symbol: "USDm",
+      decimals: 18,
+      source: "V2_RESERVE",
+      blockNumber: 60_700_000n,
+      blockTimestamp: 1_716_400_000n,
+    });
+    assert.equal(row.id, `42220-${V2_CUSD_USDM_ADDRESS}`);
+    assert.equal(row.chainId, 42220);
+    assert.equal(row.tokenAddress, V2_CUSD_USDM_ADDRESS);
+    assert.equal(row.tokenSymbol, "USDm");
+    assert.equal(row.source, "V2_RESERVE");
+    assert.equal(row.tokenDecimals, 18);
+    assert.equal(row.totalSupply, 0n);
+    assert.equal(row.supplyBaselineSeeded, false);
+    assert.equal(row.mintedTodayBucket, 0n);
+    assert.equal(row.burnedTodayBucket, 0n);
+    assert.equal(row.lastEventBlock, 60_700_000n);
+    assert.equal(row.lastEventTimestamp, 1_716_400_000n);
+  });
+
+  it("pins currentDayBucket to dayBucket(blockTimestamp) — first-day no-flush invariant", () => {
+    // Block timestamp = 2024-05-22 15:30:00 UTC → currentDayBucket should
+    // be 2024-05-22 00:00:00 UTC. The first day-flush call with a same-day
+    // event then returns no-op (currentDayBucket >= eventDay).
+    const blockTimestamp = 1_716_391_800n; // 2024-05-22 15:30:00 UTC
+    const expectedDay = 1_716_336_000n; // 2024-05-22 00:00:00 UTC
+    const row = makeV2StableTokenSupply({
+      chainId: 42220,
+      tokenAddress: V2_CUSD_USDM_ADDRESS,
+      symbol: "USDm",
+      decimals: 18,
+      source: "V2_RESERVE",
+      blockNumber: 60_700_000n,
+      blockTimestamp,
+    });
+    assert.equal(row.currentDayBucket, expectedDay);
+  });
+});
+
+describe("schema → TS enum drift gate", () => {
+  const SCHEMA = readFileSync(
+    new URL("../schema.graphql", import.meta.url),
+    "utf8",
+  );
+
+  function parseEnumValues(enumName: string): Set<string> {
+    const re = new RegExp(`enum\\s+${enumName}\\s*\\{([^}]+)\\}`);
+    const match = SCHEMA.match(re);
+    assert.ok(match, `enum ${enumName} missing from schema.graphql`);
+    const body = match[1];
+    return new Set(
+      body
+        .split("\n")
+        .map((line) => line.replace(/#.*$/, "").trim())
+        .filter((line) => line.length > 0),
+    );
+  }
+
+  it("StableSupplySource TS union matches schema enum values exactly", () => {
+    const schemaValues = parseEnumValues("StableSupplySource");
+    // TS union value set — kept hand-listed so a future schema addition
+    // requires updating BOTH places (drift then surfaces here, not at
+    // runtime when the handler writes an unknown enum value).
+    const tsValues = new Set(["V2_RESERVE", "V3_HUB_COLLATERAL", "V3_LIQUITY"]);
+    assert.deepEqual(
+      [...schemaValues].sort(),
+      [...tsValues].sort(),
+      `Schema enum StableSupplySource drifted from TS union. Update both.`,
+    );
+  });
+
+  it("V2StableSupplyChangeKind TS union matches schema enum values exactly", () => {
+    const schemaValues = parseEnumValues("V2StableSupplyChangeKind");
+    const tsValues = new Set([
+      "RESERVE_MINT",
+      "RESERVE_BURN",
+      "BRIDGE_MINT",
+      "BRIDGE_BURN",
+      "OTHER_MINT",
+      "OTHER_BURN",
+    ]);
+    assert.deepEqual(
+      [...schemaValues].sort(),
+      [...tsValues].sort(),
+      `Schema enum V2StableSupplyChangeKind drifted from TS union. Update both.`,
+    );
+  });
+});
+
 // Handler integration tests (via Envio's createTestIndexer harness) for the
 // load-bearing transfer.ts path — baseline-seed mint, baseline-seed burn,
-// throw-on-RPC-failure retry — are tracked as a follow-up. The V2StableToken
-// contract is registered in indexerTestHarness.ts in this PR; the mock-event
-// + effect-mock-routing wiring across createTestIndexer's runtime needs
-// more harness work than this PR can absorb. The strengthened helper tests
-// above (dailyFlush field assertions, classifyKind helper/transceiver/
-// chain-dispatch cases) cover what's testable without the full harness.
-// See codex + tests specialist findings.
+// throw-on-RPC-failure retry, pre-deployment-block 0n-seed — are tracked
+// as a follow-up. The V2StableToken contract is registered in
+// indexerTestHarness.ts in this PR; the mock-event + effect-mock-routing
+// wiring across createTestIndexer's runtime needs more harness work than
+// this PR can absorb. The helper tests above (dailyFlush field
+// assertions, classifyKind helper/transceiver/chain-dispatch cases,
+// makeV2StableTokenSupply pure-function tests, schema↔TS enum drift gate)
+// cover what's testable without the full harness.
 
 type MockSupply = {
   id: string;

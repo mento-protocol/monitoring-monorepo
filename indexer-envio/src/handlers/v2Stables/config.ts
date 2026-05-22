@@ -87,8 +87,7 @@ const V3_HUB_USDM_INFO: V2StableInfo = {
 const buildV2Stables = (): ReadonlyArray<V2StableInfo> => {
   const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(V2_STABLE_CHAIN_ID)];
   const entries =
-    ns &&
-    (_contractsJson as ContractsJson)[String(V2_STABLE_CHAIN_ID)]?.[ns];
+    ns && (_contractsJson as ContractsJson)[String(V2_STABLE_CHAIN_ID)]?.[ns];
   if (!entries) return [];
 
   const out: V2StableInfo[] = [];
@@ -130,15 +129,44 @@ export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
       );
     }
   }
-  // Also sanity-check the V3 hub USDm hasn't been added under the bare USDm
-  // key (which would mean the upstream package has republished it and the
-  // hardcoded entry needs to be removed to avoid duplicate subscriptions).
+  // Also sanity-check that V2 cUSD-USDm and the hardcoded V3 hub USDm are
+  // at DISTINCT on-chain addresses. The two USDm entries must differ — if
+  // the upstream package starts publishing USDm at the V3 hub address
+  // (`0x106cc…`), the length check below alone would pass with two
+  // duplicate-address rows, and `_byAddress` would silently collapse them
+  // (last-write-wins). Asserting distinctness here fails loud at module
+  // load so an operator removes V3_HUB_USDM_INFO before deploy.
   const usdmEntries = V2_STABLES.filter((s) => s.symbol === "USDm");
   if (usdmEntries.length !== 2) {
     throw new Error(
       `[v2Stables/config] Expected exactly 2 USDm entries (V2 cUSD-USDm + V3 hub USDm), found ${usdmEntries.length}. ` +
         `If @mento-protocol/contracts now ships USDm at ${V3_HUB_USDM_ADDRESS}, remove V3_HUB_USDM_INFO from this file.`,
     );
+  }
+  // `usdmEntries.length === 2` guaranteed by the prior throw, so index
+  // access is safe; the local-binding pattern keeps TS strict-null happy.
+  const [firstUsdm, secondUsdm] = usdmEntries;
+  if (firstUsdm && secondUsdm && firstUsdm.address === secondUsdm.address) {
+    throw new Error(
+      `[v2Stables/config] Both USDm entries resolved to the same address ${firstUsdm.address}. ` +
+        `@mento-protocol/contracts likely republished USDm at the V3 hub address — remove V3_HUB_USDM_INFO from this file.`,
+    );
+  }
+  // Belt-and-braces: assert no duplicate (chainId, address) keys overall.
+  // `_byAddress` below silently collapses duplicates; the test in
+  // test/v2Stables.test.ts catches drift at YAML time, but a registry-side
+  // collision should fail at module load with a clearer error than the
+  // downstream map-build losing a row.
+  const seenKeys = new Set<string>();
+  for (const s of V2_STABLES) {
+    const key = `${s.chainId}-${s.address}`;
+    if (seenKeys.has(key)) {
+      throw new Error(
+        `[v2Stables/config] Duplicate (chainId, address) entry in V2_STABLES: ${key}. ` +
+          `Check EXCLUDED_FROM_V2 / EXTERNAL_STABLES / NATIVE_GAS filters and the hardcoded V3_HUB_USDM_INFO.`,
+      );
+    }
+    seenKeys.add(key);
   }
 }
 
