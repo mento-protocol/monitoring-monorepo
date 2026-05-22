@@ -507,13 +507,19 @@ function TradersTile() {
       timeoutMs: 30_000,
     },
   );
-  // A snapshot whose `snapshotDay` lags behind yesterday's UTC midnight
-  // leaves a gap: traders from the missing closed days are absent from
-  // both `windowTraders` (capped at snapshotDay) and the today-partial
-  // query (timestamp >= todayMidnight). Flag the tile as approximate so
-  // the count is shown with a "≈" prefix and an explanatory subtitle
-  // until the indexer catches up. Mirrors the LP tile's partial-state
-  // pattern and the BreakdownTile's `totalPrefix="≈ "` convention.
+  // Two distinct partial-data states feed the same "≈" badge:
+  //   - `hasStaleChain`: a chain's snapshot lags behind yesterday's UTC
+  //     midnight, so closed days between snapshotDay and yesterday are
+  //     absent from both `windowTraders` (capped at snapshotDay) and
+  //     the today-partial query (timestamp >= todayMidnight). The count
+  //     understates by the missing-day deltas.
+  //   - `todayPartialMissing`: the today-partial query errored, so any
+  //     wallet whose first-ever v3 swap is today is silently dropped
+  //     from the union. The closed-day count is still trustworthy on
+  //     its own, but the "all-time" framing isn't.
+  // Both surface as the same `≈` prefix + "Approximate — …" subtitle so
+  // the tile signals degraded data uniformly. Mirrors the LP tile's
+  // partial-state pattern and the BreakdownTile's `totalPrefix="≈ "`.
   const yesterdayMidnight = (utcDayKey - 1) * SECONDS_PER_DAY;
   const hasStaleChain = useMemo(
     () =>
@@ -522,6 +528,8 @@ function TradersTile() {
       ),
     [snapshotGql.data, yesterdayMidnight],
   );
+  const todayPartialMissing = todayGql.error !== undefined;
+  const isPartial = hasStaleChain || todayPartialMissing;
   const count = useMemo(() => {
     if (snapshotGql.error) return null;
     if (!snapshotGql.data) return null;
@@ -530,9 +538,11 @@ function TradersTile() {
       for (const addr of row.windowTraders) set.add(addr.toLowerCase());
     }
     // Today's partial merge — only when the query has settled with
-    // data. If it's still loading or errored we render the closed-day
-    // count alone rather than blocking the tile entirely; the snapshot
-    // half is the load-bearing data and degrades gracefully on its own.
+    // data. If it's still loading we render the closed-day count alone
+    // and the snapshot is the load-bearing data (no degradation
+    // signal). If it errored, we still skip the merge but flag
+    // `todayPartialMissing` above so the tile renders with "≈ N" +
+    // "Approximate — …".
     if (todayGql.data) {
       for (const row of todayGql.data.TraderDailySnapshot) {
         set.add(row.trader.toLowerCase());
@@ -544,15 +554,13 @@ function TradersTile() {
   if (snapshotGql.isLoading) value = "…";
   else if (count === null) value = "N/A";
   else
-    value = hasStaleChain
-      ? `≈ ${count.toLocaleString()}`
-      : count.toLocaleString();
+    value = isPartial ? `≈ ${count.toLocaleString()}` : count.toLocaleString();
   return (
     <Tile
       label="Traders"
       value={value}
       subtitle={
-        hasStaleChain
+        isPartial
           ? "Approximate — chain snapshot catching up"
           : "Unique addresses that traded on v3"
       }

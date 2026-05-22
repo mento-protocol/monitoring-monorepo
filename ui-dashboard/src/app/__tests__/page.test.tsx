@@ -919,4 +919,47 @@ describe("GlobalPage — Traders tile", () => {
     expect(tradersMatch?.[1]).toBe("≈ 1");
     expect(html).toContain("Approximate — chain snapshot catching up");
   });
+
+  // When the today-partial query errors (timeout / Hasura error / schema
+  // drift) we still render the snapshot half, but any wallet whose
+  // first-ever v3 swap is today is silently dropped. Tile must surface
+  // the partial state so the count isn't read as exact. Mocks the
+  // snapshot result on first call and a today-partial ERROR on the
+  // second — `mockReturnValueOnce` chains in call order: snapshot then
+  // today-partial.
+  it("flags the tile as approximate when the today-partial query errors", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL)
+      .mockReturnValueOnce({
+        data: {
+          LeaderboardWindowSnapshot: [
+            {
+              chainId: 42220,
+              snapshotDay: yesterdaySec,
+              windowTraders: [
+                "0xaaaa000000000000000000000000000000000001",
+                "0xbbbb000000000000000000000000000000000002",
+              ],
+            },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse)
+      .mockReturnValueOnce({
+        data: undefined,
+        error: new Error("Hasura timeout"),
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 2");
+    expect(html).toContain("Approximate — chain snapshot catching up");
+  });
 });
