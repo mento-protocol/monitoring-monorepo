@@ -179,20 +179,25 @@ export type BrokerTraderRouterMarkerRow = {
   timestamp: string;
 };
 
-export type BrokerTraderViaRoute = {
-  /** Stable key for React + dedupe. Cluster routes use the aggregator label
-   *  (so all addresses in the same cluster collapse into one pill); address
-   *  routes use the lowercased tx.to so each distinct router gets its own. */
+/**
+ * Stable key for React + dedupe. Cluster routes use the aggregator label
+ * (so all addresses in the same cluster collapse into one pill); address
+ * routes use the lowercased tx.to so each distinct router gets its own.
+ *
+ * Discriminated on `isCluster` so the renderer can narrow `txTo` without a
+ * runtime null-fallback. Cluster routes preserve the "one fleet" signal —
+ * we deliberately drop the tx.to because the cluster label is the user-facing
+ * identity, not the underlying contract.
+ */
+type BrokerTraderViaRouteBase = {
   key: string;
   aggregator: string;
-  /** Raw tx.to. `null` only for cluster-collapsed routes. */
-  txTo: string | null;
-  /** True when this route folds multiple tx.to addresses under one cluster
-   *  label (preserves the "one fleet" signal for cluster traders). */
-  isCluster: boolean;
   days: number;
   latestTimestamp: number;
 };
+export type BrokerTraderViaRoute =
+  | (BrokerTraderViaRouteBase & { isCluster: true; txTo: null })
+  | (BrokerTraderViaRouteBase & { isCluster: false; txTo: string });
 
 const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
   "0x": "0x Router",
@@ -417,14 +422,20 @@ export function aggregateBrokerViaByTrader(
     [...byTrader.entries()].map(([key, routes]) => [
       key,
       [...routes.values()]
-        .map((acc) => ({
-          key: acc.key,
-          aggregator: acc.aggregator,
-          txTo: acc.txTo,
-          isCluster: acc.isCluster,
-          days: acc.days.size,
-          latestTimestamp: acc.latestTimestamp,
-        }))
+        .map<BrokerTraderViaRoute>((acc) => {
+          const base = {
+            key: acc.key,
+            aggregator: acc.aggregator,
+            days: acc.days.size,
+            latestTimestamp: acc.latestTimestamp,
+          };
+          // Discriminated union construction — the accumulator carries
+          // `isCluster` + `txTo` separately, but the public route must keep
+          // them in sync so consumers can narrow safely.
+          return acc.isCluster
+            ? { ...base, isCluster: true, txTo: null }
+            : { ...base, isCluster: false, txTo: acc.txTo as string };
+        })
         .sort((a, b) => {
           if (b.days !== a.days) return b.days - a.days;
           if (b.latestTimestamp !== a.latestTimestamp) {

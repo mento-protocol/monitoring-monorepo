@@ -125,25 +125,43 @@ export function V2LeaderboardTraderTable({
     );
   }
 
+  // The degraded-Via banner mirrors the aggregator-table cap-hit pattern so
+  // operators get a visible, keyboard/SR-accessible signal — not just
+  // tooltip text — when route attribution is incomplete vs. when the row
+  // genuinely has no markers.
+  const viaBanner = via.hasError
+    ? (via.errorReason ?? "Couldn't load v2 route attribution.")
+    : (via.unavailableReason ?? null);
   return (
-    <Table>
-      <V2TraderTableHead
-        sortKey={sortKey}
-        sortDir={sortDir}
-        onSort={handleSort}
-        viaIsLoading={via.isLoading}
-      />
-      <tbody>
-        {visibleRows.map((row, idx) => (
-          <V2TraderRow
-            key={`${row.chainId}-${row.trader}`}
-            row={row}
-            rank={idx + 1}
-            via={via}
-          />
-        ))}
-      </tbody>
-    </Table>
+    <div className="space-y-3">
+      {viaBanner && (
+        <div
+          className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90"
+          role="status"
+        >
+          <strong className="font-medium">Via column degraded.</strong>{" "}
+          {viaBanner}
+        </div>
+      )}
+      <Table>
+        <V2TraderTableHead
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={handleSort}
+          viaIsLoading={via.isLoading}
+        />
+        <tbody>
+          {visibleRows.map((row, idx) => (
+            <V2TraderRow
+              key={`${row.chainId}-${row.trader}`}
+              row={row}
+              rank={idx + 1}
+              via={via}
+            />
+          ))}
+        </tbody>
+      </Table>
+    </div>
   );
 }
 
@@ -352,9 +370,12 @@ function ViaRoutePill({
   // etc.) the address-book typically already names them; for `unknown` we fall
   // back to a truncated address — that alone is more useful than the generic
   // bucket name when the trader uses exactly one router.
+  // `route.txTo` is narrowed to `string` here by the discriminated union on
+  // `BrokerTraderViaRoute` (the cluster branch above carries `txTo: null`).
+  // No null fallback needed.
   return (
     <span className="inline-flex items-center gap-1 rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300">
-      <AddressLink address={route.txTo ?? ""} chainId={chainId} readOnly />
+      <AddressLink address={route.txTo} chainId={chainId} readOnly />
     </span>
   );
 }
@@ -367,8 +388,7 @@ function routeTooltipText(routes: readonly BrokerTraderViaRoute[]): string {
         return `${brokerViaDisplayName(route.aggregator)} (${days})`;
       }
       const label = brokerViaDisplayName(route.aggregator);
-      const addr = route.txTo ?? "";
-      return `${label} via ${addr} (${days})`;
+      return `${label} via ${route.txTo} (${days})`;
     })
     .join(", ")}`;
 }

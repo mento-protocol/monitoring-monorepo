@@ -797,6 +797,34 @@ describe("Broker.Swap handler", () => {
     );
   });
 
+  it("does NOT write BrokerTraderRouterDayMarker when brokerCaller is a registered VirtualPool (aggregator → VirtualPool → Broker path)", async () => {
+    // Sibling of the existing "does NOT write trader/aggregator rollups
+    // when brokerCaller is a registered VirtualPool" test (around line 524).
+    // The aggregator → VirtualPool → Broker path has `tx.to = aggregator`
+    // (NOT Routerv300), so `routedViaV3Router=false` — but the v3 leaderboard
+    // already counts the sibling `VirtualPool.Swap`. Writing a marker here
+    // would attribute v3 flow as legacy-v2 trader activity. This test pins
+    // the skip symmetry between the two double-count guards.
+    const EXTERNAL_AGGREGATOR =
+      "0x0000000000000000000000000000000000001111".toLowerCase();
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedVirtualPool(mockDb);
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: EXTERNAL_AGGREGATOR,
+      brokerCaller: VIRTUAL_POOL_ADDR,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const markerId = `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}-${EXTERNAL_AGGREGATOR}-${dayTs}`;
+    assert.isUndefined(
+      mockDb.entities.BrokerTraderRouterDayMarker.get(markerId),
+      "VirtualPool-routed swap should not produce a trader-router marker",
+    );
+  });
+
   it("buckets distinct exchangeProviders into separate daily snapshots", async () => {
     // Per-provider rows are kept so a future "v2 by exchange provider"
     // breakdown is a query-time filter rather than a schema migration. The
