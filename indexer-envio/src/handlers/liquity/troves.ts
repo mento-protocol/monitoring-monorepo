@@ -93,9 +93,20 @@ export const applySystemDebtDelta = (
   const oldContribution = isOpenStatus(prev.status) ? prev.debt : 0n;
   const newContribution = isOpenStatus(next.status) ? next.debt : 0n;
   if (oldContribution === newContribution) return instance;
+  const delta = newContribution - oldContribution;
+  const mintAdd = delta > 0n ? delta : 0n;
+  const burnAdd = delta < 0n ? -delta : 0n;
   return {
     ...instance,
-    systemDebt: instance.systemDebt + newContribution - oldContribution,
+    systemDebt: instance.systemDebt + delta,
+    // Per-day + cumulative mint/burn accumulators for the V3_LIQUITY
+    // StableSupplyDailySnapshot row. Day bucket resets on rollover in
+    // `instance.ts:resetDayBuckets`. Cum never resets — feeds future
+    // KPI "lifetime borrow/repay" tiles.
+    systemDebtMintedDayBucket: instance.systemDebtMintedDayBucket + mintAdd,
+    systemDebtBurnedDayBucket: instance.systemDebtBurnedDayBucket + burnAdd,
+    systemDebtMintedCum: instance.systemDebtMintedCum + mintAdd,
+    systemDebtBurnedCum: instance.systemDebtBurnedCum + burnAdd,
   };
 };
 

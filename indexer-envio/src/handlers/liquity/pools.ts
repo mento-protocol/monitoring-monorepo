@@ -10,6 +10,7 @@ import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import type {
   LiquityInstanceDailySnapshot,
   LiquityInstanceSnapshot,
+  StableSupplyDailySnapshot,
 } from "envio";
 
 type PoolGaugeContext = LiquityBootstrapContext & {
@@ -17,6 +18,9 @@ type PoolGaugeContext = LiquityBootstrapContext & {
   LiquityInstanceSnapshot: { set: (entity: LiquityInstanceSnapshot) => void };
   LiquityInstanceDailySnapshot: {
     set: (entity: LiquityInstanceDailySnapshot) => void;
+  };
+  StableSupplyDailySnapshot: {
+    set: (entity: StableSupplyDailySnapshot) => void;
   };
 };
 
@@ -74,6 +78,16 @@ async function updatePoolGauge({
   // its delta back into systemDebt to keep the accounting whole:
   //   systemDebt = Σ open-trove recorded debts (delta-tracked) + defaultPoolDebt
   const defaultPoolDebtDelta = defaultPoolDebt - next.defaultPoolDebt;
+  // Bucket the DefaultPool-driven systemDebt change into mint/burn
+  // accumulators too — `applySystemDebtDelta` covers ActivePool-style
+  // recorded-debt changes but the DefaultPool path mutates systemDebt
+  // directly here, and `StableSupplyDailySnapshot.dailyMintAmount` /
+  // `dailyBurnAmount` for V3_LIQUITY MUST account for both paths or
+  // they drift from `totalSupply` on the next liquidation
+  // redistribution. Same sign convention: positive delta → minted (new
+  // outstanding debt entered the system), negative → burned.
+  const dpMintAdd = defaultPoolDebtDelta > 0n ? defaultPoolDebtDelta : 0n;
+  const dpBurnAdd = defaultPoolDebtDelta < 0n ? -defaultPoolDebtDelta : 0n;
   context.LiquityInstance.set({
     ...next,
     activePoolDebt,
@@ -82,6 +96,10 @@ async function updatePoolGauge({
     defaultPoolColl,
     systemColl: activePoolColl + defaultPoolColl,
     systemDebt: next.systemDebt + defaultPoolDebtDelta,
+    systemDebtMintedDayBucket: next.systemDebtMintedDayBucket + dpMintAdd,
+    systemDebtBurnedDayBucket: next.systemDebtBurnedDayBucket + dpBurnAdd,
+    systemDebtMintedCum: next.systemDebtMintedCum + dpMintAdd,
+    systemDebtBurnedCum: next.systemDebtBurnedCum + dpBurnAdd,
     tcrBps: -1,
   });
 }
