@@ -955,9 +955,11 @@ while IFS= read -r path; do
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "Safe ABI changed (handler + listener consume it)"
           add_terraform_validate_commands "alerts/infra" "Safe ABI changed (listener filter uses it at plan time)"
           ;;
-        alerts/infra/onchain-event-handler/scripts/*|alerts/infra/onchain-event-handler/README.md|alerts/infra/onchain-event-handler/.gcloudignore|alerts/infra/onchain-event-handler/.prettierrc.json|alerts/infra/onchain-event-handler/.prettierignore)
-          add_command "bash -n alerts/infra/onchain-event-handler/scripts/deploy.sh" "alerts handler deploy/aux script changed"
-          ;;
+        # Other handler files (scripts/*.sh, README.md, .gcloudignore,
+        # .prettierrc.json, .prettierignore) need no extra routing: shell
+        # scripts hit the generic `*.sh → bash -n $(quote_path "$path")`
+        # branch above; the others are doc/config-only and don't gate
+        # anything.
       esac
       ;;
     alerts/infra/scripts/*)
