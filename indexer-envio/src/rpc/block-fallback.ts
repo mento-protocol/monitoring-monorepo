@@ -34,18 +34,31 @@ const BLOCK_NOT_AVAILABLE_RE =
 
 /** Matches RPC error messages indicating the node lacks archive depth back
  * to the requested block — *the contract IS deployed there, the node just
- * doesn't have state pruned that far back*.
+ * doesn't have state pruned that far back* — or, more broadly, that the
+ * primary provider is rejecting `eth_call` and the recovery path is to try
+ * the secondary RPC at the same block.
  *
- * Provider-specific phrasings:
+ * Provider-specific phrasings (QuickNode emits at least three first-sentence
+ * variants paired with the same second sentence):
  * - QuickNode: `"Block requested not found. Request might be querying
  *   historical state that is not available."` — match on `querying
  *   historical state`.
  * - QuickNode (alternate): `"Invalid parameters were provided to the RPC
- *   method. Double check you have provided the correct parameters."` — fires
- *   when the requested block is below the pruning window. Match the full
- *   two-sentence form so unrelated "Invalid parameters" errors (malformed
- *   address, wrong ABI selector, future provider-specific tweaks) don't
- *   trigger archive-depth handling and poison the runtime horizon.
+ *   method.\nDouble check you have provided the correct parameters."`
+ * - QuickNode (third variant): `"Missing or invalid parameters.\nDouble
+ *   check you have provided the correct parameters."` — observed in
+ *   production 2026-05-22 against `eth_call` on a recent (non-archive)
+ *   Celo block during a broad QuickNode rejection. Routed through the
+ *   archive-depth branch because the recovery is identical: try the
+ *   secondary RPC at the same block.
+ *
+ * Both alternate variants share the second sentence; the regex uses `\s+`
+ * between sentences so the real viem-emitted message (which uses `\n`, not
+ * a single space) actually matches the alternation. The literal-space
+ * version of this regex shipped silently broken for several months — viem's
+ * error formatter inserts `\n` between sentences, the unit tests used a
+ * single space, and the live indexer never engaged the secondary on these
+ * errors.
  *
  * The bare `Block requested not found` phrase by itself can also mean
  * "transient lag — node hasn't seen this block yet" on some providers,
@@ -63,7 +76,7 @@ const BLOCK_NOT_AVAILABLE_RE =
  * preserves the prior known-good value (or schema default) until the
  * indexer reaches a block whose state the primary can serve. */
 const ARCHIVE_DEPTH_RE =
-  /querying historical state|Invalid parameters were provided to the RPC method\. Double check you have provided the correct parameters/i;
+  /querying historical state|(?:Invalid parameters were provided to the RPC method|Missing or invalid parameters)\.\s+Double check you have provided the correct parameters/i;
 
 export type BlockFallbackResult = {
   result: unknown;

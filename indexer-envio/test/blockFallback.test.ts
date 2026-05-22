@@ -495,6 +495,54 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.usedLatestFallback, false);
   });
 
+  // viem formats `ContractFunctionExecutionError` with a `\n` between
+  // sentences, not a single space. The previous literal-space anchor in
+  // ARCHIVE_DEPTH_RE silently failed to match production messages even
+  // though the unit tests above used a literal space and passed. Keep these
+  // two `\n`-separator cases so any future regex regression resurfaces
+  // immediately. Mirror the in-the-wild viem output exactly.
+  it("archive-depth: 'Invalid parameters were provided' with `\\n` separator (viem-formatted)", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
+  // Third QuickNode first-sentence variant observed 2026-05-22 against
+  // recent (non-archive) Celo blocks; broad provider rejection rather than
+  // pure archive-depth, but the recovery path is identical (try the
+  // secondary at the same block), so it's routed through ARCHIVE_DEPTH_RE.
+  it("archive-depth: 'Missing or invalid parameters' (QuickNode 2026-05-22 variant)", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "Missing or invalid parameters.\nDouble check you have provided the correct parameters.",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
   it("archive-depth: secondary also fails → throws (fail-closed)", async () => {
     // Pre-PR behaviour preserved: archive-depth + secondary failure
     // throws to the caller. We must NOT silently fall through to `latest`

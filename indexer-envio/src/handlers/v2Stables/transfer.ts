@@ -99,13 +99,20 @@ indexer.onEvent(
     if (!supply) return;
 
     // First Transfer per token: seed baseline from on-chain
-    // totalSupply(block-1). Failure throws → Envio retries the event. We
-    // can't silently return null here: that would drop the V2StableSupply-
-    // ChangeEvent row + day-bucket contribution for this exact event,
-    // while a later event would self-heal `totalSupply` (because the next
-    // baseline call would capture this event's delta in its block). The
-    // running supply would recover; the event log would not. Throwing
-    // forces a clean retry of the original event when RPC recovers.
+    // totalSupply(block-1). On RPC failure we skip the event rather than
+    // throw. Throwing surfaces as "Indexer has failed, restarting" and —
+    // when the underlying RPC failure is sustained — loops the indexer
+    // through restart-then-throw indefinitely (observed in production
+    // 2026-05-22: broad QuickNode rejection on Celo halted the v3
+    // deployment from ever catching up). Skipping keeps the indexer
+    // alive: `supplyBaselineSeeded` stays false, so the next Transfer
+    // retries seeding once RPC recovers; the post-recovery on-chain
+    // `totalSupply(block-1)` read is exact because the chain itself
+    // reflects every mint/burn including the events we skipped. The
+    // tradeoff is that V2StableSupplyChangeEvent audit rows for events
+    // during the outage window are lost — totalSupply remains correct,
+    // but the /stables "Recent Changes" table has a gap. Worth it: a
+    // halted indexer hides every other chain's data too.
     if (!supply.supplyBaselineSeeded) {
       const baseline = await context.effect(v2StableTotalSupplyEffect, {
         chainId,
@@ -113,10 +120,10 @@ indexer.onEvent(
         blockNumber: blockNumber - 1n,
       });
       if (baseline === null) {
-        throw new Error(
-          `[v2Stables] totalSupply baseline failed for ${tokenAddress} on chain ${chainId} at block ${blockNumber - 1n}. ` +
-            `Retrying. Persistent failure halts ingestion until RPC recovers — investigate the chain's RPC endpoint.`,
+        context.log.warn(
+          `[v2Stables.baseline_unavailable] chainId=${chainId} tokenAddress=${tokenAddress} blockNumber=${blockNumber - 1n} — totalSupply RPC read failed on both primary and fallback; skipping event, will retry on next Transfer.`,
         );
+        return;
       }
       supply = {
         ...supply,
