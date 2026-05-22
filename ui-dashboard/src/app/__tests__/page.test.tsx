@@ -88,17 +88,23 @@ function render(networkData: NetworkData[], isLoading = false): string {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedProps = null;
-  // Default `useGQL` mock for the Traders tile — empty payload so existing
-  // tests get a deterministic `0` Traders count without touching their setup.
-  // The single object carries both response shapes (the
-  // `LEADERBOARD_WINDOW_TRADERS_LATEST` snapshot and the
-  // `LEADERBOARD_TODAY_TRADERS` partial) because `useGQL` is mocked as a
-  // single function; the consumer picks the field it reads, so an object
-  // with both empty arrays satisfies both call sites without per-query
-  // dispatch. Tests that exercise the Traders tile specifically override via
+  // Default `useGQL` mock for the Traders tile — one fresh snapshot row
+  // per prod chain (Celo 42220 + Monad 143) keyed at yesterday's UTC
+  // midnight so the Traders tile renders a deterministic count without
+  // tripping the missing-chain / stale-chain / empty-rows guards.
+  // Tests that exercise the Traders tile's partial paths override via
   // `mockReturnValueOnce` / `mockReturnValue` directly.
+  const yesterdaySec = String(
+    Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+  );
   vi.mocked(useGQL).mockReturnValue({
-    data: { LeaderboardWindowSnapshot: [], TraderDailySnapshot: [] },
+    data: {
+      LeaderboardWindowSnapshot: [
+        { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+        { chainId: 143, snapshotDay: yesterdaySec, windowTraders: [] },
+      ],
+      TraderDailySnapshot: [],
+    },
     error: undefined,
     isLoading: false,
     isValidating: false,
@@ -1026,6 +1032,74 @@ describe("GlobalPage — Traders tile", () => {
     const html = render([makeNetworkData({ pools: [], fees: null })]);
     const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
     expect(tradersMatch?.[1]).toBe("≈ 2");
+    // When the partial reason is specifically today-error (no stale
+    // chain), the subtitle reads "today's partial unavailable" — not
+    // "chain snapshot catching up", which would mislead about the
+    // actual degradation. `renderToStaticMarkup` HTML-encodes the
+    // apostrophe (`&#x27;`), so match a prefix that's stable across
+    // encodings.
+    expect(html).toContain("Approximate — today");
+    expect(html).toContain("partial unavailable");
+    expect(html).not.toContain("Approximate — chain snapshot catching up");
+  });
+
+  // Variant of the stale-chain branch: when a configured chain has NO
+  // snapshot row at all (heartbeat hasn't fired, indexer not yet
+  // populated for that chain), `hasMissingOrStaleChain` must still
+  // fire — closed-day data for that chain is structurally absent.
+  // Renders `≈ N` with the chain-catching-up subtitle.
+  it("flags the tile as approximate when a configured chain has no snapshot row", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        // Only Celo's snapshot row — Monad is configured (passed via
+        // networkData below) but missing from the snapshot feed.
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: yesterdaySec,
+            windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+          },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([
+      makeNetworkData({ pools: [], fees: null }),
+      makeNetworkData({ network: NETWORK_2, pools: [], fees: null }),
+    ]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 1");
     expect(html).toContain("Approximate — chain snapshot catching up");
+  });
+
+  // Snapshot returns the right shape but with no rows (fresh indexer
+  // pre-first-heartbeat, schema-lag returning the shape with zero
+  // rows, or a wholesale outage on all chains). Must NOT render a
+  // confirmed `0` — that would read as a real metric. Falls back to
+  // `N/A` with the canonical subtitle (no partial number to qualify).
+  it("renders N/A when the snapshot response has no rows at all", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("N/A");
+    // Canonical subtitle — no "Approximate" qualifier when the value
+    // itself is the missing-data signal.
+    expect(html).toContain("Unique addresses that traded on v3");
   });
 });

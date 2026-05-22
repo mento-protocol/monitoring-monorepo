@@ -401,7 +401,7 @@ function GlobalContent({
             }
             subtitle="All-time across all pools"
           />
-          <TradersTile isLoading={isLoading} />
+          <TradersTile isLoading={isLoading} networkData={networkData} />
         </div>
       </section>
 
@@ -448,7 +448,13 @@ function GlobalContent({
 // parent's starting line past the eslint baseline-diff proximity window;
 // function declarations hoist, so calling it from inside `GlobalContent`
 // is fine.
-function TradersTile({ isLoading }: { isLoading: boolean }) {
+function TradersTile({
+  isLoading,
+  networkData,
+}: {
+  isLoading: boolean;
+  networkData: NetworkData[];
+}) {
   const snapshotGql = useGQL<LeaderboardWindowTradersLatest>(
     LEADERBOARD_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
@@ -507,34 +513,62 @@ function TradersTile({ isLoading }: { isLoading: boolean }) {
       timeoutMs: 30_000,
     },
   );
-  // Two distinct partial-data states feed the same "≈" badge:
-  //   - `hasStaleChain`: a chain's snapshot lags behind yesterday's UTC
-  //     midnight, so closed days between snapshotDay and yesterday are
-  //     absent from both `windowTraders` (capped at snapshotDay) and
-  //     the today-partial query (timestamp >= todayMidnight). The count
-  //     understates by the missing-day deltas.
+  // Three distinct partial-data states surface as the same `≈` badge,
+  // but each carries a distinct subtitle reason so the user can tell
+  // them apart:
+  //
+  //   - `hasMissingOrStaleChain`: a configured chain either has no
+  //     `LeaderboardWindowSnapshot` row at all (heartbeat hasn't fired
+  //     yet) OR its row's `snapshotDay` lags behind yesterday's UTC
+  //     midnight. In either case, closed days for that chain are
+  //     absent from `windowTraders` (capped at snapshotDay or empty
+  //     entirely) and the today-partial query (timestamp >=
+  //     todayMidnight). The count understates by the missing chain or
+  //     missing-day deltas.
   //   - `todayPartialMissing`: the today-partial query errored, so any
   //     wallet whose first-ever v3 swap is today is silently dropped
   //     from the union. The closed-day count is still trustworthy on
   //     its own, but the "all-time" framing isn't.
-  // Both surface as the same `≈` prefix + "Approximate — …" subtitle so
-  // the tile signals degraded data uniformly. Mirrors the LP tile's
-  // partial-state pattern and the BreakdownTile's `totalPrefix="≈ "`.
+  //
+  // The `count === null` branch ALSO covers snapshot returned-but-empty
+  // (no chains have any data yet — e.g. fresh indexer, schema-lag
+  // returning the shape with zero rows). `0` would otherwise read as a
+  // real metric (LP tile uses the same null-fallback pattern).
   const yesterdayMidnight = (utcDayKey - 1) * SECONDS_PER_DAY;
-  const hasStaleChain = useMemo(
-    () =>
-      (snapshotGql.data?.LeaderboardWindowSnapshot ?? []).some(
-        (row) => Number(row.snapshotDay) < yesterdayMidnight,
-      ),
-    [snapshotGql.data, yesterdayMidnight],
+  const expectedChainIds = useMemo(
+    () => new Set(networkData.map((n) => n.network.chainId)),
+    [networkData],
   );
+  const snapshotRows = useMemo(
+    () => snapshotGql.data?.LeaderboardWindowSnapshot ?? [],
+    [snapshotGql.data],
+  );
+  const hasMissingOrStaleChain = useMemo(() => {
+    const returnedChainIds = new Set(snapshotRows.map((r) => r.chainId));
+    for (const id of expectedChainIds) {
+      if (!returnedChainIds.has(id)) return true;
+    }
+    return snapshotRows.some(
+      (row) => Number(row.snapshotDay) < yesterdayMidnight,
+    );
+  }, [snapshotRows, expectedChainIds, yesterdayMidnight]);
   const todayPartialMissing = todayGql.error !== undefined;
-  const isPartial = hasStaleChain || todayPartialMissing;
+  // `partialReason` is null when the count is complete. When set it
+  // selects both the `≈` prefix and the matching subtitle copy. Chain
+  // coverage wins over today-error when both fire (the chain gap is
+  // strictly worse — entire closed days missing, not just today's
+  // first-time traders).
+  const partialReason: "chain" | "today" | null = hasMissingOrStaleChain
+    ? "chain"
+    : todayPartialMissing
+      ? "today"
+      : null;
   const count = useMemo(() => {
     if (snapshotGql.error) return null;
     if (!snapshotGql.data) return null;
+    if (snapshotRows.length === 0) return null;
     const set = new Set<string>();
-    for (const row of snapshotGql.data.LeaderboardWindowSnapshot) {
+    for (const row of snapshotRows) {
       for (const addr of row.windowTraders) set.add(addr.toLowerCase());
     }
     // Today's partial merge — only when the query has settled with
@@ -542,14 +576,14 @@ function TradersTile({ isLoading }: { isLoading: boolean }) {
     // and the snapshot is the load-bearing data (no degradation
     // signal). If it errored, we still skip the merge but flag
     // `todayPartialMissing` above so the tile renders with "≈ N" +
-    // "Approximate — …".
+    // "Approximate — today's partial unavailable".
     if (todayGql.data) {
       for (const row of todayGql.data.TraderDailySnapshot) {
         set.add(row.trader.toLowerCase());
       }
     }
     return set.size;
-  }, [snapshotGql.data, snapshotGql.error, todayGql.data]);
+  }, [snapshotGql.data, snapshotGql.error, snapshotRows, todayGql.data]);
   // `isLoading` (from `useAllNetworksData`) folds the page-level fetch
   // race into the tile's loading sentinel: the snapshot query is a
   // single Hasura request and routinely finishes BEFORE the per-network
@@ -562,21 +596,25 @@ function TradersTile({ isLoading }: { isLoading: boolean }) {
   // is the snapshot-only subtotal and any wallet whose first-ever v3
   // trade is today is missing. Stay on "…" until BOTH halves have
   // settled (either with data or with an error — the error branch is
-  // handled below by `isPartial`).
+  // handled below by `partialReason`).
   let value: string;
   if (isLoading || snapshotGql.isLoading || todayGql.isLoading) value = "…";
   else if (count === null) value = "N/A";
   else
-    value = isPartial ? `≈ ${count.toLocaleString()}` : count.toLocaleString();
-  return (
-    <Tile
-      label="Traders"
-      value={value}
-      subtitle={
-        isPartial
-          ? "Approximate — chain snapshot catching up"
-          : "Unique addresses that traded on v3"
-      }
-    />
-  );
+    value =
+      partialReason === null
+        ? count.toLocaleString()
+        : `≈ ${count.toLocaleString()}`;
+  // When `count === null` the value is "N/A" or "…"; the canonical
+  // subtitle is correct (no partial number to qualify) regardless of
+  // whether the today-partial errored.
+  let subtitle: string;
+  if (count === null || partialReason === null) {
+    subtitle = "Unique addresses that traded on v3";
+  } else if (partialReason === "chain") {
+    subtitle = "Approximate — chain snapshot catching up";
+  } else {
+    subtitle = "Approximate — today's partial unavailable";
+  }
+  return <Tile label="Traders" value={value} subtitle={subtitle} />;
 }
