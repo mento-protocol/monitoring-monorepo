@@ -430,6 +430,28 @@ type BrokerAggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
 }
 
+# Per-(trader, tx.to, day) marker for v2 leaderboard Via attribution at raw
+# router-address granularity. Complements BrokerAggregatorTraderDayMarker
+# (which collapses to the canonical aggregator bucket) so the dashboard can
+# render clickable router addresses for traders today bucketed as `unknown`
+# or wrapped under a generic name. `aggregator` is cached so the cluster
+# collapse path stays cheap on the read side. Written only on the legacy v2
+# path — same skip rules as the existing aggregator marker
+# (`routedViaV3Router`, `brokerCallerIsVirtualPool`, zero USD volume).
+#
+# Indexes are scoped to the current read pattern: dashboard queries by
+# `caller _in` + `timestamp _gte cutoff`. `txTo` is not indexed because no
+# query filters by it; add the @index back if a "which traders used router X"
+# query lands.
+type BrokerTraderRouterDayMarker {
+  id: ID! # "{chainId}-{caller}-{txTo}-{day}"
+  chainId: Int! @index
+  caller: String! @index
+  txTo: String!
+  aggregator: String!
+  timestamp: BigInt! @index
+}
+
 # ============================================================================
 # BiPoolManager exchanges (v2 backend that VirtualPools wrap)
 #
@@ -1120,6 +1142,15 @@ type LiquityInstance {
   rebalanceRedemptionDebtDayBucket: BigInt!
   spRebalanceCountDayBucket: Int!
   shortfallSubsidyDayBucket: BigInt!
+  # Per-day mint/burn accumulators for V3 CDP debt. Updated by
+  # `applySystemDebtDelta`: positive delta = minted (open / adjust-
+  # borrow); negative delta = burned (close / repay / liquidate /
+  # redeem). Surfaced into `StableSupplyDailySnapshot.dailyMintAmount`
+  # / `dailyBurnAmount` on the V3_LIQUITY row at day rollover.
+  systemDebtMintedDayBucket: BigInt!
+  systemDebtBurnedDayBucket: BigInt!
+  systemDebtMintedCum: BigInt!
+  systemDebtBurnedCum: BigInt!
   currentDayBucket: BigInt!
   isShutDown: Boolean!
   shutDownAt: BigInt
@@ -1737,4 +1768,133 @@ type AggregatorTraderDayMarker {
 
 type TraderPoolDayMarker {
   id: ID! # "{chainId}-{trader}-{poolId}-{day}"
+}
+
+# ---------------------------------------------------------------------------
+# Mento stablecoin supply tracking — feeds the /stables dashboard page.
+#
+# V2 handler (src/handlers/v2Stables/transfer.ts) writes from Transfer-with-
+# zero-address events on each subscribed Mento stable. V3 handler
+# (src/handlers/liquity/instance.ts) writes parallel V3_LIQUITY rows at each
+# daily flush in a follow-up PR (per the plan, PR1 ships V3 systemDebt-derived
+# rows with dailyMintAmount=0n / dailyBurnAmount=0n until the V3 mint/burn
+# breakdown lands).
+#
+# Sparse-day semantics: StableSupplyDailySnapshot emits ONE row per day per
+# token PER OBSERVED EVENT. If a token has no mint/burn events on day D, no
+# row is written for that day. The UI carries totalSupply forward across
+# missing days (the running supply is unchanged when no Transfer-zero fires).
+# Same shape as LiquityInstanceDailySnapshot — keep the contract consistent.
+# ---------------------------------------------------------------------------
+
+# Source discriminator for the unified daily-supply / running-supply tables.
+enum StableSupplySource {
+  # V2 reserve-backed stables (12 tokens: USDm/EURm/BRLm/...). Mint/burn
+  # via Mento Reserve through Broker.swap or via NTT bridge.
+  V2_RESERVE
+  # V3 hub USDm collateral (`0x106cc…`) — a distinct on-chain contract from
+  # V2 cUSD-USDm. Mint primarily via NTT bridge.
+  V3_HUB_COLLATERAL
+  # V3 Liquity Bold debt tokens (GBPm/CHFm/JPYm). Mint via CDP borrow; burn
+  # via repay / redemption / liquidation. Supply derived from
+  # LiquityInstance.systemDebt at daily flush.
+  V3_LIQUITY
+}
+
+# Classification of a V2 Transfer-with-zero event by `tx.to`. See
+# `src/handlers/v2Stables/classifyKind.ts` for the routing logic.
+enum V2StableSupplyChangeKind {
+  RESERVE_MINT
+  RESERVE_BURN
+  BRIDGE_MINT
+  BRIDGE_BURN
+  # Everything that isn't Broker or NTT — typically a future router or an
+  # EOA-initiated direct mint (rare). Surfaces in the dashboard's
+  # changes table so we don't silently lose them.
+  OTHER_MINT
+  OTHER_BURN
+}
+
+# Unified daily supply per (chainId, tokenAddress). 16 tokens covered:
+# 12 V2 reserve-backed + V3 hub USDm collateral + 3 V3 Liquity debt tokens.
+type StableSupplyDailySnapshot
+  @index(fields: ["chainId", "tokenSymbol", "timestamp"])
+  @index(fields: ["chainId", "source", "timestamp"])
+  @index(fields: ["chainId", "tokenAddress", "timestamp"]) {
+  id: ID! # "{chainId}-{tokenAddress}-{day}"
+  chainId: Int! @index
+  tokenAddress: String! @index
+  tokenSymbol: String! # Mento brand name: USDm, EURm, GBPm, ...
+  source: StableSupplySource!
+  tokenDecimals: Int! # denormalized; UI doesn't need to join
+  timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  totalSupply: BigInt! # token-native wei, end-of-day
+  # Gross daily flows. For V2_RESERVE + V3_HUB_COLLATERAL: derived from
+  # Transfer-with-zero events. For V3_LIQUITY: derived from per-day
+  # mint/burn accumulators on `LiquityInstance` (updated by
+  # `applySystemDebtDelta` on trove ops AND by the DefaultPool delta
+  # path on liquidation redistributions).
+  dailyMintAmount: BigInt!
+  dailyBurnAmount: BigInt!
+  # blockNumber + updatedAtTimestamp anchor to the FIRST event of the
+  # NEXT day (the event that triggered the rolling flush), NOT the
+  # last event of the snapshotted day. Use `timestamp` (the UTC day
+  # bucket) for "supply on day X" queries — `blockNumber` is for
+  # debugging the flush-trigger only.
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# Per-tx supply change for V2 reserve-backed stables + V3 hub USDm collateral.
+# V3 Liquity debt token mint/burn is tracked via the existing
+# TroveOperationEvent / RedemptionEvent / LiquidationEvent entities — the
+# /stables UI merges those four streams client-side.
+type V2StableSupplyChangeEvent
+  @index(fields: ["tokenAddress", "blockTimestamp"])
+  @index(fields: ["chainId", "caller"]) {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  tokenAddress: String! @index
+  tokenSymbol: String!
+  # Denormalized from V2_STABLES registry so the UI changes-table can
+  # render token amounts without hardcoding 18. Every V2 stable in the
+  # registry today is 18 decimals; surfacing the field per-row removes
+  # the hardcode and stays safe for any future non-18 Mento stable.
+  tokenDecimals: Int!
+  source: StableSupplySource!
+  kind: V2StableSupplyChangeKind!
+  # The non-zero side of the Transfer:
+  # - kind=*_MINT  → counterparty = Transfer.to (recipient gets fresh supply)
+  # - kind=*_BURN  → counterparty = Transfer.from (sender loses supply)
+  counterparty: String! @index
+  caller: String! @index # tx.from — the EOA that signed (leaderboard key)
+  txTo: String! # tx.to — used to classify `kind`; "" for contract-creation tx
+  isSystemCaller: Boolean! # isSystemAddress(chainId, caller) snapshot
+  # Signed token-native wei: + for mint, - for burn.
+  amount: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+# Running per-token supply state. One row per (chainId, tokenAddress).
+# Holds the rolling-day accumulators + the supply-baseline-seeded flag so
+# we don't re-fetch totalSupply() once we've established it. Subsequent
+# events derive from deltas and never re-call RPC.
+type V2StableTokenSupply {
+  id: ID! # "{chainId}-{tokenAddress}"
+  chainId: Int! @index
+  tokenAddress: String!
+  tokenSymbol: String!
+  source: StableSupplySource!
+  tokenDecimals: Int!
+  totalSupply: BigInt! # baseline + cumulative deltas
+  supplyBaselineSeeded: Boolean!
+  # Today-bucket accumulators (reset on day rollover, mirrored to the
+  # StableSupplyDailySnapshot row at flush).
+  currentDayBucket: BigInt!
+  mintedTodayBucket: BigInt!
+  burnedTodayBucket: BigInt!
+  lastEventBlock: BigInt!
+  lastEventTimestamp: BigInt!
 }

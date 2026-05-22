@@ -114,6 +114,20 @@ const ALLOWLIST = new Map([
     "0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c",
     { chainId: 10143, reason: "FPMM testnet instance" },
   ],
+  // V3 hub USDm collateral — distinct on-chain contract from V2 cUSD-USDm.
+  // Address constant lives at src/constants.ts:V3_HUB_USDM_ADDRESS (imported
+  // by handlers/liquity/config.ts AND handlers/v2Stables/config.ts) — kept
+  // duplicated here because this script is .mjs and can't import .ts. If
+  // the value below ever drifts from constants.ts, the test
+  // test/v2Stables.test.ts:YAML drift gate fails. Remove this entry once
+  // `@mento-protocol/contracts` republishes USDm at the V3 hub address.
+  [
+    "0x106cc9ff5a2c488780635be8afc07c68522b7ea5",
+    {
+      chainId: 42220,
+      reason: "V3 hub USDm — hand-typed, not in @mento-protocol/contracts",
+    },
+  ],
 ]);
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;

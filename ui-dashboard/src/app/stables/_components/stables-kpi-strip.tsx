@@ -1,0 +1,136 @@
+"use client";
+
+import { useMemo } from "react";
+import { BreakdownTile } from "@/components/breakdown-tile";
+import { formatUSD, parseWei } from "@/lib/format";
+import { displayLabel, effectiveOracleRate } from "@/lib/stables";
+import type { OracleRateMap } from "@/lib/tokens";
+import { rollupByToken, winnersAndLosers7d } from "../_lib/aggregate";
+import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
+
+// `formatUSD` thresholds (>= 999_950, >= 1_000) miss negative inputs and
+// fall through to `$-5000000.00` instead of `-$5M`. Strip the sign first
+// then prepend it manually so the K/M/B suffix logic fires correctly for
+// supply contractions on the 7d-change + biggest-contraction tiles.
+function formatSignedUSD(v: number): string {
+  return `${v >= 0 ? "+" : "-"}${formatUSD(Math.abs(v))}`;
+}
+
+type Props = {
+  // Per-token latest rows (one per token via distinct_on). Sufficient for
+  // the "Total outstanding" headline; the winners/losers tiles need the
+  // wider snapshot stream for the 7d baseline comparison.
+  latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
+  // Daily-snapshot stream from useStablesDailySnapshots — feeds the 7d
+  // change calculation. Empty array is acceptable (tiles render N/A).
+  snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
+  rates: OracleRateMap;
+  isLoading: boolean;
+  hasError: boolean;
+};
+
+export function StablesKpiStrip({
+  latestPerToken,
+  snapshots,
+  rates,
+  isLoading,
+  hasError,
+}: Props): React.JSX.Element {
+  // Memoize the rollup + derived totals. SWR polls at 30s; parent re-renders
+  // (range pill, hover state) shouldn't re-sort N=1000 snapshots each time.
+  const { rollup, biggestExpansion, biggestContraction } = useMemo(() => {
+    const r = rollupByToken(snapshots, rates);
+    const wl = winnersAndLosers7d(r);
+    return {
+      rollup: r,
+      biggestExpansion: wl.biggestExpansion,
+      biggestContraction: wl.biggestContraction,
+    };
+  }, [snapshots, rates]);
+
+  const totalUsd = useMemo<number | null>(() => {
+    return latestPerToken.reduce<number | null>((acc, row) => {
+      // `effectiveOracleRate` defaults USD-pegged stables (USDm, cUSD,
+      // ...) to 1.0 when the oracle map doesn't carry an entry —
+      // without this fallback, USDm (the largest stable) silently
+      // drops out of the headline total since useOracleRates derives
+      // rates against USDm pairs and never emits one for USDm itself.
+      const rate = effectiveOracleRate(rates, row.tokenSymbol);
+      if (rate == null) return acc;
+      const usd = parseWei(row.totalSupply, row.tokenDecimals) * rate;
+      return (acc ?? 0) + usd;
+    }, null);
+  }, [latestPerToken, rates]);
+
+  const totalNetChange7dUsd = useMemo<number | null>(() => {
+    return Array.from(rollup.values()).reduce<number | null>(
+      (acc, agg) =>
+        agg.netChange7dUsd == null ? acc : (acc ?? 0) + agg.netChange7dUsd,
+      null,
+    );
+  }, [rollup]);
+
+  return (
+    <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <BreakdownTile
+        label="Total outstanding"
+        total={totalUsd}
+        sub24h={null}
+        sub7d={null}
+        sub30d={null}
+        isLoading={isLoading}
+        hasError={hasError}
+        format={(v) => formatUSD(v)}
+      />
+      <BreakdownTile
+        label="7d net change"
+        total={totalNetChange7dUsd}
+        sub24h={null}
+        sub7d={null}
+        sub30d={null}
+        isLoading={isLoading}
+        hasError={hasError}
+        format={formatSignedUSD}
+      />
+      <MoverTile
+        label="Biggest expansion (7d)"
+        agg={biggestExpansion}
+        isLoading={isLoading}
+        hasError={hasError}
+      />
+      <MoverTile
+        label="Biggest contraction (7d)"
+        agg={biggestContraction}
+        isLoading={isLoading}
+        hasError={hasError}
+      />
+    </section>
+  );
+}
+
+function MoverTile({
+  label,
+  agg,
+  isLoading,
+  hasError,
+}: {
+  label: string;
+  agg: TokenAgg | null;
+  isLoading: boolean;
+  hasError: boolean;
+}): React.JSX.Element {
+  const subtitle = agg ? displayLabel(agg.tokenSymbol, agg.source) : undefined;
+  return (
+    <BreakdownTile
+      label={label}
+      total={agg?.netChange7dUsd ?? null}
+      sub24h={null}
+      sub7d={null}
+      sub30d={null}
+      isLoading={isLoading}
+      hasError={hasError}
+      format={formatSignedUSD}
+      subtitle={subtitle}
+    />
+  );
+}

@@ -286,6 +286,7 @@ export const TestHelpers = {
     "SpreadUpdated",
   ]),
   ERC20FeeToken: contract("ERC20FeeToken", ["Transfer"]),
+  V2StableToken: contract("V2StableToken", ["Transfer"]),
   BreakerBox: contract("BreakerBox", [
     "BreakerStatusUpdated",
     "BreakerTripped",
