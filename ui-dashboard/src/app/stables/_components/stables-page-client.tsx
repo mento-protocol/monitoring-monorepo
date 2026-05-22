@@ -11,6 +11,7 @@ import {
 import { StablesChangesTable } from "./stables-changes-table";
 import { StablesHeroChart } from "./stables-hero-chart";
 import { StablesKpiStrip } from "./stables-kpi-strip";
+import { StablesSparklineGrid } from "./stables-sparkline-grid";
 
 export function StablesPageClient(): React.JSX.Element {
   return (
@@ -61,6 +62,14 @@ function StablesContent(): React.JSX.Element {
       <StablesKpiStrip
         latestPerToken={latestPerToken}
         snapshots={snapshots}
+        rates={rates}
+        isLoading={isLoading}
+        hasError={hasError}
+      />
+
+      <StablesSparklineGrid
+        snapshots={snapshots}
+        latestPerToken={latestPerToken}
         rates={rates}
         isLoading={isLoading}
         hasError={hasError}
