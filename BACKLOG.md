@@ -108,6 +108,42 @@ The initial Lighthouse CI gate landed in PR #451 with desktop performance + acce
 - [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance. Depends on the bypass mechanism above — performance numbers from the SSO interstitial are not meaningful.
 - [ ] Add INP (interaction-to-next-paint) coverage via lhci's user-flow mode with scripted interactions on the dashboard pages. Lighthouse's default navigation mode never produces an INP numeric value, so the budget was intentionally omitted in PR #451 to avoid silent-pass false confidence. User-flow mode would script the typical "open page, hover a chart, click a filter" interaction and run an INP audit on the scripted timespan.
 
+### React Compiler Evaluation
+
+Context: `ui-dashboard` is already on Next.js 16.2.6 + React 19.2.6, and
+`pnpm --filter @mento-protocol/ui-dashboard react-doctor` reports 100/100 with
+no issues. React Compiler is not enabled yet; Next.js 16 supports it via the
+top-level `reactCompiler` config and `babel-plugin-react-compiler`.
+
+- [ ] **Pilot React Compiler in annotation mode first.** Add
+      `babel-plugin-react-compiler` as a dashboard dev dependency and configure
+      `reactCompiler: { compilationMode: "annotation" }` in
+      `ui-dashboard/next.config.ts`, leaving global compilation off until the
+      pilot has behavior and build-time evidence.
+- [ ] **Pick one high-churn client surface for `"use memo"`.** Prefer
+      `leaderboard`, `pools`, or a chart-heavy page where URL state, filters,
+      tables, and derived arrays currently rely on manual `useMemo` /
+      `useCallback`. Keep the first PR narrow enough that regressions are easy
+      to attribute.
+- [ ] **Measure before expanding.** Capture baseline vs compiler-enabled
+      interaction behavior with React Profiler or Playwright traces for a small
+      set of real interactions: filter/search updates, tab/range changes, chart
+      hover/toggle, and table sort/page changes. Record whether the win is
+      measurable UI smoothness, reduced render count, or only cleaner code.
+- [ ] **Run the dashboard safety gate.** At minimum run `react-doctor`,
+      `pnpm dashboard:build`, and the relevant browser interaction tests. Add a
+      focused regression test if the pilot touches URL-backed controls,
+      optimistic mutations, or chart/table synchronization.
+- [ ] **Decide rollout mode from evidence.** If annotation mode is clean and
+      useful, either expand `"use memo"` to the next client-heavy surfaces or
+      switch to `reactCompiler: true` behind a follow-up PR with the same
+      measurement and browser-test gate. If build time increases materially and
+      user-visible wins are weak, keep compiler usage targeted.
+
+Acceptance: the pilot PR documents build-time delta, interaction/render evidence,
+and any components deliberately left uncompiled via `"use no memo"` or by
+remaining outside annotation mode.
+
 ### Package-Manager Supply-Chain Hardening Review
 
 Why: the TanStack npm compromise shows that provenance and trusted publishing are
