@@ -14,3 +14,36 @@
 .gitignore
 
 node_modules
+
+# Dev-only files that must NEVER reach the Cloud Build source bundle.
+# Terraform's archive_file already strips these (see archive_file.function_source
+# in main.tf) but `gcloud functions deploy --source=` from scripts/deploy.sh
+# uses .gcloudignore instead — keep these two in sync. .env files are the
+# most dangerous: scripts/generate:env writes QUICKNODE_SIGNING_SECRET +
+# both Discord webhook URLs into them locally.
+.env
+.env.*
+.project_vars_cache
+
+# Test files — bundled-into-prod-zip noise + leak the test fixture.
+**/*.test.ts
+**/*.test.js
+
+# Operator scripts, formatter configs, vitest config. None needed at runtime;
+# shipping `scripts/test-payload.json` leaks the canonical webhook payload
+# schema and the .sh files reveal internal gcloud + Terraform invocations.
+scripts
+vitest.config.ts
+eslint.config.mjs
+knip.json
+.prettierrc.json
+.prettierignore
+
+# Terraform artifacts (only present if someone ran `terraform plan` inside
+# the module dir by mistake — defensive).
+.terraform
+**/*.tfstate
+**/*.tfstate.backup
+**/*.tfvars
+**/*.tfvars.json
+function-source.zip

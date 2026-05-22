@@ -166,10 +166,20 @@ echo -e "${GREEN}═════════════════════
 # Determine the filter function template file path (in onchain-event-listeners directory)
 FILTER_FUNCTION_FILE="${PROJECT_ROOT}/onchain-event-listeners/filter-function.js.tpl"
 
-# Replace hardcoded contracts array with Terraform template syntax
-# This allows contracts to be injected from var.multisig_addresses
-# Use perl to handle the replacement properly (handles special characters)
-FILTER_FUNCTION_TEMPLATE=$(echo "${FILTER_FUNCTION}" | perl -pe 's/const contracts = \[.*?\];/const contracts = \${jsonencode([for addr in contracts : lower(addr)])};/')
+# Replace hardcoded contracts array with the Terraform template placeholder
+# so contracts get injected from var.multisig_addresses at apply time. Use
+# awk instead of perl: the perl version chokes because the replacement
+# string contains `${jsonencode(...)}`, which perl tries to parse as
+# `${name}` (alternate variable-name syntax) and aborts with a compile
+# error before writing the template file. awk's gensub treats the
+# replacement as a plain string — no backref/interpolation surprises.
+FILTER_FUNCTION_TEMPLATE=$(echo "${FILTER_FUNCTION}" | awk '{
+  if (match($0, /const contracts = \[[^]]*\];/)) {
+    print substr($0, 1, RSTART - 1) "const contracts = ${jsonencode([for addr in contracts : lower(addr)])};" substr($0, RSTART + RLENGTH)
+  } else {
+    print $0
+  }
+}')
 
 # Save filter function template to file
 echo "${FILTER_FUNCTION_TEMPLATE}" >"${FILTER_FUNCTION_FILE}"
