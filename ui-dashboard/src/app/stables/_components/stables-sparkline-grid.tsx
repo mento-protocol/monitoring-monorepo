@@ -10,6 +10,7 @@ import {
   computeChartStartSeconds,
   groupSnapshotsByTokenSource,
   rollupByToken,
+  unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import { sparklinePoints } from "../_lib/sparkline";
 import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
@@ -44,10 +45,7 @@ export function StablesSparklineGrid({
   // the hero chart).
   const cards = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) return [];
-    const byId = new Map<string, StableSupplyDailySnapshot>();
-    for (const r of snapshots) byId.set(r.id, r);
-    for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
-    const merged = Array.from(byId.values());
+    const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
 
     const rollup = rollupByToken(merged, rates);
     const grouped = groupSnapshotsByTokenSource(merged);
