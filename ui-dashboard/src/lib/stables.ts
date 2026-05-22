@@ -9,7 +9,11 @@
 // to the hub variant so the legend stays unambiguous.
 // ---------------------------------------------------------------------------
 
-import { LEGACY_ALIASES_PUBLIC } from "./tokens";
+import {
+  LEGACY_ALIASES_PUBLIC,
+  USD_PEGGED_SYMBOLS_PUBLIC,
+  type OracleRateMap,
+} from "./tokens";
 
 export type StableSupplySource =
   | "V2_RESERVE"
@@ -47,6 +51,26 @@ export function displayLabel(
   const base = applyLegacyAlias(indexerSymbol);
   if (base === "USDm" && source === "V3_HUB_COLLATERAL") return "USDm · v3";
   return base;
+}
+
+/**
+ * Returns the USD rate for `symbol` from the oracle rate map, defaulting
+ * to 1.0 for known USD-pegged stables (`USDm`, cUSD, USDC, ...). This
+ * exists because `useOracleRates`/`buildOracleRateMap` derives non-USDm
+ * symbols from USDm-paired pools but never emits a rate for USDm itself
+ * — so `rates.get("USDm")` returns `undefined` even on healthy data,
+ * which would drop USDm from the /stables KPI tiles and stacked chart.
+ * The single source of truth for "this symbol is USD-pegged" is
+ * `USD_PEGGED_SYMBOLS_PUBLIC` in `tokens.ts`.
+ */
+export function effectiveOracleRate(
+  rates: OracleRateMap,
+  symbol: string,
+): number | null {
+  const direct = rates.get(symbol);
+  if (direct != null) return direct;
+  if (USD_PEGGED_SYMBOLS_PUBLIC.has(symbol)) return 1;
+  return null;
 }
 
 /** Discriminate a supply-change event into mint vs burn from its `kind`

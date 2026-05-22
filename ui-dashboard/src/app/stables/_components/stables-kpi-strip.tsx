@@ -3,10 +3,18 @@
 import { useMemo } from "react";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { formatUSD, parseWei } from "@/lib/format";
-import { displayLabel } from "@/lib/stables";
+import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import { rollupByToken, winnersAndLosers7d } from "../_lib/aggregate";
 import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
+
+// `formatUSD` thresholds (>= 999_950, >= 1_000) miss negative inputs and
+// fall through to `$-5000000.00` instead of `-$5M`. Strip the sign first
+// then prepend it manually so the K/M/B suffix logic fires correctly for
+// supply contractions on the 7d-change + biggest-contraction tiles.
+function formatSignedUSD(v: number): string {
+  return `${v >= 0 ? "+" : "-"}${formatUSD(Math.abs(v))}`;
+}
 
 type Props = {
   // Per-token latest rows (one per token via distinct_on). Sufficient for
@@ -42,10 +50,14 @@ export function StablesKpiStrip({
 
   const totalUsd = useMemo<number | null>(() => {
     return latestPerToken.reduce<number | null>((acc, row) => {
-      const rate = rates.get(row.tokenSymbol);
+      // `effectiveOracleRate` defaults USD-pegged stables (USDm, cUSD,
+      // ...) to 1.0 when the oracle map doesn't carry an entry —
+      // without this fallback, USDm (the largest stable) silently
+      // drops out of the headline total since useOracleRates derives
+      // rates against USDm pairs and never emits one for USDm itself.
+      const rate = effectiveOracleRate(rates, row.tokenSymbol);
       if (rate == null) return acc;
-      const usd =
-        parseWei(BigInt(row.totalSupply).toString(), row.tokenDecimals) * rate;
+      const usd = parseWei(row.totalSupply, row.tokenDecimals) * rate;
       return (acc ?? 0) + usd;
     }, null);
   }, [latestPerToken, rates]);
@@ -78,7 +90,7 @@ export function StablesKpiStrip({
         sub30d={null}
         isLoading={isLoading}
         hasError={hasError}
-        format={(v) => `${v >= 0 ? "+" : ""}${formatUSD(v)}`}
+        format={formatSignedUSD}
       />
       <MoverTile
         label="Biggest expansion (7d)"
@@ -117,7 +129,7 @@ function MoverTile({
       sub30d={null}
       isLoading={isLoading}
       hasError={hasError}
-      format={(v) => `${v >= 0 ? "+" : ""}${formatUSD(v)}`}
+      format={formatSignedUSD}
       subtitle={subtitle}
     />
   );

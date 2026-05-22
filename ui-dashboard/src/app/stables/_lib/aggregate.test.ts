@@ -237,10 +237,14 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
     ]);
   });
 
-  it("returns empty for token without an oracle rate", () => {
+  it("returns empty for non-USD-pegged token without an oracle rate", () => {
+    // USDm + other USD-pegged stables default to rate=1 via
+    // `effectiveOracleRate`; this test uses BRLm to actually exercise
+    // the "no rate" path.
     const series = buildTokenUsdTimeSeries(
       [
         snapshot({
+          tokenSymbol: "BRLm",
           timestamp: String(NOW_TS),
           totalSupply: "100",
         }),
@@ -250,5 +254,24 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
       Number(NOW_TS),
     );
     expect(series).toEqual([]);
+  });
+
+  it("defaults USDm to rate=1 when oracle map is empty (cursor HIGH + codex P1 follow-up)", () => {
+    const series = buildTokenUsdTimeSeries(
+      [
+        snapshot({
+          tokenSymbol: "USDm",
+          timestamp: String(NOW_TS),
+          totalSupply: String(BigInt(1_000_000) * BigInt(10) ** BigInt(18)),
+        }),
+      ],
+      new Map(),
+      "7d",
+      Number(NOW_TS),
+    );
+    expect(series.length).toBeGreaterThan(0);
+    // The NOW_TS day should reflect 1M USDm at rate=1 = $1M.
+    const today = series.find((p) => p.timestamp === Number(NOW_TS));
+    expect(today?.valueUsd).toBeCloseTo(1_000_000, 0);
   });
 });

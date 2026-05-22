@@ -2,6 +2,7 @@
 // No SWR, no React, no fetch — just transforms over snapshot/event arrays.
 
 import { parseWei } from "@/lib/format";
+import { effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import type { RangeKey, StableSupplyDailySnapshot, TokenAgg } from "./types";
 
@@ -92,7 +93,12 @@ function buildTokenAgg(
       ? null
       : (Number(netChange7d) / Number(baselineSupply)) * 100;
 
-  const rate = rates.get(latest.tokenSymbol);
+  // USD-pegged stables (USDm, cUSD, USDC, ...) default to rate=1 when the
+  // oracle map doesn't carry a direct entry — useOracleRates derives
+  // non-USDm rates against USDm pairs, so USDm itself never gets an
+  // entry. Without the default, USDm tiles and stacked-area slices
+  // render null on healthy data.
+  const rate = effectiveOracleRate(rates, latest.tokenSymbol);
   const usd = (raw: bigint): number | null =>
     rate == null ? null : parseWei(raw.toString(), latest.tokenDecimals) * rate;
 
@@ -148,7 +154,7 @@ export function buildTokenUsdTimeSeries(
 ): Array<{ timestamp: number; valueUsd: number }> {
   if (snapshots.length === 0) return [];
   const symbol = snapshots[0].tokenSymbol;
-  const rate = rates.get(symbol);
+  const rate = effectiveOracleRate(rates, symbol);
   if (rate == null) return [];
 
   const startTs = rangeStartSeconds(range, nowSeconds);

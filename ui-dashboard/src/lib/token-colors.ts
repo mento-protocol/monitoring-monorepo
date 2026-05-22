@@ -49,12 +49,9 @@ const FALLBACK = [
   "#94a3b8",
 ];
 
-/**
- * Returns a 6-digit hex color for a token symbol. Curated picks for known
- * Mento stables; deterministic hash fallback for anything else. Stable
- * identity per symbol — calling with "USDm" always returns the same color.
- */
-export function tokenColor(symbol: string): string {
+// Internal — `tokenColorForSource` is the only callsite today. If a
+// future caller wants a single-symbol lookup (no source split), re-export.
+function tokenColor(symbol: string): string {
   const hit = PALETTE[symbol];
   if (hit) return hit;
   let hash = 0;
@@ -62,4 +59,27 @@ export function tokenColor(symbol: string): string {
     hash = (hash * 31 + symbol.charCodeAt(i)) | 0;
   }
   return FALLBACK[Math.abs(hash) % FALLBACK.length];
+}
+
+// Source overrides: when the same symbol maps to two on-chain contracts
+// distinguished by `source` (today only V3 hub USDm vs V2 cUSD-USDm), the
+// V3 variant gets a darker green so the stacked chart's two USDm slices
+// don't visually merge.
+const SOURCE_OVERRIDES: Record<string, string> = {
+  // "USDm" V3_HUB_COLLATERAL → green-500 (vs V2 emerald-400 #34d399).
+  "USDm:V3_HUB_COLLATERAL": "#22c55e",
+};
+
+/**
+ * Returns a stack-distinct color for the (symbol, source) pair. Falls
+ * back to `tokenColor(symbol)` when there's no source override. Used by
+ * the /stables hero chart's stacked area where the same `tokenSymbol`
+ * can map to two distinct on-chain rows (V2 cUSD-USDm + V3 hub USDm).
+ * Calling site picks `tokenColorForSource(symbol, source)` — the chart's
+ * `BreakdownSeries.color` consumes the result directly.
+ */
+export function tokenColorForSource(symbol: string, source: string): string {
+  const override = SOURCE_OVERRIDES[`${symbol}:${source}`];
+  if (override) return override;
+  return tokenColor(symbol);
 }

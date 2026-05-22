@@ -6,7 +6,7 @@ import type { BreakdownSeries } from "@/components/time-series-chart-card-overla
 import { formatUSD } from "@/lib/format";
 import { displayLabel } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
-import { tokenColor } from "@/lib/token-colors";
+import { tokenColorForSource } from "@/lib/token-colors";
 import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
@@ -61,7 +61,11 @@ export function StablesHeroChart({
       breakdownEntries.push({
         id: key,
         name: displayLabel(sample.tokenSymbol, sample.source),
-        color: tokenColor(sample.tokenSymbol),
+        // V2 USDm and V3 hub USDm share `tokenSymbol` but live at
+        // distinct addresses; source-aware coloring keeps the stacked
+        // chart's two USDm slices visually distinct (otherwise they
+        // merge into a single emerald block).
+        color: tokenColorForSource(sample.tokenSymbol, sample.source),
         series: series.map((p) => ({
           timestamp: p.timestamp,
           value: p.valueUsd,

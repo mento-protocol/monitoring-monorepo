@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { displayLabel, isMintKind, kindLabel } from "./stables";
+import {
+  displayLabel,
+  effectiveOracleRate,
+  isMintKind,
+  kindLabel,
+} from "./stables";
 
 describe("displayLabel", () => {
   it("appends `· v3` suffix when source is V3_HUB_COLLATERAL and symbol is USDm", () => {
@@ -39,6 +44,37 @@ describe("isMintKind", () => {
     expect(isMintKind("RESERVE_BURN")).toBe(false);
     expect(isMintKind("BRIDGE_BURN")).toBe(false);
     expect(isMintKind("OTHER_BURN")).toBe(false);
+  });
+});
+
+describe("effectiveOracleRate", () => {
+  it("returns the direct oracle rate when present", () => {
+    const rates = new Map([["EURm", 1.1]]);
+    expect(effectiveOracleRate(rates, "EURm")).toBe(1.1);
+  });
+
+  it("defaults USDm to 1.0 when the oracle map has no entry (cursor HIGH + codex P1)", () => {
+    // `useOracleRates`/`buildOracleRateMap` derives non-USDm rates from
+    // USDm pairs and never emits USDm itself, so this fallback is
+    // required for USDm to participate in the total + stacked chart.
+    expect(effectiveOracleRate(new Map(), "USDm")).toBe(1);
+  });
+
+  it("defaults other USD-pegged symbols to 1.0", () => {
+    expect(effectiveOracleRate(new Map(), "cUSD")).toBe(1);
+    expect(effectiveOracleRate(new Map(), "USDC")).toBe(1);
+  });
+
+  it("returns null for non-USD-pegged symbols without a rate", () => {
+    expect(effectiveOracleRate(new Map(), "EURm")).toBeNull();
+    expect(effectiveOracleRate(new Map(), "BRLm")).toBeNull();
+  });
+
+  it("direct rate takes precedence over USD-pegged default", () => {
+    // Defensive: if the oracle ever produced a USDm rate slightly off
+    // from 1.0 (e.g. depeg signal), we honor it rather than overriding.
+    const rates = new Map([["USDm", 0.997]]);
+    expect(effectiveOracleRate(rates, "USDm")).toBe(0.997);
   });
 });
 

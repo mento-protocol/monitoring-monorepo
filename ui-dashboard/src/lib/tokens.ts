@@ -20,6 +20,15 @@ const USD_PEGGED_SYMBOLS = new Set([
   "AUSD",
 ]);
 
+/** Public view of `USD_PEGGED_SYMBOLS` for consumers that need the same
+ *  USD-anchor list (e.g. `stables.ts:effectiveOracleRate` defaults
+ *  USD-pegged stables to 1.0 when the oracle rate map doesn't include
+ *  them \u2014 `useOracleRates` derives non-USDm symbols from USDm pairs but
+ *  never emits a rate for USDm itself). Keep this re-export so the set
+ *  has one source of truth. */
+export const USD_PEGGED_SYMBOLS_PUBLIC: ReadonlySet<string> =
+  USD_PEGGED_SYMBOLS;
+
 /** Maps token symbol → USD-per-1-token rate, derived from pool oracle prices. */
 export type OracleRateMap = Map<string, number>;
 
