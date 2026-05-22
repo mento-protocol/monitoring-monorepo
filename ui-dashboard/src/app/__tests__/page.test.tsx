@@ -847,6 +847,35 @@ describe("GlobalPage — Traders tile", () => {
     expect(tradersMatch?.[1]).toBe("…");
   });
 
+  // The traders snapshot is a single Hasura query that routinely
+  // finishes BEFORE `useAllNetworksData`'s per-network fan-out, so
+  // even when the snapshot result is already in (here: empty
+  // `windowTraders` arrays), the page-level loading state must keep
+  // the tile on "…" until the siblings catch up. Without this, the
+  // tile would render a confirmed "0" while LPs / Swaps still show
+  // "…", which reads as a real count instead of a load race.
+  it("renders '…' while the page is still loading even if the traders query has settled", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    // Second arg passes `isLoading: true` to `useAllNetworksData`.
+    const html = render([], true);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
+
   // The closed-day snapshot only refreshes at the per-chain UTC-midnight
   // heartbeat, so today's brand-new traders are missing without the
   // today-partial union. This test pins the union: a trader present

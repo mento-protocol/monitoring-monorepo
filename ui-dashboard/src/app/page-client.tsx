@@ -401,7 +401,7 @@ function GlobalContent({
             }
             subtitle="All-time across all pools"
           />
-          <TradersTile />
+          <TradersTile isLoading={isLoading} />
         </div>
       </section>
 
@@ -448,7 +448,7 @@ function GlobalContent({
 // parent's starting line past the eslint baseline-diff proximity window;
 // function declarations hoist, so calling it from inside `GlobalContent`
 // is fine.
-function TradersTile() {
+function TradersTile({ isLoading }: { isLoading: boolean }) {
   const snapshotGql = useGQL<LeaderboardWindowTradersLatest>(
     LEADERBOARD_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
@@ -550,8 +550,15 @@ function TradersTile() {
     }
     return set.size;
   }, [snapshotGql.data, snapshotGql.error, todayGql.data]);
+  // `isLoading` (from `useAllNetworksData`) folds the page-level fetch
+  // race into the tile's loading sentinel: the snapshot query is a
+  // single Hasura request and routinely finishes BEFORE the per-network
+  // fan-out behind `useAllNetworksData`. Without this, the tile would
+  // flip to a confirmed number while the sibling KPI tiles still
+  // render "…" — UX-confusing, especially on the empty-data race
+  // where a transient "0" would read as a real count.
   let value: string;
-  if (snapshotGql.isLoading) value = "…";
+  if (isLoading || snapshotGql.isLoading) value = "…";
   else if (count === null) value = "N/A";
   else
     value = isPartial ? `≈ ${count.toLocaleString()}` : count.toLocaleString();
