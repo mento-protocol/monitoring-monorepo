@@ -32,33 +32,41 @@ import { consoleLogger, type RpcLogger } from "./log.js";
 const BLOCK_NOT_AVAILABLE_RE =
   /block is out of range|block number out of range|header not found|unknown block|block requested not found/i;
 
-/** Matches RPC error messages indicating the node lacks archive depth back
- * to the requested block — *the contract IS deployed there, the node just
- * doesn't have state pruned that far back* — or, more broadly, that the
- * primary provider is rejecting `eth_call` and the recovery path is to try
- * the secondary RPC at the same block.
+/** Matches RPC error messages that should ROUTE through the archive-depth
+ * branch — either genuine archive-depth failures (node lacks state back to
+ * the requested block) or broader provider rejections that the secondary
+ * RPC may still be able to serve. Strictly a routing predicate; see
+ * `PROVEN_ARCHIVE_DEPTH_RE` below for the narrower predicate that pins the
+ * per-chain fallback horizon.
  *
  * Provider-specific phrasings (QuickNode emits at least three first-sentence
  * variants paired with the same second sentence):
  * - QuickNode: `"Block requested not found. Request might be querying
  *   historical state that is not available."` — match on `querying
- *   historical state`.
+ *   historical state`. Genuine archive-depth signal.
  * - QuickNode (alternate): `"Invalid parameters were provided to the RPC
- *   method.\nDouble check you have provided the correct parameters."`
+ *   method.\nDouble check you have provided the correct parameters."` —
+ *   fires when the requested block is below the pruning window. Genuine
+ *   archive-depth signal.
  * - QuickNode (third variant): `"Missing or invalid parameters.\nDouble
  *   check you have provided the correct parameters."` — observed in
- *   production 2026-05-22 against `eth_call` on a recent (non-archive)
- *   Celo block during a broad QuickNode rejection. Routed through the
- *   archive-depth branch because the recovery is identical: try the
- *   secondary RPC at the same block.
+ *   production 2026-05-22 against `eth_call` on a RECENT (non-archive)
+ *   Celo block during a broad QuickNode rejection. NOT an archive-depth
+ *   signal; routed through the archive-depth branch only because the
+ *   recovery path is identical (try the secondary at the same block).
  *
- * Both alternate variants share the second sentence; the regex uses `\s+`
- * between sentences so the real viem-emitted message (which uses `\n`, not
- * a single space) actually matches the alternation. The literal-space
- * version of this regex shipped silently broken for several months — viem's
- * error formatter inserts `\n` between sentences, the unit tests used a
- * single space, and the live indexer never engaged the secondary on these
- * errors.
+ * The split between routing and horizon-poisoning matters: pinning the
+ * horizon at a recent block on a transient provider rejection would skip
+ * the fallback for ~all blocks below that height until process restart.
+ * Only `PROVEN_ARCHIVE_DEPTH_RE` matches should call
+ * `recordFallbackArchiveMiss`; this broader regex is for routing only.
+ *
+ * All alternates share the second sentence; the regex uses `\s+` between
+ * sentences so the real viem-emitted message (which uses `\n`, not a
+ * single space) actually matches. The literal-space version of this
+ * regex shipped silently broken for several months — viem's error
+ * formatter inserts `\n`, the unit tests used a single space, and the
+ * live indexer never engaged the secondary on these errors.
  *
  * The bare `Block requested not found` phrase by itself can also mean
  * "transient lag — node hasn't seen this block yet" on some providers,
@@ -77,6 +85,18 @@ const BLOCK_NOT_AVAILABLE_RE =
  * indexer reaches a block whose state the primary can serve. */
 const ARCHIVE_DEPTH_RE =
   /querying historical state|(?:Invalid parameters were provided to the RPC method|Missing or invalid parameters)\.\s+Double check you have provided the correct parameters/i;
+
+/** Subset of `ARCHIVE_DEPTH_RE` that represents a GENUINE archive-depth
+ * miss — the secondary's response shape says "this node lacks state at
+ * the requested block". Only these patterns should poison the per-chain
+ * fallback horizon via `recordFallbackArchiveMiss`. The broader routing
+ * regex includes a third QuickNode variant (`Missing or invalid
+ * parameters`) that fires on RECENT blocks during transient rejection;
+ * recording a horizon there would block fallback usage for ~all blocks
+ * below that height until process restart, masking a transient glitch
+ * as a permanent provider limit. */
+const PROVEN_ARCHIVE_DEPTH_RE =
+  /querying historical state|Invalid parameters were provided to the RPC method\.\s+Double check you have provided the correct parameters/i;
 
 export type BlockFallbackResult = {
   result: unknown;
@@ -227,6 +247,17 @@ function isArchiveDepthErr(
   );
 }
 
+/** Narrower predicate than `isArchiveDepthErr`: only the verified
+ * archive-depth phrasings, NOT the broader provider-rejection variant
+ * that can fire on recent blocks. Use this to gate horizon-poisoning
+ * (`recordFallbackArchiveMiss`) so a transient provider glitch on a
+ * recent block doesn't pin the fallback as "lacks archive depth at
+ * block N" for the rest of the process. Block-number agnostic — the
+ * caller has already established the routing context. */
+function isProvenArchiveDepthErr(err: unknown): err is Error {
+  return err instanceof Error && PROVEN_ARCHIVE_DEPTH_RE.test(err.message);
+}
+
 function isBlockNotAvailableErr(
   err: unknown,
   blockNumber: bigint | undefined,
@@ -320,10 +351,7 @@ async function attemptRateLimitRecovery(
         value: { result, usedFallback: true, usedLatestFallback: false },
       };
     } catch (fallbackErr) {
-      if (
-        blockNumber !== undefined &&
-        isArchiveDepthErr(fallbackErr, blockNumber)
-      ) {
+      if (blockNumber !== undefined && isProvenArchiveDepthErr(fallbackErr)) {
         recordFallbackArchiveMiss(chainId, blockNumber);
       }
       if (isRateLimitError(fallbackErr)) {
@@ -370,10 +398,7 @@ async function attemptArchiveDepthSecondary(
     );
     return { result, usedFallback: true, usedLatestFallback: false };
   } catch (fallbackErr) {
-    if (
-      fallbackErr instanceof Error &&
-      ARCHIVE_DEPTH_RE.test(fallbackErr.message)
-    ) {
+    if (isProvenArchiveDepthErr(fallbackErr)) {
       recordFallbackArchiveMiss(chainId, blockNumber);
     }
     recordFallbackStat(deps, "archiveFailures");
@@ -457,7 +482,7 @@ async function attemptBlockSecondaryFallback(
     const result = await makeCall(fallbackClient, blockNumber);
     return { result, usedFallback: true, usedLatestFallback: false };
   } catch (fallbackErr) {
-    if (isArchiveDepthErr(fallbackErr, blockNumber)) {
+    if (isProvenArchiveDepthErr(fallbackErr)) {
       recordFallbackArchiveMiss(chainId, blockNumber);
     }
     if (isRateLimitError(fallbackErr)) {
