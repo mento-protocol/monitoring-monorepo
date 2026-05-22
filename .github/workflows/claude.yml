@@ -69,6 +69,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
+          # The inline-comment MCP server is gated behind explicit --allowedTools:
+          # without this flag the action neither installs github-inline-comment-server.ts
+          # nor adds the tool to ALLOWED_TOOLS, so Claude silently falls back to a
+          # sticky-only review even when the prompt instructs it to use inline comments.
+          # See anthropics/claude-code-action src/mcp/install-mcp-server.ts (hasInlineCommentTools).
+          claude_args: |
+            --allowedTools mcp__github_inline_comment__create_inline_comment
           prompt: |
             If this invocation is a code review (initial review, re-review, "review the changes", "check the diff"), use hybrid output:
 
@@ -113,6 +120,11 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
           track_progress: true
+          # See note on the on-demand job above — without --allowedTools the action
+          # never installs the inline-comment MCP server, so the prompt's inline-comment
+          # instructions are no-ops.
+          claude_args: |
+            --allowedTools mcp__github_inline_comment__create_inline_comment
           prompt: |
             Review this PR using hybrid output:
 

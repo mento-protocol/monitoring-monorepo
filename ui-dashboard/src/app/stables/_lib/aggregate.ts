@@ -41,6 +41,26 @@ export function rollupByToken(
 }
 
 /**
+ * Union the paginated daily-snapshot stream with the `latestPerToken`
+ * one-row-per-token feed. Tokens whose only known snapshot is older
+ * than the retained 1000-row page would otherwise drop out of the
+ * stacked total + sparkline grid; this floor keeps them present.
+ *
+ * De-dupes on row id, so when both feeds carry the same row it
+ * collapses cleanly. Both `StablesHeroChart` and `StablesSparklineGrid`
+ * call this — single source so they can't drift on collision precedence.
+ */
+export function unionSnapshotsWithLatest(
+  snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
+  latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>,
+): StableSupplyDailySnapshot[] {
+  const byId = new Map<string, StableSupplyDailySnapshot>();
+  for (const r of snapshots) byId.set(r.id, r);
+  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
+  return Array.from(byId.values());
+}
+
+/**
  * Group snapshots by `{tokenAddress}|{source}`. Exported so the hero chart
  * can reuse the same discriminator key — V2 cUSD-USDm and V3 hub USDm
  * share the symbol "USDm" but live at distinct addresses, and the rollup

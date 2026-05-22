@@ -22,6 +22,7 @@ export type V2StableSupplyChangeEvent = {
   chainId: number;
   tokenAddress: string;
   tokenSymbol: string;
+  tokenDecimals: number;
   source: StableSupplySource;
   kind: StableSupplyChangeKind;
   counterparty: string;
