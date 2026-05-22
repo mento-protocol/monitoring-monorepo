@@ -35,6 +35,12 @@ export type OracleRatePool = Pick<
  * may still carry old symbols like "cEUR" instead of "EURm". */
 const LEGACY_ALIASES: ReadonlyArray<[string, string]> = [["cEUR", "EURm"]];
 
+/** Public re-export of LEGACY_ALIASES for `stables.ts` and any other module
+ *  that needs the v2→v3 symbol remap table. Kept as a re-export so this
+ *  file remains the single source of truth — new aliases land here. */
+export const LEGACY_ALIASES_PUBLIC: ReadonlyArray<readonly [string, string]> =
+  LEGACY_ALIASES;
+
 /**
  * Builds a symbol→USD rate map from pools that have a USDm leg.
  * For each pool with one USDm token and a valid oraclePrice,
