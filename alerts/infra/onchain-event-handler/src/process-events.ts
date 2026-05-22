@@ -43,10 +43,12 @@ export async function processEvents(
 
   // Filter out logs that should be skipped before parallel processing
   const logsToProcess = logs.filter((logEntry) => {
+    // Guard against null/non-object/missing-transactionHash entries before
+    // touching any field — payload validation only checks `result` is an
+    // array, so a malformed batch entry could otherwise 500 the whole batch
+    // and drop every valid sibling event.
+    if (logEntry === null || typeof logEntry !== "object") return true;
     // Skip ExecutionSuccess if we already have SafeMultiSigTransaction for this tx.
-    // Guard against a non-string transactionHash so a malformed batch entry
-    // can't throw before per-event validation/try-catch runs (would otherwise
-    // 500 the whole batch and drop every valid sibling event).
     if (
       logEntry.name === "ExecutionSuccess" &&
       typeof logEntry.transactionHash === "string" &&

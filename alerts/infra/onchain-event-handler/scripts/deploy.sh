@@ -309,7 +309,10 @@ main() {
 		"--timeout=${timeout_seconds}s"
 		"--max-instances=${max_instances}"
 		"--min-instances=${min_instances}"
-		"--set-secrets=QUICKNODE_SIGNING_SECRET=${secret_name}:latest"
+		# Keep this list in sync with the secret_environment_variables block
+		# in alerts/infra/onchain-event-handler/main.tf. Cloud Function refuses
+		# to boot if any required env var (per src/config.ts) is missing.
+		"--set-secrets=QUICKNODE_SIGNING_SECRET=${secret_name}:latest,DISCORD_WEBHOOK_ALERTS=${secret_name}-discord-alerts:latest,DISCORD_WEBHOOK_EVENTS=${secret_name}-discord-events:latest"
 		"--impersonate-service-account=${terraform_service_account}"
 	)
 

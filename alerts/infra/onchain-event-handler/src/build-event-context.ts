@@ -21,9 +21,10 @@ export function buildEventContext(
 
   for (const log of logs) {
     // Payload-level validation only guarantees `result` is an array, so each
-    // log's `transactionHash` could be missing or a non-string. Skip those
-    // entries here so a malformed batch entry can't throw a TypeError before
-    // per-log validation runs.
+    // log could be null, a primitive, or missing transactionHash entirely.
+    // Skip those entries here so a malformed batch entry can't throw a
+    // TypeError before per-log validation runs.
+    if (log === null || typeof log !== "object") continue;
     if (typeof log.transactionHash !== "string") continue;
     const txHashLower = log.transactionHash.toLowerCase();
 

@@ -129,12 +129,16 @@ module "onchain_event_listeners" {
     restapi.quicknode = restapi.quicknode
   }
 
-  webhook_endpoint_url     = module.onchain_event_handler.function_url
-  multisig_addresses       = [for k, v in each.value : v.address]
-  webhook_name             = "safe-multisig-monitor-${each.key}"
-  chain_key                = each.key
-  safe_abi                 = local.safe_abi
-  quicknode_network_name   = each.value[keys(each.value)[0]].quicknode_network_name # All multisigs in group have same network
+  webhook_endpoint_url = module.onchain_event_handler.function_url
+  multisig_addresses   = [for k, v in each.value : v.address]
+  webhook_name         = "safe-multisig-monitor-${each.key}"
+  chain_key            = each.key
+  safe_abi             = local.safe_abi
+  # All multisigs in the same chain group must declare the same
+  # quicknode_network_name. local.multisigs_by_chain_network is built from a
+  # distinct() check in locals.tf — terraform plan fails with a clear error
+  # if an operator mixes networks within one chain.
+  quicknode_network_name   = local.multisigs_by_chain_network[each.key]
   quicknode_api_key        = var.quicknode_api_key
   quicknode_signing_secret = var.quicknode_signing_secret
   debug_mode               = var.debug_mode
