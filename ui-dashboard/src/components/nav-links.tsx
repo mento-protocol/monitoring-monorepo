@@ -21,6 +21,12 @@ export function NavLinks() {
         Pools
       </Link>
       <Link
+        href="/stables"
+        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+      >
+        Stables
+      </Link>
+      <Link
         href="/bridge-flows"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >
