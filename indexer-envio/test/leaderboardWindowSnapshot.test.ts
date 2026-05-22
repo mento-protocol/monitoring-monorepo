@@ -147,6 +147,59 @@ describe("buildLeaderboardWindowSnapshot", () => {
     assert.equal(snap.totalSwapCountIncludingSystem, 3);
     assert.equal(snap.uniqueTraders, 1);
     assert.equal(snap.uniqueTradersIncludingSystem, 2);
+    // windowTraders mirrors the count split: A (non-system) only in
+    // primary; both A and B in *IncludingSystem. Sorted ascending.
+    assert.deepEqual(snap.windowTraders, [TRADER_A]);
+    assert.deepEqual(snap.windowTradersIncludingSystem, [TRADER_A, TRADER_B]);
+  });
+
+  it("windowTraders is empty when aggregates are empty", () => {
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "all",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: 0n,
+      aggregates: [],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.deepEqual(snap.windowTraders, []);
+    assert.deepEqual(snap.windowTradersIncludingSystem, []);
+  });
+
+  it("windowTraders length matches uniqueTraders / IncludingSystem counts", () => {
+    // Two non-system + one system trader. The address lists should
+    // satisfy `length === <count>` for both system-filter branches —
+    // this is the invariant the homepage Traders tile relies on for
+    // cross-chain Set-deduplication.
+    //
+    // Input deliberately reversed so the deepEqual on the sorted output
+    // is a real sort assertion, not a no-op identity check.
+    const snap = buildLeaderboardWindowSnapshot({
+      chainId: CHAIN,
+      windowKey: "all",
+      snapshotDay: DAY_2026_05_07,
+      windowStartDay: 0n,
+      aggregates: [
+        agg({ trader: TRADER_C, isSystemAddress: true }),
+        agg({ trader: TRADER_B, isSystemAddress: false }),
+        agg({ trader: TRADER_A, isSystemAddress: false }),
+      ],
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(snap.windowTraders.length, snap.uniqueTraders);
+    assert.equal(
+      snap.windowTradersIncludingSystem.length,
+      snap.uniqueTradersIncludingSystem,
+    );
+    // Deterministic order — addresses are sorted ascending (input was reversed).
+    assert.deepEqual(snap.windowTraders, [TRADER_A, TRADER_B]);
+    assert.deepEqual(snap.windowTradersIncludingSystem, [
+      TRADER_A,
+      TRADER_B,
+      TRADER_C,
+    ]);
   });
 
   it("firstDay fields default to zero when no aggregates carry first-day slice", () => {

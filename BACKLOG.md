@@ -4,59 +4,6 @@ Active work only. Remove items from this file once they ship or are closed.
 Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`,
 or tests.
 
-## CDP dashboard cleanup (indexer side already shipped)
-
-Indexer-side `systemDebt` delta-tracking and the rebalance-redemption split
-landed on prod at commit `026c629` (promoted 2026-05-20). Verified via
-introspection against `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`:
-`LiquityInstance.systemDebt` returns non-zero (cBRL 16.4M, cREAL 70K, GBPm
-314K), and `RedemptionEvent.isRebalance` + the `rebalanceRedemption{Count,
-Debt,Fee}Cum` buckets are populated (GBPm 367/368 rebalance-driven, JPYm
-13/13).
-
-Background on the indexer changes (kept here because the dashboard cleanup
-below assumes them):
-
-1. **`LiquityInstance.systemDebt` derivation** — `applySystemDebtDelta` in
-   `indexer-envio/src/handlers/liquity/troves.ts` runs in every trove handler
-   (`TroveOperation`, `TroveUpdated`, `BatchUpdated`, plus the loop in
-   `reclassifyTrovesForLoadedParams`). `pools.ts:updatePoolGauge` no longer
-   sets `systemDebt` (it would clobber the delta-tracked value on the first
-   DefaultPool event).
-2. **Rebalance-redemption split** — PR #31 in `mento-protocol/bold` added
-   `redeemCollateralRebalancing` which fires identical `Redemption` events
-   to user redemptions. Discriminator: `event.transaction.to ==
-cdpLiquidityStrategy` (single shared strategy
-   `0x4e78bd9565341eabe99cdc024acb044d9bdcb985` on Celo). Totals
-   (`redemption*Cum`) still increment for every redemption — the rebalance
-   subset is added on top, so user-driven = total − rebalance.
-
-What's left (dashboard only):
-
-- [ ] **Delete the dashboard `systemDebt` workaround** in
-      `ui-dashboard/src/app/cdps/_lib/health.ts` / `cdps-page-client.tsx` /
-      `cdp-detail-client.tsx` / `lib/queries/liquity.ts`. Drop the `Trove {
-id collateralId status debt coll }` selection from `CDP_MARKETS`, stop
-      calling `aggregateTroves`, read `instance.systemDebt` directly. Keep
-      `aggregateTroves` for the borrower count — `activeTroveCount` still
-      excludes zombies (that's a separate indexer-side gap; consider adding
-      an `openTroveCount` field maintained alongside `activeTroveCount` in
-      the same delta path).
-- [ ] **Surface rebalance vs user redemption split** in the dashboard.
-      Existing UI shows nothing about redemptions, but Total / Rebalance /
-      User KPI tiles or a stacked time-series in the CDP detail page would
-      be the natural next surface.
-- [ ] **Replace `formatTokenAmount`'s `-1` sentinel for signed values.**
-      `ui-dashboard/src/app/cdps/_lib/format.ts` treats `-1` as the
-      "unknown" sentinel for unsigned counters, but with the new signed
-      `collChange` / `debtChange` int256 deltas (PR #477) a hypothetical
-      `-1 wei` withdrawal would render as `—` instead of the actual
-      amount. Astronomically unlikely in practice, but the semantic
-      collision worsens as the helper grows. Fix: split into
-      `formatTokenAmount` (unsigned, keeps the sentinel) and
-      `formatSignedWei` (signed, only guards `null`/`undefined`); migrate
-      callers individually.
-
 ## Indexer relabel: mento-router-v2 / -v3 (next /deploy-indexer)
 
 PR #513 (merged 2026-05-21) renamed the broker classifier's `mento-router-v2`
@@ -105,6 +52,42 @@ agent sessions.
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
 
+### Agent PR Loop Speed Follow-Ups
+
+The PR #508 readiness-tooling session was slow mostly because agent review
+requests and readiness polling became part of the inner edit loop. Local gates
+were acceptable; repeated pushes plus duplicate `@codex review` requests caused
+most of the wall-clock churn.
+
+- [ ] Add `pnpm pr:ready-state --watch --compact` for babysitting. Output only
+      the current head SHA, mergeability, required blockers, pending required
+      checks, unresolved threads, unreplied review comments, and Codex
+      PR-description approval state. Keep `--json` for machine consumers, but
+      make the human watch path low-noise.
+- [ ] Track Codex review-request state in `pr:ready-state`: `missing`,
+      `requested`, `in_flight`, `stale`, and `approved`. Treat a current-head
+      `@codex review` comment with bot `eyes` reaction, a current-head Codex
+      review, or a current-head Codex top-level result as in-flight/signal so
+      agents do not post duplicate requests while waiting.
+- [ ] Add a regression test fixture for duplicate-review prevention: multiple
+      historical `@codex review` comments on old heads, one current-head request
+      in flight, and no PR-description thumbs-up yet. Expected result: not
+      ready, but fallback action is "wait", not "request review again".
+- [ ] Update `AGENTS.md` and Claude/Codex agent docs to make the loop explicit:
+      batch review fixes locally, audit sibling cases before pushing, run the
+      mapped local gate once per batch, then wait for automatic/current-head
+      review signal. Manual `@codex review` is a one-shot stale fallback, not a
+      post-push habit.
+- [ ] Add a short "PR babysitting speed discipline" checklist to the shared
+      readiness note: build a feedback ledger, avoid broad bot review as an
+      inner loop, cap manual Codex fallback to one per head, and only declare
+      all-clear from the compact readiness result.
+
+Acceptance: a follow-up PR can babysit a review-heavy branch without repeated
+manual Codex pings, without dumping huge readiness JSON on every poll, and
+without weakening the rule that all-clear requires a current-head Codex
+PR-description thumbs-up.
+
 ### CodeScene-Equivalent OSS Quality Checks — Remaining Follow-Ups
 
 The 5-PR rollout (#422/#423/#424/#425/#426) shipped knip, dependency-cruiser,
@@ -124,6 +107,42 @@ The initial Lighthouse CI gate landed in PR #451 with desktop performance + acce
 - [ ] **Architect a reliable Vercel deployment-protection bypass for lhci.** PR #451 shipped with bypass-via-header, but lhci's puppeteer-launched Chrome appears to redirect to the Vercel SSO interstitial despite the `x-vercel-protection-bypass` header — verified empirically (lhci audited `vercel.com/login?next=...` URLs instead of the dashboard). The query-param form works but embeds the secret in the publicly-readable lhci report (`temporary-public-storage`). Options to evaluate: (a) configure Vercel project to disable preview protection (Vercel project setting, may need governance approval); (b) gate the secret-bearing audit to a separate `workflow_run`-triggered job that runs from trusted base ref; (c) deploy a CDN-fronted preview alias that's unprotected for crawlers but auth-gated for browsers; (d) self-host lhci on a runner that talks to Vercel's API directly and uses a different auth flow. Once a reliable bypass lands, **promote accessibility from `warn` to `error` in `.lighthouserc.cjs`** so regressions block.
 - [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance. Depends on the bypass mechanism above — performance numbers from the SSO interstitial are not meaningful.
 - [ ] Add INP (interaction-to-next-paint) coverage via lhci's user-flow mode with scripted interactions on the dashboard pages. Lighthouse's default navigation mode never produces an INP numeric value, so the budget was intentionally omitted in PR #451 to avoid silent-pass false confidence. User-flow mode would script the typical "open page, hover a chart, click a filter" interaction and run an INP audit on the scripted timespan.
+
+### React Compiler Evaluation
+
+Context: `ui-dashboard` is already on Next.js 16.2.6 + React 19.2.6, and
+`pnpm --filter @mento-protocol/ui-dashboard react-doctor` reports 100/100 with
+no issues. React Compiler is not enabled yet; Next.js 16 supports it via the
+top-level `reactCompiler` config and `babel-plugin-react-compiler`.
+
+- [ ] **Pilot React Compiler in annotation mode first.** Add
+      `babel-plugin-react-compiler` as a dashboard dev dependency and configure
+      `reactCompiler: { compilationMode: "annotation" }` in
+      `ui-dashboard/next.config.ts`, leaving global compilation off until the
+      pilot has behavior and build-time evidence.
+- [ ] **Pick one high-churn client surface for `"use memo"`.** Prefer
+      `leaderboard`, `pools`, or a chart-heavy page where URL state, filters,
+      tables, and derived arrays currently rely on manual `useMemo` /
+      `useCallback`. Keep the first PR narrow enough that regressions are easy
+      to attribute.
+- [ ] **Measure before expanding.** Capture baseline vs compiler-enabled
+      interaction behavior with React Profiler or Playwright traces for a small
+      set of real interactions: filter/search updates, tab/range changes, chart
+      hover/toggle, and table sort/page changes. Record whether the win is
+      measurable UI smoothness, reduced render count, or only cleaner code.
+- [ ] **Run the dashboard safety gate.** At minimum run `react-doctor`,
+      `pnpm dashboard:build`, and the relevant browser interaction tests. Add a
+      focused regression test if the pilot touches URL-backed controls,
+      optimistic mutations, or chart/table synchronization.
+- [ ] **Decide rollout mode from evidence.** If annotation mode is clean and
+      useful, either expand `"use memo"` to the next client-heavy surfaces or
+      switch to `reactCompiler: true` behind a follow-up PR with the same
+      measurement and browser-test gate. If build time increases materially and
+      user-visible wins are weak, keep compiler usage targeted.
+
+Acceptance: the pilot PR documents build-time delta, interaction/render evidence,
+and any components deliberately left uncompiled via `"use no memo"` or by
+remaining outside annotation mode.
 
 ### Package-Manager Supply-Chain Hardening Review
 

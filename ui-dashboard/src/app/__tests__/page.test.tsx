@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { SWRResponse } from "swr";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import {
   BASE_NETWORK,
@@ -20,6 +21,15 @@ import {
 // Mock hooks that have side effects / SWR dependency
 vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
+}));
+
+// `useGQL` (Traders tile) is wired through SWR + useNetwork; without a mock
+// the call throws "useNetwork must be used within <NetworkProvider>" at
+// render time, blanking the markup. Mock with a stable default and override
+// per-test via `vi.mocked(useGQL).mockReturnValueOnce(...)` for the new
+// homepage Traders tile coverage below.
+vi.mock("@/lib/graphql", () => ({
+  useGQL: vi.fn(),
 }));
 
 // GlobalPoolsTable has complex deps — stub it, but capture props for assertions
@@ -39,6 +49,7 @@ vi.mock("@/components/global-pools-table", () => ({
 }));
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { useGQL } from "@/lib/graphql";
 import * as volumeModule from "@/lib/volume";
 import { buildSnapshotWindows } from "@/lib/volume";
 // Import from page-client (not page.tsx): page.tsx is now an async Server
@@ -77,6 +88,29 @@ function render(networkData: NetworkData[], isLoading = false): string {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedProps = null;
+  // Default `useGQL` mock for the Traders tile — one fresh snapshot row
+  // per chain in the fixtures' BASE_NETWORK + NETWORK_2 (chainIds 42220
+  // and 11142220) keyed at yesterday's UTC midnight so the tile renders
+  // a deterministic count without tripping the missing-chain /
+  // stale-chain / empty-rows guards. Tests that exercise the Traders
+  // tile's partial paths override via `mockReturnValueOnce` /
+  // `mockReturnValue` directly.
+  const yesterdaySec = String(
+    Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+  );
+  vi.mocked(useGQL).mockReturnValue({
+    data: {
+      LeaderboardWindowSnapshot: [
+        { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+        { chainId: 11142220, snapshotDay: yesterdaySec, windowTraders: [] },
+      ],
+      TraderDailySnapshot: [],
+    },
+    error: undefined,
+    isLoading: false,
+    isValidating: false,
+    mutate: vi.fn(),
+  } as unknown as SWRResponse);
 });
 
 // Loading state
@@ -710,5 +744,434 @@ describe("GlobalPage — Volume chart wiring", () => {
     ]);
 
     expect(html.split("· partial data").length - 1).toBe(1);
+  });
+});
+
+// Traders tile — sources its count from the isolated
+// LEADERBOARD_WINDOW_TRADERS_LATEST query. Cross-chain Set-deduplication
+// (a wallet active on multiple chains counts once) is the load-bearing
+// invariant for this tile; the existing `uniqueTraders` field on the hero
+// snapshot can't satisfy it because naïve summing double-counts.
+
+describe("GlobalPage — Traders tile", () => {
+  it("counts cross-chain overlapping addresses once (Set-deduplicates)", () => {
+    // Two chains each contribute 3 traders with 2 overlaps (case-insensitive).
+    // Expected unique count = |{A, B, C, D}| = 4. `snapshotDay` set to
+    // yesterday's UTC midnight so the stale-chain detection stays off.
+    // Uses NETWORK_2's chainId (11142220) so both rows fall inside
+    // `expectedChainIds` for the network-scope filter.
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const yesterdaySec = String(todaySec - 86400);
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: yesterdaySec,
+            windowTraders: [
+              "0xAAAA000000000000000000000000000000000001",
+              "0xBBBB000000000000000000000000000000000002",
+              "0xCCCC000000000000000000000000000000000003",
+            ],
+          },
+          {
+            chainId: 11142220,
+            snapshotDay: yesterdaySec,
+            windowTraders: [
+              // First two overlap with Celo (mixed case on purpose — the page
+              // lowercases before dedupe).
+              "0xaaaa000000000000000000000000000000000001",
+              "0xbbbb000000000000000000000000000000000002",
+              "0xDDDD000000000000000000000000000000000004",
+            ],
+          },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    // Both networks pass so `expectedChainIds` covers Celo (42220) and
+    // Monad (143) and neither chain's snapshot rows are filtered out by
+    // the network-scope guard.
+    const html = render([
+      makeNetworkData({ pools: [], fees: null }),
+      makeNetworkData({ network: NETWORK_2, pools: [], fees: null }),
+    ]);
+    expect(html).toContain("Traders");
+    // Angle-bracket match guards against Tailwind class digits.
+    expect(html).toContain(">4<");
+  });
+
+  it("renders N/A when the Traders query errors", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: new Error("Hasura schema-drift: field not found"),
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    expect(html).toContain("Traders");
+    expect(html).toContain("N/A");
+  });
+
+  it("renders 0 when every chain returns an empty windowTraders array", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+          { chainId: 11142220, snapshotDay: yesterdaySec, windowTraders: [] },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    expect(html).toContain("Traders");
+    expect(html).toContain(">0<");
+    expect(html).not.toContain(">N/A<");
+  });
+
+  // Per AGENTS.md "Loading vs zero vs empty" — a `data === undefined &&
+  // !error` SWR slice must NOT render a happy-path zero. Without an
+  // explicit `isLoading: true` mock, the prior tests don't exercise
+  // this branch and a regression that swallowed the loading sentinel
+  // would silently ship `0` instead of `…`. We isolate the Traders
+  // tile via its label + the adjacent value markup so the LPs / Swaps
+  // tiles (which also render `0` against the empty fixture) don't
+  // bleed into the assertion.
+  it("renders '…' while the Traders query is loading", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isLoading: true,
+      isValidating: true,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
+
+  // When the snapshot has resolved but the today-partial query is
+  // still in flight, the displayed count would be the snapshot-only
+  // subtotal — missing today's first-time traders. Render "…" until
+  // BOTH halves settle so the user never sees a transient understated
+  // count as if it were complete.
+  it("renders '…' while the today-partial query is still loading", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL)
+      .mockReturnValueOnce({
+        data: {
+          LeaderboardWindowSnapshot: [
+            {
+              chainId: 42220,
+              snapshotDay: yesterdaySec,
+              windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+            },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse)
+      .mockReturnValueOnce({
+        data: undefined,
+        error: undefined,
+        isLoading: true,
+        isValidating: true,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
+
+  // The traders snapshot is a single Hasura query that routinely
+  // finishes BEFORE `useAllNetworksData`'s per-network fan-out, so
+  // even when the snapshot result is already in (here: empty
+  // `windowTraders` arrays), the page-level loading state must keep
+  // the tile on "…" until the siblings catch up. Without this, the
+  // tile would render a confirmed "0" while LPs / Swaps still show
+  // "…", which reads as a real count instead of a load race.
+  it("renders '…' while the page is still loading even if the traders query has settled", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    // Second arg passes `isLoading: true` to `useAllNetworksData`.
+    const html = render([], true);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
+
+  // The closed-day snapshot only refreshes at the per-chain UTC-midnight
+  // heartbeat, so today's brand-new traders are missing without the
+  // today-partial union. This test pins the union: a trader present
+  // ONLY in `TraderDailySnapshot` (today's partial) but absent from
+  // every chain's `windowTraders` must still count, and a trader
+  // present in both must dedupe to one. `snapshotDay` is set to
+  // yesterday's UTC midnight so the stale-chain detection stays off.
+  it("merges today's partial trader set on top of the closed-day snapshot", () => {
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const yesterdaySec = String(todaySec - 86400);
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: yesterdaySec,
+            windowTraders: [
+              "0xaaaa000000000000000000000000000000000001",
+              "0xbbbb000000000000000000000000000000000002",
+            ],
+          },
+        ],
+        TraderDailySnapshot: [
+          // Overlaps Celo's TRADER_B from the snapshot — should dedupe.
+          {
+            chainId: 42220,
+            trader: "0xBBBB000000000000000000000000000000000002",
+          },
+          // Brand-new today (no snapshot row) — must still count.
+          {
+            chainId: 42220,
+            trader: "0xeeee000000000000000000000000000000000005",
+          },
+        ],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("3");
+    // Subtitle should stay on the canonical copy — no "Approximate"
+    // marker because the snapshot is fresh (snapshotDay = yesterday).
+    expect(html).toContain("Unique addresses that traded on v3");
+    expect(html).not.toContain("Approximate — chain snapshot catching up");
+  });
+
+  // A snapshot whose snapshotDay lags behind yesterday's UTC midnight
+  // leaves a gap (closed days between snapshotDay and yesterday are
+  // missing from BOTH windowTraders and the today-partial query).
+  // Tile must signal approximation with a "≈" prefix + an explanatory
+  // subtitle until the indexer catches up.
+  it("flags the tile as approximate when any chain snapshot is stale", () => {
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const threeDaysAgo = String(todaySec - 3 * 86400);
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: threeDaysAgo,
+            windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+          },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 1");
+    expect(html).toContain("Approximate — chain snapshot catching up");
+  });
+
+  // When the today-partial query errors (timeout / Hasura error / schema
+  // drift) we still render the snapshot half, but any wallet whose
+  // first-ever v3 swap is today is silently dropped. Tile must surface
+  // the partial state so the count isn't read as exact. Mocks the
+  // snapshot result on first call and a today-partial ERROR on the
+  // second — `mockReturnValueOnce` chains in call order: snapshot then
+  // today-partial.
+  it("flags the tile as approximate when the today-partial query errors", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL)
+      .mockReturnValueOnce({
+        data: {
+          LeaderboardWindowSnapshot: [
+            {
+              chainId: 42220,
+              snapshotDay: yesterdaySec,
+              windowTraders: [
+                "0xaaaa000000000000000000000000000000000001",
+                "0xbbbb000000000000000000000000000000000002",
+              ],
+            },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse)
+      .mockReturnValueOnce({
+        data: undefined,
+        error: new Error("Hasura timeout"),
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 2");
+    // When the partial reason is specifically today-error (no stale
+    // chain), the subtitle reads "today's partial unavailable" — not
+    // "chain snapshot catching up", which would mislead about the
+    // actual degradation. `renderToStaticMarkup` HTML-encodes the
+    // apostrophe (`&#x27;`), so match a prefix that's stable across
+    // encodings.
+    expect(html).toContain("Approximate — today");
+    expect(html).toContain("partial unavailable");
+    expect(html).not.toContain("Approximate — chain snapshot catching up");
+  });
+
+  // Variant of the stale-chain branch: when a configured chain has NO
+  // snapshot row at all (heartbeat hasn't fired, indexer not yet
+  // populated for that chain), `hasMissingOrStaleChain` must still
+  // fire — closed-day data for that chain is structurally absent.
+  // Renders `≈ N` with the chain-catching-up subtitle.
+  it("flags the tile as approximate when a configured chain has no snapshot row", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        // Only Celo's snapshot row — Monad is configured (passed via
+        // networkData below) but missing from the snapshot feed.
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: yesterdaySec,
+            windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+          },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([
+      makeNetworkData({ pools: [], fees: null }),
+      makeNetworkData({ network: NETWORK_2, pools: [], fees: null }),
+    ]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 1");
+    expect(html).toContain("Approximate — chain snapshot catching up");
+  });
+
+  // Hasura may return snapshot or today-partial rows for chains the
+  // indexer covers but the dashboard hasn't wired into `networkData`
+  // (e.g. an experimental chain). Counting those would inflate the
+  // tile vs LPs/Swaps (which are network-scoped) AND a stale row for
+  // a non-configured chain would spuriously flip the approximate
+  // badge. The fix filters both halves of the union by
+  // `expectedChainIds`. This test pins the filter: a snapshot row +
+  // a today-partial row, both on an unconfigured chain (chainId
+  // 99999, not Celo or Monad), should be dropped from the count.
+  it("scopes both halves of the union to expectedChainIds (drops unconfigured chains)", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: yesterdaySec,
+            windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+          },
+          // Unconfigured chain — must be filtered out before counting.
+          {
+            chainId: 99999,
+            snapshotDay: yesterdaySec,
+            windowTraders: [
+              "0xcccc000000000000000000000000000000000003",
+              "0xdddd000000000000000000000000000000000004",
+            ],
+          },
+        ],
+        TraderDailySnapshot: [
+          {
+            chainId: 42220,
+            trader: "0xbbbb000000000000000000000000000000000002",
+          },
+          // Unconfigured chain's today partial — must also drop.
+          {
+            chainId: 99999,
+            trader: "0xeeee000000000000000000000000000000000005",
+          },
+        ],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    // Only Celo is configured; Monad isn't passed either, but the
+    // unconfigured chain (99999) is what the scope filter must catch.
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    // Only 2 traders count: 0xaaa…1 (snapshot, Celo) + 0xbbb…2
+    // (today-partial, Celo). The 99999-chain rows are dropped.
+    expect(tradersMatch?.[1]).toBe("2");
+  });
+
+  // Snapshot returns the right shape but with no rows (fresh indexer
+  // pre-first-heartbeat, schema-lag returning the shape with zero
+  // rows, or a wholesale outage on all chains). Must NOT render a
+  // confirmed `0` — that would read as a real metric. Falls back to
+  // `N/A` with the canonical subtitle (no partial number to qualify).
+  it("renders N/A when the snapshot response has no rows at all", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("N/A");
+    // Canonical subtitle — no "Approximate" qualifier when the value
+    // itself is the missing-data signal.
+    expect(html).toContain("Unique addresses that traded on v3");
   });
 });

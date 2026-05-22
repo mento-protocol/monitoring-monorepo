@@ -28,8 +28,8 @@ import {
 } from "../../_lib/types";
 import {
   cdpSymbolSlug,
-  formatAggregateAmount,
   formatTokenAmount,
+  redemptionEventSubtitle,
 } from "../../_lib/format";
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
@@ -106,8 +106,9 @@ function CdpDetailState({
   collateral: CdpCollateral | undefined;
   network: Network;
 }) {
-  // aggregateTroves runs a BigInt sum across up to 500 troves; memoize so
-  // the 30s SWR refresh doesn't recompute when neither input changed.
+  // aggregateTroves loops over up to 500 trove rows to produce the borrower
+  // count; memoize so the 30s SWR refresh doesn't recompute when neither
+  // input changed. systemDebt/systemColl come from `LiquityInstance` directly.
   const aggregates = useMemo(
     () =>
       collateral == null
@@ -176,10 +177,10 @@ function buildContentProps({
   };
 }
 
-// For aggregates, use the chain-wide markets-list query (up to 500 troves)
-// filtered to this collateral, NOT the 50-row detail query — that one
-// exists only for the recent-activity table and would understate System
-// Debt / Open Troves for any market with >50 open troves.
+// For the borrower count, use the chain-wide markets-list query (up to 500
+// troves) filtered to this collateral, NOT the 50-row detail query — that
+// one exists only for the recent-activity table and would understate the
+// open-trove count for any market with >50 open troves.
 function aggregatesFromChainTroves(
   collateralId: string,
   allChainTroves: CdpTroveListRow[] | undefined,
@@ -216,21 +217,12 @@ function CdpDetailContent({
 }) {
   return (
     <div className="space-y-8">
-      <DetailHeader
-        collateral={collateral}
-        instance={instance}
-        aggregates={aggregates}
-      />
+      <DetailHeader collateral={collateral} instance={instance} />
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Tile
           label="Total Supply (System Debt)"
-          value={formatAggregateAmount(
-            aggregates.totalDebt,
-            collateral.symbol,
-            aggregates.truncated,
-          )}
-          subtitle={aggregates.truncated ? "Trove list truncated" : undefined}
+          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
         />
         <Tile
           label="System Collateral"
@@ -248,9 +240,15 @@ function CdpDetailContent({
               ? "—"
               : `${aggregates.truncated ? "≥" : ""}${aggregates.openTroveCount}`
           }
-          subtitle={`Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`}
+          subtitle={
+            aggregates.truncated
+              ? "Trove list truncated"
+              : `Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`
+          }
         />
       </section>
+
+      <RedemptionsSection instance={instance} symbol={collateral.symbol} />
 
       <CdpStabilityPoolTvlChart
         snapshots={snapshots}
@@ -287,13 +285,11 @@ function CdpDetailContent({
 function DetailHeader({
   collateral,
   instance,
-  aggregates,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
-  aggregates: ReturnType<typeof aggregateTroves>;
 }) {
-  const health = deriveCdpHealth(collateral, instance, aggregates);
+  const health = deriveCdpHealth(collateral, instance);
   return (
     <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -314,6 +310,59 @@ function DetailHeader({
         </span>
       </div>
     </header>
+  );
+}
+
+/** Total / User / Rebalance redemption KPI tiles. The indexer (post-commit
+ * 026c629) tracks the rebalance subset separately via `tx.to ==
+ * cdpLiquidityStrategy`; user-driven = total − rebalance. */
+function RedemptionsSection({
+  instance,
+  symbol,
+}: {
+  instance: CdpInstance | undefined;
+  symbol: string;
+}) {
+  // When `instance` is undefined (no LiquityInstance row indexed yet for this
+  // collateral, or a transient query gap), every tile renders `—` for both
+  // amount and event-count — never a happy-path "0 events".
+  const totalCount = instance?.redemptionCountCum;
+  const rebalanceCount = instance?.rebalanceRedemptionCountCum;
+  const userCount =
+    totalCount != null && rebalanceCount != null
+      ? Math.max(0, totalCount - rebalanceCount)
+      : null;
+  const totalDebt = instance?.redemptionDebtCum ?? null;
+  const rebalanceDebt = instance?.rebalanceRedemptionDebtCum ?? null;
+  // Clamp the subtraction to 0 to mirror `userCount`'s Math.max(0, ...) —
+  // defensive consistency. The indexer writes both counters in a single
+  // LiquityInstance.set call so rebalance > total isn't a live race today.
+  let userDebt: string | null = null;
+  if (totalDebt != null && rebalanceDebt != null) {
+    const diff = BigInt(totalDebt) - BigInt(rebalanceDebt);
+    userDebt = diff < BigInt(0) ? "0" : diff.toString();
+  }
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-white mb-3">Redemptions</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Tile
+          label="Total Redemptions"
+          value={formatTokenAmount(totalDebt, symbol)}
+          subtitle={redemptionEventSubtitle(totalCount)}
+        />
+        <Tile
+          label="User Redemptions"
+          value={formatTokenAmount(userDebt, symbol)}
+          subtitle={redemptionEventSubtitle(userCount)}
+        />
+        <Tile
+          label="Rebalance Redemptions"
+          value={formatTokenAmount(rebalanceDebt, symbol)}
+          subtitle={redemptionEventSubtitle(rebalanceCount)}
+        />
+      </div>
+    </section>
   );
 }
 

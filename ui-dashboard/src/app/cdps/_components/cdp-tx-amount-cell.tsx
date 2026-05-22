@@ -1,7 +1,7 @@
 "use client";
 
 import { Td } from "@/components/table";
-import { formatTokenAmount } from "../_lib/format";
+import { formatSignedWei, formatTokenAmount } from "../_lib/format";
 import { amountsFor, type TroveSnapshot } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
 
@@ -29,10 +29,17 @@ export function CdpTxAmountCell({
   snapshot: TroveSnapshot | null;
 }) {
   if (snapshot == null) {
+    // troveOp rows carry signed int256 deltas (collChange/debtChange); the
+    // other event kinds (liquidation/redemption/spRebalance) project
+    // unsigned event-totals. Route signed values through formatSignedWei so
+    // a hypothetical -1 wei delta doesn't collapse to the unknown sentinel.
     const { debt, coll } = amountsFor(row);
+    const value = leg === "debt" ? debt : coll;
     return (
       <Td mono small align="right">
-        {formatTokenAmount(leg === "debt" ? debt : coll, symbol)}
+        {row.kind === "troveOp"
+          ? formatSignedWei(value, symbol)
+          : formatTokenAmount(value, symbol)}
       </Td>
     );
   }

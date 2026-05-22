@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatTokenAmount,
   cdpSymbolSlug,
-  formatAggregateAmount,
+  formatSignedWei,
+  formatTokenAmount,
+  redemptionEventSubtitle,
 } from "./format";
 
 describe("CDP format helpers", () => {
@@ -22,15 +23,46 @@ describe("CDP format helpers", () => {
     expect(cdpSymbolSlug("GBPm")).toBe("gbpm");
     expect(cdpSymbolSlug("BOLD")).toBe("bold");
   });
+});
 
-  it("formatAggregateAmount prefixes >= only when truncated", () => {
-    const val = BigInt("1000000000000000000"); // 1 token
-    expect(formatAggregateAmount(val, "BOLD", false)).toMatch(/^1\.00 BOLD$/);
-    expect(formatAggregateAmount(val, "BOLD", true)).toMatch(/^≥ 1\.00 BOLD$/);
+describe("formatSignedWei", () => {
+  it("does NOT treat -1 as an unknown sentinel — renders the literal amount", () => {
+    // Regression guard for the formatTokenAmount sentinel collision: a -1 wei
+    // collChange/debtChange is a legitimate signed value, not "unknown".
+    expect(formatSignedWei("-1", "BOLD")).toBe("-0.00 BOLD");
   });
 
-  it("formatAggregateAmount returns — for -1 sentinel regardless of truncated", () => {
-    expect(formatAggregateAmount(BigInt(-1), "BOLD", false)).toBe("—");
-    expect(formatAggregateAmount(BigInt(-1), "BOLD", true)).toBe("—");
+  it("renders positive values with no sign prefix", () => {
+    expect(formatSignedWei("1000000000000000000", "BOLD")).toBe("1.00 BOLD");
+  });
+
+  it("renders negative values with a leading minus", () => {
+    expect(formatSignedWei("-1000000000000000000", "BOLD")).toBe("-1.00 BOLD");
+  });
+
+  it("renders zero as 0", () => {
+    expect(formatSignedWei("0", "BOLD")).toBe("0 BOLD");
+  });
+
+  it("returns — only for null/undefined", () => {
+    expect(formatSignedWei(null, "BOLD")).toBe("—");
+    expect(formatSignedWei(undefined, "BOLD")).toBe("—");
+  });
+});
+
+describe("redemptionEventSubtitle", () => {
+  it("renders — when count is missing (unknown instance)", () => {
+    // Guards against the loading-state anti-pattern: when LiquityInstance has
+    // not been indexed yet (or is mid-write), the tile must NOT collapse to
+    // "0 events" — it must surface unknown.
+    expect(redemptionEventSubtitle(null)).toBe("—");
+    expect(redemptionEventSubtitle(undefined)).toBe("—");
+  });
+
+  it("pluralises events correctly", () => {
+    expect(redemptionEventSubtitle(0)).toBe("0 events");
+    expect(redemptionEventSubtitle(1)).toBe("1 event");
+    expect(redemptionEventSubtitle(2)).toBe("2 events");
+    expect(redemptionEventSubtitle(1_234)).toBe("1,234 events");
   });
 });

@@ -122,22 +122,19 @@ export function CdpsPageClient() {
   const queryTruncated = (troves?.length ?? 0) >= CDP_TROVES_LIST_LIMIT;
 
   const aggregatesByCollateral = useMemo(() => {
-    // Single pass: accumulate directly per collateralId, skipping non-open
-    // statuses inline. Avoids the intermediate `grouped` map of trove arrays.
+    // Single pass: count opens per collateralId, skipping non-open
+    // statuses inline. Borrower count only — system debt/coll come from
+    // `LiquityInstance` directly so we no longer accumulate per-row sums.
     const out = new Map<string, CdpAggregates>();
     for (const trove of troves ?? []) {
       if (!isOpenTroveStatus(trove.status)) continue;
       const agg = out.get(trove.collateralId) ?? {
         openTroveCount: 0,
-        totalDebt: BigInt(0),
-        totalColl: BigInt(0),
         truncated: queryTruncated,
       };
       out.set(trove.collateralId, {
         ...agg,
         openTroveCount: agg.openTroveCount + 1,
-        totalDebt: agg.totalDebt + BigInt(trove.debt),
-        totalColl: agg.totalColl + BigInt(trove.coll),
       });
     }
     return out;
