@@ -18,6 +18,13 @@ import type { RangeKey, StableSupplyDailySnapshot } from "../_lib/types";
 
 type Props = {
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
+  // Latest snapshot per `(tokenAddress, source)` from
+  // `useStablesLatestPerToken` — used as a baseline floor for tokens
+  // whose history is paginated out of `snapshots` once the 1000-row
+  // cap hits. Without it, a token with no in-range snapshot disappears
+  // from the stacked total even though `latestPerToken` knows its
+  // current supply.
+  latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   rates: OracleRateMap;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
@@ -35,6 +42,7 @@ type Props = {
  */
 export function StablesHeroChart({
   snapshots,
+  latestPerToken,
   rates,
   range,
   onRangeChange,
@@ -45,13 +53,22 @@ export function StablesHeroChart({
   // Group snapshots by `{tokenAddress}|{source}` so V2 cUSD-USDm and V3 hub
   // USDm get distinct stack slices (same symbol "USDm", different addresses).
   const { breakdown, totalSeries } = useMemo(() => {
-    if (snapshots.length === 0) {
+    if (snapshots.length === 0 && latestPerToken.length === 0) {
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
+    // Union the daily-snapshot stream with `latestPerToken` so tokens
+    // whose only known snapshot is older than the retained 1000-row page
+    // still contribute their last-known supply to the stacked total.
+    // De-dupe on (chainId, tokenAddress, source, timestamp) by row id —
+    // `latestPerToken` rows share the same id shape as `snapshots`, so
+    // a Map by id collapses duplicates correctly.
+    const byId = new Map<string, StableSupplyDailySnapshot>();
+    for (const r of snapshots) byId.set(r.id, r);
+    for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
+    const merged = Array.from(byId.values());
     // Shared discriminator with `_lib/aggregate.ts` so KPI strip and hero
-    // chart group V2 cUSD-USDm vs V3 hub USDm identically. Inline grouping
-    // here previously was duplication caught by review.
-    const grouped = groupSnapshotsByTokenSource(snapshots);
+    // chart group V2 cUSD-USDm vs V3 hub USDm identically.
+    const grouped = groupSnapshotsByTokenSource(merged);
     // Shared x-axis start across all per-token series. Critical for
     // `range === "all"` — `rangeStartSeconds("all")` returns 0 (epoch),
     // and a naive per-token iteration would generate ~20K days per

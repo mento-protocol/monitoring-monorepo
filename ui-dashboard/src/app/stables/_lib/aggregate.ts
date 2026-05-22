@@ -24,7 +24,14 @@ export function rollupByToken(
   rates: OracleRateMap,
   nowSeconds: bigint = BigInt(Math.floor(Date.now() / 1000)),
 ): Map<string, TokenAgg> {
-  const sevenDayCutoff = nowSeconds - BigInt(7) * SECONDS_PER_DAY;
+  // 7d baseline cutoff: floor `nowSeconds` to its UTC day first, then
+  // step back 7 days. Without the floor, mid-day calls land at
+  // `dayStart - (now - dayStart) - 7d` which picks the row 8 day-buckets
+  // before today (snapshots are day-bucketed) — the 7d KPI tile silently
+  // reports an 8-day delta during most of the day. Aligns with the
+  // chart's `rangeStartSeconds` math.
+  const dayStartNow = (nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const sevenDayCutoff = dayStartNow - BigInt(7) * SECONDS_PER_DAY;
   const grouped = groupSnapshotsByTokenSource(snapshots);
   const out = new Map<string, TokenAgg>();
   for (const [key, rows] of grouped) {

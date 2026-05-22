@@ -42,6 +42,13 @@ export const STABLES_DAILY_SNAPSHOTS = `
 //
 // Hasura `distinct_on` is supported (verified via existing protocol-fees
 // queries) and keeps the row count bounded to ~16 per chain.
+//
+// Invariant: each (chainId, tokenAddress) maps to exactly one `source`
+// today — V2 cUSD-USDm and V3 hub USDm live at DISTINCT addresses
+// (`0x765de8…` vs `0x106cc…`), and no other Mento stable has a sibling
+// source. So `distinct_on: tokenAddress` returns the same set as the
+// rollup's `(tokenAddress, source)` grouping. Indexer-side: enforced by
+// `v2Stables/config.ts:_byAddress` (no duplicate-address keys).
 export const STABLES_LATEST_PER_TOKEN = `
   query StablesLatestPerToken($chainId: Int!) {
     StableSupplyDailySnapshot(

@@ -12,8 +12,6 @@ import { displayLabel, isMintKind, kindLabel } from "@/lib/stables";
 import { explorerTxUrl } from "@/lib/tokens";
 import type { V2StableSupplyChangeEvent } from "../_lib/types";
 
-const CELO_CHAIN_ID = 42220;
-
 type Props = {
   events: ReadonlyArray<V2StableSupplyChangeEvent>;
   isLoading: boolean;
@@ -67,7 +65,7 @@ export function StablesChangesTable({
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-100">Supply changes</h2>
         {capped ? (
-          <p className="text-xs text-amber-400">
+          <p className="text-xs text-amber-400" role="status">
             Showing the most recent {events.length} events — older entries may
             be truncated.
           </p>
@@ -139,7 +137,7 @@ function SupplyChangeRow({
             {truncateAddress(event.caller)}
           </span>
         ) : (
-          <AddressLink address={event.caller} chainId={CELO_CHAIN_ID} />
+          <AddressLink address={event.caller} chainId={event.chainId} />
         )}
       </td>
       <td className="py-3 font-mono text-xs">

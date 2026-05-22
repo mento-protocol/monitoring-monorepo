@@ -68,6 +68,7 @@ function StablesContent(): React.JSX.Element {
 
       <StablesHeroChart
         snapshots={snapshots}
+        latestPerToken={latestPerToken}
         rates={rates}
         range={range}
         onRangeChange={setRange}
