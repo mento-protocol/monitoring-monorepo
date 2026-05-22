@@ -1,7 +1,11 @@
 import type { EventContext } from "./build-event-context";
 import { formatDiscordMessage, sendToDiscord } from "./discord";
 import { logger } from "./logger";
-import type { ProcessedEvent, QuickNodeWebhookPayload } from "./types";
+import type {
+  ProcessedEvent,
+  QuickNodeDecodedLog,
+  QuickNodeWebhookPayload,
+} from "./types";
 import {
   findChainForAddress,
   findChainFromBlockHash,
@@ -43,11 +47,13 @@ export async function processEvents(
 
   // Filter out logs that should be skipped before parallel processing
   const logsToProcess = logs.filter((logEntry) => {
-    // Guard against null/non-object/missing-transactionHash entries before
-    // touching any field — payload validation only checks `result` is an
-    // array, so a malformed batch entry could otherwise 500 the whole batch
-    // and drop every valid sibling event.
-    if (logEntry === null || typeof logEntry !== "object") return true;
+    // Drop null / non-object entries at filter time. Payload validation only
+    // checks that `result` is an array, so a malformed batch entry would
+    // otherwise reach processEvent → validateLog → the per-event catch (all
+    // of which read fields like `transactionHash`) and throw a TypeError that
+    // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
+    // duplicate Discord deliveries for events that already succeeded.
+    if (logEntry === null || typeof logEntry !== "object") return false;
     // Skip ExecutionSuccess if we already have SafeMultiSigTransaction for this tx.
     if (
       logEntry.name === "ExecutionSuccess" &&
@@ -73,6 +79,12 @@ export async function processEvents(
       try {
         return await processEvent(logEntry, txHashMap);
       } catch (error) {
+        // Defense-in-depth: logEntry could in principle still be malformed
+        // (e.g. a primitive that slipped past the filter's object check).
+        // Guard property reads so a logger call can't throw and reject
+        // Promise.all on top of the original error.
+        const safe: Partial<QuickNodeDecodedLog> =
+          logEntry !== null && typeof logEntry === "object" ? logEntry : {};
         logger.error("Error processing log", {
           error:
             error instanceof Error
@@ -82,8 +94,8 @@ export async function processEvents(
                   stack: error.stack,
                 }
               : String(error),
-          transactionHash: logEntry.transactionHash,
-          eventName: logEntry.name,
+          transactionHash: safe.transactionHash,
+          eventName: safe.name,
           chainDetectionFailure: error instanceof ChainDetectionError,
         });
         return null;
