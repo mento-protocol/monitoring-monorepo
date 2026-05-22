@@ -847,6 +847,43 @@ describe("GlobalPage — Traders tile", () => {
     expect(tradersMatch?.[1]).toBe("…");
   });
 
+  // When the snapshot has resolved but the today-partial query is
+  // still in flight, the displayed count would be the snapshot-only
+  // subtotal — missing today's first-time traders. Render "…" until
+  // BOTH halves settle so the user never sees a transient understated
+  // count as if it were complete.
+  it("renders '…' while the today-partial query is still loading", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
+    vi.mocked(useGQL)
+      .mockReturnValueOnce({
+        data: {
+          LeaderboardWindowSnapshot: [
+            {
+              chainId: 42220,
+              snapshotDay: yesterdaySec,
+              windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+            },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        isValidating: false,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse)
+      .mockReturnValueOnce({
+        data: undefined,
+        error: undefined,
+        isLoading: true,
+        isValidating: true,
+        mutate: vi.fn(),
+      } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("…");
+  });
+
   // The traders snapshot is a single Hasura query that routinely
   // finishes BEFORE `useAllNetworksData`'s per-network fan-out, so
   // even when the snapshot result is already in (here: empty

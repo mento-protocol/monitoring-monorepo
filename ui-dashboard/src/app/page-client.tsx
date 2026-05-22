@@ -557,8 +557,14 @@ function TradersTile({ isLoading }: { isLoading: boolean }) {
   // flip to a confirmed number while the sibling KPI tiles still
   // render "…" — UX-confusing, especially on the empty-data race
   // where a transient "0" would read as a real count.
+  // The today-partial is also part of the "is the count complete"
+  // signal — if it's still loading (vs settled or errored), the count
+  // is the snapshot-only subtotal and any wallet whose first-ever v3
+  // trade is today is missing. Stay on "…" until BOTH halves have
+  // settled (either with data or with an error — the error branch is
+  // handled below by `isPartial`).
   let value: string;
-  if (isLoading || snapshotGql.isLoading) value = "…";
+  if (isLoading || snapshotGql.isLoading || todayGql.isLoading) value = "…";
   else if (count === null) value = "N/A";
   else
     value = isPartial ? `≈ ${count.toLocaleString()}` : count.toLocaleString();
