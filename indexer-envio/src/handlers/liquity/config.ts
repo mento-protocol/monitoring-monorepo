@@ -1,3 +1,4 @@
+import { V3_HUB_USDM_ADDRESS } from "../../constants.js";
 import { requireContractAddress } from "../../contractAddresses.js";
 import { asAddress } from "../../helpers.js";
 
@@ -39,7 +40,11 @@ export type LiquityMarketConfig = {
 // mode). Do not "consolidate" these.
 // ---------------------------------------------------------------------------
 type Sym = "GBPm" | "CHFm" | "JPYm";
-const V3_COLL_TOKEN_USDM = "0x106cc9ff5a2c488780635be8afc07c68522b7ea5";
+// Re-export under the historical name so this file's existing call sites stay
+// readable. The canonical source is `V3_HUB_USDM_ADDRESS` in `constants.ts`
+// — also imported by `handlers/v2Stables/config.ts` so the two hardcodes can
+// never drift.
+const V3_COLL_TOKEN_USDM = V3_HUB_USDM_ADDRESS;
 
 // Liquity's CollateralRegistry assigns each market a fixed index at deployment
 // time (`addCollateral(index, ...)`). Order matches the on-chain registry; not

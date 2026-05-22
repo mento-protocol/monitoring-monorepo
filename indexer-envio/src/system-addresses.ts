@@ -57,6 +57,26 @@ const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
  * `Pool.rebalancerAddress` and checked dynamically in `isSystemAddress(...)`
  * via the optional `pool` argument.
  */
+// Per-chain NTT-bridge address index. Built first so it can be reused by
+// both `STATIC_SYSTEM_ADDRESSES_BY_CHAIN` (union into the system set) and
+// `nttBridgeAddressesForChain` (exposed for the V2 stable `classifyKind`
+// helper). Single source of truth — a third caller would import the same
+// helper, not re-parse NTT_ENTRIES.
+const NTT_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
+  const out = new Map<number, Set<string>>();
+  for (const ntt of NTT_ENTRIES) {
+    let set = out.get(ntt.chainId);
+    if (!set) {
+      set = new Set<string>();
+      out.set(ntt.chainId, set);
+    }
+    set.add(ntt.helper.toLowerCase());
+    set.add(ntt.nttManagerProxy.toLowerCase());
+    set.add(ntt.transceiverProxy.toLowerCase());
+  }
+  return out;
+})();
+
 const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   const out = new Map<number, Set<string>>();
 
@@ -67,16 +87,11 @@ const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
     for (const entry of iterateContractAddresses(chainId)) {
       set.add(entry.address);
     }
+    // Union in the NTT addresses built above (helper, nttManagerProxy,
+    // transceiverProxy) — same addresses, single iteration point.
+    const nttSet = NTT_ADDRESSES_BY_CHAIN.get(chainId);
+    if (nttSet) for (const addr of nttSet) set.add(addr);
     out.set(chainId, set);
-  }
-
-  // Add NTT proxies / helpers / managers per chain.
-  for (const ntt of NTT_ENTRIES) {
-    const set = out.get(ntt.chainId);
-    if (!set) continue;
-    set.add(ntt.helper.toLowerCase());
-    set.add(ntt.nttManagerProxy.toLowerCase());
-    set.add(ntt.transceiverProxy.toLowerCase());
   }
 
   return out;
@@ -111,4 +126,12 @@ export function isSystemAddress(
 /** Test-only: expose the static set for assertions. */
 export function _staticSystemAddressesForChain(chainId: number): Set<string> {
   return STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
+}
+
+/** Returns the set of NTT-bridge addresses for the given chain (helpers,
+ *  managers, transceivers). Used by V2 stable handler's tx.to-based
+ *  classification to tag mints/burns as BRIDGE_*. Returns an empty Set when
+ *  the chain has no NTT entries. */
+export function nttBridgeAddressesForChain(chainId: number): Set<string> {
+  return NTT_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
 }
