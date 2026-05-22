@@ -136,8 +136,8 @@ function SparklineCard({
   // - `totalSupplyUsdLatest == null` → no oracle rate (USD-priced
   //   sparkline can't be drawn even with full history)
   // - else `sparkline.length < 2` → not enough snapshots yet
-  // Misattributing the cause was the codex P2 finding; the operator
-  // triage path needs to know which signal is missing.
+  // Operator triage needs to see WHICH signal is missing, not a
+  // generic "no data" placeholder.
   const sparklineMissingReason: "no-rate" | "short-history" | null =
     sparkline.length >= 2
       ? null
@@ -179,9 +179,9 @@ function MiniSparkline({
 }): React.JSX.Element {
   if (series.length < 2) {
     // Visible text labels the empty placeholder. Screen readers get
-    // the same string via the actual text content — no aria-label-
-    // on-div pattern (which doesn't reliably announce in NVDA/VoiceOver
-    // — codex P2 finding).
+    // the same string via the actual text content — `aria-label` on a
+    // plain `<div>` is a naming-prohibited pattern that NVDA and
+    // VoiceOver may drop silently.
     const message =
       missingReason === "no-rate" ? "No USD rate" : "Building history…";
     return (
