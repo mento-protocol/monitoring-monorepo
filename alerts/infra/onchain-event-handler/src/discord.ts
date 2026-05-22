@@ -100,7 +100,19 @@ const DISCORD_RETRY_CONFIG = {
 } as const;
 
 /**
- * Check if an error is retryable
+ * Check if an error is retryable.
+ *
+ * Discord webhooks have no idempotency key, so retrying after the message
+ * may have been accepted server-side produces duplicates. To bound that:
+ *
+ * - Client-side timeouts (`ECONNABORTED`): NOT retryable. The connection
+ *   was cut after we sent the request; Discord may have processed it.
+ *   A retry could duplicate the message. Accept the risk of a rare lost
+ *   alert over the certainty of duplicate spam in #multisig-alerts.
+ * - Pre-send connection failures (ECONNREFUSED, ENOTFOUND, etc.):
+ *   retryable. The request never left the box.
+ * - 5xx / 429 responses: retryable. The server told us to retry.
+ * - Other 4xx: not retryable.
  */
 function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -110,9 +122,13 @@ function isRetryableError(error: unknown): boolean {
   const axiosError = error as AxiosError;
   const status = axiosError.response?.status;
 
-  // Retry on network errors (no response) or retryable status codes
   if (!status) {
-    return true; // Network error, retry
+    // Client-side timeout: don't retry — Discord may have processed it.
+    if (axiosError.code === "ECONNABORTED") {
+      return false;
+    }
+    // Other network errors (pre-send) are safe to retry.
+    return true;
   }
 
   return DISCORD_RETRY_CONFIG.retryableStatusCodes.includes(status);
