@@ -4,7 +4,8 @@
   "private": true,
   "description": "Utility scripts for Mento Alerts infrastructure",
   "scripts": {
-    "check-discord-permissions": "tsx check-discord-permissions.ts"
+    "check-discord-permissions": "tsx check-discord-permissions.ts",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

@@ -960,6 +960,17 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    alerts/infra/scripts/*)
+      add_surface "alerts-infra"
+      case "$path" in
+        alerts/infra/scripts/package.json|alerts/infra/scripts/tsconfig.json|alerts/infra/scripts/*.ts)
+          add_command "pnpm --filter @mento-protocol/alerts-scripts typecheck" "alerts-scripts pkg changed"
+          ;;
+        alerts/infra/scripts/*.sh)
+          add_command "bash -n $(quote_path "$path")" "alerts-scripts shell script changed"
+          ;;
+      esac
+      ;;
     alerts/infra/*)
       add_surface "alerts-infra"
       add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"

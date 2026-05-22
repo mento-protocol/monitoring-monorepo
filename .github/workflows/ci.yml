@@ -115,6 +115,7 @@ jobs:
               - .github/actions/pnpm-install/**
             alerts:
               - alerts/infra/onchain-event-handler/**
+              - alerts/infra/scripts/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -421,7 +422,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
-      - name: Typecheck
+      - name: Typecheck (onchain-event-handler)
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck
       - name: Lint
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler lint
@@ -429,6 +430,10 @@ jobs:
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler knip
       - name: Test
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler test
+      # Sibling workspace package — covers check-discord-permissions.ts and
+      # any other operator scripts so TS breakage can't merge silently.
+      - name: Typecheck (alerts-scripts)
+        run: pnpm --filter @mento-protocol/alerts-scripts typecheck
       # Cloud Build's `npm ci` consumes alerts/infra/onchain-event-handler/
       # package-lock.json for prod deploys. The package is ALSO a pnpm
       # workspace member, so a dev bumping deps via `pnpm install` only
