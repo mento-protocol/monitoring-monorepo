@@ -232,7 +232,7 @@ variable "multisigs" {
 #####################
 
 variable "debug_mode" {
-  description = "Enable debug mode for REST API provider"
+  description = "Enable per-resource debug logging on the QuickNode AND Discord restapi providers. With TF_LOG=DEBUG the full HTTP request/response gets logged — that leaks both the QuickNode `x-api-key` header + `security_token` body field AND the Discord `Authorization: Bot <token>` header. Keep false in CI; only flip when actively debugging."
   type        = bool
   default     = false
 }

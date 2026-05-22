@@ -180,6 +180,26 @@ read_tfvar() {
 	echo "${value}"
 }
 
+# Read a Terraform variable value, preferring terraform.tfvars overrides
+# over variables.tf defaults. Mirrors Terraform's own precedence so deploy
+# helpers target whatever the operator actually configured.
+#
+# Usage: read_tfvar_with_override "variable_name" "vars_file_path"
+# Example: project_name=$(read_tfvar_with_override "project_name" "${ROOT_DIR}/variables.tf")
+read_tfvar_with_override() {
+	local var_name="$1"
+	local vars_file="$2"
+
+	local override
+	override=$(read_tfvars_value "${var_name}")
+	if [[ -n ${override} ]]; then
+		echo "${override}"
+		return
+	fi
+
+	read_tfvar "${var_name}" "${vars_file}"
+}
+
 # Read a numeric default value from variables.tf file
 # Usage: read_tfvar_default_number "variable_name" "fallback_value" "vars_file_path"
 # Example: memory=$(read_tfvar_default_number "memory_mb" "256" "${MODULE_DIR}/variables.tf")

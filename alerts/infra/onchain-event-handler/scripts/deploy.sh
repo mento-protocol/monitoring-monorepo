@@ -178,12 +178,24 @@ get_function_url() {
 	local function_name="$1"
 	local region="$2"
 	local impersonate_sa="$3"
+	local project_id="${4:-}"
+
+	# Pin `gcloud functions describe` to the project we just deployed to,
+	# not whatever's active in `gcloud config core/project`. The cached
+	# project-vars flow doesn't always re-run `gcloud config set project`
+	# (documented above), so a stale gcloud config could otherwise read
+	# the URL from the wrong project after the deploy itself targeted
+	# the right one via --project=.
+	local project_flag=()
+	if [[ -n ${project_id} ]]; then
+		project_flag=("--project=${project_id}")
+	fi
 
 	local url
 	if [[ -n ${impersonate_sa} ]]; then
-		url=$(gcloud functions describe "${function_name}" --gen2 --region="${region}" --impersonate-service-account="${impersonate_sa}" --format="value(serviceConfig.uri)" 2>/dev/null || echo "")
+		url=$(gcloud functions describe "${function_name}" --gen2 --region="${region}" "${project_flag[@]}" --impersonate-service-account="${impersonate_sa}" --format="value(serviceConfig.uri)" 2>/dev/null || echo "")
 	else
-		url=$(gcloud functions describe "${function_name}" --gen2 --region="${region}" --format="value(serviceConfig.uri)" 2>/dev/null || echo "")
+		url=$(gcloud functions describe "${function_name}" --gen2 --region="${region}" "${project_flag[@]}" --format="value(serviceConfig.uri)" 2>/dev/null || echo "")
 	fi
 
 	if [[ -n ${url} ]]; then
@@ -239,9 +251,11 @@ main() {
 	secret_name=""
 	parse_function_config_from_files "${MODULE_DIR}"
 
-	# Read terraform_service_account from root variables.tf for impersonation
+	# Read terraform_service_account, preferring tfvars override over default.
+	# Operators commonly override this in real environments and the deploy
+	# would otherwise impersonate the wrong (or non-existent) principal.
 	local terraform_service_account
-	terraform_service_account=$(read_tfvar "terraform_service_account" "${ROOT_DIR}/variables.tf")
+	terraform_service_account=$(read_tfvar_with_override "terraform_service_account" "${ROOT_DIR}/variables.tf")
 
 	# Get environment variables from Terraform state (computed values)
 	# Note: Environment variables are computed in Terraform, so we need state for these
@@ -349,9 +363,18 @@ main() {
 		"--impersonate-service-account=${terraform_service_account}"
 	)
 
-	# Add environment variables if we have them
+	# Add environment variables if we have them. If not, fail fast: the
+	# Cloud Function won't boot without MULTISIG_CONFIG (which is computed
+	# in Terraform and not in the secret-env-vars list), and a hotfix that
+	# silently deploys without env-vars-file would route nothing — operator
+	# wouldn't know until events started disappearing.
 	if [[ -n ${env_vars_file} ]] && [[ -f ${env_vars_file} ]]; then
 		deploy_cmd_args+=("--env-vars-file=${env_vars_file}")
+	else
+		error "No env-vars-file resolved from Terraform state."
+		error "Required env vars (MULTISIG_CONFIG, SUPPORTED_CHAINS, MULTISIG_*) are computed by Terraform and would be missing from a hotfix deploy — the function would fail config validation on boot."
+		error "Run 'pnpm alerts:infra:apply' first to populate state with the env-var outputs."
+		exit 1
 	fi
 
 	# Display deployment command in a more readable format
@@ -369,7 +392,7 @@ main() {
 	if gcloud "${deploy_cmd_args[@]}"; then
 		info "Deployment successful!"
 		info "Getting function URL..."
-		get_function_url "${function_name}" "${region}" "${terraform_service_account}"
+		get_function_url "${function_name}" "${region}" "${terraform_service_account}" "${project_id}"
 	else
 		error "Deployment failed"
 		exit 1

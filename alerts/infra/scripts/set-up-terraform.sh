@@ -32,18 +32,22 @@ source "${SCRIPT_DIR}/common.sh"
 # Checks if the user has the "Service Account Token Creator" role in the Terraform Seed Project
 # This role is necessary to access the Terraform state bucket in Google Cloud
 check_gcloud_iam_permissions() {
+	# Use tfvars overrides over variables.tf defaults so operators who
+	# override these in terraform.tfvars (common for non-default seed
+	# projects / impersonation identities) get the right preflight target
+	# instead of false passes/failures against the wrong principals.
 	printf "Looking up Terraform Seed Project ID..."
-	terraform_seed_project_id=$(awk '/variable "terraform_seed_project_id"/{f=1} f==1&&/default/{print $3; exit}' ./variables.tf | tr -d '",')
+	terraform_seed_project_id=$(read_tfvar_with_override "terraform_seed_project_id" "./variables.tf")
 	if [[ -z ${terraform_seed_project_id} ]]; then
-		error "Variable \$terraform_seed_project_id is empty. Please ensure it's set in ./variables.tf"
+		error "Variable \$terraform_seed_project_id is empty. Please ensure it's set in ./variables.tf or terraform.tfvars"
 		exit 1
 	fi
 	printf ' \033[1m%s\033[0m\n' "${terraform_seed_project_id}"
 
 	printf "Looking up Terraform Service Account email..."
-	terraform_service_account=$(awk '/variable "terraform_service_account"/{f=1} f==1&&/default/{print $3; exit}' ./variables.tf | tr -d '",')
+	terraform_service_account=$(read_tfvar_with_override "terraform_service_account" "./variables.tf")
 	if [[ -z ${terraform_service_account} ]]; then
-		error "Variable \$terraform_service_account is empty. Please ensure it's set in ./variables.tf"
+		error "Variable \$terraform_service_account is empty. Please ensure it's set in ./variables.tf or terraform.tfvars"
 		exit 1
 	fi
 	printf ' \033[1m%s\033[0m\n\n' "${terraform_service_account}"

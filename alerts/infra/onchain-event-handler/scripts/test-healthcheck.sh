@@ -73,7 +73,12 @@ fi
 info "HTTP Status Code: ${HTTP_CODE}"
 info ""
 info "Response Body:"
-jq . /tmp/healthcheck_response.json
+# Try to pretty-print as JSON; if the response isn't JSON (e.g. Cloud
+# Function gateway returns text/HTML on 4xx/5xx), dump the raw body so
+# the HTTP-status branch below still runs instead of `set -e` aborting.
+if ! jq . /tmp/healthcheck_response.json 2>/dev/null; then
+	cat /tmp/healthcheck_response.json
+fi
 echo ""
 
 # Clean up temp file

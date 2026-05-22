@@ -50,7 +50,10 @@ ROOT_DIR="$(cd "${MODULE_DIR}/.." && pwd)"
 source "${ROOT_DIR}/scripts/common.sh"
 
 set_project_id() {
-	project_name=$(read_tfvar "project_name" "${ROOT_DIR}/variables.tf")
+	# Prefer terraform.tfvars override (mento-alerts) over variables.tf
+	# default (alerts) — otherwise we'd resolve to the wrong project name
+	# whenever an operator follows the documented setup.
+	project_name=$(read_tfvar_with_override "project_name" "${ROOT_DIR}/variables.tf")
 
 	if [[ -z ${project_name} ]]; then
 		error "Could not read project_name from ${ROOT_DIR}/variables.tf"
@@ -151,9 +154,11 @@ cache_values() {
 
 	info "Loading and caching project values..."
 
-	project_name=$(read_tfvar "project_name" "${ROOT_DIR}/variables.tf")
-	region=$(read_tfvar "region" "${ROOT_DIR}/variables.tf")
-	function_name=$(read_tfvar "function_name" "${MODULE_DIR}/variables.tf")
+	# Use tfvars overrides (project_name + region commonly differ from
+	# variables.tf defaults in real environments).
+	project_name=$(read_tfvar_with_override "project_name" "${ROOT_DIR}/variables.tf")
+	region=$(read_tfvar_with_override "region" "${ROOT_DIR}/variables.tf")
+	function_name=$(read_tfvar_with_override "function_name" "${MODULE_DIR}/variables.tf")
 
 	info "  Project Name: ${project_name}"
 	info "  Region: ${region}"
