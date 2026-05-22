@@ -48,13 +48,16 @@ locals {
 
   # Flatten multisig configs into environment variables
   # Format: MULTISIG_{KEY}_ADDRESS, etc.
-  multisig_env_vars = merge([
+  # The `length(...) > 0 ? merge(...) : {}` guard handles the empty-config
+  # case: `merge([]...)` is `merge()` (zero args), which Terraform errors on
+  # before reaching the function precondition's friendly validation message.
+  multisig_env_vars = length(local.multisig_webhooks_nonsensitive) > 0 ? merge([
     for key, config in local.multisig_webhooks_nonsensitive : {
       "MULTISIG_${upper(replace(key, "-", "_"))}_ADDRESS" = config.address
       "MULTISIG_${upper(replace(key, "-", "_"))}_NAME"    = config.name
       "MULTISIG_${upper(replace(key, "-", "_"))}_CHAIN"   = config.chain
     }
-  ]...)
+  ]...) : {}
 
   # Multisig config
   multisig_config_for_json = {

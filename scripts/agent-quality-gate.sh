@@ -981,6 +981,17 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    alerts/infra/onchain-event-listeners/*|alerts/infra/channels/*)
+      # Listener filter (filter-function.js.tpl) feeds into the handler —
+      # a regression like dropping blockHash from it silently breaks the
+      # handler's cross-chain detection, and the 38 vitest cases cover
+      # that behavior. Route to handler tests in addition to TF validate.
+      # Matches the CI alerts paths-filter in .github/workflows/ci.yml.
+      add_surface "alerts-infra"
+      add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts/infra listener or channels changed (handler tests cover cross-chain behavior)"
+      add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+      ;;
     alerts/infra/*)
       add_surface "alerts-infra"
       add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"

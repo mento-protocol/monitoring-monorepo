@@ -311,6 +311,14 @@ main() {
 		exit 1
 	fi
 
+	# Fail fast if get-project-vars.sh couldn't resolve project_id. This can
+	# happen if Terraform state is missing or stale.
+	if [[ -z ${project_id} ]]; then
+		error "GCP project_id not found in Terraform state."
+		error "Run 'pnpm alerts:infra:apply' first."
+		exit 1
+	fi
+
 	# Build the gcloud deploy command as an array to properly handle special characters
 	# Cloud Build will automatically run `npm install` and `npm run build` when it detects package.json
 	# All parameters come from Terraform files (single source of truth)
@@ -319,6 +327,12 @@ main() {
 		"--gen2"
 		"--runtime=${runtime}"
 		"--region=${region}"
+		# Pin the project explicitly: `gcloud config` can be stale (especially
+		# since get-project-vars.sh has a cache that doesn't always re-run
+		# `gcloud config set project`). Without --project, an operator who
+		# switched gcloud config between runs would silently deploy to the
+		# wrong GCP project.
+		"--project=${project_id}"
 		"--source=${MODULE_DIR}"
 		"--service-account=${service_account_email}"
 		"--entry-point=${entry_point}"
