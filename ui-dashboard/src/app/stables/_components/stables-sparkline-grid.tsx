@@ -73,7 +73,9 @@ export function StablesSparklineGrid({
   if (isLoading) {
     return (
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <p className="text-sm text-slate-500">Loading per-token detail…</p>
+        <p className="text-sm text-slate-500" role="status">
+          Loading per-token detail…
+        </p>
       </section>
     );
   }
@@ -131,6 +133,19 @@ function SparklineCard({
       : change7d >= 0
         ? "text-emerald-400"
         : "text-rose-400";
+  // Differentiate the two empty-sparkline cases for the visible
+  // placeholder + the SVG accessible name:
+  // - `totalSupplyUsdLatest == null` → no oracle rate (USD-priced
+  //   sparkline can't be drawn even with full history)
+  // - else `sparkline.length < 2` → not enough snapshots yet
+  // Misattributing the cause was the codex P2 finding; the operator
+  // triage path needs to know which signal is missing.
+  const sparklineMissingReason: "no-rate" | "short-history" | null =
+    sparkline.length >= 2
+      ? null
+      : agg.totalSupplyUsdLatest == null
+        ? "no-rate"
+        : "short-history";
 
   return (
     <article className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 flex flex-col gap-2">
@@ -142,7 +157,12 @@ function SparklineCard({
         {usd}
       </div>
       <div className="mt-1">
-        <MiniSparkline series={sparkline} color={color} />
+        <MiniSparkline
+          series={sparkline}
+          color={color}
+          label={label}
+          missingReason={sparklineMissingReason}
+        />
       </div>
     </article>
   );
@@ -151,16 +171,25 @@ function SparklineCard({
 function MiniSparkline({
   series,
   color,
+  label,
+  missingReason,
 }: {
   series: ReadonlyArray<number>;
   color: string;
-}): React.JSX.Element | null {
+  label: string;
+  missingReason: "no-rate" | "short-history" | null;
+}): React.JSX.Element {
   if (series.length < 2) {
+    // Visible text labels the empty placeholder. Screen readers get
+    // the same string via the actual text content — no aria-label-
+    // on-div pattern (which doesn't reliably announce in NVDA/VoiceOver
+    // — codex P2 finding).
+    const message =
+      missingReason === "no-rate" ? "No USD rate" : "Building history…";
     return (
-      <div
-        className="h-[40px] w-full bg-slate-800/40 rounded"
-        aria-label="Insufficient history for sparkline"
-      />
+      <div className="h-[40px] w-full rounded bg-slate-800/40 flex items-center justify-center">
+        <span className="text-[10px] text-slate-500">{message}</span>
+      </div>
     );
   }
   const w = 240;
@@ -174,7 +203,7 @@ function MiniSparkline({
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label="30-day supply sparkline"
+      aria-label={`${label} 30-day supply sparkline`}
     >
       <polyline
         points={points}
