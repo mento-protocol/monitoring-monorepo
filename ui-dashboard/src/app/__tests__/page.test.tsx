@@ -749,13 +749,16 @@ describe("GlobalPage — Volume chart wiring", () => {
 describe("GlobalPage — Traders tile", () => {
   it("counts cross-chain overlapping addresses once (Set-deduplicates)", () => {
     // Two chains each contribute 3 traders with 2 overlaps (case-insensitive).
-    // Expected unique count = |{A, B, C, D}| = 4.
+    // Expected unique count = |{A, B, C, D}| = 4. `snapshotDay` set to
+    // yesterday's UTC midnight so the stale-chain detection stays off.
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const yesterdaySec = String(todaySec - 86400);
     vi.mocked(useGQL).mockReturnValue({
       data: {
         LeaderboardWindowSnapshot: [
           {
             chainId: 42220,
-            snapshotDay: "1778803200",
+            snapshotDay: yesterdaySec,
             windowTraders: [
               "0xAAAA000000000000000000000000000000000001",
               "0xBBBB000000000000000000000000000000000002",
@@ -764,7 +767,7 @@ describe("GlobalPage — Traders tile", () => {
           },
           {
             chainId: 143,
-            snapshotDay: "1778803200",
+            snapshotDay: yesterdaySec,
             windowTraders: [
               // First two overlap with Celo (mixed case on purpose — the page
               // lowercases before dedupe).
@@ -801,11 +804,14 @@ describe("GlobalPage — Traders tile", () => {
   });
 
   it("renders 0 when every chain returns an empty windowTraders array", () => {
+    const yesterdaySec = String(
+      Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
+    );
     vi.mocked(useGQL).mockReturnValue({
       data: {
         LeaderboardWindowSnapshot: [
-          { chainId: 42220, snapshotDay: "1778803200", windowTraders: [] },
-          { chainId: 143, snapshotDay: "1778803200", windowTraders: [] },
+          { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
+          { chainId: 143, snapshotDay: yesterdaySec, windowTraders: [] },
         ],
         TraderDailySnapshot: [],
       },
@@ -846,14 +852,17 @@ describe("GlobalPage — Traders tile", () => {
   // today-partial union. This test pins the union: a trader present
   // ONLY in `TraderDailySnapshot` (today's partial) but absent from
   // every chain's `windowTraders` must still count, and a trader
-  // present in both must dedupe to one.
+  // present in both must dedupe to one. `snapshotDay` is set to
+  // yesterday's UTC midnight so the stale-chain detection stays off.
   it("merges today's partial trader set on top of the closed-day snapshot", () => {
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const yesterdaySec = String(todaySec - 86400);
     vi.mocked(useGQL).mockReturnValue({
       data: {
         LeaderboardWindowSnapshot: [
           {
             chainId: 42220,
-            snapshotDay: "1778803200",
+            snapshotDay: yesterdaySec,
             windowTraders: [
               "0xaaaa000000000000000000000000000000000001",
               "0xbbbb000000000000000000000000000000000002",
@@ -875,5 +884,39 @@ describe("GlobalPage — Traders tile", () => {
     const html = render([makeNetworkData({ pools: [], fees: null })]);
     const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
     expect(tradersMatch?.[1]).toBe("3");
+    // Subtitle should stay on the canonical copy — no "Approximate"
+    // marker because the snapshot is fresh (snapshotDay = yesterday).
+    expect(html).toContain("Unique addresses that traded on v3");
+    expect(html).not.toContain("Approximate — chain snapshot catching up");
+  });
+
+  // A snapshot whose snapshotDay lags behind yesterday's UTC midnight
+  // leaves a gap (closed days between snapshotDay and yesterday are
+  // missing from BOTH windowTraders and the today-partial query).
+  // Tile must signal approximation with a "≈" prefix + an explanatory
+  // subtitle until the indexer catches up.
+  it("flags the tile as approximate when any chain snapshot is stale", () => {
+    const todaySec = Math.floor(Date.now() / 1000 / 86400) * 86400;
+    const threeDaysAgo = String(todaySec - 3 * 86400);
+    vi.mocked(useGQL).mockReturnValue({
+      data: {
+        LeaderboardWindowSnapshot: [
+          {
+            chainId: 42220,
+            snapshotDay: threeDaysAgo,
+            windowTraders: ["0xaaaa000000000000000000000000000000000001"],
+          },
+        ],
+        TraderDailySnapshot: [],
+      },
+      error: undefined,
+      isLoading: false,
+      isValidating: false,
+      mutate: vi.fn(),
+    } as unknown as SWRResponse);
+    const html = render([makeNetworkData({ pools: [], fees: null })]);
+    const tradersMatch = html.match(/Traders<\/p>[\s\S]{0,200}?>([^<]+)</);
+    expect(tradersMatch?.[1]).toBe("≈ 1");
+    expect(html).toContain("Approximate — chain snapshot catching up");
   });
 });

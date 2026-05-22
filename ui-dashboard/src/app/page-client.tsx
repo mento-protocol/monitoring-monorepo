@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
@@ -475,15 +475,29 @@ function TradersTile() {
   // day), so without this merge a wallet whose first-ever v3 swap is
   // today would silently drop out of the all-time count for up to 24h.
   // Mirrors the leaderboard hero's today-partial union in
-  // `useHeroRollup` (`mergeHeroSnapshot`). `todayMidnight` is captured
-  // once at mount — at current Mento scale the UTC-midnight rollover
-  // edge case (tab left open past midnight) costs at most a few hours
-  // of slight overcount as today's set still includes "yesterday"
-  // until the next refresh picks up the advanced snapshot.
-  const todayMidnight = useMemo(
-    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-    [],
+  // `useHeroRollup` (`mergeHeroSnapshot`).
+  //
+  // `utcDayKey` is a minute-polled ticker (same pattern as the
+  // leaderboard hero — `setTimeout` to midnight isn't reliable because
+  // backgrounded tabs throttle timers) that flips at UTC rollover so
+  // the today-partial query window resets every day; without it, a
+  // wallboard tab left open across midnight would keep querying
+  // `TraderDailySnapshot` from the original day forever and eventually
+  // hit the `limit: 1000` truncation as the slice grew multi-day.
+  const [utcDayKey, setUtcDayKey] = useState<number>(() =>
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
   );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = window.setInterval(() => {
+      setUtcDayKey((prev) => {
+        const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
+        return next === prev ? prev : next;
+      });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const todayMidnight = utcDayKey * SECONDS_PER_DAY;
   const todayGql = useGQL<LeaderboardTodayTraders>(
     LEADERBOARD_TODAY_TRADERS,
     { todayMidnight, isSystemAddressIn: [false] },
@@ -492,6 +506,21 @@ function TradersTile() {
       refreshInterval: 5 * 60_000,
       timeoutMs: 30_000,
     },
+  );
+  // A snapshot whose `snapshotDay` lags behind yesterday's UTC midnight
+  // leaves a gap: traders from the missing closed days are absent from
+  // both `windowTraders` (capped at snapshotDay) and the today-partial
+  // query (timestamp >= todayMidnight). Flag the tile as approximate so
+  // the count is shown with a "≈" prefix and an explanatory subtitle
+  // until the indexer catches up. Mirrors the LP tile's partial-state
+  // pattern and the BreakdownTile's `totalPrefix="≈ "` convention.
+  const yesterdayMidnight = (utcDayKey - 1) * SECONDS_PER_DAY;
+  const hasStaleChain = useMemo(
+    () =>
+      (snapshotGql.data?.LeaderboardWindowSnapshot ?? []).some(
+        (row) => Number(row.snapshotDay) < yesterdayMidnight,
+      ),
+    [snapshotGql.data, yesterdayMidnight],
   );
   const count = useMemo(() => {
     if (snapshotGql.error) return null;
@@ -511,16 +540,22 @@ function TradersTile() {
     }
     return set.size;
   }, [snapshotGql.data, snapshotGql.error, todayGql.data]);
-  const value = snapshotGql.isLoading
-    ? "…"
-    : count === null
-      ? "N/A"
+  let value: string;
+  if (snapshotGql.isLoading) value = "…";
+  else if (count === null) value = "N/A";
+  else
+    value = hasStaleChain
+      ? `≈ ${count.toLocaleString()}`
       : count.toLocaleString();
   return (
     <Tile
       label="Traders"
       value={value}
-      subtitle="Unique addresses that traded on v3"
+      subtitle={
+        hasStaleChain
+          ? "Approximate — chain snapshot catching up"
+          : "Unique addresses that traded on v3"
+      }
     />
   );
 }
