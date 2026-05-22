@@ -248,11 +248,16 @@ main() {
 	local env_vars_json
 	env_vars_json=$(get_env_vars_from_state "${ROOT_DIR}")
 
-	# Create environment variables file if we have env vars
+	# Create environment variables file if we have env vars.
+	# `set -e` aborts on assignment-with-failed-command-substitution, so we
+	# capture the result via an `if`-guarded block instead — that lets the
+	# fallback "no env vars" branch actually run on first-deploy / missing-
+	# state cases instead of aborting the whole script.
 	local env_vars_file=""
-	local create_result
-	env_vars_file=$(create_env_vars_file "${env_vars_json}")
-	create_result=$?
+	local create_result=1
+	if env_vars_file=$(create_env_vars_file "${env_vars_json}"); then
+		create_result=0
+	fi
 	if [[ ${create_result} -eq 0 ]] && [[ -n ${env_vars_file} ]]; then
 		# Set up cleanup trap for temporary file
 		# Store the file path in a way that's accessible to the trap

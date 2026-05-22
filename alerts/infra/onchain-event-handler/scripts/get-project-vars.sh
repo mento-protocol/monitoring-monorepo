@@ -59,12 +59,26 @@ set_project_id() {
 
 	info "Looking up project name: ${project_name}"
 
-	project_id=$(gcloud projects list --filter="name:${project_name}" --format="value(projectId)")
+	# Exact match (`name=`) instead of substring (`name:`) — otherwise an
+	# unrelated project whose name happens to be a prefix/suffix of ours
+	# gets matched and project_id becomes multi-valued, breaking subsequent
+	# `gcloud config set project` calls.
+	project_id=$(gcloud projects list --filter="name=${project_name}" --format="value(projectId)")
 
 	if [[ -z ${project_id} ]]; then
 		error "No project found with name '${project_name}'"
 		error "This usually means the GCP project hasn't been created yet."
 		error "Please ensure you've run the terraform apply in the root directory first."
+		exit 1
+	fi
+
+	# Guard against the impossible-but-defensive case where the registry still
+	# returns multiple matches (gcloud's exact-match semantics are case-
+	# insensitive on some surfaces).
+	if [[ $(echo "${project_id}" | wc -l) -gt 1 ]]; then
+		error "Multiple GCP projects matched name '${project_name}':"
+		echo "${project_id}" | sed 's/^/  - /' >&2
+		error "Refusing to proceed — narrow the project_name in variables.tf or set a specific project ID manually."
 		exit 1
 	fi
 

@@ -32,10 +32,15 @@ QUICKNODE_API_BASE="https://api.quicknode.com/webhooks/rest/v1/webhooks"
 pause_webhook() {
 	local webhook_id="$1"
 	local api_key="$2"
+	# Per-invocation tmpfile so concurrent per-chain runs (celo + ethereum)
+	# can't clobber each other's API response bodies.
+	local response_file
+	response_file=$(mktemp -t webhook_pause.XXXXXX.json)
+	trap 'rm -f "${response_file}"' RETURN
 
 	echo "Pausing webhook ${webhook_id}..."
 
-	HTTP_CODE=$(curl -s -o /tmp/webhook_pause.json -w "%{http_code}" -X PUT \
+	HTTP_CODE=$(curl -s -o "${response_file}" -w "%{http_code}" -X PUT \
 		"${QUICKNODE_API_BASE}/${webhook_id}" \
 		-H "x-api-key: ${api_key}" \
 		-H "Content-Type: application/json" \
@@ -44,12 +49,10 @@ pause_webhook() {
 
 	if [[ ${HTTP_CODE} == "200" ]] || [[ ${HTTP_CODE} == "204" ]]; then
 		echo "Webhook paused successfully (HTTP ${HTTP_CODE})"
-		rm -f /tmp/webhook_pause.json
 		return 0
 	else
-		BODY=$(cat /tmp/webhook_pause.json 2>/dev/null || echo "No response body")
+		BODY=$(cat "${response_file}" 2>/dev/null || echo "No response body")
 		echo "Warning: Failed to pause webhook (HTTP ${HTTP_CODE}): ${BODY}"
-		rm -f /tmp/webhook_pause.json
 		return 1
 	fi
 }
@@ -57,22 +60,23 @@ pause_webhook() {
 delete_webhook() {
 	local webhook_id="$1"
 	local api_key="$2"
+	local response_file
+	response_file=$(mktemp -t webhook_delete.XXXXXX.json)
+	trap 'rm -f "${response_file}"' RETURN
 
 	echo "Deleting webhook ${webhook_id}..."
 
-	DELETE_CODE=$(curl -s -o /tmp/webhook_delete.json -w "%{http_code}" -X DELETE \
+	DELETE_CODE=$(curl -s -o "${response_file}" -w "%{http_code}" -X DELETE \
 		"${QUICKNODE_API_BASE}/${webhook_id}" \
 		-H "x-api-key: ${api_key}" \
 		-H "accept: application/json")
 
 	if [[ ${DELETE_CODE} == "200" ]] || [[ ${DELETE_CODE} == "204" ]]; then
 		echo "Webhook deleted successfully (HTTP ${DELETE_CODE})"
-		rm -f /tmp/webhook_delete.json
 		return 0
 	else
-		DELETE_BODY=$(cat /tmp/webhook_delete.json 2>/dev/null || echo "No response body")
+		DELETE_BODY=$(cat "${response_file}" 2>/dev/null || echo "No response body")
 		echo "Warning: Failed to delete webhook (HTTP ${DELETE_CODE}): ${DELETE_BODY}"
-		rm -f /tmp/webhook_delete.json
 		return 1
 	fi
 }

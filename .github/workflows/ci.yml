@@ -434,6 +434,13 @@ jobs:
       # any other operator scripts so TS breakage can't merge silently.
       - name: Typecheck (alerts-scripts)
         run: pnpm --filter @mento-protocol/alerts-scripts typecheck
+      # Operator shell scripts (deploy, get-logs, manage-quicknode-webhook, etc.).
+      # Runtime invocation by operators, so a syntax error here breaks deploy
+      # / incident flows rather than CI. `bash -n` parses without executing.
+      - name: Shell-script syntax check
+        run: |
+          find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
+            | xargs -0 -I {} bash -n {}
       # Cloud Build's `npm ci` consumes alerts/infra/onchain-event-handler/
       # package-lock.json for prod deploys. The package is ALSO a pnpm
       # workspace member, so a dev bumping deps via `pnpm install` only
