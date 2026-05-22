@@ -167,11 +167,29 @@ export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
   id: string;
 };
 export type BrokerAggregatorWindowRow = AggregatorWindowRow;
-export type BrokerAggregatorTraderDayMarkerRow = {
+
+/** Per-(trader, tx.to, day) row returned by `BrokerTraderRouterDayMarker`. */
+export type BrokerTraderRouterMarkerRow = {
   id: string;
-};
-export type BrokerTraderViaRoute = {
+  chainId: number;
+  caller: string;
+  txTo: string;
   aggregator: string;
+  /** numeric Hasura column — arrives as a string. */
+  timestamp: string;
+};
+
+export type BrokerTraderViaRoute = {
+  /** Stable key for React + dedupe. Cluster routes use the aggregator label
+   *  (so all addresses in the same cluster collapse into one pill); address
+   *  routes use the lowercased tx.to so each distinct router gets its own. */
+  key: string;
+  aggregator: string;
+  /** Raw tx.to. `null` only for cluster-collapsed routes. */
+  txTo: string | null;
+  /** True when this route folds multiple tx.to addresses under one cluster
+   *  label (preserves the "one fleet" signal for cluster traders). */
+  isCluster: boolean;
   days: number;
   latestTimestamp: number;
 };
@@ -341,108 +359,44 @@ export function aggregateBrokerTradersByWindow(
 
 export const aggregateBrokerAggregatorsByWindow = aggregateAggregatorsByWindow;
 
-// The aggregator segment is intentionally greedy: route labels can contain
-// hyphens (`cluster-*`, future versioned names), so splitting on `-` is unsafe.
-// The trailing lowercase caller address + day anchor the parse; malformed ids
-// are ignored by `aggregateBrokerViaByTrader`.
-const BROKER_VIA_MARKER_ID_RE = /^(\d+)-(.+)-(0x[a-f0-9]{40})-(\d+)$/;
-export const BROKER_VIA_MARKER_ID_LIMIT = 50_000;
-
-export type BrokerViaMarkerIdBuildResult = {
-  ids: string[];
-  truncated: boolean;
-};
-
 /**
- * Build exact BrokerAggregatorTraderDayMarker ids for the visible trader rows.
- * The marker table only exposes the composite id, so exact `_in` lookups are
- * much cheaper than a wide regex over `{chainId}-{aggregator}-{caller}-{day}`.
- */
-export function buildBrokerViaMarkerIds(
-  rows: readonly BrokerTraderWindowRow[],
-  aggregators: readonly string[],
-  cutoff: number,
-  options: { maxIds?: number } = {},
-): BrokerViaMarkerIdBuildResult | null {
-  // All-time can span enough day markers to saturate ENVIO_MAX_ROWS and make
-  // attribution silently partial. Show Via only for bounded windows until the
-  // indexer exposes a per-window route entity or a structured marker query.
-  if (cutoff <= 0) return null;
-  if (rows.length === 0) return null;
-
-  const routes = [
-    ...new Set(
-      aggregators.flatMap((aggregator) => {
-        const route = aggregator.trim().toLowerCase();
-        return route ? [route] : [];
-      }),
-    ),
-  ].sort();
-  if (routes.length === 0) return null;
-
-  const traderKeys = new Map<string, { chainId: number; trader: string }>();
-  for (const row of rows) {
-    const trader = row.trader.toLowerCase();
-    traderKeys.set(`${row.chainId}-${trader}`, {
-      chainId: row.chainId,
-      trader,
-    });
-  }
-  const traders = [...traderKeys.values()].sort((a, b) => {
-    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
-    return a.trader.localeCompare(b.trader);
-  });
-  if (traders.length === 0) return null;
-
-  const todayMidnightUtc =
-    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  const days = dayBuckets(cutoff, todayMidnightUtc);
-  if (!days) return null;
-
-  const maxIds = options.maxIds ?? BROKER_VIA_MARKER_ID_LIMIT;
-  const requestedIds = traders.length * routes.length * days.length;
-  if (requestedIds > maxIds) return { ids: [], truncated: true };
-
-  const ids: string[] = [];
-  for (const { chainId, trader } of traders) {
-    for (const route of routes) {
-      for (const day of days) {
-        ids.push(`${chainId}-${route}-${trader}-${day}`);
-      }
-    }
-  }
-  return { ids, truncated: false };
-}
-
-/**
- * Parse v2 route marker ids into per-trader route labels. The route order is
- * by active-day count, then recency, then label for deterministic rendering.
+ * Group v2 route markers by trader. Cluster traders (aggregator starts with
+ * `cluster-`) collapse to a single pill so the "one fleet" signal survives —
+ * even though they rotate across many distinct contracts under one cluster
+ * label. Everything else groups by raw tx.to so the dashboard surfaces the
+ * actual router instead of a generic `unknown` bucket. Ordered by active-day
+ * count, then recency, then key for deterministic rendering.
  */
 export function aggregateBrokerViaByTrader(
-  rows: readonly BrokerAggregatorTraderDayMarkerRow[],
+  rows: readonly BrokerTraderRouterMarkerRow[],
 ): Map<string, BrokerTraderViaRoute[]> {
   const byTrader = new Map<string, Map<string, BrokerTraderViaRoute>>();
   for (const row of rows) {
-    const parsed = parseBrokerViaMarkerId(row.id);
-    if (!parsed) continue;
-    const key = `${parsed.chainId}-${parsed.trader}`;
-    let routes = byTrader.get(key);
+    const caller = row.caller.toLowerCase();
+    const txTo = row.txTo.toLowerCase();
+    const traderKey = `${row.chainId}-${caller}`;
+    const isCluster = row.aggregator.startsWith("cluster-");
+    const routeKey = isCluster ? row.aggregator : txTo;
+    const timestamp = Number(row.timestamp);
+    let routes = byTrader.get(traderKey);
     if (!routes) {
       routes = new Map<string, BrokerTraderViaRoute>();
-      byTrader.set(key, routes);
+      byTrader.set(traderKey, routes);
     }
-    const existing = routes.get(parsed.aggregator);
+    const existing = routes.get(routeKey);
     if (existing) {
       existing.days += 1;
-      existing.latestTimestamp = Math.max(
-        existing.latestTimestamp,
-        parsed.timestamp,
-      );
+      if (timestamp > existing.latestTimestamp) {
+        existing.latestTimestamp = timestamp;
+      }
     } else {
-      routes.set(parsed.aggregator, {
-        aggregator: parsed.aggregator,
+      routes.set(routeKey, {
+        key: routeKey,
+        aggregator: row.aggregator,
+        txTo: isCluster ? null : txTo,
+        isCluster,
         days: 1,
-        latestTimestamp: parsed.timestamp,
+        latestTimestamp: timestamp,
       });
     }
   }
@@ -455,7 +409,7 @@ export function aggregateBrokerViaByTrader(
         if (b.latestTimestamp !== a.latestTimestamp) {
           return b.latestTimestamp - a.latestTimestamp;
         }
-        return a.aggregator.localeCompare(b.aggregator);
+        return a.key.localeCompare(b.key);
       }),
     ]),
   );
@@ -468,31 +422,6 @@ export function brokerViaDisplayName(aggregator: string): string {
   const known = BROKER_VIA_DISPLAY_NAMES[aggregator];
   if (known) return known;
   return humanizeRouteBucket(aggregator);
-}
-
-function parseBrokerViaMarkerId(id: string): {
-  chainId: number;
-  aggregator: string;
-  trader: string;
-  timestamp: number;
-} | null {
-  const match = BROKER_VIA_MARKER_ID_RE.exec(id);
-  if (!match) return null;
-  return {
-    chainId: Number(match[1]),
-    aggregator: match[2]!,
-    trader: match[3]!,
-    timestamp: Number(match[4]),
-  };
-}
-
-function dayBuckets(from: number, to: number): string[] | null {
-  if (from > to) return null;
-  const days: string[] = [];
-  for (let day = from; day <= to; day += SECONDS_PER_DAY) {
-    days.push(String(day));
-  }
-  return days;
 }
 
 function humanizeRouteBucket(value: string): string {

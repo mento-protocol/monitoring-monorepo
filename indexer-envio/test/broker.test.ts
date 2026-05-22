@@ -18,6 +18,7 @@ type MockDb = MockDbWith<{
   BrokerTraderDailySnapshot: EntityReader;
   BrokerAggregatorDailySnapshot: EntityReader;
   BrokerAggregatorTraderDayMarker: EntityReader;
+  BrokerTraderRouterDayMarker: EntityReader;
   Pool: EntityReader;
 }>;
 
@@ -717,6 +718,83 @@ describe("Broker.Swap handler", () => {
     assert.equal(row!.aggregator, "unknown");
     assert.equal(row!.lastSeenAggregatorAddress, MYSTERY_ROUTER.toLowerCase());
     assert.equal(row!.swapCount, 1);
+  });
+
+  it("writes BrokerTraderRouterDayMarker per (caller, tx.to, day) for v2 Via attribution", async () => {
+    // Two swaps from the same caller through the SAME tx.to on the same day:
+    // exactly one marker row should exist (idempotent get → set if undefined).
+    const ROUTER_A = "0x1111111111111111111111111111111111111111";
+    const ROUTER_B = "0x2222222222222222222222222222222222222222";
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: ROUTER_A,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      txTo: ROUTER_A,
+    });
+    // Third swap from the same caller routes through a DIFFERENT tx.to on the
+    // same day — a second marker row should exist for the (caller, ROUTER_B)
+    // pair. This is the case the new entity exists to capture: today's
+    // `BrokerAggregatorTraderDayMarker` collapses both swaps under
+    // `aggregator=unknown` and loses the address split.
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 102,
+      blockTimestamp: 1_700_001_000,
+      logIndex: 0,
+      txTo: ROUTER_B,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const aMarkerId = `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}-${ROUTER_A.toLowerCase()}-${dayTs}`;
+    const bMarkerId = `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}-${ROUTER_B.toLowerCase()}-${dayTs}`;
+    const aMarker = mockDb.entities.BrokerTraderRouterDayMarker.get(
+      aMarkerId,
+    ) as
+      | {
+          chainId: number;
+          caller: string;
+          txTo: string;
+          aggregator: string;
+          timestamp: bigint;
+        }
+      | undefined;
+    const bMarker = mockDb.entities.BrokerTraderRouterDayMarker.get(bMarkerId);
+    assert.isOk(aMarker, "ROUTER_A marker missing");
+    assert.isOk(bMarker, "ROUTER_B marker missing");
+    assert.equal(aMarker!.chainId, CHAIN_CELO);
+    assert.equal(aMarker!.caller, SIGNER_EOA.toLowerCase());
+    assert.equal(aMarker!.txTo, ROUTER_A.toLowerCase());
+    assert.equal(aMarker!.aggregator, "unknown");
+    assert.equal(aMarker!.timestamp, dayTs);
+  });
+
+  it("does NOT write BrokerTraderRouterDayMarker when routedViaV3Router=true", async () => {
+    // Mirrors the existing aggregator-marker skip: router-driven swaps that
+    // sibling a VirtualPool.Swap are excluded from the v2 producer rollups
+    // (already counted via the v3 leaderboard). The new per-trader-router
+    // marker follows the same skip rule.
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedVirtualPool(mockDb);
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: V3_ROUTER,
+      brokerCaller: VIRTUAL_POOL_ADDR,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const markerId = `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}-${V3_ROUTER.toLowerCase()}-${dayTs}`;
+    assert.isUndefined(
+      mockDb.entities.BrokerTraderRouterDayMarker.get(markerId),
+      "router-driven swap should not produce a trader-router marker",
+    );
   });
 
   it("buckets distinct exchangeProviders into separate daily snapshots", async () => {

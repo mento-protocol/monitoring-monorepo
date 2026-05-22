@@ -1,20 +1,30 @@
 /**
- * Narrow route-attribution query for the v2 leaderboard's Via column.
- *
- * BrokerAggregatorTraderDayMarker only stores its composite id today:
- * "{chainId}-{aggregator}-{caller}-{day}". The dashboard builds exact ids for
- * the visible top-trader rows and known route buckets, then parses the returned
- * ids client-side. Exact `_in` lookups avoid the slow regex scan that made the
- * Via column visibly lag behind the rest of the v2 table.
+ * Per-(trader, tx.to, day) route-attribution query for the v2 leaderboard Via
+ * column. BrokerTraderRouterDayMarker carries the raw `tx.to` plus the cached
+ * `aggregator` classification, so the dashboard can render clickable router
+ * addresses for traders the bucketed view today labels `unknown` or wraps
+ * under a generic name, while still collapsing cluster traders into a single
+ * pill via the cached aggregator field. Filtered server-side by `caller _in`
+ * + `timestamp _gte cutoff`; the `caller` and `timestamp` @index entries on
+ * the entity keep this cheap.
  */
-export const BROKER_AGGREGATOR_TRADER_DAY_MARKERS_BY_ID = /* GraphQL */ `
-  query BrokerAggregatorTraderDayMarkersById($ids: [String!]!, $limit: Int!) {
-    BrokerAggregatorTraderDayMarker(
-      where: { id: { _in: $ids } }
-      order_by: { id: asc }
+export const BROKER_TRADER_ROUTER_DAY_MARKERS = /* GraphQL */ `
+  query BrokerTraderRouterDayMarkers(
+    $callers: [String!]!
+    $afterTimestamp: numeric!
+    $limit: Int!
+  ) {
+    BrokerTraderRouterDayMarker(
+      where: { caller: { _in: $callers }, timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ timestamp: desc }, { id: asc }]
       limit: $limit
     ) {
       id
+      chainId
+      caller
+      txTo
+      aggregator
+      timestamp
     }
   }
 `;

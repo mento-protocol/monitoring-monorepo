@@ -80,7 +80,7 @@
     "file": "src/app/leaderboard/_components/aggregator-breakdown-section.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'AggregatorTable' has too many lines (144). Maximum allowed is 100.",
-    "line": 116,
+    "line": 121,
     "linePreview": " | function AggregatorTable({ | aggregators,"
   },
   {
@@ -110,27 +110,6 @@
     "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100.",
     "line": 180,
     "linePreview": " | function TraderRow({ | rank,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'V2LeaderboardTraderTable' has a complexity of 28. Maximum allowed is 15.",
-    "line": 34,
-    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'V2LeaderboardTraderTable' has too many lines (201). Maximum allowed is 100.",
-    "line": 34,
-    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/v2-leaderboard-tables.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 34,
-    "linePreview": " | export function V2LeaderboardTraderTable({ | cutoff,"
   },
   {
     "file": "src/app/leaderboard/_components/v3-flow-insights.tsx",
@@ -206,28 +185,28 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 146,
+    "line": 162,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'GlobalContent' has a complexity of 21. Maximum allowed is 15.",
-    "line": 89,
+    "line": 105,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'GlobalContent' has too many lines (269). Maximum allowed is 100.",
-    "line": 89,
+    "line": 105,
     "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | function GlobalContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 146,
+    "line": 162,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {

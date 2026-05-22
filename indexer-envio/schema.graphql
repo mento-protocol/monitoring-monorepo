@@ -430,6 +430,22 @@ type BrokerAggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
 }
 
+# Per-(trader, tx.to, day) marker for v2 leaderboard Via attribution at raw
+# router-address granularity. Complements BrokerAggregatorTraderDayMarker
+# (which collapses to the canonical aggregator bucket) so the dashboard can
+# render clickable router addresses for traders today bucketed as `unknown`
+# or wrapped under a generic name. `aggregator` is cached so the cluster
+# collapse path stays cheap on the read side. Written only on
+# `routedViaV3Router == false` rows (legacy v2 path).
+type BrokerTraderRouterDayMarker {
+  id: ID! # "{chainId}-{caller}-{txTo}-{day}"
+  chainId: Int! @index
+  caller: String! @index
+  txTo: String! @index
+  aggregator: String!
+  timestamp: BigInt! @index
+}
+
 # ============================================================================
 # BiPoolManager exchanges (v2 backend that VirtualPools wrap)
 #
