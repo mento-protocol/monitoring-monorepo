@@ -116,6 +116,14 @@ jobs:
             alerts:
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/scripts/**
+              # Listener filter feeds into the handler — a regression like
+              # dropping blockHash from the QuickNode filter would silently
+              # break cross-chain chain detection in the handler, and the
+              # 38 vitest cases cover that behavior. Trigger the alerts job
+              # on listener + channel changes too.
+              - alerts/infra/onchain-event-listeners/**
+              - alerts/infra/channels/**
+              - alerts/infra/*.tf
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml

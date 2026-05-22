@@ -28,9 +28,9 @@ variable "memory_mb" {
 }
 
 variable "timeout_seconds" {
-  description = "Function timeout in seconds"
+  description = "Function timeout in seconds. Bumped from 60s to 300s to reduce QuickNode batch-retry duplicates: each webhook event can issue multiple 5s RPC calls + a 10s Discord POST, and large batches running in parallel under Promise.all could blow the old 60s ceiling. A 300s ceiling gives substantial headroom; the proper cooperative wall-clock budget guard is tracked in BACKLOG.md."
   type        = number
-  default     = 60
+  default     = 300
 }
 
 variable "max_instances" {
