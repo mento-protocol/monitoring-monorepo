@@ -159,9 +159,13 @@ cache_values() {
 	info "  Region: ${region}"
 	info "  Function Name: ${function_name}"
 
-	# Service account from Terraform state
-	service_account_email=$(terraform state show "google_service_account.project_sa" 2>/dev/null | grep email | awk '{print $3}' | tr -d '"' || echo "")
-	info "  Service Account: ${service_account_email:-<not found>}"
+	# Function RUNTIME service account from Terraform state. NOT the Cloud
+	# Build SA (`google_service_account.project_sa`) — the runtime SA is
+	# distinct, only carries Secret Manager access, and is what `gcloud
+	# functions deploy --service-account=...` needs so the deployed function
+	# can actually read its secrets.
+	service_account_email=$(terraform state show "module.onchain_event_handler.google_service_account.function_runtime" 2>/dev/null | grep email | awk '{print $3}' | tr -d '"' || echo "")
+	info "  Runtime Service Account: ${service_account_email:-<not found>}"
 
 	# Entry point from main.tf (using shared function)
 	function_entry_point=$(read_entry_point_from_main_tf "${MODULE_DIR}/main.tf" "processQuicknodeWebhook")

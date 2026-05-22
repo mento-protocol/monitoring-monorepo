@@ -48,15 +48,27 @@ check_gcloud_iam_permissions() {
 	fi
 	printf ' \033[1m%s\033[0m\n\n' "${terraform_service_account}"
 
-	# Check if the user has access to the Terraform state via the Service Account Token Creator role
+	# Check if the user has access to the Terraform state via the Service Account Token Creator role.
+	# Token Creator can be granted EITHER project-wide (legacy) OR directly on the
+	# target service account (recommended least-privilege). Check both before
+	# concluding the user is missing the role — otherwise the direct-grant
+	# case reports a false failure and the script tries to bind project-wide,
+	# which can fail for non-owners or over-broaden privileges.
 	info "Checking if you have the 'Service Account Token Creator' role in the terraform seed project..."
 	user_account_to_check="$(gcloud config get-value account)"
-	local check_result
-	check_result=$(gcloud projects get-iam-policy "${terraform_seed_project_id}" --format=json |
+	local check_result project_result sa_result
+	project_result=$(gcloud projects get-iam-policy "${terraform_seed_project_id}" --format=json |
 		jq -r \
 			--arg MEMBER "user:${user_account_to_check}" \
-			--arg SA "${terraform_service_account}" \
 			'.bindings[] | select(.members[] | contains($MEMBER)) | select(.role == "roles/iam.serviceAccountTokenCreator" or .role == "roles/iam.serviceAccountUser") | .role')
+	sa_result=$(gcloud iam service-accounts get-iam-policy "${terraform_service_account}" \
+		--project="${terraform_seed_project_id}" --format=json 2>/dev/null |
+		jq -r \
+			--arg MEMBER "user:${user_account_to_check}" \
+			'.bindings[]? | select(.members[]? | contains($MEMBER)) | select(.role == "roles/iam.serviceAccountTokenCreator" or .role == "roles/iam.serviceAccountUser") | .role' \
+		|| echo "")
+	check_result="${project_result}
+${sa_result}"
 
 	if echo "${check_result}" | grep -q "roles/iam.serviceAccountTokenCreator"; then
 		info "Permission check passed: ${user_account_to_check} has the Service Account Token Creator role in the terraform seed project."
@@ -83,9 +95,16 @@ check_gcloud_iam_permissions() {
 # Set up Terraform variables
 set_up_terraform() {
 	script_dir=$(dirname "$0")
+	# shellcheck source=check-gcloud-login.sh
 	source "${script_dir}/check-gcloud-login.sh"
 
 	check_tools "terraform" "jq" "gcloud"
+
+	# Actually invoke the login check — sourcing alone doesn't run it. Without
+	# this, a workstation with an expired ADC falls through to the IAM probe /
+	# terraform init below and fails with a confusing "permission denied"
+	# instead of prompting for `gcloud auth login`.
+	check_gcloud_login
 
 	check_gcloud_iam_permissions
 

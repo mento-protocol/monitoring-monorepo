@@ -103,8 +103,10 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     # even though the IAM resources are in the same plan.
     google_project_iam_member.cloudbuild_builder,
     google_storage_bucket_iam_member.cloud_build_storage_access,
-    # Runtime SA needs Secret Manager access before the function boots.
-    google_project_iam_member.runtime_secret_accessor,
+    # Runtime SA needs per-secret Secret Manager access before boot.
+    google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
+    google_secret_manager_secret_iam_member.runtime_discord_webhook_alerts,
+    google_secret_manager_secret_iam_member.runtime_discord_webhook_events,
   ]
 
   timeouts {
@@ -356,9 +358,27 @@ resource "google_service_account" "function_runtime" {
   description  = "Runtime identity for the onchain-event-handler Cloud Function. Read-only on Secret Manager; no Cloud Build access."
 }
 
-# Grant the runtime SA Secret Manager access (the only privilege it needs).
-resource "google_project_iam_member" "runtime_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.function_runtime.email}"
+# Grant the runtime SA Secret Manager access — per-secret, NOT project-wide.
+# Project-wide secretAccessor would give the publicly-invokable function
+# read access to every secret in the project (current + future), which
+# defeats the point of running it under a least-privilege identity.
+resource "google_secret_manager_secret_iam_member" "runtime_quicknode_signing_secret" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.quicknode_signing_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "runtime_discord_webhook_alerts" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.discord_webhook_alerts.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "runtime_discord_webhook_events" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.discord_webhook_events.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.function_runtime.email}"
 }
