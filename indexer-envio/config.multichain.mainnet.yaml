@@ -200,6 +200,18 @@ contracts:
     events:
       - event: Transfer
 
+  # V2 Mento stablecoins (USDm/EURm/BRLm/...) + V3 hub USDm collateral.
+  # Subscribes Transfer with `from=0x0 OR to=0x0` for mint/burn tracking;
+  # supply rollups feed the /stables dashboard page.
+  # Address list lives under each chain's `contracts:` block. V3 Liquity
+  # debt tokens (GBPm/CHFm/JPYm) are NOT in this set — their supply is
+  # derived from LiquityInstance.systemDebt via the existing v3 handler.
+  - name: V2StableToken
+    abi_file_path: abis/ERC20.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Transfer
+
   # Circuit Breakers (BreakerBox + MedianDelta + ValueDelta).
   # MarketHoursBreaker is registered on-chain but emits no events; we
   # represent it as a Breaker row (kind=MARKET_HOURS) seeded by BreakerAdded.
@@ -345,6 +357,26 @@ chains:
           - 0x094C0cD42f21289AD7279285dD3793CD8C998916 # JPYm
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
+      - name: V2StableToken
+        # 12 V2 reserve-backed stables from @mento-protocol/contracts mainnet
+        # namespace + V3 hub USDm collateral (hand-listed; package still maps
+        # the bare "USDm" key to V2 cUSD per liquity/config.ts:28-33).
+        # Must stay in sync with V2_STABLES in src/handlers/v2Stables/config.ts —
+        # the test in test/v2Stables.test.ts asserts both sets match.
+        address:
+          - 0x765de816845861e75a25fca122bb6898b8b1282a # USDm (V2 cUSD)
+          - 0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73 # EURm (V2 cEUR)
+          - 0xe8537a3d056da446677b9e9d6c5db704eaab4787 # BRLm
+          - 0x7175504c455076f15c04a2f90a8e352281f492f9 # AUDm
+          - 0xff4ab19391af240c311c54200a492233052b6325 # CADm
+          - 0x8a567e2ae79ca692bd748ab832081c45de4041ea # COPm
+          - 0xfaea5f3404bba20d3cc2f8c4b0a888f55a3c7313 # GHSm
+          - 0x456a3d042c0dbd3db53d5489e98dfb038553b0d0 # KESm
+          - 0xe2702bd97ee33c88c8f6f92da3b733608aa76f71 # NGNm
+          - 0x105d4a9306d2e55a71d2eb95b81553ae1dc20d7b # PHPm
+          - 0x73f93dcc49cb8a239e2032663e9475dd5ef29a08 # XOFm
+          - 0x4c35853a3b4e647fd266f4de678dcc8fec410bf6 # ZARm
+          - 0x106cc9ff5a2c488780635be8afc07c68522b7ea5 # V3 hub USDm (collateral)
       - name: BreakerBox
         address:
           - 0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39
@@ -391,6 +423,8 @@ chains:
           - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
+      - name: V2StableToken
+        address: [] # V2 reserve-backed stables are Celo-only
       - name: OpenLiquidityStrategy
         address:
           # CREATE2 deterministic — same address as Celo.

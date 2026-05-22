@@ -833,3 +833,7 @@ export const vpExchangeIdEffect = createEffect(
     return result ?? null;
   },
 );
+
+// v2StableTotalSupplyEffect lives in src/rpc/v2-stables.ts alongside the
+// fetcher — keeps the Group A/B/C/D taxonomy clean and this file under the
+// 600-line soft cap.

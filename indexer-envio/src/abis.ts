@@ -277,6 +277,21 @@ export const ERC20_DECIMALS_ABI = [
   },
 ] as const;
 
+// Used by `fetchV2StableTotalSupply` to seed the V2 stable supply baseline
+// from on-chain at the block before the first observed Transfer event.
+// Inline minimal ABI rather than vendoring a full StableToken ABI for the
+// same reason as ERC20_DECIMALS_ABI above — keeps the read site type-safe
+// without importing 1000+ lines of unrelated event signatures.
+export const ERC20_TOTAL_SUPPLY_ABI = [
+  {
+    type: "function",
+    name: "totalSupply",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 // ---------------------------------------------------------------------------
 // BiPoolManager — getPoolExchange backfill
 //

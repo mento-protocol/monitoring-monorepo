@@ -112,3 +112,30 @@ export function isSystemAddress(
 export function _staticSystemAddressesForChain(chainId: number): Set<string> {
   return STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
 }
+
+// Per-chain NTT-bridge address index. Builds once at module load from the
+// same NTT entries that feed STATIC_SYSTEM_ADDRESSES_BY_CHAIN above. The
+// V2 stable `classifyKind` helper uses this to discriminate BRIDGE_* from
+// other system Mints/burns — avoiding a second copy of the NTT JSON parse.
+const NTT_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
+  const out = new Map<number, Set<string>>();
+  for (const ntt of NTT_ENTRIES) {
+    let set = out.get(ntt.chainId);
+    if (!set) {
+      set = new Set<string>();
+      out.set(ntt.chainId, set);
+    }
+    set.add(ntt.helper.toLowerCase());
+    set.add(ntt.nttManagerProxy.toLowerCase());
+    set.add(ntt.transceiverProxy.toLowerCase());
+  }
+  return out;
+})();
+
+/** Returns the set of NTT-bridge addresses for the given chain (helpers,
+ *  managers, transceivers). Used by V2 stable handler's tx.to-based
+ *  classification to tag mints/burns as BRIDGE_*. Returns an empty Set when
+ *  the chain has no NTT entries. */
+export function nttBridgeAddressesForChain(chainId: number): Set<string> {
+  return NTT_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
+}
