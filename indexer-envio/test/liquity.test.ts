@@ -769,6 +769,80 @@ describe("Liquity CDP helpers", () => {
     });
   });
 
+  describe("flushLiquitySnapshots — V3_LIQUITY StableSupplyDailySnapshot row", () => {
+    const SECONDS_PER_DAY = 86_400n;
+
+    it("writes a V3_LIQUITY snapshot row using LIQUITY_MARKETS metadata + bucketed mint/burn", async () => {
+      const { flushLiquitySnapshots } =
+        await import("../src/handlers/liquity/instance");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm, "GBPm market missing from registry");
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n; // 2024-05-22 00:00:00 UTC
+      const day1 = day0 + SECONDS_PER_DAY;
+
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        systemDebt: 1_500_000n * 10n ** 18n,
+        systemDebtMintedDayBucket: 300_000n * 10n ** 18n,
+        systemDebtBurnedDayBucket: 50_000n * 10n ** 18n,
+      };
+
+      const captured: Array<Record<string, unknown>> = [];
+      const ctx = {
+        LiquityInstanceSnapshot: { set: () => undefined },
+        LiquityInstanceDailySnapshot: { set: () => undefined },
+        StableSupplyDailySnapshot: {
+          set: (row: Record<string, unknown>) => captured.push(row),
+        },
+      };
+
+      flushLiquitySnapshots(ctx as never, instance, day1, 1_000_000n);
+
+      assert.equal(captured.length, 1);
+      const row = captured[0];
+      assert.equal(row.id, `42220-${gbpm.debtToken}-${day0}`);
+      assert.equal(row.chainId, 42220);
+      assert.equal(row.tokenAddress, gbpm.debtToken);
+      assert.equal(row.tokenSymbol, "GBPm");
+      assert.equal(row.source, "V3_LIQUITY");
+      assert.equal(row.tokenDecimals, 18);
+      assert.equal(row.timestamp, day0);
+      assert.equal(row.totalSupply, 1_500_000n * 10n ** 18n);
+      assert.equal(row.dailyMintAmount, 300_000n * 10n ** 18n);
+      assert.equal(row.dailyBurnAmount, 50_000n * 10n ** 18n);
+    });
+
+    it("resets mint/burn day buckets on rollover so the next day starts at 0n", async () => {
+      const { flushLiquitySnapshots } =
+        await import("../src/handlers/liquity/instance");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const day1 = day0 + SECONDS_PER_DAY;
+
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        systemDebtMintedDayBucket: 100n,
+        systemDebtBurnedDayBucket: 50n,
+      };
+      const ctx = {
+        LiquityInstanceSnapshot: { set: () => undefined },
+        LiquityInstanceDailySnapshot: { set: () => undefined },
+        StableSupplyDailySnapshot: { set: () => undefined },
+      };
+
+      const next = flushLiquitySnapshots(ctx as never, instance, day1, 1n);
+      // Day rollover happened — buckets reset to 0n.
+      assert.equal(next.systemDebtMintedDayBucket, 0n);
+      assert.equal(next.systemDebtBurnedDayBucket, 0n);
+      // Cum survives the rollover (unchanged because flush doesn't bump cum).
+      assert.equal(next.systemDebtMintedCum, 0n);
+      assert.equal(next.systemDebtBurnedCum, 0n);
+    });
+  });
+
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {
     const rows = new Map<string, Record<string, unknown>>();
     const context = {

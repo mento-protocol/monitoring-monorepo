@@ -1830,9 +1830,10 @@ type StableSupplyDailySnapshot
   timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
   totalSupply: BigInt! # token-native wei, end-of-day
   # Gross daily flows. For V2_RESERVE + V3_HUB_COLLATERAL: derived from
-  # Transfer-with-zero events. For V3_LIQUITY in PR1: always 0n
-  # (deferred to follow-up PR; the UI's mint-vs-burn chart shows V2/hub
-  # fully + V3 net-only computed client-side from totalSupply diff).
+  # Transfer-with-zero events. For V3_LIQUITY: derived from per-day
+  # mint/burn accumulators on `LiquityInstance` (updated by
+  # `applySystemDebtDelta` on trove ops AND by the DefaultPool delta
+  # path on liquidation redistributions).
   dailyMintAmount: BigInt!
   dailyBurnAmount: BigInt!
   # blockNumber + updatedAtTimestamp anchor to the FIRST event of the
