@@ -133,23 +133,22 @@ export function rangeStartSeconds(
   return dayStart - daysBack * SECONDS_PER_DAY_NUMBER;
 }
 
-// Builds one (timestamp, usdValue) point per UTC day across the active
-// range, forward-filling totalSupply across sparse days. Critical for the
-// stacked hero chart: ALL tokens emit a point per day, even days before
-// the token's first in-range snapshot — codex flagged that the previous
-// per-token start day caused a false ramp in the stacked total ("supply
-// growth" was an artifact of tokens entering the index at different days,
-// not real mint activity).
+// Builds one (timestamp, usdValue) point per UTC day from `effectiveStartTs`
+// to today, forward-filling totalSupply across sparse days.
 //
-// Pre-window snapshots (rows whose timestamp < startTs) are used to seed
-// the baseline so a token with its only known snapshot 14 days ago still
-// contributes its supply across the 7d window. Tokens with no pre-window
-// data start at 0 — semantically correct (we don't know their pre-index
-// supply; treating as 0 is the most honest default).
+// The caller computes `effectiveStartTs` via `computeChartStartSeconds` so
+// the stacked hero chart shares a single x-axis across all token series.
+// Critical: a naive call with `rangeStartSeconds("all") === 0` (epoch)
+// would iterate ~20K days × N tokens and freeze the browser — the
+// caller-side helper clamps `"all"` to the earliest observed snapshot.
+//
+// Pre-`effectiveStartTs` snapshots are used to seed the baseline so a
+// token with its only known snapshot 14 days ago still contributes its
+// supply across a 7d window. Tokens with no pre-window data start at 0.
 export function buildTokenUsdTimeSeries(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
   rates: OracleRateMap,
-  range: RangeKey,
+  effectiveStartTs: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Array<{ timestamp: number; valueUsd: number }> {
   if (snapshots.length === 0) return [];
@@ -157,7 +156,6 @@ export function buildTokenUsdTimeSeries(
   const rate = effectiveOracleRate(rates, symbol);
   if (rate == null) return [];
 
-  const startTs = rangeStartSeconds(range, nowSeconds);
   // Sort ASC over the FULL set (including pre-window). Don't mutate the
   // input — readonly inputs from upstream rollups would surprise-mutate.
   const sorted = [...snapshots].sort(
@@ -169,16 +167,23 @@ export function buildTokenUsdTimeSeries(
   const decimals = sorted[0].tokenDecimals;
 
   // Walk pre-window rows to seed the baseline. The last row at or before
-  // startTs holds the supply we forward-fill from.
+  // effectiveStartTs holds the supply we forward-fill from.
   let cursor = 0;
   let lastSupply = BigInt(0);
-  while (cursor < sorted.length && Number(sorted[cursor].timestamp) < startTs) {
+  while (
+    cursor < sorted.length &&
+    Number(sorted[cursor].timestamp) < effectiveStartTs
+  ) {
     lastSupply = BigInt(sorted[cursor].totalSupply);
     cursor++;
   }
 
   const out: Array<{ timestamp: number; valueUsd: number }> = [];
-  for (let d = startTs; d <= dayStartNow; d += SECONDS_PER_DAY_NUMBER) {
+  for (
+    let d = effectiveStartTs;
+    d <= dayStartNow;
+    d += SECONDS_PER_DAY_NUMBER
+  ) {
     while (cursor < sorted.length && Number(sorted[cursor].timestamp) <= d) {
       lastSupply = BigInt(sorted[cursor].totalSupply);
       cursor++;
@@ -189,6 +194,38 @@ export function buildTokenUsdTimeSeries(
     });
   }
   return out;
+}
+
+/**
+ * Shared x-axis start across all token series in the hero chart. Bounded
+ * so `range === "all"` doesn't degenerate into an epoch-to-now iteration
+ * (`rangeStartSeconds("all") === 0` would iterate ~20K days × N tokens
+ * and freeze the browser). For `"all"`, floors at the earliest observed
+ * snapshot across all groups. For bounded ranges, returns the standard
+ * `rangeStartSeconds` cutoff as-is.
+ */
+export function computeChartStartSeconds(
+  groupedSnapshots: ReadonlyMap<
+    string,
+    ReadonlyArray<StableSupplyDailySnapshot>
+  >,
+  range: RangeKey,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): number {
+  if (range !== "all") return rangeStartSeconds(range, nowSeconds);
+
+  let earliest: number | null = null;
+  for (const rows of groupedSnapshots.values()) {
+    for (const r of rows) {
+      const t = Number(r.timestamp);
+      if (earliest === null || t < earliest) earliest = t;
+    }
+  }
+  const dayStartNow =
+    Math.floor(nowSeconds / SECONDS_PER_DAY_NUMBER) * SECONDS_PER_DAY_NUMBER;
+  if (earliest === null) return dayStartNow;
+  // Floor to UTC midnight of the earliest snapshot's day.
+  return Math.floor(earliest / SECONDS_PER_DAY_NUMBER) * SECONDS_PER_DAY_NUMBER;
 }
 
 // Sum per-token series into a single "total Mento stable supply" line.

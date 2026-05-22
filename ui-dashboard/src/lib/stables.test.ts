@@ -53,7 +53,7 @@ describe("effectiveOracleRate", () => {
     expect(effectiveOracleRate(rates, "EURm")).toBe(1.1);
   });
 
-  it("defaults USDm to 1.0 when the oracle map has no entry (cursor HIGH + codex P1)", () => {
+  it("defaults USDm to 1.0 when the oracle map has no entry", () => {
     // `useOracleRates`/`buildOracleRateMap` derives non-USDm rates from
     // USDm pairs and never emits USDm itself, so this fallback is
     // required for USDm to participate in the total + stacked chart.

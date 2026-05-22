@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTokenUsdTimeSeries,
+  computeChartStartSeconds,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
@@ -125,6 +126,58 @@ describe("rangeStartSeconds", () => {
   });
 });
 
+describe("computeChartStartSeconds", () => {
+  it("returns rangeStartSeconds for bounded ranges (7d/30d/90d)", () => {
+    const grouped = new Map<string, ReadonlyArray<{ timestamp: string }>>();
+    const start7d = computeChartStartSeconds(
+      grouped as never,
+      "7d",
+      Number(NOW_TS),
+    );
+    expect(start7d).toBe(rangeStartSeconds("7d", Number(NOW_TS)));
+  });
+
+  it("for `all`, clamps to the earliest observed snapshot day (not epoch)", () => {
+    // Critical: rangeStartSeconds("all") returns 0 → naive day-loop
+    // would iterate ~20K days and freeze the browser.
+    // computeChartStartSeconds clamps to the earliest snapshot day.
+    const earliest = Number(NOW_TS) - 30 * DAY;
+    const grouped = new Map([
+      [
+        "0xa|V2_RESERVE",
+        [
+          { timestamp: String(earliest) },
+          { timestamp: String(Number(NOW_TS) - 7 * DAY) },
+        ] as ReadonlyArray<{ timestamp: string }>,
+      ],
+      [
+        "0xb|V2_RESERVE",
+        [{ timestamp: String(Number(NOW_TS) - 14 * DAY) }] as ReadonlyArray<{
+          timestamp: string;
+        }>,
+      ],
+    ]);
+    const start = computeChartStartSeconds(
+      grouped as never,
+      "all",
+      Number(NOW_TS),
+    );
+    // Floors to UTC midnight; the earliest snapshot was already on a
+    // day boundary in this test so it stays unchanged.
+    expect(start).toBe(earliest);
+  });
+
+  it("for `all` with no snapshots, clamps to today (not epoch)", () => {
+    const grouped = new Map<string, ReadonlyArray<{ timestamp: string }>>();
+    const start = computeChartStartSeconds(
+      grouped as never,
+      "all",
+      Number(NOW_TS),
+    );
+    expect(start).toBe(Number(NOW_TS));
+  });
+});
+
 describe("winnersAndLosers7d", () => {
   it("identifies biggest expansion + biggest contraction by USD", () => {
     const snapshots: StableSupplyDailySnapshot[] = [
@@ -208,7 +261,7 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
     const series = buildTokenUsdTimeSeries(
       snapshots,
       rates,
-      "7d",
+      rangeStartSeconds("7d", Number(NOW_TS)),
       Number(NOW_TS),
     );
     // Window is 7 days; we should get one entry per day from window start.
@@ -250,13 +303,13 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
         }),
       ],
       new Map(),
-      "7d",
+      rangeStartSeconds("7d", Number(NOW_TS)),
       Number(NOW_TS),
     );
     expect(series).toEqual([]);
   });
 
-  it("defaults USDm to rate=1 when oracle map is empty (cursor HIGH + codex P1 follow-up)", () => {
+  it("defaults USDm to rate=1 when oracle map is empty", () => {
     const series = buildTokenUsdTimeSeries(
       [
         snapshot({
@@ -266,7 +319,7 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
         }),
       ],
       new Map(),
-      "7d",
+      rangeStartSeconds("7d", Number(NOW_TS)),
       Number(NOW_TS),
     );
     expect(series.length).toBeGreaterThan(0);

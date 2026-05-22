@@ -10,6 +10,7 @@ import { tokenColorForSource } from "@/lib/token-colors";
 import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
+  computeChartStartSeconds,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
 } from "../_lib/aggregate";
@@ -51,11 +52,17 @@ export function StablesHeroChart({
     // chart group V2 cUSD-USDm vs V3 hub USDm identically. Inline grouping
     // here previously was duplication caught by review.
     const grouped = groupSnapshotsByTokenSource(snapshots);
+    // Shared x-axis start across all per-token series. Critical for
+    // `range === "all"` — `rangeStartSeconds("all")` returns 0 (epoch),
+    // and a naive per-token iteration would generate ~20K days per
+    // token and freeze the browser. `computeChartStartSeconds` clamps
+    // `"all"` to the earliest observed snapshot.
+    const effectiveStartTs = computeChartStartSeconds(grouped, range);
 
     const breakdownEntries: BreakdownSeries[] = [];
     const allSeries: Array<Array<{ timestamp: number; valueUsd: number }>> = [];
     for (const [key, rows] of grouped) {
-      const series = buildTokenUsdTimeSeries(rows, rates, range);
+      const series = buildTokenUsdTimeSeries(rows, rates, effectiveStartTs);
       if (series.length === 0) continue;
       const sample = rows[0];
       breakdownEntries.push({
