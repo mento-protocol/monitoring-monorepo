@@ -2,11 +2,7 @@ import Link from "next/link";
 import { relativeTime } from "@/lib/format";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
-import {
-  cdpSymbolSlug,
-  formatAggregateAmount,
-  formatTokenAmount,
-} from "../_lib/format";
+import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
 import { CdpHealthBadge } from "./cdp-health-badge";
 
 export function CdpMarketCard({
@@ -26,7 +22,7 @@ export function CdpMarketCard({
   ops24hLoading: boolean;
   ops24hHasError: boolean;
 }) {
-  const health = deriveCdpHealth(collateral, instance, aggregates);
+  const health = deriveCdpHealth(collateral, instance);
   return (
     <Link
       href={`/cdps/${cdpSymbolSlug(collateral.symbol)}`}
@@ -50,11 +46,7 @@ export function CdpMarketCard({
       <div className="grid grid-cols-2 gap-3">
         <Metric
           label="System Debt"
-          value={formatAggregateAmount(
-            aggregates.totalDebt,
-            collateral.symbol,
-            aggregates.truncated,
-          )}
+          value={formatTokenAmount(instance?.systemDebt, collateral.symbol)}
         />
         <Metric
           label="System Collateral"

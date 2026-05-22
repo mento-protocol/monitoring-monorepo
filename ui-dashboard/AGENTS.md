@@ -213,13 +213,17 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Shared constants needed on both sides go in zero-dependency modules — e.g. `lib/hasura-timeout.ts` (single `export const HASURA_TIMEOUT_MS = 5000`). The client-side `lib/graphql.ts` re-exports for backwards compat, but new server-side imports MUST target the zero-dep module directly.
 - Caused codex P1 on PR #372 — `HASURA_TIMEOUT_MS` was added to `lib/graphql.ts` and three OG modules imported it; CI didn't catch it because the next build step isn't gated, but it would have leaked SWR into the server bundle.
 
-### CDP page — derived metrics until indexer is resynced
+### CDP page — derived metrics
 
-The `/cdps` list page and detail page (`src/app/cdps/`) derive `systemDebt` and `openTroveCount` **client-side** from active+zombie `Trove` entities, because the indexer's `LiquityInstance.systemDebt` is permanently `0` until the indexer is resynced against the post-fix handlers. The derivation lives in `_lib/health.ts:aggregateTroves` and runs on data fetched by `CDP_MARKETS` (which intentionally pulls all open troves, max 500).
+`systemDebt` / `systemColl` / `spDeposits` are read straight from `LiquityInstance` (delta-tracked by `applySystemDebtDelta` in the indexer since commit 026c629, promoted 2026-05-20). The `/cdps` list and detail pages still derive the **open-trove count** client-side from active+zombie `Trove` entities because the indexer's `activeTroveCount` excludes zombies; the UX-meaningful "positions with outstanding debt" count is `active + zombie`. The derivation lives in `_lib/health.ts:aggregateTroves` and runs on the trimmed `CDP_MARKETS` Trove fetch (`id collateralId status` only, max 500). If the indexer ever grows an `openTroveCount` field maintained alongside `activeTroveCount` in the same delta path, drop the client-side count too.
 
-Once the indexer is resynced (see `BACKLOG.md` "Indexer: deploy + resync"), delete the `Trove { ... }` selection from `CDP_MARKETS` in `src/lib/queries/liquity.ts`, remove `aggregateTroves` from the page wiring, and read `instance.systemDebt` directly again. Keep `aggregateTroves` for the borrower count if the indexer's `activeTroveCount` still excludes zombies — that's a separate indexer-side gap (`activeTroveCount` is only "active", but UX-meaningful is "active + zombie" = positions with outstanding debt).
+The CDP detail page surfaces a redemption split (`Total` / `User` / `Rebalance`) from the indexer's `redemption*Cum` + `rebalanceRedemption*Cum` fields. The rebalance subset is discriminated by `tx.to == cdpLiquidityStrategy` in the indexer (PR #31 in `mento-protocol/bold`); user-driven = total − rebalance.
 
 The CDP health badge state machine is in `_lib/health.ts:deriveCdpHealth`. Today's signals: shutdown flag (terminal), SP-empty + outstanding debt (critical), SP coverage tiers (<5% critical, <50% warning). ICR/TCR percentiles are stubbed to `-1` in the indexer (no live price feed yet); when those become real, add ratio-based signals to the state machine.
+
+### Unsigned vs signed wei formatting
+
+`src/app/cdps/_lib/format.ts` exposes two helpers and the distinction matters: `formatTokenAmount(value, symbol)` for unsigned values (balances, deposits, cumulative totals) — treats `-1` as the indexer's "unknown" sentinel (e.g. `spHeadroom`, ICR percentiles before the price feed lands) and renders `—`. `formatSignedWei(value, symbol)` for signed values (int256 deltas like `TroveOperationEvent.collChange` / `debtChange`) — does NOT treat `-1` as a sentinel since a `-1 wei` withdrawal is a legitimate amount; only `null`/`undefined` resolve to `—`. Pick the helper based on the source field's sign semantics — a hypothetical `-1 wei` `collChange` under `formatTokenAmount` would collapse to `—` instead of the actual amount.
 
 ### Content-Security-Policy (nonce-based)
 

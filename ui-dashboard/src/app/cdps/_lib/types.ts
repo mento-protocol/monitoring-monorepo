@@ -33,8 +33,12 @@ export type CdpInstance = {
   icrFracBelowMcrBps: number;
   liqCountCum: number;
   redemptionCountCum: number;
-  borrowingFeeCum: string;
+  redemptionDebtCum: string;
   redemptionFeeCum: string;
+  rebalanceRedemptionCountCum: number;
+  rebalanceRedemptionDebtCum: string;
+  rebalanceRedemptionFeeCum: string;
+  borrowingFeeCum: string;
   isShutDown: boolean;
   shutDownAt: string | null;
   shutDownTcrBps: number | null;
@@ -59,13 +63,14 @@ export type CdpTrove = {
 };
 
 /** Subset of {@link CdpTrove} fetched on the markets list page — enough to
- * compute openTroveCount + totalDebt without paying for the full row. */
+ * count open troves (active + zombie) for the borrower-count tile.
+ * `LiquityInstance.activeTroveCount` excludes zombies, so we still derive the
+ * UX-meaningful "positions with outstanding debt" count client-side until the
+ * indexer grows an `openTroveCount` field. */
 export type CdpTroveListRow = {
   id: string;
   collateralId: string;
   status: string;
-  debt: string;
-  coll: string;
 };
 
 /** Trove status values from the indexer's `TROVE_STATUS` enum
@@ -75,10 +80,9 @@ export type CdpTroveListRow = {
 export const CDP_TROVE_OPEN_STATUSES = ["active", "zombie"] as const;
 export type CdpTroveOpenStatus = (typeof CDP_TROVE_OPEN_STATUSES)[number];
 
-// Caps on the workaround GraphQL queries that pull open troves for client-side
-// aggregation. Single source of truth shared between the queries and the
-// completeness-check in the aggregator. When the indexer's `systemDebt` is
-// resynced and the workaround is removed (see BACKLOG), drop these too.
+// Row cap on the list-page trove fetch used for the borrower count.
+// Per-row payload is minimal (id + collateralId + status) so 500 is generous
+// for today's population; the count tile prefixes `≥` when the cap is hit.
 export const CDP_TROVES_LIST_LIMIT = 500;
 export const CDP_TROVES_DETAIL_LIMIT = 50;
 
