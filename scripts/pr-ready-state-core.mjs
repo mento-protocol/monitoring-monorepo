@@ -339,6 +339,24 @@ function currentHeadUpdatedAt(pr) {
   return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
 
+function reviewCommitOid(review) {
+  return (
+    review.commit?.oid ??
+    review.commit?.sha ??
+    review.commitId ??
+    review.commit_id ??
+    null
+  );
+}
+
+function isCurrentReviewSignal(review, currentHeadOid, headUpdatedAt) {
+  if (currentHeadOid) return reviewCommitOid(review) === currentHeadOid;
+
+  const submittedAt =
+    review.submittedAt ?? review.submitted_at ?? review.createdAt;
+  return isCurrentSignal(submittedAt, headUpdatedAt);
+}
+
 export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
   if (headUpdatedAt === null) return false;
 
@@ -355,6 +373,7 @@ export function classifyCodexReviewSignal({
   issueComments = [],
   reviews = [],
   headUpdatedAt = null,
+  currentHeadOid = null,
   codexApprovalReaction = false,
 } = {}) {
   if (codexApprovalReaction) return "approved";
@@ -393,9 +412,7 @@ export function classifyCodexReviewSignal({
     const author = review.author?.login ?? review.user?.login ?? null;
     if (!isBotApproverLogin(author)) continue;
 
-    const submittedAt =
-      review.submittedAt ?? review.submitted_at ?? review.createdAt;
-    if (isCurrentSignal(submittedAt, headUpdatedAt)) {
+    if (isCurrentReviewSignal(review, currentHeadOid, headUpdatedAt)) {
       hasCurrentInFlightSignal = true;
     } else {
       hasHistoricalSignal = true;
@@ -443,6 +460,7 @@ export function summarizeReadyState({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
+    currentHeadOid: pr.headRefOid ?? pr.headOid ?? null,
     codexApprovalReaction,
   });
 

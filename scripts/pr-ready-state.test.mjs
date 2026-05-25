@@ -972,13 +972,16 @@ test("uses a shared matcher for Codex review request comments", () => {
 
 test("classifies stale vs current Codex review submissions", () => {
   const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
+  const currentHeadOid = "head-sha";
 
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt,
+      currentHeadOid,
       reviews: [
         {
-          submittedAt: "2026-05-21T13:21:00Z",
+          commit: { oid: "old-sha" },
+          submittedAt: "2026-05-21T13:23:00Z",
           author: { login: "chatgpt-codex-connector[bot]" },
         },
       ],
@@ -988,13 +991,15 @@ test("classifies stale vs current Codex review submissions", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt,
+      currentHeadOid,
       reviews: [
         {
-          submittedAt: "2026-05-21T13:21:00Z",
+          commit: { oid: "old-sha" },
           author: { login: "chatgpt-codex-connector[bot]" },
         },
         {
-          submittedAt: "2026-05-21T13:23:00Z",
+          commit: { oid: currentHeadOid },
+          submittedAt: "2026-05-21T13:21:00Z",
           author: { login: "chatgpt-codex-connector[bot]" },
         },
       ],
@@ -1004,8 +1009,10 @@ test("classifies stale vs current Codex review submissions", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt,
+      currentHeadOid,
       reviews: [
         {
+          commit_id: currentHeadOid,
           submittedAt: "2026-05-21T13:23:00Z",
           author: { login: "chatgpt-codex-connector" },
         },
@@ -1098,8 +1105,10 @@ test("treats review requests before check observation as stale", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),
+      currentHeadOid: "head-sha",
       reviews: [
         {
+          commit: { oid: "old-sha" },
           submittedAt: "2026-05-21T13:22:00Z",
           author: { login: "chatgpt-codex-connector" },
         },
