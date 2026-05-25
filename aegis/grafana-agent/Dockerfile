@@ -1,5 +1,12 @@
 FROM grafana/agent:v0.35.0
 
+# Install jq + ensure curl is present so entrypoint.sh can call the GCE
+# metadata server and Secret Manager. base64 ships in coreutils on Debian.
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends jq curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Add healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost:8080/-/healthy || exit 1
 
@@ -15,9 +22,14 @@ RUN groupadd -g 10001 agent && \
 # runtime — pre-create and chown here.
 RUN mkdir -p /etc/agent/data && chown -R agent:agent /etc/agent
 
+# agent.yaml uses ${VAR} references for Grafana Cloud credentials. The
+# entrypoint script fetches the values from Secret Manager at container
+# start and `grafana-agent -config.expand-env=true` performs the
+# substitution. Neither file contains any secret material.
 COPY --chown=agent:agent agent.yaml /etc/agent/agent.yaml
+COPY --chown=agent:agent --chmod=0555 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Switch to non-root user
 USER agent
 
-CMD ["-config.file=/etc/agent/agent.yaml", "-server.http.address=0.0.0.0:8080"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

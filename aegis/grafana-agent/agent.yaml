@@ -1,3 +1,11 @@
+# Grafana Agent runtime config.
+#
+# Grafana Cloud BasicAuth credentials are read at container start by
+# `entrypoint.sh` from Secret Manager via the App Engine Flex compute
+# service account, exported as env vars, and substituted into this file
+# by `grafana-agent -config.expand-env=true`. Secrets never touch the
+# deployed source-staging bucket or the container image filesystem.
+
 # `server` block used to carry `log_level` + `http_listen_port` here; those
 # fields were removed from the static-mode schema in v0.26.0. The image's
 # default CMD binds the HTTP server to 12345, but App Engine Flexible custom
@@ -9,10 +17,10 @@ metrics:
   global:
     scrape_interval: 1m
     remote_write:
-      - url: GRAFANA_AGENT_ENDPOINT
+      - url: ${GRAFANA_AGENT_ENDPOINT}
         basic_auth:
-          username: GRAFANA_AGENT_USERNAME
-          password: GRAFANA_AGENT_PASSWORD
+          username: ${GRAFANA_AGENT_USERNAME}
+          password: ${GRAFANA_AGENT_PASSWORD}
   configs:
     - name: aegis-metrics
       scrape_configs:
@@ -24,7 +32,7 @@ metrics:
         # the Envio indexer every 30s and exports `mento_pool_*` gauges.
         # Producer identity comes from `job="metrics-bridge"` automatically;
         # no extra labels here. Alert rules in monitoring-monorepo
-        # alerts/rules/ attach their own `service` label (matching the
+        # terraform/alerts/ attach their own `service` label (matching the
         # existing Aegis alert convention of service = monitored-domain) to
         # drive Slack routing.
         - job_name: metrics-bridge
