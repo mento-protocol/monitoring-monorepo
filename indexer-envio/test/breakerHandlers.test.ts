@@ -9,7 +9,9 @@ import {
   _setMockBreakerKind,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,
+  _setMockBreakerList,
   _clearBreakerMocks,
+  _clearBootstrapCaches,
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 
@@ -35,7 +37,9 @@ const THRESHOLD = 4n * 10n ** 22n; // 4% Fixidity
 describe("BreakerBox handlers — bootstrap + state transitions", () => {
   beforeEach(() => {
     _clearBreakerMocks();
+    _clearBootstrapCaches();
     // RPC self-heal payload for fetchBreakerKind / Defaults / FeedState.
+    _setMockBreakerList(CHAIN_ID, [MD_BREAKER]);
     _setMockBreakerKind(CHAIN_ID, MD_BREAKER, "MEDIAN_DELTA");
     _setMockBreakerDefaults(CHAIN_ID, MD_BREAKER, {
       activatesTradingMode: 3,
@@ -390,6 +394,33 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(cfg!.tradingMode, 3);
     assert.equal(cfg!.status, "TRIPPED");
     assert.equal(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
+  });
+
+  it("TradingModeUpdated bootstraps missing BreakerConfig rows before applying override", async () => {
+    let mockDb = MockDb.createMockDb();
+
+    const override = BreakerBox.TradingModeUpdated.createMockEvent({
+      rateFeedID: FEED,
+      tradingMode: 3n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 2,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 250, timestamp: 1_700_001_500 },
+      },
+    });
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: override,
+      mockDb,
+    });
+
+    const cfg = mockDb.entities.BreakerConfig.get(
+      makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED),
+    ) as { enabled: boolean; tradingMode: number; status: string } | undefined;
+    assert.ok(cfg, "missing config should be hydrated from the breaker list");
+    assert.equal(cfg!.enabled, true);
+    assert.equal(cfg!.tradingMode, 3);
+    assert.equal(cfg!.status, "TRIPPED");
   });
 
   it("TradingModeUpdated leaves disabled BreakerConfigs untouched", async () => {

@@ -19,6 +19,7 @@ import type { BreakerConfig, BreakerTripEvent } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import {
+  bootstrapFeedBreakerConfigs,
   computeCooldownEndsAt,
   effectiveCooldown,
   effectiveThreshold,
@@ -272,7 +273,16 @@ indexer.onEvent(
 
     const rateFeedID = asAddress(event.params.rateFeedID);
     const tradingMode = Number(event.params.tradingMode);
+    const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    await bootstrapFeedBreakerConfigs(
+      context,
+      event.chainId,
+      rateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
 
     // Multi-row update — fan-out across this feed's ENABLED configs on this
     // chain. Disabled configs are skipped: a governance-disabled breaker is
