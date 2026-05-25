@@ -122,10 +122,10 @@ describe("buildDailySeries — pool filtering", () => {
     expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
   });
 
-  it("drops FPMM pools without snapshots (new-pool-inflation guard)", () => {
-    // FPMM pool with live reserves but NO snapshot → excluded from both series
-    // and nowTvl. This is the critical invariant the chart relies on so a newly
-    // deployed pool cannot cause a phantom right-edge cliff.
+  it("uses FPMM pools without snapshots for current TVL but not history", () => {
+    // FPMM pool with live reserves but NO snapshot: historical buckets stay
+    // empty, but the current appended point/headline should still include the
+    // live pool once it is priceable.
     const pool = makeTvlPool({
       id: "new-pool",
       reserves0: HUNDRED,
@@ -138,7 +138,11 @@ describe("buildDailySeries — pool filtering", () => {
         snapshots30d: [],
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
+    expect(out.series).toEqual([]);
+    expect(out.nowTvl).toBeCloseTo(200, 6);
+    expect(out.byChain).toHaveLength(1);
+    expect(out.byChain[0].series).toEqual([]);
+    expect(out.byChain[0].nowTvl).toBeCloseTo(200, 6);
   });
 });
 
@@ -391,10 +395,10 @@ describe("buildDailySeries — nowTvl semantics", () => {
     expect(nowTvl).toBeCloseTo(20, 6);
   });
 
-  it("excludes FPMM pools without snapshots from nowTvl", () => {
+  it("includes FPMM pools without snapshots in nowTvl", () => {
     // Pool A has snapshots (counted). Pool B is FPMM with live reserves but
-    // no snapshot — must NOT contribute to nowTvl, matching the exclusion in
-    // the series itself. Guards against the same new-pool-inflation concern.
+    // no snapshot — it must contribute to nowTvl so the appended current point
+    // matches the dashboard headline. Historical buckets remain snapshot-only.
     const today = dayAlignedNow();
     const poolA = makeTvlPool({
       id: "pool-a",
@@ -421,8 +425,43 @@ describe("buildDailySeries — nowTvl semantics", () => {
       }),
     ]);
 
-    // nowTvl = pool A live ($20) only; pool B ($200) is excluded.
-    expect(nowTvl).toBeCloseTo(20, 6);
+    // nowTvl = pool A live ($20) + pool B live ($200).
+    expect(nowTvl).toBeCloseTo(220, 6);
+  });
+
+  it("keeps historical buckets snapshot-only when adding current-only pools", () => {
+    const today = dayAlignedNow();
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: today,
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+
+    const { series, nowTvl, byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA, poolB],
+        snapshots30d: [snapA],
+      }),
+    ]);
+
+    expect(series).toHaveLength(1);
+    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
+    expect(nowTvl).toBeCloseTo(220, 6);
+    expect(byChain).toHaveLength(1);
+    expect(byChain[0].series[0].tvlUSD).toBeCloseTo(100, 6);
+    expect(byChain[0].nowTvl).toBeCloseTo(220, 6);
   });
 });
 
@@ -547,6 +586,91 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     expect(chainB.series[0].tvlUSD).toBe(0);
     expect(chainB.series[1].tvlUSD).toBe(0);
     expect(chainB.series[2].tvlUSD).toBeCloseTo(100, 6);
+  });
+
+  it("includes current-only chains in the breakdown latest point", () => {
+    const today = dayAlignedNow();
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: today,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+
+    const { series, nowTvl, byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots30d: [snapA],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [poolB],
+        snapshots30d: [],
+      }),
+    ]);
+
+    expect(series).toHaveLength(1);
+    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
+    expect(nowTvl).toBeCloseTo(120, 6);
+    expect(byChain).toHaveLength(2);
+    const currentOnlyChain = byChain.find(
+      (c) => c.network.id === TVL_NETWORK_2.id,
+    )!;
+    expect(currentOnlyChain.series).toHaveLength(1);
+    expect(currentOnlyChain.series[0].tvlUSD).toBe(0);
+    expect(currentOnlyChain.nowTvl).toBeCloseTo(100, 6);
+  });
+
+  it("does not zero-fill history for chains whose snapshot fetch failed before rows", () => {
+    const today = dayAlignedNow();
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: today,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+
+    const { series, nowTvl, byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots30d: [snapA],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [poolB],
+        snapshotsAllDaily: [],
+        snapshotsAllDailyError: new Error("page-1 timeout"),
+      }),
+    ]);
+
+    expect(series).toHaveLength(1);
+    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
+    expect(nowTvl).toBeCloseTo(120, 6);
+    const failedChain = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
+    expect(failedChain.series).toEqual([]);
+    expect(failedChain.nowTvl).toBeCloseTo(100, 6);
   });
 
   it("omits chains whose entire fetch failed (top-level error)", () => {
@@ -676,17 +800,16 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Unable to load TVL history");
   });
 
-  it("renders 'Historical data partial' when hasSnapshotError and no rows survived", () => {
+  it("renders 'Historical data partial' when hasSnapshotError and no live TVL survived", () => {
     // First-page failure on the paginated all-history fetch: snapshotsAllDaily
     // comes back empty AND snapshotsAllDailyError is set. Chart shows the
     // partial-history empty state (not a confident-but-blank plot).
-    const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [
           makeNetworkData({
             network: TVL_NETWORK,
-            pools: [pool],
+            pools: [],
             snapshotsAllDaily: [],
             snapshotsAllDailyError: new Error("page-1 timeout"),
           }),
@@ -702,6 +825,96 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Historical data partial");
     expect(html).not.toContain("Unable to load TVL history");
     expect(html).not.toContain("Not enough history yet");
+  });
+
+  it("renders current live TVL when every chain has no snapshot history yet", () => {
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [poolA],
+            snapshots30d: [],
+          }),
+          makeNetworkData({
+            network: TVL_NETWORK_2,
+            pools: [poolB],
+            snapshots30d: [],
+          }),
+        ],
+        totalTvl: 300,
+        tvlPartial: false,
+        change7d: null,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: false,
+      }),
+    );
+
+    expect(html).not.toContain("Not enough history yet");
+    const traces = capturedPlotProps.data as Array<{
+      name?: string;
+      x: string[];
+      y: number[];
+    }>;
+    expect(traces).toHaveLength(3);
+    expect(traces[0].name).toBe("Total");
+    expect(traces[0].x).toHaveLength(1);
+    expect(traces[0].y).toEqual([300]);
+    expect(traces[1].name).toBe(TVL_NETWORK.label);
+    expect(traces[1].x).toHaveLength(1);
+    expect(traces[1].y).toEqual([200]);
+    expect(traces[2].name).toBe(TVL_NETWORK_2.label);
+    expect(traces[2].x).toHaveLength(1);
+    expect(traces[2].y).toEqual([100]);
+  });
+
+  it("renders current live TVL without historical zero-fill when snapshots failed before rows", () => {
+    const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [pool],
+            snapshotsAllDaily: [],
+            snapshotsAllDailyError: new Error("page-1 timeout"),
+          }),
+        ],
+        totalTvl: 200,
+        tvlPartial: false,
+        change7d: null,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: true,
+      }),
+    );
+
+    expect(html).toContain("· partial data");
+    expect(html).not.toContain("Historical data partial");
+    expect(html).not.toContain("Not enough history yet");
+    const traces = capturedPlotProps.data as Array<{
+      name?: string;
+      x: string[];
+      y: number[];
+    }>;
+    expect(traces).toHaveLength(2);
+    expect(traces[0].name).toBe("Total");
+    expect(traces[0].x).toHaveLength(1);
+    expect(traces[0].y).toEqual([200]);
+    expect(traces[1].name).toBe(TVL_NETWORK.label);
+    expect(traces[1].x).toHaveLength(1);
+    expect(traces[1].y).toEqual([200]);
   });
 
   it("renders a skeleton (not the real value) in the hero while loading", () => {
