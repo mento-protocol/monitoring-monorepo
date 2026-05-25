@@ -28,6 +28,24 @@ type PoolHistory = {
   points: Array<{ ts: number; r0: string; r1: string }>;
 };
 
+type CurrentPool = {
+  pool: Pool;
+  network: Network;
+  rates: OracleRateMap;
+};
+
+type TvlInputs = {
+  histories: PoolHistory[];
+  currentPools: CurrentPool[];
+  chainsSeen: Network[];
+  earliestTs: number;
+};
+
+type HistoricalSeries = {
+  series: SeriesPoint[];
+  perChainSeries: Map<string, SeriesPoint[]>;
+};
+
 export type ChainTvlSeries = {
   network: Network;
   series: SeriesPoint[];
@@ -61,8 +79,67 @@ export function buildDailySeries(
   nowTvl: number;
   byChain: ChainTvlSeries[];
 } {
+  const { histories, currentPools, chainsSeen, earliestTs } =
+    collectTvlInputs(networkData);
+  const { nowTvl, perChainNowTvl } = computeCurrentTvl(currentPools);
+  if (histories.length === 0) {
+    return {
+      series: [],
+      nowTvl,
+      byChain: chainsSeen.map((network) => ({
+        network,
+        series: [],
+        nowTvl: perChainNowTvl.get(network.id) ?? 0,
+      })),
+    };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const dataStartBucket =
+    Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
+  // When a window clamp is requested, start emission at the later of the
+  // window's bucket and the earliest snapshot's bucket. Earlier iterations
+  // are skipped entirely (not materialized), but the per-pool cursor fast-
+  // forwards naturally on the first emitted iteration, so forward-fill
+  // still uses the correct reserves from before the window start.
+  const windowStartBucket =
+    fromTimestamp !== undefined
+      ? Math.max(
+          dataStartBucket,
+          Math.floor(fromTimestamp / bucketSeconds) * bucketSeconds,
+        )
+      : dataStartBucket;
+  const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
+  const { series, perChainSeries } = buildHistoricalSeries(
+    histories,
+    chainsSeen,
+    bucketSeconds,
+    windowStartBucket,
+    endBucket,
+  );
+
+  const byChain: ChainTvlSeries[] = chainsSeen.map((network) => ({
+    network,
+    series: perChainSeries.get(network.id)!,
+    nowTvl: perChainNowTvl.get(network.id) ?? 0,
+  }));
+
+  return { series, nowTvl, byChain };
+}
+
+function collectTvlInputs(networkData: NetworkData[]): TvlInputs {
   const histories: PoolHistory[] = [];
+  const currentPools: CurrentPool[] = [];
+  const chainsSeen: Network[] = [];
+  const chainsSeenIds = new Set<string>();
   let earliestTs = Infinity;
+
+  function rememberChain(network: Network): void {
+    if (!chainsSeenIds.has(network.id)) {
+      chainsSeenIds.add(network.id);
+      chainsSeen.push(network);
+    }
+  }
 
   for (const netData of networkData) {
     // Only skip on top-level failure. `snapshotsAllDailyError` may be set
@@ -71,6 +148,14 @@ export function buildDailySeries(
     // partial-badge.
     if (netData.error !== null) continue;
     const fpmmPools = netData.pools.filter(isFpmm);
+    for (const pool of fpmmPools) {
+      rememberChain(netData.network);
+      currentPools.push({
+        pool,
+        network: netData.network,
+        rates: netData.rates,
+      });
+    }
     const snapsByPool = new Map<string, PoolSnapshotWindow[]>();
     for (const snap of netData.snapshotsAllDaily) {
       const list = snapsByPool.get(snap.poolId);
@@ -97,34 +182,16 @@ export function buildDailySeries(
     }
   }
 
-  if (histories.length === 0) return { series: [], nowTvl: 0, byChain: [] };
+  return { histories, currentPools, chainsSeen, earliestTs };
+}
 
-  const chainsSeen: Network[] = [];
-  const chainsSeenIds = new Set<string>();
-  for (const h of histories) {
-    if (!chainsSeenIds.has(h.network.id)) {
-      chainsSeenIds.add(h.network.id);
-      chainsSeen.push(h.network);
-    }
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  const dataStartBucket =
-    Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
-  // When a window clamp is requested, start emission at the later of the
-  // window's bucket and the earliest snapshot's bucket. Earlier iterations
-  // are skipped entirely (not materialized), but the per-pool cursor fast-
-  // forwards naturally on the first emitted iteration, so forward-fill
-  // still uses the correct reserves from before the window start.
-  const windowStartBucket =
-    fromTimestamp !== undefined
-      ? Math.max(
-          dataStartBucket,
-          Math.floor(fromTimestamp / bucketSeconds) * bucketSeconds,
-        )
-      : dataStartBucket;
-  const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
-
+function buildHistoricalSeries(
+  histories: PoolHistory[],
+  chainsSeen: Network[],
+  bucketSeconds: number,
+  windowStartBucket: number,
+  endBucket: number,
+): HistoricalSeries {
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: SeriesPoint[] = [];
   const perChainSeries = new Map<string, SeriesPoint[]>();
@@ -178,24 +245,23 @@ export function buildDailySeries(
       });
     }
   }
+  return { series, perChainSeries };
+}
 
+function computeCurrentTvl(currentPools: CurrentPool[]): {
+  nowTvl: number;
+  perChainNowTvl: Map<string, number>;
+} {
   let nowTvl = 0;
   const perChainNowTvl = new Map<string, number>();
-  for (const history of histories) {
-    const poolTvl = poolTvlUSD(history.pool, history.network, history.rates);
+  for (const current of currentPools) {
+    const poolTvl = poolTvlUSD(current.pool, current.network, current.rates);
     if (poolTvl === null) continue;
     nowTvl += poolTvl;
-    const id = history.network.id;
+    const id = current.network.id;
     perChainNowTvl.set(id, (perChainNowTvl.get(id) ?? 0) + poolTvl);
   }
-
-  const byChain: ChainTvlSeries[] = chainsSeen.map((network) => ({
-    network,
-    series: perChainSeries.get(network.id)!,
-    nowTvl: perChainNowTvl.get(network.id) ?? 0,
-  }));
-
-  return { series, nowTvl, byChain };
+  return { nowTvl, perChainNowTvl };
 }
 
 interface TvlOverTimeChartProps {
