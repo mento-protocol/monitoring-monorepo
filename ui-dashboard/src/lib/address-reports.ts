@@ -97,6 +97,40 @@ redis.call('HSET', key, addr, encoded)
 return cjson.encode({ ok = true, report = payload })
 `;
 
+const DELETE_SCRIPT = `
+local key = KEYS[1]
+local addr = ARGV[1]
+local expectedVersion = tonumber(ARGV[2])
+
+local existing = redis.call('HGET', key, addr)
+if not existing then
+  return cjson.encode({
+    ok = false,
+    error = 'not_found'
+  })
+end
+
+local prior = cjson.decode(existing)
+-- Mirrors the priorVersion normalization in UPSERT_SCRIPT. Keep in sync.
+local priorVersion = prior.version
+if type(priorVersion) ~= 'number' or priorVersion <= 0 then
+  priorVersion = 1
+else
+  priorVersion = math.floor(priorVersion)
+end
+
+if priorVersion ~= expectedVersion then
+  return cjson.encode({
+    ok = false,
+    error = 'version_conflict',
+    existingVersion = priorVersion
+  })
+end
+
+redis.call('HDEL', key, addr)
+return cjson.encode({ ok = true })
+`;
+
 // Data access helpers (all server-side)
 
 export class AddressReportVersionConflictError extends Error {
@@ -106,6 +140,13 @@ export class AddressReportVersionConflictError extends Error {
     super("Address report version conflict");
     this.name = "AddressReportVersionConflictError";
     this.existingVersion = existingVersion;
+  }
+}
+
+export class AddressReportNotFoundError extends Error {
+  constructor() {
+    super("Address report not found");
+    this.name = "AddressReportNotFoundError";
   }
 }
 
@@ -182,9 +223,27 @@ export async function upsertReport(
   return upgradeReport(result.report as Record<string, unknown>);
 }
 
-export async function deleteReport(address: string): Promise<void> {
+export async function deleteReport(
+  address: string,
+  baseVersion: number,
+): Promise<void> {
   const redis = getRedis();
-  await redis.hdel(REPORTS_KEY, address.toLowerCase());
+  const result = (await redis.eval(
+    DELETE_SCRIPT,
+    [REPORTS_KEY],
+    [address.toLowerCase(), String(baseVersion)],
+  )) as Record<string, unknown>;
+
+  if (result.ok !== true) {
+    if (result.error === "not_found") {
+      throw new AddressReportNotFoundError();
+    }
+    throw new AddressReportVersionConflictError(
+      typeof result.existingVersion === "number"
+        ? result.existingVersion
+        : null,
+    );
+  }
 }
 
 /**

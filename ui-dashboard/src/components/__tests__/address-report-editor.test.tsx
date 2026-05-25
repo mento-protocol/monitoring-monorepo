@@ -367,3 +367,39 @@ describe("AddressReportEditor — save", () => {
     expect(calls.some((c) => typeof c[0] === "function")).toBe(false);
   });
 });
+
+describe("AddressReportEditor — delete", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    mockSwrData = {
+      body: "# Hi",
+      title: "T",
+      authorEmail: "alice@mentolabs.xyz",
+      version: 3,
+      createdAt: "2026-05-07T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
+    };
+  });
+
+  it("sends the current report version header as the delete precondition", async () => {
+    render();
+
+    await act(async () => {
+      findButton("Delete report")?.click();
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/address-reports");
+    expect((init as RequestInit).method).toBe("DELETE");
+    expect((init as RequestInit).headers).toEqual({
+      "Content-Type": "application/json",
+      "If-Match": '"3"',
+    });
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({ address: VALID_ADDR });
+  });
+});

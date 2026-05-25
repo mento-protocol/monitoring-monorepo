@@ -14,6 +14,12 @@ vi.mock("@/lib/address-reports", async () => {
     typeof import("@/lib/address-reports-shared")
   >("@/lib/address-reports-shared");
   return {
+    AddressReportNotFoundError: class AddressReportNotFoundError extends Error {
+      constructor() {
+        super("Address report not found");
+        this.name = "AddressReportNotFoundError";
+      }
+    },
     AddressReportVersionConflictError: class AddressReportVersionConflictError extends Error {
       readonly existingVersion: number | null;
 
@@ -34,6 +40,7 @@ vi.mock("@/lib/address-reports", async () => {
 
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportNotFoundError,
   AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
@@ -147,6 +154,30 @@ describe("PUT /api/address-reports", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("rejects a null JSON body", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify(null),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(upsertReport).not.toHaveBeenCalled();
+  });
+
+  it("rejects an array JSON body", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        body: JSON.stringify([{ address: VALID_ADDR, body: "x" }]),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(upsertReport).not.toHaveBeenCalled();
   });
 
   it("rejects a body that exceeds the size cap", async () => {
@@ -284,7 +315,7 @@ describe("PUT /api/address-reports", () => {
 
   it("returns 409 when storage detects a stale base version", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new AddressReportVersionConflictError(7),
     );
 
@@ -320,7 +351,7 @@ describe("DELETE /api/address-reports", () => {
     expect(deleteReport).not.toHaveBeenCalled();
   });
 
-  it("deletes when authenticated", async () => {
+  it("requires a version precondition", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
     const res = await DELETE(
       new NextRequest("http://localhost/api/address-reports", {
@@ -328,8 +359,74 @@ describe("DELETE /api/address-reports", () => {
         body: JSON.stringify({ address: VALID_ADDR }),
       }),
     );
+    expect(res.status).toBe(400);
+    expect(deleteReport).not.toHaveBeenCalled();
+  });
+
+  it("deletes with an If-Match version precondition", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        headers: { "If-Match": '"3"' },
+        body: JSON.stringify({ address: VALID_ADDR }),
+      }),
+    );
     expect(res.status).toBe(200);
-    expect(deleteReport).toHaveBeenCalledWith(VALID_ADDR);
+    expect(deleteReport).toHaveBeenCalledWith(VALID_ADDR, 3);
+  });
+
+  it("deletes with a body baseVersion precondition", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        body: JSON.stringify({ address: VALID_ADDR, baseVersion: 4 }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(deleteReport).toHaveBeenCalledWith(VALID_ADDR, 4);
+  });
+
+  it("returns 409 when storage detects a stale delete", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (deleteReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new AddressReportVersionConflictError(7),
+    );
+
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        headers: { "If-Match": '"6"' },
+        body: JSON.stringify({ address: VALID_ADDR }),
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "Report version conflict",
+      existingVersion: 7,
+    });
+  });
+
+  it("returns 404 when storage reports the report was already deleted", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (deleteReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new AddressReportNotFoundError(),
+    );
+
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        headers: { "If-Match": '"6"' },
+        body: JSON.stringify({ address: VALID_ADDR }),
+      }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: "Report no longer exists",
+    });
   });
 
   it("rejects an invalid address", async () => {
@@ -338,6 +435,30 @@ describe("DELETE /api/address-reports", () => {
       new NextRequest("http://localhost/api/address-reports", {
         method: "DELETE",
         body: JSON.stringify({ address: "not-hex" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(deleteReport).not.toHaveBeenCalled();
+  });
+
+  it("rejects a null JSON body", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        body: JSON.stringify(null),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(deleteReport).not.toHaveBeenCalled();
+  });
+
+  it("rejects an array JSON body", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        body: JSON.stringify([{ address: VALID_ADDR }]),
       }),
     );
     expect(res.status).toBe(400);

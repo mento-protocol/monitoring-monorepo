@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportNotFoundError,
   AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
@@ -65,6 +66,9 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 
   const parsed = await readBoundedJson(req, MAX_PUT_BODY_BYTES);
   if (parsed instanceof NextResponse) return parsed;
+  if (!isJsonObject(parsed)) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   const {
     address,
@@ -135,17 +139,54 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
   const parsed = await readBoundedJson(req, MAX_DELETE_BODY_BYTES);
   if (parsed instanceof NextResponse) return parsed;
+  if (!isJsonObject(parsed)) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  const { address } = parsed as Record<string, unknown>;
+  const { address, baseVersion: rawBaseVersion } = parsed;
 
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
   }
 
+  const parsedBaseVersion = parseBaseVersion(
+    rawBaseVersion,
+    req.headers.get("if-match"),
+  );
+  if (!parsedBaseVersion.ok) {
+    return NextResponse.json(
+      { error: parsedBaseVersion.error },
+      { status: 400 },
+    );
+  }
+  if (parsedBaseVersion.baseVersion === undefined) {
+    return NextResponse.json(
+      {
+        error: "Report delete requires a baseVersion or If-Match precondition",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
-    await deleteReport(address);
+    await deleteReport(address, parsedBaseVersion.baseVersion);
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (err instanceof AddressReportNotFoundError) {
+      return NextResponse.json(
+        { error: "Report no longer exists" },
+        { status: 404 },
+      );
+    }
+    if (err instanceof AddressReportVersionConflictError) {
+      return NextResponse.json(
+        {
+          error: "Report version conflict",
+          existingVersion: err.existingVersion,
+        },
+        { status: 409 },
+      );
+    }
     return serverError(err, "delete");
   }
 }
@@ -209,6 +250,10 @@ function parseBaseVersion(
 
 function isValidBaseVersion(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function serverError(

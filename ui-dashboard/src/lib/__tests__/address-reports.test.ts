@@ -183,6 +183,52 @@ describe("upsertReport — Upstash auto-deserialization contract", () => {
   });
 });
 
+describe("deleteReport — optimistic concurrency", () => {
+  it("passes the expected base version into the atomic Lua script", async () => {
+    mockEval.mockResolvedValueOnce({ ok: true });
+
+    const { deleteReport } = await import("@/lib/address-reports");
+    await deleteReport(ADDR, 3);
+
+    const callArgs = mockEval.mock.calls[0]!;
+    expect(callArgs[1]).toEqual(["reports"]);
+    expect(callArgs[2]).toEqual([ADDR.toLowerCase(), "3"]);
+  });
+
+  it("throws a typed conflict when Redis reports a stale delete", async () => {
+    mockEval.mockResolvedValueOnce({
+      ok: false,
+      error: "version_conflict",
+      existingVersion: 7,
+    });
+
+    const { deleteReport, AddressReportVersionConflictError } =
+      await import("@/lib/address-reports");
+
+    try {
+      await deleteReport(ADDR, 6);
+      throw new Error("expected conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AddressReportVersionConflictError);
+      expect(err).toMatchObject({ existingVersion: 7 });
+    }
+  });
+
+  it("throws a typed not-found error when Redis reports a missing report", async () => {
+    mockEval.mockResolvedValueOnce({
+      ok: false,
+      error: "not_found",
+    });
+
+    const { deleteReport, AddressReportNotFoundError } =
+      await import("@/lib/address-reports");
+
+    await expect(deleteReport(ADDR, 6)).rejects.toBeInstanceOf(
+      AddressReportNotFoundError,
+    );
+  });
+});
+
 describe("findReport — single-key lookup", () => {
   it("returns the report when it exists", async () => {
     mockHget.mockResolvedValueOnce({
