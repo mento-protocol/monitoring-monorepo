@@ -12,42 +12,63 @@
 #   even after Secret Manager rotation. Fetching at runtime keeps secrets
 #   in Secret Manager only.
 #
-# Required IAM: the App Engine Flex compute service account
-# (`<project-number>-compute@developer.gserviceaccount.com`) needs
+# Required IAM: the App Engine default service account
+# (`<project>@appspot.gserviceaccount.com`) needs
 # `roles/secretmanager.secretAccessor` on each of:
 #   - grafana-agent-endpoint
 #   - grafana-agent-username
 #   - grafana-agent-password
-# Provisioned by `terraform/main.tf` → `grafana_agent_cloudbuild_compute_accessor`.
+# Provisioned by `terraform/main.tf` → `grafana_agent_appspot_accessor`.
+#
+# Why the AppSpot SA, not the Compute default SA: App Engine Flex apps run as
+# the App Engine default service account (`<project>@appspot.gserviceaccount.com`)
+# even though the underlying GCE VM runs as the Compute Engine default SA.
+# The metadata server inside the application context returns the App Engine
+# SA's token, so that's the identity that needs the Secret Manager binding.
 
 set -eu
 
 GCP_PROJECT="${GOOGLE_CLOUD_PROJECT:-mento-monitoring}"
 METADATA="http://metadata.google.internal/computeMetadata/v1"
+HTTP_TIMEOUT=10
 
-# Get an access token from the App Engine Flex compute service account via
-# the GCE metadata server. -f ensures non-2xx fails the pipe.
-token=$(curl -sfH "Metadata-Flavor: Google" \
+# Get an access token from the App Engine default service account via the
+# GCE metadata server. --max-time bounds the request so a transient
+# metadata-server outage doesn't wedge the container indefinitely (no
+# health-check responses, no logs, no rotation possible). The `|| { ... }`
+# guard catches transport-layer failures (DNS, TCP, timeout) which would
+# otherwise leave `token` empty and produce a confusing downstream null check.
+token=$(curl -sfH "Metadata-Flavor: Google" --max-time "${HTTP_TIMEOUT}" \
   "${METADATA}/instance/service-accounts/default/token" \
-  | jq -r .access_token)
+  | jq -r .access_token) || {
+  echo "entrypoint: curl/jq failed reaching metadata server for access token" >&2
+  exit 1
+}
 
 if [ -z "${token}" ] || [ "${token}" = "null" ]; then
-  echo "entrypoint: failed to get GCP access token from metadata server" >&2
+  echo "entrypoint: empty/null access token from metadata server" >&2
   exit 1
 fi
 
 fetch_secret() {
   secret_name=$1
-  payload=$(curl -sfH "Authorization: Bearer ${token}" \
+  payload=$(curl -sfH "Authorization: Bearer ${token}" --max-time "${HTTP_TIMEOUT}" \
     "https://secretmanager.googleapis.com/v1/projects/${GCP_PROJECT}/secrets/${secret_name}/versions/latest:access" \
-    | jq -r .payload.data)
+    | jq -r .payload.data) || {
+    echo "entrypoint: curl/jq failed reaching Secret Manager for ${secret_name}" >&2
+    exit 1
+  }
 
   if [ -z "${payload}" ] || [ "${payload}" = "null" ]; then
-    echo "entrypoint: failed to read secret ${secret_name}" >&2
+    echo "entrypoint: empty/null payload reading secret ${secret_name}" >&2
     exit 1
   fi
 
-  printf '%s' "${payload}" | base64 -d
+  # `tr -d '\n'` strips a trailing newline that would otherwise become part
+  # of the env var. The seed-secrets script uses `printf '%s'` so this should
+  # be a no-op in steady state — defensive against future seed paths or
+  # manual `gcloud secrets versions add` invocations using `echo` (adds \n).
+  printf '%s' "${payload}" | base64 -d | tr -d '\n'
 }
 
 GRAFANA_AGENT_ENDPOINT=$(fetch_secret grafana-agent-endpoint)

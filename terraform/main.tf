@@ -475,6 +475,25 @@ resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_com
   ]
 }
 
+# App Engine Flex apps run as the App Engine default SA
+# (`<project>@appspot.gserviceaccount.com`), not the Compute Engine default
+# SA. The metadata server in the application's request context returns the
+# AppSpot SA's token, so `grafana-agent/entrypoint.sh` needs THIS binding —
+# the Compute SA grant above is preserved for the legacy Cloud Build path
+# and other consumers but isn't what authenticates the runtime fetch.
+resource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor" {
+  for_each  = google_secret_manager_secret.grafana_agent
+  project   = google_project.monitoring.project_id
+  secret_id = each.value.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.secretmanager,
+  ]
+}
+
 resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" {
   for_each = {
     for binding in setproduct(keys(local.grafana_agent_cloudbuild_service_accounts), local.grafana_agent_cloudbuild_project_roles) :
