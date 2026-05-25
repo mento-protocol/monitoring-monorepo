@@ -832,6 +832,19 @@ test("requires chatgpt-codex-connector +1 reaction exactly", () => {
     ]),
     "expected wrong reaction or wrong bot to fail",
   );
+  assert(
+    hasCodexApprovalReaction(
+      [
+        {
+          content: "+1",
+          user: { login: "chatgpt-codex-connector" },
+          created_at: "2026-05-21T13:23:00Z",
+        },
+      ],
+      Date.parse("2026-05-21T13:22:23Z"),
+    ),
+    "expected app slug login to pass",
+  );
 });
 
 test("classifies Codex review signal as missing, requested, in flight, stale, or approved", () => {
@@ -982,6 +995,18 @@ test("classifies stale vs current Codex review submissions", () => {
         {
           submittedAt: "2026-05-21T13:23:00Z",
           author: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+    }),
+    "in_flight",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      reviews: [
+        {
+          submittedAt: "2026-05-21T13:23:00Z",
+          author: { login: "chatgpt-codex-connector" },
         },
       ],
     }),

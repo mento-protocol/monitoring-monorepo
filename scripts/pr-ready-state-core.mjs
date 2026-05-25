@@ -1,4 +1,5 @@
 export const BOT_APPROVER = "chatgpt-codex-connector[bot]";
+const BOT_APPROVER_LOGIN = "chatgpt-codex-connector";
 const OPTIONAL_CHECK_NAMES = new Set([
   "Core Web Vitals + accessibility (ui-dashboard)",
   "Cursor Bugbot",
@@ -289,6 +290,10 @@ export function isCodexReviewRequestBody(body) {
   return /(^|\s)@codex\s+review\b/i.test(String(body ?? ""));
 }
 
+function isBotApproverLogin(login) {
+  return login === BOT_APPROVER || login === BOT_APPROVER_LOGIN;
+}
+
 function commentReactionContent(reaction) {
   return String(reaction?.content ?? reaction ?? "").toLowerCase();
 }
@@ -302,7 +307,7 @@ function hasCodexEyesReaction(comment, headUpdatedAt, fallbackCurrent = false) {
   return reactionNodes.some((reaction) => {
     if (
       commentReactionContent(reaction) !== "eyes" ||
-      reaction?.user?.login !== BOT_APPROVER
+      !isBotApproverLogin(reaction?.user?.login)
     ) {
       return false;
     }
@@ -340,7 +345,7 @@ export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
   return reactions.some(
     (reaction) =>
       reaction.content === "+1" &&
-      reaction.user?.login === BOT_APPROVER &&
+      isBotApproverLogin(reaction.user?.login) &&
       parseTimestamp(reaction.created_at ?? reaction.createdAt) >=
         headUpdatedAt,
   );
@@ -363,9 +368,9 @@ export function classifyCodexReviewSignal({
     const createdAt = comment.created_at ?? comment.createdAt;
     const isCurrent = isCurrentSignal(createdAt, headUpdatedAt);
 
-    if (author === BOT_APPROVER && isCurrent) {
+    if (isBotApproverLogin(author) && isCurrent) {
       hasCurrentInFlightSignal = true;
-    } else if (author === BOT_APPROVER) {
+    } else if (isBotApproverLogin(author)) {
       hasHistoricalSignal = true;
     }
 
@@ -386,7 +391,7 @@ export function classifyCodexReviewSignal({
 
   for (const review of reviews) {
     const author = review.author?.login ?? review.user?.login ?? null;
-    if (author !== BOT_APPROVER) continue;
+    if (!isBotApproverLogin(author)) continue;
 
     const submittedAt =
       review.submittedAt ?? review.submitted_at ?? review.createdAt;
