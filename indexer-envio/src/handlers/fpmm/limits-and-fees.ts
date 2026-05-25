@@ -87,6 +87,8 @@ indexer.onEvent(
   { contract: "FPMM", event: "LiquidityStrategyUpdated" },
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.srcAddress);
+    if (await maybePreloadPool(context, poolId)) return;
+
     const strategy = asAddress(event.params.strategy);
     const status = event.params.status;
 
@@ -111,9 +113,13 @@ type FeeFieldKey = "lpFee" | "protocolFee" | "rebalanceReward";
 
 async function updatePoolFeeField(
   context: {
+    isPreload: boolean;
     Pool: {
       get: (id: string) => Promise<Pool | undefined>;
       set: (entity: Pool) => void;
+    };
+    DeviationThresholdBreach: {
+      get: (id: string) => Promise<unknown>;
     };
   },
   event: {
@@ -125,6 +131,8 @@ async function updatePoolFeeField(
   newValue: bigint,
 ): Promise<void> {
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  if (await maybePreloadPool(context, poolId)) return;
+
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
   context.Pool.set({

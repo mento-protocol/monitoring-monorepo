@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   indexerTestHelpers,
   type MockDbWith,
@@ -26,6 +28,9 @@ const POOL_ADDRESS = "0x00000000000000000000000000000000000000aa";
 const TOKEN0 = "0x00000000000000000000000000000000000000b0";
 const TOKEN1 = "0x00000000000000000000000000000000000000b1";
 const FACTORY = "0x00000000000000000000000000000000000000cc";
+const LIMITS_AND_FEES_SOURCE = fileURLToPath(
+  new URL("../src/handlers/fpmm/limits-and-fees.ts", import.meta.url),
+);
 
 async function seedFpmmPool(mockDb: MockDb): Promise<MockDb> {
   // Mock the ERC20 decimals fallback so the FPMMDeployed handler doesn't
@@ -137,6 +142,19 @@ describe("FPMM fee-config event handlers", () => {
       pool,
       undefined,
       "Handler must not create a pool from thin air",
+    );
+  });
+
+  it("keeps direct Pool writes behind the preload guard", () => {
+    const source = readFileSync(LIMITS_AND_FEES_SOURCE, "utf8");
+    const guardedWrites = source.match(
+      /if \(await maybePreloadPool\(context, poolId\)\) return;/g,
+    );
+
+    assert.ok(guardedWrites);
+    assert.ok(
+      guardedWrites.length >= 4,
+      "TradingLimitConfigured, LiquidityStrategyUpdated, fee updates, and RebalanceThresholdUpdated must all bail during preload",
     );
   });
 });
