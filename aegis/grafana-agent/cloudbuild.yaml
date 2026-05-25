@@ -1,18 +1,17 @@
+# Grafana Cloud BasicAuth secrets are fetched at runtime by `entrypoint.sh`
+# inside the deployed container — see Dockerfile + entrypoint.sh in this dir.
+# The previous flow rendered secrets into agent.yaml on the Cloud Build VM
+# and shipped the plaintext via `gcloud app deploy`, which retained the
+# rendered file indefinitely in (a) the App Engine source staging bucket
+# and (b) the container image layer. Runtime fetch keeps the secrets in
+# Secret Manager only.
+#
+# The App Engine default service account
+# (`<project>@appspot.gserviceaccount.com`) needs
+# `roles/secretmanager.secretAccessor` on each grafana-agent-* secret;
+# bound by `terraform/main.tf` → `grafana_agent_appspot_accessor`.
+# (App Engine Flex apps run as the AppSpot SA, not the Compute default
+# SA, even though the underlying VM uses Compute.)
 steps:
   - name: gcr.io/cloud-builders/gcloud
-    entrypoint: bash
-    args: [./template-agent.sh]
-    secretEnv:
-      - GRAFANA_AGENT_ENDPOINT
-      - GRAFANA_AGENT_USERNAME
-      - GRAFANA_AGENT_PASSWORD
-  - name: gcr.io/cloud-builders/gcloud
     args: [app, deploy, --quiet, grafana-agent.yaml]
-availableSecrets:
-  secretManager:
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-endpoint/versions/latest
-      env: GRAFANA_AGENT_ENDPOINT
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-username/versions/latest
-      env: GRAFANA_AGENT_USERNAME
-    - versionName: projects/$PROJECT_ID/secrets/grafana-agent-password/versions/latest
-      env: GRAFANA_AGENT_PASSWORD
