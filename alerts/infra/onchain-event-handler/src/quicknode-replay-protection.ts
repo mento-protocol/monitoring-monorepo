@@ -3,7 +3,6 @@ import { logger } from "./logger";
 
 const METADATA_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
-const STORAGE_OBJECT_BASE_URL = "https://storage.googleapis.com/storage/v1/b";
 const STORAGE_UPLOAD_BASE_URL =
   "https://storage.googleapis.com/upload/storage/v1/b";
 const METADATA_TOKEN_REFRESH_SKEW_MS = 60_000;
@@ -22,65 +21,6 @@ interface ReplayProtectionOptions {
 let cachedMetadataToken:
   | { accessToken: string; expiresAtMs: number }
   | undefined;
-
-export async function checkQuickNodeNonce(
-  nonce: string,
-  timestamp: string,
-  options: ReplayProtectionOptions = {},
-): Promise<ReplayProtectionResult> {
-  const setup = await replayProtectionSetup(nonce, timestamp, options);
-  if (!setup.valid) return setup;
-
-  const {
-    fetchImpl,
-    bucketName,
-    objectName,
-    timestamp: requestTimestamp,
-    nonceHash,
-  } = setup;
-
-  try {
-    const accessToken = await getMetadataAccessToken(fetchImpl);
-    const objectUrl = `${STORAGE_OBJECT_BASE_URL}/${encodeURIComponent(
-      bucketName,
-    )}/o/${encodeURIComponent(objectName)}`;
-    const response = await fetchImpl(objectUrl, {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (response.status === 404) return { valid: true };
-
-    if (response.ok) {
-      logger.warn("Acknowledged replayed QuickNode webhook nonce", {
-        timestamp: requestTimestamp,
-        nonceHash,
-      });
-      return {
-        valid: false,
-        status: 200,
-        message: "Duplicate webhook nonce already processed",
-        replayed: true,
-      };
-    }
-
-    logger.error("Failed to check QuickNode webhook nonce", {
-      status: response.status,
-      statusText: response.statusText,
-      timestamp: requestTimestamp,
-      nonceHash,
-    });
-    return serverConfigurationError();
-  } catch (error) {
-    logger.error("QuickNode replay protection check failed", {
-      error: error instanceof Error ? error.message : String(error),
-      timestamp: requestTimestamp,
-      nonceHash,
-    });
-    return serverConfigurationError();
-  }
-}
 
 export async function reserveQuickNodeNonce(
   nonce: string,

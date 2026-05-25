@@ -1,7 +1,7 @@
 import type { Request } from "@google-cloud/functions-framework";
 import config from "./config";
 import { logger } from "./logger";
-import { checkQuickNodeNonce } from "./quicknode-replay-protection";
+import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { verifyQuickNodeSignature } from "./verify-quicknode-signature";
 
 type ValidationResult =
@@ -108,7 +108,7 @@ export async function validateQuickNodeWebhook(
     };
   }
 
-  const replayValidation = await checkQuickNodeNonce(nonce, timestamp);
+  const replayValidation = await reserveQuickNodeNonce(nonce, timestamp);
   if (!replayValidation.valid) {
     return replayValidation;
   }

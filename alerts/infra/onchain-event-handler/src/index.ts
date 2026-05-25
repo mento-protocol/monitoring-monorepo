@@ -4,7 +4,6 @@ import { checkPayloadSize } from "./check-payload-size";
 import { handleHealthCheck } from "./health-check";
 import { logger } from "./logger";
 import { processEvents } from "./process-events";
-import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { validatePayload } from "./validate-payload";
 import { validateQuickNodeWebhook } from "./validate-quicknode-webhook";
 
@@ -39,7 +38,6 @@ export const processQuicknodeWebhook = async (
     // 2. Verify webhook signature (skip in local development)
     const isProduction = process.env.NODE_ENV !== "development";
 
-    let replayNonce: { nonce: string; timestamp: string } | undefined;
     if (isProduction) {
       const requestValidation = await validateQuickNodeWebhook(req);
       if (!requestValidation.valid) {
@@ -50,10 +48,6 @@ export const processQuicknodeWebhook = async (
         res.status(requestValidation.status).send(requestValidation.message);
         return;
       }
-      replayNonce = {
-        nonce: requestValidation.nonce,
-        timestamp: requestValidation.timestamp,
-      };
     }
 
     // 3. Validate payload structure
@@ -85,21 +79,6 @@ export const processQuicknodeWebhook = async (
       processed: results.length,
       total: webhookData.length,
     });
-
-    if (replayNonce) {
-      const replayReservation = await reserveQuickNodeNonce(
-        replayNonce.nonce,
-        replayNonce.timestamp,
-      );
-      if (!replayReservation.valid) {
-        logger.warn("Webhook replay nonce reservation failed", {
-          status: replayReservation.status,
-          message: replayReservation.message,
-        });
-        res.status(replayReservation.status).send(replayReservation.message);
-        return;
-      }
-    }
 
     // 6. Return success
     res.status(200).json({

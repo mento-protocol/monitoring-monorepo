@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
     warn: vi.fn(),
   },
   processEvents: vi.fn(),
-  reserveQuickNodeNonce: vi.fn(),
   validatePayload: vi.fn(),
   validateQuickNodeWebhook: vi.fn(),
 }));
@@ -31,9 +30,6 @@ vi.mock("./health-check", () => ({
 }));
 vi.mock("./logger", () => ({ logger: mocks.logger }));
 vi.mock("./process-events", () => ({ processEvents: mocks.processEvents }));
-vi.mock("./quicknode-replay-protection", () => ({
-  reserveQuickNodeNonce: mocks.reserveQuickNodeNonce,
-}));
 vi.mock("./validate-payload", () => ({
   validatePayload: mocks.validatePayload,
 }));
@@ -75,7 +71,6 @@ describe("processQuicknodeWebhook", () => {
       payload: { result: [] },
     });
     mocks.processEvents.mockResolvedValue([]);
-    mocks.reserveQuickNodeNonce.mockResolvedValue({ valid: true });
   });
 
   it("acknowledges duplicate webhook nonces without processing them", async () => {
@@ -91,38 +86,29 @@ describe("processQuicknodeWebhook", () => {
     await processQuicknodeWebhook(request(), res);
 
     expect(mocks.processEvents).not.toHaveBeenCalled();
-    expect(mocks.reserveQuickNodeNonce).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.send).toHaveBeenCalledWith(
       "Duplicate webhook nonce already processed",
     );
   });
 
-  it("does not reserve a replay nonce when downstream processing fails", async () => {
+  it("returns 500 when downstream processing fails after validation claimed the nonce", async () => {
     mocks.processEvents.mockRejectedValue(new Error("temporary failure"));
     const { processQuicknodeWebhook } = await import("./index");
     const res = response();
 
     await processQuicknodeWebhook(request(), res);
 
-    expect(mocks.reserveQuickNodeNonce).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.send).toHaveBeenCalledWith("Internal Server Error");
   });
 
-  it("reserves the replay nonce after downstream processing succeeds", async () => {
+  it("returns success after downstream processing succeeds", async () => {
     const { processQuicknodeWebhook } = await import("./index");
     const res = response();
 
     await processQuicknodeWebhook(request(), res);
 
-    expect(mocks.processEvents).toHaveBeenCalledBefore(
-      mocks.reserveQuickNodeNonce,
-    );
-    expect(mocks.reserveQuickNodeNonce).toHaveBeenCalledWith(
-      "nonce-1",
-      "1700000000",
-    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ processed: 0, total: 0 });
   });

@@ -62,8 +62,8 @@ describe("validateQuickNodeWebhook", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(200, { access_token: "token-1" }))
-      .mockResolvedValueOnce(response(404, {}))
-      .mockResolvedValueOnce(response(200, {}));
+      .mockResolvedValueOnce(response(200, {}))
+      .mockResolvedValueOnce(response(412, {}));
     vi.stubGlobal("fetch", fetchMock);
 
     const { validateQuickNodeWebhook } = await loadValidator();
@@ -81,10 +81,11 @@ describe("validateQuickNodeWebhook", () => {
     });
 
     const uploadCall = fetchMock.mock.calls[1];
-    expect(String(uploadCall[0])).toContain("/storage/v1/b/");
+    expect(String(uploadCall[0])).toContain("/upload/storage/v1/b/");
     expect(String(uploadCall[0])).toContain(
-      "quicknode-replay-nonces%2F1700000000%2F",
+      "name=quicknode-replay-nonces%2F1700000000%2F",
     );
+    expect(String(uploadCall[0])).toContain("ifGenerationMatch=0");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
