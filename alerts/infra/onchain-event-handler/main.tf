@@ -161,7 +161,18 @@ resource "google_storage_bucket" "webhook_replay_nonces" {
 
   lifecycle_rule {
     condition {
-      age = 1
+      age        = 1
+      with_state = "LIVE"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age        = 1
+      with_state = "ARCHIVED"
     }
     action {
       type = "Delete"

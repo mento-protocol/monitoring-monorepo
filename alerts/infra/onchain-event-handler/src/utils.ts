@@ -22,6 +22,9 @@ const VIEM_CHAINS: Record<string, typeof celo | typeof mainnet> = {
   celo,
   ethereum: mainnet,
 };
+const MAX_SAFE_DYNAMIC_OFFSET_WORD = BigInt(
+  Math.floor(Number.MAX_SAFE_INTEGER / 2),
+);
 
 /**
  * Get multisig key from contract address and chain
@@ -243,13 +246,15 @@ export async function extractSignersFromSignatures(
         }
 
         if (vByte === 0) {
-          const dynamicOffset = Number.parseInt(sHex, 16) * 2;
-          if (
-            Number.isSafeInteger(dynamicOffset) &&
-            dynamicOffset >= i + 130 &&
-            dynamicOffset <= sigBytes.length
-          ) {
-            staticSignaturesEnd = Math.min(staticSignaturesEnd, dynamicOffset);
+          const dynamicOffsetWord = BigInt(`0x${sHex}`);
+          if (dynamicOffsetWord <= MAX_SAFE_DYNAMIC_OFFSET_WORD) {
+            const dynamicOffset = Number(dynamicOffsetWord) * 2;
+            if (dynamicOffset >= i + 130 && dynamicOffset <= sigBytes.length) {
+              staticSignaturesEnd = Math.min(
+                staticSignaturesEnd,
+                dynamicOffset,
+              );
+            }
           }
         }
 

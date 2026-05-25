@@ -271,6 +271,21 @@ describe("extractSignersFromSignatures", () => {
     ).resolves.toEqual([contractSigner]);
   });
 
+  it("ignores oversized contract-signature dynamic offsets without precision loss", async () => {
+    const hugeOffset = (1n << 240n) + 65n;
+    const dynamicPayloadThatLooksLikeASignature =
+      paddedAddress(approvedHashSigner) + uint256Word(0n) + "01";
+    const signature =
+      paddedAddress(contractSigner) +
+      uint256Word(hugeOffset) +
+      "00" +
+      dynamicPayloadThatLooksLikeASignature;
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${signature}`, safeTxHash),
+    ).resolves.toEqual([contractSigner, approvedHashSigner]);
+  });
+
   it("extracts v=1 approved-hash signature owners from r", async () => {
     const signature =
       paddedAddress(approvedHashSigner) + uint256Word(0n) + "01";

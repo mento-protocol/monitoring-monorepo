@@ -58,31 +58,34 @@ describe("validateQuickNodeWebhook", () => {
     vi.resetModules();
   });
 
-  it("reserves a signed nonce and rejects the same nonce when GCS reports it already exists", async () => {
+  it("accepts a signed nonce and acknowledges duplicate nonces without auth retries", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(200, { access_token: "token-1" }))
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(response(200, { access_token: "token-2" }))
-      .mockResolvedValueOnce(response(412, {}));
+      .mockResolvedValueOnce(response(404, {}))
+      .mockResolvedValueOnce(response(200, {}));
     vi.stubGlobal("fetch", fetchMock);
 
     const { validateQuickNodeWebhook } = await loadValidator();
 
     await expect(validateQuickNodeWebhook(request())).resolves.toEqual({
       valid: true,
+      nonce,
+      timestamp,
     });
     await expect(validateQuickNodeWebhook(request())).resolves.toEqual({
       valid: false,
-      status: 401,
-      message: "Unauthorized: Replayed webhook nonce",
+      status: 200,
+      message: "Duplicate webhook nonce already processed",
+      replayed: true,
     });
 
     const uploadCall = fetchMock.mock.calls[1];
-    expect(String(uploadCall[0])).toContain("ifGenerationMatch=0");
+    expect(String(uploadCall[0])).toContain("/storage/v1/b/");
     expect(String(uploadCall[0])).toContain(
       "quicknode-replay-nonces%2F1700000000%2F",
     );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("fails closed when the replay nonce bucket is not configured", async () => {
