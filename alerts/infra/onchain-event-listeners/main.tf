@@ -183,10 +183,12 @@ resource "null_resource" "pause_webhook_on_destroy" {
 
         # API key captured into triggers at plan time so we don't depend on
         # the shell environment (which is empty under the normal tfvars
-        # workflow). Empty value still falls through to the skip branch
-        # below — the script just gracefully no-ops if QUICKNODE_API_KEY
-        # is missing.
-        API_KEY="${self.triggers.api_key}"
+        # workflow). `try(...)` defaults to empty when the old state didn't
+        # have the api_key trigger — a destroy provisioner reads triggers
+        # from the EXISTING state, not the new config, so resources created
+        # before this trigger was added need the safe fallback to skip pause
+        # gracefully instead of failing the destroy.
+        API_KEY="${try(self.triggers.api_key, "")}"
         if [ -z "$API_KEY" ] || [ "$API_KEY" = "" ]; then
           echo "Warning: QuickNode API key not configured in triggers, skipping pause"
           exit 0
