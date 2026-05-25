@@ -67,6 +67,10 @@ Suggested invocation:
 pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch]
 ```
 
+`--watch --json` emits one JSON summary per poll, separated by newlines. Use
+`--watch --compact` for human babysitting and reserve JSON output for machine
+consumers that can parse newline-delimited JSON.
+
 Expected top-level fields:
 
 ```json
@@ -124,6 +128,11 @@ Expected top-level fields:
       "ready": true,
       "required": true,
       "unrepliedCount": 0
+    },
+    "reviewThreads": {
+      "ready": true,
+      "required": true,
+      "unresolvedCount": 0
     }
   },
   "requiredStatusContexts": [

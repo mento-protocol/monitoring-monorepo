@@ -285,7 +285,7 @@ export function findTopLevelBotReviewComments(reviews = []) {
     }));
 }
 
-function isCodexReviewRequestBody(body) {
+export function isCodexReviewRequestBody(body) {
   return /(^|\s)@codex\s+review\b/i.test(String(body ?? ""));
 }
 

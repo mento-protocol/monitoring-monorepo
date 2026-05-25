@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   checkDisplayName,
+  isCodexReviewRequestBody,
   summarizeReadyState,
 } from "./pr-ready-state-core.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
@@ -627,13 +628,9 @@ function fetchIssueCommentReactions({ repo, commentId }) {
   ]);
 }
 
-function commentRequestsCodexReview(comment) {
-  return /(^|\s)@codex\s+review\b/i.test(String(comment.body ?? ""));
-}
-
 function attachCodexRequestReactions({ repo, issueComments }) {
   return issueComments.map((comment) => {
-    if (!commentRequestsCodexReview(comment)) return comment;
+    if (!isCodexReviewRequestBody(comment.body)) return comment;
     return {
       ...comment,
       reactions: fetchIssueCommentReactions({ repo, commentId: comment.id }),
@@ -775,7 +772,7 @@ function fetchReadyState({ prArg, repoArg }) {
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n\nNote: --watch --json emits newline-delimited JSON, one summary per poll.\n`;
 }
 
 function readFlagValue(rest, flag) {

@@ -12,6 +12,7 @@ import {
   groupStatusChecks,
   hasCodexApprovalReaction,
   classifyCodexReviewSignal,
+  isCodexReviewRequestBody,
   summarizeReadyState,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
@@ -887,6 +888,45 @@ test("classifies Codex review signal as missing, requested, in flight, stale, or
       codexApprovalReaction: true,
     }),
     "approved",
+  );
+});
+
+test("uses a shared matcher for Codex review request comments", () => {
+  assert(isCodexReviewRequestBody("@codex review"));
+  assert(isCodexReviewRequestBody("please @codex review this"));
+  assert(!isCodexReviewRequestBody("@codex summarize"));
+});
+
+test("classifies stale vs current Codex review submissions", () => {
+  const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
+
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      reviews: [
+        {
+          submittedAt: "2026-05-21T13:21:00Z",
+          author: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+    }),
+    "stale",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      reviews: [
+        {
+          submittedAt: "2026-05-21T13:21:00Z",
+          author: { login: "chatgpt-codex-connector[bot]" },
+        },
+        {
+          submittedAt: "2026-05-21T13:23:00Z",
+          author: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+    }),
+    "in_flight",
   );
 });
 
