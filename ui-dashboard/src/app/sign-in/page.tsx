@@ -44,13 +44,24 @@ export function sanitizeCallbackUrl(raw?: string): string {
   return raw;
 }
 
+type SearchParamValue = string | string[] | undefined;
+
+export function normalizeCallbackUrl(
+  raw: SearchParamValue,
+): string | undefined {
+  return typeof raw === "string" ? raw : undefined;
+}
+
 type Props = {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{
+    callbackUrl?: SearchParamValue;
+    error?: SearchParamValue;
+  }>;
 };
 
 export default async function SignInPage({ searchParams }: Props) {
   const { callbackUrl, error } = await searchParams;
-  const redirectTo = sanitizeCallbackUrl(callbackUrl);
+  const redirectTo = sanitizeCallbackUrl(normalizeCallbackUrl(callbackUrl));
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
