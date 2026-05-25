@@ -1,0 +1,87 @@
+[
+  {
+    "name": "AddedOwner",
+    "signature": "AddedOwner(address)",
+    "hash": "0x9465fa0c962cc76958e6373a993326400c1c94f8be2fe3a952adfa7f60b2ea26"
+  },
+  {
+    "name": "ApproveHash",
+    "signature": "ApproveHash(bytes32,address)",
+    "hash": "0xf2a0eb156472d1440255b0d7c1e19cc07115d1051fe605b0dce69acfec884d9c"
+  },
+  {
+    "name": "ChangedFallbackHandler",
+    "signature": "ChangedFallbackHandler(address)",
+    "hash": "0x5ac6c46c93c8d0e53714ba3b53db3e7c046da994313d7ed0d192028bc7c228b0"
+  },
+  {
+    "name": "ChangedGuard",
+    "signature": "ChangedGuard(address)",
+    "hash": "0x1151116914515bc0891ff9047a6cb32cf902546f83066499bcf8ba33d2353fa2"
+  },
+  {
+    "name": "ChangedThreshold",
+    "signature": "ChangedThreshold(uint256)",
+    "hash": "0x610f7ff2b304ae8903c3de74c60c6ab1f7d6226b3f52c5161905bb5ad4039c93"
+  },
+  {
+    "name": "DisabledModule",
+    "signature": "DisabledModule(address)",
+    "hash": "0xaab4fa2b463f581b2b32cb3b7e3b704b9ce37cc209b5fb4d77e593ace4054276"
+  },
+  {
+    "name": "EnabledModule",
+    "signature": "EnabledModule(address)",
+    "hash": "0xecdf3a3effea5783a3c4c2140e677577666428d44ed9d474a0b3a4c9943f8440"
+  },
+  {
+    "name": "ExecutionFailure",
+    "signature": "ExecutionFailure(bytes32,uint256)",
+    "hash": "0x23428b18acfb3ea64b08dc0c1d296ea9c09702c09083ca5272e64d115b687d23"
+  },
+  {
+    "name": "ExecutionFromModuleFailure",
+    "signature": "ExecutionFromModuleFailure(address)",
+    "hash": "0xacd2c8702804128fdb0db2bb49f6d127dd0181c13fd45dbfe16de0930e2bd375"
+  },
+  {
+    "name": "ExecutionFromModuleSuccess",
+    "signature": "ExecutionFromModuleSuccess(address)",
+    "hash": "0x6895c13664aa4f67288b25d7a21d7aaa34916e355fb9b6fae0a139a9085becb8"
+  },
+  {
+    "name": "ExecutionSuccess",
+    "signature": "ExecutionSuccess(bytes32,uint256)",
+    "hash": "0x442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e"
+  },
+  {
+    "name": "RemovedOwner",
+    "signature": "RemovedOwner(address)",
+    "hash": "0xf8d49fc529812e9a7c5c50e69c20f0dccc0db8fa95c98bc58cc9a4f1c1299eaf"
+  },
+  {
+    "name": "SafeModuleTransaction",
+    "signature": "SafeModuleTransaction(address,address,uint256,bytes,uint8)",
+    "hash": "0xb648d3644f584ed1c2232d53c46d87e693586486ad0d1175f8656013110b714e"
+  },
+  {
+    "name": "SafeMultiSigTransaction",
+    "signature": "SafeMultiSigTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes,bytes)",
+    "hash": "0x66753cd2356569ee081232e3be8909b950e0a76c1f8460c3a5e3c2be32b11bed"
+  },
+  {
+    "name": "SafeReceived",
+    "signature": "SafeReceived(address,uint256)",
+    "hash": "0x3d0ce9bfc3ed7d6862dbb28b2dea94561fe714a1b4d019aa8af39730d1ad7c3d"
+  },
+  {
+    "name": "SafeSetup",
+    "signature": "SafeSetup(address,address[],uint256,address,address)",
+    "hash": "0x141df868a6331af528e38c83b7aa03edc19be66e37ae67f9285bf4f8e3c6a1a8"
+  },
+  {
+    "name": "SignMsg",
+    "signature": "SignMsg(bytes32)",
+    "hash": "0xe7f4675038f4f6034dfcbbb24c4dc08e4ebf10eb9d257d3d02c0f38d122ac6e4"
+  }
+]

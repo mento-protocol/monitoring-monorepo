@@ -14,11 +14,6 @@ variable "chain_key" {
   }
 }
 
-variable "safe_abi" {
-  description = "Decoded Gnosis Safe ABI. Passed in by the parent root so this module doesn't reach into the handler module's source tree to read the file."
-  type        = any
-}
-
 variable "debug_mode" {
   description = "Enable per-resource debug on the restapi provider. Leaves the QuickNode API key + signing secret in TF_LOG=DEBUG output; keep false in CI."
   type        = bool

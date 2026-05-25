@@ -176,4 +176,32 @@ describe("fetchBreakerKind RPC selector probes", () => {
     assert.equal(kind, "MARKET_HOURS");
     assert.deepEqual(functionNames, ["medianRatesEMA", "referenceValues"]);
   });
+
+  it("emits a structured warn when defaulting an unknown breaker to MARKET_HOURS", async () => {
+    const warnings: string[] = [];
+    const spyLogger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: (msg: string) => {
+        warnings.push(msg);
+      },
+      error: () => undefined,
+    };
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async () => {
+        throw new Error('The contract function "x" returned no data ("0x").');
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, spyLogger);
+
+    assert.equal(kind, "MARKET_HOURS");
+    const match = warnings.find((w) =>
+      w.startsWith("breakers.fetchBreakerKind.market_hours_default"),
+    );
+    assert.ok(
+      match,
+      `expected a warn with prefix breakers.fetchBreakerKind.market_hours_default, got: ${JSON.stringify(warnings)}`,
+    );
+  });
 });
