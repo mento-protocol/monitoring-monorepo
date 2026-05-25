@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getLabel, getLabels, importLabels } from "@/lib/address-labels";
+import { isArkhamSourced } from "@/lib/address-labels-shared";
 import {
   ArkhamAuthError,
   enrichBatch,
@@ -26,6 +27,7 @@ export const maxDuration = 800;
 // gets the same Binance entity attribution Arkham assigns it on Ethereum/BSC.
 const CELO_CHAIN_ID = NETWORKS["celo-mainnet"].chainId;
 const DEFAULT_MAX_ADDRESSES = 10_000;
+const LABEL_READ_CONCURRENCY = 16;
 
 type EnrichMode = "new" | "refresh" | "dryRun";
 
@@ -45,6 +47,16 @@ type EnrichResponse = {
   mode: EnrichMode;
 };
 
+type EnrichWriteSet = Record<string, NonNullable<EnrichmentResult["entry"]>>;
+type EnrichWriteCandidate =
+  | {
+      status: "write";
+      address: string;
+      entry: NonNullable<EnrichmentResult["entry"]>;
+    }
+  | { status: "skip" }
+  | { status: "error"; error: string };
+
 function parseMode(raw: string | null): EnrichMode {
   if (raw === "refresh" || raw === "dryRun") return raw;
   return "new";
@@ -57,6 +69,95 @@ function parseLimit(raw: string | null): number {
   // work for zero enrichments". Treat as default rather than no-op-spend.
   if (n === 0) return DEFAULT_MAX_ADDRESSES;
   return Math.min(n, DEFAULT_MAX_ADDRESSES);
+}
+
+async function buildLabelWrites(
+  results: EnrichmentResult[],
+  mode: EnrichMode,
+): Promise<{ toWrite: EnrichWriteSet; errors: string[] }> {
+  const toWrite: EnrichWriteSet = {};
+  const candidates = await runWithConcurrency(
+    results,
+    LABEL_READ_CONCURRENCY,
+    (result) => buildWriteCandidate(result, mode),
+  );
+  const errors = candidates.flatMap((candidate) =>
+    candidate.status === "error" ? [candidate.error] : [],
+  );
+  for (const candidate of candidates) {
+    if (candidate.status === "write") {
+      toWrite[candidate.address] = candidate.entry;
+    }
+  }
+  return { toWrite, errors };
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  const runNext = (): Promise<void> => {
+    const index = nextIndex;
+    nextIndex += 1;
+    if (index >= items.length) return Promise.resolve();
+
+    const item = items[index];
+    if (item === undefined) return runNext();
+
+    return fn(item).then((result) => {
+      results[index] = result;
+      return runNext();
+    });
+  };
+
+  const workers = Array.from({ length: workerCount }, runNext);
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function buildWriteCandidate(
+  result: EnrichmentResult,
+  mode: EnrichMode,
+): Promise<EnrichWriteCandidate> {
+  if (result.error) {
+    return { status: "error", error: `${result.address}: ${result.error}` };
+  }
+  if (!result.entry) return { status: "skip" };
+  if (mode === "dryRun") {
+    return { status: "write", address: result.address, entry: result.entry };
+  }
+
+  let latest: Awaited<ReturnType<typeof getLabel>>;
+  try {
+    latest = await getLabel(result.address);
+  } catch (err) {
+    return {
+      status: "error",
+      error: `${result.address}: getLabel failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+
+  if (mode === "refresh") {
+    if (!latest || !isArkhamSourced(latest)) return { status: "skip" };
+    // Preserve edits made after the initial candidate snapshot but before
+    // this long-running Arkham batch finished.
+    return {
+      status: "write",
+      address: result.address,
+      entry: mergeRefreshEntry(latest, result.entry),
+    };
+  }
+  return latest
+    ? { status: "skip" }
+    : { status: "write", address: result.address, entry: result.entry };
 }
 
 /**
@@ -136,22 +237,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         candidates = candidates.slice(0, maxAddresses);
 
         const results = await enrichBatch(candidates, { apiKey });
-
-        const toWrite: Record<
-          string,
-          NonNullable<EnrichmentResult["entry"]>
-        > = {};
-        const errors: string[] = [];
-        for (const r of results) {
-          if (r.error) errors.push(`${r.address}: ${r.error}`);
-          if (!r.entry) continue;
-          // In refresh mode, preserve user-edited notes/isPublic + any tags
-          // they added on top of a previous arkham write.
-          toWrite[r.address] =
-            mode === "refresh"
-              ? mergeRefreshEntry(existing[r.address], r.entry)
-              : r.entry;
-        }
+        const { toWrite, errors } = await buildLabelWrites(results, mode);
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
           // Single labels hash — Arkham's attribution is inherently

@@ -6,6 +6,7 @@ vi.mock("@/lib/cron-auth", () => ({
 }));
 
 vi.mock("@/lib/address-labels", () => ({
+  getLabel: vi.fn(),
   getLabels: vi.fn(),
   importLabels: vi.fn().mockResolvedValue(undefined),
 }));
@@ -33,7 +34,7 @@ vi.mock("@sentry/nextjs", () => ({
 
 import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getLabel, getLabels, importLabels } from "@/lib/address-labels";
 import { ARKHAM_TAG } from "@/lib/address-labels-shared";
 import { ArkhamAuthError, enrichBatch, fetchHealth } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
@@ -41,6 +42,7 @@ import { requireCronAuth } from "@/lib/cron-auth";
 import * as Sentry from "@sentry/nextjs";
 
 const mockGetLabels = vi.mocked(getLabels);
+const mockGetLabel = vi.mocked(getLabel);
 const mockImportLabels = vi.mocked(importLabels);
 const mockFetchHealth = vi.mocked(fetchHealth);
 const mockEnrichBatch = vi.mocked(enrichBatch);
@@ -48,12 +50,16 @@ const mockDiscover = vi.mocked(discoverMentoAddresses);
 const mockRequireCronAuth = vi.mocked(requireCronAuth);
 const mockCaptureMessage = vi.mocked(Sentry.captureMessage);
 
+let currentLabels: Record<string, AddressEntry>;
+
 function emptyLabels(): Record<string, AddressEntry> {
-  return {};
+  currentLabels = {};
+  return currentLabels;
 }
 function existingLabels(
   entries: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
+  currentLabels = entries;
   return entries;
 }
 
@@ -68,6 +74,10 @@ beforeEach(() => {
   // override per-case.
   mockRequireCronAuth.mockResolvedValue(null);
   mockFetchHealth.mockResolvedValue(true);
+  currentLabels = {};
+  mockGetLabel.mockImplementation(
+    async (address) => currentLabels[address.toLowerCase()] ?? null,
+  );
 });
 
 function makeReq(
@@ -297,6 +307,93 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     );
   });
 
+  it("refresh mode preserves user edits saved after the initial label snapshot", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xark"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
+        "0xark": {
+          name: "Binance",
+          tags: ["exchange"],
+          notes: "old note",
+          isPublic: false,
+          source: "arkham",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+    mockEnrichBatch.mockImplementation(async () => {
+      currentLabels["0xark"] = {
+        ...currentLabels["0xark"],
+        notes: "edited during refresh",
+        tags: ["exchange", "user-curated"],
+        isPublic: true,
+        updatedAt: "2026-04-27T00:00:00Z",
+      };
+      return [
+        {
+          address: "0xark",
+          entry: {
+            name: "Binance Hot Wallet 14",
+            tags: ["exchange"],
+            source: "arkham",
+            updatedAt: "2026-04-28T00:00:00Z",
+          },
+        },
+      ];
+    });
+
+    const res = await GET(
+      makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockImportLabels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "0xark": expect.objectContaining({
+          name: "Binance Hot Wallet 14",
+          notes: "edited during refresh",
+          isPublic: true,
+          tags: expect.arrayContaining(["exchange", "user-curated"]),
+        }),
+      }),
+    );
+  });
+
+  it("new mode skips an address that becomes manually labeled during enrichment", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xnew"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(emptyLabels());
+    mockEnrichBatch.mockImplementation(async () => {
+      currentLabels["0xnew"] = {
+        name: "Manual label",
+        tags: ["mento"],
+        updatedAt: "2026-04-27T00:00:00Z",
+      };
+      return [
+        {
+          address: "0xnew",
+          entry: {
+            name: "Coinbase",
+            tags: ["exchange"],
+            source: "arkham",
+            updatedAt: "2026-04-28T00:00:00Z",
+          },
+        },
+      ];
+    });
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    expect(res.status).toBe(200);
+    expect(mockImportLabels).not.toHaveBeenCalled();
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.enriched).toBe(0);
+    expect(body.skipped).toBe(1);
+  });
+
   it("refresh mode rotates oldest Arkham-sourced entries first", async () => {
     mockDiscover.mockResolvedValue({
       addresses: ["0xnewer", "0xoldest", "0xmiddle"],
@@ -461,5 +558,95 @@ describe("GET /api/arkham/enrich — pipeline", () => {
         level: "warning",
       }),
     );
+  });
+
+  it("reports getLabel failures per address without failing the run", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xa", "0xb"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(emptyLabels());
+    mockEnrichBatch.mockResolvedValue([
+      {
+        address: "0xa",
+        entry: {
+          name: "A",
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+      {
+        address: "0xb",
+        entry: {
+          name: "B",
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+    ]);
+    mockGetLabel.mockImplementation(async (address) => {
+      if (address === "0xa") throw new Error("redis read failed");
+      return null;
+    });
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.errors).toBe(1);
+    expect(body.enriched).toBe(1);
+    expect(body.skipped).toBe(0);
+    expect(body.sampleErrors).toEqual([
+      "0xa: getLabel failed: redis read failed",
+    ]);
+    expect(mockImportLabels).toHaveBeenCalledWith({
+      "0xb": expect.objectContaining({ name: "B", source: "arkham" }),
+    });
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "[arkham/enrich] 1 errors during batch",
+      expect.objectContaining({
+        tags: { route: "arkham/enrich", mode: "new" },
+        level: "warning",
+      }),
+    );
+  });
+
+  it("bounds late getLabel reads while building the write set", async () => {
+    const addresses = Array.from({ length: 33 }, (_, index) => `0x${index}`);
+    mockDiscover.mockResolvedValue({
+      addresses,
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(emptyLabels());
+    mockEnrichBatch.mockResolvedValue(
+      addresses.map((address) => ({
+        address,
+        entry: {
+          name: address,
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      })),
+    );
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    mockGetLabel.mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return null;
+    });
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+
+    expect(res.status).toBe(200);
+    expect(mockGetLabel).toHaveBeenCalledTimes(addresses.length);
+    expect(maxInFlight).toBeLessThan(addresses.length);
+    expect(maxInFlight).toBeLessThanOrEqual(16);
   });
 });
