@@ -12,27 +12,20 @@ export function handleHealthCheck(res: Response): void {
   try {
     const hasWebhookAlerts = !!config.DISCORD_WEBHOOK_ALERTS;
     const hasWebhookEvents = !!config.DISCORD_WEBHOOK_EVENTS;
-    const hasMultisigConfig =
-      !!config.MULTISIG_CONFIG && config.MULTISIG_CONFIG !== "{}";
     const hasSigningSecret = !!config.QUICKNODE_SIGNING_SECRET;
 
     checks.config = {
       status:
-        hasWebhookAlerts &&
-        hasWebhookEvents &&
-        hasMultisigConfig &&
-        hasSigningSecret
+        hasWebhookAlerts && hasWebhookEvents && hasSigningSecret
           ? "ok"
           : "error",
       message: !hasWebhookAlerts
         ? "Missing DISCORD_WEBHOOK_ALERTS"
         : !hasWebhookEvents
           ? "Missing DISCORD_WEBHOOK_EVENTS"
-          : !hasMultisigConfig
-            ? "Missing MULTISIG_CONFIG"
-            : !hasSigningSecret
-              ? "Missing QUICKNODE_SIGNING_SECRET"
-              : undefined,
+          : !hasSigningSecret
+            ? "Missing QUICKNODE_SIGNING_SECRET"
+            : undefined,
     };
   } catch (error) {
     checks.config = {
@@ -52,7 +45,7 @@ export function handleHealthCheck(res: Response): void {
     }
     const multisigCount = Object.keys(MULTISIGS_BY_CHAIN).length;
     checks.multisigs = {
-      status: multisigCount > 0 ? "ok" : "warning",
+      status: multisigCount > 0 ? "ok" : "error",
       message:
         multisigCount > 0
           ? `${multisigCount} multisig(s) configured`

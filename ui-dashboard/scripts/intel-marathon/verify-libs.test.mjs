@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { samples, verifyLibSamples } from "./verify-libs.mjs";
+import { isMainModule, samples, verifyLibSamples } from "./verify-libs.mjs";
 
 function logger() {
   return {
@@ -30,5 +30,9 @@ describe("verifyLibSamples", () => {
     const result = await verifyLibSamples(redis, logger());
 
     expect(result.missing).toBe(0);
+  });
+
+  it("does not treat an absent argv entry as the ESM main module", () => {
+    expect(isMainModule("file:///tmp/verify-libs.mjs", ["node"])).toBe(false);
   });
 });

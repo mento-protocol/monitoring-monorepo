@@ -98,8 +98,42 @@ function parseMultisigsByChain(): {
       { address: string; name: string; chain: string }
     >;
 
+    if (
+      !multisigConfig ||
+      typeof multisigConfig !== "object" ||
+      Array.isArray(multisigConfig)
+    ) {
+      return {
+        multisigsByChain: {},
+        error: "MULTISIG_CONFIG must be a JSON object",
+      };
+    }
+
+    if (Object.keys(multisigConfig).length === 0) {
+      return {
+        multisigsByChain: {},
+        error: "MULTISIG_CONFIG must include at least one multisig",
+      };
+    }
+
     // Build mapping: address:chain -> key
     for (const [key, multisigConfigItem] of Object.entries(multisigConfig)) {
+      if (
+        !multisigConfigItem ||
+        typeof multisigConfigItem !== "object" ||
+        typeof multisigConfigItem.address !== "string" ||
+        typeof multisigConfigItem.name !== "string" ||
+        typeof multisigConfigItem.chain !== "string" ||
+        !multisigConfigItem.address ||
+        !multisigConfigItem.name ||
+        !multisigConfigItem.chain
+      ) {
+        return {
+          multisigsByChain: {},
+          error: `Invalid MULTISIG_CONFIG entry for ${key}`,
+        };
+      }
+
       const normalizedAddress = multisigConfigItem.address.toLowerCase();
       const chain = multisigConfigItem.chain.toLowerCase();
       const compositeKey = `${normalizedAddress}:${chain}`;

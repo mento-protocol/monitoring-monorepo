@@ -66,6 +66,16 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main();
+export function isMainModule(importMetaUrl, argv = process.argv) {
+  const entrypoint = argv[1];
+  return typeof entrypoint === "string"
+    ? importMetaUrl === pathToFileURL(entrypoint).href
+    : false;
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }
