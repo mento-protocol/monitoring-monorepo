@@ -75,6 +75,19 @@ describe("intel-deep", () => {
     expect(result).toBe(legacyRecord);
   });
 
+  it("getIntelDeep: falls back to mixed-case legacy address keys", async () => {
+    const legacyRecord = { address: "0xBBB", fetchedAt: "2026-01-01" };
+    hget
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(legacyRecord);
+    const result = await getIntelDeep("0xBBB");
+    expect(hget).toHaveBeenNthCalledWith(1, INTEL_DEEP_KEY, "0xbbb");
+    expect(hget).toHaveBeenNthCalledWith(2, "arkham_deep", "0xbbb");
+    expect(hget).toHaveBeenNthCalledWith(3, "arkham_deep", "0xBBB");
+    expect(result).toBe(legacyRecord);
+  });
+
   it("getAllIntelDeep: merges legacy entries, intel wins on collision", async () => {
     const intel = { "0xaaa": { address: "0xaaa", source: "intel" } };
     const legacy = {
@@ -125,6 +138,24 @@ describe("intel-transfers", () => {
     expect(await getIntelTransfers("0xabc")).toBeNull();
   });
 
+  it("getIntelTransfers: falls back to mixed-case legacy address keys", async () => {
+    const legacyRecord = {
+      address: "0xABC",
+      fetchedAt: "2026-01-01",
+      transferCount: 0,
+      transfers: null,
+    };
+    hget
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(legacyRecord);
+    const result = await getIntelTransfers("0xABC");
+    expect(hget).toHaveBeenNthCalledWith(1, INTEL_TRANSFERS_KEY, "0xabc");
+    expect(hget).toHaveBeenNthCalledWith(2, "arkham_transfers", "0xabc");
+    expect(hget).toHaveBeenNthCalledWith(3, "arkham_transfers", "0xABC");
+    expect(result).toBe(legacyRecord);
+  });
+
   it("getAllIntelTransfers: falls back to {} on null", async () => {
     hgetall.mockResolvedValue(null);
     expect(await getAllIntelTransfers()).toEqual({});
@@ -150,6 +181,26 @@ describe("intel-wealth", () => {
   it("getIntelWealth: returns null on cache miss", async () => {
     hget.mockResolvedValue(null);
     expect(await getIntelWealth("0xabc")).toBeNull();
+  });
+
+  it("getIntelWealth: falls back to mixed-case legacy address keys", async () => {
+    const legacyRecord = {
+      address: "0xABC",
+      fetchedAt: "2026-01-01",
+      sources: [],
+      balances: null,
+      portfolio: null,
+      version: 1,
+    };
+    hget
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(legacyRecord);
+    const result = await getIntelWealth("0xABC");
+    expect(hget).toHaveBeenNthCalledWith(1, INTEL_WEALTH_KEY, "0xabc");
+    expect(hget).toHaveBeenNthCalledWith(2, "arkham_wealth", "0xabc");
+    expect(hget).toHaveBeenNthCalledWith(3, "arkham_wealth", "0xABC");
+    expect(result).toBe(legacyRecord);
   });
 
   it("getAllIntelWealth: falls back to {} on null", async () => {

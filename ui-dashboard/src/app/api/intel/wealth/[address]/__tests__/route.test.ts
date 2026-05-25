@@ -10,11 +10,13 @@ vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
 
 import { getAuthSession } from "@/auth";
 import { getIntelWealth } from "@/lib/intel-wealth";
+import * as Sentry from "@sentry/nextjs";
 import { GET } from "../route";
 
 const ADDR = "0x" + "c".repeat(40);
 const mockSession = vi.mocked(getAuthSession);
 const mockGet = vi.mocked(getIntelWealth);
+const mockCaptureException = vi.mocked(Sentry.captureException);
 
 function makeReq(address = ADDR) {
   return new NextRequest(`http://localhost/api/intel/wealth/${address}`);
@@ -78,5 +80,18 @@ describe("GET /api/intel/wealth/[address]", () => {
     mockGet.mockRejectedValue(new Error("redis down"));
     const res = await GET(makeReq(), params());
     expect(res.status).toBe(500);
+  });
+
+  it("500 when auth session lookup throws", async () => {
+    const err = new Error("auth down");
+    mockSession.mockRejectedValue(err);
+    const res = await GET(makeReq(), params());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "Failed to read intel wealth record",
+    });
+    expect(mockCaptureException).toHaveBeenCalledWith(err, {
+      tags: { route: "intel/wealth" },
+    });
   });
 });

@@ -106,6 +106,40 @@ describe("deriveBridgeStatus", () => {
     ).toBe("STUCK");
   });
 
+  it("keeps recently progressed ATTESTED transfers from being marked stuck", () => {
+    const now = 1_700_100_000;
+    const sentLongAgo = now - 25 * 60 * 60;
+    const updatedRecently = now - 60 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "ATTESTED",
+          sentTimestamp: String(sentLongAgo),
+          firstSeenAt: String(sentLongAgo),
+          lastUpdatedAt: String(updatedRecently),
+        },
+        now,
+      ),
+    ).toBe("ATTESTED");
+  });
+
+  it("keeps recently progressed QUEUED_INBOUND transfers from being marked stuck", () => {
+    const now = 1_700_100_000;
+    const sentLongAgo = now - 25 * 60 * 60;
+    const updatedRecently = now - 60 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "QUEUED_INBOUND",
+          sentTimestamp: String(sentLongAgo),
+          firstSeenAt: String(sentLongAgo),
+          lastUpdatedAt: String(updatedRecently),
+        },
+        now,
+      ),
+    ).toBe("QUEUED_INBOUND");
+  });
+
   it("ages SENT via firstSeenAt when sentTimestamp is missing (dest-first race)", () => {
     // Prior behaviour left this as SENT forever; now firstSeenAt is the
     // fallback clock so the stuck-transfer view surfaces it.

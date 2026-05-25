@@ -38,15 +38,16 @@ export const ALL_BRIDGE_STATUSES = [
  * hasn't progressed within 24h. Client-side so the window stays fresh
  * without a bespoke indexer recompute.
  *
- * Age basis: prefer `sentTimestamp` when present; fall back to
- * `firstSeenAt`. PENDING rows created by a destination-first race have no
- * `sentTimestamp`, so using only that field would let them live
- * indefinitely as "Pending" even when the source side has clearly gone
- * missing — `firstSeenAt` is always populated and is the correct clock
- * for those rows.
+ * Age basis: prefer `lastUpdatedAt` so recently progressed transfers do not
+ * get marked stuck just because the original send is old; fall back to
+ * `sentTimestamp` and then `firstSeenAt` for older schemas or partial rows.
+ * PENDING rows created by a destination-first race have no `sentTimestamp`,
+ * so `firstSeenAt` remains the final fallback clock for rows that never
+ * progressed.
  */
 export function deriveBridgeStatus(
-  transfer: Pick<BridgeTransfer, "status" | "sentTimestamp" | "firstSeenAt">,
+  transfer: Pick<BridgeTransfer, "status" | "sentTimestamp" | "firstSeenAt"> &
+    Partial<Pick<BridgeTransfer, "lastUpdatedAt">>,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): BridgeStatusOverlay {
   const { status } = transfer;
@@ -56,9 +57,10 @@ export function deriveBridgeStatus(
     status === "ATTESTED" ||
     status === "QUEUED_INBOUND";
   if (!inFlight) return status;
+  const lastUpdated = parseBridgeTimestamp(transfer.lastUpdatedAt);
   const sent = parseBridgeTimestamp(transfer.sentTimestamp);
   const firstSeen = parseBridgeTimestamp(transfer.firstSeenAt);
-  const ts = sent ?? firstSeen;
+  const ts = lastUpdated ?? sent ?? firstSeen;
   if (ts === null || !Number.isFinite(ts)) return status;
   return nowSeconds - ts > STUCK_THRESHOLD_SECONDS ? "STUCK" : status;
 }

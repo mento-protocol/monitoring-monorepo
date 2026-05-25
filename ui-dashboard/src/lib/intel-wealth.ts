@@ -44,11 +44,7 @@ export type IntelWealthRecord = {
 export async function getIntelWealth(
   address: string,
 ): Promise<IntelWealthRecord | null> {
-  return hgetWithLegacy<IntelWealthRecord>(
-    HASH_KEY,
-    LEGACY_HASH_KEY,
-    address.toLowerCase(),
-  );
+  return hgetWithLegacy<IntelWealthRecord>(HASH_KEY, LEGACY_HASH_KEY, address);
 }
 
 export async function getAllIntelWealth(): Promise<

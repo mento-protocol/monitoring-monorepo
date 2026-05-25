@@ -195,4 +195,49 @@ describe("processEvents - ChainDetectionError handling", () => {
     // At least one error log per failed event.
     expect(loggerErrorMock).toHaveBeenCalled();
   });
+
+  it("falls back to ExecutionSuccess when matching SafeMultiSigTransaction is malformed", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "ExecutionSuccess",
+        transactionHash: "0xtx-success",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        txHash: "0xsafeTx",
+      },
+      {
+        name: "SafeMultiSigTransaction",
+        transactionHash: "0xtx-success",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "2",
+      },
+    ] as never;
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context);
+
+    expect(result).toEqual([
+      {
+        multisigKey: "SOLO_CELO",
+        eventName: "ExecutionSuccess",
+        channelType: "events",
+      },
+    ]);
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(loggerWarnMock).toHaveBeenCalledWith("Invalid log entry", {
+      error: "Log missing or invalid address field",
+      address: undefined,
+      name: "SafeMultiSigTransaction",
+      transactionHash: "0xtx-success",
+    });
+  });
 });

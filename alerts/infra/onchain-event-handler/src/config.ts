@@ -16,10 +16,10 @@ const schema: JSONSchemaType<Env> = {
     "QUICKNODE_SIGNING_SECRET",
   ],
   properties: {
-    DISCORD_WEBHOOK_ALERTS: { type: "string" },
-    DISCORD_WEBHOOK_EVENTS: { type: "string" },
-    MULTISIG_CONFIG: { type: "string" },
-    QUICKNODE_SIGNING_SECRET: { type: "string" },
+    DISCORD_WEBHOOK_ALERTS: { type: "string", default: "" },
+    DISCORD_WEBHOOK_EVENTS: { type: "string", default: "" },
+    MULTISIG_CONFIG: { type: "string", default: "{}" },
+    QUICKNODE_SIGNING_SECRET: { type: "string", default: "" },
   },
 };
 

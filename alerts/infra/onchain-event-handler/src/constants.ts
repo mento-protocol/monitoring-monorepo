@@ -83,7 +83,10 @@ export const SECURITY_EVENTS: EventName[] = securityEvents;
  * Chain-aware mapping of address+chain to multisig key
  * This prevents collisions when the same address exists on multiple chains
  */
-export const MULTISIGS_BY_CHAIN: Record<string, MultisigKey> = (() => {
+function parseMultisigsByChain(): {
+  multisigsByChain: Record<string, MultisigKey>;
+  error: string | null;
+} {
   const multisigsByChain: Record<string, MultisigKey> = {};
 
   // Load multisig config from JSON environment variable
@@ -103,13 +106,21 @@ export const MULTISIGS_BY_CHAIN: Record<string, MultisigKey> = (() => {
       multisigsByChain[compositeKey] = key;
     }
   } catch (error) {
-    throw new Error(
-      `Failed to parse MULTISIG_CONFIG: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    return {
+      multisigsByChain: {},
+      error: `Failed to parse MULTISIG_CONFIG: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 
-  return multisigsByChain;
-})();
+  return { multisigsByChain, error: null };
+}
+
+const multisigParseResult = parseMultisigsByChain();
+
+export const MULTISIGS_BY_CHAIN: Record<string, MultisigKey> =
+  multisigParseResult.multisigsByChain;
+
+export const MULTISIG_CONFIG_ERROR = multisigParseResult.error;
 
 /**
  * Chain configuration mapping chain names to their properties

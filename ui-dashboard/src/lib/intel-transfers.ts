@@ -50,7 +50,7 @@ export async function getIntelTransfers(
   return hgetWithLegacy<IntelTransfersRecord>(
     HASH_KEY,
     LEGACY_HASH_KEY,
-    address.toLowerCase(),
+    address,
   );
 }
 
