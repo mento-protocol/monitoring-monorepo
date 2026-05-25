@@ -613,7 +613,10 @@ describe("Bridge-flows handlers — MessageAttestedTo interaction", () => {
       "status promotes from PENDING to ATTESTED",
     );
 
-    const attestationId = `${id}-${attesterAddr}-0`;
+    // BridgeAttestation.id includes event.chainId: Celo and Monad share
+    // identical transceiver addresses, so the chain disambiguates
+    // same-digest/same-transceiver attestations across chains.
+    const attestationId = `${id}-${e.chainId}-${attesterAddr}-0`;
     const attestation = mockDb.entities.BridgeAttestation.get(attestationId);
     assert.ok(attestation, "BridgeAttestation row written");
     assert.equal(attestation!.transferId, id);
@@ -652,6 +655,63 @@ describe("Bridge-flows handlers — MessageAttestedTo interaction", () => {
       1,
       "replay of same attestation does not double the counter",
     );
+  });
+
+  it("keeps Celo and Monad attestations distinct when digest+transceiver+index collide", async () => {
+    // Celo and Monad share identical USDm manager + transceiver addresses
+    // (deterministic deploy). Without chainId in BridgeAttestation.id, two
+    // legitimate attestations on the same digest from different chains would
+    // collide on a single row. With chainId in the id, both coexist.
+    const celo = findByNttManager(
+      42220,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    )!;
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    )!;
+    assert.ok(celo, "celo USDm manifest entry");
+    assert.ok(monad, "monad USDm manifest entry");
+
+    let mockDb = MockDb.createMockDb();
+    const attesterAddr = "0xcccccccccccccccccccccccccccccccccccccccc";
+    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
+
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: DIGEST_1,
+        transceiver: attesterAddr,
+        index: 0n,
+        mockEventData: mockEventData({
+          chainId: celo.chainId,
+          manager: celo.nttManagerProxy,
+          logIndex: 2,
+        }),
+      }),
+      mockDb,
+    });
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: DIGEST_1,
+        transceiver: attesterAddr,
+        index: 0n,
+        mockEventData: mockEventData({
+          chainId: monad.chainId,
+          manager: monad.nttManagerProxy,
+          logIndex: 2,
+        }),
+      }),
+      mockDb,
+    });
+
+    const celoAttestation = mockDb.entities.BridgeAttestation.get(
+      `${id}-${celo.chainId}-${attesterAddr}-0`,
+    );
+    const monadAttestation = mockDb.entities.BridgeAttestation.get(
+      `${id}-${monad.chainId}-${attesterAddr}-0`,
+    );
+    assert.ok(celoAttestation, "Celo attestation row exists");
+    assert.ok(monadAttestation, "Monad attestation row exists");
   });
 });
 
