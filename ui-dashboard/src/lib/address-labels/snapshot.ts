@@ -563,11 +563,11 @@ function extractIntelFields(body: AddressLabelsSnapshot): {
 }
 
 function selectNonEmptySnapshotMap<T extends Record<string, unknown>>(
-  primary: T | undefined,
-  legacy: T | undefined,
+  primary: T | null | undefined,
+  legacy: T | null | undefined,
 ): T | undefined {
-  if (primary !== undefined && Object.keys(primary).length > 0) return primary;
-  if (legacy !== undefined && Object.keys(legacy).length > 0) return legacy;
+  if (primary && Object.keys(primary).length > 0) return primary;
+  if (legacy && Object.keys(legacy).length > 0) return legacy;
   return undefined;
 }
 

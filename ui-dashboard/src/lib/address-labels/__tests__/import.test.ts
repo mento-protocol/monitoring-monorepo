@@ -1110,6 +1110,33 @@ describe("handleSnapshot trusted restore mode", () => {
     );
   });
 
+  it("falls back to legacy arkham fields when canonical intel fields are null", async () => {
+    const legacyAddressRecord = { [ADDR_A]: { address: ADDR_A } };
+
+    const res = await handleSnapshot(
+      {
+        exportedAt: "2026-05-11T00:00:00.000Z",
+        addresses: {},
+        reports: {},
+        intelDeep: null,
+        arkhamDeep: legacyAddressRecord,
+      } as unknown as Parameters<typeof handleSnapshot>[0],
+      {
+        importerEmail: "restore@cron",
+        reportMetadataMode: "preserve",
+        labelProvenanceMode: "preserve",
+        writeMode: "replace",
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(replaceSnapshotHashes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intelDeep: legacyAddressRecord,
+      }),
+    );
+  });
+
   it("rejects intel-only payloads in merge mode with a 400 (no silent 200/zero-import)", async () => {
     const res = await handleSnapshot(
       {
