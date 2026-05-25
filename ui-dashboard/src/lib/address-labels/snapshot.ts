@@ -531,22 +531,44 @@ function extractIntelFields(body: AddressLabelsSnapshot): {
   hasArkhamPayload: boolean;
 } {
   const fields: IntelSnapshotFields = {};
-  // Prefer new names; fall back to legacy names for older backups.
-  fields.intelDeep = body.intelDeep ?? body.arkhamDeep;
-  fields.intelTransfers = body.intelTransfers ?? body.arkhamTransfers;
-  fields.intelWealth = body.intelWealth ?? body.arkhamWealth;
-  fields.intelEntities = body.intelEntities ?? body.arkhamEntities;
-  fields.intelEntityCps = body.intelEntityCps ?? body.arkhamEntityCps;
-  for (const k of Object.keys(fields) as Array<keyof IntelSnapshotFields>) {
-    const v = fields[k];
-    if (
-      v === undefined ||
-      (typeof v === "object" && v !== null && Object.keys(v).length === 0)
-    ) {
-      delete fields[k];
-    }
-  }
+  // Prefer non-empty new names; fall back to legacy names for older backups.
+  const intelDeep = selectNonEmptySnapshotMap(body.intelDeep, body.arkhamDeep);
+  if (intelDeep) fields.intelDeep = intelDeep;
+
+  const intelTransfers = selectNonEmptySnapshotMap(
+    body.intelTransfers,
+    body.arkhamTransfers,
+  );
+  if (intelTransfers) fields.intelTransfers = intelTransfers;
+
+  const intelWealth = selectNonEmptySnapshotMap(
+    body.intelWealth,
+    body.arkhamWealth,
+  );
+  if (intelWealth) fields.intelWealth = intelWealth;
+
+  const intelEntities = selectNonEmptySnapshotMap(
+    body.intelEntities,
+    body.arkhamEntities,
+  );
+  if (intelEntities) fields.intelEntities = intelEntities;
+
+  const intelEntityCps = selectNonEmptySnapshotMap(
+    body.intelEntityCps,
+    body.arkhamEntityCps,
+  );
+  if (intelEntityCps) fields.intelEntityCps = intelEntityCps;
+
   return { fields, hasArkhamPayload: Object.keys(fields).length > 0 };
+}
+
+function selectNonEmptySnapshotMap<T extends Record<string, unknown>>(
+  primary: T | undefined,
+  legacy: T | undefined,
+): T | undefined {
+  if (primary !== undefined && Object.keys(primary).length > 0) return primary;
+  if (legacy !== undefined && Object.keys(legacy).length > 0) return legacy;
+  return undefined;
 }
 
 function mergePreservingProvenance(

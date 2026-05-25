@@ -107,6 +107,13 @@ export async function handleGnosisSafe(
 }
 
 export async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json(
+      { error: "labels must be an object mapping address → entry" },
+      { status: 400 },
+    );
+  }
+
   const { labels } = body as Record<string, unknown>;
   // The legacy simple format had `chainId` + `labels`; chainId is now
   // ignored. Accept the field (or not) but only validate `labels`.
