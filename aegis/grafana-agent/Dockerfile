@@ -1,4 +1,9 @@
-FROM grafana/agent:v0.35.0
+# grafana/agent:v0.43.4 is the last pre-Alloy-rename release and ships on
+# Ubuntu Jammy 22.04 LTS (supported through April 2027). The previous pin
+# at v0.35.0 sat on Ubuntu Lunar 23.04, EOL'd Jan 2024 and removed from
+# the archive — `apt-get update` 404s, so the jq/curl install below fails.
+# Pinned by digest to remove tag-mutability risk.
+FROM grafana/agent:v0.43.4@sha256:6fdea192ec80f34548b2f722212df4185f36a346fddb6c9735b7a4f6e26b697e
 
 # Install jq + ensure curl is present so entrypoint.sh can call the GCE
 # metadata server and Secret Manager. base64 ships in coreutils on Debian.
@@ -11,8 +16,8 @@ RUN apt-get update \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost:8080/-/healthy || exit 1
 
 # Create a non-root user for security.
-# `grafana/agent:v0.35.0` is Debian-based (BusyBox `addgroup`/`adduser -D`
-# aren't available) AND already uses GID/UID 1000 for its built-in `grafana`
+# `grafana/agent` is Debian-based (BusyBox `addgroup`/`adduser -D` aren't
+# available) AND already uses GID/UID 1000 for its built-in `grafana`
 # account, so we pick 10001 to avoid the collision.
 RUN groupadd -g 10001 agent && \
     useradd -u 10001 -g agent -M -s /usr/sbin/nologin agent
