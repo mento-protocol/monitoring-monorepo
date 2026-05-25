@@ -151,10 +151,10 @@ describe("FPMM fee-config event handlers", () => {
       /if \(await maybePreloadPool\(context, poolId\)\) return;/g,
     );
 
-    assert.ok(guardedWrites);
-    assert.ok(
-      guardedWrites.length >= 4,
-      "TradingLimitConfigured, LiquidityStrategyUpdated, fee updates, and RebalanceThresholdUpdated must all bail during preload",
+    assert.equal(
+      guardedWrites?.length,
+      4,
+      "Current preload-guarded surfaces are TradingLimitConfigured, LiquidityStrategyUpdated, LPFeeUpdated/ProtocolFeeUpdated/RebalanceIncentiveUpdated, and RebalanceThresholdUpdated",
     );
   });
 });

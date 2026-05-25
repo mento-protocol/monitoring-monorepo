@@ -60,7 +60,6 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
 
   afterEach(() => {
     _clearBreakerMocks();
-    _clearBootstrapCaches();
   });
 
   it("BreakerStatusUpdated bootstraps Breaker + BreakerConfig from RPC mocks", async () => {
