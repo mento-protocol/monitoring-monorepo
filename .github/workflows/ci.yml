@@ -442,6 +442,21 @@ jobs:
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler knip
       - name: Test
         run: pnpm --filter @mento-protocol/alerts-onchain-event-handler test
+      # Verify event-hashes.json is in sync with safe-abi.json. The handler
+      # computes Safe event topic hashes at runtime from safe-abi.json
+      # (constants.ts:extractEventSignatures), and the QuickNode webhook
+      # filters on the SAME hashes via the vendored event-hashes.json. A
+      # safe-abi.json edit that forgets to regenerate event-hashes.json
+      # leaves the webhook filtering on the OLD topics — silent event drop
+      # for any new Safe event type. This step regenerates the JSON in-place
+      # and fails if it differs from the committed copy.
+      - name: Verify event-hashes.json is in sync with safe-abi.json
+        run: |
+          pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
+          if ! git diff --exit-code -- alerts/infra/onchain-event-listeners/event-hashes.json; then
+            echo "::error::event-hashes.json is stale. Regenerate with: pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes"
+            exit 1
+          fi
       # Sibling workspace package — covers check-discord-permissions.ts and
       # any other operator scripts so TS breakage can't merge silently.
       - name: Typecheck (alerts-scripts)

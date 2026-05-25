@@ -148,7 +148,6 @@ module "onchain_event_listeners" {
   multisig_addresses   = [for k, v in each.value : v.address]
   webhook_name         = "safe-multisig-monitor-${each.key}"
   chain_key            = each.key
-  safe_abi             = local.safe_abi
   # All multisigs in the same chain group must declare the same
   # quicknode_network_name. local.multisigs_by_chain_network is built from a
   # distinct() check in locals.tf — terraform plan fails with a clear error
