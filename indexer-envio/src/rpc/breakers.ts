@@ -270,6 +270,19 @@ export async function fetchBreakerKind(
   if (vdProbe === "present") return "VALUE_DELTA";
 
   // Both selectors confirmed missing — this is a MarketHours-style breaker.
+  //
+  // Caveat (sec-review 2026-05-22 f-004, codex-validated): this default also
+  // catches contracts that simply lack both selectors (a future breaker kind,
+  // a proxy-upgraded breaker, an EOA mistakenly added to BreakerBox via
+  // governance / RPC poisoning). The effect-level cache (`cache: true` in
+  // `breakerKindEffect`) means the misclassification persists. Emit a
+  // structured warn so the Loki → Grafana alert pipeline can surface it for
+  // operator review (per [[reference_indexer_envio_alerting]]). Real fix
+  // requires adding a positive MARKET_HOURS probe OR caching only on positive
+  // identification — deferred to a follow-up PR.
+  log.warn?.(
+    `breakers.fetchBreakerKind.market_hours_default chain=${chainId} breaker=${breakerAddress} — neither MedianDelta nor ValueDelta selectors present; defaulting to MARKET_HOURS and caching`,
+  );
   return "MARKET_HOURS";
 }
 

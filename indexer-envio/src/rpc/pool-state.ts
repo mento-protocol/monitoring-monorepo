@@ -455,7 +455,26 @@ export async function fetchTokenDecimalsScaling(
       getFallbackRpcClient(chainId),
       log,
     );
-    return result as bigint;
+    const scaling = result as bigint;
+    // Bounds check — mirror the ERC20 fallback path's `d < 0 || d > 36`
+    // guard. A malicious or buggy RPC returning an oversized BigInt would
+    // otherwise be cached (`tokenDecimalsScalingEffect.cache = true`) and
+    // poison every downstream volume/reserve calculation forever. The
+    // permitted range is [1, 10^36] — ERC20 supports up to 36 decimals.
+    // Returning null routes the caller to the ERC20 fallback path.
+    // sec-review 2026-05-22 f-003 (codex-validated).
+    if (scaling <= 0n || scaling > 10n ** 36n) {
+      logRpcFailure(
+        chainId,
+        fn,
+        poolAddress,
+        new Error(`out-of-range scaling factor ${scaling.toString()}`),
+        undefined,
+        log,
+      );
+      return null;
+    }
+    return scaling;
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
     return null;
