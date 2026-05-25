@@ -111,6 +111,28 @@ describe("GET /api/bridge-redeem", () => {
     });
   });
 
+  it("returns 502 when Wormholescan operations is not an array", async () => {
+    mockWormholeResponse({ operations: {} });
+
+    const res = await GET(makeRequest());
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: "Wormholescan returned an invalid response.",
+    });
+  });
+
+  it("returns 502 when Wormholescan operations contains malformed entries", async () => {
+    mockWormholeResponse({ operations: [null] });
+
+    const res = await GET(makeRequest());
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: "Wormholescan returned an invalid response.",
+    });
+  });
+
   it("returns 404 when Wormholescan has no operation for the tx", async () => {
     mockWormholeResponse({ operations: [] });
 
