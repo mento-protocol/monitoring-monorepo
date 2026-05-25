@@ -692,6 +692,63 @@ describe("mergeFeeSnapshot pure function", () => {
     assert.equal(second.blockNumber, 501n, "blockNumber = max");
   });
 
+  it("same-token merge: resolved slot metadata prices later UNKNOWN transfers", () => {
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({ amount: AMOUNT_1E6 }),
+    );
+    const second = mergeFeeSnapshot(
+      first,
+      makeInput({
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: 0,
+        amount: AMOUNT_1E6 * 2n,
+        blockNumber: 501n,
+      }),
+    );
+
+    assert.equal(second!.transferCount, 2);
+    assert.deepStrictEqual(second!.tokenSymbols, ["USDC"]);
+    assert.deepStrictEqual(second!.tokenDecimals, [USDC_DECIMALS]);
+    assert.equal(second!.amounts[0], AMOUNT_1E6 * 3n);
+    assert.equal(second!.feesUsdWei, AMOUNT_1E6_USD_WEI * 3n);
+    assert.equal(second!.allPegged, true);
+    assert.equal(second!.unresolvedCount, 0);
+  });
+
+  it("same-token merge: missing stored decimals keeps later UNKNOWN transfers unpriced", () => {
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({ amount: AMOUNT_1E6 }),
+    );
+    const malformedExisting = {
+      ...first!,
+      tokenDecimals: [],
+    };
+
+    const second = mergeFeeSnapshot(
+      malformedExisting,
+      makeInput({
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: 0,
+        amount: AMOUNT_1E6 * 2n,
+        blockNumber: 501n,
+      }),
+    );
+
+    assert.equal(second!.transferCount, 2);
+    assert.deepStrictEqual(second!.tokenSymbols, ["USDC"]);
+    assert.deepStrictEqual(second!.tokenDecimals, []);
+    assert.equal(second!.amounts[0], AMOUNT_1E6 * 3n);
+    assert.equal(
+      second!.feesUsdWei,
+      AMOUNT_1E6_USD_WEI,
+      "must not price UNKNOWN input using fallback decimals",
+    );
+    assert.equal(second!.allPegged, false);
+    assert.equal(second!.unresolvedCount, 0);
+  });
+
   // -------------------------------------------------------------------------
   // New-token append
   // -------------------------------------------------------------------------

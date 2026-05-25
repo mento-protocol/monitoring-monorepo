@@ -139,6 +139,42 @@ function appendNewTokenSlot(
   };
 }
 
+function effectiveAddFlagsForTrackedSlot(
+  existing: PoolDailyFeeSnapshot,
+  tokenIdx: number,
+  flags: InputFlags,
+): InputFlags {
+  const existingSymbol = existing.tokenSymbols[tokenIdx];
+  if (
+    !flags.isUnresolvedInput ||
+    existingSymbol === undefined ||
+    existingSymbol === "UNKNOWN"
+  ) {
+    return flags;
+  }
+
+  const tokenDecimals = existing.tokenDecimals[tokenIdx];
+  if (tokenDecimals === undefined) {
+    return flags;
+  }
+
+  const input = {
+    ...flags.input,
+    tokenSymbol: existingSymbol,
+    tokenDecimals,
+  };
+  return {
+    input,
+    isUnresolvedInput: false,
+    isInputPegged: USD_PEGGED_SYMBOLS.has(existingSymbol),
+    inputContribution: computeFeeUsdWei({
+      tokenSymbol: existingSymbol,
+      tokenDecimals,
+      amount: input.amount,
+    }),
+  };
+}
+
 export function mergeFeeSnapshot(
   existing: PoolDailyFeeSnapshot | undefined,
   input: MergeInput,
@@ -212,9 +248,17 @@ export function mergeFeeSnapshot(
     nextAllPegged,
     nextUnresolvedCount,
   };
-  return mode === "heal"
-    ? finalizeHeal(existing, input, state)
-    : finalizeAdd(existing, { flags, tokenIdx, shouldHeal, state });
+  if (mode === "heal") {
+    return finalizeHeal(existing, input, state);
+  }
+
+  const addFlags = effectiveAddFlagsForTrackedSlot(existing, tokenIdx, flags);
+  return finalizeAdd(existing, {
+    flags: addFlags,
+    tokenIdx,
+    shouldHeal,
+    state,
+  });
 }
 
 type MergedSlotState = {

@@ -144,6 +144,16 @@ function buildSummary(): string {
   ].join(" ");
 }
 
+function emitSummaryLog(context: AnyContext): void {
+  const log = context.log as { info?: unknown } | undefined;
+  if (typeof log?.info !== "function") return;
+  try {
+    log.info(buildSummary());
+  } catch {
+    // Performance instrumentation must not change handler semantics.
+  }
+}
+
 function effectName(effect: unknown): string {
   if (
     typeof effect === "object" &&
@@ -251,8 +261,7 @@ export async function withInstrumentedHandler(
       stats.processCalls += 1;
       processedHandlerCalls += 1;
       if (processedHandlerCalls % logInterval === 0) {
-        const log = context.log as { info?: (message: string) => void };
-        log.info?.(buildSummary());
+        emitSummaryLog(context);
       }
     }
   }
