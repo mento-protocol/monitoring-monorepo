@@ -20,8 +20,6 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   fetchHeadUpdatedAt,
-  fetchReviewRequestLowerBound,
-  headCommitCommittedAt,
   parseArgs,
   renderSummary,
   repoFromPullRequestUrl,
@@ -1077,57 +1075,16 @@ test("watch JSON output is one compact JSON object per line", () => {
 test("uses check observation time for approval freshness", () => {
   assertEqual(
     fetchHeadUpdatedAt({
-      headCommittedAt: "2026-05-21T13:21:00Z",
       observedAt: "2026-05-21T13:23:00Z",
     }),
     "2026-05-21T13:23:00Z",
   );
 });
 
-test("uses head commit time before check observation time for review requests", () => {
-  assertEqual(
-    fetchReviewRequestLowerBound({
-      headCommittedAt: "2026-05-21T13:21:00Z",
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "2026-05-21T13:21:00Z",
-  );
-  assertEqual(
-    fetchReviewRequestLowerBound({
-      headCommittedAt: null,
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "2026-05-21T13:23:00Z",
-  );
-});
-
-test("falls back to check observation time when the head commit is absent", () => {
-  assertEqual(
-    headCommitCommittedAt({
-      headRefOid: "head",
-      commits: [
-        {
-          oid: "older",
-          committedDate: "2026-05-21T13:21:00Z",
-        },
-      ],
-    }),
-    null,
-  );
-  assertEqual(
-    fetchReviewRequestLowerBound({
-      headCommittedAt: null,
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "2026-05-21T13:23:00Z",
-  );
-});
-
-test("allows current review requests before check observation without approving stale signals", () => {
+test("treats review requests before check observation as stale", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),
-      reviewRequestLowerBound: Date.parse("2026-05-21T13:21:00Z"),
       issueComments: [
         {
           body: "@codex review",
@@ -1136,12 +1093,11 @@ test("allows current review requests before check observation without approving 
         },
       ],
     }),
-    "requested",
+    "stale",
   );
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),
-      reviewRequestLowerBound: Date.parse("2026-05-21T13:21:00Z"),
       reviews: [
         {
           submittedAt: "2026-05-21T13:22:00Z",

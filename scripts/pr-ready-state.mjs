@@ -554,23 +554,8 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-export function headCommitCommittedAt(pr) {
-  const commits = pr.commits ?? [];
-  return (
-    commits.find((commit) => commit.oid === pr.headRefOid)?.committedDate ??
-    null
-  );
-}
-
 export function fetchHeadUpdatedAt({ observedAt }) {
   return observedAt ?? null;
-}
-
-export function fetchReviewRequestLowerBound({
-  headCommittedAt = null,
-  observedAt,
-}) {
-  return headCommittedAt ?? observedAt ?? null;
 }
 
 function fetchReviewThreads({ repo, number }) {
@@ -709,7 +694,6 @@ function fetchReadyState({ prArg, repoArg }) {
     [
       "author",
       "baseRefName",
-      "commits",
       "headRefName",
       "headRefOid",
       "isDraft",
@@ -741,17 +725,11 @@ function fetchReadyState({ prArg, repoArg }) {
     headSha: pr.headRefOid,
   });
   const headUpdatedAt = fetchHeadUpdatedAt({
-    headCommittedAt: headCommitCommittedAt(pr),
-    observedAt,
-  });
-  const reviewRequestLowerBound = fetchReviewRequestLowerBound({
-    headCommittedAt: headCommitCommittedAt(pr),
     observedAt,
   });
   const annotatedPr = {
     ...pr,
     headUpdatedAt,
-    reviewRequestLowerBound,
     statusCheckRollup: annotateStatusCheckSources(
       pr.statusCheckRollup ?? [],
       sourceMap,
