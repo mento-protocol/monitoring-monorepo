@@ -76,10 +76,17 @@ describe("normalizeCallbackUrl", () => {
     expect(normalizeCallbackUrl("/address-book")).toBe("/address-book");
   });
 
+  it("treats undefined callbackUrl as missing", () => {
+    expect(normalizeCallbackUrl(undefined)).toBe(undefined);
+  });
+
   it("treats repeated callbackUrl values as missing", () => {
     expect(normalizeCallbackUrl(["/address-book", "/leaderboard"])).toBe(
       undefined,
     );
+  });
+
+  it("falls back to default for repeated callbackUrl values", () => {
     expect(
       sanitizeCallbackUrl(
         normalizeCallbackUrl(["/address-book", "/leaderboard"]),
