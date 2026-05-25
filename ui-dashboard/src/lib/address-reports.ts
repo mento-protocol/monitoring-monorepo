@@ -106,12 +106,12 @@ local existing = redis.call('HGET', key, addr)
 if not existing then
   return cjson.encode({
     ok = false,
-    error = 'version_conflict',
-    existingVersion = cjson.null
+    error = 'not_found'
   })
 end
 
 local prior = cjson.decode(existing)
+-- Mirrors the priorVersion normalization in UPSERT_SCRIPT. Keep in sync.
 local priorVersion = prior.version
 if type(priorVersion) ~= 'number' or priorVersion <= 0 then
   priorVersion = 1
@@ -140,6 +140,13 @@ export class AddressReportVersionConflictError extends Error {
     super("Address report version conflict");
     this.name = "AddressReportVersionConflictError";
     this.existingVersion = existingVersion;
+  }
+}
+
+export class AddressReportNotFoundError extends Error {
+  constructor() {
+    super("Address report not found");
+    this.name = "AddressReportNotFoundError";
   }
 }
 
@@ -228,6 +235,9 @@ export async function deleteReport(
   )) as Record<string, unknown>;
 
   if (result.ok !== true) {
+    if (result.error === "not_found") {
+      throw new AddressReportNotFoundError();
+    }
     throw new AddressReportVersionConflictError(
       typeof result.existingVersion === "number"
         ? result.existingVersion

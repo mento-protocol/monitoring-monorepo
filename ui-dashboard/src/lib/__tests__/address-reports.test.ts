@@ -213,6 +213,20 @@ describe("deleteReport — optimistic concurrency", () => {
       expect(err).toMatchObject({ existingVersion: 7 });
     }
   });
+
+  it("throws a typed not-found error when Redis reports a missing report", async () => {
+    mockEval.mockResolvedValueOnce({
+      ok: false,
+      error: "not_found",
+    });
+
+    const { deleteReport, AddressReportNotFoundError } =
+      await import("@/lib/address-reports");
+
+    await expect(deleteReport(ADDR, 6)).rejects.toBeInstanceOf(
+      AddressReportNotFoundError,
+    );
+  });
 });
 
 describe("findReport — single-key lookup", () => {

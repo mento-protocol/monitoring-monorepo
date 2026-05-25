@@ -14,6 +14,12 @@ vi.mock("@/lib/address-reports", async () => {
     typeof import("@/lib/address-reports-shared")
   >("@/lib/address-reports-shared");
   return {
+    AddressReportNotFoundError: class AddressReportNotFoundError extends Error {
+      constructor() {
+        super("Address report not found");
+        this.name = "AddressReportNotFoundError";
+      }
+    },
     AddressReportVersionConflictError: class AddressReportVersionConflictError extends Error {
       readonly existingVersion: number | null;
 
@@ -34,6 +40,7 @@ vi.mock("@/lib/address-reports", async () => {
 
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportNotFoundError,
   AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
@@ -308,7 +315,7 @@ describe("PUT /api/address-reports", () => {
 
   it("returns 409 when storage detects a stale base version", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (upsertReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new AddressReportVersionConflictError(7),
     );
 
@@ -383,7 +390,7 @@ describe("DELETE /api/address-reports", () => {
 
   it("returns 409 when storage detects a stale delete", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    (deleteReport as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (deleteReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new AddressReportVersionConflictError(7),
     );
 
@@ -399,6 +406,26 @@ describe("DELETE /api/address-reports", () => {
     expect(await res.json()).toEqual({
       error: "Report version conflict",
       existingVersion: 7,
+    });
+  });
+
+  it("returns 404 when storage reports the report was already deleted", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    (deleteReport as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new AddressReportNotFoundError(),
+    );
+
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        headers: { "If-Match": '"6"' },
+        body: JSON.stringify({ address: VALID_ADDR }),
+      }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: "Report no longer exists",
     });
   });
 

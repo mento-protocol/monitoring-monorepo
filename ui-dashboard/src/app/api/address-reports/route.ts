@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
+  AddressReportNotFoundError,
   AddressReportVersionConflictError,
   findReport,
   getReportsIndex,
@@ -171,6 +172,12 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     await deleteReport(address, parsedBaseVersion.baseVersion);
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (err instanceof AddressReportNotFoundError) {
+      return NextResponse.json(
+        { error: "Report no longer exists" },
+        { status: 404 },
+      );
+    }
     if (err instanceof AddressReportVersionConflictError) {
       return NextResponse.json(
         {
