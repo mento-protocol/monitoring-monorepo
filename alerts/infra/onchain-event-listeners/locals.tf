@@ -1,8 +1,4 @@
 locals {
-  # ABI is injected by the parent root (single read of the canonical file
-  # at alerts/infra/onchain-event-handler/safe-abi.json).
-  safe_abi = var.safe_abi
-
   # Event topic hashes — keccak256 of each Safe event signature. QuickNode's
   # `evmContractEvents` template fires when a log's topic0 matches any of
   # these from any of the configured `contracts` addresses, then ABI-decodes

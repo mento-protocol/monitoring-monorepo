@@ -32,7 +32,23 @@ const abi = JSON.parse(readFileSync(join(moduleDir, "safe-abi.json"), "utf8"));
 const events = abi
   .filter((item) => item.type === "event" && item.name)
   .map((item) => {
-    const paramTypes = (item.inputs || []).map((i) => i.type).filter(Boolean);
+    const paramTypes = (item.inputs || [])
+      .map((i) => {
+        // EVM canonical topic0 hashing requires tuple params to be expanded
+        // to their `(type1,type2,...)` form — using the literal string `tuple`
+        // produces wrong hashes silently. The current Safe ABI v1.3.0 has no
+        // tuple-typed event params, but a future ABI bump could introduce
+        // one. Fail loudly so the operator implements proper expansion
+        // (recursively flattening `i.components` to `(t1,t2,...)`) instead
+        // of shipping mismatched topics to QuickNode.
+        if (i.type === "tuple" || (i.type || "").startsWith("tuple")) {
+          throw new Error(
+            `Event ${item.name} has a tuple-typed param — implement canonical expansion of i.components before hashing. See https://docs.soliditylang.org/en/latest/abi-spec.html#json for the encoding rules.`,
+          );
+        }
+        return i.type;
+      })
+      .filter(Boolean);
     const signature = `${item.name}(${paramTypes.join(",")})`;
     const hash = `0x${keccak("keccak256").update(signature).digest("hex")}`;
     return { name: item.name, signature, hash };
