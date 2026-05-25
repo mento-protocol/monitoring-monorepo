@@ -293,22 +293,36 @@ function commentReactionContent(reaction) {
   return String(reaction?.content ?? reaction ?? "").toLowerCase();
 }
 
-function hasCodexEyesReaction(comment) {
+function hasCodexEyesReaction(comment, headUpdatedAt, fallbackCurrent = false) {
   const reactions = comment.reactions;
   const reactionNodes = Array.isArray(reactions)
     ? reactions
     : (reactions?.nodes ?? []);
 
-  return reactionNodes.some(
-    (reaction) =>
-      commentReactionContent(reaction) === "eyes" &&
-      reaction?.user?.login === BOT_APPROVER,
-  );
+  return reactionNodes.some((reaction) => {
+    if (
+      commentReactionContent(reaction) !== "eyes" ||
+      reaction?.user?.login !== BOT_APPROVER
+    ) {
+      return false;
+    }
+
+    if (headUpdatedAt === null) return true;
+
+    const createdAt = parseTimestamp(reaction.created_at ?? reaction.createdAt);
+    if (createdAt === null) return fallbackCurrent;
+    return createdAt >= headUpdatedAt;
+  });
 }
 
 function isAtOrAfter(timestamp, lowerBound) {
   const parsed = parseTimestamp(timestamp);
   return parsed !== null && lowerBound !== null && parsed >= lowerBound;
+}
+
+function isCurrentSignal(timestamp, lowerBound) {
+  if (lowerBound === null) return true;
+  return isAtOrAfter(timestamp, lowerBound);
 }
 
 function parseTimestamp(value) {
@@ -347,10 +361,7 @@ export function classifyCodexReviewSignal({
   for (const comment of issueComments) {
     const author = comment.user?.login ?? comment.author?.login ?? null;
     const createdAt = comment.created_at ?? comment.createdAt;
-    const updatedAt = comment.updated_at ?? comment.updatedAt ?? createdAt;
-    const isCurrent =
-      isAtOrAfter(createdAt, headUpdatedAt) ||
-      isAtOrAfter(updatedAt, headUpdatedAt);
+    const isCurrent = isCurrentSignal(createdAt, headUpdatedAt);
 
     if (author === BOT_APPROVER && isCurrent) {
       hasCurrentInFlightSignal = true;
@@ -362,10 +373,13 @@ export function classifyCodexReviewSignal({
 
     if (isCurrent) {
       hasCurrentRequest = true;
-      if (hasCodexEyesReaction(comment)) {
+      if (hasCodexEyesReaction(comment, headUpdatedAt, true)) {
         hasCurrentInFlightSignal = true;
       }
     } else {
+      if (hasCodexEyesReaction(comment, headUpdatedAt)) {
+        hasCurrentInFlightSignal = true;
+      }
       hasHistoricalSignal = true;
     }
   }
@@ -376,7 +390,7 @@ export function classifyCodexReviewSignal({
 
     const submittedAt =
       review.submittedAt ?? review.submitted_at ?? review.createdAt;
-    if (isAtOrAfter(submittedAt, headUpdatedAt)) {
+    if (isCurrentSignal(submittedAt, headUpdatedAt)) {
       hasCurrentInFlightSignal = true;
     } else {
       hasHistoricalSignal = true;

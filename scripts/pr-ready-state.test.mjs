@@ -20,6 +20,7 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   parseArgs,
+  renderSummary,
   repoFromPullRequestUrl,
   requiredStatusContextsFromProtection,
   requiredStatusContextsFromRules,
@@ -891,6 +892,64 @@ test("classifies Codex review signal as missing, requested, in flight, stale, or
   );
 });
 
+test("treats Codex review requests as current when no head timestamp is available", () => {
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt: null,
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:21:00Z",
+          user: { login: "chapati23" },
+        },
+      ],
+    }),
+    "requested",
+  );
+});
+
+test("does not revive stale Codex review requests from comment edits", () => {
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt: Date.parse("2026-05-21T13:22:23Z"),
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:21:00Z",
+          updated_at: "2026-05-21T13:23:00Z",
+          user: { login: "chapati23" },
+        },
+      ],
+    }),
+    "stale",
+  );
+});
+
+test("uses Codex eyes reaction timestamps to detect current in-flight reviews", () => {
+  const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
+
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:21:00Z",
+          user: { login: "chapati23" },
+          reactions: [
+            {
+              content: "eyes",
+              created_at: "2026-05-21T13:23:00Z",
+              user: { login: "chatgpt-codex-connector[bot]" },
+            },
+          ],
+        },
+      ],
+    }),
+    "in_flight",
+  );
+});
+
 test("uses a shared matcher for Codex review request comments", () => {
   assert(isCodexReviewRequestBody("@codex review"));
   assert(isCodexReviewRequestBody("please @codex review this"));
@@ -969,6 +1028,22 @@ test("duplicate-review prevention fixture waits on current-head Codex request in
     ),
     "expected missing final approval gate to keep PR not ready",
   );
+});
+
+test("watch JSON output is one compact JSON object per line", () => {
+  const summary = {
+    ready: false,
+    number: 123,
+    blockers: [{ name: "ci", state: "pending" }],
+  };
+  const output = renderSummary(summary, {
+    json: true,
+    compact: false,
+    watch: true,
+  });
+
+  assertEqual(output.split("\n").length, 2);
+  assertDeepEqual(JSON.parse(output), summary);
 });
 
 test("rejects stale chatgpt-codex-connector reaction from before the head update", () => {

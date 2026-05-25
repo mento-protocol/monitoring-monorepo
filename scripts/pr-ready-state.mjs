@@ -620,20 +620,19 @@ function fetchReviewThreads({ repo, number }) {
   }
 }
 
-function fetchIssueCommentReactions({ repo, commentId }) {
-  return ghApiJsonPages(repo, [
-    "-H",
-    "Accept: application/vnd.github+json",
-    `repos/${repoPath(repo)}/issues/comments/${commentId}/reactions`,
-  ]);
-}
-
 function attachCodexRequestReactions({ repo, issueComments }) {
   return issueComments.map((comment) => {
     if (!isCodexReviewRequestBody(comment.body)) return comment;
+    const result = ghApiJsonPagesResult(repo, [
+      "-H",
+      "Accept: application/vnd.github+json",
+      `repos/${repoPath(repo)}/issues/comments/${comment.id}/reactions`,
+    ]);
+    if (!result.ok) return comment;
+
     return {
       ...comment,
-      reactions: fetchIssueCommentReactions({ repo, commentId: comment.id }),
+      reactions: result.value,
     };
   });
 }
@@ -819,8 +818,8 @@ export function parseArgs(argv) {
   return { json, compact, watch, prArg, repoArg };
 }
 
-function renderSummary(summary, { json, compact }) {
-  if (json) return `${JSON.stringify(summary, null, 2)}\n`;
+export function renderSummary(summary, { json, compact, watch = false }) {
+  if (json) return `${JSON.stringify(summary, null, watch ? 0 : 2)}\n`;
   if (compact) return `${formatCompact(summary)}\n`;
   return formatHuman(summary);
 }
@@ -840,8 +839,14 @@ async function main() {
     }
 
     for (;;) {
-      const summary = fetchReadyState({ prArg, repoArg });
-      process.stdout.write(renderSummary(summary, { json, compact }));
+      try {
+        const summary = fetchReadyState({ prArg, repoArg });
+        process.stdout.write(renderSummary(summary, { json, compact, watch }));
+      } catch (err) {
+        if (!watch) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[pr-ready-state] ${message}\n`);
+      }
       if (!watch) return;
       await sleep(60_000);
     }
