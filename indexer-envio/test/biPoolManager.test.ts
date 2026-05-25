@@ -1132,6 +1132,44 @@ describe("fetchTokenDecimalsScaling test mock", () => {
       null,
     );
   });
+
+  it("rejects a zero scaling factor as out-of-range", async () => {
+    const unsupportedChainId = 999_999;
+    _setMockTokenDecimalsScaling(
+      unsupportedChainId,
+      VP_ADDRESS,
+      "decimals0",
+      0n,
+    );
+    assert.equal(
+      await fetchTokenDecimalsScaling(
+        unsupportedChainId,
+        VP_ADDRESS,
+        "decimals0",
+        noopLogger,
+      ),
+      null,
+    );
+  });
+
+  it("rejects a scaling factor above 10^36 as out-of-range", async () => {
+    const unsupportedChainId = 999_999;
+    _setMockTokenDecimalsScaling(
+      unsupportedChainId,
+      VP_ADDRESS,
+      "decimals0",
+      10n ** 36n + 1n,
+    );
+    assert.equal(
+      await fetchTokenDecimalsScaling(
+        unsupportedChainId,
+        VP_ADDRESS,
+        "decimals0",
+        noopLogger,
+      ),
+      null,
+    );
+  });
 });
 
 describe("fetchVirtualPoolExchangeId discriminator", () => {

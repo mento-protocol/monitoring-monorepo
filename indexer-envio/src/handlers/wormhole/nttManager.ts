@@ -428,20 +428,22 @@ indexer.onEvent(
     // that's the happy-path signal MessageAttestedTo ran — otherwise (rare:
     // HyperSync drops the attest log, historical backfills) drain here too.
     //
-    // Caveat (sec-review 2026-05-22 f-009, codex-validated): the fallback
-    // drain has NO transceiver filter, so in a multi-NTT-inbound same-tx
-    // the nearest unrelated scratch row gets paired and source identity
-    // is mis-stamped onto this transfer. Emit a structured warn whenever
-    // this fallback path fires so the alert pipeline catches the cases.
-    // Real fix (require positive transceiver match via peer registry) is
-    // a follow-up PR.
+    // Caveat: the fallback drain has NO transceiver filter, so in a
+    // multi-NTT-inbound same-tx the nearest unrelated scratch row gets
+    // paired and source identity is mis-stamped onto this transfer. Emit
+    // a structured warn (signature
+    // `wormhole.transferRedeemed.fallback_drain`) whenever this fallback
+    // path fires so the alert pipeline catches the cases. A stricter fix
+    // — require positive transceiver match via peer registry, or only
+    // drain when exactly one scratch row exists in the tx — is tracked
+    // as a follow-up.
     const priorDetail = await (
       context as HandlerContext
     ).WormholeTransferDetail.get(id);
     let destPending = undefined;
     if (!priorDetail?.transceiverDigest) {
       context.log.warn(
-        `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} — MessageAttestedTo missing; draining scratch without transceiver filter (may mis-attribute source identity in multi-message tx, see sec-review f-009)`,
+        `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} — MessageAttestedTo missing; draining scratch without transceiver filter (may mis-attribute source identity in multi-message tx)`,
       );
       destPending = await drainDestPending(context as HandlerContext, event);
     }
@@ -545,9 +547,8 @@ indexer.onEvent(
     // identical NTT transceiver addresses (deterministic deploy — see
     // `nttAddresses.json`). Without the chain component, two MessageAttestedTo
     // events with the same digest/transceiver/index but different chainId
-    // collide and silently overwrite. sec-review 2026-05-22 f-008,
-    // codex-validated. Re-sync required: existing rows under the old id format
-    // are orphaned after this change.
+    // collide and silently overwrite. Re-sync required: existing rows under
+    // the old id format are orphaned after this change.
     const attestation: BridgeAttestation = {
       id: `${id}-${event.chainId}-${p.transceiver.toLowerCase()}-${attesterIdx}`,
       transferId: id,
