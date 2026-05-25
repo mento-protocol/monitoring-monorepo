@@ -22,10 +22,13 @@ SUPPORTED_CHAINS=${join(",", local.chains)}
 
 # QuickNode Configuration
 QUICKNODE_SIGNING_SECRET=${var.quicknode_signing_secret}
+# Local development should not depend on or mutate the Terraform-managed
+# production replay bucket. Override this with a real bucket only when testing
+# replay persistence against GCS.
+QUICKNODE_REPLAY_BUCKET=local-quicknode-replay-nonces
 
 # Discord Webhook URLs (shared across all multisigs)
 DISCORD_WEBHOOK_ALERTS=${local.shared_webhook_urls.alerts}
 DISCORD_WEBHOOK_EVENTS=${local.shared_webhook_urls.events}
   EOT
 }
-

@@ -1,11 +1,18 @@
 import type { Request } from "@google-cloud/functions-framework";
 import config from "./config";
 import { logger } from "./logger";
+import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { verifyQuickNodeSignature } from "./verify-quicknode-signature";
 
 type ValidationResult =
-  | { valid: true }
-  | { valid: false; status: number; message: string; error?: unknown };
+  | { valid: true; nonce: string; timestamp: string }
+  | {
+      valid: false;
+      status: number;
+      message: string;
+      error?: unknown;
+      replayed?: boolean;
+    };
 
 /**
  * Extended Request interface that includes rawBody for signature verification
@@ -21,7 +28,9 @@ interface RequestWithRawBody extends Request {
  * @param req - The incoming HTTP request
  * @returns Validation result - if invalid, includes status code and error message
  */
-export function validateQuickNodeWebhook(req: Request): ValidationResult {
+export async function validateQuickNodeWebhook(
+  req: Request,
+): Promise<ValidationResult> {
   // Extract required headers
   const nonce = req.headers["x-qn-nonce"] as string | undefined;
   const timestamp = req.headers["x-qn-timestamp"] as string | undefined;
@@ -99,5 +108,10 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
     };
   }
 
-  return { valid: true };
+  const replayValidation = await reserveQuickNodeNonce(nonce, timestamp);
+  if (!replayValidation.valid) {
+    return replayValidation;
+  }
+
+  return { valid: true, nonce, timestamp };
 }

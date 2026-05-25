@@ -51,7 +51,7 @@ export const processQuicknodeWebhook = async (
     const isProduction = process.env.NODE_ENV !== "development";
 
     if (isProduction) {
-      const requestValidation = validateQuickNodeWebhook(req);
+      const requestValidation = await validateQuickNodeWebhook(req);
       if (!requestValidation.valid) {
         logger.warn("Webhook validation failed", {
           status: requestValidation.status,
