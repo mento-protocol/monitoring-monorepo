@@ -32,7 +32,11 @@ RUN mkdir -p /etc/agent/data && chown -R agent:agent /etc/agent
 # start and `grafana-agent -config.expand-env=true` performs the
 # substitution. Neither file contains any secret material.
 COPY --chown=agent:agent agent.yaml /etc/agent/agent.yaml
-COPY --chown=agent:agent --chmod=0555 entrypoint.sh /usr/local/bin/entrypoint.sh
+# `COPY --chmod=...` requires BuildKit, which Cloud Build's default Docker
+# driver doesn't enable. App Engine's source-based build runs the legacy
+# builder, so we chmod in a separate RUN step that works on both.
+COPY --chown=agent:agent entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0555 /usr/local/bin/entrypoint.sh
 
 # Switch to non-root user
 USER agent
