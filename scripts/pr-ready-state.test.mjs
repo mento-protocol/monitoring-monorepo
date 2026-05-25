@@ -11,10 +11,11 @@ import {
   findUnresolvedReviewThreads,
   groupStatusChecks,
   hasCodexApprovalReaction,
+  classifyCodexReviewSignal,
   summarizeReadyState,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
-import { formatHuman } from "./pr-ready-state-format.mjs";
+import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   parseArgs,
@@ -138,6 +139,8 @@ test("parses explicit help without requiring a PR argument", () => {
   assertDeepEqual(parseArgs(["--help"]), {
     help: true,
     json: false,
+    compact: false,
+    watch: false,
     prArg: null,
     repoArg: null,
   });
@@ -829,6 +832,105 @@ test("requires chatgpt-codex-connector +1 reaction exactly", () => {
   );
 });
 
+test("classifies Codex review signal as missing, requested, in flight, stale, or approved", () => {
+  const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
+
+  assertEqual(classifyCodexReviewSignal({ headUpdatedAt }), "missing");
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chapati23" },
+        },
+      ],
+    }),
+    "requested",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chapati23" },
+          reactions: [
+            {
+              content: "eyes",
+              user: { login: "chatgpt-codex-connector[bot]" },
+            },
+          ],
+        },
+      ],
+    }),
+    "in_flight",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:21:00Z",
+          user: { login: "chapati23" },
+        },
+      ],
+    }),
+    "stale",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      codexApprovalReaction: true,
+    }),
+    "approved",
+  );
+});
+
+test("duplicate-review prevention fixture waits on current-head Codex request in flight", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [
+      {
+        id: 1,
+        body: "@codex review",
+        created_at: "2026-05-21T12:00:00Z",
+        user: { login: "chapati23" },
+      },
+      {
+        id: 2,
+        body: "@codex review",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chapati23" },
+        reactions: [
+          {
+            content: "eyes",
+            user: { login: "chatgpt-codex-connector[bot]" },
+          },
+        ],
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.codexReviewSignal, "in_flight");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
+  assert(
+    summary.required.blockers.some(
+      (blocker) => blocker.name === "Codex PR-description approval",
+    ),
+    "expected missing final approval gate to keep PR not ready",
+  );
+});
+
 test("rejects stale chatgpt-codex-connector reaction from before the head update", () => {
   assert(
     !hasCodexApprovalReaction(
@@ -1047,6 +1149,21 @@ test("human output names the readiness verdict and codex reaction gate", () => {
     ),
     output,
   );
+  assert(output.includes("Codex review signal: missing"), output);
+});
+
+test("compact output includes only readiness counters and Codex signal state", () => {
+  const output = formatCompact(
+    summarizeReadyState({
+      pr: { ...basePr, statusCheckRollup: [] },
+      reactions: [],
+    }),
+  );
+
+  assert(output.includes("PR #123 BLOCKED"), output);
+  assert(output.includes("required_blockers=1"), output);
+  assert(output.includes("codex_approval=missing"), output);
+  assert(output.includes("codex_signal=missing"), output);
 });
 
 if (failed > 0) {

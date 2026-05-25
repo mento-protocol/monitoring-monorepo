@@ -285,6 +285,32 @@ export function findTopLevelBotReviewComments(reviews = []) {
     }));
 }
 
+function isCodexReviewRequestBody(body) {
+  return /(^|\s)@codex\s+review\b/i.test(String(body ?? ""));
+}
+
+function commentReactionContent(reaction) {
+  return String(reaction?.content ?? reaction ?? "").toLowerCase();
+}
+
+function hasCodexEyesReaction(comment) {
+  const reactions = comment.reactions;
+  const reactionNodes = Array.isArray(reactions)
+    ? reactions
+    : (reactions?.nodes ?? []);
+
+  return reactionNodes.some(
+    (reaction) =>
+      commentReactionContent(reaction) === "eyes" &&
+      reaction?.user?.login === BOT_APPROVER,
+  );
+}
+
+function isAtOrAfter(timestamp, lowerBound) {
+  const parsed = parseTimestamp(timestamp);
+  return parsed !== null && lowerBound !== null && parsed >= lowerBound;
+}
+
 function parseTimestamp(value) {
   const timestamp = Date.parse(value ?? "");
   return Number.isNaN(timestamp) ? null : timestamp;
@@ -304,6 +330,63 @@ export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
       parseTimestamp(reaction.created_at ?? reaction.createdAt) >=
         headUpdatedAt,
   );
+}
+
+export function classifyCodexReviewSignal({
+  issueComments = [],
+  reviews = [],
+  headUpdatedAt = null,
+  codexApprovalReaction = false,
+} = {}) {
+  if (codexApprovalReaction) return "approved";
+
+  let hasHistoricalSignal = false;
+  let hasCurrentRequest = false;
+  let hasCurrentInFlightSignal = false;
+
+  for (const comment of issueComments) {
+    const author = comment.user?.login ?? comment.author?.login ?? null;
+    const createdAt = comment.created_at ?? comment.createdAt;
+    const updatedAt = comment.updated_at ?? comment.updatedAt ?? createdAt;
+    const isCurrent =
+      isAtOrAfter(createdAt, headUpdatedAt) ||
+      isAtOrAfter(updatedAt, headUpdatedAt);
+
+    if (author === BOT_APPROVER && isCurrent) {
+      hasCurrentInFlightSignal = true;
+    } else if (author === BOT_APPROVER) {
+      hasHistoricalSignal = true;
+    }
+
+    if (!isCodexReviewRequestBody(comment.body)) continue;
+
+    if (isCurrent) {
+      hasCurrentRequest = true;
+      if (hasCodexEyesReaction(comment)) {
+        hasCurrentInFlightSignal = true;
+      }
+    } else {
+      hasHistoricalSignal = true;
+    }
+  }
+
+  for (const review of reviews) {
+    const author = review.author?.login ?? review.user?.login ?? null;
+    if (author !== BOT_APPROVER) continue;
+
+    const submittedAt =
+      review.submittedAt ?? review.submitted_at ?? review.createdAt;
+    if (isAtOrAfter(submittedAt, headUpdatedAt)) {
+      hasCurrentInFlightSignal = true;
+    } else {
+      hasHistoricalSignal = true;
+    }
+  }
+
+  if (hasCurrentInFlightSignal) return "in_flight";
+  if (hasCurrentRequest) return "requested";
+  if (hasHistoricalSignal) return "stale";
+  return "missing";
 }
 
 export function summarizeReadyState({
@@ -337,6 +420,12 @@ export function summarizeReadyState({
     reactions,
     headUpdatedAt,
   );
+  const codexReviewSignal = classifyCodexReviewSignal({
+    issueComments,
+    reviews: pr.reviews ?? [],
+    headUpdatedAt,
+    codexApprovalReaction,
+  });
 
   const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";
   const reviewDecision = normalizeStatusValue(pr.reviewDecision);
@@ -426,6 +515,15 @@ export function summarizeReadyState({
       required: true,
       state: codexApprovalReaction ? "present" : "missing",
     },
+    codexReviewSignal: {
+      ready: ["approved", "in_flight"].includes(codexReviewSignal),
+      required: false,
+      state: codexReviewSignal,
+      fallbackAction:
+        codexReviewSignal === "missing" || codexReviewSignal === "stale"
+          ? "request_review_once_after_grace"
+          : "wait",
+    },
     reviewCommentReplies: {
       ready: unrepliedRootReviewComments.length === 0,
       required: true,
@@ -488,5 +586,6 @@ export function summarizeReadyState({
     unrepliedRootReviewComments,
     topLevelBotComments,
     codexApprovalReaction,
+    codexReviewSignal,
   };
 }

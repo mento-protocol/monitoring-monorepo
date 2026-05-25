@@ -127,6 +127,12 @@ run the shared readiness probe:
 pnpm pr:ready-state --pr <number> --json
 ```
 
+For an interactive low-noise watch, use:
+
+```bash
+pnpm pr:ready-state --pr <number> --watch --compact
+```
+
 Use the command's required-only result as the readiness source of truth. The raw
 GitHub status rollup and required review gates decide readiness; advisory bot
 lag is reported separately. In particular, Cursor Bugbot can trail the current
@@ -136,9 +142,9 @@ for the expected CLI fields and Claude/Codex workflow contract.
 
 Codex re-reviews new pushes automatically. Do not post `@codex review` as a
 routine post-push step, and never post duplicate review requests while a
-current-head Codex request has a reaction or review in flight. Use one manual
-request only as a fallback when the current head has no Codex signal after the
-normal automatic-review window.
+current-head Codex request is `requested`, `in_flight`, or `approved` in
+`pr:ready-state`. Use one manual request only as a fallback when the current
+head has no Codex signal after the normal automatic-review window.
 
 ## Review-loop discipline
 

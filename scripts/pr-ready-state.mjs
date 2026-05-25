@@ -13,7 +13,7 @@ import {
   checkDisplayName,
   summarizeReadyState,
 } from "./pr-ready-state-core.mjs";
-import { formatHuman } from "./pr-ready-state-format.mjs";
+import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 
 function runGh(args) {
   const result = spawnSync("gh", args, {
@@ -619,6 +619,28 @@ function fetchReviewThreads({ repo, number }) {
   }
 }
 
+function fetchIssueCommentReactions({ repo, commentId }) {
+  return ghApiJsonPages(repo, [
+    "-H",
+    "Accept: application/vnd.github+json",
+    `repos/${repoPath(repo)}/issues/comments/${commentId}/reactions`,
+  ]);
+}
+
+function commentRequestsCodexReview(comment) {
+  return /(^|\s)@codex\s+review\b/i.test(String(comment.body ?? ""));
+}
+
+function attachCodexRequestReactions({ repo, issueComments }) {
+  return issueComments.map((comment) => {
+    if (!commentRequestsCodexReview(comment)) return comment;
+    return {
+      ...comment,
+      reactions: fetchIssueCommentReactions({ repo, commentId: comment.id }),
+    };
+  });
+}
+
 function fetchRequiredStatusContexts({
   repo,
   baseRef,
@@ -719,9 +741,12 @@ function fetchReadyState({ prArg, repoArg }) {
     ),
   };
 
-  const issueComments = ghApiJsonPages(repo, [
-    `repos/${path}/issues/${number}/comments`,
-  ]);
+  const issueComments = attachCodexRequestReactions({
+    repo,
+    issueComments: ghApiJsonPages(repo, [
+      `repos/${path}/issues/${number}/comments`,
+    ]),
+  });
   const reactions = ghApiJsonPages(repo, [
     "-H",
     "Accept: application/vnd.github+json",
@@ -750,7 +775,7 @@ function fetchReadyState({ prArg, repoArg }) {
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json]\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n`;
 }
 
 function readFlagValue(rest, flag) {
@@ -768,10 +793,23 @@ function readFlagValue(rest, flag) {
 
 export function parseArgs(argv) {
   const help = argv.includes("--help") || argv.includes("-h");
-  if (help) return { help: true, json: false, prArg: null, repoArg: null };
+  if (help) {
+    return {
+      help: true,
+      json: false,
+      compact: false,
+      watch: false,
+      prArg: null,
+      repoArg: null,
+    };
+  }
 
   const json = argv.includes("--json");
-  const rest = argv.filter((arg) => arg !== "--json");
+  const compact = argv.includes("--compact");
+  const watch = argv.includes("--watch");
+  const rest = argv.filter(
+    (arg) => !["--json", "--compact", "--watch"].includes(arg),
+  );
   const repoArg = readFlagValue(rest, "--repo");
   let prArg = readFlagValue(rest, "--pr");
   if (!prArg) {
@@ -781,20 +819,35 @@ export function parseArgs(argv) {
   if (!prArg || rest.length > 0) {
     throw new Error(usage());
   }
-  return { json, prArg, repoArg };
+  return { json, compact, watch, prArg, repoArg };
 }
 
-function main() {
+function renderSummary(summary, { json, compact }) {
+  if (json) return `${JSON.stringify(summary, null, 2)}\n`;
+  if (compact) return `${formatCompact(summary)}\n`;
+  return formatHuman(summary);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function main() {
   try {
-    const { help, json, prArg, repoArg } = parseArgs(process.argv.slice(2));
+    const { help, json, compact, watch, prArg, repoArg } = parseArgs(
+      process.argv.slice(2),
+    );
     if (help) {
       process.stdout.write(usage());
       return;
     }
-    const summary = fetchReadyState({ prArg, repoArg });
-    process.stdout.write(
-      json ? `${JSON.stringify(summary, null, 2)}\n` : formatHuman(summary),
-    );
+
+    for (;;) {
+      const summary = fetchReadyState({ prArg, repoArg });
+      process.stdout.write(renderSummary(summary, { json, compact }));
+      if (!watch) return;
+      await sleep(60_000);
+    }
   } catch (err) {
     process.stderr.write(err instanceof Error ? err.message : String(err));
     if (!String(err).endsWith("\n")) process.stderr.write("\n");
@@ -803,5 +856,5 @@ function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
+  await main();
 }

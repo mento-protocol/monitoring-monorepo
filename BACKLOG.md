@@ -4,31 +4,6 @@ Active work only. Remove items from this file once they ship or are closed.
 Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`,
 or tests.
 
-## Indexer relabel: mento-router-v2 / -v3 (next /deploy-indexer)
-
-PR #513 (merged 2026-05-21) renamed the broker classifier's `mento-router-v2`
-label to `mento-router-v3` for v3 router (`0x4861840…`) traffic, and added
-the actual v2 router (`0xBE729350F8CdFC19DB6866e8579841188eE57f67`) to
-`aggregators.json` as `mento-router-v2`. Indexer prod is still on commit
-`026c629` (pre-rename), so existing `BrokerAggregatorDailySnapshot` rows
-keep the old labels until the next indexer deploy + resync. No action
-needed standalone — fold into the next `/deploy-indexer` cycle.
-
-## CDP glue contracts: state mutations without events (NICE TO KNOW)
-
-From the mento-core + deployments-v2 sweep on 2026-05-19:
-
-- `CDPLiquidityStrategy.setCDPConfig(pool, CDPConfig)` lets governance rotate
-  `stabilityPool` / `collateralRegistry` / `stabilityPoolPercentage` /
-  `maxIterations` post-add with no event. Our `CdpPool` row doesn't store
-  these fields today, so silent rotation is invisible. If we ever surface
-  any of them, re-read `getCDPConfig(pool)` via `eth_call` on
-  `PoolAdded`/`LiquidityMoved` or ask mento-core for a `CDPConfigSet` event.
-- `ReserveTroveFactory.withdraw(token, recipient)` is owner-only and silent.
-  Pulls accumulated debt/coll tokens (factory holds `ETH_GAS_COMPENSATION`
-  refunds from each `createReserveTrove`). Re-derivable from ERC20 Transfer
-  logs if we ever need it.
-
 ## Thoughtworks Technology Radar Follow-Ups
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
@@ -51,42 +26,6 @@ agent sessions.
 
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
-
-### Agent PR Loop Speed Follow-Ups
-
-The PR #508 readiness-tooling session was slow mostly because agent review
-requests and readiness polling became part of the inner edit loop. Local gates
-were acceptable; repeated pushes plus duplicate `@codex review` requests caused
-most of the wall-clock churn.
-
-- [ ] Add `pnpm pr:ready-state --watch --compact` for babysitting. Output only
-      the current head SHA, mergeability, required blockers, pending required
-      checks, unresolved threads, unreplied review comments, and Codex
-      PR-description approval state. Keep `--json` for machine consumers, but
-      make the human watch path low-noise.
-- [ ] Track Codex review-request state in `pr:ready-state`: `missing`,
-      `requested`, `in_flight`, `stale`, and `approved`. Treat a current-head
-      `@codex review` comment with bot `eyes` reaction, a current-head Codex
-      review, or a current-head Codex top-level result as in-flight/signal so
-      agents do not post duplicate requests while waiting.
-- [ ] Add a regression test fixture for duplicate-review prevention: multiple
-      historical `@codex review` comments on old heads, one current-head request
-      in flight, and no PR-description thumbs-up yet. Expected result: not
-      ready, but fallback action is "wait", not "request review again".
-- [ ] Update `AGENTS.md` and Claude/Codex agent docs to make the loop explicit:
-      batch review fixes locally, audit sibling cases before pushing, run the
-      mapped local gate once per batch, then wait for automatic/current-head
-      review signal. Manual `@codex review` is a one-shot stale fallback, not a
-      post-push habit.
-- [ ] Add a short "PR babysitting speed discipline" checklist to the shared
-      readiness note: build a feedback ledger, avoid broad bot review as an
-      inner loop, cap manual Codex fallback to one per head, and only declare
-      all-clear from the compact readiness result.
-
-Acceptance: a follow-up PR can babysit a review-heavy branch without repeated
-manual Codex pings, without dumping huge readiness JSON on every poll, and
-without weakening the rule that all-clear requires a current-head Codex
-PR-description thumbs-up.
 
 ### CodeScene-Equivalent OSS Quality Checks — Remaining Follow-Ups
 
@@ -144,55 +83,22 @@ Acceptance: the pilot PR documents build-time delta, interaction/render evidence
 and any components deliberately left uncompiled via `"use no memo"` or by
 remaining outside annotation mode.
 
-### Package-Manager Supply-Chain Hardening Review
-
-Why: the TanStack npm compromise shows that provenance and trusted publishing are
-not enough when a release pipeline restores poisoned package-manager cache
-contents. This repo already has useful defenses: minimumReleaseAge: 4320,
-onlyBuiltDependencies, high+ pnpm audit, SHA-pinned CI install actions in the
-shared install action, and a dedicated supply-chain workflow. The next step is a
-targeted review, not a blind pnpm major bump.
-
-- [ ] Compare current pnpm 10 protections with pnpm 11 security features and
-      migration risk for this monorepo.
-- [ ] Audit GitHub workflows for pull_request_target, writable token
-      permissions, package-manager caches restored before untrusted code runs,
-      and unpinned third-party actions; include .github/actions/pnpm-install
-      and .github/workflows/supply-chain.yml.
-- [ ] Decide whether minimumReleaseAge, minimumReleaseAgeExclude,
-      onlyBuiltDependencies, and ignoredBuiltDependencies need tighter docs,
-      tests, or policy checks.
-- [ ] Evaluate whether an external package firewall or advisory service
-      (Socket, Snyk, or equivalent) adds real signal beyond current pnpm audit
-      without turning every lockfile refresh into noise.
-- [x] Produce a short recommendation PR: either implement the low-noise hardening
-      directly, or document why the existing controls are sufficient for now.
-      → Done: `scripts/lockfile-lint.mjs` + `supply-chain.yml` lockfile-lint job.
-      Validates sha512 integrity on all lockfile packages + blocks custom registry
-      overrides. Note: `lockfile-lint` npm package doesn't support pnpm v9 format
-      (no `resolved:` URLs); check is a custom zero-dep Node.js script instead.
-
-Acceptance: any implementation must preserve CI stability, keep frozen-lockfile
-installs fast, and include a rollback path. Reject pnpm 11 or third-party
-scanners if the only benefit is theoretical.
-
 ## File Size And Lint Hygiene
 
-Current line counts for remaining watch files were refreshed on 2026-05-11.
+Current line counts for remaining watch files were refreshed on 2026-05-25.
 `raw` is physical lines; `rough` approximates the ESLint `max-lines` count
 after skipping blanks and comments. Refresh before starting a split.
 
 | Raw | Rough | File                                            | Action                                                                                   |
 | --: | ----: | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| 749 |   542 | `indexer-envio/src/rpc/effects.ts`              | Watch; split if adding another effect family.                                            |
-| 731 |   496 | `ui-dashboard/src/lib/network-fetcher/fetch.ts` | Watch; split fetch orchestration if another network-wide data source lands.              |
-| 689 |   418 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
+| 847 |   616 | `indexer-envio/src/rpc/effects.ts`              | Watch; split if adding another effect family.                                            |
+| 759 |   520 | `ui-dashboard/src/lib/network-fetcher/fetch.ts` | Watch; split fetch orchestration if another network-wide data source lands.              |
+| 701 |   435 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
-| 608 |   464 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
+| 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
 ## Envio v3 Migration Follow-Ups
 
-- [ ] **Pin `envio` to stable `^3.0.0` once released.** The migration currently targets `3.0.0-rc.0`; after the stable release, bump the dependency, regenerate code, and rerun codegen/typecheck/tests to catch API drift.
 - [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.
 
 ## Indexer-envio defensive-hardening follow-ups (from rpc + bridge PR)
@@ -254,22 +160,8 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-- [ ] **`BLOB_READ_WRITE_TOKEN` lost `development` scope** during the unrelated root-stack apply on 2026-05-20. Production + preview were restored on 2026-05-21 via Vercel-API-driven store-project reconnect (after the broken token caused the daily address-labels-backup cron to fail; see [ANALYTICS-MENTO-ORG-G](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-G)). Development is still missing — fix is `target = ["production", "preview", "development"]` in `terraform/main.tf:117` (currently `["production", "preview"]`) on next quiet-window apply. Out of band by the OIDC upgrade item below — if OIDC lands first, this becomes moot (no static token).
 - [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
 - [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
-
-## address-labels backup: per-hash blob splits
-
-Daily backup snapshot crossed both restore-path caps on 2026-05-21 (Sentry [ANALYTICS-MENTO-ORG-19](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-19) / [ANALYTICS-MENTO-ORG-18](https://mento-labs.sentry.io/issues/ANALYTICS-MENTO-ORG-18)): total snapshot 33.8 MB > `MAX_RESTORE_BLOB_BYTES` (32 MB) and `intel_deep` EVAL payload 8.78 MB > `MAX_REDIS_HASH_REPLACE_BYTES` (8 MB, Upstash Lua EVAL ceiling). Backup itself still succeeds and the raw blob is salvageable manually, but disaster-recovery restore would reject it. Code comment at `ui-dashboard/src/app/api/address-labels/backup/route.ts:11` already prescribes the right fix ("the cron should switch to per-hash blob splits").
-
-Plan — single PR, additive on restore side:
-
-- [ ] **Backup route** (`backup/route.ts`): replace the single `address-labels-backup-YYYY-MM-DD.json` write with parallel per-hash blobs under `address-labels-backup-YYYY-MM-DD/<hash>.json` (one per `labels`, `reports`, `intelDeep`, `intelTransfers`, `intelWealth`, `intelEntities`, `intelEntityCps`) plus a `manifest.json` listing `{exportedAt, hashes: [{name, pathname, size, sha256}]}`. All 8 blobs uploaded via `Promise.all`. No single blob crosses ~10 MB → both caps stop biting.
-- [ ] **Restore route** (`restore/route.ts`): detect manifest vs legacy blob shape (filename pattern or JSON probe of first chunk); manifest path fetches each referenced hash blob in parallel and runs `replaceRedisHashes` per hash (preserves per-hash atomicity, drops cross-hash atomicity which the per-hash route already gave up). Keep the legacy monolithic-blob path for back-compat — restoring older snapshots stays possible. Bump `MAX_RESTORE_BLOB_BYTES` to 16 MB per blob (well under any platform limit).
-- [ ] Update `isAllowedRestorePathname` to accept the new `address-labels-backup-YYYY-MM-DD/(<hash>|manifest).json` pattern alongside the existing patterns.
-- [ ] `flagOversizeBackup` stays as a safety net; warnings should never fire under the new shape.
-- [ ] Tests: extend `backup/__tests__/route.test.ts` to assert 8 blobs + manifest get written; add a restore test that consumes a manifest blob; keep an existing legacy-blob restore test.
-- [ ] Optional follow-up: 30-day rolling cleanup of old monolithic blobs once new format has soaked for ~1 week.
 
 ## Upgrade `@vercel/blob` to ^2.4.0 + switch to OIDC tokens
 
@@ -281,20 +173,23 @@ Eliminates the static-token rotation pain that took ~1 hour to root-cause on 202
 - [ ] Ship via normal worktree + `/ship` flow.
 - [ ] After prod deploy READY: Vercel dashboard → Storage → `address-labels-backup` → click **Upgrade to OIDC** banner.
 - [ ] Verify cron: `curl -H "Authorization: Bearer $CRON_SECRET" https://monitoring.mento.org/api/address-labels/backup` → expect 200.
-- [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Also drop `vercel_project_environment_variable.blob_token` from `terraform/main.tf` (and the `blob_token` variable + tfvars entry).
+- [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Terraform no longer manages this env var; `terraform/main.tf` already contains a non-destructive `removed` block for the old `vercel_project_environment_variable.blob_token` resource.
 - [ ] Optional: trigger a cron-style restore against the latest backup blob to confirm OIDC works for `get()` too.
-- [ ] Closes the "lost development scope" loose end above (no static token → no scope to lose).
+- [ ] Closes the remaining static-token scope drift risk (no static token → no production/preview/development scope to lose).
 
 ## Alerts integration follow-ups
 
-- [x] ~~**Terraform state mv** — in `alerts/infra/` (`prefix=alerts`): `terraform state mv module.discord_channel_manager module.discord_channels` and `terraform state mv module.sentry_alerts module.sentry_bridge`. Plan must show 0 changes after. User-gated.~~ Superseded by `moved` blocks in `alerts/infra/main.tf` — Terraform handles the rename as a state migration on the next apply, no manual `state mv` needed.
 - [ ] **State backend prefix unification** — `alerts/rules/`: `monorepo-alerts` → `alerts-rules`; `alerts/infra/`: `alerts` → `alerts-infra`. Use `terraform init -migrate-state`. Separate PR.
-- [ ] **Slack adapter for `onchain-event-handler`** — split `src/discord.ts` into `src/{notifier,discord,slack}.ts`. Add `alerts/infra/channels/slack-channels/` parallel module. Route by env.
-- [ ] **Retire Sentry → Discord bridge** after Slack adapter — drop `channels/sentry-bridge/` Discord wiring; Sentry's native Slack integration is already configured.
+- [ ] **Slack adapter + Sentry bridge retirement** — split
+      `onchain-event-handler/src/discord.ts` into
+      `src/{notifier,discord,slack}.ts`; add
+      `alerts/infra/channels/slack-channels/` parallel module; route by env;
+      then drop `channels/sentry-bridge/` Discord wiring. Sentry's native
+      Slack integration is already configured, so these should ship as one
+      migration batch.
 - [ ] **Consolidate Aegis v2 alerts** under `alerts/rules-v2/` once the in-flight Aegis Discord→Slack cutover lands.
 - [ ] **Archive `mento-protocol/alerts`** on GitHub once integration is verified stable.
 - [ ] **CI deploy job for `alerts/infra/`** — `terraform apply` on merge to main with manual approval, OIDC/WIF to GCP. Match `metrics-bridge.yml` pattern.
 - [ ] **Workspace/lockfile consolidation** — `alerts/infra/onchain-event-handler/package-lock.json` exists for Cloud Build's `npm ci`, but the package is also a pnpm workspace member (uses root `pnpm-lock.yaml` for local dev). Either switch Cloud Build to pnpm (via `pnpm deploy` bundle or buildpack pnpm-lock.yaml detection) and drop the npm lockfile, or remove the package from the pnpm workspace.
 - [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by HMAC-SHA256 signature verification. Accepted risk for now (matches vendored upstream). Revisit if QuickNode publishes a stable egress IP range (or supports OIDC-signed delivery): switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
 - [ ] **Cooperative wall-clock budget in `processEvents`** — current `Promise.all(logsToProcess.map(processEvent))` has no cooperative cancellation. If a large QuickNode batch + slow RPCs + Discord posts exceed the function timeout, the function dies without HTTP 200, QuickNode retries the whole batch, and events that already Discord-fired get duplicated. Mitigated for now by bumping the function timeout from 60s to 300s, but the proper fix is a wall-clock budget guard: track elapsed time inside the orchestrator, and once we're within (say) 30s of the function limit, abort remaining events, log them as `skipped_due_to_timeout`, and return 200 with `{processed, skipped}`. Needs the per-event chain to accept an `AbortSignal` so in-flight RPC/Discord calls also cancel. Out of scope for the integration PR.
-- [ ] **Nonce replay protection in `verifyQuickNodeSignature`** — the HMAC signature check validates `(secret, nonce, timestamp, body, signature)` and rejects timestamps outside a 5-minute window, but nothing stops the exact same authenticated request tuple from being replayed multiple times within that window. An in-path attacker (TLS-MITM or compromised intermediary) who captured one legitimate webhook could replay it to spam `#multisig-alerts` with duplicate posts until the timestamp window closes. Real fix: persist seen nonces in Firestore/Memorystore with a TTL ≥ the timestamp window, reject duplicates. Defer to a follow-up PR because (a) the threat model requires a TLS-in-path attacker which is narrow, (b) needs a new GCP dependency (Firestore or Redis), (c) the function is currently stateless and ephemeral instances complicate any in-memory-only solution.
