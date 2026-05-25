@@ -19,6 +19,7 @@ import {
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
+  fetchHeadUpdatedAt,
   parseArgs,
   renderSummary,
   repoFromPullRequestUrl,
@@ -1069,6 +1070,23 @@ test("watch JSON output is one compact JSON object per line", () => {
 
   assertEqual(output.split("\n").length, 2);
   assertDeepEqual(JSON.parse(output), summary);
+});
+
+test("uses head commit time before check observation time for freshness", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headCommittedAt: "2026-05-21T13:21:00Z",
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:21:00Z",
+  );
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headCommittedAt: null,
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:23:00Z",
+  );
 });
 
 test("rejects stale chatgpt-codex-connector reaction from before the head update", () => {

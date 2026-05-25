@@ -554,8 +554,16 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-function fetchHeadUpdatedAt({ observedAt }) {
-  return observedAt ?? null;
+function headCommitCommittedAt(pr) {
+  const commits = pr.commits ?? [];
+  const headCommit =
+    commits.find((commit) => commit.oid === pr.headRefOid) ??
+    commits[commits.length - 1];
+  return headCommit?.committedDate ?? null;
+}
+
+export function fetchHeadUpdatedAt({ headCommittedAt = null, observedAt }) {
+  return headCommittedAt ?? observedAt ?? null;
 }
 
 function fetchReviewThreads({ repo, number }) {
@@ -726,6 +734,7 @@ function fetchReadyState({ prArg, repoArg }) {
     headSha: pr.headRefOid,
   });
   const headUpdatedAt = fetchHeadUpdatedAt({
+    headCommittedAt: headCommitCommittedAt(pr),
     observedAt,
   });
   const annotatedPr = {
