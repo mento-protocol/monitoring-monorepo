@@ -8,11 +8,12 @@ vi.mock("@upstash/redis", () => {
   const hget = vi.fn();
   const hset = vi.fn();
   const hdel = vi.fn();
+  const evalMock = vi.fn();
   return {
     Redis: function MockRedis() {
-      return { hgetall, hget, hset, hdel };
+      return { hgetall, hget, hset, hdel, eval: evalMock };
     },
-    __mocks: { hgetall, hget, hset, hdel },
+    __mocks: { hgetall, hget, hset, hdel, evalMock },
   };
 });
 
@@ -25,6 +26,7 @@ import {
   upsertEntry,
   deleteLabel,
   importLabels,
+  importLabelsIfAbsent,
   upgradeEntry,
 } from "@/lib/address-labels";
 import * as upstash from "@upstash/redis";
@@ -36,6 +38,7 @@ const mocks = (
       hget: ReturnType<typeof vi.fn>;
       hset: ReturnType<typeof vi.fn>;
       hdel: ReturnType<typeof vi.fn>;
+      evalMock: ReturnType<typeof vi.fn>;
     };
   }
 ).__mocks;
@@ -188,6 +191,41 @@ describe("importLabels", () => {
   it("is a no-op when the batch is empty", async () => {
     await importLabels({});
     expect(mocks.hset).not.toHaveBeenCalled();
+  });
+});
+
+describe("importLabelsIfAbsent", () => {
+  it("inserts labels with an atomic HGET/HSET Lua script and returns written count", async () => {
+    mocks.evalMock.mockResolvedValue(1);
+
+    await expect(
+      importLabelsIfAbsent({
+        "0xAAA": {
+          name: "A",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+        "0xbbb": {
+          name: "B",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      }),
+    ).resolves.toBe(1);
+
+    expect(mocks.evalMock).toHaveBeenCalledTimes(1);
+    const [script, keys, argv] = mocks.evalMock.mock.calls[0]!;
+    expect(script).toContain("HGET");
+    expect(script).toContain("HSET");
+    expect(keys).toEqual(["labels"]);
+    expect(argv).toHaveLength(4);
+    expect(argv[0]).toBe("0xaaa");
+    expect(argv[2]).toBe("0xbbb");
+  });
+
+  it("is a no-op when the insert-only batch is empty", async () => {
+    await expect(importLabelsIfAbsent({})).resolves.toBe(0);
+    expect(mocks.evalMock).not.toHaveBeenCalled();
   });
 });
 

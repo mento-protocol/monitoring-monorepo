@@ -17,6 +17,16 @@ import { isValidAddress } from "@/lib/format";
 // (arkham) or causes UI confusion where the badge says "custom" but the
 // Tags column shows "minipay". Provenance lives on `source`, not tags.
 const RESERVED_SOURCE_TAGS = new Set<string>([ARKHAM_TAG, MINIPAY_SOURCE]);
+const MAX_JSON_BODY_BYTES = 64 * 1024;
+const MAX_RAW_TAGS = 100;
+
+type PutLabelInput = {
+  address: string;
+  name: string;
+  tags: string[];
+  notes: string | undefined;
+  isPublic: boolean;
+};
 
 export async function GET(): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -50,84 +60,22 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   const payload = await readJsonObject(req);
   if (payload instanceof NextResponse) return payload;
 
-  const { address, name, tags, notes, isPublic } = payload;
-
-  if (typeof address !== "string" || !isValidAddress(address)) {
-    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
-  }
-
-  const trimmedName = typeof name === "string" ? name.trim() : "";
-  const trimmedTags = Array.isArray(tags)
-    ? tags.flatMap((t) => {
-        if (typeof t !== "string") return [];
-        const trimmed = t.trim();
-        return trimmed ? [trimmed] : [];
-      })
-    : [];
-
-  // DoS guards: cap input sizes
-  if (trimmedName.length > 200) {
-    return NextResponse.json(
-      { error: "name must be 200 characters or fewer" },
-      { status: 400 },
-    );
-  }
-  const trimmedNotes =
-    typeof notes === "string" ? notes.trim() || undefined : undefined;
-  if (trimmedNotes && trimmedNotes.length > 500) {
-    return NextResponse.json(
-      { error: "notes must be 500 characters or fewer" },
-      { status: 400 },
-    );
-  }
-  const longTag = trimmedTags.find((t) => t.length > 50);
-  if (longTag) {
-    return NextResponse.json(
-      { error: "each tag must be 50 characters or fewer" },
-      { status: 400 },
-    );
-  }
-
-  // Deduplicate tags case-insensitively (preserve first-occurrence casing)
-  // and strip reserved server-provenance tags.
-  const seenTags = new Set<string>();
-  const deduplicatedTags = trimmedTags.filter((t) => {
-    const key = t.toLowerCase();
-    if (RESERVED_SOURCE_TAGS.has(key)) return false;
-    if (seenTags.has(key)) return false;
-    seenTags.add(key);
-    return true;
-  });
-
-  if (deduplicatedTags.length > 20) {
-    return NextResponse.json(
-      { error: "tags must have 20 items or fewer" },
-      { status: 400 },
-    );
-  }
-
-  // Relaxed validation: at least one of name or normalized user tags must be
-  // non-empty. Reserved source tags do not count as user-provided labels.
-  if (!trimmedName && deduplicatedTags.length === 0) {
-    return NextResponse.json(
-      { error: "At least one of name or tags must be provided" },
-      { status: 400 },
-    );
-  }
+  const input = normalizePutInput(payload);
+  if (input instanceof NextResponse) return input;
 
   try {
     // Read only the prior entry, not the entire hash — `getLabel` does an
     // HGET vs HGETALL. Source is preserved across edits so user changes
     // don't silently demote an Arkham/MiniPay entry to `custom` and drop
     // it out of future refresh runs.
-    const prior = await getLabel(address);
+    const prior = await getLabel(input.address);
     const preservedSource = derivePreservedSource(prior);
 
-    await upsertEntry(address, {
-      name: trimmedName,
-      tags: deduplicatedTags,
-      notes: trimmedNotes,
-      isPublic: isPublic === true,
+    await upsertEntry(input.address, {
+      name: input.name,
+      tags: input.tags,
+      notes: input.notes,
+      isPublic: input.isPublic,
       ...(preservedSource ? { source: preservedSource } : {}),
       // Preserve first-write timestamp; `upsertEntry` defaults to `now`
       // when undefined (new row).
@@ -137,6 +85,109 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     return serverError(err, "save");
   }
+}
+
+function normalizePutInput(
+  payload: Record<string, unknown>,
+): PutLabelInput | NextResponse {
+  const { address, name, tags, notes, isPublic } = payload;
+
+  if (typeof address !== "string" || !isValidAddress(address)) {
+    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+  }
+
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+
+  // DoS guards: cap input sizes.
+  if (trimmedName.length > 200) {
+    return NextResponse.json(
+      { error: "name must be 200 characters or fewer" },
+      { status: 400 },
+    );
+  }
+
+  const trimmedNotes =
+    typeof notes === "string" ? notes.trim() || undefined : undefined;
+  if (trimmedNotes && trimmedNotes.length > 500) {
+    return NextResponse.json(
+      { error: "notes must be 500 characters or fewer" },
+      { status: 400 },
+    );
+  }
+
+  const tagsResult = normalizeTags(tags);
+  if (!tagsResult.ok) return tagsResult.response;
+
+  // Relaxed validation: at least one of name or normalized user tags must be
+  // non-empty. Reserved source tags do not count as user-provided labels.
+  if (!trimmedName && tagsResult.value.length === 0) {
+    return NextResponse.json(
+      { error: "At least one of name or tags must be provided" },
+      { status: 400 },
+    );
+  }
+
+  return {
+    address,
+    name: trimmedName,
+    tags: tagsResult.value,
+    notes: trimmedNotes,
+    isPublic: isPublic === true,
+  };
+}
+
+function normalizeTags(
+  tags: unknown,
+): { ok: true; value: string[] } | { ok: false; response: NextResponse } {
+  if (Array.isArray(tags) && tags.length > MAX_RAW_TAGS) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "tags must have 100 raw items or fewer" },
+        { status: 400 },
+      ),
+    };
+  }
+
+  const trimmedTags = Array.isArray(tags)
+    ? tags.flatMap((tag) => {
+        if (typeof tag !== "string") return [];
+        const trimmed = tag.trim();
+        return trimmed ? [trimmed] : [];
+      })
+    : [];
+
+  const longTag = trimmedTags.find((tag) => tag.length > 50);
+  if (longTag) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "each tag must be 50 characters or fewer" },
+        { status: 400 },
+      ),
+    };
+  }
+
+  const seenTags = new Set<string>();
+  const deduplicatedTags = trimmedTags.filter((tag) => {
+    const key = tag.toLowerCase();
+    if (RESERVED_SOURCE_TAGS.has(key)) return false;
+    if (seenTags.has(key)) return false;
+    seenTags.add(key);
+    return true;
+  });
+
+  if (deduplicatedTags.length > 20) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "tags must have 20 items or fewer" },
+        { status: 400 },
+      ),
+    };
+  }
+
+  return { ok: true, value: deduplicatedTags };
 }
 
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
@@ -168,8 +219,26 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 async function readJsonObject(
   req: NextRequest,
 ): Promise<Record<string, unknown> | NextResponse> {
+  const contentLengthHeader = req.headers.get("content-length");
+  if (
+    contentLengthHeader !== null &&
+    Number(contentLengthHeader) > MAX_JSON_BODY_BYTES
+  ) {
+    return NextResponse.json(
+      { error: "Request body too large (max 64KB)" },
+      { status: 413 },
+    );
+  }
+
   try {
-    const body = await req.json();
+    const text = await req.text();
+    if (Buffer.byteLength(text, "utf8") > MAX_JSON_BODY_BYTES) {
+      return NextResponse.json(
+        { error: "Request body too large (max 64KB)" },
+        { status: 413 },
+      );
+    }
+    const body = JSON.parse(text) as unknown;
     const payload = asObjectBody(body);
     return (
       payload ??

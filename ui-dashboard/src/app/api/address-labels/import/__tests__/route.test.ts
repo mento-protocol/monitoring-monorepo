@@ -55,18 +55,18 @@ async function getImported(res: Response): Promise<ImportedCounts> {
   return json.imported ?? { addresses: 0 };
 }
 
-function jsonReq(body: unknown) {
+function jsonReq(body: unknown, contentType = "application/json") {
   return new NextRequest("http://localhost/api/address-labels/import", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": contentType },
     body: JSON.stringify(body),
   });
 }
 
-function csvReq(csvText: string) {
+function csvReq(csvText: string, contentType = "text/csv") {
   return new NextRequest("http://localhost/api/address-labels/import", {
     method: "POST",
-    headers: { "Content-Type": "text/csv" },
+    headers: { "Content-Type": contentType },
     body: csvText,
   });
 }
@@ -469,6 +469,22 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(400);
   });
 
+  it("treats JSON media types case-insensitively without CSV sniffing", async () => {
+    const res = await POST(
+      jsonReq("address,name\nnot-json,Alice", "Application/JSON"),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  it("does not treat invalid JSON media-type prefixes as JSON", async () => {
+    const csv = `address,name,tags\n${validAddress},Alice,whale`;
+    const res = await POST(csvReq(csv, "application/jsonfoo"));
+    expect(res.status).toBe(200);
+    const counts = await getImported(res);
+    expect(counts.addresses).toBe(1);
+  });
+
   it("strips arkham provenance from user imports (legacy tag)", async () => {
     const res = await POST(
       jsonReq({
@@ -564,6 +580,14 @@ describe("POST /api/address-labels/import — CSV", () => {
     expect(counts.addresses).toBe(1);
     const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(arg[validAddress.toLowerCase()].tags).toEqual(["whale", "defi"]);
+  });
+
+  it("treats CSV media types case-insensitively", async () => {
+    const csv = `address,name,tags\n${validAddress},Alice,whale`;
+    const res = await POST(csvReq(csv, "Text/CSV; Charset=UTF-8"));
+    expect(res.status).toBe(200);
+    const counts = await getImported(res);
+    expect(counts.addresses).toBe(1);
   });
 
   it("rejects oversized CSV without a Content-Length header", async () => {

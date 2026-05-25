@@ -16,7 +16,6 @@ locals {
     "${path.module}/package.json",
     "${path.module}/package-lock.json",
     "${path.module}/tsconfig.json",
-    "${path.module}/safe-abi.json",
   ]
   # Include multisig config in the hash so adding/removing a Safe address
   # forces a full Cloud Function redeploy with the new MULTISIG_CONFIG env
@@ -77,11 +76,11 @@ locals {
   all_env_vars = merge(
     {
       # JSON-encoded multisig config for easy lookup in the function
-      MULTISIG_CONFIG = jsonencode(local.multisig_config_for_json)
+      MULTISIG_CONFIG         = jsonencode(local.multisig_config_for_json)
+      QUICKNODE_REPLAY_BUCKET = google_storage_bucket.webhook_replay_nonces.name
       # Comma-separated list of supported chains
       SUPPORTED_CHAINS = join(",", local.chains)
     },
     local.multisig_env_vars
   )
 }
-

@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn(),
-  importLabels: vi.fn().mockResolvedValue(undefined),
+  importLabelsIfAbsent: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("@/lib/mento-address-discovery", () => ({
@@ -28,15 +28,17 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 import { GET } from "../tag/route";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getLabels, importLabelsIfAbsent } from "@/lib/address-labels";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { intersectMiniPay, getMiniPaySetSize } from "@/lib/minipay";
+import * as Sentry from "@sentry/nextjs";
 
 const mockGetLabels = vi.mocked(getLabels);
-const mockImportLabels = vi.mocked(importLabels);
+const mockImportLabelsIfAbsent = vi.mocked(importLabelsIfAbsent);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
 const mockIntersect = vi.mocked(intersectMiniPay);
 const mockSetSize = vi.mocked(getMiniPaySetSize);
+const mockWithMonitor = vi.mocked(Sentry.withMonitor);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -45,6 +47,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.test/graphql");
   vi.stubEnv("NODE_ENV", "production");
   mockSetSize.mockResolvedValue(1_000_000);
+  mockImportLabelsIfAbsent.mockResolvedValue(0);
 });
 
 function makeReq(
@@ -98,10 +101,23 @@ describe("GET /api/minipay/tag — filtering", () => {
     // intersect should be called with only 0xc — others were filtered out
     expect(mockIntersect).toHaveBeenCalledWith(["0xc"]);
 
-    // import should write only 0xc, with source=minipay (single-arg signature)
-    expect(mockImportLabels).toHaveBeenCalledWith({
+    // Insert-only import should write only 0xc, with source=minipay.
+    expect(mockImportLabelsIfAbsent).toHaveBeenCalledWith({
       "0xc": expect.objectContaining({ source: "minipay" }),
     });
+  });
+
+  it("reports the insert-only write count to surface labels added during the scan", async () => {
+    mockDiscover.mockResolvedValue({ addresses: ["0xa"], perEntity: [] });
+    mockGetLabels.mockResolvedValue({});
+    mockIntersect.mockResolvedValue(["0xa"]);
+    mockImportLabelsIfAbsent.mockResolvedValue(0);
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { matched: number; written: number };
+    expect(body.matched).toBe(1);
+    expect(body.written).toBe(0);
   });
 
   it("dryRun returns the would-write addresses without persisting", async () => {
@@ -126,7 +142,7 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(body.matched).toBe(2);
     expect(body.written).toBe(0);
     expect(body.wouldWrite).toEqual(["0xa", "0xc"]);
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
   });
 
   it("non-dryRun does not include wouldWrite (keeps payload small)", async () => {
@@ -138,6 +154,20 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { wouldWrite?: string[] };
     expect(body.wouldWrite).toBeUndefined();
+  });
+
+  it("keeps Sentry maxRuntime aligned with the route execution budget", async () => {
+    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
+    mockGetLabels.mockResolvedValue({});
+    mockIntersect.mockResolvedValue([]);
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    expect(res.status).toBe(200);
+    expect(mockWithMonitor).toHaveBeenCalledWith(
+      "minipay-tag",
+      expect.any(Function),
+      expect.objectContaining({ maxRuntime: 14 }),
+    );
   });
 
   it("returns clean no-op when MiniPay set is empty AND skips expensive upstream fetches", async () => {
@@ -158,6 +188,6 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(mockDiscover).not.toHaveBeenCalled();
     expect(mockGetLabels).not.toHaveBeenCalled();
     expect(mockIntersect).not.toHaveBeenCalled();
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
   });
 });

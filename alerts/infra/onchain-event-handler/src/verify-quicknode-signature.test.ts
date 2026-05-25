@@ -212,12 +212,7 @@ describe("verifyQuickNodeSignature", () => {
     expect(result).toBe(false);
   });
 
-  it("replay: same timestamp+nonce+signature can be verified twice (known limitation: no nonce store)", () => {
-    // The current implementation does NOT track previously-seen nonces, so a
-    // captured (timestamp, nonce, signature) tuple is replayable within the
-    // 5-minute window. This test pins that as KNOWN behavior — if a nonce
-    // store is added, this test should be updated to expect the second call
-    // to return false.
+  it("keeps cryptographic verification stateless; replay protection is enforced by request validation", () => {
     const anchorSec = 1_700_000_000;
     vi.setSystemTime(anchorSec * 1000);
 

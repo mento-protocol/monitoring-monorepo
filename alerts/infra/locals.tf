@@ -34,9 +34,5 @@ locals {
     for chain, ms in local.multisigs_by_chain :
     chain => one(distinct([for k, v in ms : v.quicknode_network_name]))
   }
-
-  # Decoded Safe ABI, read once at the root and passed to consumers as a
-  # variable so submodules don't reach into each other's source trees.
-  safe_abi = jsondecode(file("${path.module}/onchain-event-handler/safe-abi.json"))
 }
 

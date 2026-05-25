@@ -11,7 +11,7 @@
  *  deadline below the refresh interval — otherwise a wedged route can
  *  stall the loop and keep the request alive past the next refresh tick.
  *  Callers can override per-call via `opts.timeoutMs`. */
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 25_000;
 
 export async function fetchJsonOrThrow<T>(
   url: string,

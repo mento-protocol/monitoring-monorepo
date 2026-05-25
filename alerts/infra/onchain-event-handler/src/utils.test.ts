@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { privateKeyToAccount } from "viem/accounts";
 
 // Mock config BEFORE importing utils so constants.ts builds
 // MULTISIGS_BY_CHAIN from this fixture. Three multisigs:
@@ -225,5 +226,89 @@ describe("decodeEventData - SafeMultiSigTransaction dispatch", () => {
     );
 
     expect(fields).toEqual([]);
+  });
+});
+
+describe("extractSignersFromSignatures", () => {
+  let utils: typeof import("./utils");
+  const safeTxHash =
+    "0x1111111111111111111111111111111111111111111111111111111111111111";
+  const contractSigner = "0x1234567890abcdef1234567890abcdef12345678";
+  const approvedHashSigner = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+
+  beforeEach(async () => {
+    utils = await import("./utils");
+  });
+
+  function paddedAddress(address: string): string {
+    return `${"0".repeat(24)}${address.slice(2).toLowerCase()}`;
+  }
+
+  function uint256Word(value: bigint): string {
+    return value.toString(16).padStart(64, "0");
+  }
+
+  it("extracts v=0 contract signature owners from r even when s is a nonzero dynamic-data offset", async () => {
+    const signature =
+      paddedAddress(contractSigner) + uint256Word(65n) + "00" + "ff".repeat(65);
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${signature}`, safeTxHash),
+    ).resolves.toEqual([contractSigner]);
+  });
+
+  it("does not parse contract-signature dynamic payload bytes as additional static signatures", async () => {
+    const dynamicPayloadThatLooksLikeASignature =
+      paddedAddress(approvedHashSigner) + uint256Word(0n) + "01";
+    const signature =
+      paddedAddress(contractSigner) +
+      uint256Word(65n) +
+      "00" +
+      dynamicPayloadThatLooksLikeASignature;
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${signature}`, safeTxHash),
+    ).resolves.toEqual([contractSigner]);
+  });
+
+  it("ignores oversized contract-signature dynamic offsets without precision loss", async () => {
+    const hugeOffset = (1n << 240n) + 65n;
+    const dynamicPayloadThatLooksLikeASignature =
+      paddedAddress(approvedHashSigner) + uint256Word(0n) + "01";
+    const signature =
+      paddedAddress(contractSigner) +
+      uint256Word(hugeOffset) +
+      "00" +
+      dynamicPayloadThatLooksLikeASignature;
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${signature}`, safeTxHash),
+    ).resolves.toEqual([contractSigner, approvedHashSigner]);
+  });
+
+  it("extracts v=1 approved-hash signature owners from r", async () => {
+    const signature =
+      paddedAddress(approvedHashSigner) + uint256Word(0n) + "01";
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${signature}`, safeTxHash),
+    ).resolves.toEqual([approvedHashSigner]);
+  });
+
+  it("recovers Safe eth_sign signatures encoded with v greater than 30", async () => {
+    const account = privateKeyToAccount(
+      "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+    const signature = await account.signMessage({
+      message: { raw: safeTxHash },
+    });
+    const safeEthSignV = (Number.parseInt(signature.slice(-2), 16) + 4)
+      .toString(16)
+      .padStart(2, "0");
+    const safeSignature = `${signature.slice(2, -2)}${safeEthSignV}`;
+
+    await expect(
+      utils.extractSignersFromSignatures(`0x${safeSignature}`, safeTxHash),
+    ).resolves.toEqual([account.address.toLowerCase()]);
   });
 });

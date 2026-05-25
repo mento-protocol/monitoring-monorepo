@@ -9,6 +9,7 @@ vi.mock("@upstash/redis", () => {
   Redis.prototype.smismember = vi.fn();
   Redis.prototype.get = vi.fn();
   Redis.prototype.set = vi.fn();
+  Redis.prototype.eval = vi.fn();
   return { Redis };
 });
 
@@ -34,6 +35,7 @@ const scardMock = Redis.prototype.scard as ReturnType<typeof vi.fn>;
 const smismemberMock = Redis.prototype.smismember as ReturnType<typeof vi.fn>;
 const getMock = Redis.prototype.get as ReturnType<typeof vi.fn>;
 const setMock = Redis.prototype.set as ReturnType<typeof vi.fn>;
+const evalMock = Redis.prototype.eval as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -42,6 +44,7 @@ beforeEach(() => {
   smismemberMock.mockReset();
   getMock.mockReset();
   setMock.mockReset();
+  evalMock.mockReset();
 });
 
 describe("addToMiniPaySet", () => {
@@ -164,14 +167,17 @@ describe("cursor helpers", () => {
   });
 
   it("advanceLastSyncedBlock writes only when the stored cursor is lower", async () => {
-    getMock.mockResolvedValueOnce("100");
-    setMock.mockResolvedValue("OK");
+    evalMock.mockResolvedValue(1);
     await expect(advanceLastSyncedBlock(BigInt(200))).resolves.toBe(true);
-    expect(setMock).toHaveBeenCalledWith("minipay:lastBlock", "200");
+    expect(evalMock).toHaveBeenCalledWith(
+      expect.stringContaining('redis.call("SET", KEYS[1], ARGV[1])'),
+      ["minipay:lastBlock"],
+      ["200"],
+    );
   });
 
   it("advanceLastSyncedBlock skips stale candidates", async () => {
-    getMock.mockResolvedValueOnce("300");
+    evalMock.mockResolvedValue(0);
     await expect(advanceLastSyncedBlock(BigInt(200))).resolves.toBe(false);
     expect(setMock).not.toHaveBeenCalled();
   });

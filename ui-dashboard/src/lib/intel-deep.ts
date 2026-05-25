@@ -43,11 +43,7 @@ export type IntelDeepRecord = {
 export async function getIntelDeep(
   address: string,
 ): Promise<IntelDeepRecord | null> {
-  return hgetWithLegacy<IntelDeepRecord>(
-    HASH_KEY,
-    LEGACY_HASH_KEY,
-    address.toLowerCase(),
-  );
+  return hgetWithLegacy<IntelDeepRecord>(HASH_KEY, LEGACY_HASH_KEY, address);
 }
 
 export async function getAllIntelDeep(): Promise<

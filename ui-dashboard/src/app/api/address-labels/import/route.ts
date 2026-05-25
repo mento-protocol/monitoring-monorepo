@@ -47,12 +47,13 @@ async function dispatchImportPayload(
   contentType: string,
   importerEmail: string,
 ): Promise<NextResponse> {
-  if (contentType.startsWith("text/csv")) {
+  const mediaType = normalizeMediaType(contentType);
+  if (mediaType === "text/csv") {
     const text = await readLimitedText(req);
     return text instanceof NextResponse ? text : handleCsvText(text);
   }
 
-  const parsed = await parseSniffedPayload(req, contentType);
+  const parsed = await parseSniffedPayload(req, mediaType);
   if (parsed instanceof NextResponse) return parsed;
   if (parsed.kind === "csv") return handleCsvText(parsed.text);
   return dispatchJsonImport(parsed.body, importerEmail);
@@ -60,7 +61,7 @@ async function dispatchImportPayload(
 
 async function parseSniffedPayload(
   req: NextRequest,
-  contentType: string,
+  mediaType: string,
 ): Promise<
   NextResponse | { kind: "csv"; text: string } | { kind: "json"; body: unknown }
 > {
@@ -69,7 +70,7 @@ async function parseSniffedPayload(
 
   const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
   const trimmed = normalized.trimStart();
-  const isJsonContentType = contentType.startsWith("application/json");
+  const isJsonContentType = mediaType === "application/json";
   if (
     !isJsonContentType &&
     trimmed &&
@@ -85,6 +86,10 @@ async function parseSniffedPayload(
   } catch {
     return invalidJsonResponse();
   }
+}
+
+function normalizeMediaType(contentType: string): string {
+  return contentType.split(";", 1)[0].trim().toLowerCase();
 }
 
 function dispatchJsonImport(

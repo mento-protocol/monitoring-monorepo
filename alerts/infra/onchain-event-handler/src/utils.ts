@@ -2,7 +2,7 @@
  * Utility functions for webhook processing
  */
 
-import { createPublicClient, http, recoverAddress } from "viem";
+import { createPublicClient, hashMessage, http, recoverAddress } from "viem";
 import { celo, mainnet } from "viem/chains";
 import config from "./config";
 import {
@@ -22,6 +22,9 @@ const VIEM_CHAINS: Record<string, typeof celo | typeof mainnet> = {
   celo,
   ethereum: mainnet,
 };
+const MAX_SAFE_DYNAMIC_OFFSET_WORD = BigInt(
+  Math.floor(Number.MAX_SAFE_INTEGER / 2),
+);
 
 /**
  * Get multisig key from contract address and chain
@@ -199,15 +202,13 @@ export function getWebhookUrl(
 }
 
 /**
- * Extract signer addresses from Safe transaction signatures
- * Safe signatures can be:
- * - Standard ECDSA signatures (65 bytes: r, s, v) where v is 27 or 28
- * - Contract signatures (v = 0 or 1, followed by 32 bytes address + 32 bytes data = 129 bytes total)
+ * Extract signer addresses from Safe transaction signatures.
  *
- * Safe contract signature format:
- * - v = 0 or 1 (not 27/28) indicates contract signature
- * - Next 32 bytes: address (right-padded, address in last 20 bytes)
- * - Next 32 bytes: signature data
+ * Safe packs each static signature entry as r(32) + s(32) + v(1). For
+ * contract signatures (v=0) and approved-hash signatures (v=1), the owner is
+ * encoded in r. Contract signatures put a dynamic-data offset in s; that
+ * dynamic payload is not another static signature and must not be parsed as
+ * one. eth_sign signatures use v > 30 and recover against the EIP-191 hash.
  *
  * @param signatures - Hex string of concatenated signatures
  * @param txHash - Safe transaction hash (EIP-712 hash) that was signed
@@ -226,68 +227,64 @@ export async function extractSignersFromSignatures(
       : signatures;
 
     let i = 0;
-    while (i < sigBytes.length) {
+    let staticSignaturesEnd = sigBytes.length;
+    while (i < staticSignaturesEnd) {
       // Check if we have at least 65 bytes (130 hex chars) for a signature
-      if (i + 130 > sigBytes.length) break;
+      if (i + 130 > staticSignaturesEnd) break;
 
       const sigHex = sigBytes.slice(i, i + 130);
       const r = ("0x" + sigHex.slice(0, 64)) as `0x${string}`;
       const s = ("0x" + sigHex.slice(64, 128)) as `0x${string}`;
       const vByte = parseInt(sigHex.slice(128, 130), 16);
-
-      // Check if r contains an address (contract signature variant where address is in r)
-      // This happens when r starts with many zeros and contains an address, and s is all zeros
-      // This check must come BEFORE the standard contract signature check
       const rHex = sigHex.slice(0, 64);
       const sHex = sigHex.slice(64, 128);
-      // Check if r has 24 leading zeros (12 hex chars) followed by an address, and s is all zeros
-      if (
-        rHex.startsWith("000000000000000000000000") &&
-        sHex ===
-          "0000000000000000000000000000000000000000000000000000000000000000"
-      ) {
-        // Extract address from r (last 40 hex chars)
-        const address = "0x" + rHex.slice(24);
-        if (address !== "0x0000000000000000000000000000000000000000") {
-          signers.push(address.toLowerCase());
+
+      if (vByte === 0 || vByte === 1) {
+        const address = addressFromPaddedWord(rHex);
+        if (address) {
+          signers.push(address);
         }
-        // Move to next signature
+
+        if (vByte === 0) {
+          const dynamicOffsetWord = BigInt(`0x${sHex}`);
+          if (dynamicOffsetWord <= MAX_SAFE_DYNAMIC_OFFSET_WORD) {
+            const dynamicOffset = Number(dynamicOffsetWord) * 2;
+            if (dynamicOffset >= i + 130 && dynamicOffset <= sigBytes.length) {
+              staticSignaturesEnd = Math.min(
+                staticSignaturesEnd,
+                dynamicOffset,
+              );
+            }
+          }
+        }
+
         i += 130;
         continue;
       }
 
-      // Check if this is a contract signature (v = 0 or 1, not 27/28)
-      // Contract signatures are 129 bytes: 65 bytes (r, s, v) + 32 bytes (address) + 32 bytes (data)
-      if ((vByte === 0 || vByte === 1) && i + 258 <= sigBytes.length) {
-        // Contract signature: extract the address directly
-        // Address is in bytes 65-96 (32 bytes), right-padded, address in last 20 bytes
-        const addressHex = sigBytes.slice(i + 130, i + 194); // 64 hex chars = 32 bytes
-        // Address is in the last 40 hex chars (20 bytes)
-        const address = "0x" + addressHex.slice(24); // Extract last 40 chars (20 bytes)
-        if (address !== "0x0000000000000000000000000000000000000000") {
-          signers.push(address.toLowerCase());
-        }
-        // Skip the full contract signature: 65 bytes (sig) + 32 bytes (addr) + 32 bytes (data) = 129 bytes = 258 hex chars
-        i += 258;
-        continue;
-      }
-
-      // Standard ECDSA signature recovery (v = 27 or 28)
-      if (vByte === 27 || vByte === 28) {
+      // Standard ECDSA signature recovery (v = 27 or 28) or eth_sign
+      // recovery (v > 30, stored as original v + 4 by Safe).
+      if (vByte === 27 || vByte === 28 || vByte > 30) {
         try {
-          // viem's recoverAddress expects v as 0 or 1 (recovery id)
-          const v: 0 | 1 = vByte === 27 ? 0 : 1;
+          const normalizedV = vByte > 30 ? vByte - 4 : vByte;
+          if (normalizedV !== 27 && normalizedV !== 28) {
+            throw new Error(`Unsupported Safe signature v=${vByte}`);
+          }
+
+          // viem's recoverAddress expects v as 0 or 1 (recovery id).
+          const v: 0 | 1 = normalizedV === 27 ? 0 : 1;
 
           // Construct signature as hex string: r + s + v (v as 0 or 1)
           const signatureHex = (r +
             s.slice(2) +
             v.toString(16).padStart(2, "0")) as `0x${string}`;
 
-          // Safe's txHash is the EIP-712 hash of the transaction
-          // Safe signs the EIP-712 hash directly (not with EIP-191 encoding)
-          // The signature is over the EIP-712 hash itself
+          const hash =
+            vByte > 30
+              ? hashMessage({ raw: txHash as `0x${string}` })
+              : (txHash as `0x${string}`);
           const recoveredAddress = await recoverAddress({
-            hash: txHash as `0x${string}`,
+            hash,
             signature: signatureHex,
           });
 
@@ -316,6 +313,17 @@ export async function extractSignersFromSignatures(
   }
 
   return signers;
+}
+
+function addressFromPaddedWord(wordHex: string): string | null {
+  if (!wordHex.startsWith("000000000000000000000000")) {
+    return null;
+  }
+
+  const address = `0x${wordHex.slice(24)}`.toLowerCase();
+  return address === "0x0000000000000000000000000000000000000000"
+    ? null
+    : address;
 }
 
 /**

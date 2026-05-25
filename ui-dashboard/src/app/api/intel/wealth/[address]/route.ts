@@ -8,22 +8,22 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ address: string }> },
 ): Promise<NextResponse> {
-  const session = await getAuthSession();
-  const email = session?.user?.email?.toLowerCase();
-  if (!email?.endsWith(ALLOWED_DOMAIN)) {
-    return NextResponse.json(
-      { error: "Authentication required" },
-      { status: 401 },
-    );
-  }
-
-  const { address } = await params;
-
-  if (!isValidAddress(address)) {
-    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
-  }
-
   try {
+    const session = await getAuthSession();
+    const email = session?.user?.email?.toLowerCase();
+    if (!email?.endsWith(ALLOWED_DOMAIN)) {
+      return NextResponse.json(
+        { error: "Authentication required" },
+        { status: 401 },
+      );
+    }
+
+    const { address } = await params;
+
+    if (!isValidAddress(address)) {
+      return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+    }
+
     const record = await getIntelWealth(address);
     if (record === null) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
