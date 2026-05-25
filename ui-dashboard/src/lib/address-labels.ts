@@ -87,3 +87,37 @@ export async function importLabels(
   const fields = encodeLabelFields(entries);
   await redis.hset(LABELS_KEY, fields);
 }
+
+const HSET_IF_ABSENT_SCRIPT = `
+local written = 0
+for i = 1, #ARGV, 2 do
+  local field = ARGV[i]
+  local value = ARGV[i + 1]
+  if redis.call("HGET", KEYS[1], field) == false then
+    redis.call("HSET", KEYS[1], field, value)
+    written = written + 1
+  end
+end
+return written
+`;
+
+/**
+ * Insert labels only for addresses that are still unlabeled at write time.
+ * Used by background provenance jobs where the pre-filter read can race with
+ * a user/manual label write.
+ */
+export async function importLabelsIfAbsent(
+  labels: Record<string, AddressEntry>,
+): Promise<number> {
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return 0;
+
+  const redis = getRedis();
+  const fields = encodeLabelFields(entries);
+  const argv = Object.entries(fields).flatMap(([field, value]) => [
+    field,
+    value,
+  ]);
+  const written = await redis.eval(HSET_IF_ABSENT_SCRIPT, [LABELS_KEY], argv);
+  return Number(written);
+}

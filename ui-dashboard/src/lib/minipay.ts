@@ -60,6 +60,15 @@ function allShardKeys(): string[] {
   return SHARD_NIBBLES.split("").map((n) => USERS_KEY_PREFIX + n);
 }
 const LAST_BLOCK_KEY = "minipay:lastBlock";
+const ADVANCE_LAST_BLOCK_SCRIPT = `
+local current = redis.call("GET", KEYS[1])
+local candidate = tonumber(ARGV[1])
+if current ~= false and tonumber(current) >= candidate then
+  return 0
+end
+redis.call("SET", KEYS[1], ARGV[1])
+return 1
+`;
 
 // Redis client — same lazy-init pattern as `address-labels.ts:46-55`.
 function getRedis(): Redis {
@@ -371,10 +380,12 @@ export async function setLastSyncedBlock(block: bigint): Promise<void> {
 }
 
 export async function advanceLastSyncedBlock(block: bigint): Promise<boolean> {
-  const current = await getLastSyncedBlock();
-  if (current >= block) return false;
-  await setLastSyncedBlock(block);
-  return true;
+  const advanced = await getRedis().eval(
+    ADVANCE_LAST_BLOCK_SCRIPT,
+    [LAST_BLOCK_KEY],
+    [block.toString()],
+  );
+  return Number(advanced) === 1;
 }
 
 // ── Entry shape ──────────────────────────────────────────────────────────────
