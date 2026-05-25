@@ -98,7 +98,10 @@ export async function GET(request: NextRequest) {
   } catch {
     return badRequest("Wormholescan returned an invalid response.", 502);
   }
-  const operations = body.operations ?? [];
+  const operations = parseOperations(body);
+  if (!operations) {
+    return badRequest("Wormholescan returned an invalid response.", 502);
+  }
 
   const vaaSelection = getSingleVaaRaw(operations);
   if (!vaaSelection.ok) return vaaSelection.response;
@@ -174,4 +177,25 @@ function getSingleVaaRaw(
     };
   }
   return { ok: true, vaaRaw };
+}
+
+function parseOperations(
+  body: WormholeOperationResponse,
+): WormholeOperation[] | null {
+  if (!isRecord(body)) return null;
+  if (body.operations === undefined) return [];
+  if (!Array.isArray(body.operations)) return null;
+
+  const operations: WormholeOperation[] = [];
+  for (const operation of body.operations) {
+    if (!isRecord(operation)) return null;
+    if (operation.vaa !== undefined && !isRecord(operation.vaa)) return null;
+    operations.push(operation as WormholeOperation);
+  }
+
+  return operations;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
