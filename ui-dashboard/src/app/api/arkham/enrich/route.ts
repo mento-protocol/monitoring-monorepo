@@ -27,6 +27,7 @@ export const maxDuration = 800;
 // gets the same Binance entity attribution Arkham assigns it on Ethereum/BSC.
 const CELO_CHAIN_ID = NETWORKS["celo-mainnet"].chainId;
 const DEFAULT_MAX_ADDRESSES = 10_000;
+const LABEL_READ_CONCURRENCY = 16;
 
 type EnrichMode = "new" | "refresh" | "dryRun";
 
@@ -47,11 +48,14 @@ type EnrichResponse = {
 };
 
 type EnrichWriteSet = Record<string, NonNullable<EnrichmentResult["entry"]>>;
-type EnrichWriteCandidate = {
-  address?: string;
-  entry?: NonNullable<EnrichmentResult["entry"]>;
-  error?: string;
-};
+type EnrichWriteCandidate =
+  | {
+      status: "write";
+      address: string;
+      entry: NonNullable<EnrichmentResult["entry"]>;
+    }
+  | { status: "skip" }
+  | { status: "error"; error: string };
 
 function parseMode(raw: string | null): EnrichMode {
   if (raw === "refresh" || raw === "dryRun") return raw;
@@ -72,41 +76,88 @@ async function buildLabelWrites(
   mode: EnrichMode,
 ): Promise<{ toWrite: EnrichWriteSet; errors: string[] }> {
   const toWrite: EnrichWriteSet = {};
-  const candidates = await Promise.all(
-    results.map((result) => buildWriteCandidate(result, mode)),
+  const candidates = await runWithConcurrency(
+    results,
+    LABEL_READ_CONCURRENCY,
+    (result) => buildWriteCandidate(result, mode),
   );
   const errors = candidates.flatMap((candidate) =>
-    candidate.error ? [candidate.error] : [],
+    candidate.status === "error" ? [candidate.error] : [],
   );
   for (const candidate of candidates) {
-    if (candidate.address && candidate.entry) {
+    if (candidate.status === "write") {
       toWrite[candidate.address] = candidate.entry;
     }
   }
   return { toWrite, errors };
 }
 
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  const runNext = (): Promise<void> => {
+    const index = nextIndex;
+    nextIndex += 1;
+    if (index >= items.length) return Promise.resolve();
+
+    const item = items[index];
+    if (item === undefined) return runNext();
+
+    return fn(item).then((result) => {
+      results[index] = result;
+      return runNext();
+    });
+  };
+
+  const workers = Array.from({ length: workerCount }, runNext);
+
+  await Promise.all(workers);
+  return results;
+}
+
 async function buildWriteCandidate(
   result: EnrichmentResult,
   mode: EnrichMode,
 ): Promise<EnrichWriteCandidate> {
-  if (result.error) return { error: `${result.address}: ${result.error}` };
-  if (!result.entry) return {};
+  if (result.error) {
+    return { status: "error", error: `${result.address}: ${result.error}` };
+  }
+  if (!result.entry) return { status: "skip" };
   if (mode === "dryRun") {
-    return { address: result.address, entry: result.entry };
+    return { status: "write", address: result.address, entry: result.entry };
   }
 
-  const latest = await getLabel(result.address);
+  let latest: Awaited<ReturnType<typeof getLabel>>;
+  try {
+    latest = await getLabel(result.address);
+  } catch (err) {
+    return {
+      status: "error",
+      error: `${result.address}: getLabel failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+
   if (mode === "refresh") {
-    if (!latest || !isArkhamSourced(latest)) return {};
+    if (!latest || !isArkhamSourced(latest)) return { status: "skip" };
     // Preserve edits made after the initial candidate snapshot but before
     // this long-running Arkham batch finished.
     return {
+      status: "write",
       address: result.address,
       entry: mergeRefreshEntry(latest, result.entry),
     };
   }
-  return latest ? {} : { address: result.address, entry: result.entry };
+  return latest
+    ? { status: "skip" }
+    : { status: "write", address: result.address, entry: result.entry };
 }
 
 /**

@@ -559,4 +559,94 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       }),
     );
   });
+
+  it("reports getLabel failures per address without failing the run", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xa", "0xb"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(emptyLabels());
+    mockEnrichBatch.mockResolvedValue([
+      {
+        address: "0xa",
+        entry: {
+          name: "A",
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+      {
+        address: "0xb",
+        entry: {
+          name: "B",
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+    ]);
+    mockGetLabel.mockImplementation(async (address) => {
+      if (address === "0xa") throw new Error("redis read failed");
+      return null;
+    });
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.errors).toBe(1);
+    expect(body.enriched).toBe(1);
+    expect(body.skipped).toBe(0);
+    expect(body.sampleErrors).toEqual([
+      "0xa: getLabel failed: redis read failed",
+    ]);
+    expect(mockImportLabels).toHaveBeenCalledWith({
+      "0xb": expect.objectContaining({ name: "B", source: "arkham" }),
+    });
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "[arkham/enrich] 1 errors during batch",
+      expect.objectContaining({
+        tags: { route: "arkham/enrich", mode: "new" },
+        level: "warning",
+      }),
+    );
+  });
+
+  it("bounds late getLabel reads while building the write set", async () => {
+    const addresses = Array.from({ length: 33 }, (_, index) => `0x${index}`);
+    mockDiscover.mockResolvedValue({
+      addresses,
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(emptyLabels());
+    mockEnrichBatch.mockResolvedValue(
+      addresses.map((address) => ({
+        address,
+        entry: {
+          name: address,
+          tags: [],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      })),
+    );
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    mockGetLabel.mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return null;
+    });
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+
+    expect(res.status).toBe(200);
+    expect(mockGetLabel).toHaveBeenCalledTimes(addresses.length);
+    expect(maxInFlight).toBeLessThan(addresses.length);
+    expect(maxInFlight).toBeLessThanOrEqual(16);
+  });
 });
