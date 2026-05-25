@@ -613,7 +613,10 @@ describe("Bridge-flows handlers — MessageAttestedTo interaction", () => {
       "status promotes from PENDING to ATTESTED",
     );
 
-    const attestationId = `${id}-${attesterAddr}-0`;
+    // BridgeAttestation.id includes event.chainId (sec-review f-008): Celo
+    // and Monad share identical transceiver addresses, so the chain
+    // disambiguates same-digest/same-transceiver attestations across chains.
+    const attestationId = `${id}-${e.chainId}-${attesterAddr}-0`;
     const attestation = mockDb.entities.BridgeAttestation.get(attestationId);
     assert.ok(attestation, "BridgeAttestation row written");
     assert.equal(attestation!.transferId, id);

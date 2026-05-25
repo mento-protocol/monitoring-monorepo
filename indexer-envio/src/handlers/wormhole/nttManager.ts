@@ -427,12 +427,24 @@ indexer.onEvent(
     // the walk when the detail row already carries `transceiverDigest` —
     // that's the happy-path signal MessageAttestedTo ran — otherwise (rare:
     // HyperSync drops the attest log, historical backfills) drain here too.
+    //
+    // Caveat (sec-review 2026-05-22 f-009, codex-validated): the fallback
+    // drain has NO transceiver filter, so in a multi-NTT-inbound same-tx
+    // the nearest unrelated scratch row gets paired and source identity
+    // is mis-stamped onto this transfer. Emit a structured warn whenever
+    // this fallback path fires so the alert pipeline catches the cases.
+    // Real fix (require positive transceiver match via peer registry) is
+    // a follow-up PR.
     const priorDetail = await (
       context as HandlerContext
     ).WormholeTransferDetail.get(id);
-    const destPending = priorDetail?.transceiverDigest
-      ? undefined
-      : await drainDestPending(context as HandlerContext, event);
+    let destPending = undefined;
+    if (!priorDetail?.transceiverDigest) {
+      context.log.warn(
+        `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} — MessageAttestedTo missing; draining scratch without transceiver filter (may mis-attribute source identity in multi-message tx, see sec-review f-009)`,
+      );
+      destPending = await drainDestPending(context as HandlerContext, event);
+    }
     const detailDelta: WormholeDetailDelta = {};
     applyDestPendingToDelta(destPending, priorTransfer, delta, detailDelta);
 
@@ -529,8 +541,15 @@ indexer.onEvent(
     const id = buildTransferId(PROVIDER, p.digest);
     const attesterIdx = Number(p.index);
 
+    // BridgeAttestation.id includes event.chainId because Celo + Monad share
+    // identical NTT transceiver addresses (deterministic deploy — see
+    // `nttAddresses.json`). Without the chain component, two MessageAttestedTo
+    // events with the same digest/transceiver/index but different chainId
+    // collide and silently overwrite. sec-review 2026-05-22 f-008,
+    // codex-validated. Re-sync required: existing rows under the old id format
+    // are orphaned after this change.
     const attestation: BridgeAttestation = {
-      id: `${id}-${p.transceiver.toLowerCase()}-${attesterIdx}`,
+      id: `${id}-${event.chainId}-${p.transceiver.toLowerCase()}-${attesterIdx}`,
       transferId: id,
       provider: PROVIDER,
       attester: p.transceiver.toLowerCase(),
