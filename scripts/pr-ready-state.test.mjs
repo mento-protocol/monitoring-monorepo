@@ -20,6 +20,7 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   fetchHeadUpdatedAt,
+  headCommitCommittedAt,
   parseArgs,
   renderSummary,
   repoFromPullRequestUrl,
@@ -1079,6 +1080,28 @@ test("uses head commit time before check observation time for freshness", () => 
       observedAt: "2026-05-21T13:23:00Z",
     }),
     "2026-05-21T13:21:00Z",
+  );
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headCommittedAt: null,
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:23:00Z",
+  );
+});
+
+test("falls back to check observation time when the head commit is absent", () => {
+  assertEqual(
+    headCommitCommittedAt({
+      headRefOid: "head",
+      commits: [
+        {
+          oid: "older",
+          committedDate: "2026-05-21T13:21:00Z",
+        },
+      ],
+    }),
+    null,
   );
   assertEqual(
     fetchHeadUpdatedAt({

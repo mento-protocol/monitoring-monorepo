@@ -554,12 +554,12 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-function headCommitCommittedAt(pr) {
+export function headCommitCommittedAt(pr) {
   const commits = pr.commits ?? [];
-  const headCommit =
-    commits.find((commit) => commit.oid === pr.headRefOid) ??
-    commits[commits.length - 1];
-  return headCommit?.committedDate ?? null;
+  return (
+    commits.find((commit) => commit.oid === pr.headRefOid)?.committedDate ??
+    null
+  );
 }
 
 export function fetchHeadUpdatedAt({ headCommittedAt = null, observedAt }) {
