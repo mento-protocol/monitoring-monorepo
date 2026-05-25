@@ -42,13 +42,6 @@
     "linePreview": " | export async function PUT(req: NextRequest): Promise<NextResponse> { | const session = await getAuthSession();"
   },
   {
-    "file": "src/app/api/arkham/enrich/route.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'GET' has too many lines (106). Maximum allowed is 100.",
-    "line": 79,
-    "linePreview": "// no body — `mode` and `limit` are query params — so GET is the right verb. | export async function GET(req: NextRequest): Promise<NextResponse> { | const authBail = await requireCronAuth(req, \"arkha"
-  },
-  {
     "file": "src/app/bridge-flows/_components/bridge-overview-section.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'BridgeOverviewSection' has too many lines (109). Maximum allowed is 100.",
@@ -941,14 +934,14 @@
     "file": "src/lib/tokens.ts",
     "ruleId": "complexity",
     "message": "Function 'buildOracleRateMap' has a complexity of 16. Maximum allowed is 15.",
-    "line": 43,
+    "line": 58,
     "linePreview": "*/ | export function buildOracleRateMap( | pools: ReadonlyArray<OracleRatePool>,"
   },
   {
     "file": "src/lib/tokens.ts",
     "ruleId": "complexity",
     "message": "Function 'poolTvlUSD' has a complexity of 17. Maximum allowed is 15.",
-    "line": 245,
+    "line": 260,
     "linePreview": "*/ | export function poolTvlUSD( | pool: {"
   },
   {

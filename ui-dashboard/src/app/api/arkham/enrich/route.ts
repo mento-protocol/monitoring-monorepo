@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getLabel, getLabels, importLabels } from "@/lib/address-labels";
+import { isArkhamSourced } from "@/lib/address-labels-shared";
 import {
   ArkhamAuthError,
   enrichBatch,
@@ -45,6 +46,13 @@ type EnrichResponse = {
   mode: EnrichMode;
 };
 
+type EnrichWriteSet = Record<string, NonNullable<EnrichmentResult["entry"]>>;
+type EnrichWriteCandidate = {
+  address?: string;
+  entry?: NonNullable<EnrichmentResult["entry"]>;
+  error?: string;
+};
+
 function parseMode(raw: string | null): EnrichMode {
   if (raw === "refresh" || raw === "dryRun") return raw;
   return "new";
@@ -57,6 +65,48 @@ function parseLimit(raw: string | null): number {
   // work for zero enrichments". Treat as default rather than no-op-spend.
   if (n === 0) return DEFAULT_MAX_ADDRESSES;
   return Math.min(n, DEFAULT_MAX_ADDRESSES);
+}
+
+async function buildLabelWrites(
+  results: EnrichmentResult[],
+  mode: EnrichMode,
+): Promise<{ toWrite: EnrichWriteSet; errors: string[] }> {
+  const toWrite: EnrichWriteSet = {};
+  const candidates = await Promise.all(
+    results.map((result) => buildWriteCandidate(result, mode)),
+  );
+  const errors = candidates.flatMap((candidate) =>
+    candidate.error ? [candidate.error] : [],
+  );
+  for (const candidate of candidates) {
+    if (candidate.address && candidate.entry) {
+      toWrite[candidate.address] = candidate.entry;
+    }
+  }
+  return { toWrite, errors };
+}
+
+async function buildWriteCandidate(
+  result: EnrichmentResult,
+  mode: EnrichMode,
+): Promise<EnrichWriteCandidate> {
+  if (result.error) return { error: `${result.address}: ${result.error}` };
+  if (!result.entry) return {};
+  if (mode === "dryRun") {
+    return { address: result.address, entry: result.entry };
+  }
+
+  const latest = await getLabel(result.address);
+  if (mode === "refresh") {
+    if (!latest || !isArkhamSourced(latest)) return {};
+    // Preserve edits made after the initial candidate snapshot but before
+    // this long-running Arkham batch finished.
+    return {
+      address: result.address,
+      entry: mergeRefreshEntry(latest, result.entry),
+    };
+  }
+  return latest ? {} : { address: result.address, entry: result.entry };
 }
 
 /**
@@ -136,22 +186,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         candidates = candidates.slice(0, maxAddresses);
 
         const results = await enrichBatch(candidates, { apiKey });
-
-        const toWrite: Record<
-          string,
-          NonNullable<EnrichmentResult["entry"]>
-        > = {};
-        const errors: string[] = [];
-        for (const r of results) {
-          if (r.error) errors.push(`${r.address}: ${r.error}`);
-          if (!r.entry) continue;
-          // In refresh mode, preserve user-edited notes/isPublic + any tags
-          // they added on top of a previous arkham write.
-          toWrite[r.address] =
-            mode === "refresh"
-              ? mergeRefreshEntry(existing[r.address], r.entry)
-              : r.entry;
-        }
+        const { toWrite, errors } = await buildLabelWrites(results, mode);
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
           // Single labels hash — Arkham's attribution is inherently
