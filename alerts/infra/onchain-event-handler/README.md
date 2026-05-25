@@ -101,7 +101,9 @@ npm install
 npm run build
 ```
 
-The build compiles `src/` to `dist/`. Terraform packages only `dist/` (excluding source files, Terraform configs, and node_modules).
+The build compiles `src/` to `dist/`, including `src/safe-abi.json` as
+`dist/safe-abi.json`. Terraform packages the module for Cloud Build while
+excluding dev-only files, Terraform configs, local env files, and node_modules.
 
 ### Step 3: Configure Terraform Variables
 
@@ -163,7 +165,9 @@ npm install
 npm run build
 ```
 
-**IMPORTANT**: Build before deploying with Terraform. The build compiles `src/` to `dist/`. Terraform packages only `dist/` (excluding source files, Terraform configs, and node_modules).
+**IMPORTANT**: Build before deploying with Terraform. The build compiles `src/`
+to `dist/`, including the Safe ABI JSON required by the compiled constants
+module.
 
 ### Local Development
 
@@ -250,6 +254,8 @@ gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com s
 
 ## Notes
 
-- Function source is archived to Cloud Storage (only `dist/` included, excludes `node_modules`, `src/`, tests, Terraform files)
+- Function source is archived to Cloud Storage with dev-only files, local env
+  files, tests, Terraform files, and `node_modules` excluded. Cloud Build runs
+  the package build and emits `dist/safe-abi.json` from `src/safe-abi.json`.
 - Build required before Terraform deployment
 - Environment variables set at deployment time (require redeployment to change)

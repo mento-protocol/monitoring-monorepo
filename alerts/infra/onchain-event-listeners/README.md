@@ -126,7 +126,7 @@ function main(payload) {
 
 ## Event Signatures
 
-Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/safe-abi.json`):
+Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/src/safe-abi.json`):
 
 ```json
 {
@@ -357,4 +357,4 @@ module "onchain_event_listeners" {
 - [QuickNode Webhooks Documentation](https://www.quicknode.com/docs/webhooks)
 - [QuickNode REST API](https://www.quicknode.com/docs/webhooks) (see webhooks section)
 - [Safe Contracts Documentation](https://docs.safe.global/)
-- Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/safe-abi.json`)
+- Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/src/safe-abi.json`)

@@ -1033,6 +1033,14 @@ assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onch
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 assert_contains "- pnpm exec turbo run test --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 
+run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
+assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
+assert_contains "- pnpm exec turbo run test --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Safe ABI changed (listener filter uses it at plan time))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
+
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
