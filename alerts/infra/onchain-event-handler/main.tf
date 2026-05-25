@@ -147,9 +147,9 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-# Archive function source (Cloud Build will compile TypeScript).
-# safe-abi.json lives under src/ so TypeScript copies it into dist/ beside
-# constants.js. excludes block also drops dev secrets (.env*) and
+# Archive function source (Cloud Build will run tsc).
+# safe-abi.json lives under src/ so the build emits dist/safe-abi.json beside
+# constants.js. The excludes block also drops dev secrets (.env*) and
 # terraform-state-derived caches so they never leak into the GCS zip.
 data "archive_file" "function_source" {
   type        = "zip"
@@ -160,6 +160,8 @@ data "archive_file" "function_source" {
   # nested in subdirs (src/**, etc.).
   excludes = [
     "node_modules",
+    "dist",
+    "dist/**",
     ".git",
     "**/*.test.ts",
     "**/*.test.js",

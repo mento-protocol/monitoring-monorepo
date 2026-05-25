@@ -952,16 +952,16 @@ while IFS= read -r path; do
     alerts/infra/onchain-event-handler/*)
       add_surface "alerts-infra"
       case "$path" in
+        alerts/infra/onchain-event-handler/src/safe-abi.json)
+          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "Safe ABI changed (handler imports it)"
+          add_terraform_validate_commands "alerts/infra" "Safe ABI changed (listener filter uses it at plan time)"
+          ;;
         alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs|alerts/infra/onchain-event-handler/package-lock.json)
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
           ;;
         alerts/infra/onchain-event-handler/*.tf)
           add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
-          ;;
-        alerts/infra/onchain-event-handler/safe-abi.json|alerts/infra/onchain-event-handler/safe-abi.d.ts)
-          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "Safe ABI changed (handler + listener consume it)"
-          add_terraform_validate_commands "alerts/infra" "Safe ABI changed (listener filter uses it at plan time)"
           ;;
         # Other handler files (scripts/*.sh, README.md, .gcloudignore,
         # .prettierrc.json, .prettierignore) need no extra routing: shell
