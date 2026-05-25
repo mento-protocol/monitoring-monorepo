@@ -1473,12 +1473,12 @@ describe("self-monitoring gauges", () => {
 // depend on so a future label rename / drop fails CI before reaching prod.
 //
 // Cross-references:
-//   - `terraform/alerts/main.tf` (`deviation_*_annotation` locals)
+//   - `alerts/rules/main.tf` (`deviation_*_annotation` locals)
 //     reads `$values.B.Labels.reason_message`,
 //     `$values.R0.Labels.token_symbol`, `$values.R1.Labels.token_symbol`.
 //     `reason_code` stays on the gauge for diagnostics even though Slack no
 //     longer renders it.
-//   - `terraform/alerts/rules-fpmms.tf` (Deviation Breach warning/critical)
+//   - `alerts/rules/rules-fpmms.tf` (Deviation Breach warning/critical)
 //     consumes the locals.
 describe("label-shape contract: alert template ↔ metric labels", () => {
   // Use a typed cast: prom-client's Gauge typings hide `labelNames` as

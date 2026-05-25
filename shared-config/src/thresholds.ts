@@ -2,7 +2,7 @@
 // Pure data — no runtime deps — so it's safe to import from indexer handlers,
 // the metrics-bridge probe, and the dashboard alike.
 //
-// IMPORTANT: terraform/alerts/rules-fpmms.tf hard-codes these same numbers as
+// IMPORTANT: alerts/rules/rules-fpmms.tf hard-codes these same numbers as
 // HCL literals (1.01 for the OK/WARN boundary, 1.05 for the WARN/CRITICAL
 // boundary). HCL can't import TS exports, so any change here must be mirrored
 // there manually. Keep this file as the single source of truth referenced from

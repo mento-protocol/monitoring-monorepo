@@ -77,7 +77,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
 2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Slack `#alerts-critical` + per-domain warning channels + Splunk On-Call (page severity); Discord dual-route stays live during the migration soak window
-3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`) — rules in `terraform/alerts/`
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`) — rules in `alerts/rules/`
 
 ### Components
 
@@ -92,7 +92,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 | Grafana Agent       | Docker (grafana/agent) | App Engine (mento-prod)      | `../aegis/grafana-agent/`               |
 | Aegis alert rules   | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-alerts/`    |
 | Aegis dashboards    | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-dashboard/` |
-| v3 alert rules      | Terraform (HCL)        | Grafana Cloud                | `terraform/alerts/`                     |
+| v3 alert rules      | Terraform (HCL)        | Grafana Cloud                | `alerts/rules/`                         |
 
 ---
 
@@ -348,7 +348,7 @@ Currently dual-routed to Slack alongside the legacy Discord channels during the 
 
 **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (aegis repo, App Engine in `mento-prod`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 
-**Terraform module** `terraform/alerts/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
+**Terraform module** `alerts/rules/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
 
 **Slack channels.** Domain-split warnings + cross-service critical channel:
 
@@ -361,7 +361,7 @@ Currently dual-routed to Slack alongside the legacy Discord channels during the 
 
 Aegis v2 dual-route additionally lands in `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Initial rollout was severity-split (`#alerts-warnings` catch-all); refined to per-domain channels once operators wanted to mute/focus by service.
 
-**Rules shipped** (10 rules across 2 services — see `terraform/alerts/rules-*.tf`):
+**Rules shipped** (10 rules across 2 services — see `alerts/rules/rules-*.tf`):
 
 | Service          | Rule                                 | Severity | Expression                                                                                                                               |
 | ---------------- | ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

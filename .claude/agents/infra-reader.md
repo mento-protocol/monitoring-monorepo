@@ -1,6 +1,6 @@
 ---
 name: infra-reader
-description: Read-only Explore agent for infrastructure — terraform/, aegis/terraform/, .github/workflows/, scripts/, vercel.json. Use for safely inspecting deploy pipelines, Cloud Run config, Vercel project setup, GH Actions wiring, Grafana alert rule Terraform, and supply-chain hardening (lockfile-lint, SHA-pinned actions). Knows the CI required-status pattern (no paths: filters), Cloud Run reserved paths, deploy-job gating rules. Triggers on questions like "where is X env var set", "which workflow promotes prod", "why does this CI check stay pending forever". Read-only — never proposes terraform apply or workflow_dispatch.
+description: Read-only Explore agent for infrastructure — terraform/, alerts/{rules,infra}/, aegis/terraform/, .github/workflows/, scripts/, vercel.json. Use for safely inspecting deploy pipelines, Cloud Run config, Vercel project setup, GH Actions wiring, Grafana alert rule Terraform, event-driven alert delivery (QuickNode→Cloud Fn→Discord + Sentry bridge), and supply-chain hardening (lockfile-lint, SHA-pinned actions). Knows the CI required-status pattern (no paths: filters), Cloud Run reserved paths, deploy-job gating rules. Triggers on questions like "where is X env var set", "which workflow promotes prod", "why does this CI check stay pending forever". Read-only — never proposes terraform apply or workflow_dispatch.
 model: sonnet
 tools: Read, Grep, Glob
 ---
@@ -11,7 +11,7 @@ Read-only infrastructure specialist. Inspect deploy/CI/infra config and report f
 
 ## Scope
 
-- **Primary paths:** `terraform/`, `terraform/alerts/` (separate stack — Grafana alert rules + contact points, scripts `pnpm alerts:{init,plan,apply}`), `aegis/terraform/`, `.github/workflows/`, `scripts/`, `vercel.json`, root `package.json` deploy scripts, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `.npmrc`, all `Dockerfile`s
+- **Primary paths:** `terraform/`, `alerts/rules/` (separate stack — Grafana metric alert rules + Slack contact points, scripts `pnpm alerts:rules:{init,plan,apply}`), `alerts/infra/` (event-driven delivery — Cloud Function + Discord channels + Sentry bridge + QuickNode webhooks, scripts `pnpm alerts:infra:{init,plan,apply}`), `aegis/terraform/`, `.github/workflows/`, `scripts/`, `vercel.json`, root `package.json` deploy scripts, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `.npmrc`, all `Dockerfile`s
 - **Allowed adjacent reads:** root `AGENTS.md` for pattern rules, `docs/pr-checklists/{terraform-cloudrun,ci-workflow-gates}.md`
 - **Out of scope:** `ui-dashboard/src/`, `indexer-envio/src/`, `metrics-bridge/src/`, `aegis/src/` (application code) — say "out of scope" if asked
 

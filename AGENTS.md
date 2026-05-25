@@ -212,8 +212,10 @@ pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
 pnpm infra:apply              # Apply infrastructure changes
-# Same shape for Grafana alert rules:
-pnpm alerts:init / alerts:plan / alerts:apply
+# Event-driven alerts stack (Cloud Function + Discord channels + Sentry bridge + QuickNode webhooks):
+pnpm alerts:infra:init / alerts:infra:plan / alerts:infra:apply
+# Grafana metric alert rules (v3 Slack rules):
+pnpm alerts:rules:init / alerts:rules:plan / alerts:rules:apply
 ```
 
 **Terraform from a worktree** (e.g. `.claude/worktrees/<name>/`): `pnpm infra:*` scripts don't pass `-var-file`, and `terraform.tfvars` only lives in the main checkout (gitignored). Either run the commands from the main checkout, or from inside the worktree's `terraform/`:
@@ -236,7 +238,8 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 | `indexer-envio/`  | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM + v2 Broker. Schema in `schema.graphql`. Handler entry point is `src/EventHandlers.ts` (imports under `src/handlers/`).                                                                                                 | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)   |
 | `ui-dashboard/`   | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                               | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)     |
 | `metrics-bridge/` | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md) |
-| `terraform/`      | Vercel project + Upstash Redis + env vars + Cloud Run services + Grafana alerting. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                | [`terraform/AGENTS.md`](terraform/AGENTS.md)           |
+| `terraform/`      | Vercel project + Upstash Redis + env vars + Cloud Run services. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                   | [`terraform/AGENTS.md`](terraform/AGENTS.md)           |
+| `alerts/`         | All alert plumbing. `alerts/rules/` = v3 Grafana metric alert rules (Slack-only); `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Discord + Sentry→Discord bridge + Discord channel/webhook mgmt). `alerts/infra/onchain-event-handler/` is the TS pnpm pkg.  | [`alerts/infra/README.md`](alerts/infra/README.md)     |
 | `scripts/`        | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                        | [`scripts/AGENTS.md`](scripts/AGENTS.md)               |
 
 ### PR Review Guidance (Dashboard Scale)

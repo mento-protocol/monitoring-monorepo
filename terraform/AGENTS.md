@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## Scope
 
-`terraform/` manages production infrastructure for the monitoring dashboard, Cloud Run services, Workload Identity Federation, and Grafana alerting.
+`terraform/` manages production infrastructure for the monitoring dashboard, Cloud Run services, and Workload Identity Federation. Alert rules live in `alerts/` (`alerts/rules/` for Grafana metric alerts, `alerts/infra/` for event-driven delivery).
 
 ## Operating Rules
 
@@ -23,4 +23,4 @@ last_verified: 2026-05-20
 
 ## Verification
 
-Run Terraform fmt/init/validate for `terraform` and `terraform/alerts`. Apply `docs/pr-checklists/terraform-cloudrun.md` for Cloud Run or deploy-adjacent changes.
+Run Terraform fmt/init/validate for `terraform`. Apply `docs/pr-checklists/terraform-cloudrun.md` for Cloud Run or deploy-adjacent changes. For alert-rule or alert-infra changes, see `alerts/rules/README.md` and `alerts/infra/README.md`.

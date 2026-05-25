@@ -35,7 +35,7 @@ describe("USD_PEGGED_SYMBOLS drift protection", () => {
       "USD_PEGGED_SYMBOLS",
     );
     const terraformSymbols = extractTerraformUsdPeggedSymbols(
-      repoFile("terraform/alerts/main.tf"),
+      repoFile("alerts/rules/main.tf"),
     );
 
     expect(sortSymbols(USD_PEGGED_SYMBOLS)).toEqual(dashboardSymbols);

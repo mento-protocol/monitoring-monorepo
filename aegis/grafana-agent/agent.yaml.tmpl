@@ -24,7 +24,7 @@ metrics:
         # the Envio indexer every 30s and exports `mento_pool_*` gauges.
         # Producer identity comes from `job="metrics-bridge"` automatically;
         # no extra labels here. Alert rules in monitoring-monorepo
-        # terraform/alerts/ attach their own `service` label (matching the
+        # alerts/rules/ attach their own `service` label (matching the
         # existing Aegis alert convention of service = monitored-domain) to
         # drive Slack routing.
         - job_name: metrics-bridge

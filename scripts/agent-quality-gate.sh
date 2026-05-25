@@ -911,10 +911,10 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-	    .github/workflows/*|.github/actions/*)
-	      add_surface "github-workflows"
-	      add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
-	      case "$path" in
+    .github/workflows/*|.github/actions/*)
+      add_surface "github-workflows"
+      add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
+      case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
@@ -935,20 +935,71 @@ while IFS= read -r path; do
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"
           add_workspace_quality_commands "pnpm install action changed"
           ;;
-	      esac
-	      ;;
-	    .trunk/*)
-	      add_surface "tooling"
-	      add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
-	      ;;
+      esac
+      ;;
+    .trunk/*)
+      add_surface "tooling"
+      add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
+      ;;
     turbo.json)
       add_surface "tooling"
       add_command "pnpm agent:quality-gate:test" "turbo task config changed"
       ;;
-	    terraform/*)
-	      add_surface "terraform"
-	      add_terraform_validate_commands "terraform" "Terraform changed"
-      add_terraform_validate_commands "terraform/alerts" "Terraform changed"
+    alerts/rules/*)
+      add_surface "alerts-rules"
+      add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+      ;;
+    alerts/infra/onchain-event-handler/*)
+      add_surface "alerts-infra"
+      case "$path" in
+        alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs|alerts/infra/onchain-event-handler/package-lock.json)
+          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
+          ;;
+        alerts/infra/onchain-event-handler/*.tf)
+          add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+          ;;
+        alerts/infra/onchain-event-handler/safe-abi.json|alerts/infra/onchain-event-handler/safe-abi.d.ts)
+          add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "Safe ABI changed (handler + listener consume it)"
+          add_terraform_validate_commands "alerts/infra" "Safe ABI changed (listener filter uses it at plan time)"
+          ;;
+        # Other handler files (scripts/*.sh, README.md, .gcloudignore,
+        # .prettierrc.json, .prettierignore) need no extra routing: shell
+        # scripts hit the generic `*.sh → bash -n $(quote_path "$path")`
+        # branch above; the others are doc/config-only and don't gate
+        # anything.
+      esac
+      ;;
+    alerts/infra/scripts/*)
+      add_surface "alerts-infra"
+      case "$path" in
+        alerts/infra/scripts/package.json|alerts/infra/scripts/tsconfig.json|alerts/infra/scripts/*.ts)
+          add_command "pnpm --filter @mento-protocol/alerts-scripts typecheck" "alerts-scripts pkg changed"
+          ;;
+        alerts/infra/scripts/*.sh)
+          add_command "bash -n $(quote_path "$path")" "alerts-scripts shell script changed"
+          ;;
+      esac
+      ;;
+    alerts/infra/onchain-event-listeners/*|alerts/infra/channels/*)
+      # Listener filter (filter-function.js.tpl) feeds into the handler —
+      # a regression like dropping blockHash from it silently breaks the
+      # handler's cross-chain detection, and the 38 vitest cases cover
+      # that behavior. Route to handler tests in addition to TF validate.
+      # Matches the CI alerts paths-filter in .github/workflows/ci.yml.
+      add_surface "alerts-infra"
+      add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts/infra listener or channels changed (handler tests cover cross-chain behavior)"
+      add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+      ;;
+    alerts/infra/*)
+      add_surface "alerts-infra"
+      add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+      add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+      ;;
+    terraform/*)
+      add_surface "terraform"
+      add_terraform_validate_commands "terraform" "Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Terraform/Cloud Run path changed"
       ;;
     cloudbuild.yaml)

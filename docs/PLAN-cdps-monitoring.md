@@ -1207,7 +1207,7 @@ For completeness; do not implement now. Follow-up PR:
 - `metrics-bridge` adds `mento_liquity_*` gauges on the same 30s tick. It may poll `LIQUITY_INSTANCE_LATEST` for latest state and sentinels, but the exported TCR gauge must use the same current-price/accrued-debt inputs as `ui-dashboard/src/lib/cdps/current-state.ts` or a dedicated current-TCR query. Do not export cached/event-only `LiquityInstance.tcrBps` as the alert TCR during quiet periods.
   - Do not export raw sentinel values as alertable samples. For TCR, keep the `-1` no-data sentinel in GraphQL but guard PromQL with `mento_liquity_tcr_bps >= 0`. For Stability Pool headroom, negative values are real alertable deficits, so pair the gauge with an explicit `mento_liquity_sp_headroom_known` gauge or omit the headroom sample until `systemParamsLoaded=true`; do not rely on `-1` as a Prometheus sentinel for this metric.
   - Export per-market threshold gauges from `LiquityCollateral` (`mento_liquity_mcr_bps`, `mento_liquity_ccr_bps`, optionally `mento_liquity_tcr_warning_bps`) and join alerts against them. Do not hardcode 115%/110%; each market's SystemParams own recovery/critical thresholds.
-- `terraform/alerts/rules-cdps.tf` with `service=cdps` rules:
+- `alerts/rules/rules-cdps.tf` with `service=cdps` rules:
   - **Stability Pool Headroom Critical** — `mento_liquity_sp_headroom <= 0 and on(chain, symbol) mento_liquity_sp_headroom_known == 1` for 5m.
   - **TCR Low Warning** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < on(chain, symbol) mento_liquity_tcr_warning_bps` for 15m.
   - **TCR Critical** — `mento_liquity_tcr_bps >= 0 and mento_liquity_tcr_bps < on(chain, symbol) mento_liquity_ccr_bps` for 5m.

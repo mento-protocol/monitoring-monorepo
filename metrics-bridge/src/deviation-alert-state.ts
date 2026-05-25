@@ -62,7 +62,7 @@ type ClassifiedDeviationAlertState = Pick<
 const previousStates = new Map<string, StateSnapshot>();
 const recentTransitions = new Map<string, DeviationAlertTransition>();
 
-// Mirrors ui-dashboard/src/lib/tokens.ts and terraform/alerts/main.tf's
+// Mirrors ui-dashboard/src/lib/tokens.ts and alerts/rules/main.tf's
 // `usd_pegged_symbols_regex_part`. The drift-protection test in
 // test/deviation-alert-state.test.ts enforces this until the FX classifier
 // moves into shared-config.

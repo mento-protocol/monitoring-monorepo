@@ -1,0 +1,59 @@
+{
+  "name": "@mento-protocol/alerts-onchain-event-handler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Routes QuickNode webhook events to Discord for Safe multisig monitoring",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc",
+    "start": "NODE_ENV=development functions-framework --target=processQuicknodeWebhook",
+    "prestart": "pnpm run build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "knip": "knip --config knip.json --no-progress",
+    "knip:report": "knip --config knip.json --no-exit-code --no-progress",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:local": "./scripts/test-local.sh",
+    "health": "./scripts/test-healthcheck.sh",
+    "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
+    "deploy": "./scripts/deploy.sh",
+    "logs": "./scripts/get-logs.sh",
+    "logs:tail": "./scripts/tail-logs.sh",
+    "format": "prettier --write \"src/**/*.{ts,js,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
+    "generate:env": "terraform -chdir=.. apply -target=module.onchain_event_handler.local_file.env_file",
+    "tail": "pnpm run logs:tail"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^4.0.0",
+    "@google-cloud/logging": "^11.2.1",
+    "axios": "^1.13.2",
+    "env-schema": "^7.0.0",
+    "keccak": "^3.0.4",
+    "viem": "^2.39.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/keccak": "^3.0.5",
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.0.10",
+    "eslint": "^9.39.1",
+    "knip": "^5.70.0",
+    "nodemon": "^3.1.11",
+    "prettier": "^3.6.2",
+    "rimraf": "^6.1.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^4.0.10"
+  },
+  "overrides": {
+    "js-yaml": "^4.1.1",
+    "express": "^4.22.0",
+    "qs": ">=6.14.2"
+  }
+}

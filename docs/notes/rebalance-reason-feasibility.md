@@ -106,7 +106,7 @@ Phase-2 implementation, contained PR:
    - Emit `mento_pool_rebalance_blocked` with `reason_code` + `reason_message` labels.
    - Vitest fixture-based tests for the decoder + cycle gating.
 
-2. **terraform/alerts:**
+2. **alerts/rules:**
    - Add a `B` data block to `Deviation Breach Critical` (and the `(anchored)` sibling) joining on `mento_pool_rebalance_blocked`.
    - New annotation `rebalance_reason` from `$labels.reason_message` + `$labels.reason_code`.
    - `slack_body_template` in `contact-points.tf`: `*Rebalance Blocked:*` line guarded by `{{ if .Annotations.rebalance_reason }}…{{ end }}`, rendered above the existing pool/started/links rows.
