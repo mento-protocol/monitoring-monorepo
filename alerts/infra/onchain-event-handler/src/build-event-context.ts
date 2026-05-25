@@ -37,8 +37,13 @@ export function buildEventContext(
       txHashMap.set(txHashLower, log.txHash);
     }
 
-    // Track which transactions have SafeMultiSigTransaction events
-    if (log.name === "SafeMultiSigTransaction") {
+    // Track only detailed events with the fields required by processEvent.
+    // Otherwise a malformed SafeMultiSigTransaction can suppress the valid
+    // ExecutionSuccess fallback and leave the batch with no notification.
+    if (
+      log.name === "SafeMultiSigTransaction" &&
+      typeof log.address === "string"
+    ) {
       hasSafeMultiSigTx.add(txHashLower);
     }
   }

@@ -77,4 +77,13 @@ describe("GET /api/intel/transfers/[address]", () => {
     const res = await GET(makeReq(), params());
     expect(res.status).toBe(500);
   });
+
+  it("500 when auth session lookup throws", async () => {
+    mockSession.mockRejectedValue(new Error("auth down"));
+    const res = await GET(makeReq(), params());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "Failed to read intel transfers record",
+    });
+  });
 });

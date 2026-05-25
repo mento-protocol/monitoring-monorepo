@@ -4,7 +4,11 @@ import path from "path";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "tests/**/*.test.{ts,tsx}",
+      "scripts/**/*.test.mjs",
+    ],
     exclude: [...configDefaults.exclude, "tests/browser/**"],
     coverage: {
       provider: "v8",

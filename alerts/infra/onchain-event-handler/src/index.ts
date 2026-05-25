@@ -1,6 +1,7 @@
 import { Request, Response } from "@google-cloud/functions-framework";
 import { buildEventContext } from "./build-event-context";
 import { checkPayloadSize } from "./check-payload-size";
+import { MULTISIG_CONFIG_ERROR } from "./constants";
 import { handleHealthCheck } from "./health-check";
 import { logger } from "./logger";
 import { processEvents } from "./process-events";
@@ -21,6 +22,17 @@ export const processQuicknodeWebhook = async (
   }
 
   try {
+    if (MULTISIG_CONFIG_ERROR) {
+      logger.error("Rejecting webhook because MULTISIG_CONFIG is invalid", {
+        error: MULTISIG_CONFIG_ERROR,
+      });
+      res.status(503).json({
+        error: "Service Unavailable",
+        message: MULTISIG_CONFIG_ERROR,
+      });
+      return;
+    }
+
     // 1. Check payload size
     const payloadSizeCheck = checkPayloadSize(req);
     if (!payloadSizeCheck.valid) {

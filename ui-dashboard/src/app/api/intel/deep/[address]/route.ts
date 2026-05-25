@@ -8,25 +8,25 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ address: string }> },
 ): Promise<NextResponse> {
-  // `getAuthSession()` already filters by ALLOWED_DOMAIN, but we recheck
-  // here so the policy is explicit at the route boundary — a future
-  // refactor of the helper can't silently widen access to this surface.
-  const session = await getAuthSession();
-  const email = session?.user?.email?.toLowerCase();
-  if (!email?.endsWith(ALLOWED_DOMAIN)) {
-    return NextResponse.json(
-      { error: "Authentication required" },
-      { status: 401 },
-    );
-  }
-
-  const { address } = await params;
-
-  if (!isValidAddress(address)) {
-    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
-  }
-
   try {
+    // `getAuthSession()` already filters by ALLOWED_DOMAIN, but we recheck
+    // here so the policy is explicit at the route boundary — a future
+    // refactor of the helper can't silently widen access to this surface.
+    const session = await getAuthSession();
+    const email = session?.user?.email?.toLowerCase();
+    if (!email?.endsWith(ALLOWED_DOMAIN)) {
+      return NextResponse.json(
+        { error: "Authentication required" },
+        { status: 401 },
+      );
+    }
+
+    const { address } = await params;
+
+    if (!isValidAddress(address)) {
+      return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+    }
+
     const record = await getIntelDeep(address);
     if (record === null) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
