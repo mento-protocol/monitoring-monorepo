@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { GET } from "../route";
+import { BACKUP_MONITOR_MAX_RUNTIME_MINUTES, GET } from "../route";
 import {
   BACKUP_MANIFEST_VERSION,
   HASH_BLOB_NAMES,
@@ -143,6 +143,26 @@ describe("GET /api/address-labels/backup", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(getAuthSession).not.toHaveBeenCalled();
+  });
+
+  it("configures the Sentry monitor to fail within the function runtime budget", async () => {
+    const Sentry = await import("@sentry/nextjs");
+    const withMonitor = vi.mocked(Sentry.withMonitor);
+
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await GET(req);
+
+    expect(withMonitor).toHaveBeenCalledWith(
+      "address-labels-backup",
+      expect.any(Function),
+      expect.objectContaining({
+        maxRuntime: BACKUP_MONITOR_MAX_RUNTIME_MINUTES,
+      }),
+    );
+    expect(BACKUP_MONITOR_MAX_RUNTIME_MINUTES).toBe(5);
   });
 
   it("401s on session-only auth — bearer required for cron GET (CSRF defence)", async () => {

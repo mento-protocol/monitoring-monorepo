@@ -9,6 +9,7 @@ import {
   type SnapshotHashName,
 } from "@/lib/address-labels/backup-format";
 import type { AddressLabelsSnapshot } from "@/lib/address-labels";
+import { isValidAddress } from "@/lib/format";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -165,13 +166,10 @@ async function assembleSnapshotFromManifest(
         { status: 400 },
       );
     }
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed)
-    ) {
+    const validationError = validateHashBlobRecord(entry.name, parsed);
+    if (validationError) {
       return NextResponse.json(
-        { error: `Hash blob ${entry.pathname} is not a record map` },
+        { error: `Hash blob ${entry.pathname} ${validationError}` },
         { status: 400 },
       );
     }
@@ -182,6 +180,68 @@ async function assembleSnapshotFromManifest(
     (snapshot as Record<string, unknown>)[field] = parsed;
   }
   return snapshot;
+}
+
+function validateHashBlobRecord(
+  name: SnapshotHashName,
+  value: unknown,
+): string | null {
+  if (!isRecordMap(value)) return "is not a record map";
+  if (name === "labels") return validateLabelRecords(value);
+  if (name === "reports") return validateReportRecords(value);
+  return validateObjectRecordValues(name, value);
+}
+
+function isRecordMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateLabelRecords(records: Record<string, unknown>): string | null {
+  for (const [address, entry] of Object.entries(records)) {
+    if (!isValidAddress(address)) {
+      return `contains invalid label address ${address}`;
+    }
+    if (!isRecordMap(entry)) {
+      return `contains invalid label payload for ${address}`;
+    }
+    const hasName =
+      (typeof entry.label === "string" && entry.label.trim() !== "") ||
+      (typeof entry.name === "string" && entry.name.trim() !== "");
+    const hasTags = Array.isArray(entry.tags) && entry.tags.length > 0;
+    if (!hasName && !hasTags) {
+      return `contains invalid label payload for ${address}`;
+    }
+  }
+  return null;
+}
+
+function validateReportRecords(
+  records: Record<string, unknown>,
+): string | null {
+  for (const [address, report] of Object.entries(records)) {
+    if (!isValidAddress(address)) {
+      return `contains invalid report address ${address}`;
+    }
+    if (!isRecordMap(report) || typeof report.body !== "string") {
+      return `contains invalid report payload for ${address}`;
+    }
+    if (report.body.trim() === "") {
+      return `contains empty report body for ${address}`;
+    }
+  }
+  return null;
+}
+
+function validateObjectRecordValues(
+  name: SnapshotHashName,
+  records: Record<string, unknown>,
+): string | null {
+  for (const [key, record] of Object.entries(records)) {
+    if (!isRecordMap(record)) {
+      return `contains invalid ${name} payload for ${key}`;
+    }
+  }
+  return null;
 }
 
 async function restoreLegacyMonolithicBlob(

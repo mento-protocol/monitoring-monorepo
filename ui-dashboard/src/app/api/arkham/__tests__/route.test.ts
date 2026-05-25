@@ -8,7 +8,8 @@ vi.mock("@/lib/cron-auth", () => ({
 vi.mock("@/lib/address-labels", () => ({
   getLabel: vi.fn(),
   getLabels: vi.fn(),
-  importLabels: vi.fn().mockResolvedValue(undefined),
+  importArkhamRefreshLabelsIfUnchanged: vi.fn().mockResolvedValue(1),
+  importLabelsIfAbsent: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock("@/lib/arkham", async () => {
@@ -34,7 +35,12 @@ vi.mock("@sentry/nextjs", () => ({
 
 import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
-import { getLabel, getLabels, importLabels } from "@/lib/address-labels";
+import {
+  getLabel,
+  getLabels,
+  importArkhamRefreshLabelsIfUnchanged,
+  importLabelsIfAbsent,
+} from "@/lib/address-labels";
 import { ARKHAM_TAG } from "@/lib/address-labels-shared";
 import { ArkhamAuthError, enrichBatch, fetchHealth } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
@@ -43,7 +49,10 @@ import * as Sentry from "@sentry/nextjs";
 
 const mockGetLabels = vi.mocked(getLabels);
 const mockGetLabel = vi.mocked(getLabel);
-const mockImportLabels = vi.mocked(importLabels);
+const mockImportArkhamRefreshLabelsIfUnchanged = vi.mocked(
+  importArkhamRefreshLabelsIfUnchanged,
+);
+const mockImportLabelsIfAbsent = vi.mocked(importLabelsIfAbsent);
 const mockFetchHealth = vi.mocked(fetchHealth);
 const mockEnrichBatch = vi.mocked(enrichBatch);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
@@ -113,7 +122,8 @@ describe("GET /api/arkham/enrich — auth", () => {
     expect(mockDiscover).not.toHaveBeenCalled();
     expect(mockGetLabels).not.toHaveBeenCalled();
     expect(mockEnrichBatch).not.toHaveBeenCalled();
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
+    expect(mockImportArkhamRefreshLabelsIfUnchanged).not.toHaveBeenCalled();
   });
 
   it("runs when cron auth passes", async () => {
@@ -204,7 +214,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       ["0xnew"],
       expect.objectContaining({ apiKey: "ak-test" }),
     );
-    expect(mockImportLabels).toHaveBeenCalledWith(
+    expect(mockImportLabelsIfAbsent).toHaveBeenCalledWith(
       expect.objectContaining({
         "0xnew": expect.objectContaining({
           name: "Coinbase",
@@ -252,7 +262,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
 
     // mergeRefreshEntry: name takes Arkham's update; user notes + isPublic
     // survive; sentinel tag stripped; source upgraded.
-    expect(mockImportLabels).toHaveBeenCalledWith(
+    expect(mockImportArkhamRefreshLabelsIfUnchanged).toHaveBeenCalledWith(
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
@@ -262,6 +272,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
           tags: expect.arrayContaining(["exchange", "user-curated"]),
         }),
       }),
+      { "0xark": "2026-01-01T00:00:00Z" },
     );
   });
 
@@ -297,13 +308,14 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     );
     expect(res.status).toBe(200);
     expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
-    expect(mockImportLabels).toHaveBeenCalledWith(
+    expect(mockImportArkhamRefreshLabelsIfUnchanged).toHaveBeenCalledWith(
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
           source: "arkham",
         }),
       }),
+      { "0xark": "2026-01-01T00:00:00Z" },
     );
   });
 
@@ -349,7 +361,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
     );
     expect(res.status).toBe(200);
-    expect(mockImportLabels).toHaveBeenCalledWith(
+    expect(mockImportArkhamRefreshLabelsIfUnchanged).toHaveBeenCalledWith(
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
@@ -358,7 +370,54 @@ describe("GET /api/arkham/enrich — pipeline", () => {
           tags: expect.arrayContaining(["exchange", "user-curated"]),
         }),
       }),
+      { "0xark": "2026-04-27T00:00:00Z" },
     );
+  });
+
+  it("refresh mode skips a label changed after the late read instead of overwriting it", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xark"],
+      perEntity: [],
+    });
+    mockGetLabels.mockResolvedValue(
+      existingLabels({
+        "0xark": {
+          name: "Binance",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+    mockEnrichBatch.mockResolvedValue([
+      {
+        address: "0xark",
+        entry: {
+          name: "Binance Hot Wallet 14",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+    ]);
+    mockImportArkhamRefreshLabelsIfUnchanged.mockResolvedValueOnce(0);
+
+    const res = await GET(
+      makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockImportArkhamRefreshLabelsIfUnchanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "0xark": expect.objectContaining({
+          name: "Binance Hot Wallet 14",
+        }),
+      }),
+      { "0xark": "2026-01-01T00:00:00Z" },
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.enriched).toBe(0);
+    expect(body.skipped).toBe(1);
   });
 
   it("new mode skips an address that becomes manually labeled during enrichment", async () => {
@@ -388,7 +447,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.enriched).toBe(0);
     expect(body.skipped).toBe(1);
@@ -459,7 +518,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       makeReq({ bearer: "cron-secret", searchParams: { mode: "dryRun" } }),
     );
     expect(res.status).toBe(200);
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.mode).toBe("dryRun");
     expect(body.enriched).toBe(1);
@@ -500,7 +559,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
 
     await GET(makeReq({ bearer: "cron-secret" }));
     expect(mockEnrichBatch).toHaveBeenCalledWith([], expect.anything());
-    expect(mockImportLabels).not.toHaveBeenCalled();
+    expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
   });
 
   it("?limit=0 falls back to the default cap (no silent no-op)", async () => {
@@ -546,7 +605,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(body.enriched).toBe(1);
     expect(body.skipped).toBe(0);
     expect(body.sampleErrors).toEqual(["0xa: 5xx"]);
-    expect(mockImportLabels).toHaveBeenCalledWith(
+    expect(mockImportLabelsIfAbsent).toHaveBeenCalledWith(
       expect.objectContaining({
         "0xb": expect.objectContaining({ source: "arkham" }),
       }),
@@ -601,7 +660,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(body.sampleErrors).toEqual([
       "0xa: getLabel failed: redis read failed",
     ]);
-    expect(mockImportLabels).toHaveBeenCalledWith({
+    expect(mockImportLabelsIfAbsent).toHaveBeenCalledWith({
       "0xb": expect.objectContaining({ name: "B", source: "arkham" }),
     });
     expect(mockCaptureMessage).toHaveBeenCalledWith(
