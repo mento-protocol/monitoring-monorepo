@@ -109,6 +109,8 @@ export default function AddressBookPage(props: AddressBookPageProps) {
   const [addingNew, setAddingNew] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const importInFlightRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Display network for global rows — keeps the Chain column populated with
@@ -219,6 +221,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
   }, []);
 
   const handleImportClick = () => {
+    if (importInFlightRef.current) return;
     setImportError(null);
     setImportSuccess(null);
     fileInputRef.current?.click();
@@ -226,14 +229,24 @@ export default function AddressBookPage(props: AddressBookPageProps) {
 
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (importInFlightRef.current) return;
       const file = e.target.files?.[0];
       if (!file) return;
       e.target.value = "";
-      const result = await importFile(file, revalidate);
-      if (result.error) {
-        setImportError(result.error);
-      } else if (result.success) {
-        setImportSuccess(result.success);
+      setImportError(null);
+      setImportSuccess(null);
+      importInFlightRef.current = true;
+      setIsImporting(true);
+      try {
+        const result = await importFile(file, revalidate);
+        if (result.error) {
+          setImportError(result.error);
+        } else if (result.success) {
+          setImportSuccess(result.success);
+        }
+      } finally {
+        importInFlightRef.current = false;
+        setIsImporting(false);
       }
     },
     [revalidate],
@@ -259,6 +272,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
             </button>
             <ImportDialog
               fileInputRef={fileInputRef}
+              isImporting={isImporting}
               onImportClick={handleImportClick}
               onFileChange={handleFileChange}
             />

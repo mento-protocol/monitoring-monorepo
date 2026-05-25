@@ -25,6 +25,7 @@ import {
   getLabel,
   upsertEntry,
   deleteLabel,
+  importArkhamRefreshLabelsIfUnchanged,
   importLabels,
   importLabelsIfAbsent,
   upgradeEntry,
@@ -225,6 +226,71 @@ describe("importLabelsIfAbsent", () => {
 
   it("is a no-op when the insert-only batch is empty", async () => {
     await expect(importLabelsIfAbsent({})).resolves.toBe(0);
+    expect(mocks.evalMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("importArkhamRefreshLabelsIfUnchanged", () => {
+  it("updates Arkham labels with an atomic source + updatedAt compare-and-set Lua script", async () => {
+    mocks.evalMock.mockResolvedValue(1);
+
+    await expect(
+      importArkhamRefreshLabelsIfUnchanged(
+        {
+          "0xAAA": {
+            name: "Arkham label",
+            tags: [],
+            source: "arkham",
+            updatedAt: "2026-04-02T00:00:00Z",
+          },
+        },
+        { "0xaaa": "2026-04-01T00:00:00Z" },
+      ),
+    ).resolves.toBe(1);
+
+    expect(mocks.evalMock).toHaveBeenCalledTimes(1);
+    const [script, keys, argv] = mocks.evalMock.mock.calls[0]!;
+    expect(script).toContain("cjson.decode");
+    expect(script).toContain("updatedAt");
+    expect(script).toContain('type(raw_updated_at) == "string"');
+    expect(script).toContain("source");
+    expect(keys).toEqual(["labels"]);
+    expect(argv).toHaveLength(3);
+    expect(argv[0]).toBe("0xaaa");
+    expect(argv[1]).toBe("2026-04-01T00:00:00Z");
+    expect(JSON.parse(argv[2] as string)).toMatchObject({
+      name: "Arkham label",
+      source: "arkham",
+    });
+  });
+
+  it("is a no-op for empty, non-Arkham, or missing-expectation refresh batches", async () => {
+    await expect(importArkhamRefreshLabelsIfUnchanged({}, {})).resolves.toBe(0);
+    await expect(
+      importArkhamRefreshLabelsIfUnchanged(
+        {
+          "0xAAA": {
+            name: "Manual label",
+            tags: [],
+            updatedAt: "2026-04-02T00:00:00Z",
+          },
+        },
+        { "0xaaa": "2026-04-01T00:00:00Z" },
+      ),
+    ).resolves.toBe(0);
+    await expect(
+      importArkhamRefreshLabelsIfUnchanged(
+        {
+          "0xBBB": {
+            name: "Arkham label",
+            tags: [],
+            source: "arkham",
+            updatedAt: "2026-04-02T00:00:00Z",
+          },
+        },
+        {},
+      ),
+    ).resolves.toBe(0);
     expect(mocks.evalMock).not.toHaveBeenCalled();
   });
 });

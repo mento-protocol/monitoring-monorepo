@@ -416,6 +416,152 @@ describe("POST /api/address-labels/restore — v2 manifest", () => {
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed label hash records before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": null,
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid label payload"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid label addresses and empty names before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "not-0x-address": { name: "", tags: [] },
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid label address"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty legacy label names before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": { label: "", tags: [] },
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid label payload"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed report hash records before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(labelRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": { title: "No body" },
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid report payload"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed intel hash records before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(labelRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({ bad: [] }) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 4; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid intelDeep payload"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized manifest blob", async () => {
     mockGet.mockResolvedValueOnce(
       blobResult(manifest, RESTORE_LIMIT + 1) as Awaited<

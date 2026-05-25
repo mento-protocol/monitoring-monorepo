@@ -25,6 +25,7 @@ import {
 // blob splits keep any single upload under ~10 MB, so the bound is mostly
 // HGETALL latency on the largest hash (intel_deep).
 export const maxDuration = 300;
+export const BACKUP_MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
 // Vercel cron jobs invoke with GET, not POST. Read-only handler taking no
 // body — GET is the right verb.
@@ -143,11 +144,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // Cron schedule mirrors vercel.json — keep them in sync.
         schedule: { type: "crontab", value: "0 3 * * *" },
         checkinMargin: 5,
-        // 60min Sentry budget reflects the realistic upper bound for a
-        // 7-hash HGETALL fan-out + 8 parallel Blob uploads (one per hash +
-        // manifest). With per-hash blob splits no single upload is large,
-        // but Upstash HGETALL latency dominates for intel_deep.
-        maxRuntime: 60,
+        // Match the function's 5min execution cap. A longer monitor window
+        // hides hung runs after Vercel has already terminated the handler.
+        maxRuntime: BACKUP_MONITOR_MAX_RUNTIME_MINUTES,
         timezone: "Etc/UTC",
       },
     );

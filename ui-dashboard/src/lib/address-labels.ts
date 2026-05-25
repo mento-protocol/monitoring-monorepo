@@ -20,6 +20,7 @@ export {
 } from "./address-labels-shared";
 
 import {
+  isArkhamSourced,
   upgradeEntry,
   upgradeEntries,
   type AddressEntry,
@@ -119,5 +120,68 @@ export async function importLabelsIfAbsent(
     value,
   ]);
   const written = await redis.eval(HSET_IF_ABSENT_SCRIPT, [LABELS_KEY], argv);
+  return Number(written);
+}
+
+const HSET_ARKHAM_REFRESH_IF_UNCHANGED_SCRIPT = `
+local written = 0
+for i = 1, #ARGV, 3 do
+  local field = ARGV[i]
+  local expected_updated_at = ARGV[i + 1]
+  local value = ARGV[i + 2]
+  local current = redis.call("HGET", KEYS[1], field)
+  if current ~= false then
+    local ok, parsed = pcall(cjson.decode, current)
+    if ok and type(parsed) == "table" then
+      local is_arkham = parsed["source"] == "arkham"
+      local tags = parsed["tags"]
+      if not is_arkham and type(tags) == "table" then
+        for _, tag in ipairs(tags) do
+          if tag == "arkham" then
+            is_arkham = true
+            break
+          end
+        end
+      end
+      local raw_updated_at = parsed["updatedAt"]
+      local current_updated_at = type(raw_updated_at) == "string" and raw_updated_at or ""
+      if is_arkham and current_updated_at == expected_updated_at then
+        redis.call("HSET", KEYS[1], field, value)
+        written = written + 1
+      end
+    end
+  end
+end
+return written
+`;
+
+/**
+ * Refresh Arkham-sourced labels only when the current stored row still matches
+ * the row read by the refresh worker. If a user edits a label after the worker
+ * read but before this write, the compare-and-set skips it instead of
+ * overwriting the user's newer fields. Deleted rows are skipped for the same
+ * reason: deletion wins over a stale refresh.
+ */
+export async function importArkhamRefreshLabelsIfUnchanged(
+  labels: Record<string, AddressEntry>,
+  expectedUpdatedAt: Record<string, string>,
+): Promise<number> {
+  const entries = Object.entries(labels).filter(([address, entry]) => {
+    const expected = expectedUpdatedAt[address.toLowerCase()];
+    return expected !== undefined && isArkhamSourced(entry);
+  });
+  if (entries.length === 0) return 0;
+
+  const redis = getRedis();
+  const fields = encodeLabelFields(entries);
+  const argv = entries.flatMap(([address]) => {
+    const lower = address.toLowerCase();
+    return [lower, expectedUpdatedAt[lower]!, fields[lower]!];
+  });
+  const written = await redis.eval(
+    HSET_ARKHAM_REFRESH_IF_UNCHANGED_SCRIPT,
+    [LABELS_KEY],
+    argv,
+  );
   return Number(written);
 }

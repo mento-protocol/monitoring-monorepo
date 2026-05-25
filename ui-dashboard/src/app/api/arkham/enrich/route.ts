@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getLabel, getLabels, importLabels } from "@/lib/address-labels";
+import {
+  getLabel,
+  getLabels,
+  importArkhamRefreshLabelsIfUnchanged,
+  importLabelsIfAbsent,
+} from "@/lib/address-labels";
 import { isArkhamSourced } from "@/lib/address-labels-shared";
 import {
   ArkhamAuthError,
@@ -48,11 +53,17 @@ type EnrichResponse = {
 };
 
 type EnrichWriteSet = Record<string, NonNullable<EnrichmentResult["entry"]>>;
+type BuildLabelWritesResult = {
+  toWrite: EnrichWriteSet;
+  expectedUpdatedAt: Record<string, string>;
+  errors: string[];
+};
 type EnrichWriteCandidate =
   | {
       status: "write";
       address: string;
       entry: NonNullable<EnrichmentResult["entry"]>;
+      expectedUpdatedAt?: string;
     }
   | { status: "skip" }
   | { status: "error"; error: string };
@@ -74,8 +85,9 @@ function parseLimit(raw: string | null): number {
 async function buildLabelWrites(
   results: EnrichmentResult[],
   mode: EnrichMode,
-): Promise<{ toWrite: EnrichWriteSet; errors: string[] }> {
+): Promise<BuildLabelWritesResult> {
   const toWrite: EnrichWriteSet = {};
+  const expectedUpdatedAt: Record<string, string> = {};
   const candidates = await runWithConcurrency(
     results,
     LABEL_READ_CONCURRENCY,
@@ -86,10 +98,14 @@ async function buildLabelWrites(
   );
   for (const candidate of candidates) {
     if (candidate.status === "write") {
-      toWrite[candidate.address] = candidate.entry;
+      const lower = candidate.address.toLowerCase();
+      toWrite[lower] = candidate.entry;
+      if (candidate.expectedUpdatedAt !== undefined) {
+        expectedUpdatedAt[lower] = candidate.expectedUpdatedAt;
+      }
     }
   }
-  return { toWrite, errors };
+  return { toWrite, expectedUpdatedAt, errors };
 }
 
 async function runWithConcurrency<T, R>(
@@ -153,11 +169,29 @@ async function buildWriteCandidate(
       status: "write",
       address: result.address,
       entry: mergeRefreshEntry(latest, result.entry),
+      expectedUpdatedAt: latest.updatedAt,
     };
   }
   return latest
     ? { status: "skip" }
     : { status: "write", address: result.address, entry: result.entry };
+}
+
+async function writeEnrichmentLabels(
+  mode: EnrichMode,
+  writes: BuildLabelWritesResult,
+): Promise<number> {
+  const attempted = Object.keys(writes.toWrite).length;
+  if (mode === "dryRun" || attempted === 0) return attempted;
+
+  // Single labels hash — Arkham's attribution is inherently cross-chain
+  // (EVM addresses are chain-agnostic), which matches the address-keyed model.
+  return mode === "refresh"
+    ? await importArkhamRefreshLabelsIfUnchanged(
+        writes.toWrite,
+        writes.expectedUpdatedAt,
+      )
+    : await importLabelsIfAbsent(writes.toWrite);
 }
 
 /**
@@ -237,16 +271,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         candidates = candidates.slice(0, maxAddresses);
 
         const results = await enrichBatch(candidates, { apiKey });
-        const { toWrite, errors } = await buildLabelWrites(results, mode);
-
-        if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-          // Single labels hash — Arkham's attribution is inherently
-          // cross-chain (EVM addresses are chain-agnostic), which matches
-          // the address-keyed model.
-          await importLabels(toWrite);
-        }
-
-        const enrichedCount = Object.keys(toWrite).length;
+        const writes = await buildLabelWrites(results, mode);
+        const { errors } = writes;
+        const enrichedCount = await writeEnrichmentLabels(mode, writes);
+        // In write modes this is based on actual atomic writes, so concurrent
+        // inserts/edits that beat our compare-and-set are counted as skipped.
         const skippedCount = results.length - enrichedCount - errors.length;
 
         if (errors.length > 0) {

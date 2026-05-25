@@ -938,6 +938,69 @@ describe("AddressBookClient — CSV import", () => {
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
+  it("disables import controls and ignores overlapping file changes while an import is pending", async () => {
+    let resolveFetch: (res: Response) => void = () => undefined;
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    render();
+
+    const input = getFileInput();
+    Object.defineProperty(input, "files", {
+      value: [
+        new File(["address,name\n0xabc,Whale\n"], "labels.csv", {
+          type: "text/csv",
+        }),
+      ],
+      configurable: true,
+    });
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const importButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Importing...",
+    );
+    expect(importButton).toBeDefined();
+    expect(importButton?.disabled).toBe(true);
+    expect(input.disabled).toBe(true);
+
+    Object.defineProperty(input, "files", {
+      value: [
+        new File(["address,name\n0xdef,Whale 2\n"], "labels-2.csv", {
+          type: "text/csv",
+        }),
+      ],
+      configurable: true,
+    });
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFetch(
+        new Response(JSON.stringify({ imported: { addresses: 1 } }), {
+          status: 200,
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      "Imported 1 label",
+    );
+    expect(getFileInput().disabled).toBe(false);
+  });
+
   it("renders an error message when the CSV import fetch throws (network failure)", async () => {
     // The `try/catch` in `handleFileChange` for CSV catches thrown fetch
     // errors and renders the error's message via `setImportError`. A

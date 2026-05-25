@@ -2,12 +2,14 @@ import type { RefObject } from "react";
 
 type ImportDialogProps = {
   fileInputRef: RefObject<HTMLInputElement | null>;
+  isImporting: boolean;
   onImportClick: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
 export function ImportDialog({
   fileInputRef,
+  isImporting,
   onImportClick,
   onFileChange,
 }: ImportDialogProps) {
@@ -15,10 +17,11 @@ export function ImportDialog({
     <div className="flex items-center gap-1">
       <button
         type="button"
+        disabled={isImporting}
         onClick={onImportClick}
-        className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+        className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
       >
-        Import
+        {isImporting ? "Importing..." : "Import"}
       </button>
       <details className="relative">
         <summary
@@ -49,6 +52,7 @@ export function ImportDialog({
         type="file"
         accept=".json,.csv,application/json,text/csv,text/plain"
         onChange={onFileChange}
+        disabled={isImporting}
         className="hidden"
         aria-label="Import address labels (JSON or CSV)"
       />
