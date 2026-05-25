@@ -15,7 +15,7 @@ import { NETWORKS } from "@/lib/networks";
 // universe scan + chunked SMISMEMBER + chunked importLabels write.
 export const runtime = "nodejs";
 export const maxDuration = 800;
-const MONITOR_MAX_RUNTIME_SECONDS = maxDuration;
+const MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
 // FederatedAttestations is a Celo contract; the discovery is gated on Celo
 // for parity with Arkham. Monad has no MiniPay surface today.
@@ -170,7 +170,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // Cron schedule mirrors vercel.json — keep them in sync.
         schedule: { type: "crontab", value: "0 5 * * *" },
         checkinMargin: 5,
-        maxRuntime: MONITOR_MAX_RUNTIME_SECONDS,
+        maxRuntime: MONITOR_MAX_RUNTIME_MINUTES,
         timezone: "Etc/UTC",
       },
     );

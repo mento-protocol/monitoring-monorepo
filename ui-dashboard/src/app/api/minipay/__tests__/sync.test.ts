@@ -111,7 +111,7 @@ describe("GET /api/minipay/sync — happy path", () => {
     expect(mockWithMonitor).toHaveBeenCalledWith(
       "minipay-sync",
       expect.any(Function),
-      expect.objectContaining({ maxRuntime: 800 }),
+      expect.objectContaining({ maxRuntime: 14 }),
     );
   });
 

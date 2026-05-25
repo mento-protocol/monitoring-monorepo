@@ -375,6 +375,14 @@ export async function getLastSyncedBlock(): Promise<bigint> {
   return BigInt(String(raw));
 }
 
+/**
+ * Unchecked cursor setter for manual seed/import flows only.
+ *
+ * This write is intentionally non-monotonic: it can move
+ * `minipay:lastBlock` backward. Cron/incremental sync paths must use
+ * `advanceLastSyncedBlock` so stale overlapping runs cannot regress the
+ * cursor.
+ */
 export async function setLastSyncedBlock(block: bigint): Promise<void> {
   await getRedis().set(LAST_BLOCK_KEY, block.toString());
 }

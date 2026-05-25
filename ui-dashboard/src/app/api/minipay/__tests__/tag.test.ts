@@ -166,7 +166,7 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(mockWithMonitor).toHaveBeenCalledWith(
       "minipay-tag",
       expect.any(Function),
-      expect.objectContaining({ maxRuntime: 800 }),
+      expect.objectContaining({ maxRuntime: 14 }),
     );
   });
 
