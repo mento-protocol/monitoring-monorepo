@@ -436,14 +436,12 @@ export async function fetchTokenDecimalsScaling(
   fn: "decimals0" | "decimals1",
   log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
+  const ctx = { chainId, poolAddress, fn, log };
   const mockKey = `${chainId}:${poolAddress.toLowerCase()}:${fn}`;
   if (_testTokenDecimalsScaling.has(mockKey)) {
     return boundsCheckDecimalsScaling(
       _testTokenDecimalsScaling.get(mockKey) ?? null,
-      chainId,
-      poolAddress,
-      fn,
-      log,
+      ctx,
     );
   }
 
@@ -461,42 +459,38 @@ export async function fetchTokenDecimalsScaling(
       getFallbackRpcClient(chainId),
       log,
     );
-    return boundsCheckDecimalsScaling(
-      result as bigint,
-      chainId,
-      poolAddress,
-      fn,
-      log,
-    );
+    return boundsCheckDecimalsScaling(result as bigint, ctx);
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
     return null;
   }
 }
 
-// Bounds check — mirrors the ERC20 fallback path's `d < 0 || d > 36` guard.
-// A malicious or buggy RPC returning an oversized BigInt would otherwise be
-// cached (`tokenDecimalsScalingEffect.cache = true`) and poison every
-// downstream volume/reserve calculation forever. The permitted range is
-// [1, 10^36] — ERC20 supports up to 36 decimals. Returning null routes the
-// caller to the ERC20 fallback path. Applied uniformly to the mock path
-// and the RPC path so test mocks can't inject out-of-bounds values either.
+type DecimalsScalingCtx = {
+  chainId: number;
+  poolAddress: string;
+  fn: "decimals0" | "decimals1";
+  log: RpcLogger;
+};
+
+// Mirrors the ERC20 fallback's `d < 0 || d > 36` guard. An oversized BigInt
+// from a buggy/malicious RPC would otherwise be cached forever via
+// `tokenDecimalsScalingEffect.cache = true` and poison every downstream
+// volume/reserve calc. Applied uniformly to mock + RPC paths.
 function boundsCheckDecimalsScaling(
   scaling: bigint | null,
-  chainId: number,
-  poolAddress: string,
-  fn: "decimals0" | "decimals1",
-  log: RpcLogger,
+  ctx: DecimalsScalingCtx,
 ): bigint | null {
   if (scaling === null) return null;
   if (scaling <= 0n || scaling > 10n ** 36n) {
+    const err = new Error(`out-of-range scaling factor ${scaling.toString()}`);
     logRpcFailure(
-      chainId,
-      fn,
-      poolAddress,
-      new Error(`out-of-range scaling factor ${scaling.toString()}`),
+      ctx.chainId,
+      ctx.fn,
+      ctx.poolAddress,
+      err,
       undefined,
-      log,
+      ctx.log,
     );
     return null;
   }
