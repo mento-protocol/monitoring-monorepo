@@ -10,10 +10,6 @@ type WormholeOperation = {
   vaa?: { raw?: string };
 };
 
-type WormholeOperationResponse = {
-  operations?: WormholeOperation[];
-};
-
 type RedeemRequest = {
   txHash: string;
   chainConfig: NonNullable<ReturnType<typeof getChainRedeemConfig>>;
@@ -92,9 +88,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  let body: WormholeOperationResponse;
+  let body: unknown;
   try {
-    body = (await response.json()) as WormholeOperationResponse;
+    body = await response.json();
   } catch {
     return badRequest("Wormholescan returned an invalid response.", 502);
   }
@@ -179,9 +175,7 @@ function getSingleVaaRaw(
   return { ok: true, vaaRaw };
 }
 
-function parseOperations(
-  body: WormholeOperationResponse,
-): WormholeOperation[] | null {
+function parseOperations(body: unknown): WormholeOperation[] | null {
   if (!isRecord(body)) return null;
   if (body.operations === undefined) return [];
   if (!Array.isArray(body.operations)) return null;
