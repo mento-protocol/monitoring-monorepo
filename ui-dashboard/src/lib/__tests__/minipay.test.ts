@@ -95,15 +95,16 @@ describe("addToMiniPaySet", () => {
 });
 
 describe("getMiniPaySetSize", () => {
-  it("sums SCARD across all 16 shards", async () => {
+  it("sums SCARD across all 16 shards and the legacy migration key", async () => {
     scardMock.mockResolvedValue(100);
     const size = await getMiniPaySetSize();
-    expect(scardMock).toHaveBeenCalledTimes(16);
-    expect(size).toBe(16 * 100);
+    expect(scardMock).toHaveBeenCalledTimes(17);
+    expect(size).toBe(17 * 100);
     // Spot-check that we hit the right shard keys
     const keys = new Set(scardMock.mock.calls.map((c) => c[0]));
     expect(keys.has("minipay:users:0")).toBe(true);
     expect(keys.has("minipay:users:f")).toBe(true);
+    expect(keys.has("minipay:users")).toBe(true);
   });
 });
 
@@ -122,10 +123,27 @@ describe("intersectMiniPay", () => {
       "0x0" + "2".repeat(39),
       "0x0" + "3".repeat(39),
     ];
-    smismemberMock.mockResolvedValueOnce([1, 0, 1, 0]);
+    smismemberMock
+      .mockResolvedValueOnce([1, 0, 1, 0])
+      .mockResolvedValueOnce([0, 0]);
     const result = await intersectMiniPay(addrs);
-    expect(smismemberMock).toHaveBeenCalledTimes(1);
+    expect(smismemberMock).toHaveBeenCalledTimes(2);
+    expect(smismemberMock).toHaveBeenNthCalledWith(2, "minipay:users", [
+      addrs[1],
+      addrs[3],
+    ]);
     expect(result).toEqual([addrs[0], addrs[2]]);
+  });
+
+  it("does not call legacy fallback when all addresses are shard hits", async () => {
+    const addrs = ["0x" + "0".repeat(40), "0x0" + "1".repeat(39)];
+    smismemberMock.mockResolvedValueOnce([1, 1]);
+
+    const result = await intersectMiniPay(addrs);
+
+    expect(smismemberMock).toHaveBeenCalledTimes(1);
+    expect(smismemberMock).toHaveBeenCalledWith("minipay:users:0", addrs);
+    expect(result).toEqual(addrs);
   });
 
   it("chunks SMISMEMBER calls within a shard and stitches positives", async () => {
@@ -135,12 +153,57 @@ describe("intersectMiniPay", () => {
     );
     smismemberMock.mockResolvedValueOnce([1, ...new Array(999).fill(0)]);
     smismemberMock.mockResolvedValueOnce([1, ...new Array(499).fill(0)]);
+    smismemberMock.mockResolvedValueOnce(new Array(1000).fill(0));
+    smismemberMock.mockResolvedValueOnce(new Array(498).fill(0));
 
     const result = await intersectMiniPay(addrs);
-    expect(smismemberMock).toHaveBeenCalledTimes(2);
+    expect(smismemberMock).toHaveBeenCalledTimes(4);
     expect(result).toHaveLength(2);
     expect(result[0]).toBe(addrs[0]);
     expect(result[1]).toBe(addrs[1000]);
+  });
+
+  it("falls back to the legacy single-key set for shard misses", async () => {
+    const addrs = [
+      "0x" + "0".repeat(40),
+      "0x0" + "1".repeat(39),
+      "0x0" + "2".repeat(39),
+    ];
+    smismemberMock
+      .mockResolvedValueOnce([0, 0, 1])
+      .mockResolvedValueOnce([1, 0]);
+
+    const result = await intersectMiniPay(addrs);
+
+    expect(smismemberMock).toHaveBeenNthCalledWith(1, "minipay:users:0", addrs);
+    expect(smismemberMock).toHaveBeenNthCalledWith(2, "minipay:users", [
+      addrs[0],
+      addrs[1],
+    ]);
+    expect(result).toEqual([addrs[0], addrs[2]]);
+  });
+
+  it("dedupes addresses that are present in both shard and legacy reads", async () => {
+    const duplicate = "0x" + "0".repeat(40);
+    const addrs = [duplicate, duplicate];
+    smismemberMock.mockResolvedValueOnce([1, 0]).mockResolvedValueOnce([1]);
+
+    const result = await intersectMiniPay(addrs);
+
+    expect(result).toEqual([duplicate]);
+  });
+
+  it("dedupes shard misses before probing the legacy set", async () => {
+    const duplicate = "0x" + "0".repeat(40);
+    const addrs = [duplicate, duplicate];
+    smismemberMock.mockResolvedValueOnce([0, 0]).mockResolvedValueOnce([1]);
+
+    const result = await intersectMiniPay(addrs);
+
+    expect(smismemberMock).toHaveBeenNthCalledWith(2, "minipay:users", [
+      duplicate,
+    ]);
+    expect(result).toEqual([duplicate]);
   });
 });
 
@@ -153,6 +216,7 @@ describe("cursor helpers", () => {
   it("getLastSyncedBlock parses string cursor", async () => {
     getMock.mockResolvedValue("1234567890");
     expect(await getLastSyncedBlock()).toBe(BigInt(1234567890));
+    expect(getMock).toHaveBeenCalledWith("minipay:lastBlock:sharded");
   });
 
   it("getLastSyncedBlock throws on garbage input — surface, don't silently reset", async () => {
@@ -163,7 +227,14 @@ describe("cursor helpers", () => {
   it("setLastSyncedBlock writes BigInt as decimal string", async () => {
     setMock.mockResolvedValue("OK");
     await setLastSyncedBlock(BigInt(99999));
-    expect(setMock).toHaveBeenCalledWith("minipay:lastBlock", "99999");
+    expect(setMock).toHaveBeenCalledWith("minipay:lastBlock:sharded", "99999");
+  });
+
+  it("setLastSyncedBlock rejects 0 because cron treats 0 as unseeded", async () => {
+    await expect(setLastSyncedBlock(BigInt(0))).rejects.toThrow(
+      "MiniPay sharded cursor cannot be set to 0",
+    );
+    expect(setMock).not.toHaveBeenCalled();
   });
 
   it("advanceLastSyncedBlock writes only when the stored cursor is lower", async () => {
@@ -171,7 +242,7 @@ describe("cursor helpers", () => {
     await expect(advanceLastSyncedBlock(BigInt(200))).resolves.toBe(true);
     expect(evalMock).toHaveBeenCalledWith(
       expect.stringContaining('redis.call("SET", KEYS[1], ARGV[1])'),
-      ["minipay:lastBlock"],
+      ["minipay:lastBlock:sharded"],
       ["200"],
     );
   });

@@ -23,7 +23,7 @@ type SyncResponse = {
   fetched: number;
   /** New SET members SADD'd. Equals `fetched` on first run; small delta after. */
   added: number;
-  /** Total `SCARD minipay:users` after the run. */
+  /** Total MiniPay Redis set cardinality after the run. */
   total: number;
   /** Highest block_number observed in the Dune result set. */
   maxBlock: string;
@@ -37,7 +37,7 @@ type SyncResponse = {
  *
  * Auth: Bearer `CRON_SECRET`.
  *
- * Cursor semantics: persisted block (`minipay:lastBlock`) is the
+ * Cursor semantics: persisted block (`minipay:lastBlock:sharded`) is the
  * **exclusive lower bound** for the next run — Dune query 7404332 filters
  * `WHERE block_number > {{lastBlock}}`, so a row at exactly `lastBlock` is
  * not re-fetched. After a successful run we persist `maxBlock` (the highest
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           return NextResponse.json(
             {
               error:
-                "MiniPay cursor is empty; run the bulk seed before enabling cron sync",
+                "MiniPay sharded cursor is empty; run the bulk seed before enabling cron sync",
             },
             { status: 409 },
           );

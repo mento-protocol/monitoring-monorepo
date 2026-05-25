@@ -34,7 +34,8 @@ upstash_api_key = "..."
 
 # ── Dune Analytics ────────────────────────────────────────────────────────────
 # API key for the nightly /api/minipay/sync cron that pulls MiniPay
-# attestations from Dune query 7404332 into the `minipay:users` Redis SET.
+# attestations from Dune query 7404332 into sharded `minipay:users:<nibble>`
+# Redis SETs.
 # Generate at api.dune.com → Settings → API. Same `count`-gated pattern as
 # arkham_api_key — leave empty until provisioned.
 # dune_api_key = "..."
