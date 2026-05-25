@@ -632,6 +632,47 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     expect(currentOnlyChain.nowTvl).toBeCloseTo(100, 6);
   });
 
+  it("does not zero-fill history for chains whose snapshot fetch failed before rows", () => {
+    const today = dayAlignedNow();
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: today,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+
+    const { series, nowTvl, byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots30d: [snapA],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [poolB],
+        snapshotsAllDaily: [],
+        snapshotsAllDailyError: new Error("page-1 timeout"),
+      }),
+    ]);
+
+    expect(series).toHaveLength(1);
+    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
+    expect(nowTvl).toBeCloseTo(120, 6);
+    const failedChain = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
+    expect(failedChain.series).toEqual([]);
+    expect(failedChain.nowTvl).toBeCloseTo(100, 6);
+  });
+
   it("omits chains whose entire fetch failed (top-level error)", () => {
     // A failed-fetch chain should disappear from the breakdown rather than
     // appear as an all-zero series — otherwise the legend lies about which
@@ -759,17 +800,16 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Unable to load TVL history");
   });
 
-  it("renders 'Historical data partial' when hasSnapshotError and no rows survived", () => {
+  it("renders 'Historical data partial' when hasSnapshotError and no live TVL survived", () => {
     // First-page failure on the paginated all-history fetch: snapshotsAllDaily
     // comes back empty AND snapshotsAllDailyError is set. Chart shows the
     // partial-history empty state (not a confident-but-blank plot).
-    const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [
           makeNetworkData({
             network: TVL_NETWORK,
-            pools: [pool],
+            pools: [],
             snapshotsAllDaily: [],
             snapshotsAllDailyError: new Error("page-1 timeout"),
           }),
@@ -785,6 +825,96 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Historical data partial");
     expect(html).not.toContain("Unable to load TVL history");
     expect(html).not.toContain("Not enough history yet");
+  });
+
+  it("renders current live TVL when every chain has no snapshot history yet", () => {
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [poolA],
+            snapshots30d: [],
+          }),
+          makeNetworkData({
+            network: TVL_NETWORK_2,
+            pools: [poolB],
+            snapshots30d: [],
+          }),
+        ],
+        totalTvl: 300,
+        tvlPartial: false,
+        change7d: null,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: false,
+      }),
+    );
+
+    expect(html).not.toContain("Not enough history yet");
+    const traces = capturedPlotProps.data as Array<{
+      name?: string;
+      x: string[];
+      y: number[];
+    }>;
+    expect(traces).toHaveLength(3);
+    expect(traces[0].name).toBe("Total");
+    expect(traces[0].x).toHaveLength(1);
+    expect(traces[0].y).toEqual([300]);
+    expect(traces[1].name).toBe(TVL_NETWORK.label);
+    expect(traces[1].x).toHaveLength(1);
+    expect(traces[1].y).toEqual([200]);
+    expect(traces[2].name).toBe(TVL_NETWORK_2.label);
+    expect(traces[2].x).toHaveLength(1);
+    expect(traces[2].y).toEqual([100]);
+  });
+
+  it("renders current live TVL without historical zero-fill when snapshots failed before rows", () => {
+    const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [pool],
+            snapshotsAllDaily: [],
+            snapshotsAllDailyError: new Error("page-1 timeout"),
+          }),
+        ],
+        totalTvl: 200,
+        tvlPartial: false,
+        change7d: null,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: true,
+      }),
+    );
+
+    expect(html).toContain("· partial data");
+    expect(html).not.toContain("Historical data partial");
+    expect(html).not.toContain("Not enough history yet");
+    const traces = capturedPlotProps.data as Array<{
+      name?: string;
+      x: string[];
+      y: number[];
+    }>;
+    expect(traces).toHaveLength(2);
+    expect(traces[0].name).toBe("Total");
+    expect(traces[0].x).toHaveLength(1);
+    expect(traces[0].y).toEqual([200]);
+    expect(traces[1].name).toBe(TVL_NETWORK.label);
+    expect(traces[1].x).toHaveLength(1);
+    expect(traces[1].y).toEqual([200]);
   });
 
   it("renders a skeleton (not the real value) in the hero while loading", () => {
