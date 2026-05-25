@@ -16,7 +16,6 @@ locals {
     "${path.module}/package.json",
     "${path.module}/package-lock.json",
     "${path.module}/tsconfig.json",
-    "${path.module}/safe-abi.json",
   ]
   # Include multisig config in the hash so adding/removing a Safe address
   # forces a full Cloud Function redeploy with the new MULTISIG_CONFIG env
@@ -84,4 +83,3 @@ locals {
     local.multisig_env_vars
   )
 }
-

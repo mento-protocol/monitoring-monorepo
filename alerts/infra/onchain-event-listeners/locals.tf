@@ -6,7 +6,7 @@ locals {
   # and any of our event signatures (topic0)
   # Includes error handling to prevent webhook failures
   # ABI is injected by the parent root (single read of the canonical file
-  # at alerts/infra/onchain-event-handler/safe-abi.json).
+  # at alerts/infra/onchain-event-handler/src/safe-abi.json).
   safe_abi = var.safe_abi
 
   # Generate ABI comment block for QuickNode template metadata
@@ -46,4 +46,3 @@ EOT
     compression     = var.compression
   }))
 }
-

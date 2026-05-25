@@ -6,7 +6,7 @@
 
 import keccak from "keccak";
 import { celo, mainnet } from "viem/chains";
-import safeAbi from "../safe-abi.json";
+import safeAbi from "./safe-abi.json";
 import config from "./config";
 import type { EventName, EventSignature, MultisigKey } from "./types";
 

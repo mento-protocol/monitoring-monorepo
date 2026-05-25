@@ -148,8 +148,8 @@ resource "random_id" "bucket_suffix" {
 }
 
 # Archive function source (Cloud Build will compile TypeScript).
-# safe-abi.json lives in this module's dir (committed), so it's included
-# automatically. excludes block also drops dev secrets (.env*) and
+# safe-abi.json lives under src/ so TypeScript copies it into dist/ beside
+# constants.js. excludes block also drops dev secrets (.env*) and
 # terraform-state-derived caches so they never leak into the GCS zip.
 data "archive_file" "function_source" {
   type        = "zip"

@@ -20,7 +20,7 @@
 #   1. Loads project variables (project_id, region, function_name, etc.)
 #   2. Reads ALL function configuration from Terraform state (single source of truth)
 #   3. Reads environment variables from Terraform state
-#   4. Ensures safe-abi.json exists in module directory
+#   4. Ensures safe-abi.json exists under src so the build emits it to dist
 #   5. Deploys function using gcloud with Cloud Build (runs npm install and build)
 #   6. Displays function URL after successful deployment
 #
@@ -162,14 +162,14 @@ create_env_vars_file() {
 	echo "${env_file}"
 }
 
-# safe-abi.json is committed in the module directory — assert it's present
-# rather than copying from a parent dir.
+# safe-abi.json is committed under src so tsc emits dist/safe-abi.json beside
+# dist/constants.js.
 ensure_safe_abi() {
-	if [[ -f "${MODULE_DIR}/safe-abi.json" ]]; then
+	if [[ -f "${MODULE_DIR}/src/safe-abi.json" ]]; then
 		return 0
 	fi
 
-	error "safe-abi.json missing from module directory: ${MODULE_DIR}/safe-abi.json"
+	error "safe-abi.json missing from source directory: ${MODULE_DIR}/src/safe-abi.json"
 	return 1
 }
 
