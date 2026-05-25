@@ -100,6 +100,14 @@ describe("PUT /api/address-labels", () => {
     });
   }
 
+  function rawJsonReq(body: string, headers: Record<string, string> = {}) {
+    return new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...headers },
+      body,
+    });
+  }
+
   it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const res = await PUT(jsonReq({ address: VALID_ADDR, name: "Alice" }));
@@ -125,6 +133,32 @@ describe("PUT /api/address-labels", () => {
       jsonReq([{ address: VALID_ADDR, name: "array body" }]),
     );
     expect(res.status).toBe(400);
+    expect(getLabel).not.toHaveBeenCalled();
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized JSON bodies before reading labels", async () => {
+    const res = await PUT(
+      rawJsonReq(JSON.stringify({ address: VALID_ADDR, name: "Alice" }), {
+        "Content-Length": String(65 * 1024),
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(getLabel).not.toHaveBeenCalled();
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized JSON bodies without a Content-Length header", async () => {
+    const res = await PUT(
+      rawJsonReq(
+        JSON.stringify({
+          address: VALID_ADDR,
+          name: "Alice",
+          notes: "x".repeat(65 * 1024),
+        }),
+      ),
+    );
+    expect(res.status).toBe(413);
     expect(getLabel).not.toHaveBeenCalled();
     expect(upsertEntry).not.toHaveBeenCalled();
   });
@@ -179,6 +213,16 @@ describe("PUT /api/address-labels", () => {
       jsonReq({ address: VALID_ADDR, name: "Alice", tags }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("rejects excessive raw tag arrays before normalization", async () => {
+    const tags = Array.from({ length: 101 }, () => "duplicate");
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "Alice", tags }),
+    );
+    expect(res.status).toBe(400);
+    expect(getLabel).not.toHaveBeenCalled();
+    expect(upsertEntry).not.toHaveBeenCalled();
   });
 
   it("rejects tags longer than 50 chars", async () => {
