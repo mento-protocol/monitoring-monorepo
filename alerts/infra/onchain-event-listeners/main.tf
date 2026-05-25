@@ -80,10 +80,15 @@ resource "null_resource" "pause_webhook_before_update" {
 }
 
 # QuickNode webhook creation
-# API Reference: https://www.quicknode.com/docs/webhooks/rest-api/webhooks/webhooks-rest-create-webhook
+# API Reference: https://www.quicknode.com/docs/webhooks/rest-api/webhooks/webhooks-rest-create-from-template
+#
+# Uses the `evmContractEvents` template (replaces the now-removed custom
+# `filter_function` API). QuickNode filters logs by topic0 from the
+# configured contracts, ABI-decodes, and delivers `{result: [...]}` in the
+# shape the handler already expects.
 resource "restapi_object" "multisig_webhook" {
   provider = restapi.quicknode
-  path     = "/webhooks/rest/v1/webhooks"
+  path     = "/webhooks/rest/v1/webhooks/template/evmContractEvents"
 
   # Configure paths for reading and deleting webhooks
   # Note: QuickNode doesn't support updates - we must recreate webhooks for any changes
@@ -94,17 +99,19 @@ resource "restapi_object" "multisig_webhook" {
   # Any configuration change will trigger replacement via replace_triggered_by lifecycle rule
 
   data = jsonencode({
-    # Append hash to name to force replacement when config changes
-    # This ensures Terraform sees it as a different resource requiring recreation
-    name            = "${var.webhook_name}-${substr(local.webhook_data_hash, 0, 8)}"
-    network         = var.quicknode_network_name
-    filter_function = local.filter_function_base64
+    # Append hash to name to force replacement when config changes.
+    # This ensures Terraform sees it as a different resource requiring recreation.
+    name    = "${var.webhook_name}-${substr(local.webhook_data_hash, 0, 8)}"
+    network = var.quicknode_network_name
     destination_attributes = {
       url            = var.webhook_endpoint_url
       security_token = var.quicknode_signing_secret
       compression    = var.compression
     }
-    status = "active"
+    templateArgs = {
+      contracts   = [for addr in var.multisig_addresses : lower(addr)]
+      eventHashes = local.event_hashes
+    }
   })
 
   id_attribute = "id"
