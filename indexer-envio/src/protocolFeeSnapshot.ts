@@ -153,8 +153,11 @@ function effectiveAddFlagsForTrackedSlot(
     return flags;
   }
 
-  const tokenDecimals =
-    existing.tokenDecimals[tokenIdx] ?? flags.input.tokenDecimals;
+  const tokenDecimals = existing.tokenDecimals[tokenIdx];
+  if (tokenDecimals === undefined) {
+    return flags;
+  }
+
   const input = {
     ...flags.input,
     tokenSymbol: existingSymbol,
@@ -245,10 +248,17 @@ export function mergeFeeSnapshot(
     nextAllPegged,
     nextUnresolvedCount,
   };
+  if (mode === "heal") {
+    return finalizeHeal(existing, input, state);
+  }
+
   const addFlags = effectiveAddFlagsForTrackedSlot(existing, tokenIdx, flags);
-  return mode === "heal"
-    ? finalizeHeal(existing, input, state)
-    : finalizeAdd(existing, { flags: addFlags, tokenIdx, shouldHeal, state });
+  return finalizeAdd(existing, {
+    flags: addFlags,
+    tokenIdx,
+    shouldHeal,
+    state,
+  });
 }
 
 type MergedSlotState = {

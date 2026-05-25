@@ -716,6 +716,39 @@ describe("mergeFeeSnapshot pure function", () => {
     assert.equal(second!.unresolvedCount, 0);
   });
 
+  it("same-token merge: missing stored decimals keeps later UNKNOWN transfers unpriced", () => {
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({ amount: AMOUNT_1E6 }),
+    );
+    const malformedExisting = {
+      ...first!,
+      tokenDecimals: [],
+    };
+
+    const second = mergeFeeSnapshot(
+      malformedExisting,
+      makeInput({
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: 0,
+        amount: AMOUNT_1E6 * 2n,
+        blockNumber: 501n,
+      }),
+    );
+
+    assert.equal(second!.transferCount, 2);
+    assert.deepStrictEqual(second!.tokenSymbols, ["USDC"]);
+    assert.deepStrictEqual(second!.tokenDecimals, []);
+    assert.equal(second!.amounts[0], AMOUNT_1E6 * 3n);
+    assert.equal(
+      second!.feesUsdWei,
+      AMOUNT_1E6_USD_WEI,
+      "must not price UNKNOWN input using fallback decimals",
+    );
+    assert.equal(second!.allPegged, false);
+    assert.equal(second!.unresolvedCount, 0);
+  });
+
   // -------------------------------------------------------------------------
   // New-token append
   // -------------------------------------------------------------------------
