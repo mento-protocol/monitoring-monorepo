@@ -107,6 +107,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
     google_secret_manager_secret_iam_member.runtime_discord_webhook_alerts,
     google_secret_manager_secret_iam_member.runtime_discord_webhook_events,
+    google_storage_bucket_iam_member.runtime_replay_nonce_creator,
   ]
 
   timeouts {
@@ -134,6 +135,37 @@ resource "google_storage_bucket" "function_bucket" {
 
   versioning {
     enabled = true
+  }
+
+  lifecycle {
+    prevent_destroy = false
+    ignore_changes  = [labels["goog-terraform-provisioned"]]
+  }
+}
+
+# trunk-ignore(checkov/CKV_GCP_62): bucket stores hashed nonce markers only; Cloud Audit Logs cover object writes
+resource "google_storage_bucket" "webhook_replay_nonces" {
+  project  = var.project_id
+  name     = "${var.project_id}-quicknode-replay-nonces-${random_id.bucket_suffix.hex}"
+  location = var.region
+
+  uniform_bucket_level_access = true
+  force_destroy               = true
+  public_access_prevention    = "enforced"
+
+  labels = var.common_labels
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "Delete"
+    }
   }
 
   lifecycle {
@@ -381,4 +413,10 @@ resource "google_secret_manager_secret_iam_member" "runtime_discord_webhook_even
   secret_id = google_secret_manager_secret.discord_webhook_events.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_storage_bucket_iam_member" "runtime_replay_nonce_creator" {
+  bucket = google_storage_bucket.webhook_replay_nonces.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.function_runtime.email}"
 }

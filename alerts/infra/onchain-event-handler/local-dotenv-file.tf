@@ -22,10 +22,10 @@ SUPPORTED_CHAINS=${join(",", local.chains)}
 
 # QuickNode Configuration
 QUICKNODE_SIGNING_SECRET=${var.quicknode_signing_secret}
+QUICKNODE_REPLAY_BUCKET=${google_storage_bucket.webhook_replay_nonces.name}
 
 # Discord Webhook URLs (shared across all multisigs)
 DISCORD_WEBHOOK_ALERTS=${local.shared_webhook_urls.alerts}
 DISCORD_WEBHOOK_EVENTS=${local.shared_webhook_urls.events}
   EOT
 }
-

@@ -1,6 +1,7 @@
 import type { Request } from "@google-cloud/functions-framework";
 import config from "./config";
 import { logger } from "./logger";
+import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { verifyQuickNodeSignature } from "./verify-quicknode-signature";
 
 type ValidationResult =
@@ -21,7 +22,9 @@ interface RequestWithRawBody extends Request {
  * @param req - The incoming HTTP request
  * @returns Validation result - if invalid, includes status code and error message
  */
-export function validateQuickNodeWebhook(req: Request): ValidationResult {
+export async function validateQuickNodeWebhook(
+  req: Request,
+): Promise<ValidationResult> {
   // Extract required headers
   const nonce = req.headers["x-qn-nonce"] as string | undefined;
   const timestamp = req.headers["x-qn-timestamp"] as string | undefined;
@@ -97,6 +100,11 @@ export function validateQuickNodeWebhook(req: Request): ValidationResult {
       status: 401,
       message: "Unauthorized: Invalid signature",
     };
+  }
+
+  const replayValidation = await reserveQuickNodeNonce(nonce, timestamp);
+  if (!replayValidation.valid) {
+    return replayValidation;
   }
 
   return { valid: true };

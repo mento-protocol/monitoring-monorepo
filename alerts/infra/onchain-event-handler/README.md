@@ -177,7 +177,9 @@ For local development, you'll need to set up environment variables. The function
    npm run generate:env
    ```
 
-   Creates `.env` with: `MULTISIG_CONFIG`, `DISCORD_WEBHOOK_ALERTS`, `DISCORD_WEBHOOK_EVENTS`, `QUICKNODE_SIGNING_SECRET`, `SUPPORTED_CHAINS`.
+   Creates `.env` with: `MULTISIG_CONFIG`, `DISCORD_WEBHOOK_ALERTS`,
+   `DISCORD_WEBHOOK_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
+   `QUICKNODE_REPLAY_BUCKET`, `SUPPORTED_CHAINS`.
 
 2. **Run locally:**
 
