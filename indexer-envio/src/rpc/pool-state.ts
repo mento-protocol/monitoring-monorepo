@@ -430,19 +430,25 @@ export async function fetchRebalanceThresholds(
  *  Returns null on RPC failure so the caller (the effect handler) can
  *  fall back to `erc20DecimalsEffect` and benefit from effect-level dedup
  *  on shared fallback tokens. */
+// Mirrors the ERC20 fallback's `d < 0 || d > 36` guard. An oversized BigInt
+// from a buggy/malicious RPC would otherwise be cached forever via
+// `tokenDecimalsScalingEffect.cache = true` and poison every downstream
+// volume/reserve calc. Applied to mock + RPC paths so tests can't inject
+// out-of-bounds either; permitted range is [1, 10^36].
+function isOutOfRangeScaling(scaling: bigint): boolean {
+  return scaling <= 0n || scaling > 10n ** 36n;
+}
+
 export async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
   fn: "decimals0" | "decimals1",
   log: RpcLogger = consoleLogger,
 ): Promise<bigint | null> {
-  const ctx = { chainId, poolAddress, fn, log };
   const mockKey = `${chainId}:${poolAddress.toLowerCase()}:${fn}`;
   if (_testTokenDecimalsScaling.has(mockKey)) {
-    return boundsCheckDecimalsScaling(
-      _testTokenDecimalsScaling.get(mockKey) ?? null,
-      ctx,
-    );
+    const mocked = _testTokenDecimalsScaling.get(mockKey) ?? null;
+    return mocked !== null && isOutOfRangeScaling(mocked) ? null : mocked;
   }
 
   try {
@@ -459,42 +465,19 @@ export async function fetchTokenDecimalsScaling(
       getFallbackRpcClient(chainId),
       log,
     );
-    return boundsCheckDecimalsScaling(result as bigint, ctx);
+    const scaling = result as bigint;
+    if (isOutOfRangeScaling(scaling)) {
+      const err = new Error(
+        `out-of-range scaling factor ${scaling.toString()}`,
+      );
+      logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
+      return null;
+    }
+    return scaling;
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err, undefined, log);
     return null;
   }
-}
-
-type DecimalsScalingCtx = {
-  chainId: number;
-  poolAddress: string;
-  fn: "decimals0" | "decimals1";
-  log: RpcLogger;
-};
-
-// Mirrors the ERC20 fallback's `d < 0 || d > 36` guard. An oversized BigInt
-// from a buggy/malicious RPC would otherwise be cached forever via
-// `tokenDecimalsScalingEffect.cache = true` and poison every downstream
-// volume/reserve calc. Applied uniformly to mock + RPC paths.
-function boundsCheckDecimalsScaling(
-  scaling: bigint | null,
-  ctx: DecimalsScalingCtx,
-): bigint | null {
-  if (scaling === null) return null;
-  if (scaling <= 0n || scaling > 10n ** 36n) {
-    const err = new Error(`out-of-range scaling factor ${scaling.toString()}`);
-    logRpcFailure(
-      ctx.chainId,
-      ctx.fn,
-      ctx.poolAddress,
-      err,
-      undefined,
-      ctx.log,
-    );
-    return null;
-  }
-  return scaling;
 }
 
 export async function fetchTradingLimits(
