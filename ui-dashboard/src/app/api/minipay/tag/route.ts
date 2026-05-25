@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getLabels, importLabelsIfAbsent } from "@/lib/address-labels";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
@@ -15,6 +15,7 @@ import { NETWORKS } from "@/lib/networks";
 // universe scan + chunked SMISMEMBER + chunked importLabels write.
 export const runtime = "nodejs";
 export const maxDuration = 800;
+const MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
 // FederatedAttestations is a Celo contract; the discovery is gated on Celo
 // for parity with Arkham. Monad has no MiniPay surface today.
@@ -142,11 +143,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           toWrite[addr] = toMiniPayEntry();
         }
 
+        let written = 0;
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
           // Single labels hash — MiniPay attestations are issued on Celo but
           // the EOA itself is chain-agnostic, which matches the global-only
-          // address-keyed model.
-          await importLabels(toWrite);
+          // address-keyed model. Insert-only writes close the race where a
+          // label is added after our pre-filter read but before persistence.
+          written = await importLabelsIfAbsent(toWrite);
         }
 
         const body: TagResponse = {
@@ -156,7 +159,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           candidates: candidates.length,
           minipaySetSize,
           matched: matches.length,
-          written: mode === "dryRun" ? 0 : Object.keys(toWrite).length,
+          written,
           ...(mode === "dryRun" ? { wouldWrite: matches } : {}),
           durationMs: Date.now() - startedAt,
           perEntity,
@@ -167,7 +170,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // Cron schedule mirrors vercel.json — keep them in sync.
         schedule: { type: "crontab", value: "0 5 * * *" },
         checkinMargin: 5,
-        maxRuntime: 15,
+        maxRuntime: MONITOR_MAX_RUNTIME_MINUTES,
         timezone: "Etc/UTC",
       },
     );

@@ -15,6 +15,7 @@ import {
 // seeding is intentionally local so Vercel does not repeat an oversized job.
 export const runtime = "nodejs";
 export const maxDuration = 800;
+const MONITOR_MAX_RUNTIME_MINUTES = Math.ceil(maxDuration / 60);
 
 type SyncResponse = {
   ok: boolean;
@@ -113,7 +114,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // Cron schedule mirrors vercel.json — keep them in sync.
         schedule: { type: "crontab", value: "30 3 * * *" },
         checkinMargin: 5,
-        maxRuntime: 15,
+        maxRuntime: MONITOR_MAX_RUNTIME_MINUTES,
         timezone: "Etc/UTC",
       },
     );

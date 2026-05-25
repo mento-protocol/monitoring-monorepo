@@ -29,12 +29,14 @@ import {
   getMiniPaySetSize,
   advanceLastSyncedBlock,
 } from "@/lib/minipay";
+import * as Sentry from "@sentry/nextjs";
 
 const mockFetch = vi.mocked(fetchMiniPayUsers);
 const mockAdd = vi.mocked(addToMiniPaySet);
 const mockSize = vi.mocked(getMiniPaySetSize);
 const mockGetCursor = vi.mocked(getLastSyncedBlock);
 const mockAdvanceCursor = vi.mocked(advanceLastSyncedBlock);
+const mockWithMonitor = vi.mocked(Sentry.withMonitor);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -97,6 +99,20 @@ describe("GET /api/minipay/sync — happy path", () => {
     expect(addOrder).toBeLessThan(setOrder);
 
     expect(mockAdvanceCursor).toHaveBeenCalledWith(BigInt(500));
+  });
+
+  it("keeps Sentry maxRuntime aligned with the route execution budget", async () => {
+    mockGetCursor.mockResolvedValue(BigInt(100));
+    mockFetch.mockReturnValue(yieldPages([]));
+    mockSize.mockResolvedValue(2);
+
+    const res = await GET(makeReq("cron-secret"));
+    expect(res.status).toBe(200);
+    expect(mockWithMonitor).toHaveBeenCalledWith(
+      "minipay-sync",
+      expect.any(Function),
+      expect.objectContaining({ maxRuntime: 14 }),
+    );
   });
 
   it("does NOT advance cursor when SADD throws (regression: data loss)", async () => {

@@ -48,8 +48,12 @@ if (!apiKey || !redisUrl || !redisToken) {
   process.exit(1);
 }
 
-// Allow reusing a previous execution_id to skip the 78s execute step.
-const REUSE_EXEC_ID = process.argv[2] ?? null;
+if (process.argv[2]) {
+  console.error(
+    "Execution-id reuse is disabled: this seed writes minipay:lastBlock and must execute Dune with lastBlock=0.",
+  );
+  process.exit(1);
+}
 
 function isValidAddress(value) {
   return typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
@@ -200,13 +204,8 @@ async function scard() {
 async function main() {
   const startedAt = Date.now();
 
-  let executionId = REUSE_EXEC_ID;
-  if (!executionId) {
-    executionId = await executeQuery(0);
-    await pollUntilComplete(executionId);
-  } else {
-    console.log(`> Reusing execution_id: ${executionId}`);
-  }
+  const executionId = await executeQuery(0);
+  await pollUntilComplete(executionId);
 
   let totalFetched = 0;
   let totalAdded = 0;
