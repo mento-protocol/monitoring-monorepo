@@ -562,7 +562,14 @@ export function headCommitCommittedAt(pr) {
   );
 }
 
-export function fetchHeadUpdatedAt({ headCommittedAt = null, observedAt }) {
+export function fetchHeadUpdatedAt({ observedAt }) {
+  return observedAt ?? null;
+}
+
+export function fetchReviewRequestLowerBound({
+  headCommittedAt = null,
+  observedAt,
+}) {
   return headCommittedAt ?? observedAt ?? null;
 }
 
@@ -737,9 +744,14 @@ function fetchReadyState({ prArg, repoArg }) {
     headCommittedAt: headCommitCommittedAt(pr),
     observedAt,
   });
+  const reviewRequestLowerBound = fetchReviewRequestLowerBound({
+    headCommittedAt: headCommitCommittedAt(pr),
+    observedAt,
+  });
   const annotatedPr = {
     ...pr,
     headUpdatedAt,
+    reviewRequestLowerBound,
     statusCheckRollup: annotateStatusCheckSources(
       pr.statusCheckRollup ?? [],
       sourceMap,

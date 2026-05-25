@@ -339,6 +339,10 @@ function currentHeadUpdatedAt(pr) {
   return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
 
+function currentReviewRequestLowerBound(pr) {
+  return parseTimestamp(pr.reviewRequestLowerBound ?? pr.headUpdatedAt);
+}
+
 export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
   if (headUpdatedAt === null) return false;
 
@@ -355,6 +359,7 @@ export function classifyCodexReviewSignal({
   issueComments = [],
   reviews = [],
   headUpdatedAt = null,
+  reviewRequestLowerBound = headUpdatedAt,
   codexApprovalReaction = false,
 } = {}) {
   if (codexApprovalReaction) return "approved";
@@ -367,6 +372,10 @@ export function classifyCodexReviewSignal({
     const author = comment.user?.login ?? comment.author?.login ?? null;
     const createdAt = comment.created_at ?? comment.createdAt;
     const isCurrent = isCurrentSignal(createdAt, headUpdatedAt);
+    const isCurrentRequest = isCurrentSignal(
+      createdAt,
+      reviewRequestLowerBound,
+    );
 
     if (isBotApproverLogin(author) && isCurrent) {
       hasCurrentInFlightSignal = true;
@@ -376,7 +385,7 @@ export function classifyCodexReviewSignal({
 
     if (!isCodexReviewRequestBody(comment.body)) continue;
 
-    if (isCurrent) {
+    if (isCurrentRequest) {
       hasCurrentRequest = true;
       if (hasCodexEyesReaction(comment, headUpdatedAt, true)) {
         hasCurrentInFlightSignal = true;
@@ -443,6 +452,7 @@ export function summarizeReadyState({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
+    reviewRequestLowerBound: currentReviewRequestLowerBound(pr),
     codexApprovalReaction,
   });
 

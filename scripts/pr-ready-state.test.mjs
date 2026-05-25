@@ -20,6 +20,7 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   fetchHeadUpdatedAt,
+  fetchReviewRequestLowerBound,
   headCommitCommittedAt,
   parseArgs,
   renderSummary,
@@ -1073,16 +1074,26 @@ test("watch JSON output is one compact JSON object per line", () => {
   assertDeepEqual(JSON.parse(output), summary);
 });
 
-test("uses head commit time before check observation time for freshness", () => {
+test("uses check observation time for approval freshness", () => {
   assertEqual(
     fetchHeadUpdatedAt({
+      headCommittedAt: "2026-05-21T13:21:00Z",
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:23:00Z",
+  );
+});
+
+test("uses head commit time before check observation time for review requests", () => {
+  assertEqual(
+    fetchReviewRequestLowerBound({
       headCommittedAt: "2026-05-21T13:21:00Z",
       observedAt: "2026-05-21T13:23:00Z",
     }),
     "2026-05-21T13:21:00Z",
   );
   assertEqual(
-    fetchHeadUpdatedAt({
+    fetchReviewRequestLowerBound({
       headCommittedAt: null,
       observedAt: "2026-05-21T13:23:00Z",
     }),
@@ -1104,11 +1115,41 @@ test("falls back to check observation time when the head commit is absent", () =
     null,
   );
   assertEqual(
-    fetchHeadUpdatedAt({
+    fetchReviewRequestLowerBound({
       headCommittedAt: null,
       observedAt: "2026-05-21T13:23:00Z",
     }),
     "2026-05-21T13:23:00Z",
+  );
+});
+
+test("allows current review requests before check observation without approving stale signals", () => {
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),
+      reviewRequestLowerBound: Date.parse("2026-05-21T13:21:00Z"),
+      issueComments: [
+        {
+          body: "@codex review",
+          created_at: "2026-05-21T13:22:00Z",
+          user: { login: "chapati23" },
+        },
+      ],
+    }),
+    "requested",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),
+      reviewRequestLowerBound: Date.parse("2026-05-21T13:21:00Z"),
+      reviews: [
+        {
+          submittedAt: "2026-05-21T13:22:00Z",
+          author: { login: "chatgpt-codex-connector" },
+        },
+      ],
+    }),
+    "stale",
   );
 });
 
