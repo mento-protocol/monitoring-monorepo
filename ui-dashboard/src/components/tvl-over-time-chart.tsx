@@ -28,6 +28,34 @@ type PoolHistory = {
   points: Array<{ ts: number; r0: string; r1: string }>;
 };
 
+type CurrentPool = {
+  pool: Pool;
+  network: Network;
+  rates: OracleRateMap;
+};
+
+type TvlInputs = {
+  histories: PoolHistory[];
+  currentPools: CurrentPool[];
+  chainsSeen: Network[];
+  chainsWithKnownHistory: Set<string>;
+  earliestTs: number;
+};
+
+type HistoricalSeries = {
+  series: SeriesPoint[];
+  perChainSeries: Map<string, SeriesPoint[]>;
+};
+
+type HistoricalSeriesInput = {
+  histories: PoolHistory[];
+  chainsSeen: Network[];
+  chainsWithKnownHistory: Set<string>;
+  bucketSeconds: number;
+  windowStartBucket: number;
+  endBucket: number;
+};
+
 export type ChainTvlSeries = {
   network: Network;
   series: SeriesPoint[];
@@ -61,8 +89,74 @@ export function buildDailySeries(
   nowTvl: number;
   byChain: ChainTvlSeries[];
 } {
+  const {
+    histories,
+    currentPools,
+    chainsSeen,
+    chainsWithKnownHistory,
+    earliestTs,
+  } = collectTvlInputs(networkData);
+  const { nowTvl, perChainNowTvl } = computeCurrentTvl(currentPools);
+  if (histories.length === 0) {
+    return {
+      series: [],
+      nowTvl,
+      byChain: chainsSeen.map((network) => ({
+        network,
+        series: [],
+        nowTvl: perChainNowTvl.get(network.id) ?? 0,
+      })),
+    };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const dataStartBucket =
+    Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
+  // When a window clamp is requested, start emission at the later of the
+  // window's bucket and the earliest snapshot's bucket. Earlier iterations
+  // are skipped entirely (not materialized), but the per-pool cursor fast-
+  // forwards naturally on the first emitted iteration, so forward-fill
+  // still uses the correct reserves from before the window start.
+  const windowStartBucket =
+    fromTimestamp !== undefined
+      ? Math.max(
+          dataStartBucket,
+          Math.floor(fromTimestamp / bucketSeconds) * bucketSeconds,
+        )
+      : dataStartBucket;
+  const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
+  const { series, perChainSeries } = buildHistoricalSeries({
+    histories,
+    chainsSeen,
+    chainsWithKnownHistory,
+    bucketSeconds,
+    windowStartBucket,
+    endBucket,
+  });
+
+  const byChain: ChainTvlSeries[] = chainsSeen.map((network) => ({
+    network,
+    series: perChainSeries.get(network.id)!,
+    nowTvl: perChainNowTvl.get(network.id) ?? 0,
+  }));
+
+  return { series, nowTvl, byChain };
+}
+
+function collectTvlInputs(networkData: NetworkData[]): TvlInputs {
   const histories: PoolHistory[] = [];
+  const currentPools: CurrentPool[] = [];
+  const chainsSeen: Network[] = [];
+  const chainsWithKnownHistory = new Set<string>();
+  const chainsSeenIds = new Set<string>();
   let earliestTs = Infinity;
+
+  function rememberChain(network: Network): void {
+    if (!chainsSeenIds.has(network.id)) {
+      chainsSeenIds.add(network.id);
+      chainsSeen.push(network);
+    }
+  }
 
   for (const netData of networkData) {
     // Only skip on top-level failure. `snapshotsAllDailyError` may be set
@@ -71,6 +165,20 @@ export function buildDailySeries(
     // partial-badge.
     if (netData.error !== null) continue;
     const fpmmPools = netData.pools.filter(isFpmm);
+    for (const pool of fpmmPools) {
+      rememberChain(netData.network);
+      currentPools.push({
+        pool,
+        network: netData.network,
+        rates: netData.rates,
+      });
+    }
+    if (
+      netData.snapshotsAllDailyError === null ||
+      netData.snapshotsAllDaily.length > 0
+    ) {
+      chainsWithKnownHistory.add(netData.network.id);
+    }
     const snapsByPool = new Map<string, PoolSnapshotWindow[]>();
     for (const snap of netData.snapshotsAllDaily) {
       const list = snapsByPool.get(snap.poolId);
@@ -97,34 +205,23 @@ export function buildDailySeries(
     }
   }
 
-  if (histories.length === 0) return { series: [], nowTvl: 0, byChain: [] };
+  return {
+    histories,
+    currentPools,
+    chainsSeen,
+    chainsWithKnownHistory,
+    earliestTs,
+  };
+}
 
-  const chainsSeen: Network[] = [];
-  const chainsSeenIds = new Set<string>();
-  for (const h of histories) {
-    if (!chainsSeenIds.has(h.network.id)) {
-      chainsSeenIds.add(h.network.id);
-      chainsSeen.push(h.network);
-    }
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  const dataStartBucket =
-    Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
-  // When a window clamp is requested, start emission at the later of the
-  // window's bucket and the earliest snapshot's bucket. Earlier iterations
-  // are skipped entirely (not materialized), but the per-pool cursor fast-
-  // forwards naturally on the first emitted iteration, so forward-fill
-  // still uses the correct reserves from before the window start.
-  const windowStartBucket =
-    fromTimestamp !== undefined
-      ? Math.max(
-          dataStartBucket,
-          Math.floor(fromTimestamp / bucketSeconds) * bucketSeconds,
-        )
-      : dataStartBucket;
-  const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
-
+function buildHistoricalSeries({
+  histories,
+  chainsSeen,
+  chainsWithKnownHistory,
+  bucketSeconds,
+  windowStartBucket,
+  endBucket,
+}: HistoricalSeriesInput): HistoricalSeries {
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: SeriesPoint[] = [];
   const perChainSeries = new Map<string, SeriesPoint[]>();
@@ -135,67 +232,108 @@ export function buildDailySeries(
     timestamp <= endBucket;
     timestamp += bucketSeconds
   ) {
-    let tvl = 0;
-    let anyContributed = false;
-    const perChainTvl = new Map<string, number>();
-    for (let i = 0; i < histories.length; i++) {
-      const history = histories[i];
-      while (
-        cursors[i] + 1 < history.points.length &&
-        history.points[cursors[i] + 1].ts < timestamp + bucketSeconds
-      ) {
-        cursors[i]++;
-      }
-      if (cursors[i] < 0) continue;
-      const point = history.points[cursors[i]];
-      const poolTvl = poolTvlUSD(
-        { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
-        history.network,
-        history.rates,
-      );
-      // Skip pools whose TVL is unknowable (untrusted decimals → null).
-      // Summing null as 0 would understate aggregate / per-chain TVL.
-      if (poolTvl === null) continue;
-      tvl += poolTvl;
-      anyContributed = true;
-      const id = history.network.id;
-      perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
+    const bucket = computeHistoricalBucket(
+      histories,
+      cursors,
+      timestamp,
+      bucketSeconds,
+    );
+    appendAggregateBucket(series, bucket, timestamp);
+    appendPerChainBucket(
+      perChainSeries,
+      chainsSeen,
+      chainsWithKnownHistory,
+      bucket.perChainTvl,
+      timestamp,
+    );
+  }
+  return { series, perChainSeries };
+}
+
+function computeHistoricalBucket(
+  histories: PoolHistory[],
+  cursors: number[],
+  timestamp: number,
+  bucketSeconds: number,
+): { tvl: number; anyContributed: boolean; perChainTvl: Map<string, number> } {
+  let tvl = 0;
+  let anyContributed = false;
+  const perChainTvl = new Map<string, number>();
+
+  for (let i = 0; i < histories.length; i++) {
+    const history = histories[i];
+    while (
+      cursors[i] + 1 < history.points.length &&
+      history.points[cursors[i] + 1].ts < timestamp + bucketSeconds
+    ) {
+      cursors[i]++;
     }
-    // Aggregate: skip the bucket entirely when no pool contributed.
-    // Emitting `tvlUSD: 0` would render as "$0 TVL" in the historical
-    // line, presenting unknown data as a real zero (codex P2 PR #372).
-    // Per-chain breakdown still emits 0 for chains that didn't
-    // contribute — the breakdown lines need filled timestamps to stay
-    // continuous (existing test "includes chains with zero contribution
-    // in a bucket as 0, not omitted").
-    if (anyContributed) {
-      series.push({ timestamp, tvlUSD: tvl });
-    }
-    for (const c of chainsSeen) {
-      perChainSeries.get(c.id)!.push({
-        timestamp,
-        tvlUSD: perChainTvl.get(c.id) ?? 0,
-      });
-    }
+    if (cursors[i] < 0) continue;
+    const point = history.points[cursors[i]];
+    const poolTvl = poolTvlUSD(
+      { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
+      history.network,
+      history.rates,
+    );
+    // Skip pools whose TVL is unknowable (untrusted decimals → null).
+    // Summing null as 0 would understate aggregate / per-chain TVL.
+    if (poolTvl === null) continue;
+    tvl += poolTvl;
+    anyContributed = true;
+    const id = history.network.id;
+    perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
   }
 
+  return { tvl, anyContributed, perChainTvl };
+}
+
+function appendAggregateBucket(
+  series: SeriesPoint[],
+  bucket: { tvl: number; anyContributed: boolean },
+  timestamp: number,
+): void {
+  // Aggregate: skip the bucket entirely when no pool contributed.
+  // Emitting `tvlUSD: 0` would render as "$0 TVL" in the historical
+  // line, presenting unknown data as a real zero (codex P2 PR #372).
+  if (bucket.anyContributed) {
+    series.push({ timestamp, tvlUSD: bucket.tvl });
+  }
+}
+
+function appendPerChainBucket(
+  perChainSeries: Map<string, SeriesPoint[]>,
+  chainsSeen: Network[],
+  chainsWithKnownHistory: Set<string>,
+  perChainTvl: Map<string, number>,
+  timestamp: number,
+): void {
+  // Per-chain breakdown still emits 0 for chains that didn't contribute
+  // when the chain has known history, so lines stay continuous.
+  for (const c of chainsSeen) {
+    if (!chainsWithKnownHistory.has(c.id) && !perChainTvl.has(c.id)) {
+      continue;
+    }
+    perChainSeries.get(c.id)!.push({
+      timestamp,
+      tvlUSD: perChainTvl.get(c.id) ?? 0,
+    });
+  }
+}
+
+function computeCurrentTvl(currentPools: CurrentPool[]): {
+  nowTvl: number;
+  perChainNowTvl: Map<string, number>;
+} {
   let nowTvl = 0;
   const perChainNowTvl = new Map<string, number>();
-  for (const history of histories) {
-    const poolTvl = poolTvlUSD(history.pool, history.network, history.rates);
+  for (const current of currentPools) {
+    const poolTvl = poolTvlUSD(current.pool, current.network, current.rates);
     if (poolTvl === null) continue;
     nowTvl += poolTvl;
-    const id = history.network.id;
+    const id = current.network.id;
     perChainNowTvl.set(id, (perChainNowTvl.get(id) ?? 0) + poolTvl);
   }
-
-  const byChain: ChainTvlSeries[] = chainsSeen.map((network) => ({
-    network,
-    series: perChainSeries.get(network.id)!,
-    nowTvl: perChainNowTvl.get(network.id) ?? 0,
-  }));
-
-  return { series, nowTvl, byChain };
+  return { nowTvl, perChainNowTvl };
 }
 
 interface TvlOverTimeChartProps {
@@ -235,7 +373,9 @@ export function TvlOverTimeChart({
     // hourly sub-buckets would show today's current reserves for all past hours
     // of the same day, distorting the intra-day trend.
     const { series: base, nowTvl, byChain } = buildDailySeries(networkData);
-    if (base.length === 0) return { fullSeries: [], fullBreakdown: [] };
+    if (base.length === 0 && nowTvl === 0) {
+      return { fullSeries: [], fullBreakdown: [] };
+    }
 
     const nowSec = Math.floor(Date.now() / 1000);
     const total = [

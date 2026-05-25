@@ -250,7 +250,7 @@ export function AddressReportEditor(props: Props) {
     try {
       const res = await fetch("/api/address-reports", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: reportMutationHeaders(data),
         signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({ address: trimmed }),
       });
@@ -478,6 +478,12 @@ export function AddressReportEditor(props: Props) {
 }
 
 function reportSaveHeaders(
+  report: AddressReport | null | undefined,
+): Record<string, string> {
+  return reportMutationHeaders(report);
+}
+
+function reportMutationHeaders(
   report: AddressReport | null | undefined,
 ): Record<string, string> {
   return report === undefined || report === null

@@ -637,27 +637,6 @@
     "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
-    "file": "src/components/tvl-over-time-chart.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'buildDailySeries' has a complexity of 27. Maximum allowed is 15.",
-    "line": 55,
-    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/components/tvl-over-time-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'buildDailySeries' has too many lines (118). Maximum allowed is 100.",
-    "line": 55,
-    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/components/tvl-over-time-chart.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 55,
-    "linePreview": "*/ | export function buildDailySeries( | networkData: NetworkData[],"
-  },
-  {
     "file": "src/components/volume-over-time-chart.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'VolumeOverTimeChart' has too many lines (113). Maximum allowed is 100.",
