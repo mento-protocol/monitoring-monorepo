@@ -97,8 +97,6 @@ function normalizePutInput(
   }
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
-  const tagsResult = normalizeTags(tags);
-  if (!tagsResult.ok) return tagsResult.response;
 
   // DoS guards: cap input sizes.
   if (trimmedName.length > 200) {
@@ -116,6 +114,9 @@ function normalizePutInput(
       { status: 400 },
     );
   }
+
+  const tagsResult = normalizeTags(tags);
+  if (!tagsResult.ok) return tagsResult.response;
 
   // Relaxed validation: at least one of name or normalized user tags must be
   // non-empty. Reserved source tags do not count as user-provided labels.

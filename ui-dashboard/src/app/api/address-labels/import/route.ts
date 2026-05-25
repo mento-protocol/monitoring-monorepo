@@ -61,7 +61,7 @@ async function dispatchImportPayload(
 
 async function parseSniffedPayload(
   req: NextRequest,
-  contentType: string,
+  mediaType: string,
 ): Promise<
   NextResponse | { kind: "csv"; text: string } | { kind: "json"; body: unknown }
 > {
@@ -70,7 +70,7 @@ async function parseSniffedPayload(
 
   const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
   const trimmed = normalized.trimStart();
-  const isJsonContentType = contentType === "application/json";
+  const isJsonContentType = mediaType === "application/json";
   if (
     !isJsonContentType &&
     trimmed &&
@@ -89,7 +89,7 @@ async function parseSniffedPayload(
 }
 
 function normalizeMediaType(contentType: string): string {
-  return contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return contentType.split(";", 1)[0].trim().toLowerCase();
 }
 
 function dispatchJsonImport(
