@@ -44,7 +44,6 @@ start_spinner() {
 	local message="${1:-Loading...}"
 	local delay=0.1
 
-	# trunk-ignore(shellcheck/SC1003)
 	local spin_string='|/-\'
 
 	# Hide cursor
