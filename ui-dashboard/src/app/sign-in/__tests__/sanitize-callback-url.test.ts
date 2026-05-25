@@ -4,7 +4,7 @@ vi.mock("@/auth", () => ({
   signIn: vi.fn(),
 }));
 
-import { sanitizeCallbackUrl } from "../page";
+import { normalizeCallbackUrl, sanitizeCallbackUrl } from "../page";
 
 describe("sanitizeCallbackUrl", () => {
   it("accepts a relative path", () => {
@@ -68,5 +68,29 @@ describe("sanitizeCallbackUrl", () => {
     ["leading whitespace", " //evil.com"],
   ])("rejects %s", (_label, input) => {
     expect(sanitizeCallbackUrl(input)).toBe("/");
+  });
+});
+
+describe("normalizeCallbackUrl", () => {
+  it("passes through a single callbackUrl value", () => {
+    expect(normalizeCallbackUrl("/address-book")).toBe("/address-book");
+  });
+
+  it("treats undefined callbackUrl as missing", () => {
+    expect(normalizeCallbackUrl(undefined)).toBe(undefined);
+  });
+
+  it("treats repeated callbackUrl values as missing", () => {
+    expect(normalizeCallbackUrl(["/address-book", "/leaderboard"])).toBe(
+      undefined,
+    );
+  });
+
+  it("falls back to default for repeated callbackUrl values", () => {
+    expect(
+      sanitizeCallbackUrl(
+        normalizeCallbackUrl(["/address-book", "/leaderboard"]),
+      ),
+    ).toBe("/");
   });
 });

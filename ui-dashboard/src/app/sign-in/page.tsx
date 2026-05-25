@@ -44,13 +44,25 @@ export function sanitizeCallbackUrl(raw?: string): string {
   return raw;
 }
 
+type SearchParamValue = string | string[] | undefined;
+
+export function normalizeCallbackUrl(
+  raw: SearchParamValue,
+): string | undefined {
+  return typeof raw === "string" ? raw : undefined;
+}
+
 type Props = {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{
+    callbackUrl?: SearchParamValue;
+    error?: SearchParamValue;
+  }>;
 };
 
 export default async function SignInPage({ searchParams }: Props) {
   const { callbackUrl, error } = await searchParams;
-  const redirectTo = sanitizeCallbackUrl(callbackUrl);
+  const redirectTo = sanitizeCallbackUrl(normalizeCallbackUrl(callbackUrl));
+  const signInError = typeof error === "string" ? error : undefined;
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
@@ -60,7 +72,7 @@ export default async function SignInPage({ searchParams }: Props) {
           Restricted to <span className="text-slate-300">@mentolabs.xyz</span>{" "}
           accounts
         </p>
-        {error === "AccessDenied" && (
+        {signInError === "AccessDenied" && (
           <p className="mb-4 rounded-lg border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-300">
             Only @mentolabs.xyz accounts are allowed.
           </p>
