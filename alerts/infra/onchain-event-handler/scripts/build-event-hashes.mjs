@@ -8,7 +8,7 @@
  * on. We compute them here so Terraform can read a static JSON and the build
  * stays reproducible.
  *
- * Source of truth: `alerts/infra/onchain-event-handler/safe-abi.json`. The
+ * Source of truth: `alerts/infra/onchain-event-handler/src/safe-abi.json`. The
  * handler's `constants.ts:extractEventSignatures()` computes the same hashes
  * at runtime — both paths read the same ABI so they stay in lock-step.
  *
@@ -27,7 +27,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const moduleDir = join(__dirname, "..");
 const repoRoot = join(moduleDir, "..", "..", "..");
 
-const abi = JSON.parse(readFileSync(join(moduleDir, "safe-abi.json"), "utf8"));
+const abi = JSON.parse(
+  readFileSync(join(moduleDir, "src/safe-abi.json"), "utf8"),
+);
 
 const events = abi
   .filter((item) => item.type === "event" && item.name)
