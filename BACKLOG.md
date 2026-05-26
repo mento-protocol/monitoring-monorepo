@@ -163,19 +163,15 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 - [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
 - [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
 
-## Upgrade `@vercel/blob` to ^2.4.0 + switch to OIDC tokens
+## Complete Vercel Blob OIDC cutover
 
-Eliminates the static-token rotation pain that took ~1 hour to root-cause on 2026-05-21 (terraform apply on 2026-05-20 silently wrote a broken `BLOB_READ_WRITE_TOKEN`; first scheduled cron at 03:00 UTC hit `BlobStoreNotFoundError`; rotation required Vercel-API surgery on store-project connections). With OIDC the SDK auto-fetches a short-lived (~1h) project-scoped token from Vercel's identity issuer at runtime — no env var to rotate or accidentally clobber.
+The code-prep PR upgraded `@vercel/blob` to `^2.4.0` so the backup and restore routes can use Vercel Blob OIDC once the store is upgraded. What remains is the production cutover after that PR deploys.
 
-- [ ] Bump `@vercel/blob` from `^2.3.1` to latest `^2.4.x` in `ui-dashboard/package.json` (OIDC support landed in 2.4).
-- [ ] Verify both call sites — `backup/route.ts:89` (`put`) and `restore/route.ts:51` (`get`) — still type-check and behave. OIDC is transparent to consumers; SDK fetches OIDC token when `BLOB_READ_WRITE_TOKEN` is absent.
-- [ ] `pnpm test` — both route tests mock `@vercel/blob`, should pass unchanged.
-- [ ] Ship via normal worktree + `/ship` flow.
-- [ ] After prod deploy READY: Vercel dashboard → Storage → `address-labels-backup` → click **Upgrade to OIDC** banner.
-- [ ] Verify cron: `curl -H "Authorization: Bearer $CRON_SECRET" https://monitoring.mento.org/api/address-labels/backup` → expect 200.
+- [ ] After prod deploy READY: Vercel dashboard -> Storage -> `address-labels` -> click **Upgrade to OIDC** banner.
+- [ ] Verify cron: `curl -H "Authorization: Bearer $CRON_SECRET" https://monitoring.mento.org/api/address-labels/backup` -> expect 200.
 - [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Terraform no longer manages this env var; `terraform/main.tf` already contains a non-destructive `removed` block for the old `vercel_project_environment_variable.blob_token` resource.
 - [ ] Optional: trigger a cron-style restore against the latest backup blob to confirm OIDC works for `get()` too.
-- [ ] Closes the remaining static-token scope drift risk (no static token → no production/preview/development scope to lose).
+- [ ] Closes the remaining static-token scope drift risk (no static token -> no production/preview/development scope to lose).
 
 ## Alerts integration follow-ups
 
