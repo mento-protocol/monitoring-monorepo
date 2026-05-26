@@ -82,7 +82,7 @@ resource "grafana_rule_group" "metrics_bridge" {
 
     annotations = {
       summary     = "Bridge poll errors ({{ $labels.kind }}) — {{ printf \"%.3f\" $values.A.Value }}/s."
-      description = "Kind is one of hasura_query, update_metrics, mark_healthy, or rebalance_probe. Stale gauges remain; alert-on-change is degraded."
+      description = "Kind is one of hasura_query (often rate-limit 429 or schema drift), update_metrics, mark_healthy, or rebalance_probe. Stale gauges remain; alert-on-change is degraded."
     }
 
     labels = {

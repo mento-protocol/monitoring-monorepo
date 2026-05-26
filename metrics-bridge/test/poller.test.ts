@@ -82,6 +82,8 @@ describe("poll", () => {
     await poll();
 
     expect(await pollErrorValue("update_metrics")).toBe(1);
+    expect(mockMarkHealthy).not.toHaveBeenCalled();
+    expect(mockRunRebalanceProbes).not.toHaveBeenCalled();
     updateSpy.mockRestore();
   });
 
@@ -95,6 +97,11 @@ describe("poll", () => {
 
     expect(await pollErrorValue("mark_healthy")).toBe(1);
     expect(mockRunRebalanceProbes).not.toHaveBeenCalled();
+    // bridgeLastPoll is set before markHealthy, so sustained mark_healthy
+    // failures page as Poll Errors instead of Metrics Bridge Not Reporting.
+    expect(
+      await getGaugeValue(register, "mento_pool_bridge_last_poll"),
+    ).toBeGreaterThan(0);
   });
 
   it("does not call markHealthy on failure", async () => {
