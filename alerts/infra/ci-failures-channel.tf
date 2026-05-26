@@ -248,10 +248,22 @@ resource "restapi_object" "ci_failures_invite_eng" {
     # `alltrue([])` is `true` in Terraform, so without it a real failure
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
     # NO `errors` array) would silently pass the postcondition.
+    #
+    # Migration guard: state written before 2026-05-26 persisted
+    # `id = "true"` while still using `read_path =
+    # "/conversations.info?channel={id}"`. Terraform refreshes with the
+    # old read path before it can apply the new `/api.test` read path, so
+    # that one legacy state shape returns `channel_not_found` for
+    # `channel=true`. Accept only that existing successful state ID; a new
+    # failed invite with `ok=false` / `id=false` still fails normally.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
+          || (
+            self.id == "true"
+            && try(jsondecode(self.api_response).error, "") == "channel_not_found"
+          )
           || (
             try(length(jsondecode(self.api_response).errors), 0) > 0
             && alltrue([
