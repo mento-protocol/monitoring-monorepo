@@ -179,7 +179,6 @@ Eliminates the static-token rotation pain that took ~1 hour to root-cause on 202
 
 ## Alerts integration follow-ups
 
-- [ ] **State backend prefix unification** — `alerts/rules/`: `monorepo-alerts` → `alerts-rules`; `alerts/infra/`: `alerts` → `alerts-infra`. Use `terraform init -migrate-state`. Separate PR.
 - [ ] **Slack adapter + Sentry bridge retirement** — split
       `onchain-event-handler/src/discord.ts` into
       `src/{notifier,discord,slack}.ts`; add

@@ -3,7 +3,7 @@ terraform {
 
   backend "gcs" {
     bucket = "mento-terraform-tfstate-6ed6"
-    prefix = "monitoring-monorepo-alerts"
+    prefix = "alerts-rules"
   }
 
   required_providers {
