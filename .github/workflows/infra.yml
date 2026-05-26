@@ -8,6 +8,7 @@ on:
       - terraform/**
       - alerts/rules/**
       - alerts/infra/**
+      - aegis/terraform/**
       - .github/workflows/infra.yml
   pull_request:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - terraform/**
       - alerts/rules/**
       - alerts/infra/**
+      - aegis/terraform/**
       - .github/workflows/infra.yml
 
 # See ci.yml for the concurrency rationale: PR runs cancel on new pushes
@@ -41,13 +43,16 @@ jobs:
         # `terraform/` owns Vercel + Cloud Run + WIF infra; `alerts/rules/`
         # owns Grafana alert rules + Slack contact points; `alerts/infra/`
         # owns the event-delivery stack (Cloud Function + Discord channels +
-        # Sentry bridge + QuickNode webhooks). All run `fmt`,
+        # Sentry bridge + QuickNode webhooks); `aegis/terraform/` owns the
+        # Aegis Grafana dashboard + alert rules + notification routing
+        # (contact points, templates, mute timings). All run `fmt`,
         # `init -backend=false` (no state access needed for validate), and
         # `validate`.
         module:
           - terraform
           - alerts/rules
           - alerts/infra
+          - aegis/terraform
     defaults:
       run:
         working-directory: ${{ matrix.module }}
