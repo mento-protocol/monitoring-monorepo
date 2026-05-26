@@ -295,6 +295,27 @@ variable "quicknode_signing_secret" {
 }
 
 #####################
+# GitHub Configuration
+#####################
+
+# Fine-grained PAT for managing the `TF_VAR_*` repo secrets consumed by
+# `.github/workflows/alerts-infra.yml`. Least-privilege scopes:
+#   - Repository: mento-protocol/monitoring-monorepo (this one only)
+#   - Permissions: Secrets (read & write)
+# Generate at https://github.com/settings/personal-access-tokens/new with
+# expiry — rotate before expiry and re-apply.
+variable "github_token" {
+  description = "Fine-grained GitHub PAT scoped to monitoring-monorepo with Secrets read/write. Used to manage the TF_VAR_* repo secrets consumed by the alerts-infra CI workflow."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.github_token) > 0
+    error_message = "GitHub PAT must not be empty."
+  }
+}
+
+#####################
 # Labeling & Tagging
 #####################
 

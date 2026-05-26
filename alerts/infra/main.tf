@@ -159,3 +159,56 @@ module "onchain_event_listeners" {
 
   depends_on = [module.onchain_event_handler]
 }
+
+#####################################################################
+# GitHub Actions secrets — TF_VAR_* values for the alerts-infra
+# workflow's plan/apply jobs (.github/workflows/alerts-infra.yml).
+#
+# The workflow reads these as ${{ secrets.TF_VAR_* }} into the job's
+# `env:` block, terraform consumes them as input variables. Without
+# this, the workflow's `terraform plan/apply` fails on variable
+# validation (each required input has a `length(var.X) > 0` check).
+#
+# Sensitive values flow tfvars → terraform state → GitHub secrets
+# store. The state path adds a fourth surface compared to a script
+# (which writes only tfvars → GitHub directly) — accepted tradeoff
+# in exchange for drift detection: someone editing a secret in the
+# GitHub UI would surface as a TF diff. Secrets in state are
+# encrypted at rest in GCS and gated by `org-terraform` impersonation
+# (same gate as every other secret already managed here, e.g. the
+# Sentry / Discord / QuickNode tokens above).
+#
+# Map: tfvars variable → secret name. Mirrors the env: block in
+# alerts-infra.yml.
+#####################################################################
+
+locals {
+  alerts_infra_ci_secrets = {
+    TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
+    TF_VAR_DISCORD_BOT_TOKEN        = var.discord_bot_token
+    TF_VAR_DISCORD_SERVER_ID        = var.discord_server_id
+    TF_VAR_DISCORD_CATEGORY_ID      = var.discord_category_id
+    TF_VAR_BILLING_ACCOUNT          = var.billing_account
+    TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
+    TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
+  }
+}
+
+# trunk-ignore-begin(checkov/CKV_GIT_4): CKV_GIT_4 prefers `encrypted_value`
+# (pre-libsodium-encrypted against the repo's public key) over
+# `plaintext_value`. The encrypted path requires an external libsodium step
+# outside Terraform — non-trivial complexity for marginal benefit here: the
+# state file is already encrypted at rest in GCS, gated by `org-terraform`
+# impersonation (same gate that already protects sentry_auth_token /
+# discord_bot_token / quicknode_signing_secret in this same state). The
+# provider handles libsodium server-side against GitHub's public key on its
+# way to the API. If the threat model ever shifts (state exposed to a wider
+# audience), revisit — `gh secret set` and `data.github_actions_public_key`
+# can build an `encrypted_value` pipeline.
+resource "github_actions_secret" "alerts_infra_tf_vars" {
+  for_each        = local.alerts_infra_ci_secrets
+  repository      = "monitoring-monorepo"
+  secret_name     = each.key
+  plaintext_value = each.value
+}
+# trunk-ignore-end(checkov/CKV_GIT_4)

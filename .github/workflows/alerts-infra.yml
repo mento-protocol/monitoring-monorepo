@@ -81,7 +81,6 @@ jobs:
       TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
       TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
       TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      TF_VAR_discord_sentry_role_id: ${{ secrets.TF_VAR_DISCORD_SENTRY_ROLE_ID }}
       # GCP
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # QuickNode
@@ -236,7 +235,6 @@ jobs:
       TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
       TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
       TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      TF_VAR_discord_sentry_role_id: ${{ secrets.TF_VAR_DISCORD_SENTRY_ROLE_ID }}
       # GCP
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # QuickNode
