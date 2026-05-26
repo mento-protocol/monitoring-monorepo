@@ -80,8 +80,8 @@ sentry_slack_workspace_name      = "Mento Labs"        # Optional, defaults to "
 sentry_slack_critical_channel    = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
 sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to current "#alerts-critical" ID
 # If rerouting critical fan-out, update both sentry_slack_critical_channel
-# and sentry_slack_critical_channel_id together. Terraform cannot cross-check
-# that the Slack name and ID refer to the same channel.
+# and sentry_slack_critical_channel_id together. Terraform rejects the default
+# ID with a custom name, but cannot prove arbitrary name/ID pairs match.
 
 # Slack Configuration (used by Terraform to create + archive Sentry and
 # on-chain event channels, and by the Cloud Function to post on-chain events).

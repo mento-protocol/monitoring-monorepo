@@ -250,20 +250,31 @@ resource "restapi_object" "ci_failures_invite_eng" {
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
     # NO `errors` array) would silently pass the postcondition.
     #
-    # Migration guard: state written before 2026-05-26 persisted
-    # `id = "true"` while still using `read_path =
-    # "/conversations.info?channel={id}"`. Terraform refreshes with the
-    # old read path before it can apply the new `/api.test` read path, so
-    # that one legacy state shape returns `channel_not_found` for
-    # `channel=true`. Accept only that existing successful state ID; a new
-    # failed invite with `ok=false` / `id=false` still fails normally.
+    # The `channel_not_found` branch is a one-time migration escape hatch for
+    # old state. Previous config also stored `id_attribute = "ok"` but used
+    # `read_path = "/conversations.info?channel={id}"`, so refresh asks Slack
+    # for `channel=true` or `channel=false` before Terraform can persist the
+    # new `/api.test` read path. `id = "false"` is only accepted when the
+    # historical create response was the benign all-already_in_channel case;
+    # a fresh create failure such as missing_scope or channel_not_found still
+    # fails this postcondition.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
           || (
-            self.id == "true"
-            && try(jsondecode(self.api_response).error, "") == "channel_not_found"
+            try(jsondecode(self.api_response).error, "") == "channel_not_found"
+            && (
+              self.id == "true"
+              || (
+                self.id == "false"
+                && try(length(jsondecode(self.create_response).errors), 0) > 0
+                && alltrue([
+                  for err in try(jsondecode(self.create_response).errors, []) :
+                  try(err.error, "") == "already_in_channel"
+                ])
+              )
+            )
           )
           || (
             try(length(jsondecode(self.api_response).errors), 0) > 0

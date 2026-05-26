@@ -63,6 +63,14 @@ variable "sentry_slack_critical_channel_id" {
     condition     = can(regex("^[CG][A-Z0-9]{8,}$", var.sentry_slack_critical_channel_id))
     error_message = "sentry_slack_critical_channel_id must be a Slack channel ID such as C0AURREPNDU."
   }
+
+  validation {
+    condition = (
+      var.sentry_slack_critical_channel == "#alerts-critical"
+      || var.sentry_slack_critical_channel_id != "C0AURREPNDU"
+    )
+    error_message = "When sentry_slack_critical_channel is changed from #alerts-critical, sentry_slack_critical_channel_id must also be set to the matching Slack channel ID."
+  }
 }
 
 variable "slack_bot_token" {
