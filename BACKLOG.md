@@ -175,7 +175,6 @@ The code-prep PR upgraded `@vercel/blob` to `^2.4.0` so the backup and restore r
 
 ## Alerts integration follow-ups
 
-- [ ] **State backend prefix unification** — `alerts/rules/`: `monorepo-alerts` → `alerts-rules`; `alerts/infra/`: `alerts` → `alerts-infra`. Use `terraform init -migrate-state`. Separate PR.
 - [ ] **Slack adapter + Sentry bridge retirement** — split
       `onchain-event-handler/src/discord.ts` into
       `src/{notifier,discord,slack}.ts`; add
