@@ -135,6 +135,21 @@ locals {
   # `infra/main.tf` random_project_id suffix).
   oracle_relayer_mainnet_project_id = "oracle-relayer-mainnet-0527"
 
+  # Pre-rendered template fragment that sets `$relayer` per rate feed. Used by
+  # the Slack stale-price template. Built from the map above as a series of
+  # independent `{{ if eq .Labels.rateFeed "..." -}}{{ $relayer = "..." -}}{{ end -}}`
+  # blocks so the runtime template doesn't need Sprig `dict` / `index` calls
+  # (Grafana's notification template engine exposes a curated subset of Sprig,
+  # and `dict` isn't documented as part of it). Each block is independent so
+  # they all evaluate; the matching one assigns `$relayer`. Wrap in `{{ if eq
+  # .Labels.chain "celo" -}}...{{ end -}}` at the call site to avoid handing
+  # Celo addresses to a Monad alert (same-named feeds like USDCUSD exist on
+  # both chains with different signer wallets).
+  celo_relayer_signer_branches = join("\n", [
+    for k, v in local.celo_relayer_signers :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
+  ])
+
   # Each entry maps alertnames → three template families:
   #   - title_template / message_template       → Discord (kept during dual-route, removed after cutover)
   #   - slack_*                                 → Slack mrkdwn (message-templates-slack.tf)
