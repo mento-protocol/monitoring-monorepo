@@ -169,7 +169,16 @@ locals {
 # `conversations.invite` returns ok=true on success. If a user is already
 # a member it returns ok=false with `errors: [{"user": "U123", "error":
 # "already_in_channel"}]` — the postcondition treats that as benign.
+#
+# `count` guards the empty-@eng case: when the usergroup is temporarily
+# empty (everyone removed; the CSV becomes ""), Slack's documented
+# `conversations.invite` requires `users` (1–1000), so the call would
+# fail with `no_user` and block unrelated applies. Skipping the resource
+# entirely when there's nobody to invite is a safer default than
+# erroring out on routine usergroup churn.
 resource "restapi_object" "ci_failures_invite_eng" {
+  count = local.eng_user_ids_csv == "" ? 0 : 1
+
   provider = restapi.slack
 
   path        = "/conversations.invite"
@@ -202,7 +211,19 @@ resource "restapi_object" "ci_failures_invite_eng" {
     local.eng_user_ids_csv,
   ]
 
-  id_attribute              = "channel/id"
+  # `id_attribute = "ok"` (not "channel/id") because Slack's
+  # `conversations.invite` response shape DIVERGES across the two
+  # success paths the postcondition accepts: on `ok=true` it includes
+  # `channel: {id: ...}`, but on the legitimate `ok=false +
+  # all-already_in_channel` benign case it returns `{ok, errors}` with
+  # NO `channel` object. `channel/id` would fail to extract on the
+  # second path and the provider would error BEFORE the postcondition
+  # runs, breaking applies during routine @eng remove-only churn (when
+  # everyone else is already a member). `ok` is always present in both
+  # paths; the resulting `"true"` / `"false"` ID string is meaningless
+  # but harmless — we recreate via `force_new` on the member CSV, so
+  # ID stability across reads isn't load-bearing.
+  id_attribute              = "ok"
   ignore_all_server_changes = true
 
   depends_on = [restapi_object.ci_failures_channel_member]

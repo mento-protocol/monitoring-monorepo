@@ -108,6 +108,16 @@ jobs:
                 ]
               }')
           else
+            # Escape commit title for Slack mrkdwn before insertion. A
+            # merged commit titled `<!channel>` or `<@U123ABC>` would
+            # otherwise render as a real mass-page mention inside the
+            # message block. Per Slack's mrkdwn rules
+            # (https://api.slack.com/reference/surfaces/formatting#escaping)
+            # the three control chars are `&`, `<`, `>` — escape `&`
+            # first or the subsequent substitutions corrupt their own
+            # output. Workflow name and actor login are GitHub-managed
+            # and can't contain mention syntax, so they don't need the
+            # same treatment.
             PAYLOAD=$(jq -nc \
               --arg ch '#ci-failures' \
               --arg wf "$WORKFLOW_NAME" \
@@ -115,12 +125,13 @@ jobs:
               --arg sha "${COMMIT_SHA:0:7}" \
               --arg msg "$COMMIT_MSG" \
               --arg actor "$ACTOR" \
-              '{
+              '($msg | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")) as $safe_msg
+               | {
                 channel: $ch,
                 text: ("❌ " + $wf + " failed on main (" + $sha + ")"),
                 blocks: [
                   {type: "section", text: {type: "mrkdwn", text: ("❌ *<" + $url + "|" + $wf + ">* failed on `main`")}},
-                  {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $msg + "\n*Triggered by:* " + $actor + "\n\n<" + $url + "|View failed run →>")}}
+                  {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $safe_msg + "\n*Triggered by:* " + $actor + "\n\n<" + $url + "|View failed run →>")}}
                 ]
               }')
           fi
