@@ -3,14 +3,14 @@ terraform {
   required_providers {
     sentry = {
       source = "jianyuan/sentry"
-      # 0.15.0-beta3 fixes the "Unable to create, got status 201" regression
-      # in `sentry_issue_alert` with `actions_v2` — provider was treating HTTP
-      # 201 Created as an error, orphaning the alert (created on Sentry's
-      # side, missing from TF state). See provider issues #816, #844, #846.
-      # Pinned with an explicit `<` upper bound so a future 0.16 doesn't
-      # silently pull a major-bump (0.15.0 marks `sentry_issue_alert`
-      # deprecated in favor of the new `sentry_alert` resource, which we'll
-      # migrate to in a follow-up).
+      # 0.15.0-beta3 supports both the new `sentry_alert` supertype resource
+      # used by `channels/sentry-bridge/` AND the `sentry_project_issue_stream_monitor`
+      # data source needed to feed it. The deprecated `sentry_issue_alert`
+      # resource (which the bridge previously used) is no longer referenced
+      # by any module here — see `channels/sentry-bridge/README.md` for the
+      # migration rationale. Historical note: this beta also fixes the
+      # "Unable to create, got status 201" regression that affected the old
+      # `sentry_issue_alert` (provider issues #816, #844, #846).
       version = "0.15.0-beta3"
     }
     discord = {

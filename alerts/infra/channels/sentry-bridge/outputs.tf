@@ -4,15 +4,15 @@ output "sentry_organization" {
 }
 
 output "sentry_team" {
-  description = "The Sentry team ID"
-  value       = data.sentry_team.main.id
+  description = "The Sentry team internal ID"
+  value       = data.sentry_team.main.internal_id
 }
 
-output "discord_channels" {
-  description = "Discord channel IDs for each project's alerts"
+output "slack_channels" {
+  description = "Map of Sentry project slug → Slack channel name for the per-project default alert"
   value = {
-    for project, channel in discord_text_channel.sentry_alerts :
-    trimprefix(project, "sentry-") => channel.id
+    for project_slug in keys(local.projects) :
+    project_slug => "#sentry-${project_slug}"
   }
 }
 

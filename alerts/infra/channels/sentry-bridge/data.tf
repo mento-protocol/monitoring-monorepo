@@ -9,19 +9,33 @@ data "sentry_organization" "main" {
 
 # Get team details
 data "sentry_team" "main" {
-  organization = data.sentry_organization.main.id
+  organization = data.sentry_organization.main.internal_id
   slug         = var.sentry_team_slug
 }
 
-# Get Discord integration details
-data "sentry_organization_integration" "discord" {
-  organization = data.sentry_organization.main.id
-  provider_key = "discord"
-  name         = var.discord_server_name
+# Get Slack integration details — the Sentry-owned Slack OAuth app installed
+# at the org level. This is NOT the same Slack token Grafana uses; Sentry's
+# Slack integration is a separate OAuth app installed via Sentry → Settings →
+# Integrations → Slack. The data source fails if the app isn't installed.
+data "sentry_organization_integration" "slack" {
+  organization = data.sentry_organization.main.internal_id
+  provider_key = "slack"
+  name         = var.sentry_slack_workspace_name
 }
 
 # Get all projects in the organization
 data "sentry_all_projects" "all" {
-  organization = data.sentry_organization.main.id
+  organization = data.sentry_organization.main.internal_id
 }
 
+# Resolve each project's default issue-stream monitor. `sentry_alert` is a
+# supertype that fires on monitor lifecycle events (first_seen / regression
+# / reappeared), so it needs a monitor ID per project. The issue-stream
+# monitor covers all issue types (errors, performance, replay, etc.) — the
+# broadest default monitor, closest to the previous "any error" semantics.
+data "sentry_project_issue_stream_monitor" "default" {
+  for_each = local.projects
+
+  organization = data.sentry_organization.main.internal_id
+  project      = each.key
+}

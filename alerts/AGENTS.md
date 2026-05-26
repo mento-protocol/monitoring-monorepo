@@ -13,7 +13,7 @@ last_verified: 2026-05-21
 `alerts/` is the domain folder for all alert plumbing. Two independent Terraform stacks live here:
 
 - **`alerts/rules/`** — v3 Grafana metric alert rules + Slack contact points. Grafana provider only. Changes daily (threshold tuning).
-- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Discord channels + Sentry → Discord bridge + GCP project. Multi-provider. Changes monthly.
+- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Discord channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + GCP project. Multi-provider. Changes monthly.
 
 Separate GCS state (`prefix=monorepo-alerts` for rules, `prefix=alerts` for infra). Keep them separate roots — cadence + blast-radius asymmetry.
 
@@ -23,7 +23,7 @@ Separate GCS state (`prefix=monorepo-alerts` for rules, `prefix=alerts` for infr
 - **`alerts/infra/` modules talk to live external APIs** (Discord, Sentry, QuickNode). Cosmetic changes can have real side effects.
 - **QuickNode state-management hack** in `alerts/infra/onchain-event-listeners/main.tf` is scoped to the current chain via `var.chain_key`. Renaming the `module "onchain_event_listeners"` block in `alerts/infra/main.tf` would silently break the state-rm grep.
 - **Cloud Function lockfile**: regenerate `alerts/infra/onchain-event-handler/package-lock.json` with `cd alerts/infra/onchain-event-handler && rm -rf node_modules && npm install --package-lock-only` whenever the pkg's deps change. CI gates lockfile drift in `.github/workflows/alerts-handler.yml`.
-- **Discord-only today.** Slack adapter is in BACKLOG. `alerts/rules/` is already Slack-first.
+- **Mixed Slack + Discord today.** `alerts/rules/` is Slack-first. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events still go to Discord via `discord-channels` + the Cloud Function. A QuickNode → Slack adapter is in BACKLOG.
 
 ## Verification
 

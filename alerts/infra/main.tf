@@ -81,24 +81,18 @@ module "discord_channels" {
   discord_category_id = var.discord_category_id
 }
 
-# Create Discord alerts for Sentry errors
+# Forward Sentry errors to Slack (per-project channel + critical fan-out)
 module "sentry_bridge" {
   source = "./channels/sentry-bridge"
 
   providers = {
-    sentry  = sentry
-    discord = discord
+    sentry = sentry
   }
 
   # Sentry configuration
-  sentry_organization_slug = var.sentry_organization_slug
-  sentry_team_slug         = var.sentry_team_slug
-
-  # Discord configuration
-  discord_server_id      = var.discord_server_id
-  discord_server_name    = var.discord_server_name
-  discord_category_id    = var.discord_category_id
-  discord_sentry_role_id = var.discord_sentry_role_id
+  sentry_organization_slug    = var.sentry_organization_slug
+  sentry_team_slug            = var.sentry_team_slug
+  sentry_slack_workspace_name = var.sentry_slack_workspace_name
 }
 
 # Deploy GCP Cloud Function for QuickNode webhook handling
