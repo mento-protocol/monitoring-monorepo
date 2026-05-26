@@ -39,6 +39,17 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Push/dispatch: queue all pending applies (up to 100) so intermediate
+  # main-branch merges don't get silently dropped by GitHub's default
+  # `queue: single` behavior (only one pending; newer-pending cancels
+  # older). For PR events, keep the default `single` — the cancel-on-new-
+  # push semantics there are what we want. `queue: max` + `cancel-in-
+  # progress: true` is invalid per GitHub, so the conditional matches the
+  # cancel-in-progress conditional above. The bundled actionlint version
+  # doesn't recognise the `queue` key yet (added by GitHub in 2025); see
+  # https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs
+  # trunk-ignore(actionlint/syntax-check)
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
 
 permissions: read-all
 
@@ -109,7 +120,11 @@ jobs:
         # we want green plans regardless of diff presence — comment-then-pass.
         run: |
           set -o pipefail
-          terraform plan -no-color -input=false 2>&1 | tee /tmp/tf-plan.txt
+          # `-lock-timeout=2m`: speculative PR plans can race a main-branch
+          # apply (separate concurrency groups). 2m is short enough not to
+          # stall CI on a long apply, long enough to absorb typical lock
+          # holds (init/refresh).
+          terraform plan -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
 
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
@@ -251,7 +266,10 @@ jobs:
         # `local_file.env_file` recreates on every fresh-checkout apply — it
         # writes `alerts/infra/onchain-event-handler/.env` for local dev and
         # has no remote side effects. Expected, ephemeral, not state drift.
-        run: terraform apply -auto-approve -input=false
+        # `-lock-timeout=10m`: apply absolutely must wait for any in-progress
+        # lock to clear rather than failing the deploy. 10m covers a typical
+        # alerts/infra plan+apply round trip with margin.
+        run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
