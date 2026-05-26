@@ -73,20 +73,28 @@ jobs:
 
       - name: Enable auto-merge for low-risk tiers
         # Three gates, all must hold for auto-merge:
-        #   1. Not a semver-major bump.
+        #   1. Update-type is explicitly minor or patch. Positive allowlist
+        #      (not `!= semver-major`) so unparsable versions, non-semver
+        #      tags, and any future fetch-metadata classification we don't
+        #      explicitly opt into fail CLOSED instead of slipping through.
+        #      fetch-metadata returns '' when versions can't be parsed
+        #      (src/dependabot/update_metadata.ts:calculateUpdateType).
         #   2. fetch-metadata's maintainer-changes flag is not set — it's
         #      a literal regex match for "Maintainer changes" in the PR
         #      body, so it catches what Dependabot itself flags but isn't
         #      an authoritative ownership audit. Still a useful low-cost
         #      tripwire for the npm-ecosystem case.
-        #   3. Not bumping any Anthropic-published action (self-loop: a
-        #      regression in claude-code-action — or any sibling action
-        #      we may add — ships unreviewed and breaks the reviewer that
-        #      would catch follow-ups).
+        #   3. Not bumping any Anthropic-published action OR any Dependabot-
+        #      published action (both are self-loops: claude-code-action is
+        #      the auto-reviewer, dependabot/fetch-metadata is what classifies
+        #      update-type for this very workflow). Mirror of the
+        #      exclude-patterns in dependabot.yml.
         if: |
-          steps.meta.outputs.update-type != 'version-update:semver-major'
+          (steps.meta.outputs.update-type == 'version-update:semver-minor'
+           || steps.meta.outputs.update-type == 'version-update:semver-patch')
           && steps.meta.outputs.maintainer-changes != 'true'
           && !contains(steps.meta.outputs.dependency-names, 'anthropics/')
+          && !contains(steps.meta.outputs.dependency-names, 'dependabot/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}

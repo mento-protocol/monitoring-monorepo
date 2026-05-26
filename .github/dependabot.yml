@@ -26,10 +26,14 @@ updates:
     # weeks the minor-patch group merges itself once CI is green and only
     # the major group lands as a human-review item.
     #
-    # `anthropics/*` is excluded from grouping so any Anthropic-published
-    # action gets its own PR — that lets the auto-merge workflow specifically
-    # exempt it (self-loop risk: a broken reviewer silently shipping itself).
-    # Glob covers future renames / sibling actions under the same org.
+    # Self-loop excludes (own PR, auto-merge gate also exempts):
+    #   - `anthropics/*` — claude-code-action is the auto-review reviewer;
+    #     a broken reviewer ships unreviewed and breaks the gate that
+    #     would catch its follow-ups. Glob covers future Anthropic actions.
+    #   - `dependabot/*` — dependabot/fetch-metadata is what classifies
+    #     update-type for THIS workflow. A regression in fetch-metadata
+    #     could silently misclassify (or hard-fail), disabling auto-merge
+    #     across the fleet. Same belt-and-suspenders rationale.
     groups:
       actions-minor-patch:
         update-types:
@@ -37,11 +41,13 @@ updates:
           - patch
         exclude-patterns:
           - anthropics/*
+          - dependabot/*
       actions-major:
         update-types:
           - major
         exclude-patterns:
           - anthropics/*
+          - dependabot/*
 
     # Buy supply-chain detection time. ~80% of recent malicious-package
     # incidents (per GitGuardian's 2026 axios attack analysis) had a

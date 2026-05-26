@@ -71,7 +71,7 @@ PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (
 - **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
 - **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
 - **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
-- **Any `anthropics/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: a regression in the reviewer ships unreviewed and breaks the gate that would catch its follow-ups.
+- **Any `anthropics/*` or `dependabot/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: claude-code-action is the auto-reviewer, dependabot/fetch-metadata is what classifies update-type for the auto-merge workflow — a regression in either ships unreviewed and breaks the gate that would catch follow-ups.
 
 Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
 
