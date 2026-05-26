@@ -15,6 +15,7 @@ import {
 } from "./utils";
 
 const DEFAULT_PROCESSING_BUDGET_MS = 270_000;
+const FALLBACK_HEADROOM_MS = 10_000;
 
 interface ProcessEventsOptions {
   /**
@@ -119,14 +120,58 @@ export async function processEvents(
 
       const elapsedMs = now() - startedAt;
       if (abortController.signal.aborted || elapsedMs >= budgetMs) {
-        skipped = logsToProcess.length - index;
-        logger.warn("Skipping remaining logs due to processing budget", {
-          reason: "skipped_due_to_timeout",
-          skipped,
-          processed: processedEvents.length,
-          elapsedMs,
-          budgetMs,
-        });
+        if (
+          isPendingExecutionFallback(
+            logEntry,
+            hasSafeMultiSigTx,
+            processedSafeMultiSigTxs,
+          )
+        ) {
+          logger.warn("Processing ExecutionSuccess fallback in headroom", {
+            reason: "fallback_after_safe_timeout",
+            transactionHash: logEntry.transactionHash,
+            elapsedMs,
+            budgetMs,
+            headroomMs: FALLBACK_HEADROOM_MS,
+          });
+          const fallbackAbortController = new AbortController();
+          const fallbackAbortTimer = setTimeout(
+            () => fallbackAbortController.abort(),
+            FALLBACK_HEADROOM_MS,
+          );
+          try {
+            const result = await processEvent(
+              logEntry,
+              txHashMap,
+              fallbackAbortController.signal,
+            );
+            if (result) {
+              processedEvents.push(result);
+            }
+          } catch (error) {
+            logProcessingError(
+              error,
+              logEntry,
+              fallbackAbortController.signal.aborted,
+            );
+            skipped += 1;
+          } finally {
+            clearTimeout(fallbackAbortTimer);
+          }
+          skipped += logsToProcess.length - index - 1;
+          if (skipped > 0) {
+            logger.warn("Skipping remaining logs due to processing budget", {
+              reason: "skipped_due_to_timeout",
+              skipped,
+              processed: processedEvents.length,
+              elapsedMs: now() - startedAt,
+              budgetMs,
+            });
+          }
+          break;
+        }
+        skipped += logsToProcess.length - index;
+        logBudgetSkip(skipped, processedEvents.length, elapsedMs, budgetMs);
         break;
       }
 
@@ -143,36 +188,27 @@ export async function processEvents(
           }
         }
       } catch (error) {
-        // Defense-in-depth: logEntry could in principle still be malformed
-        // (e.g. a primitive that slipped past the filter's object check).
-        // Guard property reads so a logger call can't throw on top of the
-        // original error. Returning 200 to QuickNode avoids replaying the whole
-        // batch and duplicating Discord deliveries that already succeeded.
-        const safe: Partial<QuickNodeDecodedLog> =
-          logEntry !== null && typeof logEntry === "object" ? logEntry : {};
-        logger.error("Error processing log", {
-          error:
-            error instanceof Error
-              ? {
-                  name: error.name,
-                  message: error.message,
-                  stack: error.stack,
-                }
-              : String(error),
-          transactionHash: safe.transactionHash,
-          eventName: safe.name,
-          chainDetectionFailure: error instanceof ChainDetectionError,
-          aborted: abortController.signal.aborted,
-        });
+        logProcessingError(error, logEntry, abortController.signal.aborted);
         if (abortController.signal.aborted) {
-          skipped = logsToProcess.length - index;
-          logger.warn("Skipping remaining logs due to processing budget", {
-            reason: "skipped_due_to_timeout",
+          skipped += 1;
+          const nextLog = logsToProcess[index + 1];
+          if (
+            nextLog &&
+            isPendingExecutionFallback(
+              nextLog,
+              hasSafeMultiSigTx,
+              processedSafeMultiSigTxs,
+            )
+          ) {
+            continue;
+          }
+          skipped += logsToProcess.length - index - 1;
+          logBudgetSkip(
             skipped,
-            processed: processedEvents.length,
-            elapsedMs: now() - startedAt,
+            processedEvents.length,
+            now() - startedAt,
             budgetMs,
-          });
+          );
           break;
         }
       }
@@ -182,6 +218,67 @@ export async function processEvents(
   }
 
   return { processedEvents, skipped };
+}
+
+function logBudgetSkip(
+  skipped: number,
+  processed: number,
+  elapsedMs: number,
+  budgetMs: number,
+): void {
+  logger.warn("Skipping remaining logs due to processing budget", {
+    reason: "skipped_due_to_timeout",
+    skipped,
+    processed,
+    elapsedMs,
+    budgetMs,
+  });
+}
+
+function logProcessingError(
+  error: unknown,
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  aborted: boolean,
+): void {
+  // Defense-in-depth: logEntry could in principle still be malformed
+  // (e.g. a primitive that slipped past the filter's object check).
+  // Guard property reads so a logger call can't throw on top of the
+  // original error. Returning 200 to QuickNode avoids replaying the whole
+  // batch and duplicating Discord deliveries that already succeeded.
+  const safe: Partial<QuickNodeDecodedLog> =
+    logEntry !== null && typeof logEntry === "object" ? logEntry : {};
+  logger.error("Error processing log", {
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : String(error),
+    transactionHash: safe.transactionHash,
+    eventName: safe.name,
+    chainDetectionFailure: error instanceof ChainDetectionError,
+    aborted,
+  });
+}
+
+function isPendingExecutionFallback(
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  hasSafeMultiSigTx: Set<string>,
+  processedSafeMultiSigTxs: Set<string>,
+): boolean {
+  if (
+    logEntry.name !== "ExecutionSuccess" ||
+    typeof logEntry.transactionHash !== "string"
+  ) {
+    return false;
+  }
+  const txHashLower = logEntry.transactionHash.toLowerCase();
+  return (
+    hasSafeMultiSigTx.has(txHashLower) &&
+    !processedSafeMultiSigTxs.has(txHashLower)
+  );
 }
 
 function eventPriority(

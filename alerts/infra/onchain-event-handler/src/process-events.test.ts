@@ -523,4 +523,89 @@ describe("processEvents - ChainDetectionError handling", () => {
       vi.useRealTimers();
     }
   });
+
+  it("uses response headroom for fallback when Safe alert aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { processEvents } = await import("./process-events");
+      const { buildEventContext } = await import("./build-event-context");
+      const { sendToDiscord } = await import("./discord");
+      const sendMock = vi.mocked(sendToDiscord);
+      sendMock.mockClear();
+
+      let sendCount = 0;
+      sendMock.mockImplementation(
+        async (_webhookUrl, _message, signal?: AbortSignal) => {
+          sendCount += 1;
+          if (sendCount === 1) {
+            return new Promise((_, reject) => {
+              signal?.addEventListener("abort", () => {
+                reject(new Error("aborted"));
+              });
+            });
+          }
+        },
+      );
+
+      const logs = [
+        {
+          address: SOLO_CELO_ADDR,
+          name: "SafeMultiSigTransaction",
+          transactionHash: "0xtx-safe",
+          blockHash: "0xblockGood",
+          blockNumber: "101",
+          logIndex: "1",
+          to: "0xtarget",
+          value: "0",
+          data: "0x",
+          operation: "0",
+          safeTxGas: "0",
+          baseGas: "0",
+          gasPrice: "0",
+          gasToken: "0x0000000000000000000000000000000000000000",
+          refundReceiver: "0x0000000000000000000000000000000000000000",
+          signatures: "0x",
+        },
+        {
+          address: SOLO_CELO_ADDR,
+          name: "ExecutionSuccess",
+          transactionHash: "0xtx-safe",
+          blockHash: "0xblockGood",
+          blockNumber: "102",
+          logIndex: "2",
+          txHash: "0xsafeTx",
+        },
+        {
+          address: SOLO_CELO_ADDR,
+          name: "AddedOwner",
+          transactionHash: "0xtx-other",
+          blockHash: "0xblockGood",
+          blockNumber: "103",
+          logIndex: "3",
+          owner: "0xowner2",
+        },
+      ];
+
+      const context = buildEventContext(logs);
+      const resultPromise = processEvents(logs, context, {
+        budgetMs: 10,
+        now: () => 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(resultPromise).resolves.toEqual({
+        processedEvents: [
+          {
+            multisigKey: "SOLO_CELO",
+            eventName: "ExecutionSuccess",
+            channelType: "events",
+          },
+        ],
+        skipped: 2,
+      });
+      expect(sendMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
