@@ -28,7 +28,10 @@ on:
       - .github/workflows/alerts-infra.yml
 
 # PR runs cancel on new pushes to the same PR ref; push/dispatch events use
-# a SHA-unique group so they never cancel each other. Matches `infra.yml`.
+# a SHA-unique group so they never cancel each other (sibling stack
+# workflows like `infra.yml` use unconditional cancel — be more careful
+# here because a cancelled apply could leave Cloud Function / QuickNode
+# webhook state half-mutated).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -140,12 +143,20 @@ jobs:
               `</details>\n\n` +
               `<!-- alerts-infra-plan-comment -->`;
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
+            // Paginate through all PR comments to find the existing
+            // plan-sticky marker. `listComments` caps at 100 per page;
+            // on long-lived PRs the marker could sit past page 1 and
+            // we'd duplicate-create instead of updating. `paginate`
+            // walks every page.
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
+              },
+            );
 
             const existing = comments.find(c =>
               c.body && c.body.includes("<!-- alerts-infra-plan-comment -->"),
@@ -178,7 +189,10 @@ jobs:
     # and aegis. Add a required-reviewer rule in repo Settings → Environments
     # to require manual approval before each apply runs.
     environment:
-      name: Production
+      # Lowercase to match sibling workflows (`metrics-bridge.yml`,
+      # `aegis-app-engine.yml`); the GitHub Environment lookup is
+      # case-insensitive, so this is purely a consistency change.
+      name: production
       url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
