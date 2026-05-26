@@ -53,6 +53,7 @@ export function formatHuman(summary) {
       summary.codexApprovalReaction ? "yes" : "no"
     }`,
   );
+  lines.push(`Codex review signal: ${summary.codexReviewSignal}`);
 
   const sections = [
     [
@@ -103,4 +104,35 @@ export function formatHuman(summary) {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function blockerNames(items) {
+  if (items.length === 0) return "none";
+  return items.map((item) => `${item.kind}:${item.name}`).join(", ");
+}
+
+export function formatCompact(summary) {
+  const pendingRequiredChecks = summary.required.blockers.filter(
+    (item) => item.kind === "check" && item.state === "pending",
+  );
+  const failingRequiredChecks = summary.required.blockers.filter(
+    (item) => item.kind === "check" && item.state === "fail",
+  );
+  const nonCheckBlockers = summary.required.blockers.filter(
+    (item) => item.kind !== "check",
+  );
+
+  return [
+    `PR #${summary.pr.number} ${summary.ready ? "READY" : "BLOCKED"}`,
+    `head=${summary.pr.headRefOid}`,
+    `mergeable=${summary.pr.mergeable ?? "UNKNOWN"}`,
+    `required_blockers=${summary.required.blockers.length}`,
+    `pending_checks=${blockerNames(pendingRequiredChecks)}`,
+    `failing_checks=${blockerNames(failingRequiredChecks)}`,
+    `other_blockers=${blockerNames(nonCheckBlockers)}`,
+    `threads=${summary.unresolvedReviewThreads.length}`,
+    `unreplied=${summary.unrepliedRootReviewComments.length}`,
+    `codex_approval=${summary.gates.codexDescriptionApproval.state}`,
+    `codex_signal=${summary.codexReviewSignal}`,
+  ].join(" ");
 }

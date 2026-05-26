@@ -58,14 +58,18 @@ protection.
 ## Expected CLI contract
 
 `pnpm pr:ready-state` must expose a stable JSON shape for agent loops via
-`--json`. Human formatting is allowed as the default for interactive use, but
-Claude and Codex babysitters should always pass `--json`.
+`--json`. Human formatting is allowed as the default for interactive use. Use
+`--watch --compact` for low-noise foreground babysitting.
 
 Suggested invocation:
 
 ```bash
-pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json]
+pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch]
 ```
+
+`--watch --json` emits one JSON summary per poll, separated by newlines. Use
+`--watch --compact` for human babysitting and reserve JSON output for machine
+consumers that can parse newline-delimited JSON.
 
 Expected top-level fields:
 
@@ -114,10 +118,21 @@ Expected top-level fields:
       "required": true,
       "state": "missing"
     },
+    "codexReviewSignal": {
+      "ready": true,
+      "required": false,
+      "state": "in_flight",
+      "fallbackAction": "wait"
+    },
     "reviewCommentReplies": {
       "ready": true,
       "required": true,
       "unrepliedCount": 0
+    },
+    "reviewThreads": {
+      "ready": true,
+      "required": true,
+      "unresolvedCount": 0
     }
   },
   "requiredStatusContexts": [
@@ -126,6 +141,7 @@ Expected top-level fields:
       "integrationId": 15368
     }
   ],
+  "codexReviewSignal": "in_flight",
   "summary": "Required check trunk is still pending; Cursor Bugbot is advisory and still pending."
 }
 ```
@@ -142,6 +158,13 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
+- `codexReviewSignal`: current-head Codex review-request state. Values are
+  `missing`, `requested`, `in_flight`, `stale`, and `approved`. `requested`
+  means a current-head `@codex review` request exists but no bot reaction or
+  review has been observed yet. `in_flight` means the current-head request has
+  a Codex `eyes` reaction, a current-head Codex review, or a current-head Codex
+  top-level result. `approved` means the final PR-description `+1` gate is
+  present. `stale` means only older-head Codex signals exist.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
@@ -154,11 +177,14 @@ Field expectations:
 ## Agent workflow
 
 1. Sweep feedback surfaces and reply to all review comments.
-2. Run `pnpm pr:ready-state --pr <number> --json`.
-3. If `ready` is false, fix or wait only on `required.blockers` and required
+2. Batch review fixes locally, auditing sibling surfaces before pushing.
+3. Run the mapped local gate once for the batch.
+4. Run `pnpm pr:ready-state --pr <number> --json`. For a foreground wait loop,
+   use `pnpm pr:ready-state --pr <number> --watch --compact`.
+5. If `ready` is false, fix or wait only on `required.blockers` and required
    `gates`.
-4. Report optional lag separately, especially Cursor Bugbot lag.
-5. Signal all-clear only after `ready` is true for the current head.
+6. Report optional lag separately, especially Cursor Bugbot lag.
+7. Signal all-clear only after `ready` is true for the current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay
@@ -166,6 +192,17 @@ outside the readiness decision.
 
 Codex re-reviews new pushes automatically. Do not post `@codex review` as a
 routine post-push action, and never post duplicate review requests while an
-existing current-head request has a Codex reaction or review in flight. A manual
-`@codex review` is only a fallback when the current head has no Codex signal
-after the normal automatic-review window.
+existing current-head request is `requested`, `in_flight`, or `approved`. A
+manual `@codex review` is only a fallback when the current head has no Codex
+signal after the normal automatic-review window.
+
+## Babysitting Speed Discipline
+
+- Build a feedback ledger before editing, then batch sibling fixes before the
+  next push.
+- Avoid broad bot review as an inner loop; use review at batch boundaries.
+- Cap manual Codex fallback to one request per head.
+- If `codexReviewSignal` is `requested` or `in_flight`, wait instead of posting
+  another `@codex review`.
+- Declare all-clear from the required-only readiness result, not from optional
+  reviewer lag clearing first.
