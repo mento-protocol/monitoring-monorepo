@@ -129,8 +129,9 @@ describe("processEvents - ChainDetectionError handling", () => {
     const result = await processEvents(logs, context);
 
     // Only the successful event survives.
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
+    expect(result.processedEvents).toHaveLength(1);
+    expect(result.skipped).toBe(0);
+    expect(result.processedEvents[0]).toMatchObject({
       multisigKey: "SOLO_CELO",
       eventName: "AddedOwner",
       channelType: "alerts",
@@ -191,7 +192,7 @@ describe("processEvents - ChainDetectionError handling", () => {
 
     const result = await processEvents(logs, context);
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({ processedEvents: [], skipped: 0 });
     // At least one error log per failed event.
     expect(loggerErrorMock).toHaveBeenCalled();
   });
@@ -225,13 +226,16 @@ describe("processEvents - ChainDetectionError handling", () => {
     const context = buildEventContext(logs);
     const result = await processEvents(logs, context);
 
-    expect(result).toEqual([
-      {
-        multisigKey: "SOLO_CELO",
-        eventName: "ExecutionSuccess",
-        channelType: "events",
-      },
-    ]);
+    expect(result).toEqual({
+      processedEvents: [
+        {
+          multisigKey: "SOLO_CELO",
+          eventName: "ExecutionSuccess",
+          channelType: "events",
+        },
+      ],
+      skipped: 0,
+    });
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(loggerWarnMock).toHaveBeenCalledWith("Invalid log entry", {
       error: "Log missing or invalid address field",
@@ -239,5 +243,369 @@ describe("processEvents - ChainDetectionError handling", () => {
       name: "SafeMultiSigTransaction",
       transactionHash: "0xtx-success",
     });
+  });
+
+  it("stops starting new events when the processing budget is exhausted", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    let currentMs = 0;
+    const now = vi.fn(() => currentMs);
+    sendMock.mockImplementation(async () => {
+      currentMs += 10;
+    });
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx1",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        owner: "0xowner1",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx2",
+        blockHash: "0xblockGood",
+        blockNumber: "102",
+        logIndex: "2",
+        owner: "0xowner2",
+      },
+    ];
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context, { budgetMs: 10, now });
+
+    expect(result).toEqual({
+      processedEvents: [
+        {
+          multisigKey: "SOLO_CELO",
+          eventName: "AddedOwner",
+          channelType: "alerts",
+        },
+      ],
+      skipped: 1,
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      "Skipping remaining logs due to processing budget",
+      {
+        reason: "skipped_due_to_timeout",
+        skipped: 1,
+        processed: 1,
+        elapsedMs: 10,
+        budgetMs: 10,
+      },
+    );
+  });
+
+  it("prioritizes SafeMultiSigTransaction over duplicate ExecutionSuccess when the budget is tight", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    let currentMs = 0;
+    const now = vi.fn(() => currentMs);
+    sendMock.mockImplementation(async () => {
+      currentMs += 10;
+    });
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "ExecutionSuccess",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        txHash: "0xsafeTx",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx-other",
+        blockHash: "0xblockGood",
+        blockNumber: "102",
+        logIndex: "2",
+        owner: "0xowner2",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "SafeMultiSigTransaction",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "103",
+        logIndex: "3",
+        to: "0xtarget",
+        value: "0",
+        data: "0x",
+        operation: "0",
+        safeTxGas: "0",
+        baseGas: "0",
+        gasPrice: "0",
+        gasToken: "0x0000000000000000000000000000000000000000",
+        refundReceiver: "0x0000000000000000000000000000000000000000",
+        signatures: "0x",
+      },
+    ];
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context, { budgetMs: 10, now });
+
+    expect(result).toEqual({
+      processedEvents: [
+        expect.objectContaining({
+          multisigKey: "SOLO_CELO",
+          eventName: "SafeMultiSigTransaction",
+        }),
+      ],
+      skipped: 1,
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps standalone ExecutionSuccess in original priority under a tight budget", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    let currentMs = 0;
+    const now = vi.fn(() => currentMs);
+    sendMock.mockImplementation(async () => {
+      currentMs += 10;
+    });
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "ExecutionSuccess",
+        transactionHash: "0xtx-standalone",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        txHash: "0xsafeTx",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx-other",
+        blockHash: "0xblockGood",
+        blockNumber: "102",
+        logIndex: "2",
+        owner: "0xowner2",
+      },
+    ];
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context, { budgetMs: 10, now });
+
+    expect(result).toEqual({
+      processedEvents: [
+        {
+          multisigKey: "SOLO_CELO",
+          eventName: "ExecutionSuccess",
+          channelType: "events",
+        },
+      ],
+      skipped: 1,
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps duplicate ExecutionSuccess fallback ahead of unrelated logs until Safe alert succeeds", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    let currentMs = 0;
+    const now = vi.fn(() => currentMs);
+    sendMock.mockImplementation(async () => {
+      currentMs += 10;
+    });
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "ExecutionSuccess",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        txHash: "0xsafeTx",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx-other",
+        blockHash: "0xblockGood",
+        blockNumber: "102",
+        logIndex: "2",
+        owner: "0xowner2",
+      },
+      {
+        name: "SafeMultiSigTransaction",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "103",
+        logIndex: "3",
+      },
+    ] as never;
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context, { budgetMs: 10, now });
+
+    expect(result).toEqual({
+      processedEvents: [
+        {
+          multisigKey: "SOLO_CELO",
+          eventName: "ExecutionSuccess",
+          channelType: "events",
+        },
+      ],
+      skipped: 1,
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts an aborted in-flight log as skipped", async () => {
+    vi.useFakeTimers();
+    try {
+      const { processEvents } = await import("./process-events");
+      const { buildEventContext } = await import("./build-event-context");
+      const { sendToDiscord } = await import("./discord");
+      const sendMock = vi.mocked(sendToDiscord);
+      sendMock.mockClear();
+      sendMock.mockImplementation(
+        async (_webhookUrl, _message, signal?: AbortSignal) =>
+          new Promise((_, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          }),
+      );
+
+      const logs = [
+        {
+          address: SOLO_CELO_ADDR,
+          name: "AddedOwner",
+          transactionHash: "0xtx1",
+          blockHash: "0xblockGood",
+          blockNumber: "101",
+          logIndex: "1",
+          owner: "0xowner1",
+        },
+      ];
+
+      const context = buildEventContext(logs);
+      const resultPromise = processEvents(logs, context, {
+        budgetMs: 10,
+        now: () => 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(resultPromise).resolves.toEqual({
+        processedEvents: [],
+        skipped: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses response headroom for fallback when Safe alert aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { processEvents } = await import("./process-events");
+      const { buildEventContext } = await import("./build-event-context");
+      const { sendToDiscord } = await import("./discord");
+      const sendMock = vi.mocked(sendToDiscord);
+      sendMock.mockClear();
+
+      let sendCount = 0;
+      sendMock.mockImplementation(
+        async (_webhookUrl, _message, signal?: AbortSignal) => {
+          sendCount += 1;
+          if (sendCount === 1) {
+            return new Promise((_, reject) => {
+              signal?.addEventListener("abort", () => {
+                reject(new Error("aborted"));
+              });
+            });
+          }
+        },
+      );
+
+      const logs = [
+        {
+          address: SOLO_CELO_ADDR,
+          name: "SafeMultiSigTransaction",
+          transactionHash: "0xtx-safe",
+          blockHash: "0xblockGood",
+          blockNumber: "101",
+          logIndex: "1",
+          to: "0xtarget",
+          value: "0",
+          data: "0x",
+          operation: "0",
+          safeTxGas: "0",
+          baseGas: "0",
+          gasPrice: "0",
+          gasToken: "0x0000000000000000000000000000000000000000",
+          refundReceiver: "0x0000000000000000000000000000000000000000",
+          signatures: "0x",
+        },
+        {
+          address: SOLO_CELO_ADDR,
+          name: "ExecutionSuccess",
+          transactionHash: "0xtx-safe",
+          blockHash: "0xblockGood",
+          blockNumber: "102",
+          logIndex: "2",
+          txHash: "0xsafeTx",
+        },
+        {
+          address: SOLO_CELO_ADDR,
+          name: "AddedOwner",
+          transactionHash: "0xtx-other",
+          blockHash: "0xblockGood",
+          blockNumber: "103",
+          logIndex: "3",
+          owner: "0xowner2",
+        },
+      ];
+
+      const context = buildEventContext(logs);
+      const resultPromise = processEvents(logs, context, {
+        budgetMs: 10,
+        now: () => 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(resultPromise).resolves.toEqual({
+        processedEvents: [
+          {
+            multisigKey: "SOLO_CELO",
+            eventName: "ExecutionSuccess",
+            channelType: "events",
+          },
+        ],
+        skipped: 2,
+      });
+      expect(sendMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

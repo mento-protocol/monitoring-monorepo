@@ -1,12 +1,25 @@
 import { Request, Response } from "@google-cloud/functions-framework";
 import { buildEventContext } from "./build-event-context";
 import { checkPayloadSize } from "./check-payload-size";
+import config from "./config";
 import { MULTISIG_CONFIG_ERROR } from "./constants";
 import { handleHealthCheck } from "./health-check";
 import { logger } from "./logger";
 import { processEvents } from "./process-events";
 import { validatePayload } from "./validate-payload";
 import { validateQuickNodeWebhook } from "./validate-quicknode-webhook";
+
+const DEFAULT_FUNCTION_TIMEOUT_SECONDS = 300;
+const RESPONSE_HEADROOM_MS = 30_000;
+
+function getProcessingBudgetMs(): number {
+  const configuredTimeoutSeconds = Number(config.FUNCTION_TIMEOUT_SECONDS);
+  const timeoutSeconds =
+    Number.isFinite(configuredTimeoutSeconds) && configuredTimeoutSeconds > 0
+      ? configuredTimeoutSeconds
+      : DEFAULT_FUNCTION_TIMEOUT_SECONDS;
+  return Math.max(0, timeoutSeconds * 1000 - RESPONSE_HEADROOM_MS);
+}
 
 /**
  * Cloud Function entry point for processing QuickNode webhooks
@@ -15,6 +28,8 @@ export const processQuicknodeWebhook = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  const requestStartedAtMs = Date.now();
+
   // Handle health check requests
   if (req.method === "GET") {
     handleHealthCheck(res);
@@ -85,16 +100,21 @@ export const processQuicknodeWebhook = async (
     const context = buildEventContext(webhookData);
 
     // 5. Process events with complete context
-    const results = await processEvents(webhookData, context);
+    const results = await processEvents(webhookData, context, {
+      budgetMs: getProcessingBudgetMs(),
+      startedAtMs: requestStartedAtMs,
+    });
 
     logger.info("Webhook processing completed", {
-      processed: results.length,
+      processed: results.processedEvents.length,
+      skipped: results.skipped,
       total: webhookData.length,
     });
 
     // 6. Return success
     res.status(200).json({
-      processed: results.length,
+      processed: results.processedEvents.length,
+      skipped: results.skipped,
       total: webhookData.length,
     });
   } catch (error) {

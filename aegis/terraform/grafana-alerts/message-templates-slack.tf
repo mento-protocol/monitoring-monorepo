@@ -4,28 +4,57 @@
 resource "grafana_message_template" "slack_oracle_stale_price_alert_title" {
   name     = "Slack: Stale Price Alert Title"
   template = <<-EOT
-{{ define "slack.oracle_stale_price_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ end }}
+{{ define "slack.oracle_stale_price_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
 }
 
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
-  name     = "Slack: Stale Price Alert Message"
+  name = "Slack: Stale Price Alert Message"
+  # Per-feed celoscan link to the relayer signer is set by the
+  # `${local.celo_relayer_signer_branches}` fragment (one independent
+  # `{{ if eq .Labels.rateFeed "X" }}` block per entry — see locals.tf for
+  # the source map). The fragment is wrapped in `{{ if eq .Labels.chain
+  # "celo" }}...{{ end }}` so Monad alerts never receive a Celo signer
+  # address (same feed names exist on both chains with different wallets).
+  # Cloud function link uses the Logs Explorer URL pattern from
+  # `mento-protocol/oracle-relayer:bin/get-function-logs-url.sh` with
+  # `resource.labels.service_name=relay-<chain>` AND
+  # `labels.rateFeed=<slash-form>` filters and the mainnet project_id from
+  # `local.oracle_relayer_mainnet_project_id`. Title link points at the
+  # Chainlink data-feed page on Celo (matches the trading_mode template
+  # convention; falls back to the Grafana alert details URL on non-Celo
+  # chains where Chainlink isn't published).
+  #
+  # Template only uses Grafana-confirmed primitives: Go text/template
+  # builtins (`if`, `eq`, `printf`, assignment) plus `reReplaceAll` (Sprig,
+  # already used by the trading-mode and low-balance templates).
   template = <<-EOT
 {{ define "slack.oracle_stale_price_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-*🚨 FIRING: Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}*
-1. Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
-2. Check if the relayer cloud function is still being triggered regularly
-{{ end }}
-{{ range .Alerts.Resolved }}
-*✅ RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain }}*
-{{ end }}
+{{ range .Alerts.Firing -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $hyphen := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $enc := reReplaceAll "/" "%2F" $slash -}}
+{{ $chain := .Labels.chain | title -}}
+{{ $relayer := "" -}}
+{{ if eq .Labels.chain "celo" -}}
+${local.celo_relayer_signer_branches}
+{{ end -}}
+{{ $titleURL := .GeneratorURL -}}
+{{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
+*<{{ $titleURL }}|Stale price for the {{ $slash }} rate feed on {{ $chain }}>*
+- Check the latest transactions of the {{ if $relayer -}}<https://{{ .Labels.explorer }}/address/{{ $relayer }}|{{ $slash }} relayer on {{ $chain }}>{{- else -}}{{ $slash }} relayer on {{ $chain }}{{- end }}
+- Check if the <https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}|relayer cloud function> is still being triggered regularly
+
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $hyphen := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $chain := .Labels.chain | title -}}
+{{ $titleURL := .GeneratorURL -}}
+{{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
+*<{{ $titleURL }}|{{ $slash }} price is fresh again on {{ $chain }}>*
+{{ end -}}
 {{ end }}
 EOT
 }

@@ -14,6 +14,25 @@ import {
   isSecurityEvent,
 } from "./utils";
 
+const DEFAULT_PROCESSING_BUDGET_MS = 270_000;
+const FALLBACK_HEADROOM_MS = 10_000;
+
+interface ProcessEventsOptions {
+  /**
+   * Maximum wall-clock time to spend starting event work. Defaults to 270s,
+   * leaving 30s of headroom under the Cloud Function's 300s timeout for the
+   * HTTP response and platform overhead.
+   */
+  budgetMs?: number;
+  now?: () => number;
+  startedAtMs?: number;
+}
+
+interface ProcessEventsResult {
+  processedEvents: ProcessedEvent[];
+  skipped: number;
+}
+
 /**
  * Error thrown when chain cannot be determined from webhook payload.
  * Local to this module — the outer handler in index.ts doesn't catch it
@@ -37,74 +56,244 @@ class ChainDetectionError extends Error {
  *
  * @param logs - Array of decoded log entries from QuickNode webhook
  * @param context - Event context built from first pass
- * @returns Array of successfully processed events
+ * @returns Successfully processed events plus the count skipped by budget
  */
 export async function processEvents(
   logs: QuickNodeWebhookPayload["result"],
   context: EventContext,
-): Promise<ProcessedEvent[]> {
+  options: ProcessEventsOptions = {},
+): Promise<ProcessEventsResult> {
   const { txHashMap, hasSafeMultiSigTx } = context;
+  const now = options.now ?? Date.now;
+  const budgetMs = options.budgetMs ?? DEFAULT_PROCESSING_BUDGET_MS;
+  const startedAt = options.startedAtMs ?? now();
+  const remainingMs = budgetMs - (now() - startedAt);
+  const abortController = new AbortController();
+  const abortTimer =
+    remainingMs > 0
+      ? setTimeout(() => abortController.abort(), remainingMs)
+      : undefined;
 
-  // Filter out logs that should be skipped before parallel processing
-  const logsToProcess = logs.filter((logEntry) => {
-    // Drop null / non-object entries at filter time. Payload validation only
-    // checks that `result` is an array, so a malformed batch entry would
-    // otherwise reach processEvent → validateLog → the per-event catch (all
-    // of which read fields like `transactionHash`) and throw a TypeError that
-    // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
-    // duplicate Discord deliveries for events that already succeeded.
-    if (logEntry === null || typeof logEntry !== "object") return false;
-    // Skip ExecutionSuccess if we already have SafeMultiSigTransaction for this tx.
-    if (
-      logEntry.name === "ExecutionSuccess" &&
-      typeof logEntry.transactionHash === "string" &&
-      hasSafeMultiSigTx.has(logEntry.transactionHash.toLowerCase())
-    ) {
-      logger.info("Skipping ExecutionSuccess notification", {
-        reason: "SafeMultiSigTransaction already sent",
-        transactionHash: logEntry.transactionHash,
-      });
-      return false;
-    }
-    return true;
-  });
+  // Filter malformed entries before processing, then prioritize Safe tx logs.
+  // ExecutionSuccess is a fallback notification for the same tx, but only
+  // suppress it after the richer SafeMultiSigTransaction alert succeeds.
+  // Otherwise a budget cutoff or per-event failure could leave no alert.
+  const candidateLogs = logs
+    .filter((logEntry) => {
+      // Drop null / non-object entries at filter time. Payload validation only
+      // checks that `result` is an array, so a malformed batch entry would
+      // otherwise reach processEvent → validateLog → the per-event catch (all
+      // of which read fields like `transactionHash`) and throw a TypeError that
+      // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
+      // duplicate Discord deliveries for events that already succeeded.
+      return logEntry !== null && typeof logEntry === "object";
+    })
+    .sort(
+      (left, right) =>
+        eventPriority(left, hasSafeMultiSigTx) -
+        eventPriority(right, hasSafeMultiSigTx),
+    );
 
-  // Process events in parallel. Per-event errors (including
-  // ChainDetectionError) are logged and the event is dropped from results;
-  // the batch's other events still process and Discord-fire normally.
-  // Returning a 422 to QuickNode would cause it to retry the whole batch,
-  // duplicating the Discord deliveries that already succeeded.
-  const results = await Promise.all(
-    logsToProcess.map(async (logEntry) => {
-      try {
-        return await processEvent(logEntry, txHashMap);
-      } catch (error) {
-        // Defense-in-depth: logEntry could in principle still be malformed
-        // (e.g. a primitive that slipped past the filter's object check).
-        // Guard property reads so a logger call can't throw and reject
-        // Promise.all on top of the original error.
-        const safe: Partial<QuickNodeDecodedLog> =
-          logEntry !== null && typeof logEntry === "object" ? logEntry : {};
-        logger.error("Error processing log", {
-          error:
-            error instanceof Error
-              ? {
-                  name: error.name,
-                  message: error.message,
-                  stack: error.stack,
-                }
-              : String(error),
-          transactionHash: safe.transactionHash,
-          eventName: safe.name,
-          chainDetectionFailure: error instanceof ChainDetectionError,
+  const logsToProcess = candidateLogs;
+
+  const processedEvents: ProcessedEvent[] = [];
+  const processedSafeMultiSigTxs = new Set<string>();
+  let skipped = 0;
+
+  try {
+    for (const [index, logEntry] of logsToProcess.entries()) {
+      const txHashLower =
+        typeof logEntry.transactionHash === "string"
+          ? logEntry.transactionHash.toLowerCase()
+          : null;
+      if (
+        logEntry.name === "ExecutionSuccess" &&
+        txHashLower &&
+        processedSafeMultiSigTxs.has(txHashLower)
+      ) {
+        logger.info("Skipping ExecutionSuccess notification", {
+          reason: "SafeMultiSigTransaction already sent",
+          transactionHash: logEntry.transactionHash,
         });
-        return null;
+        continue;
       }
-    }),
-  );
 
-  // Filter out null results (failed events)
-  return results.filter((result): result is ProcessedEvent => result !== null);
+      const elapsedMs = now() - startedAt;
+      if (abortController.signal.aborted || elapsedMs >= budgetMs) {
+        if (
+          isPendingExecutionFallback(
+            logEntry,
+            hasSafeMultiSigTx,
+            processedSafeMultiSigTxs,
+          )
+        ) {
+          logger.warn("Processing ExecutionSuccess fallback in headroom", {
+            reason: "fallback_after_safe_timeout",
+            transactionHash: logEntry.transactionHash,
+            elapsedMs,
+            budgetMs,
+            headroomMs: FALLBACK_HEADROOM_MS,
+          });
+          const fallbackAbortController = new AbortController();
+          const fallbackAbortTimer = setTimeout(
+            () => fallbackAbortController.abort(),
+            FALLBACK_HEADROOM_MS,
+          );
+          try {
+            const result = await processEvent(
+              logEntry,
+              txHashMap,
+              fallbackAbortController.signal,
+            );
+            if (result) {
+              processedEvents.push(result);
+            }
+          } catch (error) {
+            logProcessingError(
+              error,
+              logEntry,
+              fallbackAbortController.signal.aborted,
+            );
+            skipped += 1;
+          } finally {
+            clearTimeout(fallbackAbortTimer);
+          }
+          skipped += logsToProcess.length - index - 1;
+          if (skipped > 0) {
+            logger.warn("Skipping remaining logs due to processing budget", {
+              reason: "skipped_due_to_timeout",
+              skipped,
+              processed: processedEvents.length,
+              elapsedMs: now() - startedAt,
+              budgetMs,
+            });
+          }
+          break;
+        }
+        skipped += logsToProcess.length - index;
+        logBudgetSkip(skipped, processedEvents.length, elapsedMs, budgetMs);
+        break;
+      }
+
+      try {
+        const result = await processEvent(
+          logEntry,
+          txHashMap,
+          abortController.signal,
+        );
+        if (result) {
+          processedEvents.push(result);
+          if (result.eventName === "SafeMultiSigTransaction" && txHashLower) {
+            processedSafeMultiSigTxs.add(txHashLower);
+          }
+        }
+      } catch (error) {
+        logProcessingError(error, logEntry, abortController.signal.aborted);
+        if (abortController.signal.aborted) {
+          skipped += 1;
+          const nextLog = logsToProcess[index + 1];
+          if (
+            nextLog &&
+            isPendingExecutionFallback(
+              nextLog,
+              hasSafeMultiSigTx,
+              processedSafeMultiSigTxs,
+            )
+          ) {
+            continue;
+          }
+          skipped += logsToProcess.length - index - 1;
+          logBudgetSkip(
+            skipped,
+            processedEvents.length,
+            now() - startedAt,
+            budgetMs,
+          );
+          break;
+        }
+      }
+    }
+  } finally {
+    clearTimeout(abortTimer);
+  }
+
+  return { processedEvents, skipped };
+}
+
+function logBudgetSkip(
+  skipped: number,
+  processed: number,
+  elapsedMs: number,
+  budgetMs: number,
+): void {
+  logger.warn("Skipping remaining logs due to processing budget", {
+    reason: "skipped_due_to_timeout",
+    skipped,
+    processed,
+    elapsedMs,
+    budgetMs,
+  });
+}
+
+function logProcessingError(
+  error: unknown,
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  aborted: boolean,
+): void {
+  // Defense-in-depth: logEntry could in principle still be malformed
+  // (e.g. a primitive that slipped past the filter's object check).
+  // Guard property reads so a logger call can't throw on top of the
+  // original error. Returning 200 to QuickNode avoids replaying the whole
+  // batch and duplicating Discord deliveries that already succeeded.
+  const safe: Partial<QuickNodeDecodedLog> =
+    logEntry !== null && typeof logEntry === "object" ? logEntry : {};
+  logger.error("Error processing log", {
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : String(error),
+    transactionHash: safe.transactionHash,
+    eventName: safe.name,
+    chainDetectionFailure: error instanceof ChainDetectionError,
+    aborted,
+  });
+}
+
+function isPendingExecutionFallback(
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  hasSafeMultiSigTx: Set<string>,
+  processedSafeMultiSigTxs: Set<string>,
+): boolean {
+  if (
+    logEntry.name !== "ExecutionSuccess" ||
+    typeof logEntry.transactionHash !== "string"
+  ) {
+    return false;
+  }
+  const txHashLower = logEntry.transactionHash.toLowerCase();
+  return (
+    hasSafeMultiSigTx.has(txHashLower) &&
+    !processedSafeMultiSigTxs.has(txHashLower)
+  );
+}
+
+function eventPriority(
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  hasSafeMultiSigTx: Set<string>,
+): number {
+  if (logEntry.name === "SafeMultiSigTransaction") return 0;
+  if (
+    logEntry.name === "ExecutionSuccess" &&
+    typeof logEntry.transactionHash === "string" &&
+    hasSafeMultiSigTx.has(logEntry.transactionHash.toLowerCase())
+  ) {
+    return 1;
+  }
+  return 2;
 }
 
 /**
@@ -142,6 +331,7 @@ function validateLog(log: QuickNodeWebhookPayload["result"][0]): {
 async function processEvent(
   logEntry: QuickNodeWebhookPayload["result"][0],
   txHashMap: Map<string, string>,
+  signal: AbortSignal,
 ): Promise<ProcessedEvent | null> {
   // 1. Validate required fields
   const validation = validateLog(logEntry);
@@ -166,7 +356,11 @@ async function processEvent(
   let chain: string | null = null;
 
   if (logEntry.blockHash && typeof logEntry.blockHash === "string") {
-    chain = await findChainFromBlockHash(logEntry.blockHash, multisigAddress);
+    chain = await findChainFromBlockHash(
+      logEntry.blockHash,
+      multisigAddress,
+      signal,
+    );
   }
 
   // Fallback to address lookup if block hash verification didn't work
@@ -222,10 +416,11 @@ async function processEvent(
     logEntry,
     multisigKey,
     txHashMap,
+    signal,
   );
 
   // 7. Send to Discord
-  await sendToDiscord(webhookUrl, discordMessage);
+  await sendToDiscord(webhookUrl, discordMessage, signal);
 
   logger.info("Event processed successfully", {
     multisigKey,

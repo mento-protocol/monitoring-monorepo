@@ -48,6 +48,7 @@ export async function formatSafeMultiSigTransactionEvent(
   chainConfig: { decimals: number; symbol: string },
   chainName: string,
   txHash?: string,
+  signal?: AbortSignal,
 ): Promise<DiscordEmbedField[]> {
   const fields: DiscordEmbedField[] = [];
   const blockExplorer = getBlockExplorer(chainName);
@@ -99,6 +100,7 @@ export async function formatSafeMultiSigTransactionEvent(
     const executor = await getTransactionExecutor(
       log.transactionHash,
       chainName,
+      signal,
     );
     if (executor) {
       fields.push({
