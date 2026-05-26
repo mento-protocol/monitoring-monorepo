@@ -165,22 +165,15 @@ resource "null_resource" "pause_webhook_on_destroy" {
   # This provisioner will run when the restapi_object is being destroyed
   # It pauses the webhook before the restapi_object destroy provisioner runs
   provisioner "local-exec" {
-    when    = destroy
-    command = <<-EOT
-      WEBHOOK_ID="${self.triggers.webhook_id}"
-      # Compute script path dynamically (works for both old and new resources)
-      # Find the project root by looking for scripts/manage-quicknode-webhook.sh
-      SCRIPT_PATH=""
-      CURRENT_DIR="$$(pwd)"
-      # Try to find script starting from current directory and going up
-      for dir in "$$CURRENT_DIR" "$$(dirname "$$CURRENT_DIR")" "$$(dirname "$$(dirname "$$CURRENT_DIR")")"; do
-        if [ -f "$$dir/scripts/manage-quicknode-webhook.sh" ]; then
-          SCRIPT_PATH="$$dir/scripts/manage-quicknode-webhook.sh"
-          break
-        fi
-      done
+    when        = destroy
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
 
-      if [ -z "$$SCRIPT_PATH" ]; then
+      WEBHOOK_ID="${self.triggers.webhook_id}"
+      SCRIPT_PATH="${try(self.triggers.script_path, "")}"
+
+      if [ -z "$SCRIPT_PATH" ] || [ ! -f "$SCRIPT_PATH" ]; then
         echo "Warning: Could not find manage-quicknode-webhook.sh script, skipping pause"
         exit 0
       fi
@@ -201,7 +194,7 @@ resource "null_resource" "pause_webhook_on_destroy" {
           exit 0
         fi
 
-        "$$SCRIPT_PATH" pause "$WEBHOOK_ID" "$API_KEY" || true
+        "$SCRIPT_PATH" pause "$WEBHOOK_ID" "$API_KEY" || true
       else
         echo "Could not determine webhook ID, skipping pause"
       fi
