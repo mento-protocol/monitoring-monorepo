@@ -81,6 +81,17 @@ quicknode_signing_secret = "your-secure-random-secret-min-32-chars"
 # Note: Each multisig specifies its own QuickNode network (see multisigs below)
 
 #####################
+# GitHub Configuration
+#####################
+
+# Fine-grained PAT for managing the TF_VAR_* repo secrets consumed by
+# .github/workflows/alerts-infra.yml. Least-privilege scopes:
+#   - Repository: mento-protocol/monitoring-monorepo (this one only)
+#   - Permissions: Secrets (read & write)
+# Generate at https://github.com/settings/personal-access-tokens/new
+github_token = "github_pat_..."
+
+#####################
 # Optional Settings
 #####################
 

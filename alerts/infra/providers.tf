@@ -10,6 +10,17 @@ provider "discord" {
   token = var.discord_bot_token
 }
 
+# GitHub provider — used solely to push the `TF_VAR_*` repo secrets that
+# `.github/workflows/alerts-infra.yml` consumes (see `github_actions_secret`
+# resources in `main.tf`). The PAT in `var.github_token` should be
+# fine-grained, scoped to this single repo, with `Secrets: Read and write`
+# permission only — that's the least-privilege grant for managing repo
+# Actions secrets.
+provider "github" {
+  token = var.github_token
+  owner = "mento-protocol"
+}
+
 # Discord API provider
 provider "restapi" {
   alias = "discord"
