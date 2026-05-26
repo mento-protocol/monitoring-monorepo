@@ -51,9 +51,16 @@ jobs:
   notify:
     # Test-fire path: workflow_dispatch always posts (no failure gate).
     # Real path: only post when a watched workflow's push-to-main run failed.
+    # Catch every "silent failure" conclusion, not just plain `failure`:
+    #   - failure          → step exited non-zero
+    #   - timed_out        → runner exceeded job timeout (also silent)
+    #   - startup_failure  → runner couldn't even start (silent)
+    # Skip `cancelled` (usually manual operator action) and `success` /
+    # `neutral` / `skipped` (not failures).
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'failure' &&
+      (contains(fromJSON('["failure","timed_out","startup_failure"]'),
+                github.event.workflow_run.conclusion) &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')
     runs-on: blacksmith-4vcpu-ubuntu-2404

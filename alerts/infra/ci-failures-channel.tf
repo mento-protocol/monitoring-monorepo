@@ -181,6 +181,12 @@ resource "restapi_object" "ci_failures_invite_eng" {
   data = jsonencode({
     channel = restapi_object.ci_failures_channel.id
     users   = local.eng_user_ids_csv
+    # `force = true` makes Slack skip invalid user IDs and continue
+    # inviting the valid ones, instead of erroring out on the first bad
+    # ID. With a usergroup-resolved member list the IDs should all be
+    # valid, but `force` is the safer default for a fan-out invite —
+    # one stale user in @eng won't fail the whole apply.
+    force = true
   })
 
   # Force-new on the member CSV: when @eng membership changes upstream,
@@ -197,21 +203,23 @@ resource "restapi_object" "ci_failures_invite_eng" {
 
   lifecycle {
     # Accept either `ok == true` (fresh invite) OR `ok == false` with a
-    # NON-EMPTY `errors` array where every per-user error is
-    # `already_in_channel` (everyone in @eng was already a member —
-    # benign).
+    # NON-EMPTY `errors` array whose length equals the number of users we
+    # asked Slack to invite AND every per-user error is
+    # `already_in_channel`. The length-equality check rules out the
+    # case where Slack returned fewer error entries than users requested
+    # (which would indicate some users weren't processed at all — they'd
+    # silently miss CI-failure alerts).
     #
     # The non-empty guard closes a vacuous-truth hole: `alltrue([])` is
     # `true` in Terraform, so without `length(...) > 0` a real failure
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
-    # NO `errors` array) would silently pass the postcondition. Caught
-    # in PR review.
+    # NO `errors` array) would silently pass the postcondition.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
           || (
-            try(length(jsondecode(self.api_response).errors), 0) > 0
+            try(length(jsondecode(self.api_response).errors), 0) == length(split(",", local.eng_user_ids_csv))
             && alltrue([
               for err in try(jsondecode(self.api_response).errors, []) :
               try(err.error, "") == "already_in_channel"
