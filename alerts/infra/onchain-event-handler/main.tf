@@ -246,6 +246,17 @@ resource "google_storage_bucket_object" "function_source" {
   bucket = google_storage_bucket.function_bucket.name
   source = data.archive_file.function_source.output_path
 
+  # `hashicorp/google >= 7.x` uses the string sentinel "different hash" as
+  # the planned value of `detect_md5hash` when the source MD5 isn't known
+  # at plan time. The actual apply then computes the real MD5 and the
+  # provider rejects the mismatch with "Provider produced inconsistent
+  # final plan". Explicitly setting `detect_md5hash = filemd5(...)` makes
+  # plan and apply agree on the value. The hash recomputes every time the
+  # archive's output_path content changes (which is what we want — the
+  # object is renamed via `local.source_hash` when content actually
+  # changes; this just stabilises the plan→apply handoff).
+  detect_md5hash = filemd5(data.archive_file.function_source.output_path)
+
   lifecycle {
     # Ignore changes to content_type and other metadata that don't affect functionality
     ignore_changes = [
