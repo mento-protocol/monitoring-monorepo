@@ -20,8 +20,20 @@ name: Dependabot auto-merge
 # instead of interpolated into run: scripts (see
 # https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/).
 
-on: pull_request
+# Explicit `types:` drops the default `reopened` event. Otherwise a human
+# closing a Dependabot PR (the canonical "do not merge this") would be
+# undone by Dependabot reopening on its next rebase — the workflow would
+# re-fire and re-enable auto-merge. Closing-without-merge needs to be a
+# durable veto.
+on:
+  pull_request:
+    types: [opened, synchronize]
 
+# `permissions: read-all` is required by checkov (CKV2_GHA_1) at the top
+# level. Job-level `permissions:` REPLACES this, so the auto-merge job
+# below sets the exact write scopes it needs without inheritance. Any
+# future job added to this workflow will inherit `read-all` unless it
+# overrides — which is the safe-by-default behavior we want.
 permissions: read-all
 
 jobs:
@@ -62,13 +74,19 @@ jobs:
       - name: Enable auto-merge for low-risk tiers
         # Three gates, all must hold for auto-merge:
         #   1. Not a semver-major bump.
-        #   2. Maintainer set unchanged upstream (new maintainer = elevated
-        #      supply-chain risk; hold for manual look).
-        #   3. Not bumping the reviewer we depend on.
+        #   2. fetch-metadata's maintainer-changes flag is not set — it's
+        #      a literal regex match for "Maintainer changes" in the PR
+        #      body, so it catches what Dependabot itself flags but isn't
+        #      an authoritative ownership audit. Still a useful low-cost
+        #      tripwire for the npm-ecosystem case.
+        #   3. Not bumping any Anthropic-published action (self-loop: a
+        #      regression in claude-code-action — or any sibling action
+        #      we may add — ships unreviewed and breaks the reviewer that
+        #      would catch follow-ups).
         if: |
           steps.meta.outputs.update-type != 'version-update:semver-major'
           && steps.meta.outputs.maintainer-changes != 'true'
-          && !contains(steps.meta.outputs.dependency-names, 'anthropics/claude-code-action')
+          && !contains(steps.meta.outputs.dependency-names, 'anthropics/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}

@@ -71,9 +71,9 @@ PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (
 - **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
 - **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
 - **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
-- **`anthropics/claude-code-action`** → never auto-merged. Self-loop: a regression in the reviewer ships unreviewed and breaks the gate that would catch its follow-ups.
+- **Any `anthropics/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: a regression in the reviewer ships unreviewed and breaks the gate that would catch its follow-ups.
 
-Cooldown defaults in `dependabot.yml`: `default-days: 3`, `semver-major-days: 7`, `semver-minor-days: 3`, `semver-patch-days: 0`. Cooldown does NOT apply to security updates (GitHub-enforced).
+Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
 
 - [ ] If you add a new external Action that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude), add it to the auto-merge exclusion list with the same self-loop rationale
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions

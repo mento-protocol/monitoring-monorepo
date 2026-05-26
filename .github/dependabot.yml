@@ -26,29 +26,32 @@ updates:
     # weeks the minor-patch group merges itself once CI is green and only
     # the major group lands as a human-review item.
     #
-    # anthropics/claude-code-action is excluded from grouping so it gets
-    # its own PR — that lets the auto-merge workflow specifically exempt
-    # it (self-loop risk: a broken reviewer silently shipping itself).
+    # `anthropics/*` is excluded from grouping so any Anthropic-published
+    # action gets its own PR — that lets the auto-merge workflow specifically
+    # exempt it (self-loop risk: a broken reviewer silently shipping itself).
+    # Glob covers future renames / sibling actions under the same org.
     groups:
       actions-minor-patch:
         update-types:
           - minor
           - patch
         exclude-patterns:
-          - anthropics/claude-code-action
+          - anthropics/*
       actions-major:
         update-types:
           - major
         exclude-patterns:
-          - anthropics/claude-code-action
+          - anthropics/*
 
     # Buy supply-chain detection time. ~80% of recent malicious-package
     # incidents (per GitGuardian's 2026 axios attack analysis) had a
-    # detection window under 7 days, so a 7-day delay on majors blocks
-    # most of them at the door. Cooldown does NOT apply to security
-    # updates — those still flow immediately with no delay.
+    # detection window under 7 days, so a 7-day delay blocks most of them
+    # at the door. Cooldown does NOT apply to security updates — those
+    # still flow immediately with no delay.
+    #
+    # Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported
+    # for the github-actions ecosystem — only `default-days` is honored.
+    # Auto-merge means the 7-day delay costs zero clicks; patches still
+    # land at zero friction, just one week later.
     cooldown:
-      default-days: 3
-      semver-major-days: 7
-      semver-minor-days: 3
-      semver-patch-days: 0
+      default-days: 7
