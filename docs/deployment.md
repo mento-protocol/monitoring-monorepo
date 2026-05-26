@@ -198,7 +198,7 @@ Terraform creates: Upstash Redis database + Vercel project + all env vars + cust
 Push any commit touching `ui-dashboard/`, or force via:
 
 ```bash
-pnpm exec vercel deploy --prod --force --with-cache --archive=tgz --yes --scope mentolabs
+vercel deploy --prod --force --with-cache --archive=tgz --yes
 ```
 
 Run manual dashboard deploys from the monorepo root, not from
@@ -250,7 +250,7 @@ commit is present in the shallow clone. For env-only changes that require a
 fresh production runtime, run the manual deploy from the monorepo root:
 
 ```bash
-pnpm exec vercel deploy --prod --force --with-cache --archive=tgz --yes --scope mentolabs
+vercel deploy --prod --force --with-cache --archive=tgz --yes
 ```
 
 Do not run that command from `ui-dashboard/`: the Vercel project already has
