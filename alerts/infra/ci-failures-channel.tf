@@ -183,7 +183,13 @@ resource "restapi_object" "ci_failures_invite_eng" {
 
   path        = "/conversations.invite"
   create_path = "/conversations.invite"
-  read_path   = "/conversations.info?channel={id}"
+  # No-op read: this resource's stored ID is the Slack response `ok` flag,
+  # not a channel ID, because the accepted all-already-in-channel path has no
+  # `channel.id` to persist. Reading `conversations.info?channel={id}` after
+  # apply would therefore query `channel=true`/`false` and fail every later
+  # plan. Treat the invite as a one-shot trigger whose refresh only proves the
+  # Slack token/API are reachable.
+  read_path = "/api.test"
 
   # No-op destroy — leaving @eng in the channel on `terraform destroy` is
   # the right default (their membership isn't ours to revoke).
