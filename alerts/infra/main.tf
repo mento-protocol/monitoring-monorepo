@@ -183,14 +183,20 @@ module "onchain_event_listeners" {
 #####################################################################
 
 locals {
-  alerts_infra_ci_secrets = {
-    TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
-    TF_VAR_DISCORD_BOT_TOKEN        = var.discord_bot_token
-    TF_VAR_DISCORD_SERVER_ID        = var.discord_server_id
-    TF_VAR_DISCORD_CATEGORY_ID      = var.discord_category_id
-    TF_VAR_BILLING_ACCOUNT          = var.billing_account
-    TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
-    TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
+  # The names set (non-sensitive) is what `for_each` iterates over —
+  # Terraform rejects sensitive values as `for_each` keys because the keys
+  # appear in plan output and resource addresses. Values are looked up
+  # from a separate map keyed by the same names. Splitting these keeps the
+  # iteration surface non-sensitive while the actual secret values flow
+  # only through the resource's `plaintext_value` field.
+  alerts_infra_ci_secret_names = toset([
+    "TF_VAR_SENTRY_AUTH_TOKEN",
+    "TF_VAR_DISCORD_BOT_TOKEN",
+    "TF_VAR_DISCORD_SERVER_ID",
+    "TF_VAR_DISCORD_CATEGORY_ID",
+    "TF_VAR_BILLING_ACCOUNT",
+    "TF_VAR_QUICKNODE_API_KEY",
+    "TF_VAR_QUICKNODE_SIGNING_SECRET",
     # Self-managed: the github provider's own PAT also lives in repo
     # secrets so CI can `terraform plan/apply` this stack (which manages
     # the github_actions_secret resources below). First apply is always
@@ -199,7 +205,18 @@ locals {
     # idempotently. Rotating the PAT: update tfvars, re-apply locally OR
     # via CI (CI works since the old PAT still authenticates until the
     # new one fully propagates).
-    TF_VAR_GITHUB_TOKEN = var.github_token
+    "TF_VAR_GITHUB_TOKEN",
+  ])
+
+  alerts_infra_ci_secret_values = {
+    TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
+    TF_VAR_DISCORD_BOT_TOKEN        = var.discord_bot_token
+    TF_VAR_DISCORD_SERVER_ID        = var.discord_server_id
+    TF_VAR_DISCORD_CATEGORY_ID      = var.discord_category_id
+    TF_VAR_BILLING_ACCOUNT          = var.billing_account
+    TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
+    TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
+    TF_VAR_GITHUB_TOKEN             = var.github_token
   }
 }
 
@@ -215,9 +232,9 @@ locals {
 # audience), revisit — `gh secret set` and `data.github_actions_public_key`
 # can build an `encrypted_value` pipeline.
 resource "github_actions_secret" "alerts_infra_tf_vars" {
-  for_each        = local.alerts_infra_ci_secrets
+  for_each        = local.alerts_infra_ci_secret_names
   repository      = "monitoring-monorepo"
   secret_name     = each.key
-  plaintext_value = each.value
+  plaintext_value = local.alerts_infra_ci_secret_values[each.key]
 }
 # trunk-ignore-end(checkov/CKV_GIT_4)
