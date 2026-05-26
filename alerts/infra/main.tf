@@ -191,6 +191,15 @@ locals {
     TF_VAR_BILLING_ACCOUNT          = var.billing_account
     TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
     TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
+    # Self-managed: the github provider's own PAT also lives in repo
+    # secrets so CI can `terraform plan/apply` this stack (which manages
+    # the github_actions_secret resources below). First apply is always
+    # local — from a checkout with `github_token` in tfvars — to bootstrap
+    # this secret. Subsequent CI runs find it in place and can re-apply
+    # idempotently. Rotating the PAT: update tfvars, re-apply locally OR
+    # via CI (CI works since the old PAT still authenticates until the
+    # new one fully propagates).
+    TF_VAR_GITHUB_TOKEN = var.github_token
   }
 }
 
