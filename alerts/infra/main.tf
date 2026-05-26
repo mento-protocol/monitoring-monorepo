@@ -81,7 +81,12 @@ module "discord_channels" {
   discord_category_id = var.discord_category_id
 }
 
-# Create Discord alerts for Sentry errors
+# Forward Sentry errors to Slack (per-project channel + critical fan-out).
+# `discord` provider is still passed because state contains Discord-typed
+# resources scheduled for destroy on the next apply — Terraform requires
+# the provider config to be available until those resources are gone. The
+# mapping can be dropped in a follow-up PR once the migration apply
+# completes and state no longer references Discord-typed resources.
 module "sentry_bridge" {
   source = "./channels/sentry-bridge"
 
@@ -91,14 +96,9 @@ module "sentry_bridge" {
   }
 
   # Sentry configuration
-  sentry_organization_slug = var.sentry_organization_slug
-  sentry_team_slug         = var.sentry_team_slug
-
-  # Discord configuration
-  discord_server_id      = var.discord_server_id
-  discord_server_name    = var.discord_server_name
-  discord_category_id    = var.discord_category_id
-  discord_sentry_role_id = var.discord_sentry_role_id
+  sentry_organization_slug    = var.sentry_organization_slug
+  sentry_slack_workspace_name = var.sentry_slack_workspace_name
+  slack_critical_channel      = var.sentry_slack_critical_channel
 }
 
 # Deploy GCP Cloud Function for QuickNode webhook handling
