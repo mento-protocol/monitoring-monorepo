@@ -19,6 +19,17 @@ const mocks = vi.hoisted(() => ({
   validateQuickNodeWebhook: vi.fn(),
 }));
 
+// `./constants` evaluates `./config` at import time, which calls
+// `envSchema(...)` and throws if any of DISCORD_WEBHOOK_ALERTS /
+// DISCORD_WEBHOOK_EVENTS / MULTISIG_CONFIG / QUICKNODE_SIGNING_SECRET is
+// missing. CI runners don't have these env vars set, and tests should not
+// depend on a real .env file. Mocking the module short-circuits the import
+// chain so `await import("./index")` below doesn't trigger envSchema.
+//
+// MULTISIG_CONFIG_ERROR is read at index.ts:74 as a truthy/falsy gate —
+// `null` keeps the test on the happy path. Tests that need to exercise the
+// 503 multisig-config-error branch should override this mock per-test.
+vi.mock("./constants", () => ({ MULTISIG_CONFIG_ERROR: null }));
 vi.mock("./build-event-context", () => ({
   buildEventContext: mocks.buildEventContext,
 }));
