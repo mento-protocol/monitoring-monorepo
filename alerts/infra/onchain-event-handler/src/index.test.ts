@@ -91,7 +91,7 @@ describe("processQuicknodeWebhook", () => {
       valid: true,
       payload: { result: [] },
     });
-    mocks.processEvents.mockResolvedValue([]);
+    mocks.processEvents.mockResolvedValue({ processedEvents: [], skipped: 0 });
   });
 
   it("acknowledges duplicate webhook nonces without processing them", async () => {
@@ -131,6 +131,10 @@ describe("processQuicknodeWebhook", () => {
     await processQuicknodeWebhook(request(), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ processed: 0, total: 0 });
+    expect(res.json).toHaveBeenCalledWith({
+      processed: 0,
+      skipped: 0,
+      total: 0,
+    });
   });
 });

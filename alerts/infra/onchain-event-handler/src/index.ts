@@ -88,13 +88,15 @@ export const processQuicknodeWebhook = async (
     const results = await processEvents(webhookData, context);
 
     logger.info("Webhook processing completed", {
-      processed: results.length,
+      processed: results.processedEvents.length,
+      skipped: results.skipped,
       total: webhookData.length,
     });
 
     // 6. Return success
     res.status(200).json({
-      processed: results.length,
+      processed: results.processedEvents.length,
+      skipped: results.skipped,
       total: webhookData.length,
     });
   } catch (error) {

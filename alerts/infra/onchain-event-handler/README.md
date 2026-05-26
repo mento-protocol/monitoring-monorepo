@@ -51,7 +51,7 @@ module "onchain_event_handler" {
 | `region`                   | GCP region                                               | `string` | `"europe-west1"`          | no       |
 | `function_name`            | Function name                                            | `string` | `"onchain-event-handler"` | no       |
 | `memory_mb`                | Memory in MB                                             | `number` | `256`                     | no       |
-| `timeout_seconds`          | Timeout in seconds                                       | `number` | `60`                      | no       |
+| `timeout_seconds`          | Timeout in seconds                                       | `number` | `300`                     | no       |
 | `max_instances`            | Max instances                                            | `number` | `10`                      | no       |
 | `min_instances`            | Min instances                                            | `number` | `0`                       | no       |
 | `quicknode_signing_secret` | QuickNode signing secret                                 | `string` | -                         | yes      |

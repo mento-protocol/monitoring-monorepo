@@ -14,6 +14,23 @@ import {
   isSecurityEvent,
 } from "./utils";
 
+const DEFAULT_PROCESSING_BUDGET_MS = 270_000;
+
+interface ProcessEventsOptions {
+  /**
+   * Maximum wall-clock time to spend starting event work. Defaults to 270s,
+   * leaving 30s of headroom under the Cloud Function's 300s timeout for the
+   * HTTP response and platform overhead.
+   */
+  budgetMs?: number;
+  now?: () => number;
+}
+
+interface ProcessEventsResult {
+  processedEvents: ProcessedEvent[];
+  skipped: number;
+}
+
 /**
  * Error thrown when chain cannot be determined from webhook payload.
  * Local to this module — the outer handler in index.ts doesn't catch it
@@ -42,10 +59,14 @@ class ChainDetectionError extends Error {
 export async function processEvents(
   logs: QuickNodeWebhookPayload["result"],
   context: EventContext,
-): Promise<ProcessedEvent[]> {
+  options: ProcessEventsOptions = {},
+): Promise<ProcessEventsResult> {
   const { txHashMap, hasSafeMultiSigTx } = context;
+  const now = options.now ?? Date.now;
+  const budgetMs = options.budgetMs ?? DEFAULT_PROCESSING_BUDGET_MS;
+  const startedAt = now();
 
-  // Filter out logs that should be skipped before parallel processing
+  // Filter out logs that should be skipped before processing.
   const logsToProcess = logs.filter((logEntry) => {
     // Drop null / non-object entries at filter time. Payload validation only
     // checks that `result` is an array, so a malformed batch entry would
@@ -69,42 +90,53 @@ export async function processEvents(
     return true;
   });
 
-  // Process events in parallel. Per-event errors (including
-  // ChainDetectionError) are logged and the event is dropped from results;
-  // the batch's other events still process and Discord-fire normally.
-  // Returning a 422 to QuickNode would cause it to retry the whole batch,
-  // duplicating the Discord deliveries that already succeeded.
-  const results = await Promise.all(
-    logsToProcess.map(async (logEntry) => {
-      try {
-        return await processEvent(logEntry, txHashMap);
-      } catch (error) {
-        // Defense-in-depth: logEntry could in principle still be malformed
-        // (e.g. a primitive that slipped past the filter's object check).
-        // Guard property reads so a logger call can't throw and reject
-        // Promise.all on top of the original error.
-        const safe: Partial<QuickNodeDecodedLog> =
-          logEntry !== null && typeof logEntry === "object" ? logEntry : {};
-        logger.error("Error processing log", {
-          error:
-            error instanceof Error
-              ? {
-                  name: error.name,
-                  message: error.message,
-                  stack: error.stack,
-                }
-              : String(error),
-          transactionHash: safe.transactionHash,
-          eventName: safe.name,
-          chainDetectionFailure: error instanceof ChainDetectionError,
-        });
-        return null;
-      }
-    }),
-  );
+  const processedEvents: ProcessedEvent[] = [];
+  let skipped = 0;
 
-  // Filter out null results (failed events)
-  return results.filter((result): result is ProcessedEvent => result !== null);
+  for (const [index, logEntry] of logsToProcess.entries()) {
+    const elapsedMs = now() - startedAt;
+    if (elapsedMs >= budgetMs) {
+      skipped = logsToProcess.length - index;
+      logger.warn("Skipping remaining logs due to processing budget", {
+        reason: "skipped_due_to_timeout",
+        skipped,
+        processed: processedEvents.length,
+        elapsedMs,
+        budgetMs,
+      });
+      break;
+    }
+
+    try {
+      const result = await processEvent(logEntry, txHashMap);
+      if (result) {
+        processedEvents.push(result);
+      }
+    } catch (error) {
+      // Defense-in-depth: logEntry could in principle still be malformed
+      // (e.g. a primitive that slipped past the filter's object check).
+      // Guard property reads so a logger call can't throw on top of the
+      // original error. Returning 200 to QuickNode avoids replaying the whole
+      // batch and duplicating Discord deliveries that already succeeded.
+      const safe: Partial<QuickNodeDecodedLog> =
+        logEntry !== null && typeof logEntry === "object" ? logEntry : {};
+      logger.error("Error processing log", {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : String(error),
+        transactionHash: safe.transactionHash,
+        eventName: safe.name,
+        chainDetectionFailure: error instanceof ChainDetectionError,
+      });
+    }
+  }
+
+  return { processedEvents, skipped };
 }
 
 /**
