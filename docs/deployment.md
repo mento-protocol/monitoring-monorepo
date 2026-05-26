@@ -107,14 +107,14 @@ pnpm infra:apply   # apply changes
 
 ### Environment Variables
 
-All env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit them manually in the Vercel dashboard.
+Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The legacy `BLOB_READ_WRITE_TOKEN` is managed by the Vercel Blob store integration until the Blob OIDC cutover removes it.
 
-| Variable                   | Source             | Description                                |
-| -------------------------- | ------------------ | ------------------------------------------ |
-| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars` | Prod Envio endpoint (Celo + Monad mainnet) |
-| `UPSTASH_REDIS_REST_URL`   | Terraform output   | Address labels Redis — auto-set from DB    |
-| `UPSTASH_REDIS_REST_TOKEN` | Terraform output   | Address labels Redis token — auto-set      |
-| `BLOB_READ_WRITE_TOKEN`    | `terraform.tfvars` | Vercel Blob token for backup cron          |
+| Variable                   | Source                   | Description                                                           |
+| -------------------------- | ------------------------ | --------------------------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)                            |
+| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB                               |
+| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set                                 |
+| `BLOB_READ_WRITE_TOKEN`    | Vercel store integration | Legacy Blob token for backup cron until the store is upgraded to OIDC |
 
 ### Address Book & Backup Cron
 
@@ -161,7 +161,7 @@ Run this once when setting up from scratch or recreating the Vercel project.
 vercel blob create-store address-labels --scope mentolabs
 ```
 
-Copy the `BLOB_READ_WRITE_TOKEN` from the output (or retrieve it later from the Vercel dashboard → Storage).
+For the current static-token flow, copy the `BLOB_READ_WRITE_TOKEN` from the output (or retrieve it later from the Vercel dashboard → Storage). After the project is upgraded to Blob OIDC, the backup and restore routes use the Vercel runtime identity instead and this env var should be removed from production and preview.
 
 **2. Delete the existing Vercel project (if recreating)**
 
