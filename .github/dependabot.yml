@@ -3,7 +3,11 @@ version: 2
 # Keep GitHub Actions pinned to commit SHAs (not floating tags). This file is
 # scoped to github-actions only so Dependabot opens a PR whenever an action
 # we use tags a new release, letting us refresh the pinned SHA under review.
-# npm updates for this monorepo are handled out-of-band (pnpm workspace).
+# npm updates for this monorepo are handled out-of-band (pnpm workspace,
+# `minimumReleaseAge: 4320` in pnpm-workspace.yaml). GitHub-issued security
+# advisories on pnpm-lock.yaml still come through as Dependabot PRs even
+# without an `npm` entry here — those flow through the normal CI gates and
+# auto-merge only if classified non-major.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -16,3 +20,35 @@ updates:
       include: scope
     labels:
       - dependencies
+
+    # Collapse the Monday batch into one PR per tier. With auto-merge on
+    # minor/patch (see .github/workflows/dependabot-auto-merge.yml), most
+    # weeks the minor-patch group merges itself once CI is green and only
+    # the major group lands as a human-review item.
+    #
+    # anthropics/claude-code-action is excluded from grouping so it gets
+    # its own PR — that lets the auto-merge workflow specifically exempt
+    # it (self-loop risk: a broken reviewer silently shipping itself).
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - anthropics/claude-code-action
+      actions-major:
+        update-types:
+          - major
+        exclude-patterns:
+          - anthropics/claude-code-action
+
+    # Buy supply-chain detection time. ~80% of recent malicious-package
+    # incidents (per GitGuardian's 2026 axios attack analysis) had a
+    # detection window under 7 days, so a 7-day delay on majors blocks
+    # most of them at the door. Cooldown does NOT apply to security
+    # updates — those still flow immediately with no delay.
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 0

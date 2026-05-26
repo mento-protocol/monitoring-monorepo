@@ -1,0 +1,75 @@
+name: Dependabot auto-merge
+
+# Tiered auto-merge for Dependabot PRs:
+#  - Patch / minor bumps → auto-merge once required CI checks pass.
+#  - Major bumps → left for human review (Cursor Bugbot already posts a
+#    risk summary on every Dependabot PR; @codex review is on-demand for
+#    a deeper second opinion).
+#  - Security advisories on any tier (incl. npm via pnpm-lock.yaml) bypass
+#    the Dependabot cooldown and auto-merge if classified non-major.
+#  - PRs that change maintainership are held back as a supply-chain signal.
+#  - anthropics/claude-code-action is never auto-merged (self-loop: if a
+#    regression lands we lose the reviewer that catches its own follow-ups).
+#
+# The job only runs `gh pr merge --auto` — no checkout, no execution against
+# the PR head — so `pull_request` is safe to use even though Dependabot PRs
+# carry external commits. The merge itself still waits for every required
+# status check in the branch ruleset (CI / Vercel / Code Quality).
+#
+# Workflow-injection hygiene: every PR-derived value is passed through env:
+# instead of interpolated into run: scripts (see
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/).
+
+on: pull_request
+
+permissions: read-all
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # alert-lookup populates ghsa-id/cvss for security advisories.
+          # Surfaces them in the workflow log so the audit trail records
+          # whether an auto-merged PR was a security patch.
+          alert-lookup: true
+
+      - name: Log classification
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPENDENCY_NAMES: ${{ steps.meta.outputs.dependency-names }}
+          DEPENDENCY_GROUP: ${{ steps.meta.outputs.dependency-group }}
+          MAINTAINER_CHANGES: ${{ steps.meta.outputs.maintainer-changes }}
+          ALERT_STATE: ${{ steps.meta.outputs.alert-state }}
+          GHSA_ID: ${{ steps.meta.outputs.ghsa-id }}
+        run: |
+          echo "update-type:        $UPDATE_TYPE"
+          echo "dependency-names:   $DEPENDENCY_NAMES"
+          echo "dependency-group:   $DEPENDENCY_GROUP"
+          echo "maintainer-changes: $MAINTAINER_CHANGES"
+          echo "alert-state:        $ALERT_STATE"
+          echo "ghsa-id:            $GHSA_ID"
+
+      - name: Enable auto-merge for low-risk tiers
+        # Three gates, all must hold for auto-merge:
+        #   1. Not a semver-major bump.
+        #   2. Maintainer set unchanged upstream (new maintainer = elevated
+        #      supply-chain risk; hold for manual look).
+        #   3. Not bumping the reviewer we depend on.
+        if: |
+          steps.meta.outputs.update-type != 'version-update:semver-major'
+          && steps.meta.outputs.maintainer-changes != 'true'
+          && !contains(steps.meta.outputs.dependency-names, 'anthropics/claude-code-action')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
