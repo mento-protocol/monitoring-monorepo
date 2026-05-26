@@ -133,6 +133,8 @@ locals {
   # from Celo even when a signer address currently matches so the Slack
   # template can select the right explorer per chain and future signer drift
   # stays local.
+  # Both monad and monad-testnet currently share this signer set; split into
+  # separate maps if testnet signers diverge.
   monad_relayer_signers = {
     AUSDUSD = "0xBF8a08d7DeC72efF538B48Ee332dd4eE938e0b1f"
     CHFUSD  = "0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d"

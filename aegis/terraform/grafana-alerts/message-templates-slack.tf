@@ -41,6 +41,7 @@ resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
 {{ if eq .Labels.chain "celo" -}}
 ${local.celo_relayer_signer_branches}
 {{ end -}}
+{{/* monad and monad-testnet currently share signer addresses; split maps if testnet diverges. */ -}}
 {{ if or (eq .Labels.chain "monad") (eq .Labels.chain "monad-testnet") -}}
 ${local.monad_relayer_signer_branches}
 {{ end -}}
