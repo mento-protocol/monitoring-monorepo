@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { register } from "../src/metrics.js";
-import { makePoolResponse, getGaugeValue } from "./fixtures.js";
+import * as metricsModule from "../src/metrics.js";
+import {
+  makePoolResponse,
+  getGaugeValue,
+  getMetricValues,
+} from "./fixtures.js";
 
 vi.mock("../src/graphql.js", () => ({
   fetchPools: vi.fn(),
@@ -27,6 +32,14 @@ const mockFetchPools = vi.mocked(fetchPools);
 const mockMarkHealthy = vi.mocked(markHealthy);
 const mockRunRebalanceProbes = vi.mocked(runRebalanceProbes);
 
+async function pollErrorValue(kind: string): Promise<number> {
+  const values = await getMetricValues(
+    register,
+    "mento_pool_bridge_poll_errors_total",
+  );
+  return values.find((value) => value.labels.kind === kind)?.value ?? 0;
+}
+
 describe("poll", () => {
   beforeEach(() => {
     register.resetMetrics();
@@ -51,15 +64,37 @@ describe("poll", () => {
     expect(mockMarkHealthy).toHaveBeenCalledOnce();
   });
 
-  it("increments pollErrors on failure", async () => {
+  it("increments pollErrors with hasura_query kind on fetch failure", async () => {
     mockFetchPools.mockRejectedValueOnce(new Error("network error"));
     await poll();
 
-    const value = await getGaugeValue(
-      register,
-      "mento_pool_bridge_poll_errors_total",
-    );
-    expect(value).toBe(1);
+    expect(await pollErrorValue("hasura_query")).toBe(1);
+  });
+
+  it("increments pollErrors with update_metrics kind on metric update failure", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    const updateSpy = vi
+      .spyOn(metricsModule, "updateMetrics")
+      .mockImplementationOnce(() => {
+        throw new Error("metrics boom");
+      });
+
+    await poll();
+
+    expect(await pollErrorValue("update_metrics")).toBe(1);
+    updateSpy.mockRestore();
+  });
+
+  it("increments pollErrors with mark_healthy kind on health marker failure", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockMarkHealthy.mockImplementationOnce(() => {
+      throw new Error("health boom");
+    });
+
+    await poll();
+
+    expect(await pollErrorValue("mark_healthy")).toBe(1);
+    expect(mockRunRebalanceProbes).not.toHaveBeenCalled();
   });
 
   it("does not call markHealthy on failure", async () => {
@@ -141,6 +176,7 @@ describe("poll", () => {
       "Rebalance probe failed:",
       expect.any(Error),
     );
+    expect(await pollErrorValue("rebalance_probe")).toBe(1);
     errorSpy.mockRestore();
   });
 });

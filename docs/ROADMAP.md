@@ -115,23 +115,23 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 **Live FPMM + bridge rule inventory:**
 
-| Service          | Rule                                    | Severity | Threshold                                                           |
-| ---------------- | --------------------------------------- | -------- | ------------------------------------------------------------------- |
-| `fpmms`          | Oracle Liveness                         | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                    |
-| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                            |
-| `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                      |
-| `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)               |
-| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m          |
-| `fpmms`          | Deviation Breach Critical               | critical | breach >3600s AND `deviation_ratio > 1.05` (magnitude + duration)   |
-| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND deviation-ratio data unavailable                  |
-| `fpmms`          | Deviation Breach State Changed          | warning  | recent warning-tier deviation state transition                      |
-| `fpmms`          | Deviation Breach Critical State Changed | critical | recent critical-tier deviation state transition                     |
-| `fpmms`          | Trading Limit Pressure                  | warning  | `limit_pressure > 0.8` for 5m                                       |
-| `fpmms`          | Trading Limit Tripped                   | critical | `limit_pressure >= 1` for 2m                                        |
-| `fpmms`          | Rebalancer Stale                        | critical | 1h+ breach AND 30m+ since last rebalance; FX weekend + reopen-gated |
-| `fpmms`          | Rebalance Effectiveness                 | warning  | last in-breach rebalance closed <50% of gap-to-boundary, `for=15m`  |
-| `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                             |
-| `metrics-bridge` | Poll Errors                             | critical | `rate(poll_errors_total[5m]) > 0` for 3m                            |
+| Service          | Rule                                    | Severity | Threshold                                                                 |
+| ---------------- | --------------------------------------- | -------- | ------------------------------------------------------------------------- |
+| `fpmms`          | Oracle Liveness                         | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                          |
+| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                                  |
+| `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                            |
+| `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)                     |
+| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m                |
+| `fpmms`          | Deviation Breach Critical               | critical | breach >3600s AND `deviation_ratio > 1.05` (magnitude + duration)         |
+| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND deviation-ratio data unavailable                        |
+| `fpmms`          | Deviation Breach State Changed          | warning  | recent warning-tier deviation state transition                            |
+| `fpmms`          | Deviation Breach Critical State Changed | critical | recent critical-tier deviation state transition                           |
+| `fpmms`          | Trading Limit Pressure                  | warning  | `limit_pressure > 0.8` for 5m                                             |
+| `fpmms`          | Trading Limit Tripped                   | critical | `limit_pressure >= 1` for 2m                                              |
+| `fpmms`          | Rebalancer Stale                        | critical | 1h+ breach AND 30m+ since last rebalance; FX weekend + reopen-gated       |
+| `fpmms`          | Rebalance Effectiveness                 | warning  | last in-breach rebalance closed <50% of gap-to-boundary, `for=15m`        |
+| `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                                   |
+| `metrics-bridge` | Poll Errors                             | critical | `sum by (kind)(rate(poll_errors_total{kind=~".+"}[5m])) > 0.01/s` for 10m |
 
 ### Deferred
 

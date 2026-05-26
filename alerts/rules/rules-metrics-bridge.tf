@@ -81,8 +81,8 @@ resource "grafana_rule_group" "metrics_bridge" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Bridge polling indexer with errors — {{ printf \"%.3f\" $values.A.Value }}/s."
-      description = "Likely Envio rate limit (429) or schema drift. Stale gauges remain; alert-on-change is degraded."
+      summary     = "Bridge poll errors ({{ $labels.kind }}) — {{ printf \"%.3f\" $values.A.Value }}/s."
+      description = "Kind is one of hasura_query, update_metrics, mark_healthy, or rebalance_probe. Stale gauges remain; alert-on-change is degraded."
     }
 
     labels = {
@@ -99,7 +99,7 @@ resource "grafana_rule_group" "metrics_bridge" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "rate(mento_pool_bridge_poll_errors_total[5m])"
+        expr    = "sum by (kind) (rate(mento_pool_bridge_poll_errors_total{kind=~\".+\"}[5m]))"
         instant = true
       })
     }

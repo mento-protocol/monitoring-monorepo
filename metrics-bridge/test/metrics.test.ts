@@ -1454,14 +1454,17 @@ describe("self-monitoring gauges", () => {
   });
 
   it("pollErrors counter increments", async () => {
-    counters.pollErrors.inc();
+    counters.pollErrors.inc({ kind: "hasura_query" });
     const metrics = await register.getMetricsAsJSON();
     const counter = metrics.find(
       (m) => m.name === "mento_pool_bridge_poll_errors_total",
     );
     expect(counter).toBeDefined();
-    const value = (counter as { values: Array<{ value: number }> }).values[0]
-      ?.value;
+    const value = (
+      counter as {
+        values: Array<{ labels: Record<string, string>; value: number }>;
+      }
+    ).values.find((sample) => sample.labels.kind === "hasura_query")?.value;
     expect(value).toBe(1);
   });
 });
@@ -1498,5 +1501,9 @@ describe("label-shape contract: alert template ↔ metric labels", () => {
   it("reserveShareToken0 / reserveShareToken1 labels include token_symbol (referenced by $values.R0.Labels.token_symbol / $values.R1.Labels.token_symbol)", () => {
     expect(labelNamesOf(gauges.reserveShareToken0)).toContain("token_symbol");
     expect(labelNamesOf(gauges.reserveShareToken1)).toContain("token_symbol");
+  });
+
+  it("pollErrors labels include bounded kind (referenced by Metrics Bridge Poll Errors)", () => {
+    expect(labelNamesOf(counters.pollErrors)).toEqual(["kind"]);
   });
 });
