@@ -287,6 +287,7 @@ async function processEvent(
     logEntry,
     multisigKey,
     txHashMap,
+    signal,
   );
 
   // 7. Send to Discord

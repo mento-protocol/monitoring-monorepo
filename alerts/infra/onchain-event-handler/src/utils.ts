@@ -367,6 +367,7 @@ export async function decodeEventData(
   log: QuickNodeDecodedLog,
   txHash?: string,
   chainName: string = "celo",
+  signal?: AbortSignal,
 ): Promise<DiscordEmbedField[]> {
   const chainConfig = getChainConfig(chainName);
   const chainTokenConfig = {
@@ -385,6 +386,7 @@ export async function decodeEventData(
       chainTokenConfig,
       chainName,
       txHash,
+      signal,
     );
   }
 
@@ -408,8 +410,13 @@ export async function decodeEventData(
 export async function getTransactionExecutor(
   transactionHash: string,
   chainName: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
+    if (signal?.aborted) {
+      return null;
+    }
+
     const chainConfig = getChainConfig(chainName);
     if (!chainConfig) {
       logger.warn(`Unknown chain: ${chainName}`);
@@ -433,9 +440,12 @@ export async function getTransactionExecutor(
       }),
     });
 
-    const tx = await publicClient.getTransaction({
-      hash: transactionHash as `0x${string}`,
-    });
+    const tx = await withAbort(
+      publicClient.getTransaction({
+        hash: transactionHash as `0x${string}`,
+      }),
+      signal,
+    );
 
     return tx.from.toLowerCase();
   } catch (error) {

@@ -28,6 +28,7 @@ export async function formatDiscordMessage(
   log: QuickNodeDecodedLog,
   multisigKey: string,
   txHashMap: Map<string, string>,
+  signal?: AbortSignal,
 ): Promise<DiscordMessage> {
   const isSecurity = isSecurityEvent(eventName);
   const color = isSecurity ? DISCORD_COLORS.ALERT : DISCORD_COLORS.EVENT;
@@ -67,7 +68,13 @@ export async function formatDiscordMessage(
       value: `[Open TX in Safe UI](${safeUiUrl})`,
       inline: false,
     },
-    ...(await decodeEventData(eventName, log, txHashForSafe, chainName)),
+    ...(await decodeEventData(
+      eventName,
+      log,
+      txHashForSafe,
+      chainName,
+      signal,
+    )),
   ];
 
   // Build title: "Mento Labs Multisig [Celo]"
@@ -116,6 +123,10 @@ const DISCORD_RETRY_CONFIG = {
  */
 function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (isAbortError(error)) {
     return false;
   }
 
@@ -247,7 +258,7 @@ function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
   }
 
   if (signal.aborted) {
-    return Promise.reject(new Error("Operation aborted"));
+    return Promise.reject(createAbortError());
   }
 
   return new Promise((resolve, reject) => {
@@ -258,10 +269,25 @@ function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
     const onAbort = () => {
       clearTimeout(timer);
       cleanup();
-      reject(new Error("Operation aborted"));
+      reject(createAbortError());
     };
     const cleanup = () => signal.removeEventListener("abort", onAbort);
 
     signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbortError(error: Error): boolean {
+  const maybeCode = (error as Error & { code?: string }).code;
+  return (
+    error.name === "AbortError" ||
+    maybeCode === "ERR_CANCELED" ||
+    error.message === "Operation aborted"
+  );
+}
+
+function createAbortError(): Error & { code: string } {
+  return Object.assign(new Error("Operation aborted"), {
+    code: "ERR_CANCELED",
   });
 }
