@@ -18,7 +18,7 @@ last_verified: 2026-05-20
 - Never run `terraform apply` without explicit human approval.
 - Resource renames/removals need `moved` blocks.
 - Cloud Run services use `/health`, not `/healthz`.
-- Keep `lifecycle.ignore_changes` for images when rollouts happen through deploy scripts or workflows.
+- Keep `lifecycle.ignore_changes` for images and Cloud Run API bookkeeping fields when rollouts happen through deploy scripts or workflows.
 - Project-level IAM changes must be ordered behind required bootstrap/API enablement dependencies.
 
 ## Verification

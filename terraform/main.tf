@@ -597,9 +597,16 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   lifecycle {
     # Image rollouts are triggered by `gcloud run services update` from the
     # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
-    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
-    # revert a freshly-deployed image back to the bootstrap placeholder.
-    ignore_changes = [template[0].containers[0].image]
+    # terraform. The Cloud Run API also rewrites bookkeeping fields on each
+    # deployment. Ignoring those attributes keeps `pnpm infra:apply` focused on
+    # intentional service-shape changes instead of cosmetic deploy drift.
+    ignore_changes = [
+      client,
+      client_version,
+      scaling,
+      template[0].containers[0].image,
+      template[0].revision,
+    ]
   }
 }
 
