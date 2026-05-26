@@ -137,7 +137,7 @@ jobs:
           cat /tmp/schema-diff-output.md
       - name: Post sticky PR comment
         if: steps.decide.outputs.run == 'true'
-        uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: schema-diff
           path: /tmp/schema-diff-output.md
@@ -149,7 +149,7 @@ jobs:
         if: >-
           steps.decide.outputs.run == 'false' &&
           steps.decide.outputs.read_only == 'false'
-        uses: marocchino/sticky-pull-request-comment@d2ad0de260ae8b0235ce059e63f2949ba9e05943 # v2.9.3
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: schema-diff
           delete: true
