@@ -164,6 +164,17 @@ export async function processEvents(
           chainDetectionFailure: error instanceof ChainDetectionError,
           aborted: abortController.signal.aborted,
         });
+        if (abortController.signal.aborted) {
+          skipped = logsToProcess.length - index;
+          logger.warn("Skipping remaining logs due to processing budget", {
+            reason: "skipped_due_to_timeout",
+            skipped,
+            processed: processedEvents.length,
+            elapsedMs: now() - startedAt,
+            budgetMs,
+          });
+          break;
+        }
       }
     }
   } finally {
@@ -183,9 +194,9 @@ function eventPriority(
     typeof logEntry.transactionHash === "string" &&
     hasSafeMultiSigTx.has(logEntry.transactionHash.toLowerCase())
   ) {
-    return 2;
+    return 1;
   }
-  return 1;
+  return 2;
 }
 
 /**

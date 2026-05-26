@@ -3,6 +3,7 @@ import { JSONSchemaType, envSchema } from "env-schema";
 interface Env {
   DISCORD_WEBHOOK_ALERTS: string;
   DISCORD_WEBHOOK_EVENTS: string;
+  FUNCTION_TIMEOUT_SECONDS?: string;
   MULTISIG_CONFIG: string;
   QUICKNODE_SIGNING_SECRET: string;
 }
@@ -18,6 +19,7 @@ const schema: JSONSchemaType<Env> = {
   properties: {
     DISCORD_WEBHOOK_ALERTS: { type: "string", minLength: 1 },
     DISCORD_WEBHOOK_EVENTS: { type: "string", minLength: 1 },
+    FUNCTION_TIMEOUT_SECONDS: { type: "string", nullable: true },
     MULTISIG_CONFIG: { type: "string", minLength: 1 },
     QUICKNODE_SIGNING_SECRET: { type: "string", minLength: 1 },
   },

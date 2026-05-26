@@ -183,7 +183,8 @@ For local development, you'll need to set up environment variables. The function
 
    Creates `.env` with: `MULTISIG_CONFIG`, `DISCORD_WEBHOOK_ALERTS`,
    `DISCORD_WEBHOOK_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
-   `QUICKNODE_REPLAY_BUCKET`, `SUPPORTED_CHAINS`.
+   `QUICKNODE_REPLAY_BUCKET`, `FUNCTION_TIMEOUT_SECONDS`,
+   `SUPPORTED_CHAINS`.
 
 2. **Run locally:**
 

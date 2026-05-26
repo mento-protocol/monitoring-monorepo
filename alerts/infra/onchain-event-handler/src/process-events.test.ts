@@ -367,7 +367,7 @@ describe("processEvents - ChainDetectionError handling", () => {
           eventName: "SafeMultiSigTransaction",
         }),
       ],
-      skipped: 2,
+      skipped: 1,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
@@ -420,5 +420,107 @@ describe("processEvents - ChainDetectionError handling", () => {
       skipped: 1,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps duplicate ExecutionSuccess fallback ahead of unrelated logs until Safe alert succeeds", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToDiscord } = await import("./discord");
+    const sendMock = vi.mocked(sendToDiscord);
+    sendMock.mockClear();
+
+    let currentMs = 0;
+    const now = vi.fn(() => currentMs);
+    sendMock.mockImplementation(async () => {
+      currentMs += 10;
+    });
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "ExecutionSuccess",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        txHash: "0xsafeTx",
+      },
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx-other",
+        blockHash: "0xblockGood",
+        blockNumber: "102",
+        logIndex: "2",
+        owner: "0xowner2",
+      },
+      {
+        name: "SafeMultiSigTransaction",
+        transactionHash: "0xtx-safe",
+        blockHash: "0xblockGood",
+        blockNumber: "103",
+        logIndex: "3",
+      },
+    ] as never;
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context, { budgetMs: 10, now });
+
+    expect(result).toEqual({
+      processedEvents: [
+        {
+          multisigKey: "SOLO_CELO",
+          eventName: "ExecutionSuccess",
+          channelType: "events",
+        },
+      ],
+      skipped: 1,
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts an aborted in-flight log as skipped", async () => {
+    vi.useFakeTimers();
+    try {
+      const { processEvents } = await import("./process-events");
+      const { buildEventContext } = await import("./build-event-context");
+      const { sendToDiscord } = await import("./discord");
+      const sendMock = vi.mocked(sendToDiscord);
+      sendMock.mockClear();
+      sendMock.mockImplementation(
+        async (_webhookUrl, _message, signal?: AbortSignal) =>
+          new Promise((_, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          }),
+      );
+
+      const logs = [
+        {
+          address: SOLO_CELO_ADDR,
+          name: "AddedOwner",
+          transactionHash: "0xtx1",
+          blockHash: "0xblockGood",
+          blockNumber: "101",
+          logIndex: "1",
+          owner: "0xowner1",
+        },
+      ];
+
+      const context = buildEventContext(logs);
+      const resultPromise = processEvents(logs, context, {
+        budgetMs: 10,
+        now: () => 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(resultPromise).resolves.toEqual({
+        processedEvents: [],
+        skipped: 1,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

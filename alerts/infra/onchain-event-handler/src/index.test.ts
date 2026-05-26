@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
     warn: vi.fn(),
   },
   processEvents: vi.fn(),
+  config: {
+    FUNCTION_TIMEOUT_SECONDS: undefined as string | undefined,
+  },
   validatePayload: vi.fn(),
   validateQuickNodeWebhook: vi.fn(),
 }));
@@ -30,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 // `null` keeps the test on the happy path. Tests that need to exercise the
 // 503 multisig-config-error branch should override this mock per-test.
 vi.mock("./constants", () => ({ MULTISIG_CONFIG_ERROR: null }));
+vi.mock("./config", () => ({ default: mocks.config }));
 vi.mock("./build-event-context", () => ({
   buildEventContext: mocks.buildEventContext,
 }));
@@ -71,6 +75,7 @@ function response(): Response {
 describe("processQuicknodeWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.config.FUNCTION_TIMEOUT_SECONDS = undefined;
     process.env.NODE_ENV = "production";
     process.env.DISCORD_WEBHOOK_ALERTS = "https://discord.test/alerts";
     process.env.DISCORD_WEBHOOK_EVENTS = "https://discord.test/events";
@@ -136,5 +141,20 @@ describe("processQuicknodeWebhook", () => {
       skipped: 0,
       total: 0,
     });
+  });
+
+  it("derives processing budget from configured function timeout", async () => {
+    mocks.config.FUNCTION_TIMEOUT_SECONDS = "120";
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+
+    await processQuicknodeWebhook(request(), res);
+
+    expect(mocks.processEvents).toHaveBeenCalledWith([], expect.any(Object), {
+      budgetMs: 90_000,
+      startedAtMs: 1_000,
+    });
+    nowSpy.mockRestore();
   });
 });
