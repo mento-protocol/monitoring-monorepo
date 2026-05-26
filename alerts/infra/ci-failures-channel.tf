@@ -151,7 +151,13 @@ locals {
     ug.id if ug.handle == local.eng_usergroup_handle
   ][0]
 
-  eng_user_ids_csv = join(",", jsondecode(data.http.slack_eng_usergroup_members.response_body).users)
+  # Sort the user IDs before joining so the CSV is a STABLE membership
+  # fingerprint. Slack's `usergroups.users.list` does not promise a stable
+  # ordering across calls — `force_new` on the raw join would treat a
+  # reordered list as a membership change and recreate
+  # `ci_failures_invite_eng` on every plan, re-firing `conversations.invite`
+  # for no real change. Lexicographic sort by Slack user ID is deterministic.
+  eng_user_ids_csv = join(",", sort(jsondecode(data.http.slack_eng_usergroup_members.response_body).users))
 }
 
 # POST conversations.invite once at create time, with the current @eng
