@@ -123,6 +123,9 @@ function isRetryableError(error: unknown): boolean {
   const status = axiosError.response?.status;
 
   if (!status) {
+    if (axiosError.code === "ERR_CANCELED") {
+      return false;
+    }
     // Client-side timeout: don't retry — Discord may have processed it.
     if (axiosError.code === "ECONNABORTED") {
       return false;
@@ -150,6 +153,7 @@ function calculateRetryDelay(attempt: number): number {
 export async function sendToDiscord(
   webhookUrl: string,
   message: DiscordMessage,
+  signal?: AbortSignal,
 ): Promise<void> {
   let lastError: unknown;
 
@@ -158,6 +162,7 @@ export async function sendToDiscord(
       await axios.post(webhookUrl, message, {
         headers: { "Content-Type": "application/json" },
         timeout: DISCORD_WEBHOOK_TIMEOUT_MS,
+        signal,
       });
 
       // Extract key info for logging
@@ -208,7 +213,7 @@ export async function sendToDiscord(
           attempt: attempt + 2,
           delayMs: delay,
         });
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await sleep(delay, signal);
         continue; // Retry
       }
 
@@ -234,4 +239,29 @@ export async function sendToDiscord(
   });
 
   throw lastError;
+}
+
+function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(new Error("Operation aborted"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error("Operation aborted"));
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

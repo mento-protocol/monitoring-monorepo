@@ -15,6 +15,8 @@ export const processQuicknodeWebhook = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  const requestStartedAtMs = Date.now();
+
   // Handle health check requests
   if (req.method === "GET") {
     handleHealthCheck(res);
@@ -85,7 +87,9 @@ export const processQuicknodeWebhook = async (
     const context = buildEventContext(webhookData);
 
     // 5. Process events with complete context
-    const results = await processEvents(webhookData, context);
+    const results = await processEvents(webhookData, context, {
+      startedAtMs: requestStartedAtMs,
+    });
 
     logger.info("Webhook processing completed", {
       processed: results.processedEvents.length,

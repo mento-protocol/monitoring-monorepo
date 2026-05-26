@@ -24,6 +24,7 @@ interface ProcessEventsOptions {
    */
   budgetMs?: number;
   now?: () => number;
+  startedAtMs?: number;
 }
 
 interface ProcessEventsResult {
@@ -64,7 +65,13 @@ export async function processEvents(
   const { txHashMap, hasSafeMultiSigTx } = context;
   const now = options.now ?? Date.now;
   const budgetMs = options.budgetMs ?? DEFAULT_PROCESSING_BUDGET_MS;
-  const startedAt = now();
+  const startedAt = options.startedAtMs ?? now();
+  const remainingMs = budgetMs - (now() - startedAt);
+  const abortController = new AbortController();
+  const abortTimer =
+    remainingMs > 0
+      ? setTimeout(() => abortController.abort(), remainingMs)
+      : undefined;
 
   // Filter out logs that should be skipped before processing.
   const logsToProcess = logs.filter((logEntry) => {
@@ -93,47 +100,56 @@ export async function processEvents(
   const processedEvents: ProcessedEvent[] = [];
   let skipped = 0;
 
-  for (const [index, logEntry] of logsToProcess.entries()) {
-    const elapsedMs = now() - startedAt;
-    if (elapsedMs >= budgetMs) {
-      skipped = logsToProcess.length - index;
-      logger.warn("Skipping remaining logs due to processing budget", {
-        reason: "skipped_due_to_timeout",
-        skipped,
-        processed: processedEvents.length,
-        elapsedMs,
-        budgetMs,
-      });
-      break;
-    }
-
-    try {
-      const result = await processEvent(logEntry, txHashMap);
-      if (result) {
-        processedEvents.push(result);
+  try {
+    for (const [index, logEntry] of logsToProcess.entries()) {
+      const elapsedMs = now() - startedAt;
+      if (abortController.signal.aborted || elapsedMs >= budgetMs) {
+        skipped = logsToProcess.length - index;
+        logger.warn("Skipping remaining logs due to processing budget", {
+          reason: "skipped_due_to_timeout",
+          skipped,
+          processed: processedEvents.length,
+          elapsedMs,
+          budgetMs,
+        });
+        break;
       }
-    } catch (error) {
-      // Defense-in-depth: logEntry could in principle still be malformed
-      // (e.g. a primitive that slipped past the filter's object check).
-      // Guard property reads so a logger call can't throw on top of the
-      // original error. Returning 200 to QuickNode avoids replaying the whole
-      // batch and duplicating Discord deliveries that already succeeded.
-      const safe: Partial<QuickNodeDecodedLog> =
-        logEntry !== null && typeof logEntry === "object" ? logEntry : {};
-      logger.error("Error processing log", {
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-              }
-            : String(error),
-        transactionHash: safe.transactionHash,
-        eventName: safe.name,
-        chainDetectionFailure: error instanceof ChainDetectionError,
-      });
+
+      try {
+        const result = await processEvent(
+          logEntry,
+          txHashMap,
+          abortController.signal,
+        );
+        if (result) {
+          processedEvents.push(result);
+        }
+      } catch (error) {
+        // Defense-in-depth: logEntry could in principle still be malformed
+        // (e.g. a primitive that slipped past the filter's object check).
+        // Guard property reads so a logger call can't throw on top of the
+        // original error. Returning 200 to QuickNode avoids replaying the whole
+        // batch and duplicating Discord deliveries that already succeeded.
+        const safe: Partial<QuickNodeDecodedLog> =
+          logEntry !== null && typeof logEntry === "object" ? logEntry : {};
+        logger.error("Error processing log", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : String(error),
+          transactionHash: safe.transactionHash,
+          eventName: safe.name,
+          chainDetectionFailure: error instanceof ChainDetectionError,
+          aborted: abortController.signal.aborted,
+        });
+      }
     }
+  } finally {
+    clearTimeout(abortTimer);
   }
 
   return { processedEvents, skipped };
@@ -174,6 +190,7 @@ function validateLog(log: QuickNodeWebhookPayload["result"][0]): {
 async function processEvent(
   logEntry: QuickNodeWebhookPayload["result"][0],
   txHashMap: Map<string, string>,
+  signal: AbortSignal,
 ): Promise<ProcessedEvent | null> {
   // 1. Validate required fields
   const validation = validateLog(logEntry);
@@ -198,7 +215,11 @@ async function processEvent(
   let chain: string | null = null;
 
   if (logEntry.blockHash && typeof logEntry.blockHash === "string") {
-    chain = await findChainFromBlockHash(logEntry.blockHash, multisigAddress);
+    chain = await findChainFromBlockHash(
+      logEntry.blockHash,
+      multisigAddress,
+      signal,
+    );
   }
 
   // Fallback to address lookup if block hash verification didn't work
@@ -257,7 +278,7 @@ async function processEvent(
   );
 
   // 7. Send to Discord
-  await sendToDiscord(webhookUrl, discordMessage);
+  await sendToDiscord(webhookUrl, discordMessage, signal);
 
   logger.info("Event processed successfully", {
     multisigKey,
