@@ -33,9 +33,16 @@ data "sentry_all_projects" "all" {
 # / reappeared), so it needs a monitor ID per project. The issue-stream
 # monitor covers all issue types (errors, performance, replay, etc.) — the
 # broadest default monitor, closest to the previous "any error" semantics.
+#
+# `first = true` guards against a project ever having multiple issue-stream
+# monitors (e.g. legacy click-ops or experimentation in the Sentry UI). The
+# provider docs are explicit: without it, the data source errors when more
+# than one monitor matches, which would fail the apply for ALL projects
+# because the for_each rolls up to a single plan.
 data "sentry_project_issue_stream_monitor" "default" {
   for_each = local.projects
 
   organization = data.sentry_organization.main.internal_id
   project      = each.key
+  first        = true
 }

@@ -99,7 +99,23 @@ These steps happen outside Terraform and must be done first:
 
 ## Rollback
 
-`git revert <PR-SHA>` + `terraform apply` restores the prior Discord shape
-within ~2 minutes (re-creates the Discord channels and the old
-`sentry_issue_alert` resources). Loss window = the time between detecting a
-Slack-delivery failure and the revert.
+`git revert <PR-SHA>` + `terraform apply` re-creates the prior shape (Discord
+channels + `sentry_issue_alert` rules) within ~2 minutes. Caveats:
+
+- **Discord channels get fresh snowflake IDs.** The original
+  `#sentry-<project-slug>` Discord channels are destroyed by this PR, so a
+  revert spins up _new_ channels with the same names but new IDs. Any
+  bookmark, pinned-message reference, or cross-link to the old channel IDs
+  is dead. Message history is gone.
+- **Loss window = time between a Slack-delivery failure being detected and
+  the revert applying.** During this window, Sentry events fire but no
+  notification lands.
+- **The `sentry_alert` rules created by this PR are destroyed on revert** —
+  if any were manually tuned via the Sentry UI between apply and revert,
+  that tuning is lost.
+
+For a less-destructive recovery, consider re-applying ONLY the new
+`sentry_alert` resources in the previous (pre-revert) state via
+`terraform apply -target=module.sentry_bridge.sentry_alert.slack_default
+-target=module.sentry_bridge.sentry_alert.slack_critical_fanout`, then
+patching the Slack channel name out-of-band.
