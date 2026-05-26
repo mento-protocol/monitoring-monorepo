@@ -130,7 +130,21 @@ terraform -chdir=alerts/infra import \
 ## Rollback
 
 `git revert <PR-SHA>` + `terraform apply` re-creates the prior shape (Discord
-channels + `sentry_issue_alert` rules) within ~2 minutes. Caveats:
+channels + `sentry_issue_alert` rules) within ~2 minutes. **Important
+additional caveat introduced by Slack-channel ownership:** a revert that
+removes the `restapi_object.sentry_slack_channel` resources will archive
+every `#sentry-<slug>` Slack channel via `conversations.archive`. If the
+revert also re-creates `sentry_alert` resources that reference those channel
+names, those alerts post to archived channels (silent delivery failure). To
+revert safely without orphaning alerts in archived channels:
+
+1. `terraform state rm 'module.sentry_bridge.restapi_object.sentry_slack_channel["<slug>"]'`
+   for each project (drops the channels from state without archiving them).
+2. Then `git revert <PR-SHA>` + `terraform apply`.
+3. The channels remain in Slack with their history intact; the alerts route
+   to them normally.
+
+Other rollback caveats (carried over from PR #561):
 
 - **Discord channels get fresh snowflake IDs.** The original
   `#sentry-<project-slug>` Discord channels are destroyed by this PR, so a

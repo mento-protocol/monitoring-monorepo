@@ -35,8 +35,8 @@ resource "restapi_object" "sentry_slack_channel" {
   provider = restapi.slack
 
   # POST https://slack.com/api/conversations.create  body: {"name": "sentry-<slug>", "is_private": false}
-  path         = "/conversations.create"
-  create_path  = "/conversations.create"
+  path        = "/conversations.create"
+  create_path = "/conversations.create"
   # `read_path` MUST be set to a real Slack endpoint. Without it the provider
   # defaults to GET <path>/{id} = `/conversations.create/<id>`, which is not a
   # valid Slack endpoint — Slack returns 404, the restapi provider treats that
