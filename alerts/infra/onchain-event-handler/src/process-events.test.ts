@@ -8,7 +8,7 @@
  * Regression context: a previous Codex review (commit d9c36716) added a
  * `if (error instanceof ChainDetectionError) throw error;` clause to abort the
  * batch and return HTTP 422 so QuickNode would retry. But QuickNode retries
- * the ENTIRE payload, which caused duplicate Discord deliveries for the events
+ * the ENTIRE payload, which caused duplicate notification deliveries for the events
  * in the batch that already succeeded. The clause was reverted; this test
  * pins the per-event-isolation behavior so the next person re-introducing it
  * gets a red test.
@@ -18,8 +18,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("./config", () => ({
   default: {
-    DISCORD_WEBHOOK_ALERTS: "https://discord.com/api/webhooks/test/alerts",
-    DISCORD_WEBHOOK_EVENTS: "https://discord.com/api/webhooks/test/events",
     MULTISIG_CONFIG: JSON.stringify({
       SOLO_CELO: {
         address: "0xAAaaaAAaAaAaAaaAaaAaaaaAaaAAaAAaAAaAaaAA",
@@ -38,6 +36,9 @@ vi.mock("./config", () => ({
       },
     }),
     QUICKNODE_SIGNING_SECRET: "test-secret",
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CHANNEL_ALERTS: "Calerts",
+    SLACK_CHANNEL_EVENTS: "Cevents",
   },
 }));
 
@@ -70,13 +71,13 @@ vi.mock("./logger", () => ({
   },
 }));
 
-// Mock the Discord send so the successful event doesn't try to hit the network.
-vi.mock("./discord", async () => {
-  const actual = await vi.importActual<typeof import("./discord")>("./discord");
+// Mock the Slack send so the successful event doesn't try to hit the network.
+vi.mock("./slack", async () => {
+  const actual = await vi.importActual<typeof import("./slack")>("./slack");
   return {
     ...actual,
-    sendToDiscord: vi.fn(async () => undefined),
-    formatDiscordMessage: vi.fn(async () => ({ embeds: [] })),
+    sendToSlack: vi.fn(async () => undefined),
+    formatSlackMessage: vi.fn(async () => ({ text: "test", blocks: [] })),
   };
 });
 
@@ -200,8 +201,8 @@ describe("processEvents - ChainDetectionError handling", () => {
   it("falls back to ExecutionSuccess when matching SafeMultiSigTransaction is malformed", async () => {
     const { processEvents } = await import("./process-events");
     const { buildEventContext } = await import("./build-event-context");
-    const { sendToDiscord } = await import("./discord");
-    const sendMock = vi.mocked(sendToDiscord);
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
     sendMock.mockClear();
 
     const logs = [
@@ -248,8 +249,8 @@ describe("processEvents - ChainDetectionError handling", () => {
   it("stops starting new events when the processing budget is exhausted", async () => {
     const { processEvents } = await import("./process-events");
     const { buildEventContext } = await import("./build-event-context");
-    const { sendToDiscord } = await import("./discord");
-    const sendMock = vi.mocked(sendToDiscord);
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
     sendMock.mockClear();
 
     let currentMs = 0;
@@ -308,8 +309,8 @@ describe("processEvents - ChainDetectionError handling", () => {
   it("prioritizes SafeMultiSigTransaction over duplicate ExecutionSuccess when the budget is tight", async () => {
     const { processEvents } = await import("./process-events");
     const { buildEventContext } = await import("./build-event-context");
-    const { sendToDiscord } = await import("./discord");
-    const sendMock = vi.mocked(sendToDiscord);
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
     sendMock.mockClear();
 
     let currentMs = 0;
@@ -375,8 +376,8 @@ describe("processEvents - ChainDetectionError handling", () => {
   it("keeps standalone ExecutionSuccess in original priority under a tight budget", async () => {
     const { processEvents } = await import("./process-events");
     const { buildEventContext } = await import("./build-event-context");
-    const { sendToDiscord } = await import("./discord");
-    const sendMock = vi.mocked(sendToDiscord);
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
     sendMock.mockClear();
 
     let currentMs = 0;
@@ -425,8 +426,8 @@ describe("processEvents - ChainDetectionError handling", () => {
   it("keeps duplicate ExecutionSuccess fallback ahead of unrelated logs until Safe alert succeeds", async () => {
     const { processEvents } = await import("./process-events");
     const { buildEventContext } = await import("./build-event-context");
-    const { sendToDiscord } = await import("./discord");
-    const sendMock = vi.mocked(sendToDiscord);
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
     sendMock.mockClear();
 
     let currentMs = 0;
@@ -484,11 +485,11 @@ describe("processEvents - ChainDetectionError handling", () => {
     try {
       const { processEvents } = await import("./process-events");
       const { buildEventContext } = await import("./build-event-context");
-      const { sendToDiscord } = await import("./discord");
-      const sendMock = vi.mocked(sendToDiscord);
+      const { sendToSlack } = await import("./slack");
+      const sendMock = vi.mocked(sendToSlack);
       sendMock.mockClear();
       sendMock.mockImplementation(
-        async (_webhookUrl, _message, signal?: AbortSignal) =>
+        async (_botToken, _channelId, _message, signal?: AbortSignal) =>
           new Promise((_, reject) => {
             signal?.addEventListener("abort", () => {
               reject(new Error("aborted"));
@@ -529,13 +530,13 @@ describe("processEvents - ChainDetectionError handling", () => {
     try {
       const { processEvents } = await import("./process-events");
       const { buildEventContext } = await import("./build-event-context");
-      const { sendToDiscord } = await import("./discord");
-      const sendMock = vi.mocked(sendToDiscord);
+      const { sendToSlack } = await import("./slack");
+      const sendMock = vi.mocked(sendToSlack);
       sendMock.mockClear();
 
       let sendCount = 0;
       sendMock.mockImplementation(
-        async (_webhookUrl, _message, signal?: AbortSignal) => {
+        async (_botToken, _channelId, _message, signal?: AbortSignal) => {
           sendCount += 1;
           if (sendCount === 1) {
             return new Promise((_, reject) => {

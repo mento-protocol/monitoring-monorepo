@@ -38,11 +38,12 @@ function response(status: number, body?: unknown): Response {
 
 async function loadValidator() {
   vi.resetModules();
-  process.env.DISCORD_WEBHOOK_ALERTS = "https://discord.test/alerts";
-  process.env.DISCORD_WEBHOOK_EVENTS = "https://discord.test/events";
   process.env.MULTISIG_CONFIG = "{}";
   process.env.QUICKNODE_SIGNING_SECRET = secret;
   process.env.QUICKNODE_REPLAY_BUCKET = "quicknode-replay-test";
+  process.env.SLACK_BOT_TOKEN = "xoxb-test";
+  process.env.SLACK_CHANNEL_ALERTS = "Calerts";
+  process.env.SLACK_CHANNEL_EVENTS = "Cevents";
   return import("./validate-quicknode-webhook");
 }
 

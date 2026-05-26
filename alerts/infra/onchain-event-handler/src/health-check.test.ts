@@ -19,21 +19,19 @@ describe("health check startup behavior", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv, NODE_ENV: "development" };
-    delete process.env.DISCORD_WEBHOOK_ALERTS;
-    delete process.env.DISCORD_WEBHOOK_EVENTS;
     delete process.env.MULTISIG_CONFIG;
     delete process.env.QUICKNODE_SIGNING_SECRET;
+    delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.SLACK_CHANNEL_ALERTS;
+    delete process.env.SLACK_CHANNEL_EVENTS;
   });
 
   it("fails module initialization when required env is absent", async () => {
-    await expect(import("./index")).rejects.toThrow(/DISCORD_WEBHOOK_ALERTS/);
+    await expect(import("./index")).rejects.toThrow(/SLACK_BOT_TOKEN/);
   });
 
   it("returns structured unhealthy JSON for malformed multisig config", async () => {
-    process.env.DISCORD_WEBHOOK_ALERTS =
-      "https://discord.com/api/webhooks/test/alerts";
-    process.env.DISCORD_WEBHOOK_EVENTS =
-      "https://discord.com/api/webhooks/test/events";
+    setSlackEnv();
     process.env.QUICKNODE_SIGNING_SECRET = "test-secret";
     process.env.MULTISIG_CONFIG = "{not-json";
 
@@ -57,10 +55,7 @@ describe("health check startup behavior", () => {
   });
 
   it("returns structured unhealthy JSON for an empty multisig config", async () => {
-    process.env.DISCORD_WEBHOOK_ALERTS =
-      "https://discord.com/api/webhooks/test/alerts";
-    process.env.DISCORD_WEBHOOK_EVENTS =
-      "https://discord.com/api/webhooks/test/events";
+    setSlackEnv();
     process.env.QUICKNODE_SIGNING_SECRET = "test-secret";
     process.env.MULTISIG_CONFIG = "{}";
 
@@ -84,10 +79,7 @@ describe("health check startup behavior", () => {
   });
 
   it("rejects webhook processing when multisig config is invalid", async () => {
-    process.env.DISCORD_WEBHOOK_ALERTS =
-      "https://discord.com/api/webhooks/test/alerts";
-    process.env.DISCORD_WEBHOOK_EVENTS =
-      "https://discord.com/api/webhooks/test/events";
+    setSlackEnv();
     process.env.QUICKNODE_SIGNING_SECRET = "test-secret";
     process.env.MULTISIG_CONFIG = "{not-json";
 
@@ -105,3 +97,9 @@ describe("health check startup behavior", () => {
     );
   });
 });
+
+function setSlackEnv(): void {
+  process.env.SLACK_BOT_TOKEN = "xoxb-test";
+  process.env.SLACK_CHANNEL_ALERTS = "Calerts";
+  process.env.SLACK_CHANNEL_EVENTS = "Cevents";
+}

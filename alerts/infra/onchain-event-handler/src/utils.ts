@@ -210,20 +210,19 @@ export function isSecurityEvent(eventName: string): boolean {
 }
 
 /**
- * Get Discord webhook URL from environment variables
- * All multisigs share the same two webhook URLs
+ * Get Slack channel ID from environment variables.
+ * All multisigs share the same two destination channels.
  */
-export function getWebhookUrl(
+export function getNotificationChannelId(
   _multisigKey: string,
   channelType: "alerts" | "events",
 ): string | null {
-  // All multisigs use the same webhook URLs
   const envKey =
-    `DISCORD_WEBHOOK_${channelType.toUpperCase()}` as keyof typeof config;
+    `SLACK_CHANNEL_${channelType.toUpperCase()}` as keyof typeof config;
 
-  const webhookUrl = config[envKey];
-  if (typeof webhookUrl === "string") {
-    return webhookUrl;
+  const channelId = config[envKey];
+  if (typeof channelId === "string") {
+    return channelId;
   }
 
   return null;
@@ -360,7 +359,7 @@ function addressFromPaddedWord(wordHex: string): string | null {
  * @param log - QuickNode decoded log entry containing decoded event parameters
  * @param txHash - Optional Safe transaction hash for extracting signers
  * @param chainName - Chain name (e.g., "celo", "ethereum") for chain-specific formatting
- * @returns Array of Discord embed fields with event parameters
+ * @returns Array of notification fields with event parameters
  */
 export async function decodeEventData(
   eventName: string,
@@ -435,7 +434,7 @@ export async function getTransactionExecutor(
         // 5s matches verifyBlockHashOnChain. Without a timeout, a stalled
         // public RPC node hangs the Cloud Function until Cloud Functions
         // kills the request (~60s), QuickNode 5xx's, and retries the whole
-        // batch → duplicate Discord deliveries for events that already fired.
+        // batch → duplicate notification deliveries for events that already fired.
         timeout: 5000,
       }),
     });

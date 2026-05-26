@@ -359,7 +359,7 @@ main() {
 		# Keep this list in sync with the secret_environment_variables block
 		# in alerts/infra/onchain-event-handler/main.tf. Cloud Function refuses
 		# to boot if any required env var (per src/config.ts) is missing.
-		"--set-secrets=QUICKNODE_SIGNING_SECRET=${secret_name}:latest,DISCORD_WEBHOOK_ALERTS=${secret_name}-discord-alerts:latest,DISCORD_WEBHOOK_EVENTS=${secret_name}-discord-events:latest"
+		"--set-secrets=QUICKNODE_SIGNING_SECRET=${secret_name}:latest,SLACK_BOT_TOKEN=${secret_name}-slack-bot-token:latest"
 		"--impersonate-service-account=${terraform_service_account}"
 	)
 

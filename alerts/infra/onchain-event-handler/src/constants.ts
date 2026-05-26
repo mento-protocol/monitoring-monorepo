@@ -232,17 +232,17 @@ export const KNOWN_CHAINS: readonly string[] = Object.freeze(
 );
 
 /**
- * Color codes for Discord embeds
+ * Color codes for alert/event notifications.
  */
-export const DISCORD_COLORS = {
+export const NOTIFICATION_COLORS = {
   ALERT: 0xff4757, // Red for security events
   EVENT: 0x5f27cd, // Purple for operational events
 } as const;
 
 /**
- * Discord webhook timeout in milliseconds (10 seconds)
+ * Slack Web API timeout in milliseconds (10 seconds)
  */
-export const DISCORD_WEBHOOK_TIMEOUT_MS = 10000;
+export const SLACK_WEB_API_TIMEOUT_MS = 10000;
 
 /**
  * Default token decimals (most EVM chains use 18)

@@ -12,6 +12,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 │
 ├── channels/
 │   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)
+│   ├── slack-channels/     # Slack channels for on-chain multisig events
 │   └── discord-channels/   # Discord channels and webhooks
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
 └── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
@@ -29,15 +30,15 @@ graph LR
     C -->|2. Validate payload| C
     C -->|3. Process events| C
     C -->|4. Format messages| C
-    C -->|HTTP POST| D[Discord<br/>Webhooks]
-    D -->|Messages| E[Discord Channels<br/>alerts/events]
+    C -->|chat.postMessage| D[Slack<br/>Web API]
+    D -->|Messages| E[Slack Channels<br/>alerts/events]
 ```
 
 ### Component Overview
 
 1. **QuickNode Webhooks**: Monitor blockchain events for configured multisig addresses
 2. **Cloud Function**: Processes webhooks, verifies signatures, formats messages
-3. **Discord Channels**: Receives formatted alerts and event notifications
+3. **Slack Channels**: Receives formatted alerts and event notifications
 4. **Terraform**: Manages all infrastructure as code
 
 ### Security
@@ -51,7 +52,8 @@ graph LR
 
 - **Terraform** >= 1.10.0
 - **GCP account** with billing enabled
-- **Discord bot** with admin permissions
+- **Discord bot** with admin permissions while legacy Discord resources remain in state
+- **Slack bot** with channel-management and chat scopes
 - **Sentry account** (for JS error monitoring)
 - **QuickNode account** (for blockchain monitoring)
 
@@ -66,7 +68,7 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-# Discord Configuration (for on-chain multisig event channels — Sentry no longer uses Discord)
+# Discord Configuration (legacy on-chain channel resources retained during Slack cutover)
 discord_bot_token      = "<your-discord-bot-token>"
 discord_server_id      = "<discord-server-id>"
 discord_category_id    = "<alert-category-id>"
@@ -77,10 +79,9 @@ sentry_organization_slug      = "my-org"            # Optional, defaults to "men
 sentry_slack_workspace_name   = "Mento Labs"        # Optional, defaults to "Mento Labs"
 sentry_slack_critical_channel = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
 
-# Slack Configuration (used by the restapi.slack provider to create + archive
-# the per-Sentry-project #sentry-<slug> channels; SEPARATE from Sentry's own
-# Slack OAuth app integration).
-# Scopes required: channels:read, channels:manage, channels:join.
+# Slack Configuration (used by Terraform to create + archive Sentry and
+# on-chain event channels, and by the Cloud Function to post on-chain events).
+# Scopes required: channels:read, channels:manage, channels:join, chat:write.
 slack_bot_token = "xoxb-..."
 
 # GCP Configuration
@@ -182,20 +183,19 @@ multisigs = {
 - One `restapi_object.sentry_slack_channel` per project — Terraform creates and archives the `#sentry-{project-slug}` channel via Slack's Web API.
 - `#alerts-critical` is NOT created here (shared with Grafana page-grade alerts; managed externally).
 
-### Discord Monitoring Infrastructure
+### Slack On-Chain Monitoring Infrastructure
 
 **Shared channels for all multisigs:**
 
-- `#🚨︱multisig-alerts` - Critical security events (owner/threshold/module changes)
-- `#🔔︱multisig-events` - Normal transaction events (executions, approvals, funds)
-- Discord webhooks (automated creation)
+- `#multisig-alerts` - Critical security events (owner/threshold/module changes)
+- `#multisig-events` - Normal transaction events (executions, approvals, funds)
 
 ### Cloud Function
 
 - Processes QuickNode webhooks from all chains
 - Routes security events to alerts channel, operational events to events channel
 - Validates webhook signatures
-- All multisigs share the same two Discord channels
+- All multisigs share the same two Slack channels
 
 ### QuickNode Webhooks
 
@@ -278,6 +278,7 @@ This shows REST API requests/responses for troubleshooting.
 ### Module Documentation
 
 - [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Slack bridge module
+- [`channels/slack-channels/README.md`](channels/slack-channels/README.md) - Slack channels for on-chain event notifications
 - [`channels/discord-channels/README.md`](channels/discord-channels/README.md) - Discord channels + webhooks module
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
@@ -295,6 +296,7 @@ Follows [AWS Terraform best practices](https://docs.aws.amazon.com/prescriptive-
 
 - [Terraform Documentation](https://developer.hashicorp.com/terraform/docs)
 - [Sentry API Docs](https://docs.sentry.io/api/)
+- [Slack API Docs](https://api.slack.com/web)
 - [Discord Developer Docs](https://discord.com/developers/docs)
 - [QuickNode Documentation](https://www.quicknode.com/docs)
 

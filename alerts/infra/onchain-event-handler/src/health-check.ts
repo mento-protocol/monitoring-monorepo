@@ -10,22 +10,28 @@ export function handleHealthCheck(res: Response): void {
 
   // Check config
   try {
-    const hasWebhookAlerts = !!config.DISCORD_WEBHOOK_ALERTS;
-    const hasWebhookEvents = !!config.DISCORD_WEBHOOK_EVENTS;
+    const hasSlackBotToken = !!config.SLACK_BOT_TOKEN;
+    const hasSlackChannelAlerts = !!config.SLACK_CHANNEL_ALERTS;
+    const hasSlackChannelEvents = !!config.SLACK_CHANNEL_EVENTS;
     const hasSigningSecret = !!config.QUICKNODE_SIGNING_SECRET;
 
     checks.config = {
       status:
-        hasWebhookAlerts && hasWebhookEvents && hasSigningSecret
+        hasSlackBotToken &&
+        hasSlackChannelAlerts &&
+        hasSlackChannelEvents &&
+        hasSigningSecret
           ? "ok"
           : "error",
-      message: !hasWebhookAlerts
-        ? "Missing DISCORD_WEBHOOK_ALERTS"
-        : !hasWebhookEvents
-          ? "Missing DISCORD_WEBHOOK_EVENTS"
-          : !hasSigningSecret
-            ? "Missing QUICKNODE_SIGNING_SECRET"
-            : undefined,
+      message: !hasSlackBotToken
+        ? "Missing SLACK_BOT_TOKEN"
+        : !hasSlackChannelAlerts
+          ? "Missing SLACK_CHANNEL_ALERTS"
+          : !hasSlackChannelEvents
+            ? "Missing SLACK_CHANNEL_EVENTS"
+            : !hasSigningSecret
+              ? "Missing QUICKNODE_SIGNING_SECRET"
+              : undefined,
     };
   } catch (error) {
     checks.config = {

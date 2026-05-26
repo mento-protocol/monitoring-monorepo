@@ -1,5 +1,5 @@
 /**
- * Type definitions for QuickNode webhook payloads and Discord messages
+ * Type definitions for QuickNode webhook payloads and notification messages
  */
 
 export interface QuickNodeDecodedLog {
@@ -33,6 +33,20 @@ export interface DiscordEmbed {
 
 export interface DiscordMessage {
   embeds: DiscordEmbed[];
+}
+
+export interface NotificationField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+export interface NotificationContent {
+  title: string;
+  description: string;
+  color: number;
+  fields: NotificationField[];
+  timestamp: string;
 }
 
 export interface ProcessedEvent {
