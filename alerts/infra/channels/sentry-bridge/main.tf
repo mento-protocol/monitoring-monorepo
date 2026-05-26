@@ -101,7 +101,10 @@ resource "sentry_alert" "slack_critical_fanout" {
 # Sentry projects are managed outside of Terraform — `data "sentry_all_projects"`
 # in data.tf auto-discovers them, so creating a new project in the Sentry UI is
 # all you need before re-running terraform apply. Terraform will then spin up
-# the two `sentry_alert` rules plus the issue-stream monitor data source.
+# the two `sentry_alert` rules, the issue-stream monitor data source, AND the
+# matching `#sentry-<project-slug>` Slack channel via
+# `restapi_object.sentry_slack_channel` in `slack_channels.tf`.
 #
-# The matching Slack channel (`#sentry-<project-slug>`) must be pre-created by
-# a Slack admin AND the @Sentry OAuth bot invited to it before apply.
+# Sentry's Slack OAuth app has `chat:write.public` by default, so it can post
+# to public channels without being invited. The channels created by this
+# module are public — no per-channel invite needed.

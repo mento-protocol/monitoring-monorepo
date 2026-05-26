@@ -93,10 +93,10 @@ terraform -chdir=alerts/infra import \
 1. Create the project in Sentry (UI or API). Terraform does not manage
    project creation. Sentry auto-creates the default issue-stream monitor
    at project creation — usually instantaneous.
-2. Have a Slack admin create the matching `#sentry-<project-slug>` channel
-   and invite `@Sentry`.
-3. Run `terraform apply` — the project is auto-discovered and both alert
-   rules spin up.
+2. Run `terraform apply` — the project is auto-discovered and Terraform
+   creates the matching `#sentry-<project-slug>` Slack channel, the two
+   `sentry_alert` rules, and wires the alert action's `channel_id` to the
+   new channel automatically.
 
 > **Known limitation:** if a brand-new Sentry project lands in the org
 > before its default issue-stream monitor has been provisioned (rare;
@@ -109,8 +109,10 @@ terraform -chdir=alerts/infra import \
 
 1. Delete the project in Sentry. Terraform won't delete projects.
 2. Run `terraform apply` — auto-discovery drops the project from the
-   `for_each` and both rules are destroyed. The Slack channel itself is not
-   Terraform-managed; archive it manually if desired.
+   `for_each` and both alert rules are destroyed AND the matching Slack
+   channel is archived (Slack doesn't support true channel deletion — the
+   channel becomes a tombstone in the workspace until a Slack admin purges
+   it via the admin UI if desired).
 
 ## Behavioral notes
 

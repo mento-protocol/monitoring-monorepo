@@ -37,7 +37,18 @@ resource "restapi_object" "sentry_slack_channel" {
   # POST https://slack.com/api/conversations.create  body: {"name": "sentry-<slug>", "is_private": false}
   path         = "/conversations.create"
   create_path  = "/conversations.create"
-  destroy_path = "/conversations.archive?channel={id}"
+  # `read_path` MUST be set to a real Slack endpoint. Without it the provider
+  # defaults to GET <path>/{id} = `/conversations.create/<id>`, which is not a
+  # valid Slack endpoint — Slack returns 404, the restapi provider treats that
+  # as "resource gone", silently removes the channel from state, and the next
+  # apply tries `conversations.create` again with a `name_taken` failure.
+  read_path = "/conversations.info?channel={id}"
+  # `destroy_method` MUST be POST. The provider defaults to DELETE, but Slack's
+  # conversations.archive endpoint only accepts POST. Without this override
+  # the destroy call 405s (or 200-ok:false), the resource is dropped from
+  # state, and the channel is orphaned in the workspace.
+  destroy_path   = "/conversations.archive?channel={id}"
+  destroy_method = "POST"
 
   # Force recreation rather than attempted updates — Slack doesn't expose
   # rename/topic-update via this provider cleanly, and our channel config
@@ -55,10 +66,18 @@ resource "restapi_object" "sentry_slack_channel" {
   id_attribute = "channel/id"
 
   # Slack adds server-side fields (created_at, creator, num_members, etc.)
-  # that we don't want to track or react to.
+  # that we don't want to track or react to. With the correct `read_path`
+  # above, this prevents drift on those volatile fields.
   ignore_all_server_changes = true
 
   lifecycle {
+    # On a `name_taken` failure (channel already exists), Slack returns
+    # {"ok": false, "error": "name_taken"} with NO `channel.id` — the
+    # provider's id_attribute extraction fails first and the apply errors out
+    # with "Failed to find channel in returned data structure" before this
+    # postcondition evaluates. The postcondition still serves as documentation
+    # of the expected response shape AND catches any other ok=false case that
+    # happens to include a `channel.id` (e.g. unusual Slack edge cases).
     postcondition {
       condition     = self.api_response != null && try(jsondecode(self.api_response).ok, false) == true
       error_message = "Slack conversations.create failed for #sentry-${each.key}: ${try(jsondecode(self.api_response).error, "unknown")}"
