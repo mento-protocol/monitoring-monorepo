@@ -81,10 +81,10 @@ variable "multisig_notifications" {
   validation {
     condition = alltrue([
       for k, v in var.multisig_notifications :
-      can(regex("^C[A-Z0-9]+$", v.alerts_channel_id)) &&
-      can(regex("^C[A-Z0-9]+$", v.events_channel_id))
+      can(regex("^[CG][A-Z0-9]+$", v.alerts_channel_id)) &&
+      can(regex("^[CG][A-Z0-9]+$", v.events_channel_id))
     ])
-    error_message = "All Slack channel IDs must start with C and contain only uppercase letters or numbers."
+    error_message = "All Slack channel IDs must start with C or G and contain only uppercase letters or numbers."
   }
 }
 

@@ -16,8 +16,8 @@ variable "channels" {
   validation {
     condition = alltrue([
       for _, channel in var.channels :
-      can(regex("^[a-z0-9][a-z0-9_-]{0,78}$", channel.name))
+      can(regex("^[a-z0-9][a-z0-9_-]{0,79}$", channel.name))
     ])
-    error_message = "Slack channel names must be lowercase and contain only letters, numbers, underscores, or hyphens."
+    error_message = "Slack channel names must be 1-80 lowercase characters and contain only letters, numbers, underscores, or hyphens."
   }
 }

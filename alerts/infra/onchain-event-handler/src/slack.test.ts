@@ -151,22 +151,28 @@ describe("sendToSlack", () => {
     expect(postMock).toHaveBeenCalledOnce();
   });
 
-  it("retries retryable Slack rate limit responses", async () => {
+  it("respects Slack Retry-After on rate-limited responses", async () => {
     vi.useFakeTimers();
-    postMock
-      .mockResolvedValueOnce({
-        data: { ok: false, error: "ratelimited" },
+    const rateLimitError = Object.assign(new Error("Too Many Requests"), {
+      response: {
+        data: { error: "ratelimited" },
+        headers: { "retry-after": "3" },
         status: 429,
         statusText: "Too Many Requests",
-      })
-      .mockResolvedValueOnce({
-        data: { ok: true },
-        status: 200,
-        statusText: "OK",
-      });
+      },
+    });
+
+    postMock.mockRejectedValueOnce(rateLimitError).mockResolvedValueOnce({
+      data: { ok: true },
+      status: 200,
+      statusText: "OK",
+    });
 
     const result = sendToSlack("xoxb-test", "Calerts", message);
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
     await result;
 
     expect(postMock).toHaveBeenCalledTimes(2);

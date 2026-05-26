@@ -30,6 +30,7 @@ class SlackApiError extends Error {
     public readonly slackError: string,
     public readonly status: number,
     public readonly statusText?: string,
+    public readonly retryAfterMs?: number,
   ) {
     super(`Slack chat.postMessage failed: ${slackError}`);
     this.name = "SlackApiError";
@@ -197,6 +198,60 @@ function calculateRetryDelay(attempt: number): number {
   return SLACK_RETRY_CONFIG.retryDelayMs * Math.pow(2, attempt);
 }
 
+function getHeader(
+  headers: Record<string, unknown> | undefined,
+  name: string,
+): unknown {
+  if (!headers) {
+    return undefined;
+  }
+
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function parseRetryAfterMs(value: unknown): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  if (typeof raw === "string") {
+    const retryAt = Date.parse(raw);
+    if (Number.isFinite(retryAt)) {
+      const delayMs = retryAt - Date.now();
+      return delayMs > 0 ? delayMs : undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function getRetryAfterDelayMs(error: unknown): number | undefined {
+  if (error instanceof SlackApiError) {
+    return error.retryAfterMs;
+  }
+
+  const axiosError = error as AxiosError;
+  return parseRetryAfterMs(
+    getHeader(
+      axiosError.response?.headers as Record<string, unknown> | undefined,
+      "retry-after",
+    ),
+  );
+}
+
 function getSlackError(error: unknown): string | undefined {
   if (error instanceof SlackApiError) {
     return error.slackError;
@@ -258,6 +313,12 @@ export async function sendToSlack(
           response.data?.error ?? "unknown",
           response.status,
           response.statusText,
+          parseRetryAfterMs(
+            getHeader(
+              response.headers as Record<string, unknown> | undefined,
+              "retry-after",
+            ),
+          ),
         );
       }
 
@@ -295,10 +356,12 @@ export async function sendToSlack(
       });
 
       if (!isLastAttempt && isRetryableError(error)) {
-        const delay = calculateRetryDelay(attempt);
+        const retryAfterDelayMs = getRetryAfterDelayMs(error);
+        const delay = retryAfterDelayMs ?? calculateRetryDelay(attempt);
         logger.info("Retrying Slack postMessage request", {
           attempt: attempt + 2,
           delayMs: delay,
+          retryAfterDelayMs,
         });
         await sleep(delay, signal);
         continue;
