@@ -111,7 +111,8 @@ resource "grafana_message_template" "victorops_trading_mode_alert_message" {
 {{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
 Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}{{ if eq $chain "Celo" }}
 - Check for tripped breakers on the {{ $rateFeedWithSlash }} pool: {{ $poolURL }}
-- Check the Chainlink feed for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}: https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}{{ end }}
+- Check the Chainlink feed for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}: https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}{{ else }}
+- Check the alert details for tripped breakers: {{ $poolURL }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}

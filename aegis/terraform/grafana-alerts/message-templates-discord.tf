@@ -84,7 +84,8 @@ Please top up the {{ $token }} balance of the [{{ .Labels.owner }}](https://celo
 🚨
 **Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**{{ if eq $chain "Celo" }}
 - Check for tripped breakers on the [{{ $rateFeedWithSlash }} pool]({{ $poolURL }})
-- Check the [Chainlink feed](https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
+- Check the [Chainlink feed](https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ else }}
+- Check the [alert details]({{ $poolURL }}) for tripped breakers{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
