@@ -42,7 +42,15 @@ resource "sentry_alert" "slack_default" {
         {
           slack = {
             integration_id = data.sentry_organization_integration.slack.id
-            channel_name   = "#sentry-${each.key}"
+            # No leading `#` here — when `channel_id` is also passed, Sentry's
+            # API strips the `#` server-side and returns the bare name, which
+            # the jianyuan/sentry provider then flags as "Provider produced
+            # inconsistent result after apply" (it sent `#sentry-foo`, got
+            # back `sentry-foo`). Sending the bare name keeps the provider
+            # state in sync. The critical fan-out below keeps the leading
+            # `#` because it has no `channel_id` (Sentry only normalises
+            # away `#` when it has the ID as the canonical lookup key).
+            channel_name = "sentry-${each.key}"
             # channel_id is documented as a rate-limit-safe optional field.
             # Wired through restapi_object so Sentry resolves the channel
             # without hitting Slack's `conversations.list` on each notify.
