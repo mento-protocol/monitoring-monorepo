@@ -91,8 +91,9 @@ module "sentry_bridge" {
   source = "./channels/sentry-bridge"
 
   providers = {
-    sentry  = sentry
-    discord = discord
+    sentry        = sentry
+    discord       = discord
+    restapi.slack = restapi.slack
   }
 
   # Sentry configuration

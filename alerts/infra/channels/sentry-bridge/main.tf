@@ -43,7 +43,11 @@ resource "sentry_alert" "slack_default" {
           slack = {
             integration_id = data.sentry_organization_integration.slack.id
             channel_name   = "#sentry-${each.key}"
-            tags           = local.slack_tags
+            # channel_id is documented as a rate-limit-safe optional field.
+            # Wired through restapi_object so Sentry resolves the channel
+            # without hitting Slack's `conversations.list` on each notify.
+            channel_id = restapi_object.sentry_slack_channel[each.key].id
+            tags       = local.slack_tags
           }
         }
       ]

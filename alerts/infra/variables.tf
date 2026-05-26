@@ -54,6 +54,17 @@ variable "sentry_slack_critical_channel" {
   }
 }
 
+variable "slack_bot_token" {
+  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive Sentry alert channels via conversations.create / conversations.archive. Needs scopes: channels:read, channels:manage, channels:join. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration, this token is only for Terraform-managed channel lifecycle."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = startswith(var.slack_bot_token, "xoxb-")
+    error_message = "slack_bot_token must be a Slack bot OAuth token starting with 'xoxb-'."
+  }
+}
+
 #####################
 # Discord Variables
 #####################
@@ -221,7 +232,7 @@ variable "multisigs" {
 #####################
 
 variable "debug_mode" {
-  description = "Enable per-resource debug logging on the QuickNode AND Discord restapi providers. With TF_LOG=DEBUG the full HTTP request/response gets logged — that leaks both the QuickNode `x-api-key` header + `security_token` body field AND the Discord `Authorization: Bot <token>` header. Keep false in CI; only flip when actively debugging."
+  description = "Enable per-resource debug logging on the QuickNode, Discord, and Slack restapi providers. With TF_LOG=DEBUG the full HTTP request/response gets logged — that leaks the QuickNode `x-api-key` header + `security_token` body field, the Discord `Authorization: Bot <token>` header, AND the Slack `Authorization: Bearer xoxb-...` header. Keep false in CI; only flip when actively debugging."
   type        = bool
   default     = false
 }
