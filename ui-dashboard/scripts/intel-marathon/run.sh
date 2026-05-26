@@ -95,13 +95,9 @@ case "$STAGE" in
     bash "$SCRIPT_DIR/upload-drafts.sh"
     ;;
   mirror-to-blob|mirror)
-    # Inline-set BLOB_READ_WRITE_TOKEN wins; fall back to tfvars only when unset.
-    # The private store (store_YRYjMV97UAqjXYS6) and the marathon's public store
-    # need different tokens — letting tfvars unconditionally override prevented
-    # a user-supplied private-store token from ever reaching @vercel/blob.
-    if [ -z "${BLOB_READ_WRITE_TOKEN:-}" ]; then
-      BLOB_READ_WRITE_TOKEN=$(extract blob_read_write_token)
-    fi
+    # Requires an explicit private-store token. The dashboard's production
+    # backup/restore routes use Vercel Blob OIDC and no longer keep a static
+    # Blob token in Terraform or project env vars.
     export BLOB_READ_WRITE_TOKEN
     cd "$REPO_ROOT"
     node "$SCRIPT_DIR/mirror-to-blob.mjs" "$@"
