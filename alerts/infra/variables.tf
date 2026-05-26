@@ -37,14 +37,20 @@ variable "sentry_organization_slug" {
   }
 }
 
-variable "sentry_team_slug" {
-  description = "Sentry team slug"
+variable "sentry_slack_workspace_name" {
+  description = "Slack workspace name as it appears in Sentry's Slack integration (Settings → Integrations → Slack). Case-sensitive."
   type        = string
-  default     = "mento-labs"
+  default     = "Mento Labs"
+}
+
+variable "sentry_slack_critical_channel" {
+  description = "Slack channel name (with leading #) that receives the fatal-first-seen/regression critical fan-out from every Sentry project. Defaults to #alerts-critical to land alongside Grafana page-grade alerts."
+  type        = string
+  default     = "#alerts-critical"
 
   validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.sentry_team_slug))
-    error_message = "Sentry team slug must contain only lowercase letters, numbers, and hyphens."
+    condition     = can(regex("^#", var.sentry_slack_critical_channel))
+    error_message = "sentry_slack_critical_channel must start with '#' (e.g. '#alerts-critical')."
   }
 }
 
@@ -73,12 +79,6 @@ variable "discord_server_id" {
   }
 }
 
-variable "discord_server_name" {
-  description = "Discord server name as it appears in Sentry integrations"
-  type        = string
-  default     = "Mento"
-}
-
 variable "discord_category_id" {
   description = "Discord category ID where alert channels will be created"
   type        = string
@@ -86,16 +86,6 @@ variable "discord_category_id" {
   validation {
     condition     = can(regex("^[0-9]{17,20}$", var.discord_category_id))
     error_message = "Discord category ID must be a valid snowflake ID (17-20 digit number)."
-  }
-}
-
-variable "discord_sentry_role_id" {
-  description = "Discord role ID for the Sentry integration (right-click the Sentry role on Discord and copy ID)"
-  type        = string
-
-  validation {
-    condition     = can(regex("^[0-9]{17,20}$", var.discord_sentry_role_id))
-    error_message = "Discord role ID must be a valid snowflake ID (17-20 digit number)."
   }
 }
 

@@ -9,12 +9,20 @@ sentry_auth_token = "your-sentry-token"
 # Sentry organization slug (from URL: https://[slug].sentry.io)
 sentry_organization_slug = "mento-labs"
 
-# Sentry team slug
-sentry_team_slug = "mento-labs"
+# Slack workspace name as it appears in Sentry's Slack integration
+# (Sentry → Settings → Integrations → Slack). Case-sensitive.
+sentry_slack_workspace_name = "Mento Labs"
+
+# Slack channel where fatal-first-seen/regression events from every Sentry
+# project also fan out. Defaults to #alerts-critical alongside Grafana page-
+# grade alerts; override only if your on-call routing differs.
+# sentry_slack_critical_channel = "#alerts-critical"
 
 #####################
 # Discord Configuration
 #####################
+# Discord is used only for the on-chain multisig event channels.
+# Sentry alerts now route to Slack via the sentry-bridge module.
 
 # Discord bot token (from Discord Developer Portal)
 # Required permissions: Administrator
@@ -24,16 +32,9 @@ discord_bot_token = "your-bot-token"
 # Must be a 17-20 digit snowflake ID
 discord_server_id = "1234567890123456789"
 
-# Discord server name as it appears in Sentry integrations
-discord_server_name = "Mento"
-
 # Discord category ID where alert channels will be created (right-click category and copy ID)
 # Must be a 17-20 digit snowflake ID
 discord_category_id = "1234567890123456789"
-
-# Discord role ID for the Sentry integration (right-click Sentry role and copy ID)
-# Must be a 17-20 digit snowflake ID
-discord_sentry_role_id = "1234567890123456789"
 
 #####################
 # Google Cloud Configuration

@@ -11,7 +11,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 ├── outputs.tf              # Aggregated outputs
 │
 ├── channels/
-│   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Discord bridge)
+│   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)
 │   └── discord-channels/   # Discord channels and webhooks
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
 └── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
@@ -66,17 +66,16 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-# Discord Configuration
+# Discord Configuration (for on-chain multisig event channels — Sentry no longer uses Discord)
 discord_bot_token      = "<your-discord-bot-token>"
 discord_server_id      = "<discord-server-id>"
 discord_category_id    = "<alert-category-id>"
-discord_sentry_role_id = "<sentry-role-id>"
-discord_server_name    = "<discord-server-name>"
 
 # Sentry Configuration
-sentry_auth_token      = "your-sentry-auth-token"
-sentry_organization_slug = "my-org"  # Optional, defaults to "mento-labs"
-sentry_team_slug       = "my-team"    # Optional, defaults to "mento-labs"
+sentry_auth_token             = "your-sentry-auth-token"
+sentry_organization_slug      = "my-org"            # Optional, defaults to "mento-labs"
+sentry_slack_workspace_name   = "Mento Labs"        # Optional, defaults to "Mento Labs"
+sentry_slack_critical_channel = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
@@ -171,9 +170,10 @@ multisigs = {
 
 ### Sentry Module
 
-- Discord channels: `#sentry-{project-name}` for each Sentry project
-- Alert rules forwarding errors to Discord
-- Proper permissions for Sentry integration
+- Two `sentry_alert` rules per Sentry project (auto-discovered):
+  - Default alert → `#sentry-{project-slug}` Slack channel (issue lifecycle events).
+  - Critical fan-out → `#alerts-critical` Slack channel (fatal first-seen/regression in production).
+- No Discord resources — the Slack channels are admin-managed in Slack; Terraform only manages the Sentry-side wiring.
 
 ### Discord Monitoring Infrastructure
 
@@ -270,7 +270,7 @@ This shows REST API requests/responses for troubleshooting.
 
 ### Module Documentation
 
-- [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Discord bridge module
+- [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Slack bridge module
 - [`channels/discord-channels/README.md`](channels/discord-channels/README.md) - Discord channels + webhooks module
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
