@@ -170,9 +170,9 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL` | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
 | `UPSTASH_REDIS_REST_URL`                 | Address labels storage (Upstash Redis)                                                                     |
 | `UPSTASH_REDIS_REST_TOKEN`               | Address labels Redis auth token                                                                            |
-| `BLOB_READ_WRITE_TOKEN`                  | Vercel Blob token for daily label backups                                                                  |
+| `BLOB_READ_WRITE_TOKEN`                  | Legacy Vercel Blob token for daily label backups until the store is upgraded to OIDC                       |
 
-Production env vars are managed by Terraform. See [`terraform/`](./terraform/).
+Production env vars are managed by Terraform except the legacy Blob token, which is managed by the Vercel store integration until the Blob OIDC cutover. See [`terraform/`](./terraform/).
 
 ## Deployment
 

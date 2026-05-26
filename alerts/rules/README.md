@@ -10,7 +10,7 @@ Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
 
 ## State
 
-Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`. Backend uses default ADC — same as the sibling module.
+Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6ed6/alerts-rules`. Backend uses default ADC — same as the sibling module.
 
 ## Prerequisites
 
