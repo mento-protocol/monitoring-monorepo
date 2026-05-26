@@ -91,9 +91,7 @@ locals {
 
   # Per-feed Celo relayer signer wallets. Used by the Slack stale-price alert
   # template to link "<pair> relayer on Celo" to the signer's celoscan page.
-  # Mirror of `global.vars.RelayerSigner<feed>` in `aegis/config.yaml`. Monad
-  # relayers aren't in this map yet — the template falls back to .GeneratorURL
-  # when the feed isn't present (so the alert still has a clickable link).
+  # Mirror of `global.vars.RelayerSigner<feed>` in `aegis/config.yaml`.
   celo_relayer_signers = {
     AUDUSD   = "0x6fa93B73F00f9c61f726bCE15f327686de05b696"
     AUSDUSD  = "0xBF8a08d7DeC72efF538B48Ee332dd4eE938e0b1f"
@@ -129,6 +127,22 @@ locals {
     ZARUSD   = "0xc0342D31Cc875f3dC85E3Ab352e60698444197AE"
   }
 
+  # Per-feed Monad relayer signer wallets. Sourced from live Aegis
+  # `Native_balanceOf{chain=~"monad|monad-testnet"}` ownerValue labels, which
+  # are populated from the Oracle Relayer signer set. Keep this map separate
+  # from Celo even when a signer address currently matches so the Slack
+  # template can select the right explorer per chain and future signer drift
+  # stays local.
+  monad_relayer_signers = {
+    AUSDUSD = "0xBF8a08d7DeC72efF538B48Ee332dd4eE938e0b1f"
+    CHFUSD  = "0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d"
+    EURUSD  = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"
+    GBPUSD  = "0x8103bE713aa149928D26c1b3873Ee240F8F7429E"
+    JPYUSD  = "0xF4615456f71157F758b7FaCaF62d57E339a664D7"
+    USDCUSD = "0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3"
+    USDTUSD = "0x36a5C808e25AF0F5e406Eaa831d1749542378794"
+  }
+
   # GCP project for mainnet relayer cloud functions. Used by the Slack
   # stale-price template's "relayer cloud function" link. Sourced from
   # `mento-protocol/oracle-relayer` repo (`.project_vars_cache`,
@@ -141,12 +155,16 @@ locals {
   # blocks so the runtime template doesn't need Sprig `dict` / `index` calls
   # (Grafana's notification template engine exposes a curated subset of Sprig,
   # and `dict` isn't documented as part of it). Each block is independent so
-  # they all evaluate; the matching one assigns `$relayer`. Wrap in `{{ if eq
-  # .Labels.chain "celo" -}}...{{ end -}}` at the call site to avoid handing
-  # Celo addresses to a Monad alert (same-named feeds like USDCUSD exist on
-  # both chains with different signer wallets).
+  # they all evaluate; the matching one assigns `$relayer`. Wrap the fragments
+  # in chain-specific `{{ if eq .Labels.chain ... }}` blocks at the call site so
+  # explorer links are only rendered for the chain whose signer map matched.
   celo_relayer_signer_branches = join("\n", [
     for k, v in local.celo_relayer_signers :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
+  ])
+
+  monad_relayer_signer_branches = join("\n", [
+    for k, v in local.monad_relayer_signers :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
   ])
 
