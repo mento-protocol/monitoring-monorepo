@@ -82,17 +82,11 @@ module "discord_channels" {
 }
 
 # Forward Sentry errors to Slack (per-project channel + critical fan-out).
-# `discord` provider is still passed because state contains Discord-typed
-# resources scheduled for destroy on the next apply — Terraform requires
-# the provider config to be available until those resources are gone. The
-# mapping can be dropped in a follow-up PR once the migration apply
-# completes and state no longer references Discord-typed resources.
 module "sentry_bridge" {
   source = "./channels/sentry-bridge"
 
   providers = {
     sentry        = sentry
-    discord       = discord
     restapi.slack = restapi.slack
   }
 
