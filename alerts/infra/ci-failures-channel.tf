@@ -98,3 +98,117 @@ output "ci_failures_channel_id" {
   description = "Slack channel ID for #ci-failures (used by the notify-slack-on-main-failure workflow)"
   value       = restapi_object.ci_failures_channel.id
 }
+
+###############################
+# Auto-invite @eng on creation #
+###############################
+#
+# Resolve the `@eng` usergroup to its current member user IDs at plan time
+# via Slack's `usergroups.list` + `usergroups.users.list`, then invite all
+# of them to #ci-failures with one `conversations.invite` call. Lifecycle
+# replace_triggered_by on the resolved member list means membership
+# changes upstream (someone joins / leaves @eng in Slack admin) re-fire
+# the invite on the next apply, keeping the channel roster in sync.
+#
+# IMPORTANT: the bot token needs `usergroups:read` scope (new) in addition
+# to `channels:read/manage/join` and `chat:write.public`. Without it the
+# data sources below return `missing_scope` and the plan fails loudly.
+#
+# Why `hashicorp/http` data sources instead of `restapi`: `restapi_object`
+# is a managed resource — overkill for read-only Slack API GETs we just
+# want to resolve at plan time. The `http` provider's `data` source is
+# the lightweight, side-effect-free read mechanism for arbitrary HTTP
+# endpoints.
+
+data "http" "slack_usergroups_list" {
+  url = "https://slack.com/api/usergroups.list"
+  request_headers = {
+    Authorization = "Bearer ${var.slack_bot_token}"
+  }
+}
+
+data "http" "slack_eng_usergroup_members" {
+  url = "https://slack.com/api/usergroups.users.list?usergroup=${local.eng_usergroup_id}"
+  request_headers = {
+    Authorization = "Bearer ${var.slack_bot_token}"
+  }
+}
+
+locals {
+  # Look up the @eng usergroup by handle. Slack's `handle` is the bare
+  # name (no leading `@`). If the team renames @eng someday, change this
+  # one constant.
+  eng_usergroup_handle = "eng"
+
+  # Validate the list call succeeded — if the bot is missing the
+  # `usergroups:read` scope, Slack returns 200 OK with {"ok": false,
+  # "error": "missing_scope"} (per the same 200-on-logical-error footgun
+  # documented in the [restapi+slack reference]
+  # (../../channels/sentry-bridge/slack_channels.tf)). The lookups below
+  # will fail with a NULL/length-zero result if we don't guard here.
+  eng_usergroup_id = [
+    for ug in jsondecode(data.http.slack_usergroups_list.response_body).usergroups :
+    ug.id if ug.handle == local.eng_usergroup_handle
+  ][0]
+
+  eng_user_ids_csv = join(",", jsondecode(data.http.slack_eng_usergroup_members.response_body).users)
+}
+
+# POST conversations.invite once at create time, with the current @eng
+# member list. The `triggers`-style behaviour comes from `force_new`:
+# Terraform recreates the invite resource whenever the resolved member
+# CSV changes, which makes Slack send fresh invites to any newly-added
+# @eng members on the next apply.
+#
+# `conversations.invite` returns ok=true on success. If a user is already
+# a member it returns ok=false with `errors: [{"user": "U123", "error":
+# "already_in_channel"}]` — the postcondition treats that as benign.
+resource "restapi_object" "ci_failures_invite_eng" {
+  provider = restapi.slack
+
+  path        = "/conversations.invite"
+  create_path = "/conversations.invite"
+  read_path   = "/conversations.info?channel={id}"
+
+  # No-op destroy — leaving @eng in the channel on `terraform destroy` is
+  # the right default (their membership isn't ours to revoke).
+  destroy_path   = "/api.test"
+  destroy_method = "POST"
+
+  update_path   = ""
+  update_method = "POST"
+
+  data = jsonencode({
+    channel = restapi_object.ci_failures_channel.id
+    users   = local.eng_user_ids_csv
+  })
+
+  # Force-new on the member CSV: when @eng membership changes upstream,
+  # the resolved CSV changes, Terraform recreates this resource, and the
+  # invite POSTs again with the fresh member list.
+  force_new = [
+    local.eng_user_ids_csv,
+  ]
+
+  id_attribute              = "channel/id"
+  ignore_all_server_changes = true
+
+  depends_on = [restapi_object.ci_failures_channel_member]
+
+  lifecycle {
+    # Accept either `ok == true` (fresh invite) OR `already_in_channel`
+    # error (everyone in @eng was already a member — benign).
+    postcondition {
+      condition = (
+        self.api_response != null && (
+          try(jsondecode(self.api_response).ok, false) == true
+          || alltrue([
+            for err in try(jsondecode(self.api_response).errors, []) :
+            err.error == "already_in_channel"
+          ])
+        )
+      )
+      error_message = "Slack conversations.invite failed for #ci-failures @eng: ${try(jsondecode(self.api_response).error, try(jsondecode(self.api_response).errors[0].error, "unknown"))}"
+    }
+  }
+}

