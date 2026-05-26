@@ -1,23 +1,18 @@
 locals {
-  # Get all projects from Sentry organization
-  # This includes both existing projects and any projects we create in this module
-  # The data source will automatically discover our managed projects after they're created
+  # Map of project slug → project object. Auto-discovered from the Sentry
+  # organization; the `sentry_alert` and `sentry_project_issue_stream_monitor`
+  # resources fan out across this map via `for_each`.
   projects = {
     for project in data.sentry_all_projects.all.projects :
     project.slug => project
   }
 
-  # Discord permission constants
-  discord_view_channel_permission = 1024 # View Channel permission (1 << 10)
+  # Comma-separated tag list shown in Slack notifications. The `sentry_alert`
+  # Slack action takes a single string, not a list (different from the
+  # deprecated `sentry_issue_alert` resource).
+  slack_tags = "url,browser,device,os,environment,level,handled"
 
-  # Sort project slugs alphabetically to ensure channels are created in alphabetical order
-  sorted_project_slugs = sort(keys(local.projects))
-
-  # Calculate channel positions alphabetically, starting at 100
-  # This ensures new channels appear after existing channels and are sorted alphabetically
-  channel_positions = {
-    for idx, project_slug in local.sorted_project_slugs :
-    project_slug => 100 + idx
-  }
+  # Sentry's numeric level scale: debug=10, info=20, warning=30, error=40,
+  # fatal=50. Used by the critical-fan-out filter to match only fatals.
+  level_fatal = 50
 }
-

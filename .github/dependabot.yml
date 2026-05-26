@@ -3,16 +3,67 @@ version: 2
 # Keep GitHub Actions pinned to commit SHAs (not floating tags). This file is
 # scoped to github-actions only so Dependabot opens a PR whenever an action
 # we use tags a new release, letting us refresh the pinned SHA under review.
-# npm updates for this monorepo are handled out-of-band (pnpm workspace).
+# npm updates for this monorepo are handled out-of-band (pnpm workspace,
+# `minimumReleaseAge: 4320` in pnpm-workspace.yaml). GitHub-issued security
+# advisories on pnpm-lock.yaml still come through as Dependabot PRs even
+# without an `npm` entry here — those flow through the normal CI gates and
+# auto-merge only if classified non-major.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    # 10 (not 5) leaves headroom for the worst-case week: grouped
+    # minor/patch PR + grouped major PR + one individual PR per
+    # exclude-patterns entry. With anthropics/* and dependabot/* already
+    # excluded and the docs flagging future self-loop additions, 5 hits
+    # the ceiling exactly on a major-bump week — Dependabot silently
+    # stops opening PRs once the limit is reached, with no alert.
+    open-pull-requests-limit: 10
     commit-message:
       prefix: ci
       include: scope
     labels:
       - dependencies
+
+    # Collapse the Monday batch into one PR per tier. With auto-merge on
+    # minor/patch (see .github/workflows/dependabot-auto-merge.yml), most
+    # weeks the minor-patch group merges itself once CI is green and only
+    # the major group lands as a human-review item.
+    #
+    # Self-loop excludes (own PR, auto-merge gate also exempts):
+    #   - `anthropics/*` — claude-code-action is the auto-review reviewer;
+    #     a broken reviewer ships unreviewed and breaks the gate that
+    #     would catch its follow-ups. Glob covers future Anthropic actions.
+    #   - `dependabot/*` — dependabot/fetch-metadata is what classifies
+    #     update-type for THIS workflow. A regression in fetch-metadata
+    #     could silently misclassify (or hard-fail), disabling auto-merge
+    #     across the fleet. Same belt-and-suspenders rationale.
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - anthropics/*
+          - dependabot/*
+      actions-major:
+        update-types:
+          - major
+        exclude-patterns:
+          - anthropics/*
+          - dependabot/*
+
+    # Buy supply-chain detection time. ~80% of recent malicious-package
+    # incidents (per GitGuardian's 2026 axios attack analysis) had a
+    # detection window under 7 days, so a 7-day delay blocks most of them
+    # at the door. Cooldown does NOT apply to security updates — those
+    # still flow immediately with no delay.
+    #
+    # Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported
+    # for the github-actions ecosystem — only `default-days` is honored.
+    # Auto-merge means the 7-day delay costs zero clicks; patches still
+    # land at zero friction, just one week later.
+    cooldown:
+      default-days: 7

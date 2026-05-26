@@ -61,7 +61,24 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 - [ ] Audit workflows MUST fail-closed on registry errors. Don't pass `--ignore-registry-errors` or equivalent
 - [ ] If you genuinely need a soft-failure path, gate it behind a manual `workflow_dispatch` with explicit input, not on every PR
 
-## 7. Lessons already paid for
+## 7. Dependabot policy
+
+Dependabot is scoped to the `github-actions` ecosystem (`.github/dependabot.yml`). npm is handled by pnpm with `minimumReleaseAge: 4320` in `pnpm-workspace.yaml`; GitHub-issued security advisories on `pnpm-lock.yaml` still come through as Dependabot PRs without an `npm` entry.
+
+PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (`.github/workflows/dependabot-auto-merge.yml`):
+
+- **Patch / minor** → auto-merge once required CI checks pass (CI / Vercel / Code Quality / Vercel Preview Comments). Cursor Bugbot's risk summary is advisory.
+- **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
+- **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
+- **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
+- **Any `anthropics/*` or `dependabot/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: claude-code-action is the auto-reviewer, dependabot/fetch-metadata is what classifies update-type for the auto-merge workflow — a regression in either ships unreviewed and breaks the gate that would catch follow-ups.
+
+Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
+
+- [ ] If you add a new external Action that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude), add it to the auto-merge exclusion list with the same self-loop rationale
+- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
+
+## 8. Lessons already paid for
 
 - PR #188 — consolidating per-package CI workflows nearly removed the push-to-main guard on the metrics-bridge deploy and the workflow_dispatch branch check
 - PR #191 — `paths:` filter on the supply-chain workflow would have made the required check skip on PRs that don't touch deps, blocking unrelated merges
