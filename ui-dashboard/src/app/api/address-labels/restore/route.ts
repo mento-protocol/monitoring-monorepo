@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { get } from "@vercel/blob";
 import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
-import { handleSnapshot, isSnapshot } from "@/lib/address-labels/snapshot";
+import {
+  handleSnapshot,
+  isEntriesMap,
+  isSnapshot,
+  validateSnapshotReports,
+} from "@/lib/address-labels/snapshot";
 import {
   type BackupManifestV2,
   isBackupManifestV2,
@@ -10,6 +15,13 @@ import {
 } from "@/lib/address-labels/backup-format";
 import type { AddressLabelsSnapshot } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+import {
+  validateIntelDeepRecords,
+  validateIntelEntityCpsRecords,
+  validateIntelEntityRecords,
+  validateIntelTransfersRecords,
+  validateIntelWealthRecords,
+} from "./intel-payload-validators";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -77,7 +89,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     // blob in parallel and assemble the snapshot in memory before handing
     // off to handleSnapshot (which expects an AddressLabelsSnapshot shape).
     if (isManifestPathname(pathname)) {
-      const assembled = await assembleSnapshotFromManifest(pathname);
+      const assembled = await assembleSnapshotFromManifest(pathname, auth);
       if (assembled instanceof Response) return assembled;
       return await handleSnapshot(assembled, restoreSnapshotOptions(auth));
     }
@@ -119,6 +131,7 @@ function isManifestPathname(pathname: string): boolean {
  */
 async function assembleSnapshotFromManifest(
   manifestPathname: string,
+  auth: { importerEmail: string },
 ): Promise<AddressLabelsSnapshot | Response> {
   const manifestBlob = await fetchPrivateBlobText(
     manifestPathname,
@@ -179,7 +192,33 @@ async function assembleSnapshotFromManifest(
     // matches that field's record shape (HGETALL → JSON → HGETALL roundtrip).
     (snapshot as Record<string, unknown>)[field] = parsed;
   }
+  const snapshotValidationError = validateAssembledSnapshot(
+    snapshot,
+    auth.importerEmail,
+  );
+  if (snapshotValidationError) {
+    return NextResponse.json(
+      { error: `Manifest snapshot ${snapshotValidationError}` },
+      { status: 400 },
+    );
+  }
   return snapshot;
+}
+
+function validateAssembledSnapshot(
+  snapshot: AddressLabelsSnapshot,
+  importerEmail: string,
+): string | null {
+  if (!isSnapshot(snapshot)) return "is not an address-label snapshot";
+  if (snapshot.addresses !== undefined && !isEntriesMap(snapshot.addresses)) {
+    return "contains invalid labels map";
+  }
+  const reportValidation = validateSnapshotReports(snapshot.reports, {
+    importerEmail,
+    reportMetadataMode: "preserve",
+  });
+  if ("error" in reportValidation) return reportValidation.error;
+  return null;
 }
 
 function validateHashBlobRecord(
@@ -189,7 +228,11 @@ function validateHashBlobRecord(
   if (!isRecordMap(value)) return "is not a record map";
   if (name === "labels") return validateLabelRecords(value);
   if (name === "reports") return validateReportRecords(value);
-  return validateObjectRecordValues(name, value);
+  if (name === "intelDeep") return validateIntelDeepRecords(value);
+  if (name === "intelTransfers") return validateIntelTransfersRecords(value);
+  if (name === "intelWealth") return validateIntelWealthRecords(value);
+  if (name === "intelEntities") return validateIntelEntityRecords(value);
+  return validateIntelEntityCpsRecords(value);
 }
 
 function isRecordMap(value: unknown): value is Record<string, unknown> {
@@ -207,7 +250,11 @@ function validateLabelRecords(records: Record<string, unknown>): string | null {
     const hasName =
       (typeof entry.label === "string" && entry.label.trim() !== "") ||
       (typeof entry.name === "string" && entry.name.trim() !== "");
-    const hasTags = Array.isArray(entry.tags) && entry.tags.length > 0;
+    const tags = entry.tags;
+    const hasTags = isStringArray(tags) && tags.length > 0;
+    if (Array.isArray(tags) && !isStringArray(tags)) {
+      return `contains invalid label tags for ${address}`;
+    }
     if (!hasName && !hasTags) {
       return `contains invalid label payload for ${address}`;
     }
@@ -232,16 +279,10 @@ function validateReportRecords(
   return null;
 }
 
-function validateObjectRecordValues(
-  name: SnapshotHashName,
-  records: Record<string, unknown>,
-): string | null {
-  for (const [key, record] of Object.entries(records)) {
-    if (!isRecordMap(record)) {
-      return `contains invalid ${name} payload for ${key}`;
-    }
-  }
-  return null;
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
 }
 
 async function restoreLegacyMonolithicBlob(
