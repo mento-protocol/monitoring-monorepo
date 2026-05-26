@@ -46,7 +46,7 @@ terraform {
   backend "gcs" {
     # https://console.cloud.google.com/storage/browser/mento-terraform-tfstate-6ed6
     bucket                      = "mento-terraform-tfstate-6ed6"
-    prefix                      = "alerts" # Cannot use variables in backend config
+    prefix                      = "alerts-infra" # Cannot use variables in backend config
     impersonate_service_account = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
   }
 }

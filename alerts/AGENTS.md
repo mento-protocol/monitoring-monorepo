@@ -15,7 +15,7 @@ last_verified: 2026-05-21
 - **`alerts/rules/`** — v3 Grafana metric alert rules + Slack contact points. Grafana provider only. Changes daily (threshold tuning).
 - **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Discord channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + GCP project. Multi-provider. Changes monthly.
 
-Separate GCS state (`prefix=monorepo-alerts` for rules, `prefix=alerts` for infra). Keep them separate roots — cadence + blast-radius asymmetry.
+Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra). Keep them separate roots — cadence + blast-radius asymmetry.
 
 ## Operating Rules
 
