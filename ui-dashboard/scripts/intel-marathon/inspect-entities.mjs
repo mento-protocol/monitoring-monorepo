@@ -3,6 +3,16 @@ import process from "node:process";
 
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+const missing = [
+  ["UPSTASH_REDIS_REST_URL", redisUrl],
+  ["UPSTASH_REDIS_REST_TOKEN", redisToken],
+]
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+if (missing.length > 0) {
+  console.error(`Missing env: ${missing.join(", ")}`);
+  process.exit(1);
+}
 
 async function upstash(path) {
   const res = await fetch(`${redisUrl}${path}`, {
