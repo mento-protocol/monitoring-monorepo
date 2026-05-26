@@ -91,6 +91,19 @@ locals {
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
   )
+
+  # Rebalancer Stale needs a short FX reopen grace after the broader weekend
+  # gate drops. Sydney has only been open for ~1h at Sun 23:00 UTC, so paging
+  # immediately at 23:05 UTC is mostly noise for FX pairs. Keep this separate
+  # from the shared deviation gate so Deviation Breach resumes at reopen.
+  fx_rebalancer_reopen_grace_gate_promql = "(day_of_week() == 0 and hour() == 23)"
+  fx_rebalancer_stale_gate_promql        = format("(%s or %s)", local.fx_weekend_gate_promql, local.fx_rebalancer_reopen_grace_gate_promql)
+  fx_rebalancer_stale_suppressed_breach_start_promql = format(
+    "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
+    local.usd_pegged_pair_regex,
+    local.fx_rebalancer_stale_gate_promql,
+  )
+
   # Critical magnitude is sticky for the life of the open breach: once the
   # indexer's open-breach peak has crossed 1.05x, the critical alert stays
   # responsible until the current ratio is back within the warning tolerance.
