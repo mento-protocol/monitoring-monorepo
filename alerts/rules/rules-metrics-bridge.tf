@@ -69,9 +69,14 @@ resource "grafana_rule_group" "metrics_bridge" {
   }
 
   rule {
-    name           = "Metrics Bridge Poll Errors"
-    condition      = "threshold"
-    for            = "3m"
+    name      = "Metrics Bridge Poll Errors"
+    condition = "threshold"
+    # Pages only on a sustained error pattern, not single transient blips. The
+    # 0.01/s threshold corresponds to ~3 failed polls per 5min window (poll
+    # cadence is 30s). Combined with `for=10m` the rule fires only when the
+    # bridge has been broken for >10 minutes. The companion `Metrics Bridge
+    # Not Reporting` rule already catches catastrophic outages at 90s.
+    for            = "10m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -111,7 +116,7 @@ resource "grafana_rule_group" "metrics_bridge" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [0], type = "gt" }
+          evaluator = { params = [0.01], type = "gt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]

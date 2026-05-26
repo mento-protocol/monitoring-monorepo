@@ -71,7 +71,19 @@ locals {
     "GBPUSD",
     "EURUSD",
     "JPYUSD",
-    "CHFUSD"
+    "CHFUSD",
+    # All seven below fired `Oldest Report Expired [Celo]` continuously from
+    # Fri 2026-05-22 21:09 UTC (NY FX close) through Sun 2026-05-24 23:03 UTC
+    # (Sydney FX reopen). Their relayers pause publishing while the
+    # corresponding FX market is closed, so the on-chain SortedOracles report
+    # ages past the expiry window and pages on-call.
+    "AUDUSD",
+    "BRLUSD",
+    "CADUSD",
+    "KESUSD",
+    "NGNUSD",
+    "XOFUSD",
+    "ZARUSD"
   ]
 
   # Create a regex pattern for the weekend-disabled feeds

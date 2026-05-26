@@ -77,6 +77,12 @@ sentry_organization_slug      = "my-org"            # Optional, defaults to "men
 sentry_slack_workspace_name   = "Mento Labs"        # Optional, defaults to "Mento Labs"
 sentry_slack_critical_channel = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
 
+# Slack Configuration (used by the restapi.slack provider to create + archive
+# the per-Sentry-project #sentry-<slug> channels; SEPARATE from Sentry's own
+# Slack OAuth app integration).
+# Scopes required: channels:read, channels:manage, channels:join.
+slack_bot_token = "xoxb-..."
+
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
 org_id           = "123456789012"        # Optional, omit if not using organization
@@ -173,7 +179,8 @@ multisigs = {
 - Two `sentry_alert` rules per Sentry project (auto-discovered):
   - Default alert → `#sentry-{project-slug}` Slack channel (issue lifecycle events).
   - Critical fan-out → `#alerts-critical` Slack channel (fatal first-seen/regression in production).
-- No Discord resources — the Slack channels are admin-managed in Slack; Terraform only manages the Sentry-side wiring.
+- One `restapi_object.sentry_slack_channel` per project — Terraform creates and archives the `#sentry-{project-slug}` channel via Slack's Web API.
+- `#alerts-critical` is NOT created here (shared with Grafana page-grade alerts; managed externally).
 
 ### Discord Monitoring Infrastructure
 

@@ -10,6 +10,17 @@ provider "discord" {
   token = var.discord_bot_token
 }
 
+# GitHub provider — used solely to push the `TF_VAR_*` repo secrets that
+# `.github/workflows/alerts-infra.yml` consumes (see `github_actions_secret`
+# resources in `main.tf`). The PAT in `var.github_token` should be
+# fine-grained, scoped to this single repo, with `Secrets: Read and write`
+# permission only — that's the least-privilege grant for managing repo
+# Actions secrets.
+provider "github" {
+  token = var.github_token
+  owner = "mento-protocol"
+}
+
 # Discord API provider
 provider "restapi" {
   alias = "discord"
@@ -40,6 +51,22 @@ provider "restapi" {
     "x-api-key"    = var.quicknode_api_key
     "Content-Type" = "application/json"
     "accept"       = "application/json"
+  }
+  write_returns_object = true
+  debug                = var.debug_mode
+}
+
+# Slack Web API provider — used by the sentry-bridge module to create and
+# archive the per-project `#sentry-<slug>` channels via `conversations.create`
+# and `conversations.archive`. Slack returns 200 OK on logical errors with
+# `{"ok": false, "error": "..."}`, so every restapi_object using this provider
+# MUST guard with a `lifecycle.postcondition` that asserts `.ok == true`.
+provider "restapi" {
+  alias = "slack"
+  uri   = "https://slack.com/api"
+  headers = {
+    "Authorization" = "Bearer ${var.slack_bot_token}"
+    "Content-Type"  = "application/json; charset=utf-8"
   }
   write_returns_object = true
   debug                = var.debug_mode
