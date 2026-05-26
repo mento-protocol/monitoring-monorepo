@@ -50,10 +50,14 @@ jobs:
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # alert-lookup populates ghsa-id/cvss for security advisories.
-          # Surfaces them in the workflow log so the audit trail records
-          # whether an auto-merged PR was a security patch.
-          alert-lookup: true
+          # alert-lookup is intentionally omitted. It populates
+          # ghsa-id/cvss for security advisories but requires a PAT or
+          # GitHub App installation token — `secrets.GITHUB_TOKEN` lacks
+          # the `vulnerabilityAlerts` GraphQL scope, and fetch-metadata
+          # bubbles the resulting 401 to `core.setFailed()` (see
+          # https://github.com/dependabot/fetch-metadata/blob/v3.1.0/src/main.ts
+          # catch block), which would hard-fail this step on every
+          # Dependabot PR and silently disable auto-merge.
 
       - name: Log classification
         env:
@@ -61,15 +65,11 @@ jobs:
           DEPENDENCY_NAMES: ${{ steps.meta.outputs.dependency-names }}
           DEPENDENCY_GROUP: ${{ steps.meta.outputs.dependency-group }}
           MAINTAINER_CHANGES: ${{ steps.meta.outputs.maintainer-changes }}
-          ALERT_STATE: ${{ steps.meta.outputs.alert-state }}
-          GHSA_ID: ${{ steps.meta.outputs.ghsa-id }}
         run: |
           echo "update-type:        $UPDATE_TYPE"
           echo "dependency-names:   $DEPENDENCY_NAMES"
           echo "dependency-group:   $DEPENDENCY_GROUP"
           echo "maintainer-changes: $MAINTAINER_CHANGES"
-          echo "alert-state:        $ALERT_STATE"
-          echo "ghsa-id:            $GHSA_ID"
 
       - name: Enable auto-merge for low-risk tiers
         # Three gates, all must hold for auto-merge:
