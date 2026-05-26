@@ -60,6 +60,12 @@ function formatFixidityValue(raw: string | null | undefined): string | null {
   return `${whole}.${fracScaled.toString().padStart(6, "0")}`;
 }
 
+function fixidityOrNull(raw: string | null | undefined): bigint | null {
+  if (raw == null) return null;
+  const value = BigInt(raw);
+  return value === BigInt(0) ? null : value;
+}
+
 /** Returns the trip-able BreakerConfig (filters out MARKET_HOURS, which has
  * no per-feed config and is rendered as the title-row pill instead). Prefers
  * enabled configs; production has ≤1 trip-able config per feed today. */
@@ -97,17 +103,12 @@ function effectiveCooldown(cfg: BreakerConfig): bigint {
  * mis-set peg (also produces a divide-by-zero). In all three cases the live
  * Δ is meaningless, so render the missing-data dash. */
 function computeLiveDelta(cfg: BreakerConfig): bigint | null {
-  const median = cfg.lastMedianRate != null ? BigInt(cfg.lastMedianRate) : null;
+  const median = fixidityOrNull(cfg.lastMedianRate);
   const reference =
     cfg.breaker.kind === "MEDIAN_DELTA"
-      ? cfg.medianRatesEMA != null
-        ? BigInt(cfg.medianRatesEMA)
-        : null
-      : cfg.referenceValue != null
-        ? BigInt(cfg.referenceValue)
-        : null;
-  if (median == null || median === BigInt(0)) return null;
-  if (reference == null || reference === BigInt(0)) return null;
+      ? fixidityOrNull(cfg.medianRatesEMA)
+      : fixidityOrNull(cfg.referenceValue);
+  if (median == null || reference == null) return null;
   const diff = median > reference ? median - reference : reference - median;
   return (diff * FIXED_1) / reference;
 }
@@ -117,15 +118,11 @@ function referenceValue(cfg: BreakerConfig): bigint | null {
     cfg.breaker.kind === "MEDIAN_DELTA"
       ? cfg.medianRatesEMA
       : cfg.referenceValue;
-  if (raw == null) return null;
-  const value = BigInt(raw);
-  return value === BigInt(0) ? null : value;
+  return fixidityOrNull(raw);
 }
 
 function actualValue(cfg: BreakerConfig): bigint | null {
-  if (cfg.lastMedianRate == null) return null;
-  const value = BigInt(cfg.lastMedianRate);
-  return value === BigInt(0) ? null : value;
+  return fixidityOrNull(cfg.lastMedianRate);
 }
 
 function valueDeltaDirection(cfg: BreakerConfig): "above" | "below" | null {
@@ -164,6 +161,7 @@ function referenceCaptionFor(
   }
   const pegDirection = valueDeltaDirection(cfg);
   if (tripped && isOverTolerance && pegDirection) {
+    // `isOverTolerance` implies a non-null live delta, so this is never "—".
     return `${formattedLiveDelta} ${pegDirection} peg`;
   }
   return "fixed peg";

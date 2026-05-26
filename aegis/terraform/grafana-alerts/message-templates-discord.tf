@@ -69,9 +69,7 @@ Please top up the {{ $token }} balance of the [{{ .Labels.owner }}](https://celo
 {{ end -}}
 {{ end -}}
 
-{{ define "discord.trading_mode_alert_title" }}
-{{ if (len .Alerts.Firing) }}🚨{{ else }}✅{{ end }}
-{{ end -}}
+{{ define "discord.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}🚨{{ else }}✅{{ end }}{{ end -}}
 
 {{ define "discord.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
