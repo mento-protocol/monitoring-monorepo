@@ -18,6 +18,14 @@ sentry_slack_workspace_name = "Mento Labs"
 # grade alerts; override only if your on-call routing differs.
 # sentry_slack_critical_channel = "#alerts-critical"
 
+# Slack bot OAuth token (xoxb-...) used by the `restapi.slack` provider in
+# `alerts/infra/providers.tf` to create + archive the per-project
+# `#sentry-<slug>` channels. Needs scopes: channels:read, channels:manage,
+# channels:join. SEPARATE from Sentry's own Slack OAuth app — Sentry posts
+# via its own integration, this token is only for Terraform-managed channel
+# lifecycle. Generate via Slack admin → Apps → (your app) → OAuth & Permissions.
+slack_bot_token = "xoxb-..."
+
 #####################
 # Discord Configuration
 #####################

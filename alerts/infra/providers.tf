@@ -45,3 +45,19 @@ provider "restapi" {
   debug                = var.debug_mode
 }
 
+# Slack Web API provider — used by the sentry-bridge module to create and
+# archive the per-project `#sentry-<slug>` channels via `conversations.create`
+# and `conversations.archive`. Slack returns 200 OK on logical errors with
+# `{"ok": false, "error": "..."}`, so every restapi_object using this provider
+# MUST guard with a `lifecycle.postcondition` that asserts `.ok == true`.
+provider "restapi" {
+  alias = "slack"
+  uri   = "https://slack.com/api"
+  headers = {
+    "Authorization" = "Bearer ${var.slack_bot_token}"
+    "Content-Type"  = "application/json; charset=utf-8"
+  }
+  write_returns_object = true
+  debug                = var.debug_mode
+}
+

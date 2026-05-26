@@ -33,19 +33,23 @@ These steps happen outside Terraform and must be done first:
    `sentry_alert` resource is in beta — if the feature isn't on for your
    org, rules apply via API but won't render in Sentry's web UI. Check the
    project Alerts page for a "Monitors" tab.
-3. **6 Slack channels pre-created** (one per project), with the `@Sentry`
-   OAuth bot invited:
-   - `#sentry-analytics-api`
-   - `#sentry-analytics-mento-org`
-   - `#sentry-app-mento-org`
-   - `#sentry-governance-mento-org`
-   - `#sentry-minipay-dapp`
-   - `#sentry-reserve-mento-org`
-4. **`@Sentry` bot invited to `#alerts-critical`** — needed for the
-   critical fan-out.
+3. **Slack bot token (`xoxb-...`) provisioned** with `channels:read`,
+   `channels:manage`, `channels:join` scopes. Set as `var.slack_bot_token`
+   in `terraform.tfvars`. This token is used by the `restapi.slack` provider
+   to create + archive channels via the Slack Web API. It is SEPARATE from
+   Sentry's own Slack OAuth app integration.
+4. **`#alerts-critical` exists** and Sentry can post to it. Public channels
+   work out of the box (Sentry's OAuth app has `chat:write.public`). For a
+   private `#alerts-critical`, `/invite @Sentry` once.
 5. **Click-ops Sentry alert rules removed.** Any non-Terraform-managed rules
    pointing to Slack will fire in parallel and double-post — delete them in
    the Sentry UI before apply.
+
+The per-project `#sentry-<project-slug>` channels are created BY this
+module via `restapi_object.sentry_slack_channel` and do not need to be
+pre-created — Terraform handles them. If they already exist from an earlier
+manual setup, `terraform import` each one once (see "Importing existing
+channels" below).
 
 ## Inputs
 
@@ -62,20 +66,45 @@ These steps happen outside Terraform and must be done first:
   monitor IDs needed by `sentry_alert.monitor_ids`.
 - `data.sentry_organization_integration.slack` — the Sentry-owned Slack OAuth
   integration; provides the `integration_id` used by the Slack action.
+- `restapi_object.sentry_slack_channel[*]` — the per-project Slack channel
+  itself, created via Slack's `conversations.create` API. Archived (not
+  deleted) on destroy because Slack doesn't expose true channel deletion.
 - `sentry_alert.slack_default[*]` — per-project default alert posting to
-  `#sentry-<project-slug>`.
+  `#sentry-<project-slug>`. Uses the created channel's `id` for rate-limit-
+  safe routing.
 - `sentry_alert.slack_critical_fanout[*]` — per-project critical fan-out
   posting to `#alerts-critical` when `level = fatal` in `production`.
+
+## Importing existing channels
+
+If a `#sentry-<slug>` channel already exists in Slack (e.g. from a prior
+manual setup), Terraform will fail on `conversations.create` with
+`name_taken`. Import each one once:
+
+```bash
+# Find the channel ID via the Slack admin UI → channel → About → Channel ID
+terraform -chdir=alerts/infra import \
+  'module.sentry_bridge.restapi_object.sentry_slack_channel["analytics-api"]' \
+  C0123ABC456
+```
+
+The companion `restapi_object.sentry_slack_channel_member` resource will
+automatically join the bot to the imported channel via `conversations.join`
+on the next apply — no manual `/invite` needed. The bot must be a member
+for `conversations.archive` to succeed on destroy; `conversations.join` is
+idempotent (Slack returns `ok=true, already_in_channel=true` if the bot
+was added to the channel some other way), so freshly-created channels are
+a no-op for that resource.
 
 ## Adding a new project
 
 1. Create the project in Sentry (UI or API). Terraform does not manage
    project creation. Sentry auto-creates the default issue-stream monitor
    at project creation — usually instantaneous.
-2. Have a Slack admin create the matching `#sentry-<project-slug>` channel
-   and invite `@Sentry`.
-3. Run `terraform apply` — the project is auto-discovered and both alert
-   rules spin up.
+2. Run `terraform apply` — the project is auto-discovered and Terraform
+   creates the matching `#sentry-<project-slug>` Slack channel, the two
+   `sentry_alert` rules, and wires the alert action's `channel_id` to the
+   new channel automatically.
 
 > **Known limitation:** if a brand-new Sentry project lands in the org
 > before its default issue-stream monitor has been provisioned (rare;
@@ -88,8 +117,10 @@ These steps happen outside Terraform and must be done first:
 
 1. Delete the project in Sentry. Terraform won't delete projects.
 2. Run `terraform apply` — auto-discovery drops the project from the
-   `for_each` and both rules are destroyed. The Slack channel itself is not
-   Terraform-managed; archive it manually if desired.
+   `for_each` and both alert rules are destroyed AND the matching Slack
+   channel is archived (Slack doesn't support true channel deletion — the
+   channel becomes a tombstone in the workspace until a Slack admin purges
+   it via the admin UI if desired).
 
 ## Behavioral notes
 
@@ -107,7 +138,21 @@ These steps happen outside Terraform and must be done first:
 ## Rollback
 
 `git revert <PR-SHA>` + `terraform apply` re-creates the prior shape (Discord
-channels + `sentry_issue_alert` rules) within ~2 minutes. Caveats:
+channels + `sentry_issue_alert` rules) within ~2 minutes. **Important
+additional caveat introduced by Slack-channel ownership:** a revert that
+removes the `restapi_object.sentry_slack_channel` resources will archive
+every `#sentry-<slug>` Slack channel via `conversations.archive`. If the
+revert also re-creates `sentry_alert` resources that reference those channel
+names, those alerts post to archived channels (silent delivery failure). To
+revert safely without orphaning alerts in archived channels:
+
+1. `terraform state rm 'module.sentry_bridge.restapi_object.sentry_slack_channel["<slug>"]'`
+   for each project (drops the channels from state without archiving them).
+2. Then `git revert <PR-SHA>` + `terraform apply`.
+3. The channels remain in Slack with their history intact; the alerts route
+   to them normally.
+
+Other rollback caveats (carried over from PR #561):
 
 - **Discord channels get fresh snowflake IDs.** The original
   `#sentry-<project-slug>` Discord channels are destroyed by this PR, so a
