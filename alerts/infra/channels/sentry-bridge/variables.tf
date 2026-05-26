@@ -7,31 +7,25 @@ variable "sentry_organization_slug" {
   type        = string
 }
 
-variable "sentry_team_slug" {
-  description = "Sentry team slug"
+variable "sentry_slack_workspace_name" {
+  description = "Slack workspace name as it appears in Sentry's Slack integration (Settings → Integrations → Slack). Case-sensitive."
   type        = string
 }
 
 ######################
-# Discord Variables
+# Slack Channel Variables
 ######################
 
-variable "discord_server_id" {
-  description = "Discord server ID"
+variable "slack_critical_channel" {
+  description = "Slack channel name (with leading #) that receives the fatal-first-seen/regression critical fan-out from every project."
   type        = string
-}
+  default     = "#alerts-critical"
 
-variable "discord_server_name" {
-  description = "Discord server name as it appears in Sentry"
-  type        = string
-}
-
-variable "discord_category_id" {
-  description = "Discord category ID where alert channels will be created"
-  type        = string
-}
-
-variable "discord_sentry_role_id" {
-  description = "Discord role ID for the Sentry integration (right-click the Sentry role on Discord and copy ID)"
-  type        = string
+  # Sentry's Slack action accepts bare channel names silently (no plan/apply
+  # error) but the notification will never land without the leading '#'.
+  # Catch that footgun at plan time instead of at notify time.
+  validation {
+    condition     = can(regex("^#", var.slack_critical_channel))
+    error_message = "slack_critical_channel must start with '#' (e.g. '#alerts-critical')."
+  }
 }

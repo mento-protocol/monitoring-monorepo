@@ -48,7 +48,7 @@ output "quicknode_webhooks" {
 # Sentry Module Outputs
 #####################
 
-output "sentry_discord_channels" {
-  description = "Discord channel URLs for Sentry alerts by project"
-  value       = { for project, channel_id in module.sentry_bridge.discord_channels : project => "https://discord.com/channels/${var.discord_server_id}/${channel_id}" }
+output "sentry_slack_channels" {
+  description = "Slack channel names for Sentry alerts by project"
+  value       = module.sentry_bridge.slack_channels
 }

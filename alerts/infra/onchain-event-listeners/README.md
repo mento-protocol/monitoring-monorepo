@@ -350,7 +350,7 @@ module "onchain_event_listeners" {
 
 - [`channels/discord-channels`](../channels/discord-channels/README.md) - Creates Discord channels and webhooks
 - [`onchain-event-handler`](../onchain-event-handler/README.md) - Processes webhooks
-- [`channels/sentry-bridge`](../channels/sentry-bridge/README.md) - Sentry → Discord bridge (application error monitoring)
+- [`channels/sentry-bridge`](../channels/sentry-bridge/README.md) - Sentry → Slack bridge (application error monitoring)
 
 ## References
 
