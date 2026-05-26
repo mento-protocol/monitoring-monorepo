@@ -20,6 +20,11 @@ Candidate commands:
 output. Other cached gate tasks intentionally avoid broad workspace dependency
 pipelines.
 
+Dashboard build cache outputs include production `.next/**` artifacts but
+exclude `.next/cache/**` and `.next/dev/**`. The dev tree is created by local
+`next dev` sessions, is not required by `pnpm dashboard:size-limit`, and can
+inflate local Turbo cache archives by hundreds of MB per entry if captured.
+
 Do not cache:
 
 - `pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`

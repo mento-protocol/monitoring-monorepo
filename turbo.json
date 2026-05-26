@@ -83,7 +83,7 @@
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": ["VERCEL_ENV"],
-      "outputs": [".next/**", "!.next/cache/**"]
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
     "size-limit": {
       "cache": true,
@@ -91,6 +91,7 @@
       "inputs": [
         ".next/**",
         "!.next/cache/**",
+        "!.next/dev/**",
         ".size-limit.cjs",
         "package.json",
         "$TURBO_ROOT$/package.json",

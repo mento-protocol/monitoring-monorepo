@@ -88,10 +88,10 @@ The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](
 
 ### Infrastructure (Terraform)
 
-All Vercel and storage infrastructure is managed by Terraform in [`terraform/`](../terraform/). This covers:
+Most Vercel project and Upstash infrastructure is managed by Terraform in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. Terraform covers:
 
 - Vercel project creation and configuration (`root_directory`, `ignore_command`, Git integration)
-- All environment variables (Hasura URLs, Upstash Redis credentials, Blob token)
+- All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (address labels storage)
 
@@ -107,20 +107,21 @@ pnpm infra:apply   # apply changes
 
 ### Environment Variables
 
-Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The legacy `BLOB_READ_WRITE_TOKEN` is managed by the Vercel Blob store integration until the Blob OIDC cutover removes it.
+Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The Blob store identity variables are managed by the Vercel Blob store integration and should not be added to Terraform.
 
-| Variable                   | Source                   | Description                                                           |
-| -------------------------- | ------------------------ | --------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)                            |
-| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB                               |
-| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set                                 |
-| `BLOB_READ_WRITE_TOKEN`    | Vercel store integration | Legacy Blob token for backup cron until the store is upgraded to OIDC |
+| Variable                   | Source                   | Description                                      |
+| -------------------------- | ------------------------ | ------------------------------------------------ |
+| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)       |
+| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB          |
+| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set            |
+| `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes |
+| `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store     |
 
 ### Address Book & Backup Cron
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.
 
-A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape for user-uploaded restores. For snapshots too large to upload through Vercel's request body limit, call `POST /api/address-labels/restore?pathname=<blob-pathname>` with either a workspace session or `Authorization: Bearer $CRON_SECRET`; this server-side Blob restore preserves report `authorEmail`, `createdAt`, `updatedAt`, `source`, and `version` metadata from trusted first-party backups. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
+A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The backup and restore routes use Vercel Blob OIDC through the project-linked `address-labels` store; do not configure a static `BLOB_READ_WRITE_TOKEN` for the dashboard project. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape for user-uploaded restores. For snapshots too large to upload through Vercel's request body limit, call `POST /api/address-labels/restore?pathname=<blob-pathname>` with either a workspace session or `Authorization: Bearer $CRON_SECRET`; this server-side Blob restore preserves report `authorEmail`, `createdAt`, `updatedAt`, `source`, and `version` metadata from trusted first-party backups. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
 
 ### Security Posture — Preview Deployments
 
@@ -161,7 +162,7 @@ Run this once when setting up from scratch or recreating the Vercel project.
 vercel blob create-store address-labels --scope mentolabs
 ```
 
-For the current static-token flow, copy the `BLOB_READ_WRITE_TOKEN` from the output (or retrieve it later from the Vercel dashboard → Storage). After the project is upgraded to Blob OIDC, the backup and restore routes use the Vercel runtime identity instead and this env var should be removed from production and preview.
+Connect the store to `monitoring-dashboard` in the Vercel dashboard and use the Blob **Upgrade to OIDC** flow if the store was created before OIDC. The integration sets `BLOB_STORE_ID` and `BLOB_WEBHOOK_PUBLIC_KEY` on the project. Do not add `BLOB_READ_WRITE_TOKEN` to production or preview; the dashboard backup and restore routes use the Vercel runtime identity.
 
 **2. Delete the existing Vercel project (if recreating)**
 
