@@ -58,6 +58,7 @@ channels" below).
 | `sentry_organization_slug`    | Sentry org slug (e.g. `mento-labs`)                                |
 | `sentry_slack_workspace_name` | Slack workspace name as shown in Sentry's Slack integration        |
 | `slack_critical_channel`      | Override the critical fan-out channel (default `#alerts-critical`) |
+| `slack_critical_channel_id`   | Slack channel ID for the critical fan-out channel                  |
 
 ## Resources Created
 
@@ -73,7 +74,9 @@ channels" below).
   `#sentry-<project-slug>`. Uses the created channel's `id` for rate-limit-
   safe routing.
 - `sentry_alert.slack_critical_fanout[*]` — per-project critical fan-out
-  posting to `#alerts-critical` when `level = fatal` in `production`.
+  posting to `#alerts-critical` when `level = fatal` in `production`. Uses the
+  channel ID as well as the name so Sentry does not need to resolve the Slack
+  channel on each notification.
 
 ## Importing existing channels
 

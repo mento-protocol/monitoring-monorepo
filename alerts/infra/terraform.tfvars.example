@@ -17,6 +17,7 @@ sentry_slack_workspace_name = "Mento Labs"
 # project also fan out. Defaults to #alerts-critical alongside Grafana page-
 # grade alerts; override only if your on-call routing differs.
 # sentry_slack_critical_channel = "#alerts-critical"
+# sentry_slack_critical_channel_id = "C0AURREPNDU"
 
 # Slack bot OAuth token (xoxb-...) used by the `restapi.slack` provider in
 # `alerts/infra/providers.tf` for all Slack channel + message operations.

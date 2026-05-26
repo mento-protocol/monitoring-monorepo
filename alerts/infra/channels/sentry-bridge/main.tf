@@ -93,7 +93,10 @@ resource "sentry_alert" "slack_critical_fanout" {
           slack = {
             integration_id = data.sentry_organization_integration.slack.id
             channel_name   = var.slack_critical_channel
-            tags           = local.slack_tags
+            # channel_id matches the per-project Slack action above: it lets
+            # Sentry route directly without resolving the channel name.
+            channel_id = var.slack_critical_channel_id
+            tags       = local.slack_tags
           }
         }
       ]
