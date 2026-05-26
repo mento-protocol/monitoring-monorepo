@@ -55,7 +55,7 @@ class ChainDetectionError extends Error {
  *
  * @param logs - Array of decoded log entries from QuickNode webhook
  * @param context - Event context built from first pass
- * @returns Array of successfully processed events
+ * @returns Successfully processed events plus the count skipped by budget
  */
 export async function processEvents(
   logs: QuickNodeWebhookPayload["result"],
@@ -73,15 +73,23 @@ export async function processEvents(
       ? setTimeout(() => abortController.abort(), remainingMs)
       : undefined;
 
-  // Filter out logs that should be skipped before processing.
-  const logsToProcess = logs.filter((logEntry) => {
-    // Drop null / non-object entries at filter time. Payload validation only
-    // checks that `result` is an array, so a malformed batch entry would
-    // otherwise reach processEvent → validateLog → the per-event catch (all
-    // of which read fields like `transactionHash`) and throw a TypeError that
-    // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
-    // duplicate Discord deliveries for events that already succeeded.
-    if (logEntry === null || typeof logEntry !== "object") return false;
+  // Filter malformed entries before processing, then prioritize Safe tx logs.
+  // ExecutionSuccess is only a fallback notification when the same tx has no
+  // SafeMultiSigTransaction; if the budget is tight, the richer Safe tx alert
+  // must be attempted before lower-priority logs can consume the budget.
+  const candidateLogs = logs
+    .filter((logEntry) => {
+      // Drop null / non-object entries at filter time. Payload validation only
+      // checks that `result` is an array, so a malformed batch entry would
+      // otherwise reach processEvent → validateLog → the per-event catch (all
+      // of which read fields like `transactionHash`) and throw a TypeError that
+      // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
+      // duplicate Discord deliveries for events that already succeeded.
+      return logEntry !== null && typeof logEntry === "object";
+    })
+    .sort((left, right) => eventPriority(left) - eventPriority(right));
+
+  const logsToProcess = candidateLogs.filter((logEntry) => {
     // Skip ExecutionSuccess if we already have SafeMultiSigTransaction for this tx.
     if (
       logEntry.name === "ExecutionSuccess" &&
@@ -153,6 +161,10 @@ export async function processEvents(
   }
 
   return { processedEvents, skipped };
+}
+
+function eventPriority(logEntry: QuickNodeWebhookPayload["result"][0]): number {
+  return logEntry.name === "SafeMultiSigTransaction" ? 0 : 1;
 }
 
 /**
