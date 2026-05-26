@@ -25,6 +25,17 @@ interface SlackMessage {
   blocks: SlackBlock[];
 }
 
+class SlackApiError extends Error {
+  constructor(
+    public readonly slackError: string,
+    public readonly status: number,
+    public readonly statusText?: string,
+  ) {
+    super(`Slack chat.postMessage failed: ${slackError}`);
+    this.name = "SlackApiError";
+  }
+}
+
 export async function formatSlackMessage(
   eventName: string,
   log: QuickNodeDecodedLog,
@@ -50,19 +61,20 @@ function formatSlackMessageFromContent(
     .map((field) => `*${field.name}*\n${toSlackMrkdwn(field.value)}`)
     .join("\n\n");
   const text = `${content.title}: ${stripMarkdown(content.description)}`;
-
-  return {
-    text,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*${escapeSlackText(content.title)}*\n${toSlackMrkdwn(
-            content.description,
-          )}`,
-        },
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${escapeSlackText(content.title)}*\n${toSlackMrkdwn(
+          content.description,
+        )}`,
       },
+    },
+  ];
+
+  if (fieldLines.length > 0) {
+    blocks.push(
       { type: "divider" },
       {
         type: "section",
@@ -71,18 +83,24 @@ function formatSlackMessageFromContent(
           text: fieldLines,
         },
       },
+    );
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [
       {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `<!date^${Math.floor(
-              Date.parse(content.timestamp) / 1000,
-            )}^{date_short_pretty} {time_secs}|${content.timestamp}>`,
-          },
-        ],
+        type: "mrkdwn",
+        text: `<!date^${Math.floor(
+          Date.parse(content.timestamp) / 1000,
+        )}^{date_short_pretty} {time_secs}|${content.timestamp}>`,
       },
     ],
+  });
+
+  return {
+    text,
+    blocks,
   };
 }
 
@@ -147,6 +165,13 @@ function isRetryableError(error: unknown): boolean {
     return false;
   }
 
+  if (error instanceof SlackApiError) {
+    return (
+      SLACK_RETRY_CONFIG.retryableStatusCodes.includes(error.status) ||
+      SLACK_RETRY_CONFIG.retryableSlackErrors.includes(error.slackError)
+    );
+  }
+
   const axiosError = error as AxiosError<{ error?: string }>;
   const status = axiosError.response?.status;
   const slackError = axiosError.response?.data?.error;
@@ -170,6 +195,33 @@ function isRetryableError(error: unknown): boolean {
 
 function calculateRetryDelay(attempt: number): number {
   return SLACK_RETRY_CONFIG.retryDelayMs * Math.pow(2, attempt);
+}
+
+function getSlackError(error: unknown): string | undefined {
+  if (error instanceof SlackApiError) {
+    return error.slackError;
+  }
+
+  const axiosError = error as AxiosError<{ error?: string }>;
+  return axiosError.response?.data?.error;
+}
+
+function getStatus(error: unknown): number | undefined {
+  if (error instanceof SlackApiError) {
+    return error.status;
+  }
+
+  const axiosError = error as AxiosError;
+  return axiosError.response?.status;
+}
+
+function getStatusText(error: unknown): string | undefined {
+  if (error instanceof SlackApiError) {
+    return error.statusText;
+  }
+
+  const axiosError = error as AxiosError;
+  return axiosError.response?.statusText;
 }
 
 export async function sendToSlack(
@@ -202,14 +254,11 @@ export async function sendToSlack(
       );
 
       if (response.data?.ok !== true) {
-        const error = new Error(
-          `Slack chat.postMessage failed: ${response.data?.error ?? "unknown"}`,
-        ) as AxiosError;
-        error.response = {
-          ...response,
-          data: response.data,
-        };
-        throw error;
+        throw new SlackApiError(
+          response.data?.error ?? "unknown",
+          response.status,
+          response.statusText,
+        );
       }
 
       if (attempt > 0) {
@@ -228,22 +277,21 @@ export async function sendToSlack(
       return;
     } catch (error) {
       lastError = error;
-      const axiosError = error as AxiosError<{ error?: string }>;
       const isLastAttempt = attempt === SLACK_RETRY_CONFIG.maxRetries;
 
       logger.warn("Slack postMessage attempt failed", {
         attempt: attempt + 1,
         maxRetries: SLACK_RETRY_CONFIG.maxRetries + 1,
         error:
-          axiosError instanceof Error
+          error instanceof Error
             ? {
-                name: axiosError.name,
-                message: axiosError.message,
+                name: error.name,
+                message: error.message,
               }
-            : String(axiosError),
-        status: axiosError.response?.status,
-        statusText: axiosError.response?.statusText,
-        slackError: axiosError.response?.data?.error,
+            : String(error),
+        status: getStatus(error),
+        statusText: getStatusText(error),
+        slackError: getSlackError(error),
       });
 
       if (!isLastAttempt && isRetryableError(error)) {
@@ -260,19 +308,18 @@ export async function sendToSlack(
     }
   }
 
-  const axiosError = lastError as AxiosError<{ error?: string }>;
   logger.error("Slack postMessage failed after all retries", {
     error:
-      axiosError instanceof Error
+      lastError instanceof Error
         ? {
-            name: axiosError.name,
-            message: axiosError.message,
-            stack: axiosError.stack,
+            name: lastError.name,
+            message: lastError.message,
+            stack: lastError.stack,
           }
-        : String(axiosError),
-    status: axiosError.response?.status,
-    statusText: axiosError.response?.statusText,
-    slackError: axiosError.response?.data?.error,
+        : String(lastError),
+    status: getStatus(lastError),
+    statusText: getStatusText(lastError),
+    slackError: getSlackError(lastError),
   });
 
   throw lastError;

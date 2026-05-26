@@ -13,7 +13,7 @@ import {
   getChainConfig,
 } from "./constants";
 import { logger } from "./logger";
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "./types";
+import type { NotificationField, QuickNodeDecodedLog } from "./types";
 
 /**
  * Map chain names to viem chain objects
@@ -367,7 +367,7 @@ export async function decodeEventData(
   txHash?: string,
   chainName: string = "celo",
   signal?: AbortSignal,
-): Promise<DiscordEmbedField[]> {
+): Promise<NotificationField[]> {
   const chainConfig = getChainConfig(chainName);
   const chainTokenConfig = {
     decimals: chainConfig?.nativeToken.decimals || DEFAULT_TOKEN_DECIMALS,

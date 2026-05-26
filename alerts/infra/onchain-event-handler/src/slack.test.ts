@@ -2,9 +2,24 @@
  * Unit tests for Slack message formatting.
  */
 
-import { describe, expect, it, vi } from "vitest";
-import { formatSlackMessage } from "./slack";
+import axios from "axios";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatSlackMessage, sendToSlack } from "./slack";
 import type { QuickNodeDecodedLog } from "./types";
+
+vi.mock("axios", () => ({
+  default: {
+    post: vi.fn(),
+  },
+}));
+
+vi.mock("./logger", () => ({
+  logger: {
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  },
+}));
 
 vi.mock("./config", () => ({
   default: {
@@ -68,5 +83,92 @@ describe("formatSlackMessage", () => {
     expect(JSON.stringify(message.blocks)).toContain(
       "<https://app.safe.global/transactions/tx?safe=celo:0x123&id=multisig_0x123_0xtx1|Open TX in Safe UI>",
     );
+  });
+});
+
+describe("sendToSlack", () => {
+  const postMock = vi.mocked(axios.post);
+  const message = {
+    text: "Test Multisig: AddedOwner",
+    blocks: [
+      {
+        type: "section" as const,
+        text: {
+          type: "mrkdwn" as const,
+          text: "*Test Multisig*",
+        },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    postMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("posts Slack messages with token, channel, and unfurling disabled", async () => {
+    postMock.mockResolvedValue({
+      data: { ok: true },
+      status: 200,
+      statusText: "OK",
+    });
+
+    await sendToSlack("xoxb-test", "Calerts", message);
+
+    expect(postMock).toHaveBeenCalledOnce();
+    expect(postMock).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.postMessage",
+      {
+        channel: "Calerts",
+        text: message.text,
+        blocks: message.blocks,
+        unfurl_links: false,
+        unfurl_media: false,
+      },
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer xoxb-test",
+        }),
+      }),
+    );
+  });
+
+  it("does not retry non-retryable Slack API errors", async () => {
+    postMock.mockResolvedValue({
+      data: { ok: false, error: "invalid_auth" },
+      status: 200,
+      statusText: "OK",
+    });
+
+    await expect(sendToSlack("xoxb-test", "Calerts", message)).rejects.toThrow(
+      "invalid_auth",
+    );
+
+    expect(postMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries retryable Slack rate limit responses", async () => {
+    vi.useFakeTimers();
+    postMock
+      .mockResolvedValueOnce({
+        data: { ok: false, error: "ratelimited" },
+        status: 429,
+        statusText: "Too Many Requests",
+      })
+      .mockResolvedValueOnce({
+        data: { ok: true },
+        status: 200,
+        statusText: "OK",
+      });
+
+    const result = sendToSlack("xoxb-test", "Calerts", message);
+    await vi.advanceTimersByTimeAsync(1000);
+    await result;
+
+    expect(postMock).toHaveBeenCalledTimes(2);
   });
 });

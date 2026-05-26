@@ -66,6 +66,7 @@ export async function formatNotificationContent(
     description: `\`${eventName}\` event detected on ${multisigName} on ${chainDisplay}`,
     color,
     fields,
+    // QuickNode decoded logs do not include block time; record dispatch time.
     timestamp: new Date().toISOString(),
   };
 }

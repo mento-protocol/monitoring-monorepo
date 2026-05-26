@@ -40,7 +40,10 @@ resource "restapi_object" "channel_member" {
   create_path = "/conversations.join"
   read_path   = "/conversations.info?channel={id}"
 
-  # Keep bot membership until the channel resource archives the channel.
+  # Deliberate no-op destroy. Slack has no "leave this bot member only when the
+  # channel itself is being archived" API shape that maps cleanly to this
+  # resource, and the parent channel destroy already archives the channel.
+  # /api.test is a stable Slack auth/health endpoint with no channel side effect.
   destroy_path   = "/api.test"
   destroy_method = "POST"
 

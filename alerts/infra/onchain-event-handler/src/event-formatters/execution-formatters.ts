@@ -2,13 +2,13 @@
  * Formatters for execution events (ExecutionSuccess, ExecutionFailure)
  */
 
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "../types";
+import type { NotificationField, QuickNodeDecodedLog } from "../types";
 
 export async function formatExecutionEvent(
   log: QuickNodeDecodedLog,
   chainConfig: { decimals: number; symbol: string },
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.payment !== undefined) {
     try {

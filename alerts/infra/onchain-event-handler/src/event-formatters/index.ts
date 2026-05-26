@@ -3,7 +3,7 @@
  * Maps event names to their formatter functions
  */
 
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "../types";
+import type { NotificationField, QuickNodeDecodedLog } from "../types";
 import * as executionFormatters from "./execution-formatters";
 import * as moduleFormatters from "./module-formatters";
 import * as ownerFormatters from "./owner-formatters";
@@ -19,7 +19,7 @@ type EventFormatter = (
   log: QuickNodeDecodedLog,
   chainConfig: { decimals: number; symbol: string },
   txHash?: string,
-) => Promise<DiscordEmbedField[]>;
+) => Promise<NotificationField[]>;
 
 /**
  * Registry of event formatters

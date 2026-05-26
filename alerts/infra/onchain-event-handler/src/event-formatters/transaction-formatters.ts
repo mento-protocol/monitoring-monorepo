@@ -7,13 +7,13 @@ import {
   getBlockExplorer,
   getTransactionExecutor,
 } from "../utils";
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "../types";
+import type { NotificationField, QuickNodeDecodedLog } from "../types";
 
 export async function formatSafeReceivedEvent(
   log: QuickNodeDecodedLog,
   chainConfig: { decimals: number; symbol: string },
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.sender && typeof log.sender === "string") {
     fields.push({
@@ -49,8 +49,8 @@ export async function formatSafeMultiSigTransactionEvent(
   chainName: string,
   txHash?: string,
   signal?: AbortSignal,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
   const blockExplorer = getBlockExplorer(chainName);
 
   if (log.to && typeof log.to === "string") {

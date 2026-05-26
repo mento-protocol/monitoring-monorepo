@@ -17,7 +17,7 @@ export interface QuickNodeWebhookPayload {
   result: QuickNodeDecodedLog[];
 }
 
-export interface DiscordEmbedField {
+export interface NotificationField {
   name: string;
   value: string;
   inline?: boolean;
@@ -27,7 +27,7 @@ export interface DiscordEmbed {
   title: string;
   description: string;
   color: number;
-  fields: DiscordEmbedField[];
+  fields: NotificationField[];
   timestamp: string;
 }
 
@@ -35,17 +35,12 @@ export interface DiscordMessage {
   embeds: DiscordEmbed[];
 }
 
-export interface NotificationField {
-  name: string;
-  value: string;
-  inline?: boolean;
-}
-
 export interface NotificationContent {
   title: string;
   description: string;
   color: number;
   fields: NotificationField[];
+  // QuickNode decoded logs do not include block time; this is formatter dispatch time.
   timestamp: string;
 }
 
