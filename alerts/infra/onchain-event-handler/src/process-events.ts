@@ -62,7 +62,7 @@ export async function processEvents(
   context: EventContext,
   options: ProcessEventsOptions = {},
 ): Promise<ProcessEventsResult> {
-  const { txHashMap } = context;
+  const { txHashMap, hasSafeMultiSigTx } = context;
   const now = options.now ?? Date.now;
   const budgetMs = options.budgetMs ?? DEFAULT_PROCESSING_BUDGET_MS;
   const startedAt = options.startedAtMs ?? now();
@@ -87,7 +87,11 @@ export async function processEvents(
       // duplicate Discord deliveries for events that already succeeded.
       return logEntry !== null && typeof logEntry === "object";
     })
-    .sort((left, right) => eventPriority(left) - eventPriority(right));
+    .sort(
+      (left, right) =>
+        eventPriority(left, hasSafeMultiSigTx) -
+        eventPriority(right, hasSafeMultiSigTx),
+    );
 
   const logsToProcess = candidateLogs;
 
@@ -169,9 +173,18 @@ export async function processEvents(
   return { processedEvents, skipped };
 }
 
-function eventPriority(logEntry: QuickNodeWebhookPayload["result"][0]): number {
+function eventPriority(
+  logEntry: QuickNodeWebhookPayload["result"][0],
+  hasSafeMultiSigTx: Set<string>,
+): number {
   if (logEntry.name === "SafeMultiSigTransaction") return 0;
-  if (logEntry.name === "ExecutionSuccess") return 2;
+  if (
+    logEntry.name === "ExecutionSuccess" &&
+    typeof logEntry.transactionHash === "string" &&
+    hasSafeMultiSigTx.has(logEntry.transactionHash.toLowerCase())
+  ) {
+    return 2;
+  }
   return 1;
 }
 
