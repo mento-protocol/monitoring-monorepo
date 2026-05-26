@@ -20,6 +20,9 @@ resource "grafana_rule_group" "oracle_relayers" {
       labels = {
         service  = "oracle-relayers"
         severity = rule.value.env == "prod" ? "page" : "warning"
+        # Consumed by the Slack template to build per-explorer links to the
+        # relayer signer wallet.
+        explorer = rule.value.explorer
       }
 
       data {

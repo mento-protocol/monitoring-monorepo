@@ -10,17 +10,39 @@ EOT
 
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
-  name     = "Slack: Stale Price Alert Message"
+  name = "Slack: Stale Price Alert Message"
+  # Per-feed celoscan link to the relayer signer comes from
+  # `local.celo_relayer_signers` (mirror of aegis/config.yaml). Cloud function
+  # link uses the Logs Explorer URL pattern from `mento-protocol/oracle-relayer`
+  # (`bin/get-function-logs-url.sh`) with `resource.labels.service_name=relay-<chain>`
+  # AND `labels.rateFeed=<slash-form>` filters and the mainnet project_id from
+  # `local.oracle_relayer_mainnet_project_id`. Title link points at the
+  # Chainlink data-feed page on Celo (matches the trading_mode template
+  # convention; falls back to the Grafana alert details URL on non-Celo chains
+  # where Chainlink isn't published).
   template = <<-EOT
 {{ define "slack.oracle_stale_price_alert_message" }}
+{{ $relayers := dict ${join(" ", [for k, v in local.celo_relayer_signers : format("%q %q", k, v)])} }}
 {{ range .Alerts.Firing -}}
-*<{{ .GeneratorURL }}|Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}>*
-- Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
-- Check if the relayer cloud function is still being triggered regularly
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $hyphen := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $enc := replace "/" "%2F" $slash -}}
+{{ $chain := .Labels.chain | title -}}
+{{ $relayer := index $relayers .Labels.rateFeed -}}
+{{ $titleURL := .GeneratorURL -}}
+{{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
+*<{{ $titleURL }}|Stale price for the {{ $slash }} rate feed on {{ $chain }}>*
+- Check the latest transactions of the {{ if $relayer -}}<https://{{ .Labels.explorer }}/address/{{ $relayer }}|{{ $slash }} relayer on {{ $chain }}>{{- else -}}{{ $slash }} relayer on {{ $chain }}{{- end }}
+- Check if the <https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}|relayer cloud function> is still being triggered regularly
 
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-*<{{ .GeneratorURL }}|{{ .Labels.rateFeed }} price is fresh again on {{ .Labels.chain | title }}>*
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $hyphen := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $chain := .Labels.chain | title -}}
+{{ $titleURL := .GeneratorURL -}}
+{{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
+*<{{ $titleURL }}|{{ $slash }} price is fresh again on {{ $chain }}>*
 {{ end -}}
 {{ end }}
 EOT

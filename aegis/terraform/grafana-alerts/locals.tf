@@ -89,6 +89,52 @@ locals {
   # Create a regex pattern for the weekend-disabled feeds
   weekend_disabled_feeds_pattern = join("|", local.weekend_disabled_feeds)
 
+  # Per-feed Celo relayer signer wallets. Used by the Slack stale-price alert
+  # template to link "<pair> relayer on Celo" to the signer's celoscan page.
+  # Mirror of `global.vars.RelayerSigner<feed>` in `aegis/config.yaml`. Monad
+  # relayers aren't in this map yet — the template falls back to .GeneratorURL
+  # when the feed isn't present (so the alert still has a clickable link).
+  celo_relayer_signers = {
+    AUDUSD   = "0x6fa93B73F00f9c61f726bCE15f327686de05b696"
+    AUSDUSD  = "0xBF8a08d7DeC72efF538B48Ee332dd4eE938e0b1f"
+    BRLUSD   = "0x7a82bfDeC85bF54B240065CdC20A811BF56528C8"
+    CADUSD   = "0x857ad1CeE80c3e72f2d8e558B773E63dAB8185fe"
+    CELOAUD  = "0x2821d073C30876187198f573Bf544200ff95bf7e"
+    CELOCAD  = "0x0faBAd32E6cb81CC20756E65b4df7B2553CFf4eE"
+    CELOCHF  = "0x658f09B516801Eb390d150EB601dD11428A03028"
+    CELOETH  = "0x55A93586a5535d1B8E10f2eB5C76b33E558F19e3"
+    CELOCOP  = "0xd8dfB551157B0B80D41787C08885e09F994B7cC5"
+    CELOGBP  = "0x7924EaC31d10682aa3049E957E3bB72bA3FF4730"
+    CELOGHS  = "0x43C9190F712C1f3c923f02073499A97cf8a9348b"
+    CELOJPY  = "0x9174bc946D0a4274ed221C75F66128174BdFB099"
+    CELOKES  = "0x34cD259E3e92B9FFEA38E8c84665A1Ca289bfB32"
+    CELONGN  = "0x5008F97b7713e2166041375a316990868F92B3d2"
+    CELOPHP  = "0xCCD3D48D6a5340156d85DC5A43743e65Bd4a6E51"
+    CELOXOF  = "0xB3B87B49De2C5012467505cAb551773023B89aEB"
+    CELOZAR  = "0x17C8c519CD32abDE464D4FA19c7461A399eE2c5a"
+    CHFUSD   = "0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d"
+    COPUSD   = "0x95C365fBE39d9b8002f4683b0Bb6020680D9C4E0"
+    EUROCEUR = "0xb0491394B775AE9BCf85Fb3835d232cEBe514Cf5"
+    EURUSD   = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"
+    EURXOF   = "0xDE96A69fAba07A8dfF8Bd9309c245bDf4175d3E7"
+    GBPUSD   = "0x8103bE713aa149928D26c1b3873Ee240F8F7429E"
+    GHSUSD   = "0x36b103087c5c46b1515c32a2d91928181F8d39f8"
+    JPYUSD   = "0xF4615456f71157F758b7FaCaF62d57E339a664D7"
+    KESUSD   = "0x3c05004b74e0fa466B24ca19929ee662d5BbEc45"
+    NGNUSD   = "0xbfA9203552e9b02035034befDFE012aC5029B4F9"
+    PHPUSD   = "0xb2cE6fa691b58Ff4fadBd610a8e09427d2918025"
+    USDCUSD  = "0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3"
+    USDTUSD  = "0x36a5C808e25AF0F5e406Eaa831d1749542378794"
+    XOFUSD   = "0x2C5dB0140b6B25CA6a37304198095B23E2604dF2"
+    ZARUSD   = "0xc0342D31Cc875f3dC85E3Ab352e60698444197AE"
+  }
+
+  # GCP project for mainnet relayer cloud functions. Used by the Slack
+  # stale-price template's "relayer cloud function" link. Sourced from
+  # `mento-protocol/oracle-relayer` repo (`.project_vars_cache`,
+  # `infra/main.tf` random_project_id suffix).
+  oracle_relayer_mainnet_project_id = "oracle-relayer-mainnet-0527"
+
   # Each entry maps alertnames → three template families:
   #   - title_template / message_template       → Discord (kept during dual-route, removed after cutover)
   #   - slack_*                                 → Slack mrkdwn (message-templates-slack.tf)
