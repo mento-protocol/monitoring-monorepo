@@ -1,0 +1,110 @@
+name: Dependabot auto-merge
+
+# Tiered auto-merge for Dependabot PRs:
+#  - Patch / minor bumps → auto-merge once required CI checks pass.
+#  - Major bumps → left for human review (Cursor Bugbot already posts a
+#    risk summary on every Dependabot PR; @codex review is on-demand for
+#    a deeper second opinion).
+#  - Security advisories on any tier (incl. npm via pnpm-lock.yaml) bypass
+#    the Dependabot cooldown and auto-merge if classified non-major.
+#  - PRs that change maintainership are held back as a supply-chain signal.
+#  - anthropics/claude-code-action is never auto-merged (self-loop: if a
+#    regression lands we lose the reviewer that catches its own follow-ups).
+#
+# The job only runs `gh pr merge --auto` — no checkout, no execution against
+# the PR head — so `pull_request` is safe to use even though Dependabot PRs
+# carry external commits. The merge itself still waits for every required
+# status check in the branch ruleset (CI / Vercel / Code Quality).
+#
+# Workflow-injection hygiene: every PR-derived value is passed through env:
+# instead of interpolated into run: scripts (see
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/).
+
+# Explicit `types:` drops the default `reopened` event. Otherwise a human
+# closing a Dependabot PR (the canonical "do not merge this") would be
+# undone by Dependabot reopening on its next rebase — the workflow would
+# re-fire and re-enable auto-merge. Closing-without-merge needs to be a
+# durable veto.
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# `permissions: read-all` is required by checkov (CKV2_GHA_1) at the top
+# level. Job-level `permissions:` REPLACES this, so the auto-merge job
+# below sets the exact write scopes it needs without inheritance. Any
+# future job added to this workflow will inherit `read-all` unless it
+# overrides — which is the safe-by-default behavior we want.
+permissions: read-all
+
+# Per-PR concurrency so rapid `synchronize` events (e.g. Dependabot
+# rebasing on conflict) don't race two `gh pr merge --auto` calls
+# against the same PR. `cancel-in-progress: true` is safe because the
+# job is idempotent — the latest run re-enables auto-merge against the
+# current head and discards the in-flight stale-head run.
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # alert-lookup is intentionally omitted. It populates
+          # ghsa-id/cvss for security advisories but requires a PAT or
+          # GitHub App installation token — `secrets.GITHUB_TOKEN` lacks
+          # the `vulnerabilityAlerts` GraphQL scope, and fetch-metadata
+          # bubbles the resulting 401 to `core.setFailed()` (see
+          # https://github.com/dependabot/fetch-metadata/blob/v3.1.0/src/main.ts
+          # catch block), which would hard-fail this step on every
+          # Dependabot PR and silently disable auto-merge.
+
+      - name: Log classification
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPENDENCY_NAMES: ${{ steps.meta.outputs.dependency-names }}
+          DEPENDENCY_GROUP: ${{ steps.meta.outputs.dependency-group }}
+          MAINTAINER_CHANGES: ${{ steps.meta.outputs.maintainer-changes }}
+        run: |
+          echo "update-type:        $UPDATE_TYPE"
+          echo "dependency-names:   $DEPENDENCY_NAMES"
+          echo "dependency-group:   $DEPENDENCY_GROUP"
+          echo "maintainer-changes: $MAINTAINER_CHANGES"
+
+      - name: Enable auto-merge for low-risk tiers
+        # Three gates, all must hold for auto-merge:
+        #   1. Update-type is explicitly minor or patch. Positive allowlist
+        #      (not `!= semver-major`) so unparsable versions, non-semver
+        #      tags, and any future fetch-metadata classification we don't
+        #      explicitly opt into fail CLOSED instead of slipping through.
+        #      fetch-metadata returns '' when versions can't be parsed
+        #      (src/dependabot/update_metadata.ts:calculateUpdateType).
+        #   2. fetch-metadata's maintainer-changes flag is not set — it's
+        #      a literal regex match for "Maintainer changes" in the PR
+        #      body, so it catches what Dependabot itself flags but isn't
+        #      an authoritative ownership audit. Still a useful low-cost
+        #      tripwire for the npm-ecosystem case.
+        #   3. Not bumping any Anthropic-published action OR any Dependabot-
+        #      published action (both are self-loops: claude-code-action is
+        #      the auto-reviewer, dependabot/fetch-metadata is what classifies
+        #      update-type for this very workflow). Mirror of the
+        #      exclude-patterns in dependabot.yml.
+        if: |
+          (steps.meta.outputs.update-type == 'version-update:semver-minor'
+           || steps.meta.outputs.update-type == 'version-update:semver-patch')
+          && steps.meta.outputs.maintainer-changes != 'true'
+          && !contains(steps.meta.outputs.dependency-names, 'anthropics/')
+          && !contains(steps.meta.outputs.dependency-names, 'dependabot/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
