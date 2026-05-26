@@ -14,6 +14,7 @@ import process from "node:process";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { put } from "@vercel/blob";
+import { privateBlobAccessHint } from "./blob-private-hint.mjs";
 
 const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
 if (!blobToken) {
@@ -94,14 +95,8 @@ async function main() {
 
 main().catch((err) => {
   console.error("✗ FAILED:", err.message);
-  if (err.message?.includes("store") || err.message?.includes("access")) {
-    console.error(
-      "  Hint: if this is a store-type error, the token may be scoped to a public store.",
-    );
-    console.error(
-      "  Try changing access: 'private' → 'public' in mirror-to-blob.mjs.",
-    );
-  }
+  const hint = privateBlobAccessHint(err.message);
+  if (hint) console.error(`  ${hint}`);
   console.error(err.stack);
   process.exit(1);
 });

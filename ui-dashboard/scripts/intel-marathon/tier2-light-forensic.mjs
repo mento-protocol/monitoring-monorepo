@@ -26,6 +26,7 @@ import {
   existsSync,
   readFileSync,
 } from "node:fs";
+import { selectTier2Queue } from "./tier2-queue.mjs";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const HASURA_URL = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql";
@@ -151,8 +152,15 @@ async function getLabels() {
   return map;
 }
 
-async function hexistsArkhamDeep(addr) {
-  const { result } = await upstash(`/hexists/intel_deep/${addr.toLowerCase()}`);
+async function getArkhamDeepDoneSet() {
+  const { result } = await upstash(`/hkeys/intel_deep`);
+  return new Set((result ?? []).map((address) => address.toLowerCase()));
+}
+
+async function hasArkhamDeepRecord(address) {
+  const { result } = await upstash(
+    `/hexists/intel_deep/${address.toLowerCase()}`,
+  );
   return result === 1;
 }
 
@@ -502,9 +510,18 @@ async function main() {
     JSON.stringify(ranked, null, 2),
   );
 
-  // Filter to limit, sliced after priority sort.
-  const queue = ranked.slice(0, limit);
+  const doneDeep = await getArkhamDeepDoneSet();
+  // Resume filtering must happen before enforcing --limit so previously
+  // completed records do not consume the current run's processing budget.
+  const { queue, skipResume: prefilteredResume } = await selectTier2Queue(
+    ranked,
+    limit,
+    (address) => doneDeep.has(address.toLowerCase()),
+  );
   console.log(`→ Will process ${queue.length} addresses (limit=${limit})`);
+  if (prefilteredResume > 0) {
+    console.log(`  skipped existing intel_deep records: ${prefilteredResume}`);
+  }
 
   // Load existing labels once for tag merge.
   const existingLabels = await getLabels();
@@ -513,13 +530,11 @@ async function main() {
   let attested = 0;
   let nullCount = 0;
   let errorCount = 0;
-  let skipResume = 0;
+  let skipResume = prefilteredResume;
 
   for (const candidate of queue) {
     const address = candidate.address;
-
-    // Resume check
-    if (await hexistsArkhamDeep(address)) {
+    if (await hasArkhamDeepRecord(address)) {
       skipResume++;
       continue;
     }

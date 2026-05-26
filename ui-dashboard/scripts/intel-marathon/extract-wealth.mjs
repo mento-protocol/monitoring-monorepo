@@ -13,6 +13,7 @@
 
 import process from "node:process";
 import { appendFileSync, mkdirSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const OUT_DIR = ".intel-marathon";
@@ -25,11 +26,6 @@ const required = [
   "UPSTASH_REDIS_REST_TOKEN",
   "ARKHAM_API_KEY",
 ];
-const missing = required.filter((k) => !process.env[k]);
-if (missing.length > 0) {
-  console.error(`Missing env: ${missing.join(", ")}`);
-  process.exit(1);
-}
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 const arkhamKey = process.env.ARKHAM_API_KEY;
@@ -151,7 +147,84 @@ async function arkhamGet(path) {
   return { status: 200, data: await res.json() };
 }
 
+export function buildWealthWriteCommand({
+  address,
+  sources,
+  balances,
+  portfolioSnapshots,
+  fetchedAt = new Date().toISOString(),
+}) {
+  if (balances.status === 404) {
+    return { ok: false, status: "notFound", reason: "balances_not_found" };
+  }
+  if (balances.status !== 200 || balances.data == null) {
+    return { ok: false, status: "incomplete", reason: "balances_incomplete" };
+  }
+
+  const portfolio = {};
+  for (const { label, ts, response } of portfolioSnapshots) {
+    if (response?.status === 404) {
+      return {
+        ok: false,
+        status: "notFound",
+        reason: `portfolio_${label}_not_found`,
+      };
+    }
+    if (response?.status !== 200 || response.data == null) {
+      return {
+        ok: false,
+        status: "incomplete",
+        reason: `portfolio_${label}_incomplete`,
+      };
+    }
+    portfolio[label] = { ts, data: response.data };
+  }
+  for (const days of PORTFOLIO_OFFSETS_DAYS) {
+    const label = `${days}d_ago`;
+    if (!Object.hasOwn(portfolio, label)) {
+      return {
+        ok: false,
+        status: "incomplete",
+        reason: `portfolio_${label}_missing`,
+      };
+    }
+  }
+
+  let record = {
+    address,
+    fetchedAt,
+    sources,
+    balances: balances.data,
+    portfolio,
+    version: 1,
+  };
+  let jsonStr = JSON.stringify(record);
+  if (jsonStr.length > 49_000) {
+    // Trim: drop balance details if too big.
+    record = {
+      ...record,
+      balances: { _truncated: true },
+      _truncated: true,
+    };
+    jsonStr = JSON.stringify(record);
+  }
+  return {
+    ok: true,
+    record,
+    command: ["HSET", "intel_wealth", address.toLowerCase(), jsonStr],
+  };
+}
+
+function requireEnv() {
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(`Missing env: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+
 async function main() {
+  requireEnv();
   const startedAt = Date.now();
   mkdirSync(OUT_DIR, { recursive: true });
   const rawFile = `${OUT_DIR}/extract-wealth-raw.jsonl`;
@@ -170,6 +243,8 @@ async function main() {
 
   let success = 0,
     errors = 0,
+    notFound = 0,
+    incomplete = 0,
     skipResume = 0;
   const writes = [];
 
@@ -189,36 +264,46 @@ async function main() {
     try {
       // Balances (1 call)
       const balances = await arkhamGet(`/balances/address/${address}`);
-      await sleep(REQ_SPACING_MS);
       // Portfolio at 4 timestamps (4 calls)
-      const portfolio = {};
-      for (let t = 0; t < timestamps.length; t++) {
-        const ts = timestamps[t];
-        const r = await arkhamGet(`/portfolio/address/${address}?time=${ts}`);
-        portfolio[`${PORTFOLIO_OFFSETS_DAYS[t]}d_ago`] = { ts, data: r.data };
-        if (t < timestamps.length - 1) await sleep(REQ_SPACING_MS);
+      const portfolioSnapshots = [];
+      if (balances.status === 200 && balances.data != null) {
+        await sleep(REQ_SPACING_MS);
+        for (let t = 0; t < timestamps.length; t++) {
+          const ts = timestamps[t];
+          const response = await arkhamGet(
+            `/portfolio/address/${address}?time=${ts}`,
+          );
+          portfolioSnapshots.push({
+            label: `${PORTFOLIO_OFFSETS_DAYS[t]}d_ago`,
+            ts,
+            response,
+          });
+          if (t < timestamps.length - 1) await sleep(REQ_SPACING_MS);
+        }
       }
-      const record = {
+      const write = buildWealthWriteCommand({
         address,
-        fetchedAt: new Date().toISOString(),
         sources,
-        balances: balances.data,
-        portfolio,
-        version: 1,
-      };
-      let jsonStr = JSON.stringify(record);
-      if (jsonStr.length > 49_000) {
-        // Trim: drop balance details if too big.
-        jsonStr = JSON.stringify({
-          ...record,
-          balances: { _truncated: true },
-          _truncated: true,
-        });
+        balances,
+        portfolioSnapshots,
+      });
+      appendFileSync(
+        rawFile,
+        JSON.stringify({
+          address,
+          status: write.status ?? "success",
+          reason: write.reason,
+          ts: now,
+        }) + "\n",
+      );
+      if (!write.ok) {
+        if (write.status === "notFound") notFound++;
+        else incomplete++;
+      } else {
+        writes.push(write.command);
+        success++;
+        if (writes.length >= 5) await pipeline(writes.splice(0));
       }
-      writes.push(["HSET", "intel_wealth", address.toLowerCase(), jsonStr]);
-      success++;
-      if (writes.length >= 5) await pipeline(writes.splice(0));
-      appendFileSync(rawFile, JSON.stringify({ address, ts: now }) + "\n");
     } catch (err) {
       if (err.message === "ARKHAM_AUTH_FAIL") {
         console.error("✗ Auth fail — halting.");
@@ -243,7 +328,7 @@ async function main() {
     if ((i + 1) % 5 === 0) {
       const e = ((Date.now() - startedAt) / 1000).toFixed(1);
       console.log(
-        `  [${i + 1}/${targets.length}] ok=${success} err=${errors} skipResume=${skipResume} elapsed=${e}s`,
+        `  [${i + 1}/${targets.length}] ok=${success} 404=${notFound} incomplete=${incomplete} err=${errors} skipResume=${skipResume} elapsed=${e}s`,
       );
     }
     await sleep(REQ_SPACING_MS);
@@ -254,13 +339,24 @@ async function main() {
   console.log(`\n✓ Wealth extraction done in ${e}s.`);
   console.log(`  targets:        ${targets.length}`);
   console.log(`  success:        ${success}`);
+  console.log(`  404:            ${notFound}`);
+  console.log(`  incomplete:     ${incomplete}`);
   console.log(`  errors:         ${errors}`);
   console.log(`  skipResume:     ${skipResume}`);
   console.log(`  raw:            ${rawFile}`);
 }
 
-main().catch((err) => {
-  console.error("✗ FAILED:", err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+export function isMainModule(importMetaUrl, argv = process.argv) {
+  const entrypoint = argv[1];
+  return typeof entrypoint === "string"
+    ? importMetaUrl === pathToFileURL(entrypoint).href
+    : false;
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error("✗ FAILED:", err.message);
+    console.error(err.stack);
+    process.exit(1);
+  });
+}
