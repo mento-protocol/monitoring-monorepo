@@ -165,6 +165,13 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ## Alerts integration follow-ups
 
+Core migration is complete: `mento-protocol/alerts` vendored into `alerts/infra/` and
+archived on GitHub, state backends unified under `alerts-infra` + `alerts-rules`, CI
+deploy job with manual approval gate live in `.github/workflows/alerts-infra.yml`.
+Items below are net-new functionality or polish, not migration blockers.
+
+### Tier 1 — Next-phase work
+
 - [ ] **Slack adapter + Sentry bridge retirement** — split
       `onchain-event-handler/src/discord.ts` into
       `src/{notifier,discord,slack}.ts`; add
@@ -172,9 +179,16 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
       then drop `channels/sentry-bridge/` Discord wiring. Sentry's native
       Slack integration is already configured, so these should ship as one
       migration batch.
-- [ ] **Consolidate Aegis v2 alerts** under `alerts/rules-v2/` once the in-flight Aegis Discord→Slack cutover lands.
-- [ ] **Archive `mento-protocol/alerts`** on GitHub once integration is verified stable.
-- [ ] **CI deploy job for `alerts/infra/`** — `terraform apply` on merge to main with manual approval, OIDC/WIF to GCP. Match `metrics-bridge.yml` pattern.
 - [ ] **Workspace/lockfile consolidation** — `alerts/infra/onchain-event-handler/package-lock.json` exists for Cloud Build's `npm ci`, but the package is also a pnpm workspace member (uses root `pnpm-lock.yaml` for local dev). Either switch Cloud Build to pnpm (via `pnpm deploy` bundle or buildpack pnpm-lock.yaml detection) and drop the npm lockfile, or remove the package from the pnpm workspace.
+- [ ] **Cooperative wall-clock budget in `processEvents`** — current `Promise.all(logsToProcess.map(processEvent))` has no cooperative cancellation. If a large QuickNode batch + slow RPCs + Discord posts exceed the function timeout, the function dies without HTTP 200, QuickNode retries the whole batch, and events that already Discord-fired get duplicated. Mitigated for now by bumping the function timeout from 60s to 300s, but the proper fix is a wall-clock budget guard: track elapsed time inside the orchestrator, and once we're within (say) 30s of the function limit, abort remaining events, log them as `skipped_due_to_timeout`, and return 200 with `{processed, skipped}`. Needs the per-event chain to accept an `AbortSignal` so in-flight RPC/Discord calls also cancel.
 - [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by HMAC-SHA256 signature verification. Accepted risk for now (matches vendored upstream). Revisit if QuickNode publishes a stable egress IP range (or supports OIDC-signed delivery): switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
-- [ ] **Cooperative wall-clock budget in `processEvents`** — current `Promise.all(logsToProcess.map(processEvent))` has no cooperative cancellation. If a large QuickNode batch + slow RPCs + Discord posts exceed the function timeout, the function dies without HTTP 200, QuickNode retries the whole batch, and events that already Discord-fired get duplicated. Mitigated for now by bumping the function timeout from 60s to 300s, but the proper fix is a wall-clock budget guard: track elapsed time inside the orchestrator, and once we're within (say) 30s of the function limit, abort remaining events, log them as `skipped_due_to_timeout`, and return 200 with `{processed, skipped}`. Needs the per-event chain to accept an `AbortSignal` so in-flight RPC/Discord calls also cancel. Out of scope for the integration PR.
+
+### Tier 2 — Gated on external work
+
+- [ ] **Consolidate Aegis v2 alerts** under `alerts/rules-v2/` once the in-flight Aegis Discord→Slack cutover lands.
+
+### Tier 3 — Hygiene / cosmetic
+
+- [ ] **Cloud Run `metrics_bridge` drift** — every `tf apply` re-applies `revision` / `client` / `client_version` / `scaling[0].manual_instance_count` / `scaling[0].min_instance_count` after `gcloud run deploy` from CI. Cosmetic — apply always succeeds. Suppress by adding `lifecycle { ignore_changes = [client, client_version, scaling[0].manual_instance_count, scaling[0].min_instance_count, template[0].revision] }` to `google_cloud_run_v2_service.metrics_bridge` in `terraform/main.tf`.
+- [ ] **Tighten `local_file.env_file` permissions** — `alerts/infra/onchain-event-handler/main.tf` writes the runtime env file at `0777`. The file is gitignored and machine-local, but secret-bearing. Drop to `0600`.
+- [ ] **Orphan GCS state files** — after PR #556 renamed backend prefixes to `alerts-infra` + `alerts-rules`, the old paths (`gs://<state-bucket>/alerts/default.tfstate` and `gs://<state-bucket>/monitoring-monorepo-alerts/default.tfstate`) still exist on GCS. No functional impact, pennies/month storage. Delete with `gcloud storage rm` on next cleanup pass.
