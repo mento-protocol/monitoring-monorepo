@@ -98,6 +98,7 @@ module "sentry_bridge" {
   # Sentry configuration
   sentry_organization_slug    = var.sentry_organization_slug
   sentry_slack_workspace_name = var.sentry_slack_workspace_name
+  slack_critical_channel      = var.sentry_slack_critical_channel
 }
 
 # Deploy GCP Cloud Function for QuickNode webhook handling

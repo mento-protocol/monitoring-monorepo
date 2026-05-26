@@ -43,6 +43,17 @@ variable "sentry_slack_workspace_name" {
   default     = "Mento Labs"
 }
 
+variable "sentry_slack_critical_channel" {
+  description = "Slack channel name (with leading #) that receives the fatal-first-seen/regression critical fan-out from every Sentry project. Defaults to #alerts-critical to land alongside Grafana page-grade alerts."
+  type        = string
+  default     = "#alerts-critical"
+
+  validation {
+    condition     = can(regex("^#", var.sentry_slack_critical_channel))
+    error_message = "sentry_slack_critical_channel must start with '#' (e.g. '#alerts-critical')."
+  }
+}
+
 #####################
 # Discord Variables
 #####################

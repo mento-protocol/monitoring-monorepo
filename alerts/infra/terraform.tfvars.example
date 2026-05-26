@@ -13,6 +13,11 @@ sentry_organization_slug = "mento-labs"
 # (Sentry → Settings → Integrations → Slack). Case-sensitive.
 sentry_slack_workspace_name = "Mento Labs"
 
+# Slack channel where fatal-first-seen/regression events from every Sentry
+# project also fan out. Defaults to #alerts-critical alongside Grafana page-
+# grade alerts; override only if your on-call routing differs.
+# sentry_slack_critical_channel = "#alerts-critical"
+
 #####################
 # Discord Configuration
 #####################
