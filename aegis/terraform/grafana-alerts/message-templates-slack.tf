@@ -4,11 +4,7 @@
 resource "grafana_message_template" "slack_oracle_stale_price_alert_title" {
   name     = "Slack: Stale Price Alert Title"
   template = <<-EOT
-{{ define "slack.oracle_stale_price_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ end }}
+{{ define "slack.oracle_stale_price_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
 }
 
@@ -17,15 +13,15 @@ resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   name     = "Slack: Stale Price Alert Message"
   template = <<-EOT
 {{ define "slack.oracle_stale_price_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-*🚨 FIRING: Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}*
-1. Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
-2. Check if the relayer cloud function is still being triggered regularly
-{{ end }}
-{{ range .Alerts.Resolved }}
-*✅ RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain }}*
-{{ end }}
+{{ range .Alerts.Firing -}}
+*<{{ .GeneratorURL }}|Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}>*
+- Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
+- Check if the relayer cloud function is still being triggered regularly
+
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+*<{{ .GeneratorURL }}|{{ .Labels.rateFeed }} price is fresh again on {{ .Labels.chain | title }}>*
+{{ end -}}
 {{ end }}
 EOT
 }
