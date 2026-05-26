@@ -62,7 +62,7 @@ export async function processEvents(
   context: EventContext,
   options: ProcessEventsOptions = {},
 ): Promise<ProcessEventsResult> {
-  const { txHashMap, hasSafeMultiSigTx } = context;
+  const { txHashMap } = context;
   const now = options.now ?? Date.now;
   const budgetMs = options.budgetMs ?? DEFAULT_PROCESSING_BUDGET_MS;
   const startedAt = options.startedAtMs ?? now();
@@ -74,9 +74,9 @@ export async function processEvents(
       : undefined;
 
   // Filter malformed entries before processing, then prioritize Safe tx logs.
-  // ExecutionSuccess is only a fallback notification when the same tx has no
-  // SafeMultiSigTransaction; if the budget is tight, the richer Safe tx alert
-  // must be attempted before lower-priority logs can consume the budget.
+  // ExecutionSuccess is a fallback notification for the same tx, but only
+  // suppress it after the richer SafeMultiSigTransaction alert succeeds.
+  // Otherwise a budget cutoff or per-event failure could leave no alert.
   const candidateLogs = logs
     .filter((logEntry) => {
       // Drop null / non-object entries at filter time. Payload validation only
@@ -89,27 +89,30 @@ export async function processEvents(
     })
     .sort((left, right) => eventPriority(left) - eventPriority(right));
 
-  const logsToProcess = candidateLogs.filter((logEntry) => {
-    // Skip ExecutionSuccess if we already have SafeMultiSigTransaction for this tx.
-    if (
-      logEntry.name === "ExecutionSuccess" &&
-      typeof logEntry.transactionHash === "string" &&
-      hasSafeMultiSigTx.has(logEntry.transactionHash.toLowerCase())
-    ) {
-      logger.info("Skipping ExecutionSuccess notification", {
-        reason: "SafeMultiSigTransaction already sent",
-        transactionHash: logEntry.transactionHash,
-      });
-      return false;
-    }
-    return true;
-  });
+  const logsToProcess = candidateLogs;
 
   const processedEvents: ProcessedEvent[] = [];
+  const processedSafeMultiSigTxs = new Set<string>();
   let skipped = 0;
 
   try {
     for (const [index, logEntry] of logsToProcess.entries()) {
+      const txHashLower =
+        typeof logEntry.transactionHash === "string"
+          ? logEntry.transactionHash.toLowerCase()
+          : null;
+      if (
+        logEntry.name === "ExecutionSuccess" &&
+        txHashLower &&
+        processedSafeMultiSigTxs.has(txHashLower)
+      ) {
+        logger.info("Skipping ExecutionSuccess notification", {
+          reason: "SafeMultiSigTransaction already sent",
+          transactionHash: logEntry.transactionHash,
+        });
+        continue;
+      }
+
       const elapsedMs = now() - startedAt;
       if (abortController.signal.aborted || elapsedMs >= budgetMs) {
         skipped = logsToProcess.length - index;
@@ -131,6 +134,9 @@ export async function processEvents(
         );
         if (result) {
           processedEvents.push(result);
+          if (result.eventName === "SafeMultiSigTransaction" && txHashLower) {
+            processedSafeMultiSigTxs.add(txHashLower);
+          }
         }
       } catch (error) {
         // Defense-in-depth: logEntry could in principle still be malformed
@@ -164,7 +170,9 @@ export async function processEvents(
 }
 
 function eventPriority(logEntry: QuickNodeWebhookPayload["result"][0]): number {
-  return logEntry.name === "SafeMultiSigTransaction" ? 0 : 1;
+  if (logEntry.name === "SafeMultiSigTransaction") return 0;
+  if (logEntry.name === "ExecutionSuccess") return 2;
+  return 1;
 }
 
 /**

@@ -367,7 +367,7 @@ describe("processEvents - ChainDetectionError handling", () => {
           eventName: "SafeMultiSigTransaction",
         }),
       ],
-      skipped: 1,
+      skipped: 2,
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
