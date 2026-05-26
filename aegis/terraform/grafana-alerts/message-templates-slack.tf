@@ -116,11 +116,7 @@ EOT
 resource "grafana_message_template" "slack_trading_mode_alert_title" {
   name     = "Slack: Trading Mode Alert Title"
   template = <<-EOT
-  {{ define "slack.trading_mode_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
-  {{ end -}}
+  {{ define "slack.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}🚨{{ else }}✅{{ end }}{{ end -}}
   EOT
 }
 
@@ -129,17 +125,23 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   template = <<-EOT
 {{ define "slack.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
+{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $rateFeedWithHyphen := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $chainlinkSlug := $rateFeedWithHyphen | lower -}}
 {{ $chain := .Labels.chain | title -}}
-*🚨 Trading halted for <{{ .GeneratorURL }}&tab=instances|{{ .Labels.rateFeed }}> on {{ $chain }}*{{ if eq $chain "Celo" }}
-- Check the <https://dune.com/mento-labs-eng/circuit-breakers|Circuit Breaker Dashboard> for tripped breakers
-- Check the <https://data.chain.link/feeds/celo/mainnet/{{ $rateFeedWithHyphen }}|Chainlink feed> for volatility around the alert time{{ end }}
+{{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
+{{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
+🚨
+*Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*{{ if eq $chain "Celo" }}
+- Check for tripped breakers on the <{{ $poolURL }}|{{ $rateFeedWithSlash }} pool>
+- Check the <https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-- *✅ Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}*
+✅
+*Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}*
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}

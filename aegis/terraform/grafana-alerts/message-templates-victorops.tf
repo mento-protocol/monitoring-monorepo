@@ -94,11 +94,7 @@ RESOLVED: Sufficient {{ $token }} balance restored for the {{ .Labels.owner }} (
 resource "grafana_message_template" "victorops_trading_mode_alert_title" {
   name     = "VictorOps: Trading Mode Alert Title"
   template = <<-EOT
-  {{ define "victorops.trading_mode_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
-  {{ end -}}
+  {{ define "victorops.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}Trading halted{{ else }}Trading resumed{{ end }}{{ end -}}
   EOT
 }
 
@@ -107,17 +103,21 @@ resource "grafana_message_template" "victorops_trading_mode_alert_message" {
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
+{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $rateFeedWithHyphen := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
+{{ $chainlinkSlug := $rateFeedWithHyphen | lower -}}
 {{ $chain := .Labels.chain | title -}}
-Trading halted for {{ .Labels.rateFeed }} on {{ $chain }} — {{ .GeneratorURL }}&tab=instances{{ if eq $chain "Celo" }}
-- Check the Circuit Breaker Dashboard for tripped breakers: https://dune.com/mento-labs-eng/circuit-breakers
-- Check the Chainlink feed for volatility around the alert time: https://data.chain.link/feeds/celo/mainnet/{{ $rateFeedWithHyphen }}{{ end }}
+{{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
+{{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
+Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}{{ if eq $chain "Celo" }}
+- Check for tripped breakers on the {{ $rateFeedWithSlash }} pool: {{ $poolURL }}
+- Check the Chainlink feed for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}: https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-- RESOLVED: Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}
+Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
