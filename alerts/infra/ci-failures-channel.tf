@@ -202,16 +202,17 @@ resource "restapi_object" "ci_failures_invite_eng" {
   depends_on = [restapi_object.ci_failures_channel_member]
 
   lifecycle {
-    # Accept either `ok == true` (fresh invite) OR `ok == false` with a
-    # NON-EMPTY `errors` array whose length equals the number of users we
-    # asked Slack to invite AND every per-user error is
-    # `already_in_channel`. The length-equality check rules out the
-    # case where Slack returned fewer error entries than users requested
-    # (which would indicate some users weren't processed at all — they'd
-    # silently miss CI-failure alerts).
+    # Accept either `ok == true` (every user newly invited) OR `ok == false`
+    # with a NON-EMPTY `errors` array whose entries are ALL
+    # `already_in_channel`. With `force = true`, Slack invites all the
+    # users it can and lists only the per-user failures in `errors`, so a
+    # mixed case (3 newly invited, 2 already members) returns
+    # `ok: false, errors: [<two already_in_channel entries>]` — length of
+    # `errors` is the count of failures, NOT the count of users requested.
+    # Don't gate on length equality; gate on "all listed errors are benign."
     #
-    # The non-empty guard closes a vacuous-truth hole: `alltrue([])` is
-    # `true` in Terraform, so without `length(...) > 0` a real failure
+    # The non-empty guard (`length > 0`) closes a vacuous-truth hole:
+    # `alltrue([])` is `true` in Terraform, so without it a real failure
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
     # NO `errors` array) would silently pass the postcondition.
     postcondition {
@@ -219,7 +220,7 @@ resource "restapi_object" "ci_failures_invite_eng" {
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
           || (
-            try(length(jsondecode(self.api_response).errors), 0) == length(split(",", local.eng_user_ids_csv))
+            try(length(jsondecode(self.api_response).errors), 0) > 0
             && alltrue([
               for err in try(jsondecode(self.api_response).errors, []) :
               try(err.error, "") == "already_in_channel"
