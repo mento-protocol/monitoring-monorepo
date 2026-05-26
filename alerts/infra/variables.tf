@@ -55,7 +55,7 @@ variable "sentry_slack_critical_channel" {
 }
 
 variable "sentry_slack_critical_channel_id" {
-  description = "Slack channel ID for sentry_slack_critical_channel. Defaults to the current #alerts-critical channel in the Mento Labs workspace."
+  description = "Slack channel ID for sentry_slack_critical_channel. Must be updated with sentry_slack_critical_channel when rerouting critical fan-out."
   type        = string
   default     = "C0AURREPNDU"
 
