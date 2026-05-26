@@ -196,16 +196,27 @@ resource "restapi_object" "ci_failures_invite_eng" {
   depends_on = [restapi_object.ci_failures_channel_member]
 
   lifecycle {
-    # Accept either `ok == true` (fresh invite) OR `already_in_channel`
-    # error (everyone in @eng was already a member — benign).
+    # Accept either `ok == true` (fresh invite) OR `ok == false` with a
+    # NON-EMPTY `errors` array where every per-user error is
+    # `already_in_channel` (everyone in @eng was already a member —
+    # benign).
+    #
+    # The non-empty guard closes a vacuous-truth hole: `alltrue([])` is
+    # `true` in Terraform, so without `length(...) > 0` a real failure
+    # like `{"ok": false, "error": "missing_scope"}` (top-level error,
+    # NO `errors` array) would silently pass the postcondition. Caught
+    # in PR review.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
-          || alltrue([
-            for err in try(jsondecode(self.api_response).errors, []) :
-            err.error == "already_in_channel"
-          ])
+          || (
+            try(length(jsondecode(self.api_response).errors), 0) > 0
+            && alltrue([
+              for err in try(jsondecode(self.api_response).errors, []) :
+              try(err.error, "") == "already_in_channel"
+            ])
+          )
         )
       )
       error_message = "Slack conversations.invite failed for #ci-failures @eng: ${try(jsondecode(self.api_response).error, try(jsondecode(self.api_response).errors[0].error, "unknown"))}"
