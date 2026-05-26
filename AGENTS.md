@@ -263,7 +263,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
 - Dashboard needs `NEXT_PUBLIC_HASURA_URL` env var for local dev; run `vercel env pull ui-dashboard/.env.local` to pull from the linked project
-- Production env vars (including Upstash Redis + Blob credentials) are managed by Terraform — see `terraform/terraform.tfvars.example`
+- Production env vars are managed by Terraform except Vercel Blob OIDC variables, which are managed by the Vercel store integration — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 
 ## Claude Code Slash Commands

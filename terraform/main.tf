@@ -114,14 +114,12 @@ resource "vercel_project_environment_variable" "redis_token" {
   sensitive  = true
 }
 
-# `BLOB_READ_WRITE_TOKEN` is now managed Vercel-side only (set via the
-# store-project integration after the 2026-05-21 incident; OIDC migration
-# will remove it from env vars entirely). Existing Terraform state referencing
-# `vercel_project_environment_variable.blob_token` is cleared via this
-# `removed` block — without it, `terraform apply` against state that still
-# tracks the resource would destroy the live env var and break the daily
-# address-labels-backup cron. `destroy = false` makes the state cleanup
-# explicit and non-destructive.
+# `BLOB_READ_WRITE_TOKEN` was retired during the Vercel Blob OIDC cutover.
+# Existing Terraform state referencing `vercel_project_environment_variable.blob_token`
+# is cleared via this `removed` block. `destroy = false` keeps the state cleanup
+# explicit and non-destructive if an older workspace still tracks the resource;
+# the live dashboard project now gets `BLOB_STORE_ID` and
+# `BLOB_WEBHOOK_PUBLIC_KEY` from the Vercel store integration instead.
 removed {
   from = vercel_project_environment_variable.blob_token
 

@@ -195,6 +195,23 @@ NODE
     fail "expected turbo task $task_name to include env: $expected_env"
 }
 
+assert_turbo_task_has_output() {
+  local task_name="$1"
+  local expected_output="$2"
+
+  node - "$task_name" "$expected_output" <<'NODE' ||
+const fs = require("node:fs");
+const [taskName, expectedOutput] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
+const outputs = config.tasks?.[taskName]?.outputs ?? [];
+if (!outputs.includes(expectedOutput)) {
+  console.error(`missing output ${expectedOutput} for turbo task ${taskName}`);
+  process.exit(1);
+}
+NODE
+    fail "expected turbo task $task_name to include output: $expected_output"
+}
+
 assert_turbo_task_absent() {
   local task_name="$1"
 
@@ -254,7 +271,12 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "build" "VERCEL_ENV"
+assert_turbo_task_has_output "build" ".next/**"
+assert_turbo_task_has_output "build" "!.next/cache/**"
+assert_turbo_task_has_output "build" "!.next/dev/**"
 assert_turbo_task_has_input "size-limit" ".next/**"
+assert_turbo_task_has_input "size-limit" "!.next/cache/**"
+assert_turbo_task_has_input "size-limit" "!.next/dev/**"
 node - <<'NODE' ||
 const fs = require("node:fs");
 const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));

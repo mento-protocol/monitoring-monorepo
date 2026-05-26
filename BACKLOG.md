@@ -163,16 +163,6 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 - [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
 - [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
 
-## Complete Vercel Blob OIDC cutover
-
-The code-prep PR upgraded `@vercel/blob` to `^2.4.0` so the backup and restore routes can use Vercel Blob OIDC once the store is upgraded. What remains is the production cutover after that PR deploys.
-
-- [ ] After prod deploy READY: Vercel dashboard -> Storage -> `address-labels` -> click **Upgrade to OIDC** banner.
-- [ ] Verify cron: `curl -H "Authorization: Bearer $CRON_SECRET" https://monitoring.mento.org/api/address-labels/backup` -> expect 200.
-- [ ] Remove the static env var: `vercel env rm BLOB_READ_WRITE_TOKEN production --yes && vercel env rm BLOB_READ_WRITE_TOKEN preview --yes`. Terraform no longer manages this env var; `terraform/main.tf` already contains a non-destructive `removed` block for the old `vercel_project_environment_variable.blob_token` resource.
-- [ ] Optional: trigger a cron-style restore against the latest backup blob to confirm OIDC works for `get()` too.
-- [ ] Closes the remaining static-token scope drift risk (no static token -> no production/preview/development scope to lose).
-
 ## Alerts integration follow-ups
 
 - [ ] **Slack adapter + Sentry bridge retirement** — split
