@@ -88,6 +88,14 @@ terraform -chdir=alerts/infra import \
   C0123ABC456
 ```
 
+The companion `restapi_object.sentry_slack_channel_member` resource will
+automatically join the bot to the imported channel via `conversations.join`
+on the next apply — no manual `/invite` needed. The bot must be a member
+for `conversations.archive` to succeed on destroy; `conversations.join` is
+idempotent (Slack returns `ok=true, already_in_channel=true` if the bot
+was added to the channel some other way), so freshly-created channels are
+a no-op for that resource.
+
 ## Adding a new project
 
 1. Create the project in Sentry (UI or API). Terraform does not manage

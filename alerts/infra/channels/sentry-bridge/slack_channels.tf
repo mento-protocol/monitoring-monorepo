@@ -84,3 +84,57 @@ resource "restapi_object" "sentry_slack_channel" {
     }
   }
 }
+
+# Ensure the Slack bot is a member of every managed channel.
+#
+# Slack auto-adds the bot to channels it CREATES, but NOT to channels it
+# IMPORTS — and `conversations.archive` requires the caller to be a member
+# (returns `not_in_channel` otherwise). Without this resource, the
+# `terraform import` recovery path for pre-existing channels is broken at
+# destroy time: imported channels would be dropped from state but never
+# archived in Slack.
+#
+# `conversations.join` is idempotent — Slack returns `{"ok": true,
+# "already_in_channel": true}` if the bot is already a member, so this
+# resource is a no-op for freshly-created channels and only does real work
+# for imported ones.
+#
+# Destroy semantics: we deliberately don't leave the channel on destroy —
+# the channel resource above (sentry_slack_channel) handles archive, which
+# requires bot membership. If this resource called conversations.leave on
+# destroy, archive would then fail with `not_in_channel`. Instead,
+# `destroy_path = "/api.test"` POSTs to Slack's health-check endpoint
+# (returns 200 ok=true, has no side effect), giving Terraform a clean
+# destroy without breaking the channel's archive lifecycle.
+resource "restapi_object" "sentry_slack_channel_member" {
+  for_each = local.projects
+  provider = restapi.slack
+
+  path        = "/conversations.join"
+  create_path = "/conversations.join"
+  read_path   = "/conversations.info?channel={id}"
+
+  # No-op destroy — see comment above.
+  destroy_path   = "/api.test"
+  destroy_method = "POST"
+
+  update_path   = ""
+  update_method = "POST"
+
+  data = jsonencode({
+    channel = restapi_object.sentry_slack_channel[each.key].id
+  })
+
+  # Same response shape as conversations.create — channel object at top level.
+  id_attribute              = "channel/id"
+  ignore_all_server_changes = true
+
+  depends_on = [restapi_object.sentry_slack_channel]
+
+  lifecycle {
+    postcondition {
+      condition     = self.api_response != null && try(jsondecode(self.api_response).ok, false) == true
+      error_message = "Slack conversations.join failed for #sentry-${each.key}: ${try(jsondecode(self.api_response).error, "unknown")}"
+    }
+  }
+}
