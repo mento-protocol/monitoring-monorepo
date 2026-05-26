@@ -468,19 +468,16 @@ jobs:
         run: |
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
-      # Cloud Build's `npm ci` consumes alerts/infra/onchain-event-handler/
-      # package-lock.json for prod deploys. The package is ALSO a pnpm
-      # workspace member, so a dev bumping deps via `pnpm install` only
-      # updates the root pnpm-lock.yaml — the per-pkg npm lockfile silently
-      # drifts and Cloud Build keeps deploying old deps.
+      # Cloud Build deploys alerts/infra/onchain-event-handler/ as a standalone
+      # source root. The package-local pnpm-lock.yaml makes the Node.js buildpack
+      # use pnpm there, while the root pnpm-lock.yaml still powers workspace CI.
       #
-      # `npm ci --dry-run` validates that package.json and package-lock.json
-      # are consistent without re-resolving to whatever's latest on the
-      # registry. (A regenerate-and-diff approach would fail every time a
-      # transitive patch version was published between commit and CI run.)
-      - name: Verify package-lock.json is in sync
+      # The package-local pnpm-workspace.yaml validates the same standalone
+      # package root that Cloud Build sees without walking up to the monorepo
+      # workspace lock.
+      - name: Verify handler pnpm-lock.yaml is in sync
         working-directory: alerts/infra/onchain-event-handler
-        run: npm ci --dry-run --ignore-scripts --no-audit --no-fund
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

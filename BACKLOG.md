@@ -188,7 +188,6 @@ Items below are net-new functionality or polish, not migration blockers.
       Discord provider/variables/GitHub secrets, and
       `channels/discord-channels/`. Keep the provider available until the
       first destroy apply can cleanly archive/delete the Discord-managed state.
-- [ ] **Workspace/lockfile consolidation** — `alerts/infra/onchain-event-handler/package-lock.json` exists for Cloud Build's `npm ci`, but the package is also a pnpm workspace member (uses root `pnpm-lock.yaml` for local dev). Either switch Cloud Build to pnpm (via `pnpm deploy` bundle or buildpack pnpm-lock.yaml detection) and drop the npm lockfile, or remove the package from the pnpm workspace.
 - [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by HMAC-SHA256 signature verification. Accepted risk for now (matches vendored upstream). Revisit if QuickNode publishes a stable egress IP range (or supports OIDC-signed delivery): switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
 
 ### Tier 2 — Gated on external work

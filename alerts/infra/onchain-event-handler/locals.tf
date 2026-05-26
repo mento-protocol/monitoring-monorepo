@@ -14,7 +14,8 @@ locals {
   source_files = [for f in local.source_files_relative : "${path.module}/${f}"]
   package_files = [
     "${path.module}/package.json",
-    "${path.module}/package-lock.json",
+    "${path.module}/pnpm-lock.yaml",
+    "${path.module}/pnpm-workspace.yaml",
     "${path.module}/tsconfig.json",
   ]
   # Include multisig config and Slack routing in the hash so adding/removing a

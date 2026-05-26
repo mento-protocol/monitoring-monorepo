@@ -99,8 +99,8 @@ module "onchain_event_handler" {
 
 ```bash
 cd onchain-event-handler
-npm install
-npm run build
+pnpm install --frozen-lockfile --lockfile-dir .
+pnpm run build
 ```
 
 The build compiles `src/` to `dist/`, including `src/safe-abi.json` as
@@ -141,7 +141,7 @@ The function URL is used as the webhook endpoint in `onchain-event-listeners`.
 ### Step 6: Update Function (Redeployment)
 
 ```bash
-cd onchain-event-handler && npm run build && cd ..
+cd onchain-event-handler && pnpm run build && cd ..
 terraform apply
 ```
 
@@ -152,19 +152,19 @@ Terraform detects `dist/` changes and creates a new archive, triggering a functi
 ### Development Prerequisites
 
 - Node.js 22
-- npm or yarn
+- pnpm 10
 
 ### Setup
 
 ```bash
 cd onchain-event-handler
-npm install
+pnpm install --frozen-lockfile --lockfile-dir .
 ```
 
 ### Build
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 **IMPORTANT**: Build before deploying with Terraform. The build compiles `src/`
@@ -180,7 +180,7 @@ For local development, you'll need to set up environment variables. The function
    After `terraform apply`, generate `.env` from root directory:
 
    ```bash
-   npm run generate:env
+   pnpm run generate:env
    ```
 
    Creates `.env` with: `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
@@ -191,9 +191,9 @@ For local development, you'll need to set up environment variables. The function
 2. **Run locally:**
 
    ```bash
-   npm run dev        # TypeScript development mode
+   pnpm run dev        # TypeScript development mode
    # or
-   npm run build && npm start  # Compiled version
+   pnpm run build && pnpm start  # Compiled version
    ```
 
    Function available at `http://localhost:8080/` by default. Set `PORT` env var for different port.
@@ -215,15 +215,16 @@ For local development, you'll need to set up environment variables. The function
 
 ### Build Issues
 
-#### Error: `npm: command not found`
+#### Error: `pnpm: command not found`
 
 - Install Node.js 22: `brew install node@22` (macOS) or use [nvm](https://github.com/nvm-sh/nvm)
+- Enable pnpm via corepack (ships with Node.js 16+): `corepack enable pnpm`
 
 #### Error: TypeScript compilation fails
 
 - Check `tsconfig.json` is present
-- Verify all dependencies are installed: `npm install`
-- Check for TypeScript errors: `npx tsc --noEmit`
+- Verify all dependencies are installed: `pnpm install --frozen-lockfile --lockfile-dir .`
+- Check for TypeScript errors: `pnpm exec tsc --noEmit`
 
 ### Deployment Issues
 
@@ -261,6 +262,7 @@ gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com s
 
 - Function source is archived to Cloud Storage with dev-only files, local env
   files, tests, Terraform files, and `node_modules` excluded. Cloud Build runs
-  the package build and emits `dist/safe-abi.json` from `src/safe-abi.json`.
+  pnpm from the checked-in package-local `pnpm-lock.yaml`, then runs the package
+  build and emits `dist/safe-abi.json` from `src/safe-abi.json`.
 - Build required before Terraform deployment
 - Environment variables set at deployment time (require redeployment to change)

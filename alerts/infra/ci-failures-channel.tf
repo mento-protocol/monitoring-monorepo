@@ -227,8 +227,9 @@ resource "restapi_object" "ci_failures_invite_eng" {
   # runs, breaking applies during routine @eng remove-only churn (when
   # everyone else is already a member). `ok` is always present in both
   # paths; the resulting `"true"` / `"false"` ID string is meaningless
-  # but harmless — we recreate via `force_new` on the member CSV, so
-  # ID stability across reads isn't load-bearing.
+  # but harmless. Since that ID is not a Slack channel ID, `read_path`
+  # uses `/api.test` as a no-op refresh; we recreate via `force_new` on
+  # the member CSV, so ID stability across reads isn't load-bearing.
   id_attribute              = "ok"
   ignore_all_server_changes = true
 

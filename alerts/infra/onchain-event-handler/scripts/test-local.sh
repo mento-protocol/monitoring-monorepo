@@ -10,7 +10,7 @@
 #   ./scripts/test-local.sh
 #
 # Prerequisites:
-#   - Cloud Function must be running locally (e.g., via `npm start`)
+#   - Cloud Function must be running locally (e.g., via `pnpm start`)
 #   - Function should be listening on http://localhost:8080/ (default)
 #   - test-payload.json must exist in scripts directory
 #
@@ -27,7 +27,7 @@
 #
 # Example:
 #   # Start function locally in another terminal
-#   cd onchain-event-handler && npm start
+#   cd onchain-event-handler && pnpm start
 #
 #   # In another terminal, run test
 #   ./scripts/test-local.sh

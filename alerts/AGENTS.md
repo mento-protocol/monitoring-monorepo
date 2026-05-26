@@ -22,7 +22,7 @@ Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for i
 - **Plan before apply, always.** Never `apply` without explicit human approval.
 - **`alerts/infra/` modules talk to live external APIs** (Slack, Sentry, QuickNode, and legacy Discord while retained). Cosmetic changes can have real side effects.
 - **QuickNode state-management hack** in `alerts/infra/onchain-event-listeners/main.tf` is scoped to the current chain via `var.chain_key`. Renaming the `module "onchain_event_listeners"` block in `alerts/infra/main.tf` would silently break the state-rm grep.
-- **Cloud Function lockfile**: regenerate `alerts/infra/onchain-event-handler/package-lock.json` with `cd alerts/infra/onchain-event-handler && rm -rf node_modules && npm install --package-lock-only` whenever the pkg's deps change. CI gates lockfile drift in `.github/workflows/alerts-handler.yml`.
+- **Cloud Function lockfile**: Cloud Build deploys `alerts/infra/onchain-event-handler/` as its own source root, so keep its package-local `pnpm-lock.yaml` in sync when handler deps change. Regenerate with `cd alerts/infra/onchain-event-handler && pnpm install --lockfile-only --lockfile-dir .`. CI validates the package-local lock with a frozen pnpm install. The handler's package-local `pnpm-workspace.yaml` carries standalone Cloud Build overrides; keep it in the function source hash.
 - **Slack delivery with legacy Discord state today.** `alerts/rules/` is Slack-first. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events route to Slack via `slack-channels` + the Cloud Function. Legacy Discord resources can remain in Terraform state until a post-soak cleanup PR removes them cleanly.
 
 ## Verification

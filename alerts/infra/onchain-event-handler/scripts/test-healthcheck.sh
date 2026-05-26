@@ -8,8 +8,8 @@
 #
 # Usage:
 #   ./scripts/test-healthcheck.sh
-#   npm run test:healthcheck
-#   npm run health
+#   pnpm run test:healthcheck
+#   pnpm run health
 #
 # Requirements:
 #   - terraform (for reading outputs)
