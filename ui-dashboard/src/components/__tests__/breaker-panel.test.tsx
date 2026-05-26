@@ -132,6 +132,20 @@ function healthyValueConfig(): BreakerConfig {
   };
 }
 
+function trippedValueConfig(): BreakerConfig {
+  return {
+    ...healthyValueConfig(),
+    status: "TRIPPED",
+    tradingMode: 3,
+    cooldownEndsAt: String(Math.floor(Date.now() / 1000) + 600),
+    lastTripAt: "1700001000",
+    lastTripTxHash:
+      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    tripCountLifetime: 1,
+    lastMedianRate: "997000000000000000000000", // 0.3% below peg
+  };
+}
+
 const noTrips: BreakerTripEvent[] = [];
 
 describe("BreakerPanel", () => {
@@ -176,7 +190,9 @@ describe("BreakerPanel", () => {
     });
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).toContain("MedianDelta");
-    expect(html).toContain("EMA Reference");
+    expect(html).toContain("EMA Reference vs Actual");
+    expect(html).toContain("ref ");
+    expect(html).toContain("actual ");
     expect(html).toContain("Threshold / Cooldown");
     expect(html).toContain("Δ Oracle Price vs EMA");
     expect(html).toContain("4.00%"); // default threshold inherited
@@ -196,11 +212,29 @@ describe("BreakerPanel", () => {
     });
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).toContain("ValueDelta");
-    expect(html).toContain("Reference"); // not "EMA Reference"
+    expect(html).toContain("Reference vs Actual");
+    expect(html).not.toContain("EMA Reference vs Actual");
     expect(html).toContain("fixed peg");
     expect(html).toContain("Δ Oracle Price vs Peg");
     expect(html).toContain("0.150%");
     expect(html).toContain("from peg");
+  });
+
+  it("renders breached ValueDelta reference and actual values in red with peg drift", () => {
+    mockUseGQL.mockReturnValue({
+      data: {
+        BreakerConfig: [trippedValueConfig()],
+        BreakerTripEvent: noTrips,
+      },
+    });
+    const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+    expect(html).toContain("Reference vs Actual");
+    expect(html).toContain("ref ");
+    expect(html).toContain("1.000000");
+    expect(html).toContain("actual ");
+    expect(html).toContain("0.997000");
+    expect(html).toContain("0.300% below peg");
+    expect(html).toContain("font-mono text-red-300");
   });
 
   it("renders the tripped MedianDelta strip with reset-path banner", () => {

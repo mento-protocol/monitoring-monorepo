@@ -19,11 +19,19 @@ sentry_slack_workspace_name = "Mento Labs"
 # sentry_slack_critical_channel = "#alerts-critical"
 
 # Slack bot OAuth token (xoxb-...) used by the `restapi.slack` provider in
-# `alerts/infra/providers.tf` to create + archive the per-project
-# `#sentry-<slug>` channels. Needs scopes: channels:read, channels:manage,
-# channels:join. SEPARATE from Sentry's own Slack OAuth app — Sentry posts
-# via its own integration, this token is only for Terraform-managed channel
-# lifecycle. Generate via Slack admin → Apps → (your app) → OAuth & Permissions.
+# `alerts/infra/providers.tf` for all Slack channel + message operations.
+# SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own
+# integration, this token is only for Terraform-managed channel lifecycle
+# and CI-failure notifications. Generate via Slack admin → Apps → (your
+# app) → OAuth & Permissions. Required Bot Token Scopes:
+#
+#   - channels:read           list/inspect public channels
+#   - channels:manage         create + archive public channels (conversations.create / archive)
+#   - channels:join           bot self-joins channels (conversations.join)
+#   - channels:write.invites  invite users to channels (conversations.invite — used for @eng auto-invite)
+#   - chat:write              post messages in channels the bot is a member of
+#   - chat:write.public       post messages in any public channel without joining
+#   - usergroups:read         list usergroups + members (@eng auto-invite resolves usergroup → user IDs)
 slack_bot_token = "xoxb-..."
 
 #####################

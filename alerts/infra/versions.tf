@@ -45,6 +45,14 @@ terraform {
       source  = "hashicorp/local"
       version = ">= 2.5"
     }
+
+    # Used by `ci-failures-channel.tf` to GET Slack `usergroups.list` and
+    # `usergroups.users.list` at plan time, so the channel invite can
+    # target the current @eng membership without hardcoding user IDs.
+    http = {
+      source  = "hashicorp/http"
+      version = ">= 3.4"
+    }
   }
 
   backend "gcs" {

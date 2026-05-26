@@ -60,12 +60,25 @@ function formatFixidityValue(raw: string | null | undefined): string | null {
   return `${whole}.${fracScaled.toString().padStart(6, "0")}`;
 }
 
+function fixidityOrNull(raw: string | null | undefined): bigint | null {
+  if (raw == null) return null;
+  const value = BigInt(raw);
+  return value === BigInt(0) ? null : value;
+}
+
 /** Returns the trip-able BreakerConfig (filters out MARKET_HOURS, which has
  * no per-feed config and is rendered as the title-row pill instead). Prefers
  * enabled configs; production has ≤1 trip-able config per feed today. */
 function pickTrippableConfig(configs: BreakerConfig[]): BreakerConfig | null {
   const candidates = configs.filter((c) => c.breaker.kind !== "MARKET_HOURS");
   return candidates.find((c) => c.enabled) ?? candidates[0] ?? null;
+}
+
+function breakerConfigQuery(
+  isVirtual: boolean,
+  rateFeedID: string,
+): string | null {
+  return !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null;
 }
 
 /** Effective threshold (Fixidity). Per-feed override else breaker default. */
@@ -90,19 +103,118 @@ function effectiveCooldown(cfg: BreakerConfig): bigint {
  * mis-set peg (also produces a divide-by-zero). In all three cases the live
  * Δ is meaningless, so render the missing-data dash. */
 function computeLiveDelta(cfg: BreakerConfig): bigint | null {
-  const median = cfg.lastMedianRate != null ? BigInt(cfg.lastMedianRate) : null;
+  const median = fixidityOrNull(cfg.lastMedianRate);
   const reference =
     cfg.breaker.kind === "MEDIAN_DELTA"
-      ? cfg.medianRatesEMA != null
-        ? BigInt(cfg.medianRatesEMA)
-        : null
-      : cfg.referenceValue != null
-        ? BigInt(cfg.referenceValue)
-        : null;
-  if (median == null || median === BigInt(0)) return null;
-  if (reference == null || reference === BigInt(0)) return null;
+      ? fixidityOrNull(cfg.medianRatesEMA)
+      : fixidityOrNull(cfg.referenceValue);
+  if (median == null || reference == null) return null;
   const diff = median > reference ? median - reference : reference - median;
   return (diff * FIXED_1) / reference;
+}
+
+function referenceValue(cfg: BreakerConfig): bigint | null {
+  const raw =
+    cfg.breaker.kind === "MEDIAN_DELTA"
+      ? cfg.medianRatesEMA
+      : cfg.referenceValue;
+  return fixidityOrNull(raw);
+}
+
+function actualValue(cfg: BreakerConfig): bigint | null {
+  return fixidityOrNull(cfg.lastMedianRate);
+}
+
+function valueDeltaDirection(cfg: BreakerConfig): "above" | "below" | null {
+  const reference = referenceValue(cfg);
+  const actual = actualValue(cfg);
+  if (reference == null || actual == null || actual === reference) return null;
+  return actual > reference ? "above" : "below";
+}
+
+type BreakerPresentation = {
+  referenceLabel: string;
+  liveDeltaLabel: string;
+  thresholdCaption: string;
+  formattedThreshold: string;
+  formattedCooldown: string;
+  formattedReference: string | null;
+  formattedActual: string | null;
+  formattedLiveDelta: string;
+  breachedValueClass: string;
+  referenceCaption: string;
+  isOverTolerance: boolean;
+};
+
+function isMedianDelta(cfg: BreakerConfig): boolean {
+  return cfg.breaker.kind === "MEDIAN_DELTA";
+}
+
+function referenceCaptionFor(
+  cfg: BreakerConfig,
+  tripped: boolean,
+  isOverTolerance: boolean,
+  formattedLiveDelta: string,
+): string {
+  if (isMedianDelta(cfg)) {
+    return `smoothing ${formatFixidityPct(cfg.smoothingFactor, 1) ?? "—"}`;
+  }
+  const pegDirection = valueDeltaDirection(cfg);
+  if (tripped && isOverTolerance && pegDirection) {
+    // `isOverTolerance` implies a non-null live delta, so this is never "—".
+    return `${formattedLiveDelta} ${pegDirection} peg`;
+  }
+  return "fixed peg";
+}
+
+function breakerPresentation(
+  cfg: BreakerConfig,
+  threshold: bigint,
+  cooldown: bigint,
+  liveDelta: bigint | null,
+  tripped: boolean,
+): BreakerPresentation {
+  const kind = cfg.breaker.kind;
+  const precision = PRECISION_BY_KIND[kind] ?? 2;
+  const formattedThreshold =
+    formatFixidityPct(threshold.toString(), precision) ?? "—";
+  const formattedLiveDelta =
+    liveDelta != null
+      ? (formatFixidityPct(liveDelta.toString(), precision) ?? "—")
+      : "—";
+  const isOverTolerance =
+    threshold > BigInt(0) && liveDelta != null && liveDelta >= threshold;
+
+  return {
+    referenceLabel:
+      kind === "MEDIAN_DELTA"
+        ? "EMA Reference vs Actual"
+        : "Reference vs Actual",
+    liveDeltaLabel:
+      kind === "MEDIAN_DELTA"
+        ? "Δ Oracle Price vs EMA"
+        : "Δ Oracle Price vs Peg",
+    thresholdCaption:
+      kind === "MEDIAN_DELTA"
+        ? `trips at >${formattedThreshold} from EMA`
+        : `trips at >${formattedThreshold} from peg`,
+    formattedThreshold,
+    formattedCooldown: formatDurationShort(Number(cooldown)),
+    formattedReference: formatFixidityValue(
+      kind === "MEDIAN_DELTA" ? cfg.medianRatesEMA : cfg.referenceValue,
+    ),
+    formattedActual: formatFixidityValue(cfg.lastMedianRate),
+    formattedLiveDelta,
+    breachedValueClass:
+      tripped && isOverTolerance ? "text-red-300" : "text-white",
+    referenceCaption: referenceCaptionFor(
+      cfg,
+      tripped,
+      isOverTolerance,
+      formattedLiveDelta,
+    ),
+    isOverTolerance,
+  };
 }
 
 /** Returns the bar fill (0-100) and color class for the live-Δ bar. Mirrors
@@ -130,15 +242,252 @@ function deltaBarStyle(
   return { pct, color };
 }
 
+function BreakerIdentityMetric({
+  cfg,
+  tripped,
+}: {
+  cfg: BreakerConfig;
+  tripped: boolean;
+}): React.ReactElement {
+  const kind = cfg.breaker.kind;
+  return (
+    <div title={`${kind} breaker · ${cfg.breaker.address}`}>
+      <dt className="text-slate-400 inline-flex items-center gap-1">
+        Breaker
+        <InfoPopover
+          label="Breaker"
+          content="On-chain circuit breaker that halts trading when the oracle price moves more than the configured threshold from the reference. Reset is automatic on the next oracle report once cooldown elapses AND the rate returns inside the band."
+        />
+      </dt>
+      <dd className="flex flex-col gap-0.5">
+        <span className={tripped ? "text-red-400" : "text-emerald-400"}>
+          {kind === "MEDIAN_DELTA" ? "MedianDelta" : "ValueDelta"}
+        </span>
+        <span
+          className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
+        >
+          trading mode {cfg.tradingMode}
+          {tripped && " · halted"}
+        </span>
+        {/* `title=` is a tooltip for sighted users; mirror its text into
+            an `sr-only` span so screen readers also surface the breaker
+            kind + address. Mirrors the MarketHoursPill pattern. */}
+        <span className="sr-only">
+          {kind} breaker at address {cfg.breaker.address}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function ReferenceMetric({
+  presentation,
+}: {
+  presentation: BreakerPresentation;
+}): React.ReactElement {
+  return (
+    <div>
+      <dt className="text-slate-400">{presentation.referenceLabel}</dt>
+      <dd className="flex flex-col gap-0.5">
+        <span className={`font-mono ${presentation.breachedValueClass}`}>
+          <span className="text-slate-500">ref </span>
+          {presentation.formattedReference ?? "—"}
+          <span className="text-slate-500"> / actual </span>
+          {presentation.formattedActual ?? "—"}
+        </span>
+        <span className="text-xs text-slate-500">
+          {presentation.referenceCaption}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function ThresholdMetric({
+  presentation,
+  tripped,
+  cooldownRemainingSec,
+}: {
+  presentation: BreakerPresentation;
+  tripped: boolean;
+  cooldownRemainingSec: number;
+}): React.ReactElement {
+  const cooldownActive = tripped && cooldownRemainingSec > 0;
+  return (
+    <div>
+      <dt className="text-slate-400">Threshold / Cooldown</dt>
+      <dd className="flex flex-col gap-0.5">
+        <span className="font-mono text-white">
+          {presentation.formattedThreshold} / {presentation.formattedCooldown}
+        </span>
+        <span
+          className={`text-xs ${cooldownActive ? "text-amber-300" : "text-slate-500"}`}
+        >
+          {cooldownActive
+            ? `${formatDurationShort(cooldownRemainingSec)} left`
+            : presentation.thresholdCaption}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function LiveDeltaMetric({
+  presentation,
+  liveDelta,
+  liveBar,
+  tripped,
+}: {
+  presentation: BreakerPresentation;
+  liveDelta: bigint | null;
+  liveBar: { pct: number; color: string };
+  tripped: boolean;
+}): React.ReactElement {
+  return (
+    <div>
+      <dt className="text-slate-400">{presentation.liveDeltaLabel}</dt>
+      <dd className="flex flex-col gap-0.5">
+        <div className="flex h-5 items-center">
+          <div className="h-2 w-full rounded-full bg-slate-700 mt-1">
+            <div
+              className={`h-2 rounded-full transition-all ${liveBar.color}`}
+              style={{ width: `${liveBar.pct}%` }}
+              role="progressbar"
+              aria-label="Live oracle Δ vs reference"
+              aria-valuenow={Math.round(liveBar.pct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          </div>
+        </div>
+        <span
+          className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
+        >
+          {liveDelta != null
+            ? `${presentation.formattedLiveDelta} of ${presentation.formattedThreshold}`
+            : "—"}
+          {tripped && presentation.isOverTolerance && " (over)"}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function LastTripMetric({
+  cfg,
+  network,
+  tripped,
+  tripsToday,
+}: {
+  cfg: BreakerConfig;
+  network: ReturnType<typeof useNetwork>["network"];
+  tripped: boolean;
+  tripsToday: number;
+}): React.ReactElement {
+  const lastTripTs = cfg.lastTripAt;
+  return (
+    <div>
+      <dt className="text-slate-400 flex items-center justify-between gap-1">
+        <span>Last trip</span>
+        {tripped && lastTripTs && (
+          <span className="text-xs font-normal text-red-400">
+            tripped {relativeTime(lastTripTs)}
+          </span>
+        )}
+      </dt>
+      <dd className="flex flex-col gap-0.5">
+        {lastTripTs && cfg.lastTripTxHash ? (
+          <a
+            href={explorerTxUrl(network, cfg.lastTripTxHash)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${
+              tripped ? "text-red-300" : "text-indigo-300"
+            } hover:text-indigo-400`}
+            title={formatTimestamp(lastTripTs)}
+          >
+            {relativeTime(lastTripTs)}
+          </a>
+        ) : (
+          <span className="text-slate-500">never</span>
+        )}
+        <span
+          className={`text-xs ${tripsToday > 0 ? "text-amber-300" : "text-slate-500"}`}
+        >
+          {cfg.tripCountLifetime} lifetime
+          {tripsToday > 0 && ` · ${tripsToday} today`}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function ResetPathBanner({
+  cooldownElapsed,
+  cooldownRemainingSec,
+  rateInBand,
+  liveDelta,
+  presentation,
+}: {
+  cooldownElapsed: boolean;
+  cooldownRemainingSec: number;
+  rateInBand: boolean;
+  liveDelta: bigint | null;
+  presentation: BreakerPresentation;
+}): React.ReactElement {
+  return (
+    <div className="mt-4 rounded border border-red-900/40 bg-red-950/30 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+      <span className="text-red-300 font-medium">Reset path</span>
+      <span className="inline-flex items-center gap-1">
+        <span className={cooldownElapsed ? "text-emerald-300" : "text-red-300"}>
+          {cooldownElapsed ? "✓" : "✗"}
+        </span>
+        Cooldown
+        <span
+          className={`font-mono ${
+            cooldownElapsed ? "text-emerald-300" : "text-amber-300"
+          }`}
+        >
+          {cooldownElapsed
+            ? "elapsed"
+            : formatDurationShort(cooldownRemainingSec)}
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className={rateInBand ? "text-emerald-300" : "text-red-300"}>
+          {rateInBand ? "✓" : "✗"}
+        </span>
+        Rate in band
+        <span
+          className={`font-mono ${
+            rateInBand ? "text-emerald-300" : "text-red-300"
+          }`}
+        >
+          {liveDelta != null
+            ? `${presentation.formattedLiveDelta} ${rateInBand ? "<" : ">"} ${presentation.formattedThreshold}`
+            : "—"}
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <span className="text-slate-500">·</span>
+        <span className="text-slate-300">Next oracle report</span>
+      </span>
+      <span className="text-slate-500 ml-auto">
+        Reset is automatic on next report once both are ✓
+      </span>
+    </div>
+  );
+}
+
 export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
 
-  const { data } = useGQL<Response>(
-    !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null,
-    { chainId: pool.chainId, rateFeedID },
-  );
+  const { data } = useGQL<Response>(breakerConfigQuery(isVirtual, rateFeedID), {
+    chainId: pool.chainId,
+    rateFeedID,
+  });
 
   const configs = data?.BreakerConfig ?? [];
   const trips = data?.BreakerTripEvent ?? [];
@@ -163,44 +512,21 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
     return () => clearInterval(id);
   }, [tickerActive]);
 
-  if (isVirtual || !rateFeedID) return null;
+  if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
-  if (!cfg) return null;
 
-  const kind = cfg.breaker.kind;
   const threshold = effectiveThreshold(cfg);
   const cooldown = effectiveCooldown(cfg);
   const cooldownEndsAt = Number(cfg.cooldownEndsAt);
   const cooldownRemainingSec = Math.max(0, cooldownEndsAt - now);
   const liveDelta = computeLiveDelta(cfg);
-  const precision = PRECISION_BY_KIND[kind] ?? 2;
-
-  const referenceLabel =
-    kind === "MEDIAN_DELTA" ? "EMA Reference" : "Reference";
-  const liveDeltaLabel =
-    kind === "MEDIAN_DELTA" ? "Δ Oracle Price vs EMA" : "Δ Oracle Price vs Peg";
-  const referenceCaption =
-    kind === "MEDIAN_DELTA"
-      ? `smoothing ${formatFixidityPct(cfg.smoothingFactor, 1) ?? "—"}`
-      : "fixed peg";
-  const thresholdCaption =
-    kind === "MEDIAN_DELTA"
-      ? `trips at >${formatFixidityPct(threshold.toString(), precision) ?? "—"} from EMA`
-      : `trips at >${formatFixidityPct(threshold.toString(), precision) ?? "—"} from peg`;
-
-  const formattedThreshold =
-    formatFixidityPct(threshold.toString(), precision) ?? "—";
-  const formattedCooldown = formatDurationShort(Number(cooldown));
-  const formattedReference =
-    kind === "MEDIAN_DELTA"
-      ? formatFixidityValue(cfg.medianRatesEMA)
-      : formatFixidityValue(cfg.referenceValue);
-  // `liveDelta != null` (instead of truthy) — `0n` is a legitimate value
-  // (median exactly matches reference), not "missing data".
-  const formattedLiveDelta =
-    liveDelta != null
-      ? (formatFixidityPct(liveDelta.toString(), precision) ?? "—")
-      : "—";
+  const presentation = breakerPresentation(
+    cfg,
+    threshold,
+    cooldown,
+    liveDelta,
+    tripped,
+  );
   const liveBar =
     liveDelta != null
       ? deltaBarStyle(liveDelta, threshold)
@@ -216,8 +542,6 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
       Number(t.blockTimestamp) >= todayMidnightSec &&
       t.breaker.address === cfg.breaker.address,
   ).length;
-  const lifetimeCount = cfg.tripCountLifetime;
-  const lastTripTs = cfg.lastTripAt;
 
   // Reset-path conditions (mirror BreakerBox.tryResetBreaker).
   const cooldownElapsed = cooldownRemainingSec === 0;
@@ -227,169 +551,35 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
     <>
       <div className="my-5 h-px bg-slate-800" />
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
-        <div title={`${cfg.breaker.kind} breaker · ${cfg.breaker.address}`}>
-          <dt className="text-slate-400 inline-flex items-center gap-1">
-            Breaker
-            <InfoPopover
-              label="Breaker"
-              content="On-chain circuit breaker that halts trading when the oracle price moves more than the configured threshold from the reference. Reset is automatic on the next oracle report once cooldown elapses AND the rate returns inside the band."
-            />
-          </dt>
-          <dd className="flex flex-col gap-0.5">
-            <span className={tripped ? "text-red-400" : "text-emerald-400"}>
-              {kind === "MEDIAN_DELTA" ? "MedianDelta" : "ValueDelta"}
-            </span>
-            <span
-              className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
-            >
-              trading mode {cfg.tradingMode}
-              {tripped && " · halted"}
-            </span>
-            {/* `title=` is a tooltip for sighted users; mirror its text into
-                an `sr-only` span so screen readers also surface the breaker
-                kind + address. Mirrors the MarketHoursPill pattern. */}
-            <span className="sr-only">
-              {cfg.breaker.kind} breaker at address {cfg.breaker.address}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400">{referenceLabel}</dt>
-          <dd className="flex flex-col gap-0.5">
-            <span className="font-mono text-white">
-              {formattedReference ?? "—"}
-            </span>
-            <span className="text-xs text-slate-500">{referenceCaption}</span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400">Threshold / Cooldown</dt>
-          <dd className="flex flex-col gap-0.5">
-            <span className="font-mono text-white">
-              {formattedThreshold} / {formattedCooldown}
-            </span>
-            <span
-              className={`text-xs ${
-                tripped && cooldownRemainingSec > 0
-                  ? "text-amber-300"
-                  : "text-slate-500"
-              }`}
-            >
-              {tripped && cooldownRemainingSec > 0
-                ? `${formatDurationShort(cooldownRemainingSec)} left`
-                : thresholdCaption}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400">{liveDeltaLabel}</dt>
-          <dd className="flex flex-col gap-0.5">
-            <div className="flex h-5 items-center">
-              <div className="h-2 w-full rounded-full bg-slate-700 mt-1">
-                <div
-                  className={`h-2 rounded-full transition-all ${liveBar.color}`}
-                  style={{ width: `${liveBar.pct}%` }}
-                  role="progressbar"
-                  aria-label="Live oracle Δ vs reference"
-                  aria-valuenow={Math.round(liveBar.pct)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                />
-              </div>
-            </div>
-            <span
-              className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
-            >
-              {liveDelta != null
-                ? `${formattedLiveDelta} of ${formattedThreshold}`
-                : "—"}
-              {tripped &&
-                liveDelta != null &&
-                liveDelta >= threshold &&
-                " (over)"}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400 flex items-center justify-between gap-1">
-            <span>Last trip</span>
-            {tripped && lastTripTs && (
-              <span className="text-xs font-normal text-red-400">
-                tripped {relativeTime(lastTripTs)}
-              </span>
-            )}
-          </dt>
-          <dd className="flex flex-col gap-0.5">
-            {lastTripTs && cfg.lastTripTxHash ? (
-              <a
-                href={explorerTxUrl(network, cfg.lastTripTxHash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${
-                  tripped ? "text-red-300" : "text-indigo-300"
-                } hover:text-indigo-400`}
-                title={formatTimestamp(lastTripTs)}
-              >
-                {relativeTime(lastTripTs)}
-              </a>
-            ) : (
-              <span className="text-slate-500">never</span>
-            )}
-            <span
-              className={`text-xs ${
-                tripsToday > 0 ? "text-amber-300" : "text-slate-500"
-              }`}
-            >
-              {lifetimeCount} lifetime
-              {tripsToday > 0 && ` · ${tripsToday} today`}
-            </span>
-          </dd>
-        </div>
+        <BreakerIdentityMetric cfg={cfg} tripped={tripped} />
+        <ReferenceMetric presentation={presentation} />
+        <ThresholdMetric
+          presentation={presentation}
+          tripped={tripped}
+          cooldownRemainingSec={cooldownRemainingSec}
+        />
+        <LiveDeltaMetric
+          presentation={presentation}
+          liveDelta={liveDelta}
+          liveBar={liveBar}
+          tripped={tripped}
+        />
+        <LastTripMetric
+          cfg={cfg}
+          network={network}
+          tripped={tripped}
+          tripsToday={tripsToday}
+        />
       </dl>
 
       {tripped && (
-        <div className="mt-4 rounded border border-red-900/40 bg-red-950/30 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-          <span className="text-red-300 font-medium">Reset path</span>
-          <span className="inline-flex items-center gap-1">
-            <span
-              className={cooldownElapsed ? "text-emerald-300" : "text-red-300"}
-            >
-              {cooldownElapsed ? "✓" : "✗"}
-            </span>
-            Cooldown
-            <span
-              className={`font-mono ${
-                cooldownElapsed ? "text-emerald-300" : "text-amber-300"
-              }`}
-            >
-              {cooldownElapsed
-                ? "elapsed"
-                : formatDurationShort(cooldownRemainingSec)}
-            </span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className={rateInBand ? "text-emerald-300" : "text-red-300"}>
-              {rateInBand ? "✓" : "✗"}
-            </span>
-            Rate in band
-            <span
-              className={`font-mono ${
-                rateInBand ? "text-emerald-300" : "text-red-300"
-              }`}
-            >
-              {liveDelta != null
-                ? `${formattedLiveDelta} ${rateInBand ? "<" : ">"} ${formattedThreshold}`
-                : "—"}
-            </span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="text-slate-500">·</span>
-            <span className="text-slate-300">Next oracle report</span>
-          </span>
-          <span className="text-slate-500 ml-auto">
-            Reset is automatic on next report once both are ✓
-          </span>
-        </div>
+        <ResetPathBanner
+          cooldownElapsed={cooldownElapsed}
+          cooldownRemainingSec={cooldownRemainingSec}
+          rateInBand={rateInBand}
+          liveDelta={liveDelta}
+          presentation={presentation}
+        />
       )}
     </>
   );
