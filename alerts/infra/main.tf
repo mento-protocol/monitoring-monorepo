@@ -189,7 +189,7 @@ locals {
   # appear in plan output and resource addresses. Values are looked up
   # from a separate map keyed by the same names. Splitting these keeps the
   # iteration surface non-sensitive while the actual secret values flow
-  # only through the resource's `plaintext_value` field.
+  # only through the resource's `value` field.
   alerts_infra_ci_secret_names = toset([
     "TF_VAR_SENTRY_AUTH_TOKEN",
     "TF_VAR_DISCORD_BOT_TOKEN",
@@ -222,8 +222,8 @@ locals {
 }
 
 # trunk-ignore-begin(checkov/CKV_GIT_4): CKV_GIT_4 prefers `encrypted_value`
-# (pre-libsodium-encrypted against the repo's public key) over
-# `plaintext_value`. The encrypted path requires an external libsodium step
+# (pre-libsodium-encrypted against the repo's public key) over the plaintext
+# `value` field. The encrypted path requires an external libsodium step
 # outside Terraform — non-trivial complexity for marginal benefit here: the
 # state file is already encrypted at rest in GCS, gated by `org-terraform`
 # impersonation (same gate that already protects sentry_auth_token /
@@ -233,9 +233,9 @@ locals {
 # audience), revisit — `gh secret set` and `data.github_actions_public_key`
 # can build an `encrypted_value` pipeline.
 resource "github_actions_secret" "alerts_infra_tf_vars" {
-  for_each        = local.alerts_infra_ci_secret_names
-  repository      = "monitoring-monorepo"
-  secret_name     = each.key
-  plaintext_value = local.alerts_infra_ci_secret_values[each.key]
+  for_each    = local.alerts_infra_ci_secret_names
+  repository  = "monitoring-monorepo"
+  secret_name = each.key
+  value       = local.alerts_infra_ci_secret_values[each.key]
 }
 # trunk-ignore-end(checkov/CKV_GIT_4)
