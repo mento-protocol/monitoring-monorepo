@@ -36,6 +36,15 @@ on:
 # overrides — which is the safe-by-default behavior we want.
 permissions: read-all
 
+# Per-PR concurrency so rapid `synchronize` events (e.g. Dependabot
+# rebasing on conflict) don't race two `gh pr merge --auto` calls
+# against the same PR. `cancel-in-progress: true` is safe because the
+# job is idempotent — the latest run re-enables auto-merge against the
+# current head and discards the in-flight stale-head run.
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   auto-merge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
