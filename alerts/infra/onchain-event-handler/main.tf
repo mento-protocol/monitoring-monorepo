@@ -242,9 +242,10 @@ data "archive_file" "function_source" {
 # Use our custom source hash instead of the archive's SHA256
 # This ensures the function only redeploys when actual source files change
 resource "google_storage_bucket_object" "function_source" {
-  name   = "onchain-event-handler-${local.source_hash}.zip"
-  bucket = google_storage_bucket.function_bucket.name
-  source = data.archive_file.function_source.output_path
+  name           = "onchain-event-handler-${local.source_hash}.zip"
+  bucket         = google_storage_bucket.function_bucket.name
+  source         = data.archive_file.function_source.output_path
+  detect_md5hash = data.archive_file.function_source.output_md5
 
   lifecycle {
     # Ignore changes to content_type and other metadata that don't affect functionality
