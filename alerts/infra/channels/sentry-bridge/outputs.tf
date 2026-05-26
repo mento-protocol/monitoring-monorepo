@@ -3,11 +3,6 @@ output "sentry_organization" {
   value       = data.sentry_organization.main
 }
 
-output "sentry_team" {
-  description = "The Sentry team internal ID"
-  value       = data.sentry_team.main.internal_id
-}
-
 output "slack_channels" {
   description = "Map of Sentry project slug → Slack channel name for the per-project default alert"
   value = {

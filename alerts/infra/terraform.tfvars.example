@@ -9,9 +9,6 @@ sentry_auth_token = "your-sentry-token"
 # Sentry organization slug (from URL: https://[slug].sentry.io)
 sentry_organization_slug = "mento-labs"
 
-# Sentry team slug
-sentry_team_slug = "mento-labs"
-
 # Slack workspace name as it appears in Sentry's Slack integration
 # (Sentry → Settings → Integrations → Slack). Case-sensitive.
 sentry_slack_workspace_name = "Mento Labs"

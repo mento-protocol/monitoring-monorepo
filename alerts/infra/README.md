@@ -74,7 +74,6 @@ discord_category_id    = "<alert-category-id>"
 # Sentry Configuration
 sentry_auth_token           = "your-sentry-auth-token"
 sentry_organization_slug    = "my-org"     # Optional, defaults to "mento-labs"
-sentry_team_slug            = "my-team"    # Optional, defaults to "mento-labs"
 sentry_slack_workspace_name = "Mento Labs" # Optional, defaults to "Mento Labs"
 
 # GCP Configuration

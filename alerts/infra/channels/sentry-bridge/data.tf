@@ -7,12 +7,6 @@ data "sentry_organization" "main" {
   slug = var.sentry_organization_slug
 }
 
-# Get team details
-data "sentry_team" "main" {
-  organization = data.sentry_organization.main.internal_id
-  slug         = var.sentry_team_slug
-}
-
 # Get Slack integration details — the Sentry-owned Slack OAuth app installed
 # at the org level. This is NOT the same Slack token Grafana uses; Sentry's
 # Slack integration is a separate OAuth app installed via Sentry → Settings →

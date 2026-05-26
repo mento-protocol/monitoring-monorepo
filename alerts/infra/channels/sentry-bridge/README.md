@@ -18,7 +18,7 @@ For each Sentry project (auto-discovered via `data "sentry_all_projects"`):
   same channel.
 
 Both rules use the new `sentry_alert` supertype resource (introduced in
-`jianyuan/sentry@0.15.0`) rather than the deprecated `sentry_issue_alert`.
+`jianyuan/sentry@0.15.0-beta3`) rather than the deprecated `sentry_issue_alert`.
 The new resource is triggered by monitor lifecycle events, so it's
 fundamentally less noisy than the old per-event firing model.
 
@@ -52,7 +52,6 @@ These steps happen outside Terraform and must be done first:
 | Variable                      | Description                                                        |
 | ----------------------------- | ------------------------------------------------------------------ |
 | `sentry_organization_slug`    | Sentry org slug (e.g. `mento-labs`)                                |
-| `sentry_team_slug`            | Sentry team slug                                                   |
 | `sentry_slack_workspace_name` | Slack workspace name as shown in Sentry's Slack integration        |
 | `slack_critical_channel`      | Override the critical fan-out channel (default `#alerts-critical`) |
 
@@ -71,11 +70,19 @@ These steps happen outside Terraform and must be done first:
 ## Adding a new project
 
 1. Create the project in Sentry (UI or API). Terraform does not manage
-   project creation.
+   project creation. Sentry auto-creates the default issue-stream monitor
+   at project creation — usually instantaneous.
 2. Have a Slack admin create the matching `#sentry-<project-slug>` channel
    and invite `@Sentry`.
 3. Run `terraform apply` — the project is auto-discovered and both alert
    rules spin up.
+
+> **Known limitation:** if a brand-new Sentry project lands in the org
+> before its default issue-stream monitor has been provisioned (rare;
+> Sentry creates it eagerly), the `data.sentry_project_issue_stream_monitor`
+> lookup fails for _that_ project and the `for_each` plan errors out for
+> _all_ projects in the same apply. Mitigation: confirm the new project's
+> "Monitors" tab is non-empty in the Sentry UI before re-running apply.
 
 ## Removing a project
 

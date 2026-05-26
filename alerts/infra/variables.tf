@@ -37,17 +37,6 @@ variable "sentry_organization_slug" {
   }
 }
 
-variable "sentry_team_slug" {
-  description = "Sentry team slug"
-  type        = string
-  default     = "mento-labs"
-
-  validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.sentry_team_slug))
-    error_message = "Sentry team slug must contain only lowercase letters, numbers, and hyphens."
-  }
-}
-
 variable "sentry_slack_workspace_name" {
   description = "Slack workspace name as it appears in Sentry's Slack integration (Settings → Integrations → Slack). Case-sensitive."
   type        = string
