@@ -14,6 +14,7 @@ Each script includes comprehensive header documentation. See the script file its
 - **`set-up-terraform.sh`** - Initialize Terraform with proper permissions
 - **`fix-webhook-state.sh`** - Fix Terraform state drift for QuickNode webhooks
 - **`get-webhook-filter-function.sh`** - Retrieve webhook filter function from QuickNode
+- **`sync-secrets-to-github.sh`** - Push the 8 `TF_VAR_*` repo secrets from `terraform.tfvars` to GitHub Actions (consumed by `.github/workflows/alerts-infra.yml`)
 
 ### Cloud Function Scripts (`/onchain-event-handler/scripts/`)
 
