@@ -231,7 +231,7 @@ terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
 terraform plan  -var-file=<main-checkout>/terraform/terraform.tfvars
 ```
 
-Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.
+Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead. (CI-driven apply via `.github/workflows/alerts-infra.yml` is gated by the `Production` GitHub Environment manual approval, which counts as explicit human approval.)
 
 ## Package routing index
 

@@ -828,3 +828,21 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
     google_project_iam_member.ci_deployer,
   ]
 }
+
+# Allows the CI deployer SA to mint short-lived tokens for `org-terraform`, the
+# seed-project SA used by `alerts/infra/` for both its GCS backend
+# (`impersonate_service_account` in `alerts/infra/versions.tf`) and its google
+# provider (`alerts/infra/providers.tf`). Without this grant, the CI workflow
+# `alerts-infra.yml` fails at `terraform init` with a 403 from STS — the
+# deployer SA is authorized via WIF but can't impersonate `org-terraform`.
+#
+# The binding lives on `org-terraform` in the seed project, NOT in
+# `mento-monitoring`. `google_service_account_iam_member` makes the target
+# explicit (vs. a project-level binding) so the blast radius is one SA, not
+# the whole seed project. `org-terraform` already has the rights it needs in
+# the seed project to grant this binding on itself.
+resource "google_service_account_iam_member" "ci_alerts_infra_org_terraform_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+}

@@ -1,0 +1,232 @@
+name: Alerts Infra
+
+# Terraform plan-on-PR + apply-on-merge for `alerts/infra/` — the event-driven
+# alert delivery stack (Cloud Function + Discord channels + Sentry bridge +
+# QuickNode webhooks). The stack's GCS backend and google provider both
+# impersonate `org-terraform@mento-terraform-seed-ffac` (see versions.tf and
+# providers.tf), so the CI deployer SA needs `roles/iam.serviceAccountTokenCreator`
+# on `org-terraform`. That grant lives in `terraform/main.tf`
+# (resource `ci_alerts_infra_org_terraform_token_creator`) and must be applied
+# from the top-level stack before this workflow can succeed.
+#
+# Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
+# (matrix module `alerts/infra`). This workflow adds `terraform plan` on PRs
+# (with a sticky comment of the diff) and `terraform apply` on merge to main,
+# gated by the `Production` GitHub Environment for human approval.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - alerts/infra/**
+      - .github/workflows/alerts-infra.yml
+  push:
+    branches: [main]
+    paths:
+      - alerts/infra/**
+      - .github/workflows/alerts-infra.yml
+
+# PR runs cancel on new pushes to the same PR ref; push/dispatch events use
+# a SHA-unique group so they never cancel each other. Matches `infra.yml`.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: read-all
+
+jobs:
+  plan:
+    name: Terraform Plan (alerts/infra)
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+      actions: read
+    defaults:
+      run:
+        working-directory: alerts/infra
+    env:
+      # Sentry
+      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
+      # Discord
+      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
+      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
+      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
+      TF_VAR_discord_sentry_role_id: ${{ secrets.TF_VAR_DISCORD_SENTRY_ROLE_ID }}
+      # GCP
+      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      # QuickNode
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        # `set -o pipefail` so a terraform failure propagates even when piped
+        # to `tee`. Default exit semantics (0 success, 1 error) are fine here;
+        # we want green plans regardless of diff presence — comment-then-pass.
+        run: |
+          set -o pipefail
+          terraform plan -no-color -input=false 2>&1 | tee /tmp/tf-plan.txt
+
+      - name: Post plan as sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          # Pass workflow context through env vars instead of `${{ }}`
+          # substitution in the inline script to keep the script free of
+          # template injection points (defensive — `steps.*.outcome` is an
+          # enum controlled by Actions, but env-based passing is the standard
+          # hardening pattern).
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        with:
+          script: |
+            const fs = require("fs");
+            const planOutput = fs.existsSync("/tmp/tf-plan.txt")
+              ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
+              : "(Plan did not produce output — check the workflow logs.)";
+
+            // GitHub PR comment hard cap is ~65KB. A fresh alerts/infra plan
+            // (Cloud Function + Discord channels + Sentry + QuickNode) can
+            // easily blow past that. Tail the last 50KB so the apply/destroy
+            // summary stays visible and link to the run for the full log.
+            const MAX = 50_000;
+            const truncated = planOutput.length > MAX;
+            const planBody = truncated
+              ? "... (truncated, see workflow logs)\n" + planOutput.slice(-MAX)
+              : planOutput;
+
+            const planOutcome = process.env.PLAN_OUTCOME || "unknown";
+            const statusIcon = planOutcome === "success" ? "✅" : "❌";
+
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const body =
+              `## Terraform Plan — \`alerts/infra/\`\n\n` +
+              `**Status:** ${statusIcon} ${planOutcome}\n\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
+              `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `<!-- alerts-infra-plan-comment -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(c =>
+              c.body && c.body.includes("<!-- alerts-infra-plan-comment -->"),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  apply:
+    name: Terraform Apply (alerts/infra)
+    # Guard against workflow_dispatch from non-main refs.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # Reuses the existing `Production` environment shared with metrics-bridge
+    # and aegis. Add a required-reviewer rule in repo Settings → Environments
+    # to require manual approval before each apply runs.
+    environment:
+      name: Production
+      url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    defaults:
+      run:
+        working-directory: alerts/infra
+    env:
+      # Sentry
+      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
+      # Discord
+      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
+      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
+      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
+      TF_VAR_discord_sentry_role_id: ${{ secrets.TF_VAR_DISCORD_SENTRY_ROLE_ID }}
+      # GCP
+      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      # QuickNode
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Apply
+        # `local_file.env_file` recreates on every fresh-checkout apply — it
+        # writes `alerts/infra/onchain-event-handler/.env` for local dev and
+        # has no remote side effects. Expected, ephemeral, not state drift.
+        run: terraform apply -auto-approve -input=false
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
