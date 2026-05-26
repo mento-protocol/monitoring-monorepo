@@ -198,8 +198,14 @@ Terraform creates: Upstash Redis database + Vercel project + all env vars + cust
 Push any commit touching `ui-dashboard/`, or force via:
 
 ```bash
-vercel deploy --prod --force
+vercel deploy --prod --force --with-cache --archive=tgz --yes
 ```
+
+Run manual dashboard deploys from the monorepo root, not from
+`ui-dashboard/`. The Vercel project root directory is `ui-dashboard`, so the
+CLI needs the repository root plus the tracked root `.vercelignore`; running
+from the package directory can miss `vercel.json`, while running from the root
+without `.vercelignore` can upload local caches and dependencies.
 
 ---
 
@@ -240,11 +246,16 @@ The script tries three anchors in order:
    behavior.
 
 If a dashboard-affecting change was skipped, check that the relevant base
-commit is present in the shallow clone. To force a deploy:
+commit is present in the shallow clone. For env-only changes that require a
+fresh production runtime, run the manual deploy from the monorepo root:
 
 ```bash
-vercel deploy --prod --force
+vercel deploy --prod --force --with-cache --archive=tgz --yes
 ```
+
+Do not run that command from `ui-dashboard/`: the Vercel project already has
+`root_directory = ui-dashboard`, so package-directory deploys do not match the
+Git integration layout.
 
 ### Envio deployment fails
 
