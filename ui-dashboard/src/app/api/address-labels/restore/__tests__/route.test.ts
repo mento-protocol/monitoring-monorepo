@@ -14,12 +14,18 @@ vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
 }));
 
-vi.mock("@/lib/address-labels/snapshot", () => ({
-  isSnapshot: vi.fn(() => true),
-  handleSnapshot: vi.fn(async () =>
-    Response.json({ ok: true, imported: { addresses: 1 } }),
-  ),
-}));
+vi.mock("@/lib/address-labels/snapshot", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/address-labels/snapshot")
+  >("@/lib/address-labels/snapshot");
+  return {
+    ...actual,
+    isSnapshot: vi.fn(() => true),
+    handleSnapshot: vi.fn(async () =>
+      Response.json({ ok: true, imported: { addresses: 1 } }),
+    ),
+  };
+});
 
 import { getAuthSession } from "@/auth";
 import * as Sentry from "@sentry/nextjs";
@@ -334,6 +340,28 @@ describe("POST /api/address-labels/restore — v2 manifest", () => {
     }
   }
 
+  function mockManifestSequenceWithHash(
+    hashName: string,
+    records: unknown,
+  ): void {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    for (const entry of manifest.hashes) {
+      const body =
+        entry.name === hashName
+          ? records
+          : entry.name === "labels"
+            ? labelRecords
+            : entry.name === "reports"
+              ? reportRecords
+              : {};
+      mockGet.mockResolvedValueOnce(
+        blobResult(body) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+  }
+
   it("fetches manifest, fetches each hash blob, assembles the snapshot, then hands off to handleSnapshot", async () => {
     mockManifestSequence();
     const res = await POST(
@@ -503,6 +531,35 @@ describe("POST /api/address-labels/restore — v2 manifest", () => {
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
 
+  it("rejects labels with non-string tag values before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": { tags: [42] },
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(reportRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid label tags"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed report hash records before replacing Redis data", async () => {
     mockGet.mockResolvedValueOnce(
       blobResult(manifest) as Awaited<ReturnType<typeof get>>,
@@ -528,6 +585,55 @@ describe("POST /api/address-labels/restore — v2 manifest", () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({
       error: expect.stringContaining("invalid report payload"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects report hash records with malformed preserved metadata before replacing Redis data", async () => {
+    mockGet.mockResolvedValueOnce(
+      blobResult(manifest) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult(labelRecords) as Awaited<ReturnType<typeof get>>,
+    );
+    mockGet.mockResolvedValueOnce(
+      blobResult({
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          body: "Report",
+          authorEmail: 42,
+        },
+      }) as Awaited<ReturnType<typeof get>>,
+    );
+    for (let i = 0; i < 5; i++) {
+      mockGet.mockResolvedValueOnce(
+        blobResult({}) as Awaited<ReturnType<typeof get>>,
+      );
+    }
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining("invalid authorEmail"),
+    });
+    expect(mockHandleSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects an assembled manifest snapshot that fails snapshot validation before replacing Redis data", async () => {
+    mockManifestSequence();
+    mockIsSnapshot.mockReturnValueOnce(false);
+
+    const res = await POST(
+      req(manifestPath, { authorization: "Bearer secret" }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: expect.stringContaining(
+        "Manifest snapshot is not an address-label snapshot",
+      ),
     });
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
@@ -561,6 +667,179 @@ describe("POST /api/address-labels/restore — v2 manifest", () => {
     });
     expect(mockHandleSnapshot).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      "intelDeep",
+      { "0xcccccccccccccccccccccccccccccccccccccccc": {} },
+      "invalid intelDeep address",
+    ],
+    [
+      "intelTransfers",
+      { "0xcccccccccccccccccccccccccccccccccccccccc": {} },
+      "invalid intelTransfers address",
+    ],
+    [
+      "intelWealth",
+      { "0xcccccccccccccccccccccccccccccccccccccccc": {} },
+      "invalid intelWealth address",
+    ],
+    ["intelEntities", { "bad slug": {} }, "invalid intelEntities slug"],
+    ["intelEntityCps", { "bad slug": {} }, "invalid intelEntityCps slug"],
+  ])(
+    "rejects object-shaped malformed %s records before replacing Redis data",
+    async (hashName, records, expectedError) => {
+      mockManifestSequenceWithHash(hashName, records);
+
+      const res = await POST(
+        req(manifestPath, { authorization: "Bearer secret" }),
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: expect.stringContaining(expectedError),
+      });
+      expect(mockHandleSnapshot).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      "intelDeep",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    ],
+    [
+      "intelTransfers",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    ],
+    [
+      "intelWealth",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    ],
+    ["intelEntities", { "sample-entity": { slug: "sample-entity" } }],
+    ["intelEntityCps", { "sample-entity": { slug: "sample-entity" } }],
+  ])(
+    "accepts legacy/minimal %s records for disaster restore compatibility",
+    async (hashName, records) => {
+      mockManifestSequenceWithHash(hashName, records);
+
+      const res = await POST(
+        req(manifestPath, { authorization: "Bearer secret" }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockHandleSnapshot).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    [
+      "intelDeep",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-05-21T03:00:00.000Z",
+          candidate: {},
+          enriched: null,
+          counterparties: null,
+          entity: null,
+          contract: null,
+          error: null,
+          version: 1,
+        },
+      },
+      "invalid intelDeep payload",
+    ],
+    [
+      "intelTransfers",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-05-21T03:00:00.000Z",
+          transferCount: 1,
+          transfers: [{}],
+        },
+      },
+      "invalid intelTransfers payload",
+    ],
+    [
+      "intelWealth",
+      {
+        "0xcccccccccccccccccccccccccccccccccccccccc": {
+          address: "0xcccccccccccccccccccccccccccccccccccccccc",
+          fetchedAt: "2026-05-21T03:00:00.000Z",
+          sources: ["test"],
+          balances: null,
+          portfolio: { "0d_ago": {} },
+          version: 1,
+        },
+      },
+      "invalid intelWealth payload",
+    ],
+    [
+      "intelEntities",
+      {
+        "sample-entity": {
+          slug: "sample-entity",
+          fetchedAt: "2026-05-21T03:00:00.000Z",
+          name: "Sample",
+          note: "",
+          id: "sample-entity",
+          customized: false,
+          type: "organization",
+          service: null,
+          addresses: [],
+          website: null,
+          twitter: null,
+          crunchbase: null,
+          linkedin: null,
+          populatedTags: [{}],
+        },
+      },
+      "invalid intelEntities payload",
+    ],
+    [
+      "intelEntityCps",
+      {
+        "sample-entity": {
+          slug: "sample-entity",
+          fetchedAt: "2026-05-21T03:00:00.000Z",
+          counterparties: { "ethereum:out": [{}] },
+        },
+      },
+      "invalid intelEntityCps payload",
+    ],
+  ])(
+    "rejects nested malformed %s records before replacing Redis data",
+    async (hashName, records, expectedError) => {
+      mockManifestSequenceWithHash(hashName, records);
+
+      const res = await POST(
+        req(manifestPath, { authorization: "Bearer secret" }),
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: expect.stringContaining(expectedError),
+      });
+      expect(mockHandleSnapshot).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects an oversized manifest blob", async () => {
     mockGet.mockResolvedValueOnce(
