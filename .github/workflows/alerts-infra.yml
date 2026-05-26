@@ -27,13 +27,17 @@ on:
       - alerts/infra/**
       - .github/workflows/alerts-infra.yml
 
-# PR runs cancel on new pushes to the same PR ref; push/dispatch events use
-# a SHA-unique group so they never cancel each other (sibling stack
-# workflows like `infra.yml` use unconditional cancel — be more careful
-# here because a cancelled apply could leave Cloud Function / QuickNode
-# webhook state half-mutated).
+# PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
+# is fine — a newer plan supersedes an older one).
+#
+# Push/dispatch runs share ONE group `<workflow>-deploy` with
+# `cancel-in-progress: false`, so concurrent merges queue and apply
+# strictly in order. Without this, a SHA-unique group would let two
+# close-together merges run `terraform apply` in parallel and the older
+# one could roll the state back to stale config (Cloud Function source +
+# QuickNode webhooks + Discord channels are all order-sensitive).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: read-all
@@ -41,7 +45,14 @@ permissions: read-all
 jobs:
   plan:
     name: Terraform Plan (alerts/infra)
-    if: github.event_name == 'pull_request'
+    # Fork PRs and Dependabot PRs don't get repository secrets, so the
+    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # Skip the job in those contexts — the plan is only meaningful when
+    # secrets are available. Internal PRs run as usual.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.fork == false &&
+      github.actor != 'dependabot[bot]'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
