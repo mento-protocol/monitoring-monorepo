@@ -842,7 +842,11 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
 # the whole seed project. `org-terraform` already has the rights it needs in
 # the seed project to grant this binding on itself.
 resource "google_service_account_iam_member" "ci_alerts_infra_org_terraform_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
+  # `var.terraform_service_account` is the fully-qualified email
+  # (`org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com`),
+  # which the google provider accepts directly as `service_account_id` —
+  # avoids the project name appearing twice (in the path AND in the email).
+  service_account_id = var.terraform_service_account
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
