@@ -533,9 +533,10 @@ resource "google_service_account_iam_member" "grafana_agent_cloudbuild_appengine
 # Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
 # runs `gcloud run services update metrics-bridge --image=<digest>` after
 # Cloud Build pushes a new revision. Terraform owns the *shape* of the
-# service (probes, env, scaling, memory) and ignores image drift via
-# `lifecycle.ignore_changes` so running `pnpm infra:apply` never reverts
-# the image back to the bootstrap placeholder.
+# service (probes, env, template scaling, memory) and ignores image plus
+# Cloud Run API bookkeeping drift via `lifecycle.ignore_changes` so running
+# `pnpm infra:apply` never reverts the deployed revision or re-applies
+# cosmetic deploy metadata.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
   project             = google_project.monitoring.project_id
@@ -603,7 +604,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
     ignore_changes = [
       client,
       client_version,
-      scaling,
+      scaling, # service-level bookkeeping block; template[0].scaling stays managed.
       template[0].containers[0].image,
       template[0].revision,
     ]
