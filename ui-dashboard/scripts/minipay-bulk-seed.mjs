@@ -4,7 +4,8 @@
  *
  * The /api/minipay/sync route can't do the first-run backfill — Dune query
  * 7404332 returns ~16M rows / ~800 MB, which exceeds Vercel's 800s function
- * cap. Run this once locally to seed `minipay:users` + persist `minipay:lastBlock`.
+ * cap. Run this once locally to seed `minipay:users:<nibble>` + persist
+ * `minipay:lastBlock:sharded`.
  * Subsequent daily syncs (cron 03:30 UTC) hit the incremental path and finish
  * in seconds.
  *
@@ -35,7 +36,8 @@ const SHARD_NIBBLES = "0123456789abcdef";
 function shardKey(address) {
   return USERS_KEY_PREFIX + address[2];
 }
-const LAST_BLOCK_KEY = "minipay:lastBlock";
+const LEGACY_LAST_BLOCK_KEY = "minipay:lastBlock";
+const LAST_BLOCK_KEY = "minipay:lastBlock:sharded";
 
 const apiKey = process.env.DUNE_API_KEY;
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
@@ -50,7 +52,7 @@ if (!apiKey || !redisUrl || !redisToken) {
 
 if (process.argv[2]) {
   console.error(
-    "Execution-id reuse is disabled: this seed writes minipay:lastBlock and must execute Dune with lastBlock=0.",
+    "Execution-id reuse is disabled: this seed writes minipay:lastBlock:sharded and must execute Dune with lastBlock=0.",
   );
   process.exit(1);
 }
@@ -93,6 +95,11 @@ async function upstashFetch(path, init = {}) {
     throw new Error(`Upstash ${path} → ${res.status}: ${await res.text()}`);
   }
   return res.json();
+}
+
+async function getStringKey(key) {
+  const body = await upstashFetch(`/get/${encodeURIComponent(key)}`);
+  return body.result ?? null;
 }
 
 async function executeQuery(lastBlock) {
@@ -204,6 +211,16 @@ async function scard() {
 async function main() {
   const startedAt = Date.now();
 
+  const [legacyCursor, shardedCursor] = await Promise.all([
+    getStringKey(LEGACY_LAST_BLOCK_KEY),
+    getStringKey(LAST_BLOCK_KEY),
+  ]);
+  if (legacyCursor !== null && shardedCursor === null) {
+    console.warn(
+      `> Legacy MiniPay cursor ${LEGACY_LAST_BLOCK_KEY} exists but ${LAST_BLOCK_KEY} is empty; running the full sharded backfill before cron sync can advance.`,
+    );
+  }
+
   const executionId = await executeQuery(0);
   await pollUntilComplete(executionId);
 
@@ -245,7 +262,7 @@ async function main() {
 
   if (maxBlock > 0n) {
     await setLastBlock(maxBlock.toString());
-    console.log(`> Cursor set: minipay:lastBlock = ${maxBlock}`);
+    console.log(`> Cursor set: ${LAST_BLOCK_KEY} = ${maxBlock}`);
   }
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
@@ -254,8 +271,8 @@ async function main() {
   console.log(`✓ Done in ${elapsed}s.`);
   console.log(`  Total rows pulled: ${totalFetched}`);
   console.log(`  Total newly SADD'd: ${totalAdded}`);
-  console.log(`  Final SCARD minipay:users = ${finalCard}`);
-  console.log(`  minipay:lastBlock = ${maxBlock}`);
+  console.log(`  Final SCARD minipay:users:<nibble> = ${finalCard}`);
+  console.log(`  ${LAST_BLOCK_KEY} = ${maxBlock}`);
 }
 
 main().catch((err) => {

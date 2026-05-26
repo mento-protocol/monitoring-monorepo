@@ -6,9 +6,11 @@
  * exposes them as `(account, max_block)` rows with a `lastBlock` parameter
  * for incremental sync.
  *
- * The user set lives in Upstash Redis as a SET (`minipay:users`); the last
- * synced block is a STRING (`minipay:lastBlock`). Tagging consumers use
- * `intersectMiniPay` to test Mento addresses against the SET.
+ * The user set lives in Upstash Redis as sharded SETs
+ * (`minipay:users:<first-hex-nibble>`); the sharded ingestion cursor is a
+ * STRING (`minipay:lastBlock:sharded`). Tagging consumers use
+ * `intersectMiniPay` to test Mento addresses against the sharded SETs, with a
+ * temporary legacy fallback to `minipay:users` while production data migrates.
  *
  * NEVER import from a client component. DUNE_API_KEY is server-only.
  */
@@ -51,6 +53,7 @@ const SMISMEMBER_CHUNK = 1000;
 // would take ~63k each but adds round-trip overhead with no real benefit
 // at our cardinality.
 const SHARD_NIBBLES = "0123456789abcdef";
+const LEGACY_USERS_KEY = "minipay:users";
 const USERS_KEY_PREFIX = "minipay:users:";
 function shardKey(address: string): string {
   // Address is `0x` + 40 hex chars; the first hex char (idx 2) is the shard.
@@ -59,7 +62,7 @@ function shardKey(address: string): string {
 function allShardKeys(): string[] {
   return SHARD_NIBBLES.split("").map((n) => USERS_KEY_PREFIX + n);
 }
-const LAST_BLOCK_KEY = "minipay:lastBlock";
+const LAST_BLOCK_KEY = "minipay:lastBlock:sharded";
 const ADVANCE_LAST_BLOCK_SCRIPT = `
 local current = redis.call("GET", KEYS[1])
 local candidate = tonumber(ARGV[1])
@@ -331,10 +334,19 @@ export async function addToMiniPaySet(addresses: string[]): Promise<number> {
   return perShard.reduce((a, b) => a + b, 0);
 }
 
-/** Cumulative SCARD across all shards. */
+/**
+ * Cumulative SCARD across all shards plus the legacy set.
+ *
+ * During migration this may double-count addresses present in both places; the
+ * current callers use it as an operational non-empty/readiness guard, not as an
+ * exact distinct-user metric.
+ */
 export async function getMiniPaySetSize(): Promise<number> {
   const redis = getRedis();
-  const sizes = await Promise.all(allShardKeys().map((k) => redis.scard(k)));
+  const sizes = await Promise.all([
+    ...allShardKeys().map((k) => redis.scard(k)),
+    redis.scard(LEGACY_USERS_KEY),
+  ]);
   return sizes.reduce((a, b) => a + b, 0);
 }
 
@@ -347,21 +359,44 @@ export async function getMiniPaySetSize(): Promise<number> {
 export async function intersectMiniPay(addresses: string[]): Promise<string[]> {
   if (addresses.length === 0) return [];
   const redis = getRedis();
-  const perShard = await Promise.all(
+  const matched = new Set<string>();
+  const misses: string[] = [];
+
+  await Promise.all(
     Array.from(bucketByShard(addresses), async ([key, members]) => {
-      const matches: string[] = [];
       // Chunks share a Redis key, so this loop must serialize.
       for (const batch of chunk(members, SMISMEMBER_CHUNK)) {
         // react-doctor-disable-next-line react-doctor/async-await-in-loop
         const flags = (await redis.smismember(key, batch)) as number[];
         for (let i = 0; i < batch.length; i += 1) {
-          if (flags[i] === 1) matches.push(batch[i]!);
+          const address = batch[i]!;
+          if (Number(flags[i]) === 1) {
+            matched.add(address);
+          } else {
+            misses.push(address);
+          }
         }
       }
-      return matches;
     }),
   );
-  return perShard.flat();
+
+  // Temporary migration guard: the old single-key set may already contain
+  // users that have not been copied into shards yet. Probe only shard misses so
+  // the fallback stays bounded by the route's candidate set.
+  for (const batch of chunk([...new Set(misses)], SMISMEMBER_CHUNK)) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
+    const flags = (await redis.smismember(LEGACY_USERS_KEY, batch)) as number[];
+    for (let i = 0; i < batch.length; i += 1) {
+      if (Number(flags[i]) === 1) matched.add(batch[i]!);
+    }
+  }
+
+  const seen = new Set<string>();
+  return addresses.filter((address) => {
+    if (!matched.has(address) || seen.has(address)) return false;
+    seen.add(address);
+    return true;
+  });
 }
 
 // ── Cursor helpers ───────────────────────────────────────────────────────────
@@ -379,11 +414,16 @@ export async function getLastSyncedBlock(): Promise<bigint> {
  * Unchecked cursor setter for manual seed/import flows only.
  *
  * This write is intentionally non-monotonic: it can move
- * `minipay:lastBlock` backward. Cron/incremental sync paths must use
+ * `minipay:lastBlock:sharded` backward. Cron/incremental sync paths must use
  * `advanceLastSyncedBlock` so stale overlapping runs cannot regress the
  * cursor.
  */
 export async function setLastSyncedBlock(block: bigint): Promise<void> {
+  if (block === BigInt(0)) {
+    throw new Error(
+      "MiniPay sharded cursor cannot be set to 0; an empty cursor means the bulk seed has not completed.",
+    );
+  }
   await getRedis().set(LAST_BLOCK_KEY, block.toString());
 }
 

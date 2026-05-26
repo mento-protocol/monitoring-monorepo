@@ -44,13 +44,17 @@ function dayAlignedNow(): number {
   return Math.floor(nowSec / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }
 
+function middaySnapshotWindows() {
+  return buildSnapshotWindows((dayAlignedNow() + 12 * 3600) * 1000);
+}
+
 function makeVolumeNetworkData(
   snapshotOverrides: object[] = [],
 ): NetworkData[] {
   return [
     makeNetworkData({
       network: TVL_NETWORK,
-      snapshotWindows: buildSnapshotWindows(Date.now()),
+      snapshotWindows: middaySnapshotWindows(),
       pools: [makeTvlPool({ id: "pool-a" })],
       snapshots30d: snapshotOverrides.map((snapshot) =>
         makeSnapshot({ poolId: "pool-a", ...snapshot }),
@@ -593,7 +597,7 @@ describe("VolumeOverTimeChart render", () => {
       networkData: [
         makeNetworkData({
           network: TVL_NETWORK,
-          snapshotWindows: buildSnapshotWindows(Date.now()),
+          snapshotWindows: middaySnapshotWindows(),
           pools: [
             makeTvlPool({ id: "pool-a" }),
             makeTvlPool({ id: "pool-b", tokenDecimalsKnown: false }),
@@ -627,7 +631,7 @@ describe("VolumeOverTimeChart render", () => {
       networkData: [
         makeNetworkData({
           network: TVL_NETWORK,
-          snapshotWindows: buildSnapshotWindows(Date.now()),
+          snapshotWindows: middaySnapshotWindows(),
           pools: [makeTvlPool({ id: "pool-a", tokenDecimalsKnown: false })],
           snapshots30d: [
             makeSnapshot({
@@ -685,7 +689,7 @@ describe("VolumeOverTimeChart render", () => {
       networkData: [
         makeNetworkData({
           network: TVL_NETWORK,
-          snapshotWindows: buildSnapshotWindows(Date.now()),
+          snapshotWindows: middaySnapshotWindows(),
           brokerSnapshotsAllDaily: [
             {
               id: `42220-bipool-direct-${today}`,
@@ -722,7 +726,7 @@ describe("VolumeOverTimeChart render", () => {
       networkData: [
         makeNetworkData({
           network: TVL_NETWORK,
-          snapshotWindows: buildSnapshotWindows(Date.now()),
+          snapshotWindows: middaySnapshotWindows(),
           pools: [makeTvlPool({ id: "pool-a" })],
           snapshots30d: [
             // v3 = $3 on day0, $5 on day1
