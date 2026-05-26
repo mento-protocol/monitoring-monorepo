@@ -28,6 +28,7 @@ export async function formatDiscordMessage(
   log: QuickNodeDecodedLog,
   multisigKey: string,
   txHashMap: Map<string, string>,
+  signal?: AbortSignal,
 ): Promise<DiscordMessage> {
   const isSecurity = isSecurityEvent(eventName);
   const color = isSecurity ? DISCORD_COLORS.ALERT : DISCORD_COLORS.EVENT;
@@ -67,7 +68,13 @@ export async function formatDiscordMessage(
       value: `[Open TX in Safe UI](${safeUiUrl})`,
       inline: false,
     },
-    ...(await decodeEventData(eventName, log, txHashForSafe, chainName)),
+    ...(await decodeEventData(
+      eventName,
+      log,
+      txHashForSafe,
+      chainName,
+      signal,
+    )),
   ];
 
   // Build title: "Mento Labs Multisig [Celo]"
@@ -119,10 +126,17 @@ function isRetryableError(error: unknown): boolean {
     return false;
   }
 
+  if (isAbortError(error)) {
+    return false;
+  }
+
   const axiosError = error as AxiosError;
   const status = axiosError.response?.status;
 
   if (!status) {
+    if (axiosError.code === "ERR_CANCELED") {
+      return false;
+    }
     // Client-side timeout: don't retry — Discord may have processed it.
     if (axiosError.code === "ECONNABORTED") {
       return false;
@@ -150,6 +164,7 @@ function calculateRetryDelay(attempt: number): number {
 export async function sendToDiscord(
   webhookUrl: string,
   message: DiscordMessage,
+  signal?: AbortSignal,
 ): Promise<void> {
   let lastError: unknown;
 
@@ -158,6 +173,7 @@ export async function sendToDiscord(
       await axios.post(webhookUrl, message, {
         headers: { "Content-Type": "application/json" },
         timeout: DISCORD_WEBHOOK_TIMEOUT_MS,
+        signal,
       });
 
       // Extract key info for logging
@@ -208,7 +224,7 @@ export async function sendToDiscord(
           attempt: attempt + 2,
           delayMs: delay,
         });
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await sleep(delay, signal);
         continue; // Retry
       }
 
@@ -234,4 +250,44 @@ export async function sendToDiscord(
   });
 
   throw lastError;
+}
+
+function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(createAbortError());
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(createAbortError());
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbortError(error: Error): boolean {
+  const maybeCode = (error as Error & { code?: string }).code;
+  return (
+    error.name === "AbortError" ||
+    maybeCode === "ERR_CANCELED" ||
+    error.message === "Operation aborted"
+  );
+}
+
+function createAbortError(): Error & { code: string } {
+  return Object.assign(new Error("Operation aborted"), {
+    code: "ERR_CANCELED",
+  });
 }

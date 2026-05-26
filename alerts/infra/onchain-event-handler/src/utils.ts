@@ -48,8 +48,13 @@ export function getMultisigKey(address: string, chain: string): string | null {
 async function verifyBlockHashOnChain(
   blockHash: string,
   chainName: string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   try {
+    if (signal?.aborted) {
+      return false;
+    }
+
     const chainConfig = getChainConfig(chainName);
     if (!chainConfig) {
       return false;
@@ -68,9 +73,12 @@ async function verifyBlockHashOnChain(
     });
 
     // Try to get the block by hash - if it exists, this will succeed
-    await publicClient.getBlock({
-      blockHash: blockHash as `0x${string}`,
-    });
+    await withAbort(
+      publicClient.getBlock({
+        blockHash: blockHash as `0x${string}`,
+      }),
+      signal,
+    );
 
     return true;
   } catch {
@@ -111,6 +119,7 @@ export function findChainForAddress(address: string): string | null {
 export async function findChainFromBlockHash(
   blockHash: string,
   address: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   // First, try to find chains that have this address
   const possibleChains: string[] = [];
@@ -138,7 +147,7 @@ export async function findChainFromBlockHash(
   // Check all possible chains in parallel for speed.
   const verificationResults = await Promise.allSettled(
     possibleChains.map(async (chain) => {
-      const exists = await verifyBlockHashOnChain(blockHash, chain);
+      const exists = await verifyBlockHashOnChain(blockHash, chain, signal);
       return { chain, exists };
     }),
   );
@@ -170,6 +179,25 @@ export async function findChainFromBlockHash(
     );
   }
   return null;
+}
+
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(new Error("Operation aborted"));
+  }
+
+  let cleanup: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    const onAbort = () => reject(new Error("Operation aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    cleanup = () => signal.removeEventListener("abort", onAbort);
+  });
+
+  return Promise.race([promise, aborted]).finally(() => cleanup?.());
 }
 
 /**
@@ -339,6 +367,7 @@ export async function decodeEventData(
   log: QuickNodeDecodedLog,
   txHash?: string,
   chainName: string = "celo",
+  signal?: AbortSignal,
 ): Promise<DiscordEmbedField[]> {
   const chainConfig = getChainConfig(chainName);
   const chainTokenConfig = {
@@ -357,6 +386,7 @@ export async function decodeEventData(
       chainTokenConfig,
       chainName,
       txHash,
+      signal,
     );
   }
 
@@ -380,8 +410,13 @@ export async function decodeEventData(
 export async function getTransactionExecutor(
   transactionHash: string,
   chainName: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
+    if (signal?.aborted) {
+      return null;
+    }
+
     const chainConfig = getChainConfig(chainName);
     if (!chainConfig) {
       logger.warn(`Unknown chain: ${chainName}`);
@@ -405,9 +440,12 @@ export async function getTransactionExecutor(
       }),
     });
 
-    const tx = await publicClient.getTransaction({
-      hash: transactionHash as `0x${string}`,
-    });
+    const tx = await withAbort(
+      publicClient.getTransaction({
+        hash: transactionHash as `0x${string}`,
+      }),
+      signal,
+    );
 
     return tx.from.toLowerCase();
   } catch (error) {

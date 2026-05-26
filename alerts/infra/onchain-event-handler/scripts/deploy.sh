@@ -372,7 +372,7 @@ main() {
 		deploy_cmd_args+=("--env-vars-file=${env_vars_file}")
 	else
 		error "No env-vars-file resolved from Terraform state."
-		error "Required env vars (MULTISIG_CONFIG, SUPPORTED_CHAINS, MULTISIG_*) are computed by Terraform and would be missing from a hotfix deploy — the function would fail config validation on boot."
+		error "Required env vars (MULTISIG_CONFIG, SUPPORTED_CHAINS, FUNCTION_TIMEOUT_SECONDS, MULTISIG_*) are computed by Terraform and would be missing from a hotfix deploy — the function would fail config validation on boot."
 		error "Run 'pnpm alerts:infra:apply' first to populate state with the env-var outputs."
 		exit 1
 	fi
