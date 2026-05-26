@@ -198,6 +198,14 @@ locals {
     "TF_VAR_BILLING_ACCOUNT",
     "TF_VAR_QUICKNODE_API_KEY",
     "TF_VAR_QUICKNODE_SIGNING_SECRET",
+    # Slack bot OAuth token (xoxb-...) consumed by the restapi.slack provider
+    # in `providers.tf` to create + archive the per-Sentry-project Slack
+    # channels. Same chicken-and-egg pattern as TF_VAR_GITHUB_TOKEN below —
+    # the first time this secret is needed by CI, it has to be bootstrapped
+    # manually via `gh secret set TF_VAR_SLACK_BOT_TOKEN` (done before this
+    # commit landed). Subsequent rotations: update tfvars, re-apply, the
+    # github_actions_secret resource keeps GH Actions in sync.
+    "TF_VAR_SLACK_BOT_TOKEN",
     # Self-managed: the github provider's own PAT also lives in repo
     # secrets so CI can `terraform plan/apply` this stack (which manages
     # the github_actions_secret resources below). First apply is always
@@ -217,6 +225,7 @@ locals {
     TF_VAR_BILLING_ACCOUNT          = var.billing_account
     TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
     TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
+    TF_VAR_SLACK_BOT_TOKEN          = var.slack_bot_token
     TF_VAR_GITHUB_TOKEN             = var.github_token
   }
 }
