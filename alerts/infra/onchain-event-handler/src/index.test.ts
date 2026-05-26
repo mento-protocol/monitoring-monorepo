@@ -61,6 +61,16 @@ describe("processQuicknodeWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NODE_ENV = "production";
+    process.env.DISCORD_WEBHOOK_ALERTS = "https://discord.test/alerts";
+    process.env.DISCORD_WEBHOOK_EVENTS = "https://discord.test/events";
+    process.env.MULTISIG_CONFIG = JSON.stringify({
+      celoGovernance: {
+        address: "0x0000000000000000000000000000000000000001",
+        chain: "celo",
+        name: "Celo Governance",
+      },
+    });
+    process.env.QUICKNODE_SIGNING_SECRET = "test-secret";
     mocks.validateQuickNodeWebhook.mockResolvedValue({
       valid: true,
       nonce: "nonce-1",
