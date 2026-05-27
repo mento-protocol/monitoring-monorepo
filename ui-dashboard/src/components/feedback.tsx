@@ -39,9 +39,9 @@ export function Tile({
 }: {
   label: string;
   value: string;
-  subtitle?: string;
+  subtitle?: string | undefined;
   /** Optional link — makes the value clickable (opens in new tab) */
-  href?: string;
+  href?: string | undefined;
 }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">

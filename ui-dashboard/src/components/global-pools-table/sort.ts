@@ -52,9 +52,9 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
 export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
-  volume24hByKey?: Map<string, number | null | undefined>;
-  volume7dByKey?: Map<string, number | null | undefined>;
-  tvlChangeWoWByKey?: Map<string, number | null>;
+  volume24hByKey?: Map<string, number | null | undefined> | undefined;
+  volume7dByKey?: Map<string, number | null | undefined> | undefined;
+  tvlChangeWoWByKey?: Map<string, number | null> | undefined;
 }
 
 export function sortGlobalPools(

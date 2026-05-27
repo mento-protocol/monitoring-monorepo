@@ -213,7 +213,7 @@ export function TimeSeriesChartCard({
       : {
           x: xs,
           y: ys,
-          name: hasBreakdown ? "Total" : undefined,
+          ...(hasBreakdown ? { name: "Total" } : {}),
           type: "scatter" as const,
           mode: "lines" as const,
           line: { color: "#6366f1", width: 2 },
@@ -336,16 +336,17 @@ export function TimeSeriesChartCard({
           fixedrange: true,
         },
         showlegend: hasBreakdown && !useCustomLegend,
-        legend:
-          hasBreakdown && !useCustomLegend
-            ? {
+        ...(hasBreakdown && !useCustomLegend
+          ? {
+              legend: {
                 orientation: "h" as const,
                 y: -0.15,
                 x: 0,
                 font: { color: "#94a3b8", size: 11 },
                 bgcolor: "transparent",
-              }
-            : undefined,
+              },
+            }
+          : {}),
         margin: {
           t: 8,
           r: 8,

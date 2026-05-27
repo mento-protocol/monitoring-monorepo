@@ -11,7 +11,7 @@ beforeEach(() => {
 function makeReq(authHeader?: string): NextRequest {
   return new NextRequest("http://localhost/route", {
     method: "GET",
-    headers: authHeader ? { authorization: authHeader } : undefined,
+    ...(authHeader ? { headers: { authorization: authHeader } } : {}),
   });
 }
 

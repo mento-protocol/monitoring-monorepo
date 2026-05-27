@@ -22,7 +22,7 @@ const mockUseGQL = vi.fn<
     query: string | null,
     variables?: Record<string, unknown>,
   ) => {
-    data?: { RebalanceEvent: { txHash: string }[] };
+    data?: { RebalanceEvent: { txHash: string }[] } | undefined;
   }
 >(() => ({}));
 

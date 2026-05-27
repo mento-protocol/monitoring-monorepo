@@ -22,8 +22,8 @@ export const MAINNET_CHAIN_IDS = [42220, 143] as const;
  * Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`; keep both
  * in lockstep. */
 export function isVirtualPool(pool: {
-  source?: string;
-  wrappedExchangeId?: string | null;
+  source?: string | undefined;
+  wrappedExchangeId?: string | null | undefined;
 }): boolean {
   return (
     (pool.source?.includes("virtual") ?? false) ||
@@ -42,49 +42,49 @@ export type Pool = {
   updatedAtBlock: string;
   updatedAtTimestamp: string;
   // Oracle & health state (optional — only present when indexer has new schema)
-  healthStatus?: string;
-  oracleOk?: boolean;
-  oraclePrice?: string;
-  oracleTimestamp?: string;
-  oracleTxHash?: string;
-  oracleExpiry?: string;
-  oracleNumReporters?: number;
-  referenceRateFeedID?: string;
-  priceDifference?: string;
-  rebalanceThreshold?: number;
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
-  rebalanceThresholdsKnown?: boolean;
-  lastRebalancedAt?: string;
-  deviationBreachStartedAt?: string;
-  lpFee?: number;
-  protocolFee?: number;
-  rebalanceReward?: number;
-  limitStatus?: string;
-  limitPressure0?: string;
-  limitPressure1?: string;
-  rebalancerAddress?: string;
-  token0Decimals?: number;
-  token1Decimals?: number;
-  tokenDecimalsKnown?: boolean;
-  swapCount?: number;
-  rebalanceCount?: number;
-  notionalVolume0?: string;
-  notionalVolume1?: string;
-  reserves0?: string;
-  reserves1?: string;
-  healthTotalSeconds?: string;
-  healthBinarySeconds?: string;
-  lastOracleSnapshotTimestamp?: string;
-  lastDeviationRatio?: string;
-  hasHealthData?: boolean;
-  breachCount?: number;
+  healthStatus?: string | undefined;
+  oracleOk?: boolean | undefined;
+  oraclePrice?: string | undefined;
+  oracleTimestamp?: string | undefined;
+  oracleTxHash?: string | undefined;
+  oracleExpiry?: string | undefined;
+  oracleNumReporters?: number | undefined;
+  referenceRateFeedID?: string | undefined;
+  priceDifference?: string | undefined;
+  rebalanceThreshold?: number | undefined;
+  rebalanceThresholdAbove?: number | undefined;
+  rebalanceThresholdBelow?: number | undefined;
+  rebalanceThresholdsKnown?: boolean | undefined;
+  lastRebalancedAt?: string | undefined;
+  deviationBreachStartedAt?: string | undefined;
+  lpFee?: number | undefined;
+  protocolFee?: number | undefined;
+  rebalanceReward?: number | undefined;
+  limitStatus?: string | undefined;
+  limitPressure0?: string | undefined;
+  limitPressure1?: string | undefined;
+  rebalancerAddress?: string | undefined;
+  token0Decimals?: number | undefined;
+  token1Decimals?: number | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  swapCount?: number | undefined;
+  rebalanceCount?: number | undefined;
+  notionalVolume0?: string | undefined;
+  notionalVolume1?: string | undefined;
+  reserves0?: string | undefined;
+  reserves1?: string | undefined;
+  healthTotalSeconds?: string | undefined;
+  healthBinarySeconds?: string | undefined;
+  lastOracleSnapshotTimestamp?: string | undefined;
+  lastDeviationRatio?: string | undefined;
+  hasHealthData?: boolean | undefined;
+  breachCount?: number | undefined;
   // Set on VirtualPools at deploy time via bytecode extraction (PUSH32
   // immediates in swap() preamble). Joins to BiPoolExchange.exchangeId in
   // the POOL_V2_EXCHANGE query. Null on FPMM pools and on VPs whose
   // deploy-time RPC failed (the next event's self-heal is not wired here —
   // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
-  wrappedExchangeId?: string;
+  wrappedExchangeId?: string | undefined;
 };
 
 /**
@@ -124,7 +124,7 @@ export type DeviationThresholdBreach = {
    * severity scoring (peak vs 1.05x) so a mid-breach threshold change can't
    * retroactively shift the magnitude verdict. Optional during the indexer
    * resync window when the new column hasn't backfilled yet. */
-  entryRebalanceThreshold?: number;
+  entryRebalanceThreshold?: number | undefined;
   peakPriceDifference: string;
   peakAt: string;
   peakAtBlock: string;

@@ -37,21 +37,21 @@ const DEFAULT_REFRESH_MS = 30_000;
 export type UseGQLOptions<T> = {
   /** Override the default 30s polling interval. Can also be supplied as the
    *  positional 3rd argument for backward compatibility. */
-  refreshInterval?: number;
+  refreshInterval?: number | undefined;
   /** Escape hatch for callers that need to override the defaults (e.g.
    *  re-enable focus revalidation for a one-shot read). Focus/reconnect
    *  revalidation is OFF by default for this hook — pool pages fan out
    *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
    *  that many requests at once on top of the 30s polling cycle. */
-  revalidateOnFocus?: boolean;
-  revalidateOnReconnect?: boolean;
+  revalidateOnFocus?: boolean | undefined;
+  revalidateOnReconnect?: boolean | undefined;
   /** Attaches an `AbortSignal.timeout(...)` to the request. Useful for
    *  fail-open extension queries where a wedged Hasura connection would
    *  otherwise stick the SWR poll until the socket times out (minutes). */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
   /** Optional Zod schema to validate the response. When provided,
    *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
-  schema?: ZodType<T>;
+  schema?: ZodType<T> | undefined;
 };
 
 /**
@@ -92,11 +92,16 @@ export function useGQL<T>(
           refreshInterval: refreshIntervalOrOptions,
           ...legacyOptions,
         };
+  // Default the SWR revalidation gates explicitly rather than spreading
+  // `opts` into useSWR — UseGQLOptions widens those keys to `T | undefined`
+  // under exactOptionalPropertyTypes, and SWR's typed config rejects an
+  // explicit `undefined` for `revalidateOnFocus`/`revalidateOnReconnect`.
   const {
     refreshInterval = DEFAULT_REFRESH_MS,
     timeoutMs,
     schema,
-    ...swrConfigOverrides
+    revalidateOnFocus = false,
+    revalidateOnReconnect = false,
   } = opts;
 
   async function fetcher(): Promise<T> {
@@ -104,7 +109,7 @@ export function useGQL<T>(
       ? client.request<T>(query!, variables)
       : client.request<T>({
           document: query!,
-          variables,
+          ...(variables !== undefined ? { variables } : {}),
           signal: AbortSignal.timeout(timeoutMs),
         }));
     if (schema != null) {
@@ -125,11 +130,10 @@ export function useGQL<T>(
     fetcher,
     {
       refreshInterval,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
+      revalidateOnFocus,
+      revalidateOnReconnect,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
-      ...swrConfigOverrides,
     },
   );
 

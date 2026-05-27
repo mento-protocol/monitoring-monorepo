@@ -11,13 +11,13 @@ import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 type Props = {
   address: string;
   /** When true, hides the inline edit pencil (e.g. for contract addresses in read-only views) */
-  readOnly?: boolean;
+  readOnly?: boolean | undefined;
   /**
    * Overrides the network context (useful in multichain tables where a row's
    * chain differs from the page-level network). Falls back to `useNetwork()`
    * when absent.
    */
-  chainId?: number;
+  chainId?: number | undefined;
 };
 
 export function AddressLink({ address, readOnly = false, chainId }: Props) {

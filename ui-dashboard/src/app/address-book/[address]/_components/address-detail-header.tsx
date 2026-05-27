@@ -13,11 +13,11 @@ import { truncateAddress } from "@/lib/format";
 type Props = {
   address: string;
   /** Display name from the label entry. Falls back to truncated address. */
-  name?: string;
+  name?: string | undefined;
   /** Tag list from the label entry — provenance tags filtered out. */
-  tags?: string[];
+  tags?: string[] | undefined;
   /** Provenance: "arkham" | "minipay" | undefined for manual / no label. */
-  source?: string;
+  source?: string | undefined;
   /** Whether the address has a forensic report attached. */
   hasReport: boolean;
   /** Whether a custom label already exists. Drives the empty-state hint. */

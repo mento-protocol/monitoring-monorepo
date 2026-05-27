@@ -16,7 +16,7 @@ interface PoolConfigPanelProps {
 }
 
 type PoolConfigExtRow = {
-  rebalanceReward?: number;
+  rebalanceReward?: number | undefined;
 };
 
 // `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel;

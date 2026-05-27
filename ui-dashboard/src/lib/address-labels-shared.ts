@@ -15,20 +15,20 @@ import type { IntelEntityCpsRecord } from "./intel-entity-cps";
 export type AddressEntry = {
   name: string;
   tags: string[];
-  notes?: string;
-  isPublic?: boolean;
+  notes?: string | undefined;
+  isPublic?: boolean | undefined;
   /**
    * Provenance marker. Set by server-side enrichment pipelines
    * (currently `"arkham"`); omitted for user-curated entries. User-controlled
    * input paths (PUT, import) MUST strip this field — see route handlers.
    */
-  source?: string;
+  source?: string | undefined;
   /**
    * ISO timestamp of first write. Set by `upsertEntry` when no prior entry
    * exists; preserved across edits and refreshes. Optional because pre-
    * migration entries didn't carry it — readers fall back to `updatedAt`.
    */
-  createdAt?: string;
+  createdAt?: string | undefined;
   updatedAt: string;
 };
 
@@ -112,14 +112,16 @@ function hasLegacyArkhamSentinel(tags: readonly string[] | undefined): boolean {
  * display tags such as "Arkham" remain manual labels.
  */
 export function isArkhamSourced(entry: {
-  source?: string;
-  tags?: string[];
+  source?: string | undefined;
+  tags?: string[] | undefined;
 }): boolean {
   return entry.source === "arkham" || hasLegacyArkhamSentinel(entry.tags);
 }
 
 /** True when an existing entry was written by the MiniPay tagging cron. */
-export function isMiniPaySourced(entry: { source?: string }): boolean {
+export function isMiniPaySourced(entry: {
+  source?: string | undefined;
+}): boolean {
   return entry.source === MINIPAY_SOURCE;
 }
 
@@ -131,7 +133,10 @@ export function isMiniPaySourced(entry: { source?: string }): boolean {
  * priors that never had a server provenance.
  */
 export function derivePreservedSource(
-  prior: { source?: string; tags?: string[] } | null | undefined,
+  prior:
+    | { source?: string | undefined; tags?: string[] | undefined }
+    | null
+    | undefined,
 ): "arkham" | "minipay" | undefined {
   if (!prior) return undefined;
   if (isArkhamSourced(prior)) return "arkham";

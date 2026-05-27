@@ -209,9 +209,9 @@ interface TankProps {
   pct: number;
   usd: number | null;
   colorClass: string;
-  thresholdLower?: number;
-  thresholdUpper?: number;
-  thresholdLegendId?: string;
+  thresholdLower?: number | undefined;
+  thresholdUpper?: number | undefined;
+  thresholdLegendId?: string | undefined;
 }
 
 function gradientFor(colorClass: string): string {

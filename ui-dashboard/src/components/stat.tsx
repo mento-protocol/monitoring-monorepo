@@ -9,9 +9,9 @@ export function Stat({
 }: {
   label: ReactNode;
   value: ReactNode;
-  title?: string;
-  mono?: boolean;
-  className?: string;
+  title?: string | undefined;
+  mono?: boolean | undefined;
+  className?: string | undefined;
 }) {
   return (
     <div className={className}>

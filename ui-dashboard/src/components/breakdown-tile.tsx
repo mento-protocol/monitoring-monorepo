@@ -22,9 +22,9 @@ export function BreakdownTile({
   hasError: boolean;
   format: (v: number) => string;
   /** Prefix for the headline value only (e.g. "≈ "), not applied to sub-values */
-  totalPrefix?: string;
-  href?: string;
-  subtitle?: string;
+  totalPrefix?: string | undefined;
+  href?: string | undefined;
+  subtitle?: string | undefined;
 }) {
   const mainValue = isLoading
     ? "…"

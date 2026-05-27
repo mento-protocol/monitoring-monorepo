@@ -103,7 +103,8 @@ afterEach(() => {
   window.history.replaceState = originalReplaceState;
   delete window.__mentoLocationChangePatched;
   window.history.replaceState(window.history.state, "", "/");
-  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
+    previousActEnvironment ?? false;
 });
 
 describe("AuthStatus sign-in href", () => {
