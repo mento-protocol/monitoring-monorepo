@@ -144,7 +144,7 @@ interface PlotlyAPI {
   ) => Promise<unknown>;
 }
 
-export interface BreakerConfigForChart {
+interface BreakerConfigForChart {
   breakerKind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
   // All numeric fields are Fixidity 1e24 strings — divide by FIXIDITY_ONE.
   rateChangeThreshold: string;
