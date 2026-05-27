@@ -86,6 +86,13 @@ resource "grafana_contact_point" "splunk_on_call" {
     title       = local.alert_config_victorops.title
     description = local.alert_config_victorops.message
   }
+
+  lifecycle {
+    # Grafana does not return the Splunk On-Call webhook settings on read, so
+    # the provider otherwise reports a sensitive no-op diff after every apply.
+    # The block is a set, so Terraform cannot ignore only the webhook URL.
+    ignore_changes = [victorops]
+  }
 }
 
 # All six points share `local.alert_config_slack` which dispatches by
