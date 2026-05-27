@@ -244,7 +244,11 @@ export async function fetchBreakerKind(
   log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
-  if (mock !== undefined) return mock ?? "MARKET_HOURS";
+  // `null` in the mock map means "unknown — return null so the caller treats
+  // it as inconclusive and skips the cache" (the same contract the unknown-
+  // kind path enforces below). Pre-PR this coerced null to MARKET_HOURS,
+  // which contradicted the new policy. Real values pass through unchanged.
+  if (mock !== undefined) return mock;
 
   const knownKind = lookupBreakerKind(chainId, breakerAddress);
   if (knownKind) return knownKind;
