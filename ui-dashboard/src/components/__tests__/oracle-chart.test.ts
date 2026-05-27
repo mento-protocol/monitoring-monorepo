@@ -36,7 +36,7 @@ describe("formatOracleChartHoverText", () => {
 
     expect(text).toContain("Oracle price: 1.00050000 (cUSD/USDC)");
     expect(text).toContain("+5.0 bps");
-    expect(text).toContain("within breaker band");
+    expect(text).toContain("within current band");
   });
 
   it("flags breaker trip when delta exceeds threshold", () => {
@@ -50,7 +50,7 @@ describe("formatOracleChartHoverText", () => {
     });
 
     expect(text).toContain("-20.0 bps");
-    expect(text).toContain("breaker would TRIP");
+    expect(text).toContain("would trip current band");
   });
 
   it("renders N/A safely when price is not finite", () => {

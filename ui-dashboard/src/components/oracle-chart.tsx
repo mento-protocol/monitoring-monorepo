@@ -180,7 +180,7 @@ export function OracleChart({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
-        Oracle Price vs Breaker Band
+        Oracle Price vs Current Breaker Band
       </h3>
       <OracleChartLegend
         breachStartedAt={breachStartedAt}
@@ -550,11 +550,11 @@ function OracleChartLegend({
     <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
       <span className="flex items-center gap-1">
         <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-        Within breaker band
+        Within current band
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-        Outside band — breaker would trip
+        Outside current band — breaker would trip
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-4 border-t-2 border-dashed border-red-500" />
@@ -622,11 +622,15 @@ export function formatOracleChartHoverText({
           const sign = delta >= 0 ? "+" : "";
           const thresholdBps =
             thresholdRatio != null ? thresholdRatio * 10_000 : null;
+          // Verdict is a CURRENT-state lens — checks the point against
+          // today's baseline + threshold, not the snapshot's at-the-time
+          // band. Matters most for MEDIAN_DELTA pools where the EMA
+          // drifts; the legend/title clarify the "current" framing.
           const verdict =
             thresholdBps != null
               ? Math.abs(bps) > thresholdBps
-                ? " · breaker would TRIP"
-                : " · within breaker band"
+                ? " · would trip current band"
+                : " · within current band"
               : "";
           return `<br>Δ vs baseline: ${sign}${delta.toFixed(8)} (${sign}${bps.toFixed(1)} bps)${verdict}`;
         })()
