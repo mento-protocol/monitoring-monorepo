@@ -109,11 +109,20 @@ try {
 
   await page.evaluate(() => {
     window.__inp = null;
-    // onINP fires either when the page is hidden OR when web-vitals' internal
-    // settling logic decides the interaction's reported duration is final.
-    window.webVitals.onINP((metric) => {
-      window.__inp = metric.value;
-    });
+    // `reportAllChanges: true` makes onINP fire every time the worst-observed
+    // INP value updates, not just once on visibility-change. Without it, a
+    // `PerformanceEventTiming` entry that arrives at the observer AFTER the
+    // visibility-change handler runs is silently dropped — the standard
+    // single-fire flush keeps whatever value it had at flush time, even if
+    // the slow interaction's entry only lands a few frames later. With
+    // `reportAllChanges`, every settled interaction updates `window.__inp`
+    // and the gate sees the worst one.
+    window.webVitals.onINP(
+      (metric) => {
+        window.__inp = metric.value;
+      },
+      { reportAllChanges: true },
+    );
   });
 
   // Wait for the dashboard's filter input to render — it's part of the
@@ -136,8 +145,17 @@ try {
     });
   await page.click('button:has-text("Apply")');
 
+  // Settle window: let the browser paint and deliver every
+  // `PerformanceEventTiming` entry to the observer before we flush. Without
+  // this wait the Apply click's entry can arrive AFTER the visibility-change
+  // and be silently dropped (Cursor Bugbot finding on 614). 1.5 s is well
+  // beyond the worst-case PerformanceObserver microtask delay observed on
+  // GHA runners while staying within the step's 30 s budget.
+  await page.waitForTimeout(1_500);
+
   // Force web-vitals to flush by hiding the page (its `onINP` reports on
-  // visibility change). Wait briefly for the visibility handler.
+  // visibility change in addition to the per-update callbacks we enabled
+  // via `reportAllChanges: true`).
   await page.evaluate(() =>
     Object.defineProperty(document, "visibilityState", {
       value: "hidden",
