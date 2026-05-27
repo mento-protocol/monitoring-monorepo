@@ -179,12 +179,17 @@ Field expectations:
 1. Sweep feedback surfaces and reply to all review comments.
 2. Batch review fixes locally, auditing sibling surfaces before pushing.
 3. Run the mapped local gate once for the batch.
-4. Run `pnpm pr:ready-state --pr <number> --json`. For a foreground wait loop,
+4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
+   run `pnpm agent:autoreview` as a structured closeout review. The command is
+   a repo adapter for the global `~/.agents/skills/autoreview` skill. Verify
+   accepted findings before editing; if review-triggered fixes change code,
+   rerun focused checks and autoreview once for that fixed batch.
+5. Run `pnpm pr:ready-state --pr <number> --json`. For a foreground wait loop,
    use `pnpm pr:ready-state --pr <number> --watch --compact`.
-5. If `ready` is false, fix or wait only on `required.blockers` and required
+6. If `ready` is false, fix or wait only on `required.blockers` and required
    `gates`.
-6. Report optional lag separately, especially Cursor Bugbot lag.
-7. Signal all-clear only after `ready` is true for the current head.
+7. Report optional lag separately, especially Cursor Bugbot lag.
+8. Signal all-clear only after `ready` is true for the current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay
@@ -201,6 +206,8 @@ signal after the normal automatic-review window.
 - Build a feedback ledger before editing, then batch sibling fixes before the
   next push.
 - Avoid broad bot review as an inner loop; use review at batch boundaries.
+- Use `pnpm agent:autoreview` for local structured closeout on non-trivial
+  batches before pushing, not as a replacement for `pr:ready-state`.
 - Cap manual Codex fallback to one request per head.
 - If `codexReviewSignal` is `requested` or `in_flight`, wait instead of posting
   another `@codex review`.
