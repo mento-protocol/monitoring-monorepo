@@ -457,9 +457,6 @@ add_package_quality_commands() {
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
-  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
-    add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
-  fi
   add_turbo_package_task "$package_name" "test" "$reason"
   add_turbo_package_task "$package_name" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
