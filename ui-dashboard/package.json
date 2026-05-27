@@ -72,6 +72,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18",
-    "vitest-axe": "1.0.0-pre.5"
+    "vitest-axe": "1.0.0-pre.5",
+    "web-vitals": "^5.2.0"
   }
 }
