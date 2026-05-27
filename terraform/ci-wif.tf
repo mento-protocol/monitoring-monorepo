@@ -1,12 +1,41 @@
 # ── CI Deploy via Workload Identity Federation ───────────────────────────────
 # GitHub Actions workflows from mento-protocol/monitoring-monorepo impersonate
-# `metrics-bridge-deployer` via OIDC — no long-lived JSON keys required.
+# `metrics-bridge-deployer` (write-capable) for apply jobs and the new
+# `metrics-bridge-plan-readonly` SA for plan jobs. Both via OIDC — no
+# long-lived JSON keys required. The plan/apply split limits the blast
+# radius of a malicious PR adding a plan-time `external` or `local-exec`
+# data source to exfiltrate context.
 #
-# After apply, set two GitHub repo secrets (run from repo root):
+# After apply, set three GitHub repo secrets (run from repo root):
 #   gh secret set GCP_WORKLOAD_IDENTITY_PROVIDER \
 #     --body="$(terraform -chdir=terraform output -raw ci_wif_provider)"
 #   gh secret set GCP_SERVICE_ACCOUNT \
 #     --body="$(terraform -chdir=terraform output -raw ci_deployer_email)"
+#   gh secret set GCP_SERVICE_ACCOUNT_PLAN \
+#     --body="$(terraform -chdir=terraform output -raw ci_plan_readonly_email)"
+#
+# PREREQUISITE (one-time, before `pnpm infra:apply`):
+#   The `org-terraform-plan-readonly@mento-terraform-seed-ffac` seed-project
+#   SA must already exist + have `roles/storage.objectViewer` on the state
+#   bucket `gs://mento-terraform-tfstate-6ed6`. Create it manually:
+#
+#     gcloud iam service-accounts create org-terraform-plan-readonly \
+#       --project=mento-terraform-seed-ffac \
+#       --description="Read-only impersonation target for CI plan jobs" \
+#       --display-name="Org Terraform (plan-readonly)" \
+#       --impersonate-service-account="org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+#
+#     gcloud storage buckets add-iam-policy-binding \
+#       gs://mento-terraform-tfstate-6ed6 \
+#       --member="serviceAccount:org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com" \
+#       --role="roles/storage.objectViewer" \
+#       --impersonate-service-account="org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+#
+#   The token-creator binding below targets that SA; apply will 403 if it
+#   doesn't exist yet. The monitoring stack doesn't manage the seed SA
+#   because `org-terraform` self-administers in seed, and adding cross-
+#   project SA-create permission to this stack would broaden the blast
+#   radius beyond what this hardening PR aims to gain.
 
 resource "google_iam_workload_identity_pool" "github_actions" {
   project                   = google_project.monitoring.project_id
@@ -159,4 +188,42 @@ resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_crea
 moved {
   from = google_service_account_iam_member.ci_alerts_infra_org_terraform_token_creator
   to   = google_service_account_iam_member.ci_alerts_org_terraform_token_creator
+}
+
+# ── Read-only Plan SA ────────────────────────────────────────────────────────
+# Plan-time hardening: PR plan jobs use a separate, read-only identity so a
+# malicious PR adding a plan-time data source (e.g. `external`, `local-exec`,
+# or a custom data source that shells out) can't mint tokens for the write-
+# capable `metrics-bridge-deployer` SA. Apply jobs continue to use the
+# deployer SA on main pushes.
+#
+# This hardening reduces SA-chain blast radius. It does NOT mitigate
+# `TF_VAR_*` cleartext exposure at plan time — providers still need those
+# secrets to refresh upstream state. That mitigation lives in the
+# `pull_request.head.repo.fork == false` guard in each workflow.
+resource "google_service_account" "metrics_bridge_plan_readonly" {
+  project      = google_project.monitoring.project_id
+  account_id   = "metrics-bridge-plan-readonly"
+  display_name = "Terraform CI plan (read-only)"
+  description  = "Impersonated by GitHub Actions PR plan jobs. Has no project-level write roles; only impersonates the read-only seed SA to refresh state."
+
+  depends_on = [google_project_service.iam]
+}
+
+# Same WIF binding shape as `deployer_wif_binding` above — the GitHub repo
+# is the upstream gate.
+resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
+  service_account_id = google_service_account.metrics_bridge_plan_readonly.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/mento-protocol/monitoring-monorepo"
+}
+
+# Grants the plan-readonly CI SA the ability to mint tokens for the
+# `org-terraform-plan-readonly@seed` SA (read-only sibling of `org-terraform`).
+# That seed SA must already exist with state-bucket `objectViewer` — see the
+# PREREQUISITE block in the file header.
+resource "google_service_account_iam_member" "ci_plan_readonly_org_terraform_plan_readonly_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_plan_readonly.email}"
 }

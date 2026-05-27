@@ -54,8 +54,13 @@ output "ci_wif_provider" {
 }
 
 output "ci_deployer_email" {
-  description = "CI deployer SA email — impersonated by the GitHub workflow. Set as GH repo secret GCP_SERVICE_ACCOUNT."
+  description = "CI deployer SA email — impersonated by GitHub workflow apply jobs. Set as GH repo secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.metrics_bridge_deployer.email
+}
+
+output "ci_plan_readonly_email" {
+  description = "CI plan SA email — read-only; impersonated by GitHub workflow plan jobs. Set as GH repo secret GCP_SERVICE_ACCOUNT_PLAN."
+  value       = google_service_account.metrics_bridge_plan_readonly.email
 }
 
 output "agent_readonly_email" {
