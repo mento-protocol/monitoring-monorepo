@@ -153,7 +153,12 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-_None remaining._ The `splunk_on_call` "1 to change" drift was fixed by bumping `grafana/grafana` from `3.7.0` to `3.25.9`, which picks up upstream PR [#2123](https://github.com/grafana/terraform-provider-grafana/pull/2123) (v3.22.3) marking `victorops.url` as `Sensitive` and packing it from state on refresh. Side effect to be aware of: out-of-band changes to the webhook URL itself are now invisible to plan, the same way Slack tokens and PagerDuty integration keys already are; title/description still drift-detect.
+The `splunk_on_call` "1 to change" drift was fixed by bumping `grafana/grafana` from `3.7.0` to `3.25.9`, which picks up upstream PR [#2123](https://github.com/grafana/terraform-provider-grafana/pull/2123) (v3.22.3) marking `victorops.url` as `Sensitive` and packing it from state on refresh. Side effect to be aware of: out-of-band changes to the webhook URL itself are now invisible to plan, the same way Slack tokens and PagerDuty integration keys already are; title/description still drift-detect.
+
+Follow-up `alerts/rules/` was moved onto the v4 major (3.25.9 → 4.36.2) by renaming the 25 `grafana_message_template` outer names away from `:` separators (`Slack: X` → `Slack - X`, same for `VictorOps`/`Discord`). Required because upstream PR [#2567](https://github.com/grafana/terraform-provider-grafana/pull/2567) (v4.28.1+) rewrote the resource to the Plugin Framework with an unbounded `strings.Split(id, ":")`, breaking colon-in-name parsing that v3.x and v4.28.0 handled fine via `SplitN(id, ":", 2)`. Inner `{{ define "slack.X" }}` names (referenced by `alert_config` locals) were left unchanged, so downstream `{{ template "X" . }}` invocations were untouched.
+
+- [ ] **`aegis/terraform/` still on `grafana/grafana ~> 3.7.0`** — that stack manages 3 resources (1 folder, 1 rule group, 1 dashboard module) and is on a separate GCS prefix with its own state. It does not exhibit the `splunk_on_call` drift (no VictorOps contact point) and does not have colon-in-name templates. Bump can land as its own PR when convenient; no urgent driver.
+- [ ] **File upstream issue against `terraform-provider-grafana`** for the colon-in-name parsing regression introduced by PR #2567. Likely fix is restoring `SplitN(id, ":", 2)` semantics in the Plugin Framework splitter so resource names containing `:` continue to round-trip through state. We worked around it by renaming our templates, but anyone else with colons in template/contact-point/folder names hits the same wall on the v4.28.1 → v4.36.2 path.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 
