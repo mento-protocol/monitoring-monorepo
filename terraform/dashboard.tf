@@ -36,6 +36,18 @@ resource "vercel_project" "dashboard" {
     repo              = "mento-protocol/monitoring-monorepo"
     production_branch = "main"
   }
+
+  # Enables the Protection Bypass for Automation feature so CI tooling
+  # (Lighthouse, the Playwright INP gate, etc.) can audit Vercel-Auth-
+  # protected preview deployments. Vercel generates a 32-char alphanumeric
+  # secret exposed both as the `VERCEL_AUTOMATION_BYPASS_SECRET` system env
+  # var on deployments and via the `protection_bypass_for_automation_secret`
+  # computed attribute — `github-secrets.tf` mirrors that into the GitHub
+  # org secret of the same name so `.github/workflows/lighthouse.yml` can
+  # read it. To rotate: toggle this attribute off, apply, toggle back on,
+  # apply. The next apply atomically rotates Vercel-side AND pushes the
+  # new value to GitHub.
+  protection_bypass_for_automation = true
 }
 
 # ── Environment Variables ─────────────────────────────────────────────────────
