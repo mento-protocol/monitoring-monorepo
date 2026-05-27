@@ -119,6 +119,12 @@ const rebalanceBlockedLabels = [
   "reason_code",
   "reason_message",
 ] as const;
+export type PollErrorKind =
+  | "hasura_query"
+  | "update_metrics"
+  | "mark_healthy"
+  | "rebalance_probe";
+const pollErrorLabels = ["kind"] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
@@ -273,7 +279,8 @@ export const gauges = {
 export const counters = {
   pollErrors: new Counter({
     name: "mento_pool_bridge_poll_errors_total",
-    help: "Total number of poll errors",
+    help: "Total number of poll errors by bounded subsystem kind",
+    labelNames: pollErrorLabels,
     registers: [register],
   }),
   deviationAlertTransitions: new Counter({
