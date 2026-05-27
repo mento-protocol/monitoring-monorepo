@@ -180,9 +180,10 @@ Field expectations:
 2. Batch review fixes locally, auditing sibling surfaces before pushing.
 3. Run the mapped local gate once for the batch.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
-   run `pnpm agent:autoreview` as a structured closeout review. Verify accepted
-   findings before editing; if review-triggered fixes change code, rerun focused
-   checks and autoreview once for that fixed batch.
+   run `pnpm agent:autoreview` as a structured closeout review. The command is
+   a repo adapter for the global `~/.agents/skills/autoreview` skill. Verify
+   accepted findings before editing; if review-triggered fixes change code,
+   rerun focused checks and autoreview once for that fixed batch.
 5. Run `pnpm pr:ready-state --pr <number> --json`. For a foreground wait loop,
    use `pnpm pr:ready-state --pr <number> --watch --compact`.
 6. If `ready` is false, fix or wait only on `required.blockers` and required

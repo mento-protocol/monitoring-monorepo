@@ -1,17 +1,17 @@
 # Auto Review
 
-Run the repo-local structured closeout review helper. Default engine is Codex;
+Run the global structured closeout review helper. Default engine is Codex;
 pass `--engine claude` when the user explicitly asks for Claude review.
 
 Arguments: `$ARGUMENTS`
 
 ## Steps
 
-1. Read `.claude/skills/autoreview/SKILL.md` for the workflow contract.
+1. Read `~/.agents/skills/autoreview/SKILL.md` for the workflow contract.
 2. Run:
 
 ```bash
-.agents/skills/autoreview/scripts/autoreview $ARGUMENTS
+pnpm agent:autoreview -- $ARGUMENTS
 ```
 
 3. Verify every accepted finding before editing. Do not blindly apply review

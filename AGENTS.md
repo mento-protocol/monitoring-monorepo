@@ -87,8 +87,9 @@ pnpm agent:autoreview
 
 Use it as a batch-boundary verifier. Verify every accepted finding in the real
 code before editing, rerun focused checks after review-triggered fixes, and
-rerun autoreview once for that fixed batch. This does not replace the final PR
-readiness probe.
+rerun autoreview once for that fixed batch. This adapter expects the global
+`~/.agents/skills/autoreview` skill and does not replace the final PR readiness
+probe.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -202,7 +203,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
-pnpm agent:autoreview              # Structured closeout review; defaults to Codex, supports -- --engine claude
+pnpm agent:autoreview              # Structured closeout review via ~/.agents/skills/autoreview; supports -- --engine claude
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
@@ -300,16 +301,20 @@ To use them you need [Claude Code](https://claude.com/claude-code). Personal/loc
 
 ## Codex Agent Skills
 
-Repo-tracked Codex skills live under `.agents/skills/`. Keep durable,
-team-shareable agent workflows there instead of relying on local-only
-`~/.codex` or `~/.claude` state. Project-level Codex MCP config lives in
-`.codex/config.toml`; local personal Codex settings still belong in
+Repo-tracked project skills live under `.agents/skills/`. Keep durable,
+team-shareable project workflows there instead of relying on local-only
+`~/.codex` or `~/.claude` state. Cross-project personal skills belong in
+`~/.agents/skills` and should be exposed to both agents through the
+`~/.codex/skills` and `~/.claude/skills` mirrors. Project-level Codex MCP config
+lives in `.codex/config.toml`; local personal Codex settings still belong in
 `~/.codex/config.toml`.
 
-`autoreview` is mirrored under `.claude/skills/autoreview/` and exposed through
-`pnpm agent:autoreview` so Codex and Claude Code use the same closeout-review
-contract. Claude Code also has `/autoreview` as a thin command shim. Keep the
-`.agents/skills/autoreview/` copy canonical and mirror content exactly.
+`autoreview` is a cross-project global skill sourced from
+`~/.agents/skills/autoreview`. This repo exposes it through
+`pnpm agent:autoreview`, and Claude Code also has `/autoreview` as a thin
+command shim. Do not add repo-local `.agents/skills/autoreview` or
+`.claude/skills/autoreview` copies unless the global skill is intentionally
+forked.
 
 ### SessionEnd hook (reflect nudge)
 

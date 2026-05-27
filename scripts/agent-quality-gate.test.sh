@@ -403,7 +403,7 @@ validator_repo="$(mktemp -d)"
     "agent:quality-gate": "true",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/check-agent-context.mjs",
-    "agent:autoreview": ".agents/skills/autoreview/scripts/autoreview",
+    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -519,7 +519,7 @@ package_json_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/check-agent-context.mjs",
-    "agent:autoreview": ".agents/skills/autoreview/scripts/autoreview",
+    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -544,7 +544,6 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- pnpm agent:autoreview -- --dry-run --mode branch --base HEAD (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
@@ -566,7 +565,7 @@ lockfile_script_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/check-agent-context.mjs",
-    "agent:autoreview": ".agents/skills/autoreview/scripts/autoreview",
+    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -591,7 +590,6 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- pnpm agent:autoreview -- --dry-run --mode branch --base HEAD (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
@@ -612,7 +610,7 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/check-agent-context.mjs",
-    "agent:autoreview": ".agents/skills/autoreview/scripts/autoreview",
+    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -637,7 +635,6 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- pnpm agent:autoreview -- --dry-run --mode branch --base HEAD (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
