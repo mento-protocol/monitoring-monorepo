@@ -264,5 +264,8 @@ gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com s
   files, tests, Terraform files, and `node_modules` excluded. Cloud Build runs
   pnpm from the checked-in package-local `pnpm-lock.yaml`, then runs the package
   build and emits `dist/safe-abi.json` from `src/safe-abi.json`.
+- CI installs from the same package-local `pnpm-lock.yaml` before running
+  handler typecheck, lint, knip, tests, and event-hash validation. The supply
+  chain workflow also audits and lockfile-lints this deploy lockfile.
 - Build required before Terraform deployment
 - Environment variables set at deployment time (require redeployment to change)

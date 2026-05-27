@@ -434,14 +434,24 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
+      # Cloud Build deploys alerts/infra/onchain-event-handler/ as a standalone
+      # source root. Install from the package-local pnpm-lock.yaml before the
+      # handler checks so CI exercises the same dependency graph that deploys.
+      - name: Install handler deploy dependencies
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
       - name: Typecheck (onchain-event-handler)
-        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run typecheck
       - name: Lint
-        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler lint
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run lint
       - name: Knip
-        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler knip
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run knip
       - name: Test
-        run: pnpm --filter @mento-protocol/alerts-onchain-event-handler test
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run test
       # Verify event-hashes.json is in sync with safe-abi.json. The handler
       # computes Safe event topic hashes at runtime from safe-abi.json
       # (constants.ts:extractEventSignatures), and the QuickNode webhook
@@ -451,10 +461,11 @@ jobs:
       # for any new Safe event type. This step regenerates the JSON in-place
       # and fails if it differs from the committed copy.
       - name: Verify event-hashes.json is in sync with safe-abi.json
+        working-directory: alerts/infra/onchain-event-handler
         run: |
-          pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
-          if ! git diff --exit-code -- alerts/infra/onchain-event-listeners/event-hashes.json; then
-            echo "::error::event-hashes.json is stale. Regenerate with: pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes"
+          pnpm run build:event-hashes
+          if ! git -C ../../.. diff --exit-code -- alerts/infra/onchain-event-listeners/event-hashes.json; then
+            echo "::error::event-hashes.json is stale. Regenerate with: cd alerts/infra/onchain-event-handler && pnpm run build:event-hashes"
             exit 1
           fi
       # Sibling workspace package — covers check-discord-permissions.ts and
@@ -468,16 +479,6 @@ jobs:
         run: |
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
-      # Cloud Build deploys alerts/infra/onchain-event-handler/ as a standalone
-      # source root. The package-local pnpm-lock.yaml makes the Node.js buildpack
-      # use pnpm there, while the root pnpm-lock.yaml still powers workspace CI.
-      #
-      # The package-local pnpm-workspace.yaml validates the same standalone
-      # package root that Cloud Build sees without walking up to the monorepo
-      # workspace lock.
-      - name: Verify handler pnpm-lock.yaml is in sync
-        working-directory: alerts/infra/onchain-event-handler
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
