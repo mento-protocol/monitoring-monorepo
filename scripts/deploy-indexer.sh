@@ -76,11 +76,18 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-# Check if deploy branch exists on remote
+# Check if deploy branch exists on remote. When it doesn't, the first-time
+# create push below IS the webhook trigger; the subsequent `HEAD:refs/heads/...`
+# push will be a no-op ("Everything up-to-date"), but that's the create-push
+# already-took-effect, not a missed webhook. Track this so the no-op handler
+# below skips the envio-cloud "not registered" probe (which would race the
+# 2-3 min webhook latency and misclassify a legitimate first-time deploy).
+BRANCH_JUST_CREATED=false
 if ! git ls-remote --heads origin "$DEPLOY_BRANCH" | grep -q "$DEPLOY_BRANCH"; then
   echo "⚠️  Deploy branch '$DEPLOY_BRANCH' does not exist on remote."
   echo "Creating it now from current main..."
   git push --no-verify origin "main:refs/heads/$DEPLOY_BRANCH"
+  BRANCH_JUST_CREATED=true
 fi
 
 echo "   Branch: $DEPLOY_BRANCH"
@@ -124,53 +131,67 @@ if ! LC_ALL=C git push --no-verify --force-with-lease origin "HEAD:refs/heads/$D
 fi
 
 if grep -q "Everything up-to-date" "$PUSH_OUTPUT_FILE"; then
-  # No-op push has two distinct meanings depending on whether Envio already
-  # has a registered deployment for this SHA:
-  #   (a) registered → legitimate idempotent re-run (interrupted babysit /
-  #       fresh shell wanting to resume status/promote). Continue to the
-  #       post-deploy checklist; the operator already has a deployment to
-  #       watch / promote.
-  #   (b) not registered → the webhook missed the original push event and
-  #       there's nothing for Envio to react to. Stop and tell the operator
-  #       to retrigger with a fresh-SHA empty commit.
-  # The multichain `envio` branch maps to the `mento` indexer; legacy
-  # per-network deploy branches each have their own `mento-v3-<network>`
-  # indexer. Probe the right one.
-  if [[ -z "$NETWORK" ]]; then
-    PROBE_INDEXER="$ENVIO_INDEXER"
-  else
-    PROBE_INDEXER="mento-v3-$NETWORK"
-  fi
-  REGISTERED_FOR_SHA=$(pnpm exec envio-cloud indexer get "$PROBE_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
-    | jq -r --arg target "$COMMIT_SHORT" \
-        'first(.data.deployments[]? | select(.commit_hash | startswith($target)) | .commit_hash) // ""')
-
-  if [[ -n "$REGISTERED_FOR_SHA" ]]; then
+  if [[ "$BRANCH_JUST_CREATED" == "true" ]]; then
+    # The earlier branch-create push (main:refs/heads/$DEPLOY_BRANCH) IS the
+    # webhook trigger; this follow-up HEAD:refs/heads/... push is a no-op
+    # because the ref already points at HEAD. The Envio webhook needs the
+    # documented 2-3 min to register, so don't probe envio-cloud here — that
+    # would race the latency and misclassify a legitimate first-time deploy
+    # as a missed webhook. Continue to the post-deploy checklist.
     echo ""
-    echo "ℹ️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT."
-    echo "   Envio already has a registered deployment for this commit, so this is a"
-    echo "   legitimate re-run (e.g. resuming after an interrupted babysit). Continuing"
-    echo "   with the post-deploy checklist so you can watch / promote the existing"
-    echo "   deployment."
+    echo "ℹ️  Push was a no-op — '$DEPLOY_BRANCH' was just created from main and"
+    echo "   already points at HEAD. The branch-create push is the webhook trigger;"
+    echo "   skipping the no-op probe (registration normally takes 2-3 min)."
     echo ""
   else
-    echo ""
-    echo "⚠️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT,"
-    echo "   and Envio has NO registered deployment for this commit. Their webhook"
-    echo "   missed the original push event; pushing the same SHA again won't help"
-    echo "   because git skips the ref-update over the wire. Retrigger with a"
-    echo "   fresh-SHA empty commit:"
-    echo ""
-    echo "     git commit --allow-empty -m 'chore: re-trigger envio webhook'"
+    # No-op push has two distinct meanings depending on whether Envio already
+    # has a registered deployment for this SHA:
+    #   (a) registered → legitimate idempotent re-run (interrupted babysit /
+    #       fresh shell wanting to resume status/promote). Continue to the
+    #       post-deploy checklist; the operator already has a deployment to
+    #       watch / promote.
+    #   (b) not registered → the webhook missed the original push event and
+    #       there's nothing for Envio to react to. Stop and tell the operator
+    #       to retrigger with a fresh-SHA empty commit.
+    # The multichain `envio` branch maps to the `mento` indexer; legacy
+    # per-network deploy branches each have their own `mento-v3-<network>`
+    # indexer. Probe the right one.
     if [[ -z "$NETWORK" ]]; then
-      echo "     pnpm deploy:indexer --yes"
+      PROBE_INDEXER="$ENVIO_INDEXER"
     else
-      echo "     pnpm deploy:indexer $NETWORK --yes"
+      PROBE_INDEXER="mento-v3-$NETWORK"
     fi
-    echo ""
-    echo "   If Envio's webhook keeps dropping events, escalate via"
-    echo "   https://discord.gg/envio — the CLI has no manual build-trigger."
-    exit 2
+    REGISTERED_FOR_SHA=$(pnpm exec envio-cloud indexer get "$PROBE_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+      | jq -r --arg target "$COMMIT_SHORT" \
+          'first(.data.deployments[]? | select(.commit_hash | startswith($target)) | .commit_hash) // ""')
+
+    if [[ -n "$REGISTERED_FOR_SHA" ]]; then
+      echo ""
+      echo "ℹ️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT."
+      echo "   Envio already has a registered deployment for this commit, so this is a"
+      echo "   legitimate re-run (e.g. resuming after an interrupted babysit). Continuing"
+      echo "   with the post-deploy checklist so you can watch / promote the existing"
+      echo "   deployment."
+      echo ""
+    else
+      echo ""
+      echo "⚠️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT,"
+      echo "   and Envio has NO registered deployment for this commit. Their webhook"
+      echo "   missed the original push event; pushing the same SHA again won't help"
+      echo "   because git skips the ref-update over the wire. Retrigger with a"
+      echo "   fresh-SHA empty commit:"
+      echo ""
+      echo "     git commit --allow-empty -m 'chore: re-trigger envio webhook'"
+      if [[ -z "$NETWORK" ]]; then
+        echo "     pnpm deploy:indexer --yes"
+      else
+        echo "     pnpm deploy:indexer $NETWORK --yes"
+      fi
+      echo ""
+      echo "   If Envio's webhook keeps dropping events, escalate via"
+      echo "   https://discord.gg/envio — the CLI has no manual build-trigger."
+      exit 2
+    fi
   fi
 fi
 
