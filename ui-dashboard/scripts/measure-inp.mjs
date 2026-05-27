@@ -13,27 +13,43 @@
 //   deps in the workspace.
 //
 // Required env:
-//   PREVIEW_URL    — Vercel preview URL (no trailing slash)
-//   BYPASS_SECRET  — VERCEL_AUTOMATION_BYPASS_SECRET
-//   INP_BUDGET_MS  — optional, default 200 (web-vitals "good" threshold)
+//   PREVIEW_URL          — Vercel preview URL (no trailing slash)
+//   BYPASS_HEADERS_JSON  — JSON object with both bypass headers
+//                          (`x-vercel-protection-bypass` + `x-vercel-set-bypass-cookie`).
+//                          Built by the workflow shell from BYPASS_SECRET so the raw
+//                          secret never reaches PR-controlled Node code — matches the
+//                          lhci step's `unset BYPASS_SECRET` pattern.
+//   INP_BUDGET_MS        — optional, default 200 (web-vitals "good" threshold).
 //
 // Exit codes:
-//   0 — INP ≤ budget, or no measurement captured (interaction didn't
-//       trigger one — surfaced as a warning, not a failure, because the
-//       page may have already been hidden or no qualifying interaction
-//       fired before the read window closed).
-//   1 — INP > budget, or chromium / network failure.
+//   0 — INP ≤ budget.
+//   1 — INP > budget, no measurement captured, chromium / network failure,
+//       or any other failure. Fail-closed: a silently absent metric means
+//       the gate isn't validating anything, so the workflow should fail
+//       loudly rather than green-light an unverifiable run.
 
 import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const PREVIEW_URL = process.env.PREVIEW_URL;
-const BYPASS_SECRET = process.env.BYPASS_SECRET;
+const BYPASS_HEADERS_JSON = process.env.BYPASS_HEADERS_JSON;
 const INP_BUDGET_MS = Number(process.env.INP_BUDGET_MS ?? 200);
 
-if (!PREVIEW_URL || !BYPASS_SECRET) {
-  console.error("::error::PREVIEW_URL and BYPASS_SECRET env vars required");
+if (!PREVIEW_URL || !BYPASS_HEADERS_JSON) {
+  console.error(
+    "::error::PREVIEW_URL and BYPASS_HEADERS_JSON env vars required",
+  );
+  process.exit(1);
+}
+
+let bypassHeaders;
+try {
+  bypassHeaders = JSON.parse(BYPASS_HEADERS_JSON);
+} catch (err) {
+  console.error(
+    `::error::BYPASS_HEADERS_JSON is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+  );
   process.exit(1);
 }
 
@@ -57,11 +73,16 @@ const webVitalsIife = resolve(
 const browser = await chromium.launch({ headless: true });
 let exitCode = 0;
 try {
+  // `bypassCSP: true` is required because the dashboard ships a nonce-based
+  // CSP (`script-src 'self' 'nonce-…'`, no `'unsafe-inline'`, see
+  // `ui-dashboard/src/lib/csp.ts`). `page.addScriptTag({ path })` injects
+  // an un-nonced inline `<script>` element that Chromium would otherwise
+  // block, leaving `window.webVitals` undefined and the INP read NaN.
+  // The bypass only affects the test context; the served dashboard's CSP
+  // is unchanged.
   const context = await browser.newContext({
-    extraHTTPHeaders: {
-      "x-vercel-protection-bypass": BYPASS_SECRET,
-      "x-vercel-set-bypass-cookie": "true",
-    },
+    bypassCSP: true,
+    extraHTTPHeaders: bypassHeaders,
   });
   const page = await context.newPage();
 
@@ -102,12 +123,17 @@ try {
     'input[aria-label="Filter swaps by pool ID or pool address"]';
   await page.waitForSelector(filterInput, { timeout: 20_000 });
 
-  // Scripted interaction sequence: focus the input, type a filter value,
-  // click Apply. Each click/keypress qualifies as an "interaction" under
-  // the Event Timing API, so web-vitals will record an INP for the slowest
-  // one.
+  // Scripted interaction sequence: focus the input, type a filter value
+  // via real keydown/keyup events, click Apply. `pressSequentially()` sends
+  // real key events (each one is a qualifying Event-Timing-API interaction);
+  // `page.fill()` would only fire a single synthetic `input` event, which
+  // wouldn't surface typing latency to web-vitals.
   await page.click(filterInput);
-  await page.fill(filterInput, "0x0000000000000000000000000000000000000000");
+  await page
+    .locator(filterInput)
+    .pressSequentially("0x0000000000000000000000000000000000000000", {
+      delay: 20,
+    });
   await page.click('button:has-text("Apply")');
 
   // Force web-vitals to flush by hiding the page (its `onINP` reports on
@@ -128,9 +154,10 @@ try {
   const inp = await page.evaluate(() => window.__inp);
 
   if (inp === null) {
-    console.warn(
-      "::warning::No INP measurement captured. web-vitals didn't observe a qualifying interaction inside the read window; nothing to assert against.",
+    console.error(
+      "::error::No INP measurement captured — web-vitals didn't observe a qualifying interaction inside the read window. Failing closed: a silently absent metric means the gate isn't validating anything (web-vitals API change, broken flush, or unqualifying interaction). Investigate before re-running.",
     );
+    exitCode = 1;
   } else if (inp > INP_BUDGET_MS) {
     console.error(
       `::error::INP regression: ${inp.toFixed(1)}ms > ${INP_BUDGET_MS}ms budget`,

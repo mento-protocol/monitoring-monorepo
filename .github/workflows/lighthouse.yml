@@ -275,11 +275,21 @@ jobs:
         # step uses; the chromium it launches inherits @playwright/test's
         # multi-process setup (no sandbox single-process workaround needed
         # on GHA runners).
+        #
+        # Secret handling matches the lhci step: build the bypass headers
+        # JSON in trusted workflow shell, `unset BYPASS_SECRET`, then pass
+        # only the resolved headers JSON to the PR-controlled script. The
+        # raw secret never reaches Node code that's part of the PR diff.
         if: steps.decide.outputs.run == 'true'
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
-        run: node ui-dashboard/scripts/measure-inp.mjs
+        run: |
+          set -eo pipefail
+          BYPASS_HEADERS_JSON=$(jq -nc --arg secret "${BYPASS_SECRET}" \
+            '{"x-vercel-protection-bypass":$secret,"x-vercel-set-bypass-cookie":"true"}')
+          unset BYPASS_SECRET
+          BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
 
       - name: Post Lighthouse results as PR comment
         if: steps.decide.outputs.run == 'true' && always()
