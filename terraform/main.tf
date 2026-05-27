@@ -533,9 +533,10 @@ resource "google_service_account_iam_member" "grafana_agent_cloudbuild_appengine
 # Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
 # runs `gcloud run services update metrics-bridge --image=<digest>` after
 # Cloud Build pushes a new revision. Terraform owns the *shape* of the
-# service (probes, env, scaling, memory) and ignores image drift via
-# `lifecycle.ignore_changes` so running `pnpm infra:apply` never reverts
-# the image back to the bootstrap placeholder.
+# service (probes, env, template scaling, memory) and ignores image plus the
+# observed Cloud Run API bookkeeping drift via `lifecycle.ignore_changes` so
+# running `pnpm infra:apply` never reverts the deployed revision or re-applies
+# cosmetic deploy metadata.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
   project             = google_project.monitoring.project_id
@@ -544,6 +545,12 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   deletion_protection = true
 
   depends_on = [google_project_service.run]
+
+  scaling {
+    # Service-level mode stays managed; only API-filled zero count fields below
+    # are ignored as bookkeeping drift.
+    scaling_mode = "AUTOMATIC"
+  }
 
   template {
     scaling {
@@ -597,9 +604,20 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   lifecycle {
     # Image rollouts are triggered by `gcloud run services update` from the
     # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
-    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
-    # revert a freshly-deployed image back to the bootstrap placeholder.
-    ignore_changes = [template[0].containers[0].image]
+    # terraform. The Cloud Run API also rewrites bookkeeping fields on each
+    # deployment. Ignoring those attributes keeps `pnpm infra:apply` focused on
+    # intentional service-shape changes instead of cosmetic deploy drift.
+    ignore_changes = [
+      client,
+      client_version,
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
+      template[0].containers[0].image,
+      # Suppresses live revision-name drift from gcloud rollouts. Remove or
+      # re-audit this ignore entry in any PR that intentionally changes the
+      # Terraform-owned template shape so Cloud Run can mint a fresh revision.
+      template[0].revision,
+    ]
   }
 }
 

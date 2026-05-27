@@ -24,7 +24,7 @@ For every `google_cloud_run_v2_service`:
 
 - [ ] Probe paths use `/health`, NOT `/healthz`. Cloud Run v2 reserves `/healthz` at the frontend, so external `/healthz` returns a Google-branded 404
 - [ ] Memory ≥ `512Mi` if `cpu_idle = false` (always-allocated CPU floor)
-- [ ] `lifecycle.ignore_changes = [template[0].containers[0].image]` if image rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image to the bootstrap default)
+- [ ] `lifecycle.ignore_changes` covers `template[0].containers[0].image` and provider-visible Cloud Run API bookkeeping drift (`client`, `client_version`, `scaling[0].manual_instance_count`, `scaling[0].min_instance_count`, `template[0].revision`) when rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image or re-applies cosmetic deploy metadata). Do not ignore the whole service-level `scaling` block, because `scaling_mode` is real runtime state. If a PR intentionally changes Terraform-owned template shape (`env`, probes, resources, or template scaling), re-audit/remove any `template[0].revision` ignore entry for that PR so Cloud Run can mint a fresh revision instead of pinning the old live revision.
 - [ ] Default/bootstrap `image` MUST respond to the configured probe path. `gcr.io/cloudrun/hello:latest` does NOT serve `/health` — using it as a default fails first-bootstrap because the service never becomes healthy
 - [ ] `depends_on = [google_project_service.run]` so `run.googleapis.com` is enabled before service creation
 
@@ -58,7 +58,7 @@ For variables that gate critical behavior:
 ## 6. Pre-apply rituals
 
 - [ ] `pnpm infra:plan` ALWAYS before apply; read every `# ... will be destroyed` line
-- [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image drift is ignored and probe paths still match the deployed app
+- [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image/API bookkeeping drift is ignored and probe paths still match the deployed app
 - [ ] After apply, hit the public URL once and confirm a 200 from `/health` — Cloud Run can return 503s for ~30s while the new revision rolls
 
 ## 7. Lessons already paid for
