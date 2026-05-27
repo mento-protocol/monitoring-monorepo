@@ -2,7 +2,7 @@
 # Selected by the `local.alert_config_slack` dispatcher in locals.tf.
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_title" {
-  name     = "Slack: Stale Price Alert Title"
+  name     = "Slack - Stale Price Alert Title"
   template = <<-EOT
 {{ define "slack.oracle_stale_price_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
@@ -10,7 +10,7 @@ EOT
 
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
-  name = "Slack: Stale Price Alert Message"
+  name = "Slack - Stale Price Alert Message"
   # Per-feed explorer links to relayer signers are set by the chain-specific
   # `${local.celo_relayer_signer_branches}` and
   # `${local.monad_relayer_signer_branches}` fragments (one independent
@@ -65,7 +65,7 @@ EOT
 }
 
 resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_title" {
-  name     = "Slack: Low Relayer Balance Alert Title"
+  name     = "Slack - Low Relayer Balance Alert Title"
   template = <<-EOT
 {{ define "slack.oracle_relayer_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
@@ -73,7 +73,7 @@ EOT
 
 
 resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_message" {
-  name     = "Slack: Low Relayer Balance Alert Message"
+  name     = "Slack - Low Relayer Balance Alert Message"
   template = <<-EOT
 {{ define "slack.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -93,14 +93,14 @@ EOT
 }
 
 resource "grafana_message_template" "slack_reserve_balance_alert_title" {
-  name     = "Slack: Reserve Balance Alert Title"
+  name     = "Slack - Reserve Balance Alert Title"
   template = <<-EOT
 {{ define "slack.reserve_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
 EOT
 }
 
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
-  name     = "Slack: Reserve Balance Alert Message"
+  name     = "Slack - Reserve Balance Alert Message"
   template = <<-EOT
 {{ define "slack.reserve_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -119,14 +119,14 @@ EOT
 }
 
 resource "grafana_message_template" "slack_trading_mode_alert_title" {
-  name     = "Slack: Trading Mode Alert Title"
+  name     = "Slack - Trading Mode Alert Title"
   template = <<-EOT
   {{ define "slack.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}🚨{{ else }}✅{{ end }}{{ end -}}
   EOT
 }
 
 resource "grafana_message_template" "slack_trading_mode_alert_message" {
-  name = "Slack: Trading Mode Alert Message"
+  name = "Slack - Trading Mode Alert Message"
   # Pool URL: `$pool` is set per-chain by the `celo_pool_branches` / `monad_pool_branches`
   # fragments (one independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see
   # locals.tf). When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
@@ -176,7 +176,7 @@ EOT
 }
 
 resource "grafana_message_template" "slack_trading_limits_alert_title" {
-  name     = "Slack: Trading Limits Alert Title"
+  name     = "Slack - Trading Limits Alert Title"
   template = <<-EOT
   {{ define "slack.trading_limits_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
@@ -187,7 +187,7 @@ resource "grafana_message_template" "slack_trading_limits_alert_title" {
 }
 
 resource "grafana_message_template" "slack_trading_limits_alert_message" {
-  name     = "Slack: Trading Limits Alert Message"
+  name     = "Slack - Trading Limits Alert Message"
   template = <<-EOT
 {{ define "slack.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -211,7 +211,7 @@ EOT
 }
 
 resource "grafana_message_template" "slack_aegis_service_alert_title" {
-  name     = "Slack: Aegis Service Alert Title"
+  name     = "Slack - Aegis Service Alert Title"
   template = <<-EOT
 {{ define "slack.aegis_service_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
@@ -222,7 +222,7 @@ EOT
 }
 
 resource "grafana_message_template" "slack_aegis_service_alert_message" {
-  name     = "Slack: Aegis Service Alert Message"
+  name     = "Slack - Aegis Service Alert Message"
   template = <<-EOT
 {{ define "slack.aegis_service_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}

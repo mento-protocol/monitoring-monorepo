@@ -3,7 +3,7 @@
 # `local.alert_config_victorops` dispatcher in locals.tf.
 
 resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
-  name     = "VictorOps: Stale Price Alert Title"
+  name     = "VictorOps - Stale Price Alert Title"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
@@ -15,7 +15,7 @@ EOT
 
 
 resource "grafana_message_template" "victorops_oracle_stale_price_alert_message" {
-  name     = "VictorOps: Stale Price Alert Message"
+  name     = "VictorOps - Stale Price Alert Message"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
@@ -32,7 +32,7 @@ EOT
 }
 
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title" {
-  name     = "VictorOps: Low Relayer Balance Alert Title"
+  name     = "VictorOps - Low Relayer Balance Alert Title"
   template = <<-EOT
 {{ define "victorops.oracle_relayer_low_balance_alert_title" }}Low Relayer Balance{{ end }}
 EOT
@@ -40,7 +40,7 @@ EOT
 
 
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
-  name     = "VictorOps: Low Relayer Balance Alert Message"
+  name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
 {{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
@@ -60,7 +60,7 @@ EOT
 }
 
 resource "grafana_message_template" "victorops_reserve_balance_alert_title" {
-  name     = "VictorOps: Reserve Balance Alert Title"
+  name     = "VictorOps - Reserve Balance Alert Title"
   template = <<-EOT
   {{ define "victorops.reserve_balance_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
@@ -71,7 +71,7 @@ resource "grafana_message_template" "victorops_reserve_balance_alert_title" {
 }
 
 resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
-  name     = "VictorOps: Reserve Balance Alert Message"
+  name     = "VictorOps - Reserve Balance Alert Message"
   template = <<-EOT
   {{ define "victorops.reserve_balance_alert_message" }}
   {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
@@ -92,14 +92,14 @@ RESOLVED: Sufficient {{ $token }} balance restored for the {{ .Labels.owner }} (
 }
 
 resource "grafana_message_template" "victorops_trading_mode_alert_title" {
-  name     = "VictorOps: Trading Mode Alert Title"
+  name     = "VictorOps - Trading Mode Alert Title"
   template = <<-EOT
   {{ define "victorops.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}Trading halted{{ else }}Trading resumed{{ end }}{{ end -}}
   EOT
 }
 
 resource "grafana_message_template" "victorops_trading_mode_alert_message" {
-  name     = "VictorOps: Trading Mode Alert Message"
+  name     = "VictorOps - Trading Mode Alert Message"
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -138,7 +138,7 @@ EOT
 }
 
 resource "grafana_message_template" "victorops_trading_limits_alert_title" {
-  name     = "VictorOps: Trading Limits Alert Title"
+  name     = "VictorOps - Trading Limits Alert Title"
   template = <<-EOT
   {{ define "victorops.trading_limits_alert_title" }}
   [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
@@ -149,7 +149,7 @@ resource "grafana_message_template" "victorops_trading_limits_alert_title" {
 }
 
 resource "grafana_message_template" "victorops_trading_limits_alert_message" {
-  name     = "VictorOps: Trading Limits Alert Message"
+  name     = "VictorOps - Trading Limits Alert Message"
   template = <<-EOT
 {{ define "victorops.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -173,7 +173,7 @@ EOT
 }
 
 resource "grafana_message_template" "victorops_aegis_service_alert_title" {
-  name     = "VictorOps: Aegis Service Alert Title"
+  name     = "VictorOps - Aegis Service Alert Title"
   template = <<-EOT
 {{ define "victorops.aegis_service_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
@@ -184,7 +184,7 @@ EOT
 }
 
 resource "grafana_message_template" "victorops_aegis_service_alert_message" {
-  name     = "VictorOps: Aegis Service Alert Message"
+  name     = "VictorOps - Aegis Service Alert Message"
   template = <<-EOT
 {{ define "victorops.aegis_service_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}

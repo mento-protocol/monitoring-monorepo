@@ -8,6 +8,23 @@ vercel_token = "vcp_..."
 # Team ID — default is already set in variables.tf; override only if changed.
 # vercel_team_id = "team_4l4TPoxnWEcusT8VeXkHbzF2"
 
+# ── GitHub ────────────────────────────────────────────────────────────────────
+# PAT for writing repository Actions secrets on
+# `mento-protocol/monitoring-monorepo` (used by the Vercel-bypass mirror in
+# `github-secrets.tf`). Fine-grained PAT scoped to that repo with
+# Repository → Secrets: Read/write. Org-admin scope is NOT needed here —
+# the secrets managed by this stack are repo-level.
+#
+# Create at: https://github.com/settings/personal-access-tokens/new
+#   Resource owner: mento-protocol
+#   Repository access: mento-protocol/monitoring-monorepo
+#   Permissions: Repository → Secrets: Read/write
+github_token = "ghp_..."
+
+# Owner default is already set in variables.tf; override only if managing a
+# different org from this stack (unlikely).
+# github_owner = "mento-protocol"
+
 # ── Upstash ───────────────────────────────────────────────────────────────────
 # API credentials at: console.upstash.com → Account → API Keys
 upstash_email   = "your@email.com"

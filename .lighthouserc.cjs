@@ -85,13 +85,16 @@ module.exports = {
         // Production measured at 0.00. Using standard "good" threshold.
         "cumulative-layout-shift": ["warn", { maxNumericValue: 0.1 }],
 
-        // NOTE: INP (interaction-to-next-paint) is intentionally NOT asserted.
-        // Lighthouse's default navigation mode (cold page load, no user
-        // interactions) never produces an INP numeric value, so an assertion
-        // would silently pass on every run and give false confidence. Adding
-        // INP coverage requires switching to lhci's user-flow mode with
-        // scripted interactions. Tracked in BACKLOG under "Lighthouse CI
-        // Follow-Ups".
+        // NOTE: INP (interaction-to-next-paint) is intentionally NOT asserted
+        // here. Lighthouse's default navigation mode (cold page load, no user
+        // interactions) never produces an INP numeric value, so a `warn` /
+        // `error` budget at this layer would silently pass on every run.
+        //
+        // INP is asserted in a separate workflow step that runs
+        // `ui-dashboard/scripts/measure-inp.mjs` — Playwright drives a
+        // scripted interaction on /pools and the web-vitals library reports
+        // the real Event-Timing-API INP. Budget defaults to 200 ms (web-vitals
+        // "good" threshold) and is overridable via INP_BUDGET_MS.
       },
     },
     upload: {

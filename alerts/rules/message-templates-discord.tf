@@ -11,7 +11,7 @@
 # blow past the limit if Discord templates remained 1-resource-per-define.
 
 resource "grafana_message_template" "discord" {
-  name     = "Discord: All Alert Templates"
+  name     = "Discord - All Alert Templates"
   template = <<-EOT
 {{ define "discord.oracle_stale_price_alert_title" }}
 [{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
