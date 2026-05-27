@@ -100,28 +100,56 @@ or the deployment record list.
 
 ## Phase 2 — Babysit the build + sync
 
+Two sub-phases. Don't collapse them: registration confirms Envio's webhook +
+build pipeline reacted to the push; sync confirms the running deployment caught
+up to chain head. They fail for different reasons and want different responses.
+
+### Phase 2a — Confirm registration (5 min hard ceiling, do not background blind)
+
+Normal registration completes 2-3 min after the `envio` push. If the deployment
+hasn't appeared in Envio's API by ~5 min, **the webhook is almost always broken
+on Envio's side** (their app missed the push event, their build queue is jammed,
+or — the silent failure mode — `pnpm deploy:indexer` no-op'd because the deploy
+branch was already at HEAD). Waiting longer rarely recovers; investigate now.
+
+Run the registration probe in the **foreground** with a tight ceiling:
+
+```bash
+ENVIO_REGISTRATION_TIMEOUT_SECONDS=300 pnpm deploy:indexer:status <TARGET_COMMIT> --watch
+```
+
+The status wrapper's default ceiling is 10 min; override to 5 min here so the
+skill doesn't tie itself to the wrapper's safety net. The wrapper emits a
+diagnostic warn at 3 min that surfaces the most likely causes inline.
+
+**If you must background this** (e.g. you're handing off to a Monitor),
+either (a) re-export the same low ceiling, or (b) checkpoint the output file
+yourself at the 5-min mark — do NOT trust the wrapper's worst-case 10-min
+default to give up "soon enough." Silent 10-min waits look identical to
+"the build is just slow" until they aren't.
+
+If registration succeeds, the wrapper transitions automatically into Phase 2b
+(sync watching). If it fails, stop and follow the diagnostic the wrapper
+already printed: check [the Envio dashboard](https://envio.dev/app/mento-protocol/mento), confirm
+the `envio` branch on GitHub actually moved, and surface to the user before
+re-pushing.
+
+### Phase 2b — Wait for sync to catch up (90 min hard ceiling)
+
+Once registered, the wrapper polls every 10 s and exits 0 when all chains
+report caught-up. Foreground is fine here; the noisy progress table is the
+work product.
+
 Watch sync in the active rollout/session and do not leave a background process
 running when you finish.
 
-Preferred watcher:
-
-```bash
-pnpm deploy:indexer:status <TARGET_COMMIT> --watch
-```
-
 The Envio Cloud deployment id is the short Git commit hash (for example
-`b92ff93b`), and the deployment can take several minutes to appear after the
-`envio` branch push. The local status wrapper resolves a full SHA to the
-registered short deployment id and, when `--watch` is present, waits up to 30
-minutes for registration before watching sync. A 404 immediately after push is
-therefore not a sync failure by itself; it means the deployment record is not
-visible yet.
+`b92ff93b`). Once the deployment is registered, this id stays stable.
 
 Do **not** use `pnpm deploy:indexer:logs` without a commit while babysitting a
-new deployment that has not registered yet. The no-commit form reads the latest
-visible deployment from Envio, which can still be the old prod deployment during
-registration lag. Once the target is visible, inspect logs with the explicit
-target:
+new deployment. The no-commit form reads the latest visible deployment from
+Envio, which can still be the old prod deployment during the registration phase
+or after a failed build. Always pass the explicit target:
 
 ```bash
 pnpm deploy:indexer:logs <TARGET_COMMIT> --build
@@ -129,7 +157,7 @@ pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
 ```
 
 Treat a successful caught-up exit as `READY_TO_PROMOTE`. If the command exits
-non-zero, the deployment never appears within 30 minutes, or full sync is not
+non-zero, the deployment never registers within 5-10 min, or full sync is not
 reached within 90 minutes, stop and surface the failure. **Never promote a
 non-synced deployment.**
 
