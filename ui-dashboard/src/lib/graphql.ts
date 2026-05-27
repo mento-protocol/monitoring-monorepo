@@ -93,9 +93,10 @@ export function useGQL<T>(
           ...legacyOptions,
         };
   // Default the SWR revalidation gates explicitly rather than spreading
-  // `opts` into useSWR — UseGQLOptions widens those keys to `T | undefined`
-  // under exactOptionalPropertyTypes, and SWR's typed config rejects an
-  // explicit `undefined` for `revalidateOnFocus`/`revalidateOnReconnect`.
+  // `opts` into useSWR — UseGQLOptions widens those keys to `boolean |
+  // undefined` under exactOptionalPropertyTypes, and SWR's typed config
+  // rejects an explicit `undefined` for `revalidateOnFocus` /
+  // `revalidateOnReconnect`.
   const {
     refreshInterval = DEFAULT_REFRESH_MS,
     timeoutMs,
@@ -106,7 +107,9 @@ export function useGQL<T>(
 
   async function fetcher(): Promise<T> {
     const raw = await (timeoutMs == null
-      ? client.request<T>(query!, variables)
+      ? variables !== undefined
+        ? client.request<T>(query!, variables)
+        : client.request<T>(query!)
       : client.request<T>({
           document: query!,
           ...(variables !== undefined ? { variables } : {}),

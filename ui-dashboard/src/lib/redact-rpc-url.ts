@@ -17,6 +17,10 @@ export function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
   const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
   // V8 stacks start with `Error: <message>\n    at …`, so the original
   // URL is embedded in the stack's first line. Scrub the stack string too.
+  // The guard exists to satisfy `exactOptionalPropertyTypes` — in Node.js
+  // `err.stack` is always populated, so the `else` branch (where the copy
+  // would inherit the auto-generated stack pointing into this file) is
+  // unreachable in practice.
   if (err.stack !== undefined) {
     copy.stack = err.stack.replaceAll(rpcUrl, "[RPC_URL]");
   }
