@@ -10,16 +10,24 @@ name: Alerts Rules
 # before this workflow can succeed.
 #
 # Plan/apply split:
-#   - `plan` job runs on every PR + push/dispatch to main. On PRs it posts a
-#     sticky comment with the plan output. On push/dispatch it uploads the
-#     binary plan as an artifact and emits `has-changes` so `apply` knows
-#     whether to fire.
+#   - `plan` job runs on every PR + push/dispatch to main. It runs
+#     `terraform plan -detailed-exitcode` and emits a `has-changes` job
+#     output. On PRs it posts a sticky comment with the plan diff.
 #   - `apply` job only runs on push/dispatch to main AND only when the plan
-#     reported actual changes. It downloads the saved `tfplan` and runs
-#     `terraform apply tfplan` — the plan the reviewer approved IS the plan
-#     that lands; no re-plan window. When there are no changes the apply
-#     job is skipped entirely, which means the `production` Environment's
+#     reported actual changes. When there are no changes the apply job is
+#     skipped entirely, which means the `production` Environment's
 #     required-reviewer prompt only fires on real-change merges.
+#
+# Note: we intentionally do NOT save the plan as a binary artifact for
+# cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
+# sensitive data in cleartext in the plan file"
+# (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
+# TF_VAR_* env block here carries production Grafana/Slack/Splunk/Discord
+# credentials. Uploading the binary plan as a workflow artifact would
+# expose those secrets to anyone with `actions:read`. Instead the apply
+# job re-plans at gate-approval time — the trade-off is the brief
+# "between approval and apply" drift window, which the reviewer can
+# detect by checking the apply-job's plan output before approving.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix module `alerts-rules`). This workflow adds the plan diff comment +
@@ -136,18 +144,18 @@ jobs:
         id: plan
         # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.
         # `set +e` around terraform so exit-2 (changes) doesn't fail the step;
-        # we capture the code, emit it as a step output for `detect`, and only
-        # `exit 1` on the real-error path.
-        # `-out=tfplan` saves a binary plan so the `apply` job can run
-        # `terraform apply tfplan` — closes the drift window between the PR
-        # comment and the production-environment approval.
+        # capture terraform's exit (not tee's) via PIPESTATUS, emit as a step
+        # output for `detect`, and only `exit 1` on real errors.
+        # Plan output is teed to `/tmp/tf-plan.txt` for the sticky comment.
+        # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
+        # (HashiCorp docs); apply re-plans at gate-approval time instead.
         # `-lock-timeout=2m`: speculative PR plans can race a main-branch
         # apply (separate concurrency groups). 2m is short enough not to stall
         # CI on a long apply, long enough to absorb typical lock holds.
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m -out=tfplan
-          EXITCODE=$?
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
+          EXITCODE=${PIPESTATUS[0]}
           set -e
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
           case "$EXITCODE" in
@@ -155,7 +163,6 @@ jobs:
             2) echo "Plan: changes detected" ;;
             *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;
           esac
-          terraform show -no-color tfplan > /tmp/tf-plan.txt
 
       - name: Detect changes
         id: detect
@@ -172,22 +179,6 @@ jobs:
           else
             echo "has-changes=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Upload binary plan for apply
-        # Only upload on merge events that will trigger apply AND only when
-        # the plan reports actual changes. PR events don't need the artifact
-        # (no apply runs on PR); push/dispatch with `has-changes=false`
-        # short-circuits the apply job before the artifact would be needed.
-        if: >-
-          success()
-          && steps.detect.outputs.has-changes == 'true'
-          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: tfplan
-          path: alerts/rules/tfplan
-          retention-days: 1
-          if-no-files-found: error
 
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
@@ -233,7 +224,7 @@ jobs:
 
             const body =
               `## Terraform Plan — \`alerts/rules/\`\n\n` +
-              `**Status:** ${statusIcon} ${planOutcome} — ${statusText}\n\n` +
+              `**Status:** ${statusIcon} ${statusText}\n\n` +
               `[Full workflow logs](${runUrl})\n\n` +
               `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
               `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
@@ -339,18 +330,13 @@ jobs:
       - name: Init
         run: terraform init -input=false
 
-      - name: Download binary plan
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: tfplan
-          path: alerts/rules
-
-      - name: Apply saved plan
-        # `terraform apply tfplan` applies the exact plan reviewed at gate
-        # approval time — no re-plan, no drift window. `-lock-timeout=10m`:
-        # apply must wait for any in-progress state lock rather than failing
-        # the deploy.
-        run: terraform apply -input=false -lock-timeout=10m tfplan
+      - name: Apply
+        # Re-plans + applies in a single step. The reviewer at the
+        # production-environment gate should read this job's plan output
+        # before approving — it's the ground truth for what lands.
+        # `-lock-timeout=10m`: apply must wait for any in-progress state
+        # lock rather than failing the deploy.
+        run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
