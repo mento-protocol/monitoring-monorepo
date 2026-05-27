@@ -688,10 +688,19 @@ export const breakerKindEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: true,
   },
-  // `fetchBreakerKind` returns null only on transient probe failure;
-  // MEDIAN_DELTA / VALUE_DELTA / MARKET_HOURS are all permanent
-  // classifications and safe to cache. Skip the cache only on null
-  // so a flaky probe doesn't poison every later breaker bootstrap.
+  // Cache rules:
+  //   * null (transient probe failure): cache: false — flaky probe must
+  //     not poison later breaker bootstraps.
+  //   * MEDIAN_DELTA / VALUE_DELTA (positive identification): cache: true.
+  //   * MARKET_HOURS: cache: false. It's the catch-all default in
+  //     `fetchBreakerKind` after both selector probes miss, so the
+  //     classification may be wrong for proxy upgrades, EOAs added via
+  //     governance, or future breaker variants. Skipping the persistent
+  //     cache prevents a stuck misclassification from surviving an
+  //     indexer restart. The known-address shortcut in `lookupBreakerKind`
+  //     bypasses the probe entirely for legitimate MARKET_HOURS breakers
+  //     in `@mento-protocol/contracts`, so the cost of re-running the
+  //     probe is paid only by unknown addresses.
   async ({ input, context }) => {
     const result = await fetchBreakerKind(
       input.chainId,
@@ -701,6 +710,9 @@ export const breakerKindEffect = createEffect(
     if (result === null) {
       context.cache = false;
       return null;
+    }
+    if (result === "MARKET_HOURS") {
+      context.cache = false;
     }
     return result;
   },
