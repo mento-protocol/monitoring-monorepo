@@ -143,3 +143,13 @@ resource "google_service_account_iam_member" "ci_alerts_infra_org_terraform_toke
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
+
+# Same grant for `alerts/rules/` — its GCS backend impersonates `org-terraform`
+# (see `alerts/rules/versions.tf`) so `alerts-rules.yml` also needs the CI SA
+# to mint tokens for that target. Separate resource (not for_each) so each
+# stack's grant can be audited and removed independently.
+resource "google_service_account_iam_member" "ci_alerts_rules_org_terraform_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+}
