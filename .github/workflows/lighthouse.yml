@@ -256,6 +256,49 @@ jobs:
           fi
           echo "Audited-page guard passed: no SSO interstitial URLs in lhci output."
 
+      - name: Install Playwright Chromium (for INP measurement)
+        # The INP step uses `@playwright/test`'s chromium (the dashboard's
+        # existing browser-test infra) rather than puppeteer-core + lighthouse
+        # user-flow because (a) zero new workspace deps, (b) web-vitals
+        # delivers the same Event-Timing-API INP a real user would see —
+        # Lighthouse timespan mode estimates it from main-thread timing.
+        #
+        # `always()` keeps the INP gate independent of the lhci step's
+        # outcome: an accessibility regression (already blocking) shouldn't
+        # silently skip the INP step and mask a simultaneous INP regression.
+        if: steps.decide.outputs.run == 'true' && always()
+        working-directory: ui-dashboard
+        run: pnpm exec playwright install chromium
+
+      - name: Measure INP (Playwright + web-vitals)
+        # Drives the /pools client surface through a scripted interaction
+        # (focus filter input → type → click Apply), captures INP via the
+        # web-vitals library injected into the page, and fails the workflow
+        # if INP > INP_BUDGET_MS (default 200 — web-vitals' "good"
+        # threshold). The script reuses the same bypass headers the lhci
+        # step uses; the chromium it launches inherits @playwright/test's
+        # multi-process setup (no sandbox single-process workaround needed
+        # on GHA runners).
+        #
+        # Secret handling matches the lhci step: build the bypass headers
+        # JSON in trusted workflow shell, `unset BYPASS_SECRET`, then pass
+        # only the resolved headers JSON to the PR-controlled script. The
+        # raw secret never reaches Node code that's part of the PR diff.
+        #
+        # `always()` mirrors the audited-page guard: don't silently skip
+        # the INP gate when an earlier step (lhci accessibility, the bypass
+        # guard) fails.
+        if: steps.decide.outputs.run == 'true' && always()
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
+        run: |
+          set -eo pipefail
+          BYPASS_HEADERS_JSON=$(jq -nc --arg secret "${BYPASS_SECRET}" \
+            '{"x-vercel-protection-bypass":$secret,"x-vercel-set-bypass-cookie":"true"}')
+          unset BYPASS_SECRET
+          BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
+
       - name: Post Lighthouse results as PR comment
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
