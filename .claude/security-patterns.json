@@ -2,7 +2,7 @@
   "patterns": [
     {
       "rule_name": "auth_secret_literal",
-      "regex": "(?i)[\"']?AUTH_SECRET[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
+      "regex": "(?i)[\"'`]?AUTH_SECRET[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9+/=_-]{16,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -33,7 +33,7 @@
     },
     {
       "rule_name": "upstash_token_literal",
-      "regex": "(?i)[\"']?(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"'`]?(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9_-]{20,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -64,7 +64,7 @@
     },
     {
       "rule_name": "envio_hasura_token_literal",
-      "regex": "(?i)[\"']?ENVIO_HASURA_(ADMIN_)?TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"'`]?ENVIO_HASURA_(ADMIN_)?TOKEN[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9_-]{20,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -95,7 +95,7 @@
     },
     {
       "rule_name": "sentry_auth_token_literal",
-      "regex": "(?i)[\"']?SENTRY_AUTH_TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"'`]?SENTRY_AUTH_TOKEN[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9_-]{20,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -126,7 +126,7 @@
     },
     {
       "rule_name": "dune_api_key_literal",
-      "regex": "(?i)[\"']?DUNE_API_KEY[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"'`]?DUNE_API_KEY[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9_-]{20,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -157,7 +157,7 @@
     },
     {
       "rule_name": "arkham_api_key_literal",
-      "regex": "(?i)[\"']?ARKHAM_API_KEY[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"'`]?ARKHAM_API_KEY[\"'`]?\\s*[=:]\\s*[\"'`]?[A-Za-z0-9_-]{20,}[\"'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -188,7 +188,7 @@
     },
     {
       "rule_name": "slack_bot_token_env_literal",
-      "regex": "(?i)[\"']?([A-Z][A-Z0-9_]*_)?SLACK_BOT_TOKEN[\"']?\\s*[=:]\\s*[\"\\']?[A-Za-z0-9_-]{20,}[\"\\']?",
+      "regex": "(?i)[\"'`]?([A-Z][A-Z0-9_]*_)?SLACK_BOT_TOKEN[\"'`]?\\s*[=:]\\s*[\"\\'`]?[A-Za-z0-9_-]{20,}[\"\\'`]?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -339,7 +339,11 @@
         "**/README.*",
         "README.*",
         "*.md",
-        "*.mdc"
+        "*.mdc",
+        "*.test.ts",
+        "*.test.tsx",
+        "*.spec.ts",
+        "*.spec.tsx"
       ],
       "reminder": "Bearer live-token literal detected (sk_live_/rk_live_). Load from secrets manager; never inline. Rotate immediately if this leaks."
     },
@@ -446,7 +450,11 @@
         "**/docs/**",
         "docs/**",
         "**/.cursor/**",
-        ".cursor/**"
+        ".cursor/**",
+        "*.test.ts",
+        "*.test.tsx",
+        "*.spec.ts",
+        "*.spec.tsx"
       ],
       "reminder": "PRIVATE_KEY-shape env literal detected (named var assigned a 64-hex value). Load from secrets manager / KMS at runtime; never inline or commit."
     },
@@ -477,7 +485,13 @@
         "**/ui-dashboard/**/*.ts",
         "ui-dashboard/**/*.ts",
         "**/ui-dashboard/**/*.tsx",
-        "ui-dashboard/**/*.tsx"
+        "ui-dashboard/**/*.tsx",
+        "**/metrics-bridge/**/*.ts",
+        "metrics-bridge/**/*.ts",
+        "**/metrics-bridge/**/*.graphql",
+        "metrics-bridge/**/*.graphql",
+        "**/metrics-bridge/**/*.gql",
+        "metrics-bridge/**/*.gql"
       ],
       "reminder": "Hasura `_aggregate` queries are unbounded on prod and have caused 429 storms. Use a pre-rolled snapshot entity or paginate + count client-side."
     },
@@ -532,9 +546,9 @@
     },
     {
       "rule_name": "workflow_action_unpinned",
-      "regex": "[\"\\']?uses[\"\\']?:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
+      "regex": "(?:[\"\\']?uses[\"\\']?:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+)|(?:[\"\\']?uses[\"\\']?:\\s*[\"\\']?docker://(?!\\S+@sha256:)\\S+)",
       "paths": ["**/.github/workflows/**", ".github/workflows/**"],
-      "reminder": "Third-party Actions must be SHA-pinned, not tag- or branch-pinned. Use the full 40-char commit SHA followed by a `# tag` comment. Catches @v1, @v1.2.3, @main, @latest, @stable, and subdirectory actions (owner/repo/path@ref)."
+      "reminder": "Third-party Actions must be pinned: GitHub Actions to a full 40-char commit SHA (`owner/repo@<sha> # tag`), Docker images to an immutable digest (`docker://image@sha256:<digest>`). Catches `@v1`, `@v1.2.3`, `@main`, `@latest`, `@stable`, subdirectory actions, and tag-only Docker images. First-party `actions/*` and `github/*` are intentionally exempt."
     },
     {
       "rule_name": "workflow_pr_write_permission",
@@ -552,7 +566,7 @@
     },
     {
       "rule_name": "webhook_no_hmac_check",
-      "regex": "(req\\.body|request\\.body|req\\.rawBody|request\\.rawBody|await\\s+req\\.json|await\\s+request\\.json)",
+      "regex": "(req\\.body|request\\.body|req\\.rawBody|request\\.rawBody|await\\s+req\\.json|await\\s+request\\.json|validatePayload\\s*\\()",
       "paths": [
         "**/alerts/infra/onchain-event-handler/src/*.ts",
         "alerts/infra/onchain-event-handler/src/*.ts",
@@ -579,7 +593,7 @@
         "**/check-payload-size.ts",
         "check-payload-size.ts"
       ],
-      "reminder": "QuickNode webhook handler reads request body \u2014 verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early. (check-payload-size.ts is the intentional pre-sig DoS-rejection gate and is excluded from this rule.)"
+      "reminder": "QuickNode webhook handler reads/parses request body \u2014 verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body or calling `validatePayload(req)`, not after. Reject unauthenticated requests early. (check-payload-size.ts is the intentional pre-sig DoS-rejection gate and is excluded from this rule.)"
     }
   ]
 }
