@@ -8,7 +8,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "AUTH_SECRET assigned a literal value. Load from env at runtime; never inline. Generate with `openssl rand -hex 32`."
     },
@@ -20,7 +27,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Upstash REST token inlined. Move to `.env.local` or Vercel env vars. Rotate immediately if this leaks."
     },
@@ -32,7 +46,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Envio Hasura token inlined. Read from env at runtime; never commit."
     },
@@ -44,7 +65,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Sentry auth token inlined. Read from env; never commit. Rotate via Sentry org auth tokens page if this leaks."
     },
@@ -56,7 +84,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Dune API key inlined. Read from env; never commit. Rotate via dune.com \u2192 Settings \u2192 API."
     },
@@ -68,7 +103,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Arkham API key inlined. Read from env; never commit. Rotate via intel.arkm.com \u2192 Settings if this leaks."
     },
@@ -80,7 +122,14 @@
         "**/.env*.example",
         "**/.env",
         "**/.env.*",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "Slack bot token inlined in an env assignment. Read from env; never commit. Rotate via Slack app settings if this leaks."
     },
@@ -98,7 +147,14 @@
         "**/__tests__/**",
         "**/*.test.ts",
         "**/*.spec.ts",
-        "**/fixtures/**"
+        "**/fixtures/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "regex": "(xoxb-|xoxe\\.xoxp-|xoxa-2-|xoxp-)[A-Za-z0-9_-]{8,}-[A-Za-z0-9_-]{8,}"
     },
@@ -116,7 +172,14 @@
         "**/__tests__/**",
         "**/*.test.ts",
         "**/*.spec.ts",
-        "**/fixtures/**"
+        "**/fixtures/**",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials."
     },
@@ -145,7 +208,14 @@
         "**/.env",
         "**/.env.*",
         "**/.env*.example",
-        "**/*.example"
+        "**/*.example",
+        "**/README.md",
+        "**/README.*",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.mdc",
+        "**/docs/**",
+        "**/.cursor/**"
       ],
       "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars \u2014 if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
     },
@@ -205,9 +275,14 @@
     },
     {
       "rule_name": "workflow_pr_write_permission",
-      "regex": "(pull-requests|contents):\\s*write",
+      "regex": "(pull-requests|contents):\\s*[\\\"']?write[\\\"']?",
       "paths": ["**/.github/workflows/**"],
-      "reminder": "Workflow grants write permission. Confirm pull_request triggers gate on `github.event.pull_request.head.repo.full_name == github.repository` so forks don't get write tokens."
+      "reminder": "Workflow grants write permission. If this workflow has a `pull_request` trigger, confirm it gates on `github.event.pull_request.head.repo.full_name == github.repository` so forks don't get write tokens. (workflow_dispatch-only or push-only workflows can ignore this.)",
+      "exclude_paths": [
+        "**/.github/workflows/update-snapshots.yml",
+        "**/.github/workflows/aegis-app-engine.yml",
+        "**/.github/workflows/release-*.yml"
+      ]
     },
     {
       "rule_name": "webhook_no_hmac_check",
