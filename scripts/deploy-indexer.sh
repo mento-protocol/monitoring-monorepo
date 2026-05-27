@@ -86,9 +86,14 @@ fi
 echo "   Branch: $DEPLOY_BRANCH"
 echo ""
 
-# Get current commit info
+# Get current commit info. `--short=7` is explicit: Envio's API stores
+# `commit_hash` truncated to exactly 7 chars, and the no-op-recovery probe
+# below does `startswith($target)` against that field. If a user has
+# `core.abbrev` set above 7 or the repo grows past the 7-char unique
+# threshold, bare `--short` returns 8+ chars and the predicate silently
+# matches zero rows — misclassifying a registered deployment as missing.
 COMMIT_SHA=$(git rev-parse HEAD)
-COMMIT_SHORT=$(git rev-parse --short HEAD)
+COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
 COMMIT_MSG=$(git log -1 --pretty=format:"%s" "$COMMIT_SHA")
 
 echo "   Commit: $COMMIT_SHA"
