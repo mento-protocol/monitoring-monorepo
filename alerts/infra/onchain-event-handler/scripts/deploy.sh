@@ -21,7 +21,7 @@
 #   2. Reads ALL function configuration from Terraform state (single source of truth)
 #   3. Reads environment variables from Terraform state
 #   4. Ensures safe-abi.json exists under src so the build emits it to dist
-#   5. Deploys function using gcloud with Cloud Build (runs npm install and build)
+#   5. Deploys function using gcloud with Cloud Build (runs pnpm install and build)
 #   6. Displays function URL after successful deployment
 #
 # Single Source of Truth:
@@ -34,8 +34,8 @@
 #   No Terraform state required for basic configuration - works before first terraform apply.
 #
 # Note:
-#   Cloud Build will automatically run `npm install` and `npm run build` when it
-#   detects package.json in the source directory.
+#   Cloud Build will automatically run `pnpm install` and `pnpm run build` when
+#   it detects package.json and pnpm-lock.yaml in the source directory.
 
 set -euo pipefail
 
@@ -333,8 +333,9 @@ main() {
 		exit 1
 	fi
 
-	# Build the gcloud deploy command as an array to properly handle special characters
-	# Cloud Build will automatically run `npm install` and `npm run build` when it detects package.json
+	# Build the gcloud deploy command as an array to properly handle special characters.
+	# Cloud Build sees pnpm-lock.yaml in the function source, so the Node.js
+	# buildpack runs `pnpm install` and the package build script.
 	# All parameters come from Terraform files (single source of truth)
 	local deploy_cmd_args=(
 		"functions" "deploy" "${function_name}"

@@ -3,9 +3,10 @@ name: Supply Chain
 # Two gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
-#    against any package in the lockfile.
+#    against any package in either deployable lockfile.
 #
-# 2. lockfile-lint — validates pnpm-lock.yaml structural integrity:
+# 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
+#    workspace lockfile and the handler's package-local Cloud Build lockfile:
 #    a) Every package has a sha512 integrity hash (pnpm cannot verify a
 #       tarball without it).
 #    b) No custom registry is configured in .npmrc or pnpm-workspace.yaml.
@@ -64,6 +65,9 @@ jobs:
       # blocks. A rare transient blip → re-run the job manually.
       - name: pnpm audit (high+ only)
         run: pnpm audit --audit-level=high
+      - name: pnpm audit handler deploy lockfile (high+ only)
+        working-directory: alerts/infra/onchain-event-handler
+        run: pnpm audit --audit-level=high
 
   lockfile-lint:
     name: lockfile integrity + registry check
@@ -88,3 +92,7 @@ jobs:
         #   2. No custom registry= in any .npmrc or registries: in
         #      pnpm-workspace.yaml (prevents registry-redirect attacks).
         run: node scripts/lockfile-lint.mjs
+      - name: handler lockfile integrity + registry check
+        # Same gate for the package-local lockfile Cloud Build uses as the
+        # on-chain handler deploy source of truth.
+        run: LOCKFILE_LINT_ROOT=alerts/infra/onchain-event-handler node scripts/lockfile-lint.mjs
