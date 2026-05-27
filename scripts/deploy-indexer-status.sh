@@ -13,8 +13,17 @@ set -euo pipefail
 
 ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
-REGISTRATION_TIMEOUT_SECONDS=1800
+# 10 min, not 30. Normal registration completes in 2-3 min after push; a 30-min
+# silent wait was almost always wrong — by the 10-min mark Envio's webhook is
+# either broken or their build queue is jammed, and waiting longer just burns
+# operator time. Override per-invocation by exporting ENVIO_REGISTRATION_TIMEOUT_SECONDS.
+REGISTRATION_TIMEOUT_SECONDS="${ENVIO_REGISTRATION_TIMEOUT_SECONDS:-600}"
 REGISTRATION_POLL_SECONDS=30
+# Emit a louder warning once registration takes longer than this. 3 min is past
+# the normal 2-min P50 but short enough to catch a broken webhook before the
+# operator walks away — the diagnostic-vs-timeout split makes broken webhooks
+# observable within minutes instead of buried under uniform "checking again".
+REGISTRATION_WARN_SECONDS=180
 SYNC_POLL_SECONDS=10
 
 deployment_list_json() {
@@ -44,6 +53,7 @@ wait_for_deployment_registration() {
   local elapsed=0
   local resolved=""
   local resolve_status=0
+  local warned_slow=false
 
   while (( elapsed <= REGISTRATION_TIMEOUT_SECONDS )); do
     set +e
@@ -59,7 +69,20 @@ wait_for_deployment_registration() {
     fi
 
     if [[ "$JSON" != "true" ]]; then
-      echo "⏳ Deployment $target not registered yet; checking again in ${REGISTRATION_POLL_SECONDS}s..." >&2
+      if (( elapsed >= REGISTRATION_WARN_SECONDS )) && [[ "$warned_slow" == "false" ]]; then
+        echo "" >&2
+        echo "⚠️  Deployment $target still unregistered after ${elapsed}s — that's past the normal P50 of ~2 min." >&2
+        echo "   Likely causes (check before waiting longer):" >&2
+        echo "     • Envio Cloud's webhook receiver lost the push event (their side, opaque to us)" >&2
+        echo "     • Push was a no-op (same SHA already on the deploy branch — see deploy-indexer.sh warning)" >&2
+        echo "     • Envio's build queue is backed up" >&2
+        echo "   Inspect: https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}" >&2
+        echo "   Will keep polling until ${REGISTRATION_TIMEOUT_SECONDS}s then give up." >&2
+        echo "" >&2
+        warned_slow=true
+      else
+        echo "⏳ Deployment $target not registered yet (${elapsed}s elapsed); checking again in ${REGISTRATION_POLL_SECONDS}s..." >&2
+      fi
     fi
     sleep "$REGISTRATION_POLL_SECONDS"
     elapsed=$((elapsed + REGISTRATION_POLL_SECONDS))
@@ -196,7 +219,10 @@ else
     set -e
     if [[ "$wait_status" -ne 0 ]]; then
       if [[ "$wait_status" -eq 1 ]]; then
-        echo "❌ Deployment $TARGET_COMMIT did not register within $((REGISTRATION_TIMEOUT_SECONDS / 60)) minutes" >&2
+        echo "❌ Deployment $TARGET_COMMIT did not register within $((REGISTRATION_TIMEOUT_SECONDS / 60)) minutes." >&2
+        echo "   This is almost always an Envio-side issue (broken webhook, stuck build queue)." >&2
+        echo "   The push to the deploy branch succeeded — verify on GitHub and check Envio's UI:" >&2
+        echo "   https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}" >&2
       else
         echo "❌ Failed to resolve deployment $TARGET_COMMIT for $ENVIO_ORG/$ENVIO_INDEXER" >&2
       fi

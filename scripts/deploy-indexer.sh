@@ -99,8 +99,31 @@ if [[ "$AUTO_YES" == "false" ]]; then
   fi
 fi
 
-# Push current HEAD to deploy branch
-git push --no-verify --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH"
+# Push current HEAD to deploy branch. Capture stdout+stderr so we can detect
+# the "Everything up-to-date" no-op case: when the deploy branch already
+# points at HEAD, git does not contact the remote, no push event is fired,
+# and Envio's webhook never runs — but the script otherwise looks successful.
+# Surface the case loudly so callers don't sit watching a non-existent build.
+PUSH_OUTPUT_FILE=$(mktemp)
+trap 'rm -f "$PUSH_OUTPUT_FILE"; restore_cursor' EXIT
+if ! git push --no-verify --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH" 2>&1 | tee "$PUSH_OUTPUT_FILE"; then
+  echo "❌ Push to $DEPLOY_BRANCH failed."
+  exit 1
+fi
+
+if grep -q "Everything up-to-date" "$PUSH_OUTPUT_FILE"; then
+  echo ""
+  echo "⚠️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT."
+  echo "   Envio's GitHub App webhook only fires on real ref updates, so NO new"
+  echo "   build will be triggered. If you intended to retrigger a deploy that"
+  echo "   never registered, push a commit with a different SHA:"
+  echo ""
+  echo "     git commit --allow-empty -m 'chore: re-trigger envio webhook'"
+  echo "     pnpm deploy:indexer --yes"
+  echo ""
+  echo "   Otherwise, the existing deployment at $COMMIT_SHORT is what's live."
+  exit 2
+fi
 
 echo ""
 echo "✅ Pushed to $DEPLOY_BRANCH"
