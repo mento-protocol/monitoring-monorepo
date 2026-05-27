@@ -136,10 +136,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
 {{ $chain := .Labels.chain | title -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
-*Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*{{ if eq $chain "Celo" }}
-- Check for tripped breakers on the <{{ $poolURL }}|{{ $rateFeedWithSlash }} pool>
-- Check the <https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ else }}
-- Check the <{{ $poolURL }}|alert details> for tripped breakers{{ end }}
+*Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*
+- Check for tripped breakers on the <{{ $poolURL }}|{{ $rateFeedWithSlash }} pool> around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ if eq $chain "Celo" }}
+- Check the <https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}|Chainlink feed> for volatility{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}

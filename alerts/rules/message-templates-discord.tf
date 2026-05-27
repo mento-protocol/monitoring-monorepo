@@ -79,10 +79,9 @@ Please top up the {{ $token }} balance of the [{{ .Labels.owner }}](https://celo
 {{ $chain := .Labels.chain | title -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
-**Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**{{ if eq $chain "Celo" }}
-- Check for tripped breakers on the [{{ $rateFeedWithSlash }} pool]({{ $poolURL }})
-- Check the [Chainlink feed](https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ else }}
-- Check the [alert details]({{ $poolURL }}) for tripped breakers{{ end }}
+**Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**
+- Check for tripped breakers on the [{{ $rateFeedWithSlash }} pool]({{ $poolURL }}) around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ if eq $chain "Celo" }}
+- Check the [Chainlink feed](https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}) for volatility{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
