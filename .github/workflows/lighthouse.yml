@@ -214,7 +214,14 @@ jobs:
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: |
           set -eo pipefail
-          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'","x-vercel-set-bypass-cookie":"true"}'
+          # jq -nc builds the JSON safely. The shell-concat form was fragile —
+          # a literal `"` or `\` in BYPASS_SECRET would silently malform the
+          # JSON. Vercel secrets are UUIDs today so this is defensive, not a
+          # current bug. `--arg secret` shell-quotes the secret as a JSON
+          # string; the cookie value stays the literal string `"true"` since
+          # HTTP header values are strings.
+          BYPASS_HEADER=$(jq -nc --arg secret "${BYPASS_SECRET}" \
+            '{"x-vercel-protection-bypass":$secret,"x-vercel-set-bypass-cookie":"true"}')
           unset BYPASS_SECRET
           pnpm exec lhci autorun \
             --collect.url="${PREVIEW_URL}/" \
@@ -231,9 +238,18 @@ jobs:
         # contains an SSO redirect, so a bypass regression is loud, not silent.
         # Verified failure mode: PR-#451 main-branch runs (pre this PR) all
         # audited `vercel.com/login` and silently passed at warn-severity.
-        if: steps.decide.outputs.run == 'true'
+        #
+        # `always()` keeps this guard running even when `lhci autorun` exits
+        # non-zero. Without it, a hard performance-budget failure (once those
+        # graduate from `warn` to `error`) would skip the SSO diagnostic and
+        # leave the engineer staring at a generic assertion failure.
+        if: steps.decide.outputs.run == 'true' && always()
         run: |
-          if grep -qi 'vercel\.com/login' /tmp/lhci-output.txt; then
+          if [ ! -f /tmp/lhci-output.txt ]; then
+            echo "::warning::lhci-output.txt not found — lhci likely crashed before writing output; cannot verify audited URL."
+            exit 0
+          fi
+          if grep -q 'vercel\.com/login' /tmp/lhci-output.txt; then
             echo "::error::Lighthouse audited Vercel's SSO interstitial instead of the dashboard."
             echo "::error::Deployment-protection bypass likely regressed — check x-vercel-protection-bypass + x-vercel-set-bypass-cookie headers."
             exit 1
