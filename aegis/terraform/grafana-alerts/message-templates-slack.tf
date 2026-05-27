@@ -11,12 +11,13 @@ EOT
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   name = "Slack: Stale Price Alert Message"
-  # Per-feed celoscan link to the relayer signer is set by the
-  # `${local.celo_relayer_signer_branches}` fragment (one independent
+  # Per-feed explorer links to relayer signers are set by the chain-specific
+  # `${local.celo_relayer_signer_branches}` and
+  # `${local.monad_relayer_signer_branches}` fragments (one independent
   # `{{ if eq .Labels.rateFeed "X" }}` block per entry — see locals.tf for
-  # the source map). The fragment is wrapped in `{{ if eq .Labels.chain
-  # "celo" }}...{{ end }}` so Monad alerts never receive a Celo signer
-  # address (same feed names exist on both chains with different wallets).
+  # the source maps). Each fragment is wrapped in a matching `{{ if eq
+  # .Labels.chain ... }}` guard so same-named feeds only render links through
+  # that chain's explorer.
   # Cloud function link uses the Logs Explorer URL pattern from
   # `mento-protocol/oracle-relayer:bin/get-function-logs-url.sh` with
   # `resource.labels.service_name=relay-<chain>` AND
@@ -39,6 +40,10 @@ resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
 {{ $relayer := "" -}}
 {{ if eq .Labels.chain "celo" -}}
 ${local.celo_relayer_signer_branches}
+{{ end -}}
+{{/* monad and monad-testnet currently share signer addresses; split maps if testnet diverges. */ -}}
+{{ if or (eq .Labels.chain "monad") (eq .Labels.chain "monad-testnet") -}}
+${local.monad_relayer_signer_branches}
 {{ end -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
