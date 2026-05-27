@@ -203,7 +203,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
-pnpm agent:autoreview              # Structured closeout review via ~/.agents/skills/autoreview; supports -- --engine claude
+pnpm agent:autoreview              # Structured closeout review via ~/.agents/skills/autoreview; supports --engine claude
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)

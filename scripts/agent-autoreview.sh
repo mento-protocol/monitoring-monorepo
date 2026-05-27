@@ -13,4 +13,8 @@ EOF
   exit 127
 fi
 
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
 exec "$helper" "$@"

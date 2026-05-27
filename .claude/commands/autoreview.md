@@ -11,7 +11,7 @@ Arguments: `$ARGUMENTS`
 2. Run:
 
 ```bash
-pnpm agent:autoreview -- $ARGUMENTS
+pnpm agent:autoreview $ARGUMENTS
 ```
 
 3. Verify every accepted finding before editing. Do not blindly apply review
