@@ -25,7 +25,7 @@ import {
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_BREAKER_CONFIG,
 } from "@/lib/queries";
-import { effectiveThreshold, pickTrippableConfig } from "@/lib/breaker";
+import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
@@ -162,11 +162,11 @@ export function OracleTab(props: OracleTabProps) {
     const row = pickTrippableConfig(configs);
     if (!row) return null;
     // Per-feed `rateChangeThreshold` is a sentinel `0` when the feed inherits
-    // the breaker default; `effectiveThreshold` resolves that so the chart
-    // band reflects the truly-applied limit instead of collapsing to 0.
+    // the breaker default; `effectiveBreakerThreshold` resolves that so the
+    // chart band reflects the truly-applied limit instead of collapsing to 0.
     return {
       breakerKind: row.breaker.kind,
-      rateChangeThreshold: effectiveThreshold(row).toString(),
+      rateChangeThreshold: effectiveBreakerThreshold(row).toString(),
       referenceValue: row.referenceValue,
       medianRatesEMA: row.medianRatesEMA,
       status: row.status,

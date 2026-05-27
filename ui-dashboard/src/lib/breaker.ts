@@ -17,11 +17,13 @@ export function pickTrippableConfig(
   return candidates.find((c) => c.enabled) ?? candidates[0] ?? null;
 }
 
-/** Effective threshold (Fixidity). Per-feed override else breaker default.
- * The on-chain BreakerBox treats a `rateChangeThreshold == 0` per-feed value
- * as "inherit from the Breaker default", so this resolution must match for
- * the dashboard to render the truly-applied limit. */
-export function effectiveThreshold(cfg: BreakerConfig): bigint {
+/** Effective breaker threshold (Fixidity). Per-feed override else breaker
+ * default. The on-chain BreakerBox treats a `rateChangeThreshold == 0`
+ * per-feed value as "inherit from the Breaker default", so this resolution
+ * must match for the dashboard to render the truly-applied limit. Named to
+ * avoid collision with `effectiveThreshold` in `@/lib/health`, which resolves
+ * a Pool's rebalance threshold (different domain). */
+export function effectiveBreakerThreshold(cfg: BreakerConfig): bigint {
   const override = BigInt(cfg.rateChangeThreshold);
   if (override > BigInt(0)) return override;
   return BigInt(cfg.breaker.defaultRateChangeThreshold);

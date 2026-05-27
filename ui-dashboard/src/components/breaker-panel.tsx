@@ -6,7 +6,7 @@ import { useNetwork } from "@/components/network-provider";
 import { POOL_BREAKER_CONFIG } from "@/lib/queries";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
-import { effectiveThreshold, pickTrippableConfig } from "@/lib/breaker";
+import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { InfoPopover } from "@/components/info-popover";
 import { explorerTxUrl } from "@/lib/tokens";
 import { formatTimestamp, relativeTime } from "@/lib/format";
@@ -501,7 +501,7 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 
-  const threshold = effectiveThreshold(cfg);
+  const threshold = effectiveBreakerThreshold(cfg);
   const cooldown = effectiveCooldown(cfg);
   const cooldownEndsAt = Number(cfg.cooldownEndsAt);
   const cooldownRemainingSec = Math.max(0, cooldownEndsAt - now);
