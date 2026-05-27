@@ -322,6 +322,27 @@ export function registerMockBreakerKindHttp(
     callArgs: [probeAddr],
     result: "0x",
   });
+  if (kind === "MARKET_HOURS") {
+    setTestRpcMock({
+      group: "breakerKind",
+      chainId,
+      address: breakerAddress,
+      functionName: "isFXMarketOpen",
+      callArgs: [0n],
+      result: true,
+    });
+    return;
+  }
+  // `null` mock — all three probes report missing; fetchBreakerKind returns
+  // null and emits the `unknown_kind` warn.
+  setTestRpcRawMock({
+    group: "breakerKind",
+    chainId,
+    address: breakerAddress,
+    functionName: "isFXMarketOpen",
+    callArgs: [0n],
+    result: "0x",
+  });
 }
 
 export function registerMockBreakerDefaultsHttp(
