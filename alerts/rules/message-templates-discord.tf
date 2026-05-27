@@ -69,7 +69,11 @@ Please top up the {{ $token }} balance of the [{{ .Labels.owner }}](https://celo
 {{ end -}}
 {{ end -}}
 
-{{ define "discord.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}🚨{{ else }}✅{{ end }}{{ end -}}
+{{ define "discord.trading_mode_alert_title" }}
+[{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
+{{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
+{{ end -}}
 
 {{ define "discord.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -91,7 +95,7 @@ ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
-**Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**
+**🚨 Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**
 - Check for tripped breakers on the [{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}]({{ $poolURL }}){{ if and $chainlinkFeedPath $chainlinkSlug }}
 - Check the [Chainlink feed](https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
 {{ end -}}
@@ -99,7 +103,7 @@ ${local.monad_chainlink_slug_branches}
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-**Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}**
+**✅ Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}**
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}

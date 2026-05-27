@@ -20,6 +20,7 @@ import {
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
+  BREAKER_CONFIG_FOR_RATE_FEED,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -44,7 +45,7 @@ type OracleTabProps = {
 // consistent with what the warning text says ("most recent N snapshots").
 const SEARCH_ORDER_BY = buildOrderBy("timestamp", "desc");
 
-// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
 export function OracleTab(props: OracleTabProps) {
   const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
@@ -116,7 +117,10 @@ export function OracleTab(props: OracleTabProps) {
   // full history context regardless of table pagination or sort state.
   const { data: chartData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
     ORACLE_SNAPSHOTS_CHART,
-    { poolId, limit: 200 },
+    // Hasura caps every query at 1000 rows. 1000 covers >7d at the typical
+    // oracle-snapshot cadence (heartbeat + delta-triggered), which is the
+    // default visible window the chart opens to.
+    { poolId, limit: 1000 },
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
@@ -125,6 +129,83 @@ export function OracleTab(props: OracleTabProps) {
     // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
     return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
+
+  // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
+  // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as
+  // baseline and `rateChangeThreshold` as the trip band — none of which are
+  // on OracleSnapshot.
+  const rateFeedID = pool?.referenceRateFeedID?.toLowerCase();
+  const chainId = pool?.chainId;
+  const {
+    data: breakerData,
+    isLoading: isBreakerLoading,
+    error: breakerError,
+  } = useGQL<{
+    BreakerConfig: Array<{
+      id: string;
+      breaker: {
+        kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+        defaultRateChangeThreshold: string;
+      };
+      rateChangeThreshold: string;
+      referenceValue: string | null;
+      medianRatesEMA: string | null;
+      lastMedianRate: string | null;
+      status: "OK" | "TRIPPED";
+      lastTripAt: string | null;
+      cooldownTime: string;
+    }>;
+  }>(
+    rateFeedID && chainId ? BREAKER_CONFIG_FOR_RATE_FEED : null,
+    rateFeedID && chainId ? { rateFeedID, chainId } : undefined,
+  );
+  const breakerConfig = useMemo(() => {
+    const row = breakerData?.BreakerConfig?.[0];
+    if (!row) return null;
+    // Per-feed `rateChangeThreshold` is a sentinel `0` when the feed inherits
+    // the breaker default (see `effectiveThreshold` in breaker-panel.tsx) —
+    // resolve it here so the chart band reflects the truly-applied limit
+    // instead of collapsing to 0.
+    const perFeed = row.rateChangeThreshold;
+    const effectiveThreshold =
+      perFeed && perFeed !== "0"
+        ? perFeed
+        : row.breaker.defaultRateChangeThreshold;
+    return {
+      breakerKind: row.breaker.kind,
+      rateChangeThreshold: effectiveThreshold,
+      referenceValue: row.referenceValue,
+      medianRatesEMA: row.medianRatesEMA,
+      status: row.status,
+      lastTripAt: row.lastTripAt,
+    };
+  }, [breakerData]);
+  // The chart distinguishes "breaker config not loaded yet" from "no breaker
+  // for this feed" so it can render a neutral state in the first case rather
+  // than greenwashing un-bounded points. A fetch error collapses to "missing"
+  // — same neutral copy, the failure shows up in the network panel.
+  //
+  // "ready" also requires the kind-specific baseline to be non-null and
+  // non-zero. A MEDIAN_DELTA breaker right after `MedianRateEMAReset` has
+  // `medianRatesEMA = "0"` until the next positive median seeds it; treating
+  // that as "ready" would let the legend advertise "within/outside current
+  // band" semantics while no band can actually be drawn. BreakerPanel has
+  // the same "unseeded → not ready" carve-out.
+  const breakerHasBaseline = breakerConfig
+    ? breakerConfig.breakerKind === "VALUE_DELTA"
+      ? !!breakerConfig.referenceValue && breakerConfig.referenceValue !== "0"
+      : !!breakerConfig.medianRatesEMA && breakerConfig.medianRatesEMA !== "0"
+    : false;
+  const breakerConfigStatus: "loading" | "ready" | "missing" =
+    !rateFeedID || !chainId
+      ? "missing"
+      : breakerError
+        ? "missing"
+        : isBreakerLoading
+          ? "loading"
+          : breakerConfig && breakerHasBaseline
+            ? "ready"
+            : "missing";
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -189,6 +270,8 @@ export function OracleTab(props: OracleTabProps) {
         token0Symbol={sym0}
         token1Symbol={sym1}
         breachStartedAt={pool?.deviationBreachStartedAt}
+        breakerConfig={breakerConfig}
+        breakerConfigStatus={breakerConfigStatus}
       />
       <TableSearch
         value={search}
@@ -237,6 +320,80 @@ type OracleSnapshotsTableProps = {
   isSearchCapped: boolean;
 };
 
+function OracleSnapshotsTableHeader({
+  sym0,
+  sym1,
+  sortCol,
+  sortDir,
+  isSearching,
+  onSort,
+}: {
+  sym0: string;
+  sym1: string;
+  sortCol: OracleSortCol;
+  sortDir: "asc" | "desc";
+  isSearching: boolean;
+  onSort: (col: OracleSortCol) => void;
+}) {
+  // Arrows and aria-sort are suppressed during search: sort controls remain
+  // clickable (to stage a sort for when search is cleared) but the UI does not
+  // announce a sort that isn't currently applied to the visible rows.
+  const arrow = (col: OracleSortCol) =>
+    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const ariaSortFor = (
+    col: OracleSortCol,
+  ): "ascending" | "descending" | "none" =>
+    !isSearching && sortCol === col
+      ? sortDir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
+  return (
+    <thead>
+      <tr className="border-b border-slate-800 bg-slate-900/50">
+        <Th>Source</Th>
+        <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
+          <button
+            type="button"
+            onClick={() => onSort("oracleOk")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Oracle OK{arrow("oracleOk")}
+          </button>
+        </Th>
+        <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
+          <button
+            type="button"
+            onClick={() => onSort("oraclePrice")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Price ({sym0}/{sym1}){arrow("oraclePrice")}
+          </button>
+        </Th>
+        <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
+          <button
+            type="button"
+            onClick={() => onSort("priceDifference")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Price Diff{arrow("priceDifference")}
+          </button>
+        </Th>
+        <Th align="right">Threshold</Th>
+        <Th aria-sort={ariaSortFor("timestamp")}>
+          <button
+            type="button"
+            onClick={() => onSort("timestamp")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Time{arrow("timestamp")}
+          </button>
+        </Th>
+      </tr>
+    </thead>
+  );
+}
+
 function OracleSnapshotsTable({
   rows,
   network,
@@ -253,65 +410,17 @@ function OracleSnapshotsTable({
   countError,
   isSearchCapped,
 }: OracleSnapshotsTableProps) {
-  // Arrows and aria-sort are suppressed during search: sort controls remain
-  // clickable (to stage a sort for when search is cleared) but the UI does not
-  // announce a sort that isn't currently applied to the visible rows.
-  const arrow = (col: OracleSortCol) =>
-    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-  const ariaSortFor = (
-    col: OracleSortCol,
-  ): "ascending" | "descending" | "none" =>
-    !isSearching && sortCol === col
-      ? sortDir === "asc"
-        ? "ascending"
-        : "descending"
-      : "none";
-
   return (
     <>
       <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>Source</Th>
-            <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
-              <button
-                type="button"
-                onClick={() => onSort("oracleOk")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Oracle OK{arrow("oracleOk")}
-              </button>
-            </Th>
-            <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
-              <button
-                type="button"
-                onClick={() => onSort("oraclePrice")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Price ({sym0}/{sym1}){arrow("oraclePrice")}
-              </button>
-            </Th>
-            <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
-              <button
-                type="button"
-                onClick={() => onSort("priceDifference")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Price Diff{arrow("priceDifference")}
-              </button>
-            </Th>
-            <Th align="right">Threshold</Th>
-            <Th aria-sort={ariaSortFor("timestamp")}>
-              <button
-                type="button"
-                onClick={() => onSort("timestamp")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Time{arrow("timestamp")}
-              </button>
-            </Th>
-          </tr>
-        </thead>
+        <OracleSnapshotsTableHeader
+          sym0={sym0}
+          sym1={sym1}
+          sortCol={sortCol}
+          sortDir={sortDir}
+          isSearching={isSearching}
+          onSort={onSort}
+        />
         <tbody>
           {rows.map((r) => (
             <OracleSnapshotRow

@@ -651,7 +651,7 @@ describe("Pool detail tab search", () => {
     );
     expect(useGQLMock).toHaveBeenCalledWith(
       ORACLE_SNAPSHOTS_CHART,
-      expect.objectContaining({ poolId: "pool-1", limit: 200 }),
+      expect.objectContaining({ poolId: "pool-1", limit: 1000 }),
     );
     expect(html).toContain("51 total");
     expect(html).toContain("page 1 of 3");
