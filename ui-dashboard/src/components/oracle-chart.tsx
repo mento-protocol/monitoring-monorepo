@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useRef } from "react";
 import type { OracleSnapshot } from "@/lib/types";
-import { parseOraclePriceToNumber } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -26,70 +25,108 @@ const ORACLE_CHART_CONFIG = {
   scrollZoom: false,
 } as const;
 
+interface PlotArea {
+  plotL: number;
+  plotR: number;
+  plotT: number;
+  plotB: number;
+}
+
+function computePlotArea(
+  graphDiv: HTMLElement,
+  layout: PlotlyFullLayout,
+): PlotArea {
+  const rect = graphDiv.getBoundingClientRect();
+  const ml = layout.margin?.l ?? 0;
+  const mr = layout.margin?.r ?? 0;
+  const mt = layout.margin?.t ?? 0;
+  const mb = layout.margin?.b ?? 0;
+  // Plot bottom excludes the rangeslider strip (thickness 0.08 by default).
+  const sliderThickness = rect.height * 0.08;
+  return {
+    plotL: ml,
+    plotR: rect.width - mr,
+    plotT: mt,
+    plotB: rect.height - mb - sliderThickness,
+  };
+}
+
+interface ZoomContext {
+  Plotly: PlotlyAPI;
+  graphDiv: HTMLElement;
+  area: PlotArea;
+  delta: number;
+}
+
+function zoomYAroundCursor(
+  ctx: ZoomContext,
+  yRange: [number, number],
+  yPos: number,
+): void {
+  const [yMin, yMax] = yRange;
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
+  const span = yMax - yMin;
+  const frac = (ctx.area.plotB - yPos) / (ctx.area.plotB - ctx.area.plotT);
+  const cursor = yMin + span * frac;
+  const newSpan = span * (ctx.delta > 0 ? 1.1 : 1 / 1.1);
+  void ctx.Plotly.relayout(ctx.graphDiv, {
+    "yaxis.range": [cursor - newSpan * frac, cursor + newSpan * (1 - frac)],
+  });
+}
+
+function zoomXAroundCursor(
+  ctx: ZoomContext,
+  xRange: [string | number, string | number],
+  xPos: number,
+): void {
+  const xMin = new Date(xRange[0]).getTime();
+  const xMax = new Date(xRange[1]).getTime();
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) return;
+  const span = xMax - xMin;
+  const frac = (xPos - ctx.area.plotL) / (ctx.area.plotR - ctx.area.plotL);
+  const cursorMs = xMin + span * frac;
+  const newSpan = span * (ctx.delta > 0 ? 1.1 : 1 / 1.1);
+  void ctx.Plotly.relayout(ctx.graphDiv, {
+    "xaxis.range": [
+      new Date(cursorMs - newSpan * frac).toISOString(),
+      new Date(cursorMs + newSpan * (1 - frac)).toISOString(),
+    ],
+  });
+}
+
 function attachOracleWheelHandler(graphDiv: HTMLElement): () => void {
   const onWheel = (e: WheelEvent) => {
     const Plotly = (window as unknown as { Plotly?: PlotlyAPI }).Plotly;
-    if (!Plotly) return;
     const layout = (graphDiv as unknown as { _fullLayout?: PlotlyFullLayout })
       ._fullLayout;
-    if (!layout?.xaxis || !layout.yaxis) return;
+    if (!Plotly || !layout?.xaxis?.range || !layout.yaxis?.range) return;
     const rect = graphDiv.getBoundingClientRect();
     const xPos = e.clientX - rect.left;
     const yPos = e.clientY - rect.top;
-    const ml = layout.margin?.l ?? 0;
-    const mr = layout.margin?.r ?? 0;
-    const mt = layout.margin?.t ?? 0;
-    const mb = layout.margin?.b ?? 0;
-    const plotL = ml;
-    const plotR = rect.width - mr;
-    const plotT = mt;
-    // Plot bottom = container bottom minus margin minus rangeslider strip.
-    const sliderThickness = rect.height * 0.08;
-    const plotB = rect.height - mb - sliderThickness;
-    const overYAxis = xPos < plotL && yPos > plotT && yPos < plotB;
-    const overPlot =
-      xPos >= plotL && xPos <= plotR && yPos >= plotT && yPos <= plotB;
+    const area = computePlotArea(graphDiv, layout);
+    const inYBounds = yPos > area.plotT && yPos < area.plotB;
+    const overYAxis = xPos < area.plotL && inYBounds;
+    const overPlot = xPos >= area.plotL && xPos <= area.plotR && inYBounds;
     if (!overYAxis && !overPlot) return;
 
     e.preventDefault();
     const delta = e.deltaY + e.deltaX;
     if (Math.abs(delta) < 1) return;
 
+    const ctx: ZoomContext = { Plotly, graphDiv, area, delta };
     if (overYAxis) {
-      const [yMin, yMax] = layout.yaxis.range as [number, number];
-      if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
-      const span = yMax - yMin;
-      const yPosFraction = (plotB - yPos) / (plotB - plotT);
-      const yCursor = yMin + span * yPosFraction;
-      const factor = delta > 0 ? 1.1 : 1 / 1.1;
-      const newSpan = span * factor;
-      Plotly.relayout(graphDiv, {
-        "yaxis.range": [
-          yCursor - newSpan * yPosFraction,
-          yCursor + newSpan * (1 - yPosFraction),
-        ],
-      });
+      zoomYAroundCursor(ctx, layout.yaxis.range, yPos);
     } else {
       // Zoom X around the cursor — matches Plotly's default scrollZoom for X
       // but leaves Y untouched so a plot-area scroll never accidentally
       // rescales the price axis.
-      const xRange = layout.xaxis.range as [string | number, string | number];
-      const xMin = new Date(xRange[0]).getTime();
-      const xMax = new Date(xRange[1]).getTime();
-      if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) return;
-      const span = xMax - xMin;
-      const xPosFraction = (xPos - plotL) / (plotR - plotL);
-      const xCursorMs = xMin + span * xPosFraction;
-      const factor = delta > 0 ? 1.1 : 1 / 1.1;
-      const newSpan = span * factor;
-      Plotly.relayout(graphDiv, {
-        "xaxis.range": [
-          new Date(xCursorMs - newSpan * xPosFraction).toISOString(),
-          new Date(xCursorMs + newSpan * (1 - xPosFraction)).toISOString(),
-        ],
-      });
+      zoomXAroundCursor(ctx, layout.xaxis.range, xPos);
     }
   };
+  // The handler calls `e.preventDefault()` to suppress Plotly's default
+  // scroll behavior; `{ passive: true }` would silently ignore that and
+  // break the axis-aware zoom.
+  // react-doctor-disable-next-line react-doctor/client-passive-event-listeners
   graphDiv.addEventListener("wheel", onWheel, { passive: false });
   return () => graphDiv.removeEventListener("wheel", onWheel);
 }
@@ -139,6 +176,12 @@ export function OracleChart({
   breachStartedAt,
   breakerConfig,
 }: OracleChartProps) {
+  // Stash the wheel-listener cleanup so we can detach when react-plotly tears
+  // the chart down (onPurge) or remounts it. Without this, stacked listeners
+  // on re-init would amplify scroll deltas. MUST be declared before the
+  // `snapshots.length === 0` early-return so hook order is stable.
+  const cleanupWheelRef = useRef<(() => void) | null>(null);
+
   if (snapshots.length === 0) return null;
 
   const baseline = breakerConfig
@@ -149,11 +192,6 @@ export function OracleChart({
   const thresholdRatio = breakerConfig
     ? fixidityToFloat(breakerConfig.rateChangeThreshold)
     : null;
-
-  // Stash the wheel-listener cleanup so we can detach when react-plotly tears
-  // the chart down (onPurge) or remounts it. Without this, stacked listeners
-  // on re-init would amplify scroll deltas.
-  const cleanupWheelRef = useRef<(() => void) | null>(null);
 
   const plotData = buildOraclePlotData({
     snapshots,

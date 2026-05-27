@@ -294,13 +294,6 @@
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing tab keeps LP pagination, totals, and degraded-count copy in one route-owned surface. | export function LpsTab({ | poolId,"
   },
   {
-    "file": "src/app/pool/[poolId]/_tabs/oracle-tab.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'OracleSnapshotsTable' has too many lines (116). Maximum allowed is 100.",
-    "line": 240,
-    "linePreview": " | function OracleSnapshotsTable({ | rows,"
-  },
-  {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",

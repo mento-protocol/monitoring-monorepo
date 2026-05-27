@@ -277,6 +277,80 @@ type OracleSnapshotsTableProps = {
   isSearchCapped: boolean;
 };
 
+function OracleSnapshotsTableHeader({
+  sym0,
+  sym1,
+  sortCol,
+  sortDir,
+  isSearching,
+  onSort,
+}: {
+  sym0: string;
+  sym1: string;
+  sortCol: OracleSortCol;
+  sortDir: "asc" | "desc";
+  isSearching: boolean;
+  onSort: (col: OracleSortCol) => void;
+}) {
+  // Arrows and aria-sort are suppressed during search: sort controls remain
+  // clickable (to stage a sort for when search is cleared) but the UI does not
+  // announce a sort that isn't currently applied to the visible rows.
+  const arrow = (col: OracleSortCol) =>
+    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const ariaSortFor = (
+    col: OracleSortCol,
+  ): "ascending" | "descending" | "none" =>
+    !isSearching && sortCol === col
+      ? sortDir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
+  return (
+    <thead>
+      <tr className="border-b border-slate-800 bg-slate-900/50">
+        <Th>Source</Th>
+        <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
+          <button
+            type="button"
+            onClick={() => onSort("oracleOk")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Oracle OK{arrow("oracleOk")}
+          </button>
+        </Th>
+        <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
+          <button
+            type="button"
+            onClick={() => onSort("oraclePrice")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Price ({sym0}/{sym1}){arrow("oraclePrice")}
+          </button>
+        </Th>
+        <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
+          <button
+            type="button"
+            onClick={() => onSort("priceDifference")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Price Diff{arrow("priceDifference")}
+          </button>
+        </Th>
+        <Th align="right">Threshold</Th>
+        <Th aria-sort={ariaSortFor("timestamp")}>
+          <button
+            type="button"
+            onClick={() => onSort("timestamp")}
+            className="hover:text-indigo-400 transition-colors"
+          >
+            Time{arrow("timestamp")}
+          </button>
+        </Th>
+      </tr>
+    </thead>
+  );
+}
+
 function OracleSnapshotsTable({
   rows,
   network,
@@ -293,65 +367,17 @@ function OracleSnapshotsTable({
   countError,
   isSearchCapped,
 }: OracleSnapshotsTableProps) {
-  // Arrows and aria-sort are suppressed during search: sort controls remain
-  // clickable (to stage a sort for when search is cleared) but the UI does not
-  // announce a sort that isn't currently applied to the visible rows.
-  const arrow = (col: OracleSortCol) =>
-    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-  const ariaSortFor = (
-    col: OracleSortCol,
-  ): "ascending" | "descending" | "none" =>
-    !isSearching && sortCol === col
-      ? sortDir === "asc"
-        ? "ascending"
-        : "descending"
-      : "none";
-
   return (
     <>
       <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>Source</Th>
-            <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
-              <button
-                type="button"
-                onClick={() => onSort("oracleOk")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Oracle OK{arrow("oracleOk")}
-              </button>
-            </Th>
-            <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
-              <button
-                type="button"
-                onClick={() => onSort("oraclePrice")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Price ({sym0}/{sym1}){arrow("oraclePrice")}
-              </button>
-            </Th>
-            <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
-              <button
-                type="button"
-                onClick={() => onSort("priceDifference")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Price Diff{arrow("priceDifference")}
-              </button>
-            </Th>
-            <Th align="right">Threshold</Th>
-            <Th aria-sort={ariaSortFor("timestamp")}>
-              <button
-                type="button"
-                onClick={() => onSort("timestamp")}
-                className="hover:text-indigo-400 transition-colors"
-              >
-                Time{arrow("timestamp")}
-              </button>
-            </Th>
-          </tr>
-        </thead>
+        <OracleSnapshotsTableHeader
+          sym0={sym0}
+          sym1={sym1}
+          sortCol={sortCol}
+          sortDir={sortDir}
+          isSearching={isSearching}
+          onSort={onSort}
+        />
         <tbody>
           {rows.map((r) => (
             <OracleSnapshotRow
