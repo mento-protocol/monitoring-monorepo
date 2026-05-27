@@ -57,10 +57,24 @@ export const ORACLE_SNAPSHOTS = `
 // Separate query for charts — always fetches the most recent N snapshots
 // ordered by timestamp desc, then reversed client-side for chronological display.
 // Decoupled from table pagination so charts always show full history context.
+// Filter the chart to median-updated snapshots only. The indexer writes
+// OracleSnapshot rows for four event types — each individual report
+// (oracle_reported), each median rotation (oracle_median_updated), every
+// reserves change (update_reserves), and every rebalance (rebalanced) —
+// but the BreakerBox only evaluates trip conditions on MedianUpdated:
+// a single outlier reporter that doesn't move the median never trips a
+// breaker. Restricting the chart to oracle_median_updated keeps the
+// band verdict semantically correct (a red point means "if this median
+// landed today, the breaker would trip"). The update_reserves /
+// rebalanced rows store pool-internal post-state deviation, not oracle
+// deviation, so they're excluded for the same reason.
 export const ORACLE_SNAPSHOTS_CHART = `
   query OracleSnapshotsChart($poolId: String!, $limit: Int!) {
     OracleSnapshot(
-      where: { poolId: { _eq: $poolId } }
+      where: {
+        poolId: { _eq: $poolId }
+        source: { _eq: "oracle_median_updated" }
+      }
       order_by: { timestamp: desc }
       limit: $limit
     ) {
@@ -77,6 +91,37 @@ export const ORACLE_SNAPSHOTS_CHART = `
       txHash
       deviationRatio
       hasHealthData
+    }
+  }
+`;
+
+// The active deviation breaker for the pool's rate feed. There's typically
+// one enabled MEDIAN_DELTA or VALUE_DELTA per feed (MARKET_HOURS is a
+// schedule halt, not a deviation comparator — excluded here). All numeric
+// fields ride as Fixidity 1e24 strings; divide by 1e24 to get the float.
+export const BREAKER_CONFIG_FOR_RATE_FEED = `
+  query BreakerConfigForRateFeed($rateFeedID: String!, $chainId: Int!) {
+    BreakerConfig(
+      where: {
+        rateFeedID: { _eq: $rateFeedID }
+        chainId: { _eq: $chainId }
+        enabled: { _eq: true }
+        breaker: { kind: { _neq: MARKET_HOURS } }
+      }
+      # Deterministic pick when a feed somehow ends up with two enabled
+      # non-MARKET_HOURS breakers — the chart reads [0] downstream.
+      order_by: { id: asc }
+      limit: 2
+    ) {
+      id
+      breaker { kind defaultRateChangeThreshold }
+      rateChangeThreshold
+      referenceValue
+      medianRatesEMA
+      lastMedianRate
+      status
+      lastTripAt
+      cooldownTime
     }
   }
 `;

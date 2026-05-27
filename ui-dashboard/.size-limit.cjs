@@ -26,9 +26,13 @@ module.exports = [
     // Dominant contributor is plotly.js-basic-dist-min (~1.3 MB brotli).
     //
     // Baseline: 1,702,785 bytes  Budget: ×1.10 = 1,873,064 bytes → 1830 KB
+    // PR #624 (oracle chart breaker-band rewrite, 2026-05-27): the chart's
+    // wheel handler, breaker-config plumbing, and new hover formatter add
+    // ~3 KB brotli. Bumped to 1850 KB (~1.4% headroom over current) so the
+    // feature ships without bumping the absolute budget unreasonably.
     name: "All client JS chunks",
     path: [".next/static/chunks/**/*.js"],
-    limit: "1830 kB",
+    limit: "1850 kB",
   },
   {
     // All CSS emitted under .next/static/ (single Tailwind v4 bundle).
