@@ -122,11 +122,12 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
 }
 
 # Allows the CI deployer SA to mint short-lived tokens for `org-terraform`,
-# the seed-project SA used by BOTH `alerts/infra/` and `alerts/rules/` for
-# their GCS backend impersonation (and, for `alerts/infra/`, also its google
-# provider). Without this grant, `alerts-infra.yml` / `alerts-rules.yml` fail
-# at `terraform init` with a 403 from STS — the deployer SA is authorized
-# via WIF but can't impersonate `org-terraform`.
+# the seed-project SA used by `alerts/infra/`, `alerts/rules/`, AND
+# `aegis/terraform/` for their GCS backend impersonation (and, for
+# `alerts/infra/`, also its google provider). Without this grant,
+# `alerts-infra.yml` / `alerts-rules.yml` / `aegis-terraform.yml` fail at
+# `terraform init` with a 403 from STS — the deployer SA is authorized via
+# WIF but can't impersonate `org-terraform`.
 #
 # `google_service_account_iam_member` is keyed on the (service_account_id,
 # role, member) triple — one Terraform resource per triple, not per
