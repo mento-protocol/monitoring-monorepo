@@ -220,6 +220,41 @@ locals {
     GBPUSD  = "0xd0e9c1a718d2a693d41eacd4b2696180403ce081"
   }
 
+  # Per-chain rateFeed → Chainlink data-feed slug maps. Source: Chainlink's
+  # reference-data-directory.vercel.app/feeds-{chain}-mainnet.json — only
+  # rateFeeds with a published `data.chain.link/<chainlink_feed_path>/<slug>`
+  # page belong here. Cross-rates like CELOAUD or computed pairs without a
+  # native Chainlink feed are intentionally absent so the template falls back
+  # to the pool-only bullet without a broken Chainlink link.
+  celo_chainlink_slugs_by_rate_feed = {
+    AUDUSD  = "aud-usd"
+    BRLUSD  = "brl-usd"
+    CADUSD  = "cad-usd"
+    CHFUSD  = "chf-usd"
+    COPUSD  = "cop-usd"
+    EURUSD  = "eur-usd"
+    GBPUSD  = "gbp-usd"
+    GHSUSD  = "ghs-usd"
+    JPYUSD  = "jpy-usd"
+    KESUSD  = "kes-usd"
+    NGNUSD  = "ngn-usd"
+    PHPUSD  = "php-usd"
+    USDCUSD = "usdc-usd"
+    USDTUSD = "usdt-usd"
+    XOFUSD  = "xof-usd"
+    ZARUSD  = "zar-usd"
+  }
+
+  monad_chainlink_slugs_by_rate_feed = {
+    AUSDUSD = "ausd-usd"
+    CHFUSD  = "chf-usd"
+    EURUSD  = "eur-usd"
+    GBPUSD  = "gbp-usd"
+    JPYUSD  = "jpy-usd"
+    USDCUSD = "usdc-usd"
+    USDTUSD = "usdt-usd"
+  }
+
   # Pre-rendered template fragments that set `$pool` per rate feed. Built from
   # the maps above using the same independent-branches idiom as the relayer
   # signer branches — Grafana's Sprig subset doesn't expose `dict` / `index`,
@@ -234,6 +269,21 @@ locals {
   monad_pool_branches = join("\n", [
     for k, v in local.monad_pool_addresses_by_rate_feed :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
+  ])
+
+  # Pre-rendered template fragments that set `$chainlinkSlug` per rate feed.
+  # Same independent-branches idiom as the pool / relayer-signer maps. Wrapped
+  # in chain-specific `{{ if eq .Labels.chain ... }}` blocks at the call site
+  # so the Chainlink line only renders when the rateFeed is in the allowlist
+  # for the firing chain.
+  celo_chainlink_slug_branches = join("\n", [
+    for k, v in local.celo_chainlink_slugs_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
+  ])
+
+  monad_chainlink_slug_branches = join("\n", [
+    for k, v in local.monad_chainlink_slugs_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
   ])
 
   # Pre-rendered template fragments that set `$chainId` and `$chainlinkChain`
