@@ -244,10 +244,7 @@ export async function fetchBreakerKind(
   log: RpcLogger = consoleLogger,
 ): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
-  // `null` in the mock map means "unknown — return null so the caller treats
-  // it as inconclusive and skips the cache" (the same contract the unknown-
-  // kind path enforces below). Pre-PR this coerced null to MARKET_HOURS,
-  // which contradicted the new policy. Real values pass through unchanged.
+  // `null` mock means "unknown" — matches the unknown-kind contract below.
   if (mock !== undefined) return mock;
 
   const knownKind = lookupBreakerKind(chainId, breakerAddress);
@@ -291,15 +288,10 @@ export async function fetchBreakerKind(
   if (mhProbe === "rpc_error") return null;
   if (mhProbe === "present") return "MARKET_HOURS";
 
-  // None of the three positive probes matched — this is NOT a known breaker
-  // kind. Return null so `breakerKindEffect` skips the cache and the next
-  // event re-probes. Misclassifications previously persisted because the
-  // function defaulted to MARKET_HOURS here; we trade false-positive cache
-  // hits for fresh probes when classification is ambiguous. Catches future
-  // breaker kinds, proxy-upgraded breakers, and EOAs mistakenly added to
-  // BreakerBox via governance / RPC poisoning. The structured warn signature
-  // is `breakers.fetchBreakerKind.unknown_kind` — Loki → Grafana surfaces
-  // these for operator review.
+  // No probe matched — return null so `breakerKindEffect` skips the cache
+  // and the next event re-probes. Catches future breaker kinds, proxy-
+  // upgraded breakers, and EOAs added via governance / RPC poisoning. Loki
+  // surfaces this via the `breakers.fetchBreakerKind.unknown_kind` warn.
   log.warn(
     `breakers.fetchBreakerKind.unknown_kind chain=${chainId} breaker=${breakerAddress} — no MedianDelta, ValueDelta, or MarketHours selector present; refusing to cache classification`,
   );
