@@ -57,10 +57,21 @@ export const ORACLE_SNAPSHOTS = `
 // Separate query for charts — always fetches the most recent N snapshots
 // ordered by timestamp desc, then reversed client-side for chronological display.
 // Decoupled from table pagination so charts always show full history context.
+// Filter the chart to oracle-sourced snapshots only. The indexer also writes
+// snapshots on every reserves change (source="update_reserves") and on
+// rebalance events (source="rebalanced") — those rows store the pool's
+// internal post-state deviation, NOT the oracle deviation. Mixing them in
+// produces apparent spikes where two snapshots at the same oraclePrice show
+// wildly different "% of threshold" values. For the oracle-health chart we
+// only want the oracle's view: each report (oracle_reported) and each
+// median rotation (oracle_median_updated).
 export const ORACLE_SNAPSHOTS_CHART = `
   query OracleSnapshotsChart($poolId: String!, $limit: Int!) {
     OracleSnapshot(
-      where: { poolId: { _eq: $poolId } }
+      where: {
+        poolId: { _eq: $poolId }
+        source: { _in: ["oracle_reported", "oracle_median_updated"] }
+      }
       order_by: { timestamp: desc }
       limit: $limit
     ) {
@@ -77,6 +88,34 @@ export const ORACLE_SNAPSHOTS_CHART = `
       txHash
       deviationRatio
       hasHealthData
+    }
+  }
+`;
+
+// The active deviation breaker for the pool's rate feed. There's typically
+// one enabled MEDIAN_DELTA or VALUE_DELTA per feed (MARKET_HOURS is a
+// schedule halt, not a deviation comparator — excluded here). All numeric
+// fields ride as Fixidity 1e24 strings; divide by 1e24 to get the float.
+export const BREAKER_CONFIG_FOR_RATE_FEED = `
+  query BreakerConfigForRateFeed($rateFeedID: String!, $chainId: Int!) {
+    BreakerConfig(
+      where: {
+        rateFeedID: { _eq: $rateFeedID }
+        chainId: { _eq: $chainId }
+        enabled: { _eq: true }
+        breaker: { kind: { _neq: "MARKET_HOURS" } }
+      }
+      limit: 2
+    ) {
+      id
+      breaker { kind }
+      rateChangeThreshold
+      referenceValue
+      medianRatesEMA
+      lastMedianRate
+      status
+      lastTripAt
+      cooldownTime
     }
   }
 `;

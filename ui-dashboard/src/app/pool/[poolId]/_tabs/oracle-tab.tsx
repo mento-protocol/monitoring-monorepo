@@ -20,6 +20,7 @@ import {
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
+  BREAKER_CONFIG_FOR_RATE_FEED,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -116,7 +117,10 @@ export function OracleTab(props: OracleTabProps) {
   // full history context regardless of table pagination or sort state.
   const { data: chartData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
     ORACLE_SNAPSHOTS_CHART,
-    { poolId, limit: 200 },
+    // Hasura caps every query at 1000 rows. 1000 covers >7d at the typical
+    // oracle-snapshot cadence (heartbeat + delta-triggered), which is the
+    // default visible window the chart opens to.
+    { poolId, limit: 1000 },
   );
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
@@ -125,6 +129,41 @@ export function OracleTab(props: OracleTabProps) {
     // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
     return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [chartData]);
+
+  // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
+  // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as
+  // baseline and `rateChangeThreshold` as the trip band — none of which are
+  // on OracleSnapshot.
+  const rateFeedID = pool?.referenceRateFeedID?.toLowerCase();
+  const chainId = pool?.chainId;
+  const { data: breakerData } = useGQL<{
+    BreakerConfig: Array<{
+      id: string;
+      breaker: { kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS" };
+      rateChangeThreshold: string;
+      referenceValue: string | null;
+      medianRatesEMA: string | null;
+      lastMedianRate: string | null;
+      status: "OK" | "TRIPPED";
+      lastTripAt: string | null;
+      cooldownTime: string;
+    }>;
+  }>(
+    rateFeedID && chainId ? BREAKER_CONFIG_FOR_RATE_FEED : null,
+    rateFeedID && chainId ? { rateFeedID, chainId } : undefined,
+  );
+  const breakerConfig = useMemo(() => {
+    const row = breakerData?.BreakerConfig?.[0];
+    if (!row) return null;
+    return {
+      breakerKind: row.breaker.kind,
+      rateChangeThreshold: row.rateChangeThreshold,
+      referenceValue: row.referenceValue,
+      medianRatesEMA: row.medianRatesEMA,
+      status: row.status,
+      lastTripAt: row.lastTripAt,
+    };
+  }, [breakerData]);
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -189,6 +228,7 @@ export function OracleTab(props: OracleTabProps) {
         token0Symbol={sym0}
         token1Symbol={sym1}
         breachStartedAt={pool?.deviationBreachStartedAt}
+        breakerConfig={breakerConfig}
       />
       <TableSearch
         value={search}

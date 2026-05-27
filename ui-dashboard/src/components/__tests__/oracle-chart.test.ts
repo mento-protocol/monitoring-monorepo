@@ -24,31 +24,59 @@ function oracleSnapshot(
 }
 
 describe("formatOracleChartHoverText", () => {
-  it("uses N/A for untrusted non-finite deviation samples", () => {
+  it("renders price + breaker verdict when inside the band", () => {
     const text = formatOracleChartHoverText({
-      snapshot: oracleSnapshot({ hasHealthData: false }),
-      price: 1.23456,
-      deviation: Number.NaN,
+      snapshot: oracleSnapshot(),
+      price: 1.0005,
+      baseline: 1.0,
+      thresholdRatio: 0.0015,
       token0Symbol: "cUSD",
       token1Symbol: "USDC",
     });
 
-    expect(text).toContain("Price: 1.2346 USDC/cUSD");
-    expect(text).toContain("Deviation: N/A");
-    expect(text).not.toContain("NaN");
+    expect(text).toContain("Oracle price: 1.00050000 (cUSD/USDC)");
+    expect(text).toContain("+5.0 bps");
+    expect(text).toContain("within breaker band");
   });
 
-  it("uses N/A for non-finite price samples", () => {
+  it("flags breaker trip when delta exceeds threshold", () => {
+    const text = formatOracleChartHoverText({
+      snapshot: oracleSnapshot(),
+      price: 0.998,
+      baseline: 1.0,
+      thresholdRatio: 0.0015,
+      token0Symbol: "USDm",
+      token1Symbol: "USDT",
+    });
+
+    expect(text).toContain("-20.0 bps");
+    expect(text).toContain("breaker would TRIP");
+  });
+
+  it("renders N/A safely when price is not finite", () => {
     const text = formatOracleChartHoverText({
       snapshot: oracleSnapshot(),
       price: Number.NaN,
-      deviation: 12.345,
+      baseline: 1.0,
+      thresholdRatio: 0.0015,
       token0Symbol: "cUSD",
       token1Symbol: "USDC",
     });
 
-    expect(text).toContain("Price: N/A USDC/cUSD");
-    expect(text).toContain("Deviation: 12.35%");
+    expect(text).toContain("Oracle price: N/A");
     expect(text).not.toContain("NaN");
+  });
+
+  it("omits delta line when baseline is unknown", () => {
+    const text = formatOracleChartHoverText({
+      snapshot: oracleSnapshot(),
+      price: 1.0,
+      baseline: null,
+      thresholdRatio: null,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+    });
+
+    expect(text).not.toContain("Δ vs baseline");
   });
 });
