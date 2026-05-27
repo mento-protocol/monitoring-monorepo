@@ -7,47 +7,61 @@ locals {
   # the metric `variants` in config.yaml). Keyed by the Prometheus `chain` label
   # aegis publishes. To add an EVM chain add an entry here — no other edits needed.
   #
-  #   title     → human label used in alert names / Discord copy (e.g. "Monad")
-  #   env       → "prod" | "staging"; drives severity + notification routing
-  #               (prod → warning + prod channels, staging → info + staging)
-  #   metric    → Prometheus metric for the native gas token balance
-  #               ("CELOToken_balanceOf" for Celo, "Native_balanceOf" for chains
-  #               whose gas token isn't ERC20-compatible, e.g. MON)
-  #   symbol    → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
-  #   threshold → low-balance alert threshold, in whole tokens
-  #   explorer  → block-explorer host for address links in alert copy
+  #   title           → human label used in alert names / Discord copy (e.g. "Monad")
+  #   env             → "prod" | "staging"; drives severity + notification routing
+  #                     (prod → warning + prod channels, staging → info + staging)
+  #   metric          → Prometheus metric for the native gas token balance
+  #                     ("CELOToken_balanceOf" for Celo, "Native_balanceOf" for chains
+  #                     whose gas token isn't ERC20-compatible, e.g. MON)
+  #   symbol          → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
+  #   threshold       → low-balance alert threshold, in whole tokens
+  #   explorer        → block-explorer host for address links in alert copy
+  #   chain_id        → EVM chain ID; used to build pool URLs like
+  #                     `monitoring.mento.org/pool/<chain_id>-<pool_address>`
+  #   chainlink_chain → `data.chain.link/feeds/<chainlink_chain>/mainnet/...` path
+  #                     component. Empty when Chainlink doesn't publish feeds for
+  #                     this chain (testnets) — gates the Chainlink-feed link in
+  #                     the trading-mode template.
   chains = {
     "celo" = {
-      title     = "Celo"
-      env       = "prod"
-      metric    = "CELOToken_balanceOf"
-      symbol    = "CELO"
-      threshold = 10
-      explorer  = "celoscan.io"
+      title           = "Celo"
+      env             = "prod"
+      metric          = "CELOToken_balanceOf"
+      symbol          = "CELO"
+      threshold       = 10
+      explorer        = "celoscan.io"
+      chain_id        = "42220"
+      chainlink_chain = "celo"
     }
     "celo-sepolia" = {
-      title     = "Celo-Sepolia"
-      env       = "staging"
-      metric    = "CELOToken_balanceOf"
-      symbol    = "CELO"
-      threshold = 10
-      explorer  = "sepolia.celoscan.io"
+      title           = "Celo-Sepolia"
+      env             = "staging"
+      metric          = "CELOToken_balanceOf"
+      symbol          = "CELO"
+      threshold       = 10
+      explorer        = "sepolia.celoscan.io"
+      chain_id        = "11142220"
+      chainlink_chain = ""
     }
     "monad" = {
-      title     = "Monad"
-      env       = "prod"
-      metric    = "Native_balanceOf"
-      symbol    = "MON"
-      threshold = 50
-      explorer  = "monadscan.com"
+      title           = "Monad"
+      env             = "prod"
+      metric          = "Native_balanceOf"
+      symbol          = "MON"
+      threshold       = 50
+      explorer        = "monadscan.com"
+      chain_id        = "143"
+      chainlink_chain = "monad"
     }
     "monad-testnet" = {
-      title     = "Monad-Testnet"
-      env       = "staging"
-      metric    = "Native_balanceOf"
-      symbol    = "MON"
-      threshold = 50
-      explorer  = "testnet.monadscan.com"
+      title           = "Monad-Testnet"
+      env             = "staging"
+      metric          = "Native_balanceOf"
+      symbol          = "MON"
+      threshold       = 50
+      explorer        = "testnet.monadscan.com"
+      chain_id        = "10143"
+      chainlink_chain = ""
     }
   }
 
@@ -168,6 +182,67 @@ locals {
   monad_relayer_signer_branches = join("\n", [
     for k, v in local.monad_relayer_signers :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
+  ])
+
+  # Per-chain rateFeed → FPMM pool address maps. Source: Envio indexer
+  # (`Pool.referenceRateFeedID` joined with `aegis/config.yaml` rateFeed IDs,
+  # filtered to `source = fpmm_factory` — the V3 hub pool is the canonical
+  # target when multiple pools share a rateFeed). Used by the trading-mode
+  # template (Slack / Discord / VictorOps) to deep-link the "tripped breakers"
+  # bullet at `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`.
+  #
+  # When a rateFeed isn't in the map, the template falls back to the Grafana
+  # alert-details URL (`.GeneratorURL`) so the bullet still resolves.
+  celo_pool_addresses_by_rate_feed = {
+    EUROCEUR = "0x3aa7c431c06b10f7422e69d3e69b66807a6af696"
+    USDTUSD  = "0x0feba760d93423d127de1b6abecdb60e5253228d"
+    EURUSD   = "0x1ad2ea06502919f935d9c09028df73a462979e29"
+    GBPUSD   = "0x8c0014afe032e4574481d8934504100bf23fcb56"
+    CHFUSD   = "0xdc81135fd82f02cae736e261fb676b716663e8b8"
+    JPYUSD   = "0x9861f6d2fe392b934c86ec89d2886ceb772b2b41"
+    # USDCUSD intentionally omitted — two FPMM pools share this rateFeed
+    # on Celo (cUSD/USDC and cUSD/axlUSDC, both created at block 60668100).
+    # The breaker trips both pools simultaneously; the bullet falls back to
+    # the Grafana alert-details URL until we pick a canonical target.
+  }
+
+  monad_pool_addresses_by_rate_feed = {
+    USDCUSD = "0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5"
+    USDTUSD = "0x0a59be741ad49c6c2e0a2d30a57ed8f5ffa5deb8"
+    EURUSD  = "0x93e15a22fda39fefccce82d387a09ccf030ead61"
+    CHFUSD  = "0xdc81135fd82f02cae736e261fb676b716663e8b8"
+    JPYUSD  = "0x4df3f08977743ad95ab31b8dc203eae885ae9d32"
+    AUSDUSD = "0xb0a0264ce6847f101b76ba36a4a3083ba489f501"
+    GBPUSD  = "0xd0e9c1a718d2a693d41eacd4b2696180403ce081"
+  }
+
+  # Pre-rendered template fragments that set `$pool` per rate feed. Built from
+  # the maps above using the same independent-branches idiom as the relayer
+  # signer branches — Grafana's Sprig subset doesn't expose `dict` / `index`,
+  # so we generate one `{{ if eq .Labels.rateFeed "X" -}}{{ $pool = "..." -}}{{ end -}}`
+  # block per entry and let only the matching one assign. Wrap the fragments
+  # in chain-specific `{{ if eq .Labels.chain ... }}` blocks at the call site.
+  celo_pool_branches = join("\n", [
+    for k, v in local.celo_pool_addresses_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
+  ])
+
+  monad_pool_branches = join("\n", [
+    for k, v in local.monad_pool_addresses_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
+  ])
+
+  # Pre-rendered template fragments that set `$chainId` and `$chainlinkChain`
+  # from `.Labels.chain`. Iterates the chains registry so adding a new chain
+  # automatically extends these without per-template edits.
+  chain_id_branches = join("\n", [
+    for k, c in local.chains :
+    format("{{ if eq .Labels.chain %q -}}{{ $chainId = %q -}}{{ end -}}", k, c.chain_id)
+  ])
+
+  chainlink_chain_branches = join("\n", [
+    for k, c in local.chains :
+    format("{{ if eq .Labels.chain %q -}}{{ $chainlinkChain = %q -}}{{ end -}}", k, c.chainlink_chain)
   ])
 
   # Each entry maps alertnames → three template families:
