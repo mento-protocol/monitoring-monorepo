@@ -262,7 +262,11 @@ jobs:
         # user-flow because (a) zero new workspace deps, (b) web-vitals
         # delivers the same Event-Timing-API INP a real user would see —
         # Lighthouse timespan mode estimates it from main-thread timing.
-        if: steps.decide.outputs.run == 'true'
+        #
+        # `always()` keeps the INP gate independent of the lhci step's
+        # outcome: an accessibility regression (already blocking) shouldn't
+        # silently skip the INP step and mask a simultaneous INP regression.
+        if: steps.decide.outputs.run == 'true' && always()
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
 
@@ -280,7 +284,11 @@ jobs:
         # JSON in trusted workflow shell, `unset BYPASS_SECRET`, then pass
         # only the resolved headers JSON to the PR-controlled script. The
         # raw secret never reaches Node code that's part of the PR diff.
-        if: steps.decide.outputs.run == 'true'
+        #
+        # `always()` mirrors the audited-page guard: don't silently skip
+        # the INP gate when an earlier step (lhci accessibility, the bypass
+        # guard) fails.
+        if: steps.decide.outputs.run == 'true' && always()
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
