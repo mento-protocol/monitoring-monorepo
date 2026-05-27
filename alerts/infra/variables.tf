@@ -54,6 +54,31 @@ variable "sentry_slack_critical_channel" {
   }
 }
 
+variable "sentry_slack_critical_channel_id" {
+  description = "Slack channel ID for sentry_slack_critical_channel. Must be updated with sentry_slack_critical_channel when rerouting critical fan-out."
+  type        = string
+  default     = "C0AURREPNDU"
+
+  validation {
+    condition     = can(regex("^[CG][A-Z0-9]{8,}$", var.sentry_slack_critical_channel_id))
+    error_message = "sentry_slack_critical_channel_id must be a Slack channel ID such as C0AURREPNDU."
+  }
+
+  validation {
+    condition = (
+      (
+        var.sentry_slack_critical_channel == "#alerts-critical"
+        && var.sentry_slack_critical_channel_id == "C0AURREPNDU"
+      )
+      || (
+        var.sentry_slack_critical_channel != "#alerts-critical"
+        && var.sentry_slack_critical_channel_id != "C0AURREPNDU"
+      )
+    )
+    error_message = "sentry_slack_critical_channel and sentry_slack_critical_channel_id must be changed together when rerouting critical fan-out."
+  }
+}
+
 variable "slack_bot_token" {
   description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels and by the on-chain event handler to post via chat.postMessage. Needs scopes: channels:read, channels:manage, channels:join, chat:write. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
   type        = string

@@ -29,3 +29,13 @@ variable "slack_critical_channel" {
     error_message = "slack_critical_channel must start with '#' (e.g. '#alerts-critical')."
   }
 }
+
+variable "slack_critical_channel_id" {
+  description = "Slack channel ID for slack_critical_channel. Used by Sentry's Slack action to avoid Slack channel-name lookup rate limits."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[CG][A-Z0-9]{8,}$", var.slack_critical_channel_id))
+    error_message = "slack_critical_channel_id must be a Slack channel ID such as C0AURREPNDU."
+  }
+}

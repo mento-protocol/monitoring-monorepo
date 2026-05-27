@@ -76,8 +76,12 @@ discord_category_id    = "<alert-category-id>"
 # Sentry Configuration
 sentry_auth_token             = "your-sentry-auth-token"
 sentry_organization_slug      = "my-org"            # Optional, defaults to "mento-labs"
-sentry_slack_workspace_name   = "Mento Labs"        # Optional, defaults to "Mento Labs"
-sentry_slack_critical_channel = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
+sentry_slack_workspace_name      = "Mento Labs"        # Optional, defaults to "Mento Labs"
+sentry_slack_critical_channel    = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
+sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to current "#alerts-critical" ID
+# If rerouting critical fan-out, update both sentry_slack_critical_channel
+# and sentry_slack_critical_channel_id together. Terraform rejects partial
+# overrides, but cannot prove arbitrary custom name/ID pairs match.
 
 # Slack Configuration (used by Terraform to create + archive Sentry and
 # on-chain event channels, and by the Cloud Function to post on-chain events).

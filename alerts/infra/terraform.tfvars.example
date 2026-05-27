@@ -15,8 +15,11 @@ sentry_slack_workspace_name = "Mento Labs"
 
 # Slack channel where fatal-first-seen/regression events from every Sentry
 # project also fan out. Defaults to #alerts-critical alongside Grafana page-
-# grade alerts; override only if your on-call routing differs.
+# grade alerts; override only if your on-call routing differs. If you reroute
+# this fan-out, update both the channel name and ID together. Terraform rejects
+# partial overrides but cannot prove arbitrary custom name/ID pairs match.
 # sentry_slack_critical_channel = "#alerts-critical"
+# sentry_slack_critical_channel_id = "C0AURREPNDU"
 
 # Slack bot OAuth token (xoxb-...) used by the `restapi.slack` provider in
 # `alerts/infra/providers.tf` for all Slack channel + message operations.
