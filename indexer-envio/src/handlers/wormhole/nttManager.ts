@@ -428,24 +428,29 @@ indexer.onEvent(
     // that's the happy-path signal MessageAttestedTo ran — otherwise (rare:
     // HyperSync drops the attest log, historical backfills) drain here too.
     //
-    // Caveat: the fallback drain has NO transceiver filter, so in a
-    // multi-NTT-inbound same-tx the nearest unrelated scratch row gets
-    // paired and source identity is mis-stamped onto this transfer. Emit
-    // a structured warn (signature
-    // `wormhole.transferRedeemed.fallback_drain`) whenever this fallback
-    // path fires so the alert pipeline catches the cases. A stricter fix
-    // — require positive transceiver match via peer registry, or only
-    // drain when exactly one scratch row exists in the tx — is tracked
-    // as a follow-up.
+    // TransferRedeemed's payload lacks the transceiver identifier, but the
+    // NttManager↔Transceiver pairing is 1:1 in our deploys (see
+    // `config/nttAddresses.json`), so we filter on `mgr.transceiver` — the
+    // manifest entry for the manager that emitted this event. In a
+    // multi-NTT-inbound same-tx the wrong-transceiver scratch rows are
+    // ignored and source identity stays unstamped rather than mis-attributed.
+    // Manifest miss (`mgr == null`) keeps the previous unfiltered behavior
+    // so a yaml-drifted manager doesn't drop attribution entirely; the
+    // structured warn signature `wormhole.transferRedeemed.fallback_drain`
+    // continues to surface the cases for operator review.
     const priorDetail = await (
       context as HandlerContext
     ).WormholeTransferDetail.get(id);
     let destPending = undefined;
     if (!priorDetail?.transceiverDigest) {
       context.log.warn(
-        `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} — MessageAttestedTo missing; draining scratch without transceiver filter (may mis-attribute source identity in multi-message tx)`,
+        `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} transceiver=${mgr?.transceiver ?? "<unknown>"} — MessageAttestedTo missing; draining scratch ${mgr ? "with manifest-derived transceiver filter" : "without filter (manifest miss)"}`,
       );
-      destPending = await drainDestPending(context as HandlerContext, event);
+      destPending = await drainDestPending(
+        context as HandlerContext,
+        event,
+        mgr?.transceiver,
+      );
     }
     const detailDelta: WormholeDetailDelta = {};
     applyDestPendingToDelta(destPending, priorTransfer, delta, detailDelta);

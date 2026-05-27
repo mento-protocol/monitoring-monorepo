@@ -221,6 +221,21 @@ export const MEDIAN_DELTA_BREAKER_ABI = [
   },
 ] as const;
 
+/** MarketHoursBreaker positive-identification probe used by `fetchBreakerKind`.
+ * `isFXMarketOpen` is unique to MarketHours-style breakers in the BreakerBox
+ * registry — neither MedianDelta nor ValueDelta expose it. Used only for the
+ * selector-presence probe; full reads aren't needed because MARKET_HOURS rows
+ * never carry per-feed cooldown/threshold/EMA state. */
+export const MARKET_HOURS_BREAKER_ABI = [
+  {
+    type: "function",
+    name: "isFXMarketOpen",
+    inputs: [{ name: "timestamp", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+] as const;
+
 /** ValueDeltaBreaker getters used by RPC self-heal. */
 export const VALUE_DELTA_BREAKER_ABI = [
   {

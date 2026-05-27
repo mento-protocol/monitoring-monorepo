@@ -9,6 +9,7 @@ import {
 import { consoleLogger, type RpcLogger } from "./log.js";
 import {
   BREAKER_BOX_ABI,
+  MARKET_HOURS_BREAKER_ABI,
   MEDIAN_DELTA_BREAKER_ABI,
   VALUE_DELTA_BREAKER_ABI,
 } from "../abis.js";
@@ -229,12 +230,14 @@ async function probeFunction(
 
 /** Classify a breaker. Known deployment addresses come from
  * @mento-protocol/contracts; selector probes are only the fallback for
- * unknown addresses. Probe order matters: MarketHours has neither
- * `medianRatesEMA` nor `referenceValues`, so we check MD-specific first,
- * then VD-specific, then default to MARKET_HOURS. The probe address
+ * unknown addresses. Probe order: MD-specific (`medianRatesEMA`), then
+ * VD-specific (`referenceValues`), then MarketHours-specific
+ * (`isFXMarketOpen`). All three are positive probes — an unknown contract
+ * that responds to none of them returns null so the caller retries instead
+ * of caching a misclassification. The probe address
  * (`0x000...0001`) is a valid input that won't have any state — we only care
  * whether the function exists in the bytecode. Returns null on transient
- * RPC failure so the caller can retry rather than poisoning the kind. */
+ * RPC failure too, for the same reason. */
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
@@ -269,22 +272,34 @@ export async function fetchBreakerKind(
   if (vdProbe === "rpc_error") return null;
   if (vdProbe === "present") return "VALUE_DELTA";
 
-  // Both selectors confirmed missing — this is a MarketHours-style breaker.
-  //
-  // Caveat: this default also catches contracts that simply lack both
-  // selectors (a future breaker kind, a proxy-upgraded breaker, an EOA
-  // mistakenly added to BreakerBox via governance / RPC poisoning). The
-  // effect-level cache (`cache: true` in `breakerKindEffect`) means the
-  // misclassification persists. Emit a structured warn (signature
-  // `breakers.fetchBreakerKind.market_hours_default`) so the Loki →
-  // Grafana alert pipeline can surface unexpected MARKET_HOURS
-  // classifications for operator review. A stricter fix — positive
-  // MARKET_HOURS probe, or caching only on positive identification —
-  // is tracked as a follow-up.
-  log.warn(
-    `breakers.fetchBreakerKind.market_hours_default chain=${chainId} breaker=${breakerAddress} — neither MedianDelta nor ValueDelta selectors present; defaulting to MARKET_HOURS and caching`,
+  // Positive MarketHours probe. `isFXMarketOpen(uint256)` is present on every
+  // MarketHoursBreaker variant in @mento-protocol/contracts (base, v300, and
+  // both Toggleable forms) and absent on MD/VD breakers. A `0` timestamp is a
+  // safe pure call — we only care whether the selector exists in bytecode.
+  const mhProbe = await probeFunction(
+    chainId,
+    breakerAddress,
+    MARKET_HOURS_BREAKER_ABI,
+    "isFXMarketOpen",
+    [0n],
+    log,
   );
-  return "MARKET_HOURS";
+  if (mhProbe === "rpc_error") return null;
+  if (mhProbe === "present") return "MARKET_HOURS";
+
+  // None of the three positive probes matched — this is NOT a known breaker
+  // kind. Return null so `breakerKindEffect` skips the cache and the next
+  // event re-probes. Misclassifications previously persisted because the
+  // function defaulted to MARKET_HOURS here; we trade false-positive cache
+  // hits for fresh probes when classification is ambiguous. Catches future
+  // breaker kinds, proxy-upgraded breakers, and EOAs mistakenly added to
+  // BreakerBox via governance / RPC poisoning. The structured warn signature
+  // is `breakers.fetchBreakerKind.unknown_kind` — Loki → Grafana surfaces
+  // these for operator review.
+  log.warn(
+    `breakers.fetchBreakerKind.unknown_kind chain=${chainId} breaker=${breakerAddress} — no MedianDelta, ValueDelta, or MarketHours selector present; refusing to cache classification`,
+  );
+  return null;
 }
 
 /** Fetch breaker defaults from RPC. `activatesTradingMode` comes from

@@ -688,10 +688,13 @@ export const breakerKindEffect = createEffect(
     rateLimit: { calls: 50, per: "second" },
     cache: true,
   },
-  // `fetchBreakerKind` returns null only on transient probe failure;
-  // MEDIAN_DELTA / VALUE_DELTA / MARKET_HOURS are all permanent
-  // classifications and safe to cache. Skip the cache only on null
-  // so a flaky probe doesn't poison every later breaker bootstrap.
+  // `fetchBreakerKind` returns null when probes are inconclusive — either a
+  // transient RPC failure OR all three positive selectors (MD `medianRatesEMA`,
+  // VD `referenceValues`, MH `isFXMarketOpen`) confirmed missing on the
+  // address. MEDIAN_DELTA / VALUE_DELTA / MARKET_HOURS are permanent
+  // classifications and safe to cache; null skips the cache so a flaky probe
+  // OR an unknown classification re-probes on the next event rather than
+  // persisting forever.
   async ({ input, context }) => {
     const result = await fetchBreakerKind(
       input.chainId,

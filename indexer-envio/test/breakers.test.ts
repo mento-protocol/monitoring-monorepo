@@ -162,11 +162,14 @@ describe("fetchBreakerKind RPC selector probes", () => {
     );
   });
 
-  it("still treats selector zero-data responses as missing functions", async () => {
+  it("identifies MarketHours positively via isFXMarketOpen probe", async () => {
     const functionNames: string[] = [];
     _setRpcClientForTests(CHAIN_ID, {
       readContract: async (args) => {
-        functionNames.push((args as { functionName: string }).functionName);
+        const name = (args as { functionName: string }).functionName;
+        functionNames.push(name);
+        // MD + VD probes report missing; isFXMarketOpen is present.
+        if (name === "isFXMarketOpen") return true;
         throw new Error('The contract function "x" returned no data ("0x").');
       },
     });
@@ -174,10 +177,14 @@ describe("fetchBreakerKind RPC selector probes", () => {
     const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
 
     assert.equal(kind, "MARKET_HOURS");
-    assert.deepEqual(functionNames, ["medianRatesEMA", "referenceValues"]);
+    assert.deepEqual(functionNames, [
+      "medianRatesEMA",
+      "referenceValues",
+      "isFXMarketOpen",
+    ]);
   });
 
-  it("emits a structured warn when defaulting an unknown breaker to MARKET_HOURS", async () => {
+  it("returns null and emits a structured warn when no selector matches", async () => {
     const warnings: string[] = [];
     const spyLogger = {
       debug: () => undefined,
@@ -195,13 +202,15 @@ describe("fetchBreakerKind RPC selector probes", () => {
 
     const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, spyLogger);
 
-    assert.equal(kind, "MARKET_HOURS");
+    // Null instead of MARKET_HOURS — caller (`breakerKindEffect`) opts out of
+    // the cache on null so a re-probe runs on the next event.
+    assert.equal(kind, null);
     const match = warnings.find((w) =>
-      w.startsWith("breakers.fetchBreakerKind.market_hours_default"),
+      w.startsWith("breakers.fetchBreakerKind.unknown_kind"),
     );
     assert.ok(
       match,
-      `expected a warn with prefix breakers.fetchBreakerKind.market_hours_default, got: ${JSON.stringify(warnings)}`,
+      `expected a warn with prefix breakers.fetchBreakerKind.unknown_kind, got: ${JSON.stringify(warnings)}`,
     );
   });
 });

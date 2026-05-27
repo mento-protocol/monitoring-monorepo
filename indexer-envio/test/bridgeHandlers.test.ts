@@ -952,4 +952,164 @@ describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", 
       "scratch persists when MessageAttestedTo never fires (replay case)",
     );
   });
+
+  it("TransferRedeemed fallback drain filters scratch by manifest transceiver in multi-NTT tx", async () => {
+    // Discriminating ordering: an unrelated NTT's scratch row sits between
+    // the matching scratch row and TransferRedeemed. Without the filter the
+    // backward walk would grab the closer (CHFm) row first and mis-stamp
+    // source identity onto the USDm transfer; with the filter we skip it.
+    const celoUsdm = findByNttManager(
+      42220,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    const monadUsdm = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    const celoChfm = findByNttManager(
+      42220,
+      "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+    );
+    const monadChfm = findByNttManager(
+      143,
+      "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+    );
+    assert.ok(celoUsdm && monadUsdm && celoChfm && monadChfm);
+    let mockDb = MockDb.createMockDb();
+    const usdmDigest = MANAGER_DIGEST;
+    const usdmTransceiverDigest = TRANSCEIVER_DIGEST;
+    const chfmTransceiverDigest =
+      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+    // USDm scratch — earlier in tx (logIndex 3).
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: usdmTransceiverDigest,
+        emitterChainId: 14,
+        emitterAddress: padAddr(celoUsdm!.transceiverProxy),
+        sequence: 42n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadUsdm!.transceiverProxy,
+          logIndex: 3,
+        }),
+      }),
+      mockDb,
+    });
+
+    // CHFm scratch — later (logIndex 5). Without a filter the backward walk
+    // from logIndex 7 would land on this row first.
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: chfmTransceiverDigest,
+        emitterChainId: 14,
+        emitterAddress: padAddr(celoChfm!.transceiverProxy),
+        sequence: 99n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadChfm!.transceiverProxy,
+          logIndex: 5,
+        }),
+      }),
+      mockDb,
+    });
+
+    // USDm TransferRedeemed — MessageAttestedTo never ran, so this hits the
+    // fallback drain path.
+    mockDb = await TestWormholeNttManager.TransferRedeemed.processEvent({
+      event: TestWormholeNttManager.TransferRedeemed.createMockEvent({
+        digest: usdmDigest,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadUsdm!.nttManagerProxy,
+          logIndex: 7,
+        }),
+      }),
+      mockDb,
+    });
+
+    // CHFm scratch must survive — wrong transceiver, filter must skip it.
+    assert.ok(
+      mockDb.entities.WormholeDestPending.get(`143-${TX_HASH.toLowerCase()}-5`),
+      "CHFm scratch row survives — filter skipped it",
+    );
+    // USDm scratch is drained.
+    assert.equal(
+      mockDb.entities.WormholeDestPending.get(`143-${TX_HASH.toLowerCase()}-3`),
+      undefined,
+      "USDm scratch row is drained (transceiver matches manifest)",
+    );
+
+    // Source identity stamped from the USDm scratch — sourceChainId=Celo
+    // (42220) and source transceiver matches the Celo USDm proxy, not the
+    // CHFm one.
+    const transfer = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${usdmDigest.toLowerCase()}`,
+    );
+    assert.ok(transfer);
+    assert.equal(transfer!.sourceChainId, 42220);
+    const detail = mockDb.entities.WormholeTransferDetail.get(
+      `wormhole-${usdmDigest.toLowerCase()}`,
+    );
+    assert.equal(
+      detail?.transceiverDigest,
+      usdmTransceiverDigest.toLowerCase(),
+      "transceiverDigest is the USDm one, not CHFm",
+    );
+  });
+
+  it("TransferRedeemed fallback drain falls back to nearest scratch on manifest miss", async () => {
+    // Manifest miss (yaml drift) — `findByNttManager` returns null, so no
+    // transceiver filter is applied. Behavior matches pre-filter days: drain
+    // the nearest scratch row and accept that source identity may be wrong
+    // in a multi-NTT tx. Keeps the transfer recoverable (operator can rerun
+    // `pnpm generate:ntt-addresses` and replay).
+    const celo = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: TRANSCEIVER_DIGEST,
+        emitterChainId: 14,
+        emitterAddress: padAddr(celo.transceiverProxy),
+        sequence: 7n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          // Unknown transceiver — manifest miss flows through the unfiltered
+          // path.
+          manager: "0x00000000000000000000000000000000000000aa",
+          logIndex: 3,
+        }),
+      }),
+      mockDb,
+    });
+
+    mockDb = await TestWormholeNttManager.TransferRedeemed.processEvent({
+      event: TestWormholeNttManager.TransferRedeemed.createMockEvent({
+        digest: MANAGER_DIGEST,
+        mockEventData: mockEventData({
+          chainId: 143,
+          // Manager not in nttAddresses.json — `mgr` resolves to null.
+          manager: "0x00000000000000000000000000000000000000bb",
+          logIndex: 5,
+        }),
+      }),
+      mockDb,
+    });
+
+    // Scratch is drained even though we couldn't filter — degraded mode.
+    assert.equal(
+      mockDb.entities.WormholeDestPending.get(`143-${TX_HASH.toLowerCase()}-3`),
+      undefined,
+      "scratch drained on manifest miss (no filter to apply)",
+    );
+    const transfer = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.equal(
+      transfer?.sourceChainId,
+      42220,
+      "source identity stamped from drained scratch",
+    );
+  });
 });
