@@ -165,9 +165,17 @@ if grep -q "Everything up-to-date" "$PUSH_OUTPUT_FILE"; then
     # Reverse-prefix predicate: ask whether Envio's stored commit_hash is a
     # prefix of our local full SHA. Works for any storage width (7, 8, full)
     # and is collision-safe in a way `startswith(local_short)` is not.
+    # Disarm set -e around the probe — we run this exact path when Envio is
+    # misbehaving (the whole reason we're checking), so an API failure /
+    # non-JSON response / jq error is the EXPECTED case here, not a fatal
+    # one. Treating "" as "no registration found" gives the operator the
+    # retrigger instructions; a hard exit at this point would swallow them.
+    set +e
     REGISTERED_FOR_SHA=$(pnpm exec envio-cloud indexer get "$PROBE_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
       | jq -r --arg full "$COMMIT_SHA" \
-          'first(.data.deployments[]? | select(.commit_hash as $h | $full | startswith($h)) | .commit_hash) // ""')
+          'first(.data.deployments[]? | select(.commit_hash as $h | $full | startswith($h)) | .commit_hash) // ""' 2>/dev/null)
+    set -e
+    REGISTERED_FOR_SHA="${REGISTERED_FOR_SHA:-}"
 
     if [[ -n "$REGISTERED_FOR_SHA" ]]; then
       echo ""
