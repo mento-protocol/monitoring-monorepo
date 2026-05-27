@@ -82,9 +82,12 @@ describe("attachOracleWheelHandler", () => {
     });
     expect(preventSpy).toHaveBeenCalledTimes(1);
     expect(relayoutSpy).toHaveBeenCalledTimes(1);
+    // Relayout is called with a flat key whose name literally contains a dot
+    // ("xaxis.range"). Use `Object.keys` rather than `toHaveProperty(path)` —
+    // the latter accepts both flat and nested matches and would mask a
+    // simultaneous-both-axes regression.
     const update = relayoutSpy.mock.calls[0]![1] as Record<string, unknown>;
-    expect(update).toHaveProperty("xaxis.range");
-    expect(update).not.toHaveProperty("yaxis.range");
+    expect(Object.keys(update)).toEqual(["xaxis.range"]);
   });
 
   it("zooms Y (not X) when cursor is over the y-axis tick column", () => {
@@ -97,8 +100,7 @@ describe("attachOracleWheelHandler", () => {
     expect(preventSpy).toHaveBeenCalledTimes(1);
     expect(relayoutSpy).toHaveBeenCalledTimes(1);
     const update = relayoutSpy.mock.calls[0]![1] as Record<string, unknown>;
-    expect(update).toHaveProperty("yaxis.range");
-    expect(update).not.toHaveProperty("xaxis.range");
+    expect(Object.keys(update)).toEqual(["yaxis.range"]);
   });
 
   it("ignores cursors below the plot (rangeslider / bottom margin)", () => {
