@@ -72,9 +72,10 @@ module.exports = {
         // `x-vercel-set-bypass-cookie: true` so the auth cookie is set on
         // the first response and carries across subresources), and
         // (c) the workflow includes a fail-closed audited-page guard
-        // (greps lhci stdout for `vercel.com/login` — a bypass regression
-        // is loud, not silent). Promotion to a manifest-based finalUrl
-        // check is tracked in BACKLOG.
+        // (`ui-dashboard/scripts/assert-lhci-finalurl.mjs` parses each
+        // report's `finalUrl` and asserts host + pathname match the
+        // preview — a bypass regression, wrong-project deployment, or
+        // unexpected redirect all fail closed).
         "categories:accessibility": ["error", { minScore: 0.94 }],
 
         // Largest Contentful Paint: warn above 1 700 ms
