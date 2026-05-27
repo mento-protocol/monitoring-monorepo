@@ -543,6 +543,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
@@ -587,6 +588,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
@@ -630,6 +632,7 @@ assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (roo
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
@@ -1026,7 +1029,7 @@ assert_contains "- bash ui-dashboard/scripts/vercel-ignore-build.test.sh (Vercel
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
-run_gate "terraform/main.tf"
+run_gate "terraform/metrics-bridge.tf"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color (Terraform changed)"
@@ -1072,6 +1075,10 @@ run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
+assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
 # Workspace-wide triggers (ci.yml here) deliberately skip the playwright
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
@@ -1084,6 +1091,14 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (central CI workflow changed)"
+
+run_gate ".github/workflows/infra.yml"
+assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry workflow changed)"
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -1171,6 +1186,21 @@ assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
 run_gate "turbo.json"
 assert_contains "- tooling"
 assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
+
+run_gate "terraform.stacks.json"
+assert_contains "- terraform"
+assert_contains "- pnpm tf:test (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack registry changed)"
+
+run_gate "scripts/tf-stacks.mjs"
+assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack wrapper changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (

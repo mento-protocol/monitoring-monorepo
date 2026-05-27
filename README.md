@@ -12,7 +12,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | [`ui-dashboard`](./ui-dashboard/)     | Next.js 16 + Plotly.js dashboard with multi-chain network switching |
 | [`metrics-bridge`](./metrics-bridge/) | Hasura → Prometheus exporter for v3 alert rules                     |
 | [`shared-config`](./shared-config/)   | Shared deployment config (chain ID → treb namespace mappings)       |
-| [`aegis`](./aegis/)                   | App Engine v2 alerting service + Grafana dashboards/alerts          |
+| [`aegis`](./aegis/)                   | App Engine v2 alerting service + Aegis Grafana dashboards           |
 
 ## Architecture
 
@@ -212,8 +212,8 @@ pnpm aegis:agent:seed-secrets
 pnpm aegis:agent:deploy
 ```
 
-Grafana dashboards and v2 alert rules live in `aegis/terraform` and keep the
-existing GCS backend prefix `aegis`:
+The Aegis dashboard and Aegis service-health alert live in `aegis/terraform`
+and keep the existing GCS backend prefix `aegis`:
 
 ```bash
 pnpm aegis:tf:init
@@ -221,17 +221,24 @@ pnpm aegis:tf:plan
 pnpm aegis:tf:apply
 ```
 
-Never run Terraform apply without reviewing the plan first.
+Protocol Grafana alert rules and global Grafana routing live in
+`alerts/rules`; event-driven Discord/Sentry/QuickNode delivery lives in
+`alerts/infra`. `terraform.stacks.json` and [docs/terraform.md](./docs/terraform.md)
+are the stack registry and operator overview. Never run Terraform apply without
+reviewing the plan first.
 
 ### Dashboard → Vercel
 
 Every push to `main` that touches `ui-dashboard/` auto-deploys to [monitoring.mento.org](https://monitoring.mento.org).
 
-Infrastructure (Vercel project, env vars, Upstash Redis) is managed by Terraform:
+Infrastructure (Vercel project, env vars, Upstash Redis, GCP project shape, CI
+WIF/IAM, Metrics Bridge Cloud Run shape, and Aegis bootstrap resources) is
+managed by the `platform` Terraform stack:
 
 ```bash
-pnpm infra:plan    # preview changes
-pnpm infra:apply   # apply changes
+pnpm tf list        # show all registered Terraform stacks
+pnpm infra:plan     # preview platform changes
+pnpm infra:apply    # apply platform changes after review
 ```
 
 ## Contract Addresses

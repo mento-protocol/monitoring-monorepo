@@ -10,11 +10,12 @@ last_verified: 2026-05-20
 
 ## Scope
 
-`terraform/` manages production infrastructure for the monitoring dashboard, Cloud Run services, and Workload Identity Federation. Alert rules live in `alerts/` (`alerts/rules/` for Grafana metric alerts, `alerts/infra/` for event-driven delivery).
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, and Workload Identity Federation. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
 
 ## Operating Rules
 
-- Run `pnpm infra:plan` or the matching module plan before any apply.
+- Use `pnpm tf list` to confirm stack ownership before moving resources.
+- Run `pnpm infra:plan` or `pnpm tf plan platform` before any apply.
 - Never run `terraform apply` without explicit human approval.
 - Resource renames/removals need `moved` blocks.
 - Cloud Run services use `/health`, not `/healthz`.
@@ -23,4 +24,4 @@ last_verified: 2026-05-20
 
 ## Verification
 
-Run Terraform fmt/init/validate for `terraform`. Apply `docs/pr-checklists/terraform-cloudrun.md` for Cloud Run or deploy-adjacent changes. For alert-rule or alert-infra changes, see `alerts/rules/README.md` and `alerts/infra/README.md`.
+Run `pnpm tf validate platform`. Apply `docs/pr-checklists/terraform-cloudrun.md` for Cloud Run or deploy-adjacent changes. For alert-rule or alert-infra changes, see `docs/terraform.md`, `alerts/rules/README.md`, and `alerts/infra/README.md`.

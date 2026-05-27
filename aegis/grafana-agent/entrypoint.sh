@@ -18,7 +18,7 @@
 #   - grafana-agent-endpoint
 #   - grafana-agent-username
 #   - grafana-agent-password
-# Provisioned by `terraform/main.tf` → `grafana_agent_appspot_accessor`.
+# Provisioned by `terraform/aegis-bootstrap.tf` → `grafana_agent_appspot_accessor`.
 #
 # Why the AppSpot SA, not the Compute default SA: App Engine Flex apps run as
 # the App Engine default service account (`<project>@appspot.gserviceaccount.com`)

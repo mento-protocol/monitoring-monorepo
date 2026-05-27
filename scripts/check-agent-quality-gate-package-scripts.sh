@@ -14,6 +14,8 @@ const expectedScripts = {
   "agent:context-check": "node scripts/check-agent-context.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+  "tf": "node scripts/tf-stacks.mjs",
+  "tf:test": "node scripts/tf-stacks.test.mjs",
   "lockfile:lint": "node scripts/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
 };
