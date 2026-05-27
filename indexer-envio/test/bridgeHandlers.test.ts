@@ -953,3 +953,189 @@ describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", 
     );
   });
 });
+
+describe("Bridge-flows handlers — TransferRedeemed fallback drain transceiver filter", () => {
+  // When MessageAttestedTo fails to fire before TransferRedeemed (HyperSync
+  // drops the attest log, historical backfills, replay), the TransferRedeemed
+  // handler falls back to draining a same-tx scratch row itself. Without a
+  // transceiver filter the fallback drain pairs the NEAREST backward scratch
+  // row by logIndex — which in a multi-NTT same-tx is often the wrong one,
+  // mis-stamping source identity (sourceChainId, sourceTransceiver) onto the
+  // BridgeTransfer for a different token. The fix looks up the expected
+  // transceiver from the NTT manifest (one transceiver per nttManager) and
+  // passes it as the drain filter.
+  const TRANSCEIVER_DIGEST_USDm =
+    "0x1111111111111111111111111111111111111111111111111111111111111111";
+  const TRANSCEIVER_DIGEST_CHFm =
+    "0x2222222222222222222222222222222222222222222222222222222222222222";
+  const MANAGER_DIGEST =
+    "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+  it("drains the matching-transceiver scratch, not the nearest unrelated one", async () => {
+    // Setup: same Monad tx redeems both USDm and CHFm transfers from Celo.
+    // Two ReceivedMessage events (different transceivers) write scratch rows
+    // at logIndex 5 (CHFm — the one we WANT) and 7 (USDm — closer to the
+    // TransferRedeemed at logIndex 10 and would win an unfiltered backward
+    // walk). One TransferRedeemed fires for the CHFm manager; MessageAttestedTo
+    // is intentionally skipped so the fallback path runs.
+    const celoChfm = findByNttManager(
+      42220,
+      "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+    );
+    const monadChfm = findByNttManager(
+      143,
+      "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+    );
+    const celoUsdm = findByNttManager(
+      42220,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    const monadUsdm = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(celoChfm && monadChfm && celoUsdm && monadUsdm);
+
+    let mockDb = MockDb.createMockDb();
+
+    // 1. ReceivedMessage for CHFm at logIndex 5 (further from redeem).
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: TRANSCEIVER_DIGEST_CHFm,
+        emitterChainId: 14, // Celo
+        emitterAddress: padAddr(celoChfm!.transceiverProxy),
+        sequence: 100n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadChfm!.transceiverProxy,
+          logIndex: 5,
+        }),
+      }),
+      mockDb,
+    });
+
+    // 2. ReceivedMessage for USDm at logIndex 7 (nearer to redeem — the
+    //    unfiltered backward walk would grab this one first).
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: TRANSCEIVER_DIGEST_USDm,
+        emitterChainId: 14,
+        emitterAddress: padAddr(celoUsdm!.transceiverProxy),
+        sequence: 200n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadUsdm!.transceiverProxy,
+          logIndex: 7,
+        }),
+      }),
+      mockDb,
+    });
+
+    // 3. TransferRedeemed for CHFm at logIndex 10. MessageAttestedTo never
+    //    fired, so the fallback path runs.
+    mockDb = await TestWormholeNttManager.TransferRedeemed.processEvent({
+      event: TestWormholeNttManager.TransferRedeemed.createMockEvent({
+        digest: MANAGER_DIGEST,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monadChfm!.nttManagerProxy,
+          logIndex: 10,
+        }),
+      }),
+      mockDb,
+    });
+
+    // The CHFm scratch (logIndex 5) is drained; the USDm scratch (logIndex 7)
+    // is left untouched. Pre-fix, the unfiltered walk would have drained USDm
+    // first and stamped USDm's source transceiver onto the CHFm BridgeTransfer.
+    const chfmScratch = mockDb.entities.WormholeDestPending.get(
+      `143-${TX_HASH.toLowerCase()}-5`,
+    );
+    const usdmScratch = mockDb.entities.WormholeDestPending.get(
+      `143-${TX_HASH.toLowerCase()}-7`,
+    );
+    assert.equal(chfmScratch, undefined, "CHFm scratch was drained");
+    assert.ok(usdmScratch, "USDm scratch was not touched (wrong transceiver)");
+
+    // The CHFm BridgeTransfer carries CHFm's source identity, not USDm's.
+    const detail = mockDb.entities.WormholeTransferDetail.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.equal(
+      detail?.transceiverDigest,
+      TRANSCEIVER_DIGEST_CHFm.toLowerCase(),
+      "transceiverDigest is CHFm's (proves the filter, not nearest-scratch)",
+    );
+    assert.equal(
+      detail?.msgSequence,
+      100n,
+      "msgSequence is CHFm's (100), not USDm's (200)",
+    );
+  });
+
+  it("manifest miss preserves the legacy unfiltered drain (degraded mode)", async () => {
+    // When the nttManager isn't in the NTT manifest (yaml drift /
+    // unregenerated config), `mgr` is null and we can't compute the expected
+    // transceiver. Fallback to the legacy unfiltered drain so we don't lose
+    // the delivery row entirely. The manifest-miss warn at
+    // ensureNttManagerSeed already surfaces this case.
+    const celo = findByNttManager(
+      42220,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(celo);
+
+    const UNKNOWN_MANAGER = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    let mockDb = MockDb.createMockDb();
+
+    // ReceivedMessage scratch.
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: TRANSCEIVER_DIGEST_USDm,
+        emitterChainId: 14,
+        emitterAddress: padAddr(celo!.transceiverProxy),
+        sequence: 42n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: "0x0000000000000000000000000000000000000bad", // any dest transceiver
+          logIndex: 5,
+        }),
+      }),
+      mockDb,
+    });
+
+    // TransferRedeemed on an unknown manager — manifest lookup returns null.
+    mockDb = await TestWormholeNttManager.TransferRedeemed.processEvent({
+      event: TestWormholeNttManager.TransferRedeemed.createMockEvent({
+        digest: MANAGER_DIGEST,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: UNKNOWN_MANAGER,
+          logIndex: 10,
+        }),
+      }),
+      mockDb,
+    });
+
+    // Scratch is consumed by the unfiltered fallback (matches the pre-fix
+    // behaviour for unknown managers; manifest-miss is the trigger to add
+    // the manager to `config/nttAddresses.json`, not to drop the row).
+    const scratch = mockDb.entities.WormholeDestPending.get(
+      `143-${TX_HASH.toLowerCase()}-5`,
+    );
+    assert.equal(
+      scratch,
+      undefined,
+      "scratch drained via legacy unfiltered fallback on manifest miss",
+    );
+
+    const detail = mockDb.entities.WormholeTransferDetail.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.equal(
+      detail?.transceiverDigest,
+      TRANSCEIVER_DIGEST_USDm.toLowerCase(),
+      "transceiverDigest is stamped from the only available scratch",
+    );
+  });
+});

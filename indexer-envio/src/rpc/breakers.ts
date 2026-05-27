@@ -204,17 +204,32 @@ async function probeFunction(
     );
     return "present";
   } catch (err) {
-    // Distinguish "function not in bytecode" (selector miss) from a
-    // transient RPC failure. viem's `ContractFunctionZeroDataError` is the
-    // unambiguous signal — its `shortMessage` always contains the exact
-    // phrase `returned no data ("0x")`. Matching just `"0x"` (which appears
-    // in addresses, calldata, and many provider error payloads) or
-    // `"execution reverted"` (which fires when the function EXISTS but
-    // throws — e.g. a require() failure on the probe address) would
-    // misclassify legitimate RPC/contract errors as selector misses and
-    // permanently persist the wrong BreakerKind.
+    // Two viem shapes signal "selector not in bytecode":
+    //   (a) ContractFunctionZeroDataError — message contains
+    //       `returned no data ("0x")` (old fallback() returns empty).
+    //   (b) ContractFunctionExecutionError whose shortMessage ends in the
+    //       bare `reverted.` suffix — modern Solidity dispatcher reverts
+    //       with no reason on missing selector. Verified against
+    //       forno.celo.org with viem 2.x on all three live Celo breakers.
+    // Reverts WITH a reason/signature/custom-error suffix mean the
+    // function exists but failed (require/typed-revert) — those must
+    // route to rpc_error so the caller can retry on the next event.
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("returned no data")) return "missing";
+    const shortMessage =
+      err &&
+      typeof err === "object" &&
+      "shortMessage" in err &&
+      typeof (err as { shortMessage?: unknown }).shortMessage === "string"
+        ? (err as { shortMessage: string }).shortMessage
+        : (msg.split("\n", 1)[0] ?? "");
+    if (
+      err instanceof Error &&
+      err.name === "ContractFunctionExecutionError" &&
+      shortMessage.endsWith("reverted.")
+    ) {
+      return "missing";
+    }
     logRpcFailure(
       chainId,
       `probe:${functionName}`,
@@ -269,20 +284,15 @@ export async function fetchBreakerKind(
   if (vdProbe === "rpc_error") return null;
   if (vdProbe === "present") return "VALUE_DELTA";
 
-  // Both selectors confirmed missing — this is a MarketHours-style breaker.
-  //
-  // Caveat: this default also catches contracts that simply lack both
-  // selectors (a future breaker kind, a proxy-upgraded breaker, an EOA
-  // mistakenly added to BreakerBox via governance / RPC poisoning). The
-  // effect-level cache (`cache: true` in `breakerKindEffect`) means the
-  // misclassification persists. Emit a structured warn (signature
-  // `breakers.fetchBreakerKind.market_hours_default`) so the Loki →
-  // Grafana alert pipeline can surface unexpected MARKET_HOURS
-  // classifications for operator review. A stricter fix — positive
-  // MARKET_HOURS probe, or caching only on positive identification —
-  // is tracked as a follow-up.
+  // Both selectors confirmed missing — assume MarketHours-style breaker.
+  // Containment: `breakerKindEffect` opts out of persistent cache on
+  // MARKET_HOURS so an unknown-breaker misclassification (future kind,
+  // proxy upgrade, EOA added via governance) cannot survive a restart.
+  // The Breaker entity row still pins the kind once written; a mid-stream
+  // misclassification requires manual re-sync. The warn signature
+  // `breakers.fetchBreakerKind.market_hours_default` is wired to Loki.
   log.warn(
-    `breakers.fetchBreakerKind.market_hours_default chain=${chainId} breaker=${breakerAddress} — neither MedianDelta nor ValueDelta selectors present; defaulting to MARKET_HOURS and caching`,
+    `breakers.fetchBreakerKind.market_hours_default chain=${chainId} breaker=${breakerAddress} — neither MedianDelta nor ValueDelta selectors present; defaulting to MARKET_HOURS (not cached)`,
   );
   return "MARKET_HOURS";
 }

@@ -101,13 +101,6 @@ after skipping blanks and comments. Refresh before starting a split.
 
 - [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.
 
-## Indexer-envio defensive-hardening follow-ups (from rpc + bridge PR)
-
-The rpc-trust + bridge-attribution hardening PR (`indexer-envio-rpc-bridge-hardening`, PR #533) landed two interim guards — a structured warn at the breaker-kind default site, and a chainId in the BridgeAttestation id — and pointed at stricter long-term fixes. Track those here.
-
-- [ ] **Positive MARKET_HOURS identification in `fetchBreakerKind`.** Today, when both MedianDelta and ValueDelta selector probes return absent, the function defaults to `MARKET_HOURS` and caches the result via `breakerKindEffect`. The default also catches future breaker kinds, proxy-upgraded breakers, and EOAs added via governance or RPC poisoning — they'd persist as MARKET_HOURS until manual eviction. The `breakers.fetchBreakerKind.market_hours_default` structured warn already surfaces these via Loki → Grafana for operator review, but the misclassification still ships. Real fix: add a positive MARKET_HOURS probe (e.g. a selector unique to MarketHoursBreaker) OR change the cache policy to only persist on positive identification — negative defaults retry next time, trading false-positive cache cost for fresh probes.
-- [ ] **Transceiver filter on the Wormhole `transferRedeemed` fallback drain.** When `MessageAttestedTo` does not fire before `TransferRedeemed` (HyperSync drops the attest log, historical backfill, replay), the fallback drain pairs the nearest scratch row in the same tx with no transceiver-identity check. In a multi-NTT-inbound same-tx the source identity gets mis-stamped onto this transfer. The `wormhole.transferRedeemed.fallback_drain` structured warn surfaces these via Loki → Grafana. Real fix: require a positive transceiver match against the peer registry on the fallback path, OR only fall back when exactly one scratch row exists in the tx (cheaper but doesn't help multi-bridge same-tx cases).
-
 ## Claude Code permissions hardening
 
 - [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
