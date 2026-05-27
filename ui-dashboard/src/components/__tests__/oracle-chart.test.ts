@@ -34,7 +34,7 @@ describe("formatOracleChartHoverText", () => {
       token1Symbol: "USDC",
     });
 
-    expect(text).toContain("Oracle price: 1.00050000 (cUSD/USDC)");
+    expect(text).toContain("Oracle feed: 1.00050000 (raw cUSD/USDC pair)");
     expect(text).toContain("+5.0 bps");
     expect(text).toContain("within current band");
   });
@@ -63,7 +63,7 @@ describe("formatOracleChartHoverText", () => {
       token1Symbol: "USDC",
     });
 
-    expect(text).toContain("Oracle price: N/A");
+    expect(text).toContain("Oracle feed: N/A");
     expect(text).not.toContain("NaN");
   });
 

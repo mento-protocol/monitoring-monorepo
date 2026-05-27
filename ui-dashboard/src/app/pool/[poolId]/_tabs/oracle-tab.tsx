@@ -45,7 +45,7 @@ type OracleTabProps = {
 // consistent with what the warning text says ("most recent N snapshots").
 const SEARCH_ORDER_BY = buildOrderBy("timestamp", "desc");
 
-// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
 export function OracleTab(props: OracleTabProps) {
   const { poolId, pool, search, onSearchChange } = props;
   const { network } = useNetwork();
@@ -136,10 +136,17 @@ export function OracleTab(props: OracleTabProps) {
   // on OracleSnapshot.
   const rateFeedID = pool?.referenceRateFeedID?.toLowerCase();
   const chainId = pool?.chainId;
-  const { data: breakerData } = useGQL<{
+  const {
+    data: breakerData,
+    isLoading: isBreakerLoading,
+    error: breakerError,
+  } = useGQL<{
     BreakerConfig: Array<{
       id: string;
-      breaker: { kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS" };
+      breaker: {
+        kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+        defaultRateChangeThreshold: string;
+      };
       rateChangeThreshold: string;
       referenceValue: string | null;
       medianRatesEMA: string | null;
@@ -155,15 +162,38 @@ export function OracleTab(props: OracleTabProps) {
   const breakerConfig = useMemo(() => {
     const row = breakerData?.BreakerConfig?.[0];
     if (!row) return null;
+    // Per-feed `rateChangeThreshold` is a sentinel `0` when the feed inherits
+    // the breaker default (see `effectiveThreshold` in breaker-panel.tsx) —
+    // resolve it here so the chart band reflects the truly-applied limit
+    // instead of collapsing to 0.
+    const perFeed = row.rateChangeThreshold;
+    const effectiveThreshold =
+      perFeed && perFeed !== "0"
+        ? perFeed
+        : row.breaker.defaultRateChangeThreshold;
     return {
       breakerKind: row.breaker.kind,
-      rateChangeThreshold: row.rateChangeThreshold,
+      rateChangeThreshold: effectiveThreshold,
       referenceValue: row.referenceValue,
       medianRatesEMA: row.medianRatesEMA,
       status: row.status,
       lastTripAt: row.lastTripAt,
     };
   }, [breakerData]);
+  // The chart distinguishes "breaker config not loaded yet" from "no breaker
+  // for this feed" so it can render a neutral state in the first case rather
+  // than greenwashing un-bounded points. A fetch error collapses to "missing"
+  // — same neutral copy, the failure shows up in the network panel.
+  const breakerConfigStatus: "loading" | "ready" | "missing" =
+    !rateFeedID || !chainId
+      ? "missing"
+      : breakerError
+        ? "missing"
+        : isBreakerLoading
+          ? "loading"
+          : breakerConfig
+            ? "ready"
+            : "missing";
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -229,6 +259,7 @@ export function OracleTab(props: OracleTabProps) {
         token1Symbol={sym1}
         breachStartedAt={pool?.deviationBreachStartedAt}
         breakerConfig={breakerConfig}
+        breakerConfigStatus={breakerConfigStatus}
       />
       <TableSearch
         value={search}

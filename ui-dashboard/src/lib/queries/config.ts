@@ -111,7 +111,7 @@ export const BREAKER_CONFIG_FOR_RATE_FEED = `
       limit: 2
     ) {
       id
-      breaker { kind }
+      breaker { kind defaultRateChangeThreshold }
       rateChangeThreshold
       referenceValue
       medianRatesEMA

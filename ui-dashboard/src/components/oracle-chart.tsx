@@ -161,12 +161,18 @@ const fixidityToFloat = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+type BreakerConfigStatus = "loading" | "ready" | "missing";
+
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
   token0Symbol?: string | undefined;
   token1Symbol?: string | undefined;
   breachStartedAt?: string | null | undefined;
   breakerConfig?: BreakerConfigForChart | null | undefined;
+  // Lets the chart distinguish "still fetching the breaker for this feed"
+  // from "no breaker exists for this feed" — only in `ready` do we color
+  // markers green/red against the band; the others render a neutral state.
+  breakerConfigStatus?: BreakerConfigStatus;
 }
 
 export function OracleChart({
@@ -175,6 +181,7 @@ export function OracleChart({
   token1Symbol = "Token 1",
   breachStartedAt,
   breakerConfig,
+  breakerConfigStatus = "ready",
 }: OracleChartProps) {
   // Stash the wheel-listener cleanup so we can detach when react-plotly tears
   // the chart down (onPurge) or remounts it. Without this, stacked listeners
@@ -199,6 +206,7 @@ export function OracleChart({
     token1Symbol,
     baseline,
     thresholdRatio,
+    breakerConfigStatus,
   });
   const shapes = buildOracleShapes(
     breachStartedAt,
@@ -223,6 +231,7 @@ export function OracleChart({
       <OracleChartLegend
         breachStartedAt={breachStartedAt}
         breakerConfig={breakerConfig}
+        breakerConfigStatus={breakerConfigStatus}
       />
       <Plot
         data={[plotData.deviationTrace]}
@@ -259,13 +268,17 @@ function buildOraclePlotData({
   token1Symbol,
   baseline,
   thresholdRatio,
+  breakerConfigStatus,
 }: {
   snapshots: OracleSnapshot[];
   token0Symbol: string;
   token1Symbol: string;
   baseline: number | null;
   thresholdRatio: number | null;
+  breakerConfigStatus: BreakerConfigStatus;
 }): OraclePlotData {
+  const haveBand =
+    breakerConfigStatus === "ready" && baseline && thresholdRatio;
   const isSparse = snapshots.length < 20;
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
@@ -281,23 +294,29 @@ function buildOraclePlotData({
     return Number(s.oraclePrice) / FIXIDITY_ONE;
   });
 
-  // Helper: marker is "tripping" if the reported price crosses the breaker band.
-  const isOutOfBand = (price: number): boolean => {
-    if (!baseline || !thresholdRatio || !Number.isFinite(price)) return false;
-    return Math.abs(price - baseline) / baseline > thresholdRatio;
+  // Marker is "tripping" if the reported price crosses the breaker band.
+  // When the breaker config isn't ready (loading / missing), we have no
+  // band to compare against, so the verdict is genuinely unknown — return
+  // null and let the caller render the marker in a neutral state instead
+  // of greenwashing it.
+  const isOutOfBand = (price: number): boolean | null => {
+    if (!haveBand || !Number.isFinite(price)) return null;
+    return Math.abs(price - baseline!) / baseline! > thresholdRatio!;
   };
 
   const markerColors = snapshots.map((s, i) => {
     if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
     const p = prices[i];
     if (!Number.isFinite(p)) return "#64748b";
-    return isOutOfBand(p) ? "#ef4444" : "#22c55e";
+    const verdict = isOutOfBand(p);
+    if (verdict === null) return "#64748b"; // unknown band — neutral
+    return verdict ? "#ef4444" : "#22c55e";
   });
   const markerSizes = snapshots.map((s, i) => {
     if (!s.oracleOk) return isSparse ? 12 : 9;
     const p = prices[i];
     if (!Number.isFinite(p)) return isSparse ? 8 : 4;
-    return isOutOfBand(p) ? (isSparse ? 12 : 8) : isSparse ? 8 : 4;
+    return isOutOfBand(p) === true ? (isSparse ? 12 : 8) : isSparse ? 8 : 4;
   });
 
   const hoverText = snapshots.map((s, i) =>
@@ -465,6 +484,11 @@ function buildOracleShapes(
   }
 
   if (breachStartedAt && Number(breachStartedAt) > 0) {
+    // `deviationBreachStartedAt` is the *rebalance* threshold's breach anchor
+    // (priceDifference > rebalanceThreshold), not a breaker trip. We keep
+    // the guide line because it's operationally useful context, but the
+    // legend explicitly labels it "Rebalance breach start" so it isn't
+    // confused with the breaker band the rest of the chart visualizes.
     const breachIso = new Date(Number(breachStartedAt) * 1000).toISOString();
     shapes.push({
       type: "line",
@@ -571,19 +595,42 @@ function buildOracleLayout({
 function OracleChartLegend({
   breachStartedAt,
   breakerConfig,
+  breakerConfigStatus,
 }: {
   breachStartedAt: string | null | undefined;
   breakerConfig: BreakerConfigForChart | null | undefined;
+  breakerConfigStatus: BreakerConfigStatus;
 }) {
-  const thresholdPct =
-    breakerConfig && fixidityToFloat(breakerConfig.rateChangeThreshold);
-  const baseline = breakerConfig
-    ? breakerConfig.breakerKind === "VALUE_DELTA"
+  // When we don't have a breaker to compare against (still loading or
+  // genuinely missing), tell the operator that — don't show "within band"
+  // chips that imply a verdict we can't make.
+  if (breakerConfigStatus !== "ready" || !breakerConfig) {
+    const msg =
+      breakerConfigStatus === "loading"
+        ? "Loading breaker config…"
+        : "No active breaker for this rate feed — band check unavailable";
+    return (
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
+          {msg}
+        </span>
+        {breachStartedAt && Number(breachStartedAt) > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
+            Rebalance breach start
+          </span>
+        )}
+      </div>
+    );
+  }
+  const thresholdPct = fixidityToFloat(breakerConfig.rateChangeThreshold);
+  const baseline =
+    breakerConfig.breakerKind === "VALUE_DELTA"
       ? fixidityToFloat(breakerConfig.referenceValue)
-      : fixidityToFloat(breakerConfig.medianRatesEMA)
-    : null;
+      : fixidityToFloat(breakerConfig.medianRatesEMA);
   const baselineLabel =
-    breakerConfig?.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg";
+    breakerConfig.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg";
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
       <span className="flex items-center gap-1">
@@ -607,7 +654,7 @@ function OracleChartLegend({
       {breachStartedAt && Number(breachStartedAt) > 0 && (
         <span className="flex items-center gap-1">
           <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-          Breach start
+          Rebalance breach start
         </span>
       )}
     </div>
@@ -673,9 +720,15 @@ export function formatOracleChartHoverText({
           return `<br>Δ vs baseline: ${sign}${delta.toFixed(8)} (${sign}${bps.toFixed(1)} bps)${verdict}`;
         })()
       : "";
+  // Don't label the price as `token0/token1` — for USD-stable-base pools
+  // `parseOraclePriceToNumber` inverts the rate for display, so the table
+  // shows the inverse direction under that same label. The chart uses the
+  // raw feed value (so it's directly comparable to the breaker config),
+  // which would be the WRONG direction under `token0/token1`. Use the
+  // pair tokens for context but make the orientation explicit.
   return (
     `<b>${ts}</b><br>` +
-    `Oracle price: ${priceText} (${token0Symbol}/${token1Symbol})` +
+    `Oracle feed: ${priceText} (raw ${token0Symbol}/${token1Symbol} pair)` +
     deltaLine +
     // Source field distinguishes oracle_reported vs oracle_median_updated.
     (snapshot.source ? `<br>Source: ${snapshot.source}` : "")
