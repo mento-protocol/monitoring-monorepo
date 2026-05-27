@@ -606,6 +606,9 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       client_version,
       scaling, # service-level bookkeeping block; template[0].scaling stays managed.
       template[0].containers[0].image,
+      # Suppresses live revision-name drift from gcloud rollouts. Remove or
+      # re-audit this ignore entry in any PR that intentionally changes the
+      # Terraform-owned template shape so Cloud Run can mint a fresh revision.
       template[0].revision,
     ]
   }
