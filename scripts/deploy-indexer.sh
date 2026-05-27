@@ -93,12 +93,13 @@ fi
 echo "   Branch: $DEPLOY_BRANCH"
 echo ""
 
-# Get current commit info. `--short=7` is explicit: Envio's API stores
-# `commit_hash` truncated to exactly 7 chars, and the no-op-recovery probe
-# below does `startswith($target)` against that field. If a user has
-# `core.abbrev` set above 7 or the repo grows past the 7-char unique
-# threshold, bare `--short` returns 8+ chars and the predicate silently
-# matches zero rows — misclassifying a registered deployment as missing.
+# Get current commit info. `--short=7` is documented as a MINIMUM, not an
+# exact width — git returns 8+ chars when the 7-char prefix is ambiguous.
+# Envio's API stores `commit_hash` truncated to exactly 7 chars, so the
+# no-op-recovery probe below uses the REVERSE startswith predicate
+# (`$full | startswith(.commit_hash)`) against the full SHA — that works
+# whether Envio stored 7 chars, 8, or any prefix of our commit. The
+# user-facing display still uses `--short=7` since it's almost always 7.
 COMMIT_SHA=$(git rev-parse HEAD)
 COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
 COMMIT_MSG=$(git log -1 --pretty=format:"%s" "$COMMIT_SHA")
@@ -161,9 +162,12 @@ if grep -q "Everything up-to-date" "$PUSH_OUTPUT_FILE"; then
     else
       PROBE_INDEXER="mento-v3-$NETWORK"
     fi
+    # Reverse-prefix predicate: ask whether Envio's stored commit_hash is a
+    # prefix of our local full SHA. Works for any storage width (7, 8, full)
+    # and is collision-safe in a way `startswith(local_short)` is not.
     REGISTERED_FOR_SHA=$(pnpm exec envio-cloud indexer get "$PROBE_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
-      | jq -r --arg target "$COMMIT_SHORT" \
-          'first(.data.deployments[]? | select(.commit_hash | startswith($target)) | .commit_hash) // ""')
+      | jq -r --arg full "$COMMIT_SHA" \
+          'first(.data.deployments[]? | select(.commit_hash as $h | $full | startswith($h)) | .commit_hash) // ""')
 
     if [[ -n "$REGISTERED_FOR_SHA" ]]; then
       echo ""
