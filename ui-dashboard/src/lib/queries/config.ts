@@ -57,20 +57,23 @@ export const ORACLE_SNAPSHOTS = `
 // Separate query for charts — always fetches the most recent N snapshots
 // ordered by timestamp desc, then reversed client-side for chronological display.
 // Decoupled from table pagination so charts always show full history context.
-// Filter the chart to oracle-sourced snapshots only. The indexer also writes
-// snapshots on every reserves change (source="update_reserves") and on
-// rebalance events (source="rebalanced") — those rows store the pool's
-// internal post-state deviation, NOT the oracle deviation. Mixing them in
-// produces apparent spikes where two snapshots at the same oraclePrice show
-// wildly different "% of threshold" values. For the oracle-health chart we
-// only want the oracle's view: each report (oracle_reported) and each
-// median rotation (oracle_median_updated).
+// Filter the chart to median-updated snapshots only. The indexer writes
+// OracleSnapshot rows for four event types — each individual report
+// (oracle_reported), each median rotation (oracle_median_updated), every
+// reserves change (update_reserves), and every rebalance (rebalanced) —
+// but the BreakerBox only evaluates trip conditions on MedianUpdated:
+// a single outlier reporter that doesn't move the median never trips a
+// breaker. Restricting the chart to oracle_median_updated keeps the
+// band verdict semantically correct (a red point means "if this median
+// landed today, the breaker would trip"). The update_reserves /
+// rebalanced rows store pool-internal post-state deviation, not oracle
+// deviation, so they're excluded for the same reason.
 export const ORACLE_SNAPSHOTS_CHART = `
   query OracleSnapshotsChart($poolId: String!, $limit: Int!) {
     OracleSnapshot(
       where: {
         poolId: { _eq: $poolId }
-        source: { _in: ["oracle_reported", "oracle_median_updated"] }
+        source: { _eq: "oracle_median_updated" }
       }
       order_by: { timestamp: desc }
       limit: $limit

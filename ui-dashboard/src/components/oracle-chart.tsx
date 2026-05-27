@@ -11,6 +11,13 @@ import {
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
 } from "@/lib/plot";
+import { attachOracleWheelHandler } from "./oracle-chart-wheel";
+import {
+  formatBaseline,
+  formatOracleChartHoverText,
+} from "./oracle-chart-hover";
+
+export { formatOracleChartHoverText };
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -24,125 +31,6 @@ const ORACLE_CHART_CONFIG = {
   ...PLOTLY_CONFIG,
   scrollZoom: false,
 } as const;
-
-interface PlotArea {
-  plotL: number;
-  plotR: number;
-  plotT: number;
-  plotB: number;
-}
-
-function computePlotArea(
-  graphDiv: HTMLElement,
-  layout: PlotlyFullLayout,
-): PlotArea {
-  const rect = graphDiv.getBoundingClientRect();
-  const ml = layout.margin?.l ?? 0;
-  const mr = layout.margin?.r ?? 0;
-  const mt = layout.margin?.t ?? 0;
-  const mb = layout.margin?.b ?? 0;
-  // Plot bottom excludes the rangeslider strip (thickness 0.08 by default).
-  const sliderThickness = rect.height * 0.08;
-  return {
-    plotL: ml,
-    plotR: rect.width - mr,
-    plotT: mt,
-    plotB: rect.height - mb - sliderThickness,
-  };
-}
-
-interface ZoomContext {
-  Plotly: PlotlyAPI;
-  graphDiv: HTMLElement;
-  area: PlotArea;
-  delta: number;
-}
-
-function zoomYAroundCursor(
-  ctx: ZoomContext,
-  yRange: [number, number],
-  yPos: number,
-): void {
-  const [yMin, yMax] = yRange;
-  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
-  const span = yMax - yMin;
-  const frac = (ctx.area.plotB - yPos) / (ctx.area.plotB - ctx.area.plotT);
-  const cursor = yMin + span * frac;
-  const newSpan = span * (ctx.delta > 0 ? 1.1 : 1 / 1.1);
-  void ctx.Plotly.relayout(ctx.graphDiv, {
-    "yaxis.range": [cursor - newSpan * frac, cursor + newSpan * (1 - frac)],
-  });
-}
-
-function zoomXAroundCursor(
-  ctx: ZoomContext,
-  xRange: [string | number, string | number],
-  xPos: number,
-): void {
-  const xMin = new Date(xRange[0]).getTime();
-  const xMax = new Date(xRange[1]).getTime();
-  if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) return;
-  const span = xMax - xMin;
-  const frac = (xPos - ctx.area.plotL) / (ctx.area.plotR - ctx.area.plotL);
-  const cursorMs = xMin + span * frac;
-  const newSpan = span * (ctx.delta > 0 ? 1.1 : 1 / 1.1);
-  void ctx.Plotly.relayout(ctx.graphDiv, {
-    "xaxis.range": [
-      new Date(cursorMs - newSpan * frac).toISOString(),
-      new Date(cursorMs + newSpan * (1 - frac)).toISOString(),
-    ],
-  });
-}
-
-function attachOracleWheelHandler(graphDiv: HTMLElement): () => void {
-  const onWheel = (e: WheelEvent) => {
-    const Plotly = (window as unknown as { Plotly?: PlotlyAPI }).Plotly;
-    const layout = (graphDiv as unknown as { _fullLayout?: PlotlyFullLayout })
-      ._fullLayout;
-    if (!Plotly || !layout?.xaxis?.range || !layout.yaxis?.range) return;
-    const rect = graphDiv.getBoundingClientRect();
-    const xPos = e.clientX - rect.left;
-    const yPos = e.clientY - rect.top;
-    const area = computePlotArea(graphDiv, layout);
-    const inYBounds = yPos > area.plotT && yPos < area.plotB;
-    const overYAxis = xPos < area.plotL && inYBounds;
-    const overPlot = xPos >= area.plotL && xPos <= area.plotR && inYBounds;
-    if (!overYAxis && !overPlot) return;
-
-    e.preventDefault();
-    const delta = e.deltaY + e.deltaX;
-    if (Math.abs(delta) < 1) return;
-
-    const ctx: ZoomContext = { Plotly, graphDiv, area, delta };
-    if (overYAxis) {
-      zoomYAroundCursor(ctx, layout.yaxis.range, yPos);
-    } else {
-      // Zoom X around the cursor — matches Plotly's default scrollZoom for X
-      // but leaves Y untouched so a plot-area scroll never accidentally
-      // rescales the price axis.
-      zoomXAroundCursor(ctx, layout.xaxis.range, xPos);
-    }
-  };
-  // The handler calls `e.preventDefault()` to suppress Plotly's default
-  // scroll behavior; `{ passive: true }` would silently ignore that and
-  // break the axis-aware zoom.
-  // react-doctor-disable-next-line react-doctor/client-passive-event-listeners
-  graphDiv.addEventListener("wheel", onWheel, { passive: false });
-  return () => graphDiv.removeEventListener("wheel", onWheel);
-}
-
-interface PlotlyFullLayout {
-  xaxis?: { range?: [string | number, string | number] };
-  yaxis?: { range?: [number, number] };
-  margin?: { l?: number; r?: number; t?: number; b?: number };
-}
-
-interface PlotlyAPI {
-  relayout: (
-    div: HTMLElement,
-    update: Record<string, unknown>,
-  ) => Promise<unknown>;
-}
 
 interface BreakerConfigForChart {
   breakerKind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
@@ -658,79 +546,5 @@ function OracleChartLegend({
         </span>
       )}
     </div>
-  );
-}
-
-function formatBaseline(b: number): string {
-  if (b >= 100) return b.toFixed(2);
-  if (b >= 1) return b.toFixed(4);
-  return b.toFixed(6);
-}
-
-export function formatOracleChartHoverText({
-  snapshot,
-  price,
-  baseline,
-  thresholdRatio,
-  token0Symbol,
-  token1Symbol,
-}: {
-  snapshot: OracleSnapshot;
-  price: number;
-  baseline?: number | null;
-  thresholdRatio?: number | null;
-  token0Symbol: string;
-  token1Symbol: string;
-}): string {
-  const d = new Date(Number(snapshot.timestamp) * 1000);
-  const ts =
-    d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }) +
-    " " +
-    d.toLocaleTimeString("en-US", {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  const priceText = Number.isFinite(price) ? price.toFixed(8) : "N/A";
-  // Distance from baseline as both an absolute price difference (8dp) and
-  // a basis-point delta, which is the unit operators tend to read in.
-  const deltaLine =
-    baseline && Number.isFinite(price)
-      ? (() => {
-          const delta = price - baseline;
-          const bps = (delta / baseline) * 10_000;
-          const sign = delta >= 0 ? "+" : "";
-          const thresholdBps =
-            thresholdRatio != null ? thresholdRatio * 10_000 : null;
-          // Verdict is a CURRENT-state lens — checks the point against
-          // today's baseline + threshold, not the snapshot's at-the-time
-          // band. Matters most for MEDIAN_DELTA pools where the EMA
-          // drifts; the legend/title clarify the "current" framing.
-          const verdict =
-            thresholdBps != null
-              ? Math.abs(bps) > thresholdBps
-                ? " · would trip current band"
-                : " · within current band"
-              : "";
-          return `<br>Δ vs baseline: ${sign}${delta.toFixed(8)} (${sign}${bps.toFixed(1)} bps)${verdict}`;
-        })()
-      : "";
-  // Don't label the price as `token0/token1` — for USD-stable-base pools
-  // `parseOraclePriceToNumber` inverts the rate for display, so the table
-  // shows the inverse direction under that same label. The chart uses the
-  // raw feed value (so it's directly comparable to the breaker config),
-  // which would be the WRONG direction under `token0/token1`. Use the
-  // pair tokens for context but make the orientation explicit.
-  return (
-    `<b>${ts}</b><br>` +
-    `Oracle feed: ${priceText} (raw ${token0Symbol}/${token1Symbol} pair)` +
-    deltaLine +
-    // Source field distinguishes oracle_reported vs oracle_median_updated.
-    (snapshot.source ? `<br>Source: ${snapshot.source}` : "")
   );
 }
