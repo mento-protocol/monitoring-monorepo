@@ -2,7 +2,7 @@
   "patterns": [
     {
       "rule_name": "auth_secret_literal",
-      "regex": "(?i)AUTH_SECRET\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
+      "regex": "(?i)[\"']?AUTH_SECRET[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -33,7 +33,7 @@
     },
     {
       "rule_name": "upstash_token_literal",
-      "regex": "(?i)(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"']?(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -64,7 +64,7 @@
     },
     {
       "rule_name": "envio_hasura_token_literal",
-      "regex": "(?i)ENVIO_HASURA_(ADMIN_)?TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"']?ENVIO_HASURA_(ADMIN_)?TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -95,7 +95,7 @@
     },
     {
       "rule_name": "sentry_auth_token_literal",
-      "regex": "(?i)SENTRY_AUTH_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"']?SENTRY_AUTH_TOKEN[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -126,7 +126,7 @@
     },
     {
       "rule_name": "dune_api_key_literal",
-      "regex": "(?i)DUNE_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"']?DUNE_API_KEY[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -157,7 +157,7 @@
     },
     {
       "rule_name": "arkham_api_key_literal",
-      "regex": "(?i)ARKHAM_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[\"']?ARKHAM_API_KEY[\"']?\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -188,7 +188,7 @@
     },
     {
       "rule_name": "slack_bot_token_env_literal",
-      "regex": "(?i)([A-Z][A-Z0-9_]*_)?SLACK_BOT_TOKEN\\s*[=:]\\s*[\"\\']?[A-Za-z0-9_-]{20,}[\"\\']?",
+      "regex": "(?i)[\"']?([A-Z][A-Z0-9_]*_)?SLACK_BOT_TOKEN[\"']?\\s*[=:]\\s*[\"\\']?[A-Za-z0-9_-]{20,}[\"\\']?",
       "exclude_paths": [
         "**/*.example",
         "*.example",
@@ -331,7 +331,15 @@
         "**/docs/**",
         "docs/**",
         "**/.cursor/**",
-        ".cursor/**"
+        ".cursor/**",
+        "**/*.mdx",
+        "*.mdx",
+        "**/README.md",
+        "README.md",
+        "**/README.*",
+        "README.*",
+        "*.md",
+        "*.mdc"
       ],
       "reminder": "Bearer live-token literal detected (sk_live_/rk_live_). Load from secrets manager; never inline. Rotate immediately if this leaks."
     },
@@ -399,6 +407,48 @@
         ".cursor/**"
       ],
       "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars \u2014 if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
+    },
+    {
+      "rule_name": "private_key_env_literal",
+      "regex": "(?i)[\"\\']?(PRIVATE_KEY|DEPLOYER_PRIVATE_KEY|SIGNER_PRIVATE_KEY|WALLET_PRIVATE_KEY)[\"\\']?\\s*[=:]\\s*[\"\\']?0x[a-fA-F0-9]{64}[\"\\']?",
+      "exclude_paths": [
+        "**/*.example",
+        "*.example",
+        "**/.env*.example",
+        "**/.env",
+        ".env",
+        "**/.env.*",
+        ".env.*",
+        "**/.claude/**",
+        ".claude/**",
+        "**/test/**",
+        "test/**",
+        "**/tests/**",
+        "tests/**",
+        "**/__tests__/**",
+        "__tests__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "**/fixtures/**",
+        "fixtures/**",
+        "**/*.md",
+        "*.md",
+        "**/*.mdx",
+        "*.mdx",
+        "**/*.mdc",
+        "*.mdc",
+        "**/README.md",
+        "README.md",
+        "**/README.*",
+        "README.*",
+        "**/docs/**",
+        "docs/**",
+        "**/.cursor/**",
+        ".cursor/**"
+      ],
+      "reminder": "PRIVATE_KEY-shape env literal detected (named var assigned a 64-hex value). Load from secrets manager / KMS at runtime; never inline or commit."
     },
     {
       "rule_name": "hasura_aggregate_query",
@@ -482,22 +532,14 @@
     },
     {
       "rule_name": "workflow_action_unpinned",
-      "regex": "uses:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
-      "paths": [
-        "**/.github/workflows/**",
-        ".github/workflows/**",
-        ".github/workflows/**"
-      ],
+      "regex": "[\"\\']?uses[\"\\']?:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
+      "paths": ["**/.github/workflows/**", ".github/workflows/**"],
       "reminder": "Third-party Actions must be SHA-pinned, not tag- or branch-pinned. Use the full 40-char commit SHA followed by a `# tag` comment. Catches @v1, @v1.2.3, @main, @latest, @stable, and subdirectory actions (owner/repo/path@ref)."
     },
     {
       "rule_name": "workflow_pr_write_permission",
-      "regex": "(pull-requests|contents):\\s*[\\\"']?write[\\\"']?",
-      "paths": [
-        "**/.github/workflows/**",
-        ".github/workflows/**",
-        ".github/workflows/**"
-      ],
+      "regex": "[\"\\']?(pull-requests|contents|permissions)[\"\\']?:\\s*[\"\\']?(write|write-all)[\"\\']?",
+      "paths": ["**/.github/workflows/**", ".github/workflows/**"],
       "reminder": "Workflow grants write permission. If this workflow has a `pull_request` trigger, confirm it gates on `github.event.pull_request.head.repo.full_name == github.repository` so forks don't get write tokens. (workflow_dispatch-only or push-only workflows can ignore this.)",
       "exclude_paths": [
         "**/.github/workflows/update-snapshots.yml",
