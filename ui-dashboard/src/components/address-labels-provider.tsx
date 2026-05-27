@@ -58,8 +58,8 @@ type AddressLabelsContextValue = {
     entry: {
       name: string;
       tags: string[];
-      notes?: string;
-      isPublic?: boolean;
+      notes?: string | undefined;
+      isPublic?: boolean | undefined;
     },
   ) => Promise<void>;
   /** Remove a custom entry. */
@@ -290,8 +290,8 @@ function useAddressLabelsValue(): AddressLabelsContextValue {
       entry: {
         name: string;
         tags: string[];
-        notes?: string;
-        isPublic?: boolean;
+        notes?: string | undefined;
+        isPublic?: boolean | undefined;
       },
     ): Promise<void> => {
       const lower = address.toLowerCase();

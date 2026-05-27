@@ -46,7 +46,7 @@ export type Network = {
   /** Whether this network has VirtualPool contracts (Celo only). Controls UI visibility of virtual-pool-related elements. */
   hasVirtualPools: boolean;
   /** JSON-RPC endpoint used for on-chain reads (e.g. rebalance simulation) */
-  rpcUrl?: string;
+  rpcUrl?: string | undefined;
 };
 
 // Delegates to shared-config so metrics-bridge + dashboard can't drift

@@ -24,7 +24,10 @@ vi.mock("@/lib/csp", () => ({
 }));
 
 async function importMiddlewareWithEnv(
-  env: { authGoogleId?: string; authGoogleSecret?: string } = {
+  env: {
+    authGoogleId?: string | undefined;
+    authGoogleSecret?: string | undefined;
+  } = {
     authGoogleId: "test-id",
     authGoogleSecret: "test-secret",
   },

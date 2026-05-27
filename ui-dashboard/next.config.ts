@@ -42,9 +42,13 @@ const nextConfig: NextConfig = {
 
 // TODO(sentry-turbopack): re-add disableLogger + automaticVercelMonitors once SDK ships Turbopack support.
 export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  ...(process.env.SENTRY_ORG ? { org: process.env.SENTRY_ORG } : {}),
+  ...(process.env.SENTRY_PROJECT
+    ? { project: process.env.SENTRY_PROJECT }
+    : {}),
+  ...(process.env.SENTRY_AUTH_TOKEN
+    ? { authToken: process.env.SENTRY_AUTH_TOKEN }
+    : {}),
   silent: !process.env.CI,
   widenClientFileUpload: true,
   tunnelRoute: "/monitoring",

@@ -56,7 +56,7 @@ export function validateEntryForm(opts: {
   name: string;
   tags?: string[];
   isContractRow: boolean;
-  requireExplicitName?: boolean;
+  requireExplicitName?: boolean | undefined;
 }): string | null {
   if (opts.isNewAddress && !isValidAddress(opts.address.trim())) {
     return "Enter a valid 0x address.";
@@ -75,7 +75,7 @@ type Props = {
   /** Empty string allows the user to type a new address. Otherwise rendered as static text. */
   address: string;
   /** Pre-filled values when editing an existing entry. */
-  initial?: AddressEntry;
+  initial?: AddressEntry | undefined;
   /**
    * Bubbles the typed address up to the parent every time it changes (only
    * in new-address mode — the input only renders when `address === ""`).
@@ -84,13 +84,13 @@ type Props = {
    * triggers it (always opens with a non-empty URL address) and can omit
    * this prop.
    */
-  onAddressChange?: (next: string) => void;
+  onAddressChange?: ((next: string) => void) | undefined;
   /** Called after a successful save. The modal uses this to close itself; the detail page can use it for revalidation/toast. */
-  onSaved?: () => void;
+  onSaved?: (() => void) | undefined;
   /** Called after a successful delete. Modal closes here; detail page navigates back. */
-  onDeleted?: () => void;
+  onDeleted?: (() => void) | undefined;
   /** When provided, renders a Cancel button in the form footer. Used by the modal. */
-  onCancel?: () => void;
+  onCancel?: (() => void) | undefined;
   /**
    * Optional ref attached to the form's first focusable field (address input
    * in new-address mode, name input otherwise). The modal owns focus
@@ -98,7 +98,7 @@ type Props = {
    * doing it inside this component would race the dialog's own focus steps
    * and land focus on the dialog's close button instead of the field.
    */
-  firstFieldRef?: RefObject<HTMLInputElement | null>;
+  firstFieldRef?: RefObject<HTMLInputElement | null> | undefined;
   /**
    * Fires whenever an in-flight save begins / ends. The detail page uses
    * this to pin its remount key during the save: `upsertEntry`'s optimistic
@@ -115,7 +115,9 @@ type Props = {
    * `""` from the initial prop), so the host can mark pending against
    * the right address in the provider's ledger.
    */
-  onSavingChange?: (saving: boolean, formId: string, address: string) => void;
+  onSavingChange?:
+    | ((saving: boolean, formId: string, address: string) => void)
+    | undefined;
   /**
    * Same as `onSavingChange` but for the delete flow. `deleteEntry`'s
    * optimistic update REMOVES the entry, transitioning the page key from
@@ -125,11 +127,9 @@ type Props = {
    * out the just-saved label. `formId` and `address` carry the same
    * scoping as `onSavingChange`.
    */
-  onDeletingChange?: (
-    deleting: boolean,
-    formId: string,
-    address: string,
-  ) => void;
+  onDeletingChange?:
+    | ((deleting: boolean, formId: string, address: string) => void)
+    | undefined;
   /**
    * When true, the form requires an explicit name regardless of tags
    * (the relaxed "name OR tags" rule is suspended). Used on the detail
@@ -137,7 +137,7 @@ type Props = {
    * disagreeing names — without this, a tag-only save persists an
    * empty global name and suppresses every contract row in the index.
    */
-  requireExplicitName?: boolean;
+  requireExplicitName?: boolean | undefined;
   /**
    * Forces the entire form (inputs + Save/Remove buttons) read-only
    * regardless of internal saving / deleting state. Used by surfaces
@@ -149,7 +149,7 @@ type Props = {
    * `updatedAt` transition). Disabling inputs makes the read-only
    * state visible and stops users from losing typed data.
    */
-  externallyDisabled?: boolean;
+  externallyDisabled?: boolean | undefined;
 };
 
 // 8 useState calls — independent form fields plus orthogonal flow flags; a

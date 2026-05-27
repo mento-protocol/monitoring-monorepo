@@ -126,7 +126,7 @@ export function FeeOverTimeChart({
       line: { color: string; width: number };
       fill: FillType;
       fillcolor: string;
-      stackgroup: string | undefined;
+      stackgroup?: string;
       hovertemplate: string;
     };
 
@@ -139,7 +139,7 @@ export function FeeOverTimeChart({
       line: { color: "#6366f1", width: 2 },
       fill: "tozeroy",
       fillcolor: "rgba(99,102,241,0.15)",
-      stackgroup: hasLpFees ? "fees" : undefined,
+      ...(hasLpFees ? { stackgroup: "fees" } : {}),
       hovertemplate:
         "<b>Protocol: $%{y:,.2f}</b><br>%{x|%b %d, %Y}<extra></extra>",
     };

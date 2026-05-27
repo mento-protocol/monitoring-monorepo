@@ -148,7 +148,9 @@ export function poolName(
  * render FPMM-only Health/TVL/Volume/Reserves panels alongside the
  * VP header. Disjoint with `isVirtualPool` by construction. */
 export function isFpmm(
-  pool: Pick<Pool, "source"> & { wrappedExchangeId?: string | null },
+  pool: Pick<Pool, "source"> & {
+    wrappedExchangeId?: string | null | undefined;
+  },
 ): boolean {
   return pool.source.toLowerCase().includes("fpmm") && !isVirtualPool(pool);
 }
@@ -259,14 +261,14 @@ export function canValueTvl(
  */
 export function poolTvlUSD(
   pool: {
-    reserves0?: string;
-    reserves1?: string;
-    token0Decimals?: number;
-    token1Decimals?: number;
-    tokenDecimalsKnown?: boolean;
-    oraclePrice?: string;
-    token0?: string | null;
-    token1?: string | null;
+    reserves0?: string | undefined;
+    reserves1?: string | undefined;
+    token0Decimals?: number | undefined;
+    token1Decimals?: number | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
+    oraclePrice?: string | undefined;
+    token0?: string | null | undefined;
+    token1?: string | null | undefined;
   },
   network: Network,
   rates?: OracleRateMap,

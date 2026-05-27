@@ -40,34 +40,34 @@ export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
 };
 
 interface PoolHealthState {
-  source?: string;
+  source?: string | undefined;
   // Healed VPs intentionally retain `fpmm_*` source (pickPreferredSource
   // priority alignment); `wrappedExchangeId` is the canonical VP signal.
   // Both feed `isVirtualPool`, which gates the "N/A" branch below.
-  wrappedExchangeId?: string | null;
-  oracleOk?: boolean;
-  oracleTimestamp?: string;
-  oracleExpiry?: string;
-  priceDifference?: string;
-  rebalanceThreshold?: number;
+  wrappedExchangeId?: string | null | undefined;
+  oracleOk?: boolean | undefined;
+  oracleTimestamp?: string | undefined;
+  oracleExpiry?: string | undefined;
+  priceDifference?: string | undefined;
+  rebalanceThreshold?: number | undefined;
   // Direction-split thresholds — populated by the isolated
   // `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` / `POOL_THRESHOLDS_KNOWN_EXT`
   // queries. Both must be 0 (with Known=true) for `isNeverRebalance` to
   // hold; the active `rebalanceThreshold` alone can't be trusted because
   // it's just the side `pickActiveThreshold` chose at index time.
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
+  rebalanceThresholdAbove?: number | undefined;
+  rebalanceThresholdBelow?: number | undefined;
   // True when the indexer has read the on-chain values for both above/below
   // thresholds; false (or missing) when still at the schema default. Drives
   // the dual-sentinel `effectiveThreshold` semantics — see that function.
-  rebalanceThresholdsKnown?: boolean;
+  rebalanceThresholdsKnown?: boolean | undefined;
   // Indexer's "is the deviation accrual trustworthy" flag. False when token
   // decimals are unknown (`normalizeTo18` would skew priceDifference) or
   // when threshold isn't yet read. Gates `computeHealthStatus` so a fresh
   // oracle report alongside untrusted priceDifference doesn't render as OK.
-  hasHealthData?: boolean;
-  lastRebalancedAt?: string | null;
-  deviationBreachStartedAt?: string | null;
+  hasHealthData?: boolean | undefined;
+  lastRebalancedAt?: string | null | undefined;
+  deviationBreachStartedAt?: string | null | undefined;
 }
 
 /**
@@ -114,9 +114,9 @@ export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thre
  * `POOL_THRESHOLDS_KNOWN_EXT` queries.
  */
 export function isNeverRebalance(pool: {
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
-  rebalanceThresholdsKnown?: boolean;
+  rebalanceThresholdAbove?: number | undefined;
+  rebalanceThresholdBelow?: number | undefined;
+  rebalanceThresholdsKnown?: boolean | undefined;
 }): boolean {
   // STRICT equality on the split fields: an absent (undefined) value is
   // NOT treated as 0. A caller with `rebalanceThresholdsKnown: true` but
@@ -153,10 +153,10 @@ export function isNeverRebalance(pool: {
  * under-bound. 1e12 fits in a JS number (≪ Number.MAX_SAFE_INTEGER).
  */
 export const effectiveThreshold = (pool: {
-  rebalanceThreshold?: number;
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
-  rebalanceThresholdsKnown?: boolean;
+  rebalanceThreshold?: number | undefined;
+  rebalanceThresholdAbove?: number | undefined;
+  rebalanceThresholdBelow?: number | undefined;
+  rebalanceThresholdsKnown?: boolean | undefined;
 }): number => {
   const threshold = pool.rebalanceThreshold ?? 0;
   if (threshold > 0) return threshold;
@@ -169,7 +169,7 @@ export const effectiveThreshold = (pool: {
 };
 
 export function getOracleStalenessThreshold(
-  pool: { oracleExpiry?: string },
+  pool: { oracleExpiry?: string | undefined },
   chainId?: number,
 ): number {
   const indexed = Number(pool.oracleExpiry ?? "0");
@@ -183,8 +183,8 @@ export function getOracleStalenessThreshold(
 
 export function isOracleFresh(
   pool: {
-    oracleTimestamp?: string;
-    oracleExpiry?: string;
+    oracleTimestamp?: string | undefined;
+    oracleExpiry?: string | undefined;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
@@ -264,10 +264,10 @@ export function computeHealthStatus(
  * - "OK":        max pressure < 0.8
  */
 export function computeLimitStatus(pool: {
-  source?: string;
-  wrappedExchangeId?: string | null;
-  limitPressure0?: string;
-  limitPressure1?: string;
+  source?: string | undefined;
+  wrappedExchangeId?: string | null | undefined;
+  limitPressure0?: string | undefined;
+  limitPressure1?: string | undefined;
 }): HealthStatus {
   if (isVirtualPool(pool)) return "N/A";
   const p0 = Number(pool.limitPressure0 ?? "0");
@@ -316,12 +316,12 @@ const MAX_HEALTH_CARRY_SECONDS = DEVIATION_BREACH_GRACE_SECONDS;
 
 type HealthCounterState = {
   source: string;
-  wrappedExchangeId?: string | null;
-  healthTotalSeconds?: string;
-  healthBinarySeconds?: string;
-  lastOracleSnapshotTimestamp?: string;
-  lastDeviationRatio?: string;
-  oracleExpiry?: string;
+  wrappedExchangeId?: string | null | undefined;
+  healthTotalSeconds?: string | undefined;
+  healthBinarySeconds?: string | undefined;
+  lastOracleSnapshotTimestamp?: string | undefined;
+  lastDeviationRatio?: string | undefined;
+  oracleExpiry?: string | undefined;
 };
 
 /** Return the counter pair with the current open interval included.
@@ -338,7 +338,10 @@ export function liveHealthCounters(
   pool: HealthCounterState,
   nowSeconds: number = Math.floor(Date.now() / 1000),
   fromSeconds?: number,
-): { healthBinarySeconds?: string; healthTotalSeconds?: string } {
+): {
+  healthBinarySeconds?: string | undefined;
+  healthTotalSeconds?: string | undefined;
+} {
   const baseBinary = Number(pool.healthBinarySeconds);
   const baseTotal = Number(pool.healthTotalSeconds ?? "0");
   if (!Number.isFinite(baseBinary) || !Number.isFinite(baseTotal)) {
@@ -459,11 +462,14 @@ const ANCHOR_FRESHNESS_LIMIT_SECONDS = 8 * 86_400;
  * masquerade as a 7d number.
  */
 export function computeWindowUptimePct(
-  now: { healthBinarySeconds?: string; healthTotalSeconds?: string },
+  now: {
+    healthBinarySeconds?: string | undefined;
+    healthTotalSeconds?: string | undefined;
+  },
   anchor: {
-    timestamp?: string;
-    cumulativeHealthBinarySeconds?: string;
-    cumulativeHealthTotalSeconds?: string;
+    timestamp?: string | undefined;
+    cumulativeHealthBinarySeconds?: string | undefined;
+    cumulativeHealthTotalSeconds?: string | undefined;
   } | null,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): number | null {
@@ -500,10 +506,10 @@ export function worstStatus(a: HealthStatus, b: HealthStatus): HealthStatus {
  * only ever writes one of the four values), falling back to the live
  * `computeLimitStatus` for older pools that pre-date the indexed field. */
 export function resolveLimitStatus(pool: {
-  source?: string;
-  limitStatus?: string;
-  limitPressure0?: string;
-  limitPressure1?: string;
+  source?: string | undefined;
+  limitStatus?: string | undefined;
+  limitPressure0?: string | undefined;
+  limitPressure1?: string | undefined;
 }): HealthStatus {
   return (
     (pool.limitStatus as HealthStatus | undefined) ?? computeLimitStatus(pool)
@@ -526,23 +532,23 @@ export function resolveLimitStatus(pool: {
  */
 export function computeEffectiveStatus(
   pool: {
-    source?: string;
-    oracleOk?: boolean;
-    oracleTimestamp?: string;
-    oracleExpiry?: string;
-    priceDifference?: string;
-    rebalanceThreshold?: number;
-    rebalanceThresholdAbove?: number;
-    rebalanceThresholdBelow?: number;
-    rebalanceThresholdsKnown?: boolean;
+    source?: string | undefined;
+    oracleOk?: boolean | undefined;
+    oracleTimestamp?: string | undefined;
+    oracleExpiry?: string | undefined;
+    priceDifference?: string | undefined;
+    rebalanceThreshold?: number | undefined;
+    rebalanceThresholdAbove?: number | undefined;
+    rebalanceThresholdBelow?: number | undefined;
+    rebalanceThresholdsKnown?: boolean | undefined;
     // Untrusted-deviation flag — propagated through `computeHealthStatus`.
     // See `PoolHealthState.hasHealthData` for the gating semantics.
-    hasHealthData?: boolean;
-    deviationBreachStartedAt?: string | null;
-    lastRebalancedAt?: string | null;
-    limitStatus?: string;
-    limitPressure0?: string;
-    limitPressure1?: string;
+    hasHealthData?: boolean | undefined;
+    deviationBreachStartedAt?: string | null | undefined;
+    lastRebalancedAt?: string | null | undefined;
+    limitStatus?: string | undefined;
+    limitPressure0?: string | undefined;
+    limitPressure1?: string | undefined;
   },
   chainId?: number,
 ): HealthStatus {
@@ -567,14 +573,14 @@ type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
  */
 export function computeRebalancerLiveness(
   pool: {
-    source?: string;
-    wrappedExchangeId?: string | null;
-    lastRebalancedAt?: string;
-    priceDifference?: string;
-    rebalanceThreshold?: number;
-    rebalanceThresholdAbove?: number;
-    rebalanceThresholdBelow?: number;
-    rebalanceThresholdsKnown?: boolean;
+    source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
+    lastRebalancedAt?: string | undefined;
+    priceDifference?: string | undefined;
+    rebalanceThreshold?: number | undefined;
+    rebalanceThresholdAbove?: number | undefined;
+    rebalanceThresholdBelow?: number | undefined;
+    rebalanceThresholdsKnown?: boolean | undefined;
   },
   nowSeconds: number,
 ): RebalancerStatus {

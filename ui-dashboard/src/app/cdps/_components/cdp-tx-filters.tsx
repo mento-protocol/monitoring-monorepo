@@ -190,8 +190,8 @@ export function CdpTxAddressFilter({
    *  resolved yet, render the input disabled with a small hint so users
    *  understand why the filter is unavailable instead of seeing zero
    *  matches after typing an address. */
-  disabled?: boolean;
-  disabledHint?: string;
+  disabled?: boolean | undefined;
+  disabledHint?: string | undefined;
 }) {
   return (
     <label className="flex flex-wrap items-center gap-1.5">

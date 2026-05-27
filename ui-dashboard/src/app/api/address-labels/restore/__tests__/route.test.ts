@@ -47,7 +47,10 @@ function req(
 ): NextRequest {
   const url = new URL("http://localhost/api/address-labels/restore");
   if (pathname) url.searchParams.set("pathname", pathname);
-  return new NextRequest(url, { method: "POST", headers });
+  return new NextRequest(url, {
+    method: "POST",
+    ...(headers ? { headers } : {}),
+  });
 }
 
 function blobResult(body: unknown, size?: number | null) {

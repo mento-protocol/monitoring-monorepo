@@ -363,7 +363,7 @@ export async function fetchNetworkData(
   const timed = <T>(document: string, variables?: Record<string, unknown>) =>
     client.request<T>({
       document,
-      variables,
+      ...(variables !== undefined ? { variables } : {}),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
