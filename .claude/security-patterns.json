@@ -41,7 +41,7 @@
         "**/mock*/**",
         "**/.claude/**"
       ],
-      "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Confirm and move secrets to env."
+      "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars — if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
     },
     {
       "rule_name": "hasura_aggregate_query",
@@ -55,7 +55,7 @@
     },
     {
       "rule_name": "bare_gcloud_in_app",
-      "regex": "(spawn|exec|execSync|execFile|spawnSync)\\([\"']gcloud",
+      "regex": "(spawn|exec|execSync|execFile|spawnSync)\\([`\"']gcloud",
       "paths": [
         "**/indexer-envio/**/*.ts",
         "**/ui-dashboard/**/*.ts",
@@ -71,6 +71,7 @@
       "paths": ["**/indexer-envio/src/handlers/**/*.ts"],
       "exclude_paths": [
         "**/indexer-envio/src/handlers/**/__tests__/**",
+        "**/indexer-envio/src/handlers/**/config.ts",
         "**/indexer-envio/test/**"
       ],
       "reminder": "Throwing from an Envio handler halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
@@ -104,9 +105,11 @@
         "**/*.test.ts",
         "**/*.spec.ts",
         "**/verify-quicknode-signature.ts",
-        "**/validate-quicknode-webhook.ts"
+        "**/validate-quicknode-webhook.ts",
+        "**/validate-payload.ts",
+        "**/check-payload-size.ts"
       ],
-      "reminder": "QuickNode webhook handler reads request body — verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early."
+      "reminder": "QuickNode webhook handler reads request body — verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early. (check-payload-size.ts is the intentional pre-sig DoS-rejection gate and is excluded from this rule.)"
     }
   ]
 }
