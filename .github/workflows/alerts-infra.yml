@@ -5,7 +5,7 @@ name: Alerts Infra
 # QuickNode webhooks). The stack's GCS backend and google provider both
 # impersonate `org-terraform@mento-terraform-seed-ffac` (see versions.tf and
 # providers.tf), so the CI deployer SA needs `roles/iam.serviceAccountTokenCreator`
-# on `org-terraform`. That grant lives in `terraform/main.tf`
+# on `org-terraform`. That grant lives in `terraform/ci-wif.tf`
 # (resource `ci_alerts_infra_org_terraform_token_creator`) and must be applied
 # from the top-level stack before this workflow can succeed.
 #

@@ -16,7 +16,7 @@ When you rename a resource, change its address (e.g. remove `count`/`for_each`, 
   - Loses any drift the team accepted out-of-band (e.g. an image rolled by `gcloud run services update`)
 - [ ] Run `pnpm infra:plan` and confirm the plan shows `# ... will be moved to ...`, NOT `# ... will be destroyed`
 
-The canonical example is `terraform/main.tf:421-424` — the metrics-bridge `moved` blocks added in PR #201.
+The canonical example is `terraform/metrics-bridge.tf` — the metrics-bridge `moved` blocks added in PR #201.
 
 ## 2. Cloud Run service shape
 

@@ -1,34 +1,36 @@
 # alerts/rules
 
-Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
+Grafana Cloud protocol alert rules, global routing, contact points, and message
+templates for Mento monitoring.
 
 ## Scope
 
-- **In this module:** `grafana_rule_group` resources for FPMM pool health, indexer health, and metrics-bridge liveness, organised into one Grafana folder per `service` label (`FPMMs`, `Indexer`, `Metrics Bridge`). Slack uses the normal critical/warning contact points plus resolve-disabled transition contact points for one-shot state-change notices.
-- **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
-- **Folder convention:** one folder per `service` label (same pattern Aegis uses for `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
+- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, oracle relayers, reserve balances, trading modes, trading limits, indexer health, and metrics-bridge liveness. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
+- **Not in this module:** Aegis dashboards and the Aegis service-health rule group. Those stay in [`aegis/terraform`](../../aegis/terraform).
+- **Folder convention:** one folder per `service` label (`FPMMs`, `Indexer`, `Metrics Bridge`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
 
 ## State
 
-Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6ed6/alerts-rules`. Backend uses default ADC — same as the sibling module.
+Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terraform-tfstate-6ed6/alerts-rules`. See [`docs/terraform.md`](../../docs/terraform.md) for the stack registry and the one-time Aegis-to-alerts state migration runbook.
 
 ## Prerequisites
 
-1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-infra` (per-domain warnings). Aegis dual-route additionally lands in `#alerts-reserve` and `#alerts-testnet`.
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
+3. **Discord and Splunk webhook URLs** for legacy protocol/Aegis routes. These moved here from `aegis/terraform`.
 
 ## Running
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Paste the Slack bot token and Grafana SA token into terraform.tfvars.
+# Paste the Slack bot token, Grafana SA token, Discord webhooks, and Splunk webhook into terraform.tfvars.
 
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
 pnpm alerts:rules:apply
 ```
 
-Both secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place, both secrets.
+All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place per stack.
 
 ## Smoke test
 
@@ -36,4 +38,7 @@ After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the 
 
 ## Service label routing
 
-Each rule attaches `service = "fpmms"`, `service = "indexer"`, or `service = "metrics-bridge"`. Future oracles / cdps rule groups will attach their own service label and stay in this module — no notification-tree churn required.
+v3 FPMM/indexer/metrics-bridge rules use rule-level `notification_settings`.
+Protocol relayer/reserve/trading/Aegis service-health rules use the global
+notification policy and route by `service`, `severity`, `chain`, and
+`rateFeed` labels.

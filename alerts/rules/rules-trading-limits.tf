@@ -1,6 +1,6 @@
 resource "grafana_rule_group" "trading_limits" {
   name             = "Trading Limits Alerts"
-  folder_uid       = var.trading_limits_folder.uid
+  folder_uid       = grafana_folder.trading_limits.uid
   interval_seconds = 120
 
   # L0 Short-term Limit Alert (Discord only)

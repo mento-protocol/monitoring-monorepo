@@ -3,10 +3,9 @@ provider "grafana" {
   auth = var.grafana_service_account_token
 }
 
-# One folder per `service` label — same split as the Aegis convention
-# (Oracle Relayers / Reserve / Trading Modes / Trading Limits are each their
-# own folder). Future `oracles` + `cdps` folders land when those rule groups
-# do; empty folders aren't created preemptively.
+# One folder per `service` label. Protocol-wide folders live in this stack
+# together with the global Grafana notification policy, while Aegis keeps only
+# its service-health folder/rules in `aegis/terraform`.
 resource "grafana_folder" "fpmms" {
   title = "FPMMs"
   uid   = "fpmms"
@@ -20,6 +19,22 @@ resource "grafana_folder" "metrics_bridge" {
 resource "grafana_folder" "indexer" {
   title = "Indexer"
   uid   = "indexer"
+}
+
+resource "grafana_folder" "oracle_relayers" {
+  title = "Oracle Relayers"
+}
+
+data "grafana_folder" "reserve" {
+  title = "Reserve"
+}
+
+resource "grafana_folder" "trading_modes" {
+  title = "Trading Modes"
+}
+
+resource "grafana_folder" "trading_limits" {
+  title = "Trading Limits"
 }
 
 locals {

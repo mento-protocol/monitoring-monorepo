@@ -88,22 +88,29 @@ The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](
 
 ### Infrastructure (Terraform)
 
-Most Vercel project and Upstash infrastructure is managed by Terraform in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. Terraform covers:
+Terraform stack ownership is registered in [`terraform.stacks.json`](../terraform.stacks.json) and summarized in [`docs/terraform.md`](./terraform.md). The dashboard/platform stack lives in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. The platform stack covers:
 
 - Vercel project creation and configuration (`root_directory`, `ignore_command`, Git integration)
 - All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (address labels storage)
+- Monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, and CI WIF/IAM
 
 **State is stored remotely** in GCS at `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo/`. No local backup is needed — GCS is the source of truth and has object versioning enabled.
 
 #### Terraform commands
 
 ```bash
+pnpm tf list       # show all registered Terraform stacks
 pnpm infra:init    # first time, or after provider changes
 pnpm infra:plan    # preview changes
 pnpm infra:apply   # apply changes
 ```
+
+Protocol Grafana alerts and global Grafana routing use the separate
+`alerts-rules` stack (`pnpm alerts:rules:plan`). Event-driven alert delivery
+uses `alerts-delivery` (`pnpm alerts:infra:plan`). Aegis dashboards and
+service-health alerts use `aegis` (`pnpm aegis:tf:plan`).
 
 ### Environment Variables
 
@@ -125,7 +132,7 @@ A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshot
 
 ### Security Posture — Preview Deployments
 
-Preview deployments receive the **same** `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `AUTH_SECRET` values as production. This is required by the Auth.js `redirectProxyUrl` flow (see [`terraform/main.tf`](../terraform/main.tf) auth block for the full rationale): Google OAuth callbacks land on the prod domain, and the signed state JWE must verify against the same `AUTH_SECRET` on both ends.
+Preview deployments receive the **same** `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `AUTH_SECRET` values as production. This is required by the Auth.js `redirectProxyUrl` flow (see [`terraform/dashboard.tf`](../terraform/dashboard.tf) auth block for the full rationale): Google OAuth callbacks land on the prod domain, and the signed state JWE must verify against the same `AUTH_SECRET` on both ends.
 
 To make this safe, two controls must hold:
 

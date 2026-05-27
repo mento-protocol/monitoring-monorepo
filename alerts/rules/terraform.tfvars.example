@@ -20,4 +20,19 @@ grafana_service_account_token = "glsa_REPLACE_ME"
 # slack_channel_oracles  = "#alerts-oracles"
 # slack_channel_pools    = "#alerts-pools"
 # slack_channel_infra    = "#alerts-infra"
+# slack_channel_reserve  = "#alerts-reserve"
+# slack_channel_testnet  = "#alerts-testnet"
 # slack_channel_warnings = "#alerts-warning" # [DEPRECATED] retained for dual-route compatibility
+
+# ── Legacy protocol routing ───────────────────────────────────────────────────
+# These values moved here from aegis/terraform. They still feed the global
+# Grafana notification policy for protocol + Aegis service-health alerts.
+discord_alerts_webhook_url_staging               = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_prod                  = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_reserve               = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_trading_modes_staging = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_trading_modes_prod    = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_trading_limits        = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_aegis                 = "https://discord.com/api/webhooks/REPLACE_ME"
+discord_alerts_webhook_url_catch_all             = "https://discord.com/api/webhooks/REPLACE_ME"
+splunk_on_call_alerts_webhook_url                = "https://alert.victorops.com/integrations/generic/REPLACE_ME/alert/REPLACE_ME"
