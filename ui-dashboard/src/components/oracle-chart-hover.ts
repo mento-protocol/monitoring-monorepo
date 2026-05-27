@@ -1,3 +1,4 @@
+import { escapePlotText } from "@/lib/plot";
 import type { OracleSnapshot } from "@/lib/types";
 
 export function formatBaseline(b: number): string {
@@ -70,6 +71,12 @@ export function formatOracleChartHoverText({
     `Oracle feed: ${priceText} (raw ${token0Symbol}/${token1Symbol} pair)` +
     deltaLine +
     // Source field distinguishes oracle_reported vs oracle_median_updated.
-    (snapshot.source ? `<br>Source: ${snapshot.source}` : "")
+    // Escape because Plotly's `text` field renders a permissive HTML subset
+    // and `source` is a DB-sourced string — even though the chart's GQL
+    // query currently restricts it to a fixed value, the rule is to escape
+    // at the render boundary (see `escapePlotText` doc).
+    (snapshot.source
+      ? `<br>Source: ${escapePlotText(snapshot.source)}`
+      : "")
   );
 }

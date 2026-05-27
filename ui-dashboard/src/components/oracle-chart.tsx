@@ -400,7 +400,18 @@ function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
   // + rangeslider below let you scrub further if needed. Falls back to a
   // padded all-data window when there are fewer than ~20 snapshots.
   const xaxisBase = makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY);
-  if (isSparse && timestamps.length >= 2) {
+  if (timestamps.length === 1) {
+    // Newly-indexed pool with exactly one snapshot — pad ±1h around the
+    // sole timestamp so the marker doesn't render against a zero-width
+    // (degenerate) X axis.
+    const ts = new Date(timestamps[0]).getTime();
+    const pad = 3600_000;
+    xaxisBase.range = [
+      new Date(ts - pad).toISOString(),
+      new Date(ts + pad).toISOString(),
+    ];
+    xaxisBase.autorange = false;
+  } else if (isSparse && timestamps.length >= 2) {
     const minTs = new Date(timestamps[0]).getTime();
     const maxTs = new Date(timestamps[timestamps.length - 1]).getTime();
     const pad = Math.max((maxTs - minTs) * 0.1, 3600_000);

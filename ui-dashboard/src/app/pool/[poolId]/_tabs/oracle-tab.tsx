@@ -184,6 +184,18 @@ export function OracleTab(props: OracleTabProps) {
   // for this feed" so it can render a neutral state in the first case rather
   // than greenwashing un-bounded points. A fetch error collapses to "missing"
   // — same neutral copy, the failure shows up in the network panel.
+  //
+  // "ready" also requires the kind-specific baseline to be non-null and
+  // non-zero. A MEDIAN_DELTA breaker right after `MedianRateEMAReset` has
+  // `medianRatesEMA = "0"` until the next positive median seeds it; treating
+  // that as "ready" would let the legend advertise "within/outside current
+  // band" semantics while no band can actually be drawn. BreakerPanel has
+  // the same "unseeded → not ready" carve-out.
+  const breakerHasBaseline = breakerConfig
+    ? breakerConfig.breakerKind === "VALUE_DELTA"
+      ? !!breakerConfig.referenceValue && breakerConfig.referenceValue !== "0"
+      : !!breakerConfig.medianRatesEMA && breakerConfig.medianRatesEMA !== "0"
+    : false;
   const breakerConfigStatus: "loading" | "ready" | "missing" =
     !rateFeedID || !chainId
       ? "missing"
@@ -191,7 +203,7 @@ export function OracleTab(props: OracleTabProps) {
         ? "missing"
         : isBreakerLoading
           ? "loading"
-          : breakerConfig
+          : breakerConfig && breakerHasBaseline
             ? "ready"
             : "missing";
 
