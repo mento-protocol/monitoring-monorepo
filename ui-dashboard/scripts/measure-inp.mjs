@@ -148,9 +148,9 @@ try {
   // Settle window: let the browser paint and deliver every
   // `PerformanceEventTiming` entry to the observer before we flush. Without
   // this wait the Apply click's entry can arrive AFTER the visibility-change
-  // and be silently dropped (Cursor Bugbot finding on 614). 1.5 s is well
-  // beyond the worst-case PerformanceObserver microtask delay observed on
-  // GHA runners while staying within the step's 30 s budget.
+  // and be silently dropped. 1.5 s is well beyond the worst-case
+  // PerformanceObserver microtask delay observed on GHA runners while
+  // staying within the step's 30 s budget.
   await page.waitForTimeout(1_500);
 
   // Force web-vitals to flush by hiding the page (its `onINP` reports on
