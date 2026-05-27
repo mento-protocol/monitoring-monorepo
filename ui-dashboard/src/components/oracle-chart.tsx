@@ -79,14 +79,20 @@ export function OracleChart({
 
   if (snapshots.length === 0) return null;
 
-  const baseline = breakerConfig
-    ? breakerConfig.breakerKind === "VALUE_DELTA"
-      ? fixidityToFloat(breakerConfig.referenceValue)
-      : fixidityToFloat(breakerConfig.medianRatesEMA)
-    : null;
-  const thresholdRatio = breakerConfig
-    ? fixidityToFloat(breakerConfig.rateChangeThreshold)
-    : null;
+  // Gate band geometry on `ready` only. SWR keeps the previous `breakerConfig`
+  // payload during a revalidation failure, so without this null-out a stale
+  // band could keep drawing while the legend / markers correctly show the
+  // neutral state. Treat any non-ready status as "no band".
+  const baseline =
+    breakerConfigStatus === "ready" && breakerConfig
+      ? breakerConfig.breakerKind === "VALUE_DELTA"
+        ? fixidityToFloat(breakerConfig.referenceValue)
+        : fixidityToFloat(breakerConfig.medianRatesEMA)
+      : null;
+  const thresholdRatio =
+    breakerConfigStatus === "ready" && breakerConfig
+      ? fixidityToFloat(breakerConfig.rateChangeThreshold)
+      : null;
 
   const plotData = buildOraclePlotData({
     snapshots,
