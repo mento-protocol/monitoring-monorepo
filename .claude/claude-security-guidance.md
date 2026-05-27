@@ -61,17 +61,28 @@ remain the enforcement layers.
   protected by Auth.js — that protection does NOT extend to route handlers
   that bypass middleware.
 
-## Aegis / metrics-bridge (webhook receivers)
+## Aegis / metrics-bridge (Prometheus exporters)
 
-- Every webhook route (Alertmanager forwarder, v2 alert forwarder,
-  QuickNode→Slack bridge) MUST verify HMAC or shared-secret before doing
-  any work. Reject before parsing.
-- Outbound destinations (Slack, VictorOps, Discord) are templated. Never
-  pass a request-controlled string directly into the channel selector or
-  the message body without escaping `<>&` in mrkdwn/HTML targets.
+- Both services are outbound pollers, not webhook receivers — aegis polls
+  on-chain view calls, metrics-bridge polls Hasura + RPC probes. The only
+  inbound routes are `GET /metrics` and `GET /health`; no body parsing.
+- Prometheus labels must have bounded cardinality. Never expose tx hashes,
+  user addresses, or pool-specific free text as unbounded labels — they
+  blow up Grafana storage and break dashboards.
 - Loki + Grafana: error events emitted as `context.log.error("<area>.<event>")`
-  are deduped per process for alert routing. Don't emit identical signatures
-  from unrelated code paths — it breaks the per-area dedup.
+  in the indexer are deduped per process for alert routing. Don't emit
+  identical signatures from unrelated code paths — it breaks the per-area
+  dedup.
+
+## Webhook receivers (alerts/infra/onchain-event-handler)
+
+- The QuickNode webhook receiver (`alerts/infra/onchain-event-handler/`,
+  GCP Cloud Function) MUST verify the QuickNode signature via
+  `verify-quicknode-signature.ts` BEFORE parsing the request body. Reject
+  unauthenticated requests early.
+- Outbound destinations (Slack, Discord) are templated. Never pass a
+  request-controlled string directly into the channel selector or the
+  message body without escaping `<>&` in mrkdwn/HTML targets.
 
 ## GitHub Actions / supply chain
 

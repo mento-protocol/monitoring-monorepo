@@ -68,16 +68,16 @@
     {
       "rule_name": "indexer_handler_throw",
       "regex": "throw\\s+new\\s+Error",
-      "paths": ["**/indexer-envio/src/**/*.ts"],
+      "paths": ["**/indexer-envio/src/handlers/**/*.ts"],
       "exclude_paths": [
-        "**/indexer-envio/src/**/__tests__/**",
+        "**/indexer-envio/src/handlers/**/__tests__/**",
         "**/indexer-envio/test/**"
       ],
       "reminder": "Throwing from an Envio handler halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
     },
     {
       "rule_name": "number_coerce_onchain_value",
-      "regex": "Number\\((amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|value)\\b",
+      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|netflow0|netflow1|netflowGlobal|limit0|limit1|limitGlobal|value)\\b",
       "paths": ["**/indexer-envio/src/**/*.ts"],
       "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge."
     },
@@ -96,9 +96,17 @@
     {
       "rule_name": "webhook_no_hmac_check",
       "regex": "(req\\.body|request\\.body|await\\s+req\\.json|await\\s+request\\.json)",
-      "paths": ["**/aegis/**/*.ts", "**/metrics-bridge/**/*.ts"],
-      "exclude_paths": ["**/test/**", "**/tests/**", "**/__tests__/**"],
-      "reminder": "Webhook handler reads body — verify HMAC / shared-secret BEFORE parsing the body, not after. Reject unauthenticated requests early."
+      "paths": ["**/alerts/infra/onchain-event-handler/src/**/*.ts"],
+      "exclude_paths": [
+        "**/test/**",
+        "**/tests/**",
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/verify-quicknode-signature.ts",
+        "**/validate-quicknode-webhook.ts"
+      ],
+      "reminder": "QuickNode webhook handler reads request body — verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early."
     }
   ]
 }
