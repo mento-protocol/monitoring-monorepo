@@ -1,6 +1,26 @@
+/** @vitest-environment jsdom */
+
 import { describe, expect, it } from "vitest";
-import { formatOracleChartHoverText } from "../oracle-chart";
+import { __test__, formatOracleChartHoverText } from "../oracle-chart";
 import type { OracleSnapshot } from "@/lib/types";
+
+const {
+  buildOracleShapes,
+  buildOracleXaxis,
+  buildOraclePlotData,
+  isOutOfBand,
+} = __test__;
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+// Fixidity 1e24 encoding for `oraclePrice`. We build the string by multiplying
+// the float by 1e6 (rounded to an integer) then padding 18 zeros, which gives
+// us a deterministic 24-digit decimal scale without losing precision on the
+// price magnitudes the chart exercises.
+const toFixidity = (n: number): string =>
+  BigInt(Math.round(n * 1_000_000)).toString() + "0".repeat(18);
 
 function oracleSnapshot(
   overrides: Partial<OracleSnapshot> = {},
@@ -10,7 +30,7 @@ function oracleSnapshot(
     chainId: 42220,
     poolId: "42220-0xpool",
     timestamp: "1778457600",
-    oraclePrice: "1000000000000000000",
+    oraclePrice: "1000000000000000000000000", // 1.0 in Fixidity 1e24
     oracleOk: true,
     numReporters: 3,
     priceDifference: "0",
@@ -22,6 +42,19 @@ function oracleSnapshot(
     ...overrides,
   };
 }
+
+/** Snapshot fixture with `oraclePrice` set from a float (Fixidity 1e24). */
+function snapAtPrice(price: number, ts: number): OracleSnapshot {
+  return oracleSnapshot({
+    id: `snap-${ts}`,
+    timestamp: String(ts),
+    oraclePrice: toFixidity(price),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// formatOracleChartHoverText (existing coverage)
+// ---------------------------------------------------------------------------
 
 describe("formatOracleChartHoverText", () => {
   it("renders price + breaker verdict when inside the band", () => {
@@ -78,5 +111,335 @@ describe("formatOracleChartHoverText", () => {
     });
 
     expect(text).not.toContain("Δ vs baseline");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isOutOfBand
+// ---------------------------------------------------------------------------
+
+describe("isOutOfBand", () => {
+  it("returns null when breakerConfigStatus is not ready", () => {
+    expect(isOutOfBand(1.0, 1.0, 0.01, "loading")).toBe(null);
+    expect(isOutOfBand(1.0, 1.0, 0.01, "missing")).toBe(null);
+  });
+
+  it("returns null when baseline is missing", () => {
+    expect(isOutOfBand(1.0, null, 0.01, "ready")).toBe(null);
+  });
+
+  it("returns null when thresholdRatio is missing", () => {
+    expect(isOutOfBand(1.0, 1.0, null, "ready")).toBe(null);
+  });
+
+  it("returns null when price is NaN", () => {
+    expect(isOutOfBand(Number.NaN, 1.0, 0.01, "ready")).toBe(null);
+  });
+
+  it("returns true when |price - baseline| / baseline > thresholdRatio", () => {
+    // baseline=1, threshold=0.01 → trip outside [0.99, 1.01].
+    expect(isOutOfBand(1.02, 1.0, 0.01, "ready")).toBe(true);
+    expect(isOutOfBand(0.97, 1.0, 0.01, "ready")).toBe(true);
+  });
+
+  it("returns false when price sits inside the band", () => {
+    expect(isOutOfBand(1.0, 1.0, 0.01, "ready")).toBe(false);
+    expect(isOutOfBand(1.005, 1.0, 0.01, "ready")).toBe(false);
+    expect(isOutOfBand(0.995, 1.0, 0.01, "ready")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOracleShapes
+// ---------------------------------------------------------------------------
+
+describe("buildOracleShapes", () => {
+  it("returns no band shapes when baseline is null", () => {
+    const shapes = buildOracleShapes(undefined, 1.1, null, 0.01);
+    expect(shapes).toEqual([]);
+  });
+
+  it("returns no band shapes when thresholdRatio is null", () => {
+    const shapes = buildOracleShapes(undefined, 1.1, 1.0, null);
+    expect(shapes).toEqual([]);
+  });
+
+  it("returns only the breach guide when band is absent but breach is set", () => {
+    const shapes = buildOracleShapes("1778457600", 1.1, null, null);
+    expect(shapes).toHaveLength(1);
+    expect(shapes![0]).toMatchObject({
+      type: "line",
+      xref: "x",
+      yref: "paper",
+      layer: "above",
+    });
+  });
+
+  it("emits three band rects + two threshold lines + baseline + breach guide", () => {
+    const shapes = buildOracleShapes("1778457600", 1.5, 1.0, 0.01);
+    // 3 rects + 2 threshold lines + 1 baseline + 1 breach guide = 7.
+    expect(shapes).toHaveLength(7);
+
+    // Order: red-below, green-inside, red-above, dashed-Lo, dashed-Hi, baseline, breach guide.
+    const [
+      redBelow,
+      greenInside,
+      redAbove,
+      threshLo,
+      threshHi,
+      baselineLine,
+      breachGuide,
+    ] = shapes!;
+
+    expect(redBelow).toMatchObject({
+      type: "rect",
+      fillcolor: "#ef4444",
+      layer: "below",
+      y0: 0,
+      y1: 0.99,
+    });
+    expect(greenInside).toMatchObject({
+      type: "rect",
+      fillcolor: "#22c55e",
+      layer: "below",
+      y0: 0.99,
+      y1: 1.01,
+    });
+    expect(redAbove).toMatchObject({
+      type: "rect",
+      fillcolor: "#ef4444",
+      layer: "below",
+      y0: 1.01,
+    });
+    // Threshold lines (dashed red, above layer).
+    expect(threshLo).toMatchObject({
+      type: "line",
+      layer: "above",
+      line: { color: "#ef4444", width: 1.25, dash: "dash" },
+      y0: 0.99,
+      y1: 0.99,
+    });
+    expect(threshHi).toMatchObject({
+      type: "line",
+      layer: "above",
+      line: { color: "#ef4444", width: 1.25, dash: "dash" },
+      y0: 1.01,
+      y1: 1.01,
+    });
+    // Baseline (dotted, dim slate).
+    expect(baselineLine).toMatchObject({
+      type: "line",
+      layer: "above",
+      line: { dash: "dot" },
+      y0: 1.0,
+      y1: 1.0,
+    });
+    // Breach guide (vertical, against paper-y). The x-anchor is derived from
+    // `breachStartedAt * 1000` → ISO; asserting it pins the unit semantics so
+    // a regression to (e.g.) millisecond inputs would surface here.
+    expect(breachGuide).toMatchObject({
+      type: "line",
+      xref: "x",
+      yref: "paper",
+      layer: "above",
+      line: { color: "#ef4444", dash: "dot" },
+      x0: "2026-05-11T00:00:00.000Z",
+      x1: "2026-05-11T00:00:00.000Z",
+    });
+  });
+
+  it("omits the breach guide when breachStartedAt is unset / zero", () => {
+    const unset = buildOracleShapes(undefined, 1.5, 1.0, 0.01);
+    expect(unset).toHaveLength(6); // 3 rects + 2 thresholds + 1 baseline.
+
+    const zero = buildOracleShapes("0", 1.5, 1.0, 0.01);
+    expect(zero).toHaveLength(6);
+  });
+
+  it("anchors the upper red rect past max(baseline*10, yMax*2)", () => {
+    const shapes = buildOracleShapes(undefined, 1.5, 1.0, 0.01);
+    const redAbove = shapes![2];
+    // max(1*10, 1.5*2) = 10.
+    expect(redAbove).toMatchObject({ y1: 10 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOracleXaxis
+// ---------------------------------------------------------------------------
+
+describe("buildOracleXaxis", () => {
+  it("pads ±1h around a single timestamp (newly-indexed pool branch)", () => {
+    const ts = "2026-05-27T12:00:00.000Z";
+    const xaxis = buildOracleXaxis([ts], true);
+    expect(xaxis.autorange).toBe(false);
+    expect(xaxis.range).toEqual([
+      "2026-05-27T11:00:00.000Z",
+      "2026-05-27T13:00:00.000Z",
+    ]);
+  });
+
+  it("pads a sparse 2+ timestamp window by max(span*0.1, 1h)", () => {
+    // Span = 30min (1800s), 0.1 * span = 180s — clamped to 3600s (1h).
+    const xaxis = buildOracleXaxis(
+      ["2026-05-27T12:00:00.000Z", "2026-05-27T12:30:00.000Z"],
+      true,
+    );
+    expect(xaxis.autorange).toBe(false);
+    expect(xaxis.range).toEqual([
+      "2026-05-27T11:00:00.000Z",
+      "2026-05-27T13:30:00.000Z",
+    ]);
+  });
+
+  it("uses span*0.1 padding when the window is already wider than 1h", () => {
+    // Span = 100h, 0.1 * span = 10h, > 1h floor.
+    const xaxis = buildOracleXaxis(
+      ["2026-05-23T00:00:00.000Z", "2026-05-27T04:00:00.000Z"],
+      true,
+    );
+    expect(xaxis.range).toEqual([
+      "2026-05-22T14:00:00.000Z",
+      "2026-05-27T14:00:00.000Z",
+    ]);
+  });
+
+  it("defaults to a 7-day trailing window when there are enough timestamps", () => {
+    // Build 25 hourly timestamps from 2026-05-20T00 → 2026-05-21T00, then
+    // jump the last one to 2026-05-27T12 so the trailing 7d window kicks
+    // in (max - 7d > minDataTs).
+    const ts: string[] = [];
+    for (let i = 0; i < 24; i++) {
+      ts.push(new Date(Date.UTC(2026, 4, 1, i)).toISOString());
+    }
+    ts.push("2026-05-27T12:00:00.000Z");
+    const xaxis = buildOracleXaxis(ts, false);
+    expect(xaxis.autorange).toBe(false);
+    expect(xaxis.range).toEqual([
+      "2026-05-20T12:00:00.000Z", // max - 7d
+      "2026-05-27T12:00:00.000Z",
+    ]);
+  });
+
+  it("clamps the trailing window to minDataTs when total span < 7d", () => {
+    // Build 25 hourly timestamps spanning <7d so `start = max(minDataTs, max - 7d)`
+    // resolves to `minDataTs`, not the 7d-ago wall clock.
+    const ts: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      ts.push(new Date(Date.UTC(2026, 4, 1, i)).toISOString());
+    }
+    const xaxis = buildOracleXaxis(ts, false);
+    expect(xaxis.range).toEqual([
+      "2026-05-01T00:00:00.000Z",
+      "2026-05-02T00:00:00.000Z",
+    ]);
+  });
+
+  it("returns the default axis (no range override) when timestamps is empty", () => {
+    const xaxis = buildOracleXaxis([], false);
+    expect(xaxis.range).toBeUndefined();
+    expect(xaxis.autorange).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOraclePlotData — y-range autosize
+// ---------------------------------------------------------------------------
+
+describe("buildOraclePlotData y-range autosize", () => {
+  function buildData(opts: {
+    prices: number[];
+    baseline: number | null;
+    thresholdRatio: number | null;
+    breakerConfigStatus?: "ready" | "loading" | "missing";
+  }) {
+    const snapshots = opts.prices.map((p, i) => snapAtPrice(p, 1778457600 + i));
+    return buildOraclePlotData({
+      snapshots,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+      baseline: opts.baseline,
+      thresholdRatio: opts.thresholdRatio,
+      breakerConfigStatus: opts.breakerConfigStatus ?? "ready",
+    });
+  }
+
+  it("excludes both band edges when data sits far from both (tight VALUE_DELTA)", () => {
+    // baseline=1.0, threshold=0.001 → band [0.999, 1.001]. Prices clustered
+    // at ~1.005 (far above both edges). dataSpan = 0.0002, margin =
+    // max(0.0001, 0.001) = 0.001. bandHi=1.001 vs dataMin-margin=1.0039 → far
+    // below, excluded. bandLo=0.999 → much farther below, also excluded.
+    // The inline comment calls this out: "For tight VALUE_DELTA stablecoin
+    // pools, data clustered at one band still hides the far band."
+    const { yMin, yMax } = buildData({
+      prices: [1.0049, 1.005, 1.0051],
+      baseline: 1.0,
+      thresholdRatio: 0.001,
+    });
+    // With both band edges excluded, the visible range straddles only the
+    // data extremes (~1.0049-1.0051) with padding.
+    expect(yMin).toBeGreaterThan(1.001); // bandHi (and bandLo) excluded
+    expect(yMax).toBeGreaterThan(1.005); // covers data + padding
+  });
+
+  it("includes one band edge when data sits near it (one-sided drift)", () => {
+    // baseline=1.0, threshold=0.05 → band [0.95, 1.05]. Push data near bandHi.
+    // dataSpan = 0.001, margin = max(5e-4, 0.05) = 0.05. Band edges within
+    // dataMin/Max ± 0.05 window — both qualify under MEDIAN_DELTA term.
+    // But the math: bandHi=1.05, dataMax=1.049 → bandHi - dataMax = 0.001
+    // is within margin (0.05). Same on the lower side: bandLo=0.95,
+    // dataMin=1.048 → dataMin - bandLo = 0.098 > 0.05 → bandLo excluded.
+    const { yMin, yMax } = buildData({
+      prices: [1.048, 1.0485, 1.049],
+      baseline: 1.0,
+      thresholdRatio: 0.05,
+    });
+    expect(yMax).toBeGreaterThanOrEqual(1.05); // bandHi included
+    expect(yMin).toBeGreaterThan(0.95); // bandLo NOT included
+  });
+
+  it("includes BOTH band edges for centered data with MEDIAN_DELTA-style margin", () => {
+    // baseline=1.0, threshold=0.05 → band [0.95, 1.05]. Prices [0.999, 1.0, 1.001].
+    // dataSpan=0.002, margin=max(0.001, 0.05) = 0.05. Both edges (±0.05 from
+    // baseline) fall within data ± margin — both should be included. This is
+    // the case the inline comment calls out as "the MEDIAN_DELTA win".
+    const { yMin, yMax } = buildData({
+      prices: [0.999, 1.0, 1.001],
+      baseline: 1.0,
+      thresholdRatio: 0.05,
+    });
+    expect(yMin).toBeLessThanOrEqual(0.95); // bandLo included
+    expect(yMax).toBeGreaterThanOrEqual(1.05); // bandHi included
+  });
+
+  it("falls back to baseline when all snapshot prices are invalid", () => {
+    // Snapshots with `oraclePrice: "0"` resolve to NaN inside the helper,
+    // so the finite-price array is empty and dataMin/dataMax fall back to
+    // baseline. yMin/yMax must still resolve to a finite window.
+    const snapshots = [
+      oracleSnapshot({ id: "s-1", oraclePrice: "0" }),
+      oracleSnapshot({ id: "s-2", oraclePrice: "" }),
+    ];
+    const { yMin, yMax } = buildOraclePlotData({
+      snapshots,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+      baseline: 1.0,
+      thresholdRatio: 0.01,
+      breakerConfigStatus: "ready",
+    });
+    expect(Number.isFinite(yMin)).toBe(true);
+    expect(Number.isFinite(yMax)).toBe(true);
+    expect(yMin).toBeLessThan(1.0);
+    expect(yMax).toBeGreaterThan(1.0);
+  });
+
+  it("produces a non-degenerate window even for perfectly flat data", () => {
+    const { yMin, yMax } = buildData({
+      prices: [1.0, 1.0, 1.0],
+      baseline: 1.0,
+      thresholdRatio: 0.01,
+    });
+    expect(yMax).toBeGreaterThan(yMin);
   });
 });
