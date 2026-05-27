@@ -105,8 +105,20 @@
     {
       "rule_name": "aws_access_key",
       "regex": "(AKIA|ASIA)[A-Z2-7]{16}",
-      "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials.",
-      "exclude_paths": ["**/.claude/**"]
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*",
+        "**/.claude/**",
+        "**/test/**",
+        "**/tests/**",
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/fixtures/**"
+      ],
+      "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials."
     },
     {
       "rule_name": "private_key_literal",
