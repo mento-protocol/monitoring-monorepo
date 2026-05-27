@@ -62,9 +62,9 @@ function makeReq(
   }
   return new NextRequest(url, {
     method: "GET",
-    headers: opts.bearer
-      ? { authorization: `Bearer ${opts.bearer}` }
-      : undefined,
+    ...(opts.bearer
+      ? { headers: { authorization: `Bearer ${opts.bearer}` } }
+      : {}),
   });
 }
 

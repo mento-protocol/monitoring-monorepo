@@ -408,7 +408,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -457,9 +457,6 @@ add_package_quality_commands() {
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
-  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
-    add_command "pnpm --filter ${package_name} typecheck:strict" "$reason"
-  fi
   add_turbo_package_task "$package_name" "test" "$reason"
   add_turbo_package_task "$package_name" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
@@ -548,6 +545,7 @@ add_root_tooling_package_script_checks() {
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
   add_command "node scripts/agent-prewarm.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
 }
 
@@ -919,6 +917,18 @@ while IFS= read -r path; do
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
           add_workspace_quality_commands "central CI workflow changed"
+          add_command "pnpm tf:test" "Terraform registry-backed CI workflow changed"
+          add_terraform_validate_commands "terraform" "Terraform registry-backed CI workflow changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform registry-backed CI workflow changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform registry-backed CI workflow changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform registry-backed CI workflow changed"
+          ;;
+        .github/workflows/infra.yml)
+          add_command "pnpm tf:test" "Terraform registry workflow changed"
+          add_terraform_validate_commands "terraform" "Terraform registry workflow changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform registry workflow changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform registry workflow changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform registry workflow changed"
           ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
@@ -1063,6 +1073,13 @@ while IFS= read -r path; do
         scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
+        scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
+          add_command "pnpm tf:test" "Terraform stack wrapper changed"
+          add_terraform_validate_commands "terraform" "Terraform stack wrapper changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform stack wrapper changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform stack wrapper changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
+          ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
@@ -1084,6 +1101,15 @@ while IFS= read -r path; do
       ;;
     scripts/*|tools/*)
       add_surface "scripts"
+      ;;
+    terraform.stacks.json)
+      add_surface "terraform"
+      add_command "pnpm tf:test" "Terraform stack registry changed"
+      add_terraform_validate_commands "terraform" "Terraform stack registry changed"
+      add_terraform_validate_commands "alerts/rules" "Terraform stack registry changed"
+      add_terraform_validate_commands "alerts/infra" "Terraform stack registry changed"
+      add_terraform_validate_commands "aegis/terraform" "Terraform stack registry changed"
+      add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
       ;;
     package.json)
       root_package_json_class="$(get_root_package_json_class)"

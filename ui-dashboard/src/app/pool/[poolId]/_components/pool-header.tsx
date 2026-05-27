@@ -52,9 +52,9 @@ export function PoolHeader({
   tradingLimitsError = false,
 }: {
   pool: Pool;
-  deployTxHash?: string;
+  deployTxHash?: string | undefined;
   tradingLimits: TradingLimit[];
-  tradingLimitsError?: boolean;
+  tradingLimitsError?: boolean | undefined;
 }) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);

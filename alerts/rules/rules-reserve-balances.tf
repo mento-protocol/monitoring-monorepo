@@ -1,6 +1,6 @@
 resource "grafana_rule_group" "reserve_balances" {
   name             = "Reserve Balance Alerts"
-  folder_uid       = var.reserve_folder.uid
+  folder_uid       = data.grafana_folder.reserve.uid
   interval_seconds = 120
 
   dynamic "rule" {

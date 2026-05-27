@@ -44,6 +44,17 @@ lint:
     - linters: [checkov]
       paths:
         - terraform/main.tf
+        # Platform root resources are bootstrapping/project-shape resources
+        # with existing reviewed IAM/WIF tradeoffs. Keep the pre-split
+        # terraform/main.tf checkov behavior stable after moving resources
+        # into concern files.
+        - terraform/aegis-bootstrap.tf
+        - terraform/ci-wif.tf
+        - terraform/dashboard.tf
+        - terraform/gcp-project.tf
+        - terraform/metrics-bridge.tf
+        - terraform/project-iam.tf
+        - terraform/providers.tf
         - pnpm-lock.yaml
         # Ethereum contract addresses look like base64 high-entropy strings to checkov;
         # this file holds only public proxy + token addresses generated from

@@ -32,7 +32,7 @@ type Props = {
   /** Pass empty string to allow the user to type a new address */
   address: string;
   /** Pre-filled initial values when editing an existing entry */
-  initial?: AddressEntry;
+  initial?: AddressEntry | undefined;
   onClose: () => void;
   /**
    * Forwarded to the inner form. Forces an explicit name when set —
@@ -40,7 +40,7 @@ type Props = {
    * disagreeing names so a tag-only save can't persist an empty
    * global label that suppresses every contract row in the index.
    */
-  requireExplicitName?: boolean;
+  requireExplicitName?: boolean | undefined;
   // Forwarded to the label form. Hosts (e.g. `AddressBookClient`)
   // wire these into the provider's pending-mutation ledger so a
   // save started in one surface (modal) blocks competing writes
@@ -49,33 +49,25 @@ type Props = {
   // may have just typed in the new-address flow), so the host
   // marks pending against the correct address — not against
   // `editTarget.address` which is `""` for the add-new modal.
-  onLabelSavingChange?: (
-    saving: boolean,
-    formId: string,
-    address: string,
-  ) => void;
-  onLabelDeletingChange?: (
-    deleting: boolean,
-    formId: string,
-    address: string,
-  ) => void;
+  onLabelSavingChange?:
+    | ((saving: boolean, formId: string, address: string) => void)
+    | undefined;
+  onLabelDeletingChange?:
+    | ((deleting: boolean, formId: string, address: string) => void)
+    | undefined;
   /** Disable the entire label form (inputs + buttons). */
-  externallyDisabledLabel?: boolean;
+  externallyDisabledLabel?: boolean | undefined;
   // Same callbacks but for the forensic-report editor inside the
   // Report tab. Tracked separately so a label save doesn't block a
   // report save against the same address (or vice versa).
-  onReportSavingChange?: (
-    saving: boolean,
-    editorId: string,
-    address: string,
-  ) => void;
-  onReportDeletingChange?: (
-    deleting: boolean,
-    editorId: string,
-    address: string,
-  ) => void;
+  onReportSavingChange?:
+    | ((saving: boolean, editorId: string, address: string) => void)
+    | undefined;
+  onReportDeletingChange?:
+    | ((deleting: boolean, editorId: string, address: string) => void)
+    | undefined;
   /** Disable the entire forensic-report editor. */
-  externallyDisabledReport?: boolean;
+  externallyDisabledReport?: boolean | undefined;
   /**
    * Bubbles the form's current address state up to the host. Used by
    * `AddressBookClient` in the add-new flow to evaluate
@@ -83,7 +75,7 @@ type Props = {
    * address the user is typing (the modal's `address` prop is `""`
    * on mount and never updates until close).
    */
-  onDraftAddressChange?: (next: string) => void;
+  onDraftAddressChange?: ((next: string) => void) | undefined;
 };
 
 function addressDraftReducer(

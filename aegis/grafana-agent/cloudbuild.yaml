@@ -9,7 +9,7 @@
 # The App Engine default service account
 # (`<project>@appspot.gserviceaccount.com`) needs
 # `roles/secretmanager.secretAccessor` on each grafana-agent-* secret;
-# bound by `terraform/main.tf` → `grafana_agent_appspot_accessor`.
+# bound by `terraform/aegis-bootstrap.tf` → `grafana_agent_appspot_accessor`.
 # (App Engine Flex apps run as the AppSpot SA, not the Compute default
 # SA, even though the underlying VM uses Compute.)
 steps:

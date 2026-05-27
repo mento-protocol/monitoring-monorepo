@@ -25,13 +25,13 @@ type Props = {
    * may swap as the user types into the new-address input on the
    * Label tab); the host uses it to mark the right pending entry.
    */
-  onSavingChange?: (saving: boolean, editorId: string, address: string) => void;
+  onSavingChange?:
+    | ((saving: boolean, editorId: string, address: string) => void)
+    | undefined;
   /** Same as `onSavingChange` but for the delete flow. */
-  onDeletingChange?: (
-    deleting: boolean,
-    editorId: string,
-    address: string,
-  ) => void;
+  onDeletingChange?:
+    | ((deleting: boolean, editorId: string, address: string) => void)
+    | undefined;
   /**
    * When true, all controls (title input, body textarea, view/edit
    * toggle, Save, Delete) are disabled. Used by the host when there's
@@ -40,7 +40,7 @@ type Props = {
    * lose those edits the moment the in-flight request settles and
    * the SWR record-key updates.
    */
-  externallyDisabled?: boolean;
+  externallyDisabled?: boolean | undefined;
 };
 
 async function fetchSingleReport(

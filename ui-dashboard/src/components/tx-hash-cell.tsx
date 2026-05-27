@@ -9,7 +9,7 @@ export function TxHashCell({
   chainId,
 }: {
   txHash: string;
-  chainId?: number;
+  chainId?: number | undefined;
 }) {
   const { network: contextNetwork } = useNetwork();
   const network = (() => {

@@ -34,7 +34,7 @@ The target project must already have enabled versions for these Secret Manager s
 - `grafana-agent-username`
 - `grafana-agent-password`
 
-Terraform (`terraform/main.tf` → `google_secret_manager_secret.grafana_agent` and the matching `_iam_member` resources) creates the secret containers, plus IAM bindings granting `roles/secretmanager.secretAccessor` to:
+Terraform (`terraform/aegis-bootstrap.tf` → `google_secret_manager_secret.grafana_agent` and the matching `_iam_member` resources) creates the secret containers, plus IAM bindings granting `roles/secretmanager.secretAccessor` to:
 
 - The App Engine default SA (`<project>@appspot.gserviceaccount.com`) via `grafana_agent_appspot_accessor` — **this is the identity `entrypoint.sh` authenticates as at runtime.** App Engine Flex apps run as the AppSpot SA (not the Compute default SA, even though the underlying VM uses Compute) — the metadata server inside the application context returns the AppSpot SA's token.
 - The Compute default SA (`<project-number>-compute@developer.gserviceaccount.com`) — kept for the legacy Cloud Build path and any future Compute-SA consumers.

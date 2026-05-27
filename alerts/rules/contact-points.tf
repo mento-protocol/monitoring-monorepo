@@ -1,11 +1,7 @@
-# Slack contact points routed via rule-level `notification_settings`, NOT via
-# the root `grafana_notification_policy` (which is owned by the Aegis repo as a
-# singleton resource — see aegis/terraform/grafana-alerts/notification-policies.tf).
-#
-# Bypassing the policy tree means:
-#   - No cross-repo coordination needed to ship v3 alerts.
-#   - v3 alerts' group/repeat timings are set per-rule below, not inherited.
-#   - Future per-domain splits (fpmms/oracles/cdps) can stay in this repo.
+# v3 rule groups route through rule-level `notification_settings` instead of
+# the global `grafana_notification_policy`. The policy tree in
+# notification-policies.tf exists for protocol/Aegis alerts that still rely on
+# label-based routing.
 
 resource "grafana_contact_point" "slack_critical" {
   name = "slack-alerts-critical"

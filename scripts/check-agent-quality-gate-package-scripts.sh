@@ -12,8 +12,11 @@ const expectedScripts = {
   "agent:prewarm": "node scripts/agent-prewarm.mjs",
   "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
   "agent:context-check": "node scripts/check-agent-context.mjs",
+  "agent:autoreview": "./scripts/agent-autoreview.sh",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+  "tf": "node scripts/tf-stacks.mjs",
+  "tf:test": "node scripts/tf-stacks.test.mjs",
   "lockfile:lint": "node scripts/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
 };

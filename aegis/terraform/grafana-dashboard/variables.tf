@@ -13,7 +13,7 @@ variable "aegis_folder" {
 
 locals {
   # Per-chain registry driving the relayer-signer panels. Mirrors the registry
-  # in grafana-alerts/locals.tf (kept in sync by hand, as the chains list was).
+  # in alerts/rules/protocol-routing-locals.tf (kept in sync by hand, as the chains list was).
   # To add an EVM chain (e.g. polygon mainnet/testnet) add an entry here.
   #
   #   title     → panel title suffix, e.g. "CELO Balances ... [Celo]"

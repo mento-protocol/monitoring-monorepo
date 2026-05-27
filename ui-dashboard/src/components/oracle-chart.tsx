@@ -163,10 +163,10 @@ const fixidityToFloat = (v: string | null | undefined): number | null => {
 
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
-  token0Symbol?: string;
-  token1Symbol?: string;
-  breachStartedAt?: string | null;
-  breakerConfig?: BreakerConfigForChart | null;
+  token0Symbol?: string | undefined;
+  token1Symbol?: string | undefined;
+  breachStartedAt?: string | null | undefined;
+  breakerConfig?: BreakerConfigForChart | null | undefined;
 }
 
 export function OracleChart({

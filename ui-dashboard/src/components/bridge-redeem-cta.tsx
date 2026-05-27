@@ -91,7 +91,7 @@ export type ToastEntry = {
   id: number;
   message: string;
   type: "success" | "error";
-  href?: string;
+  href?: string | undefined;
 };
 
 export type AddToast = (

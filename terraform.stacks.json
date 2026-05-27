@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 1,
+  "stacks": [
+    {
+      "id": "platform",
+      "name": "Platform",
+      "path": "terraform",
+      "description": "Dashboard Vercel project, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI Workload Identity Federation, and project IAM.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "monitoring-monorepo"
+      },
+      "providers": ["google", "local", "upstash", "vercel"],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "manual",
+        "apply": "manual"
+      },
+      "applyPolicy": "human-review-required",
+      "changedPathPatterns": [
+        "terraform/**",
+        "terraform.stacks.json",
+        "scripts/tf-stacks.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml"
+      ],
+      "aliases": ["pnpm infra:init", "pnpm infra:plan", "pnpm infra:apply"]
+    },
+    {
+      "id": "alerts-rules",
+      "name": "Alerts Rules",
+      "path": "alerts/rules",
+      "description": "Protocol Grafana alert rules, Grafana folders, global notification policy, contact points, message templates, and mute timings.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "alerts-rules"
+      },
+      "providers": ["grafana"],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "pull-request",
+        "apply": "push-main-production-environment"
+      },
+      "applyPolicy": "ci-production-environment-approved",
+      "changedPathPatterns": [
+        "alerts/rules/**",
+        "terraform.stacks.json",
+        "scripts/tf-stacks.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml",
+        ".github/workflows/alerts-rules.yml"
+      ],
+      "aliases": [
+        "pnpm alerts:rules:init",
+        "pnpm alerts:rules:plan",
+        "pnpm alerts:rules:apply"
+      ]
+    },
+    {
+      "id": "alerts-delivery",
+      "name": "Alerts Delivery",
+      "path": "alerts/infra",
+      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Function, Discord channel management, Sentry bridge, Slack channel lifecycle, and related GCP resources.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "alerts-infra"
+      },
+      "providers": [
+        "archive",
+        "discord",
+        "github",
+        "google",
+        "http",
+        "local",
+        "null",
+        "random",
+        "restapi",
+        "sentry"
+      ],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "pull-request",
+        "apply": "push-main-production-environment"
+      },
+      "applyPolicy": "ci-production-environment-approved",
+      "changedPathPatterns": [
+        "alerts/infra/**",
+        "terraform.stacks.json",
+        "scripts/tf-stacks.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml",
+        ".github/workflows/alerts-infra.yml"
+      ],
+      "aliases": [
+        "pnpm alerts:infra:init",
+        "pnpm alerts:infra:plan",
+        "pnpm alerts:infra:apply"
+      ]
+    },
+    {
+      "id": "aegis",
+      "name": "Aegis",
+      "path": "aegis/terraform",
+      "description": "Aegis Grafana dashboard, Aegis folder, and Aegis service-health rule group. Protocol alert rules and global routing live in alerts-rules.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "aegis"
+      },
+      "providers": ["grafana"],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "manual",
+        "apply": "manual"
+      },
+      "applyPolicy": "human-review-required",
+      "changedPathPatterns": [
+        "aegis/terraform/**",
+        "terraform.stacks.json",
+        "scripts/tf-stacks.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml"
+      ],
+      "aliases": [
+        "pnpm aegis:tf:init",
+        "pnpm aegis:tf:plan",
+        "pnpm aegis:tf:apply"
+      ]
+    }
+  ]
+}

@@ -18,8 +18,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   providers: [
     Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      ...(process.env.AUTH_GOOGLE_ID
+        ? { clientId: process.env.AUTH_GOOGLE_ID }
+        : {}),
+      ...(process.env.AUTH_GOOGLE_SECRET
+        ? { clientSecret: process.env.AUTH_GOOGLE_SECRET }
+        : {}),
       // On preview deployments PKCE cannot be used: the code verifier cookie is
       // set on the preview domain but the callback lands on prod (via the proxy)
       // — different domains, cookie never sent. Use state-only: JWE signed with

@@ -27,13 +27,13 @@ type AddressRowProps = {
   name: string;
   tags: string[];
   network: Network;
-  notes?: string;
-  isPublic?: boolean;
+  notes?: string | undefined;
+  isPublic?: boolean | undefined;
   isCustom: boolean;
-  kind?: "contract" | "custom" | "report";
-  source?: string;
-  createdAt?: string;
-  updatedAt?: string;
+  kind?: "contract" | "custom" | "report" | undefined;
+  source?: string | undefined;
+  createdAt?: string | undefined;
+  updatedAt?: string | undefined;
   canEdit: boolean;
   /** Pre-computed by the parent so the reports index hook isn't re-subscribed
    * per row — see AddressBookClient. */
@@ -42,7 +42,7 @@ type AddressRowProps = {
   /** When set, the whole row becomes a link to this href via an
    * absolutely-positioned overlay <Link>. Inner interactive elements
    * (explorer link, Edit button) take pointer events back via z-10. */
-  detailHref?: string;
+  detailHref?: string | undefined;
   onEdit: () => void;
 };
 

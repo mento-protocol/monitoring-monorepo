@@ -40,7 +40,7 @@ const SECONDS_PER_DAY = 86_400;
 export default function GlobalPage({
   initialNetworkData,
 }: {
-  initialNetworkData?: NetworkData[];
+  initialNetworkData?: NetworkData[] | undefined;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
   // back-navigation the populated SWR cache wins, which is the right call —
@@ -105,7 +105,7 @@ function perPoolTvlWindow(
 function GlobalContent({
   initialNetworkData,
 }: {
-  initialNetworkData?: NetworkData[];
+  initialNetworkData?: NetworkData[] | undefined;
 }) {
   const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
 

@@ -7,7 +7,7 @@ function makeClientError(status: number, retryAfter?: string): ClientError {
   const headers = new Headers();
   if (retryAfter !== undefined) headers.set("retry-after", retryAfter);
   return new ClientError(
-    { status, headers, body: "", errors: undefined, data: undefined },
+    { status, headers, body: "" },
     { query: "{ __typename }" },
   );
 }

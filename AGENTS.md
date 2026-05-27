@@ -68,14 +68,28 @@ execute until you review package scripts/lifecycle hooks and pass
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
 `scripts.agent:prewarm:test`, `scripts.agent:context-check`,
-`scripts.pr:ready-state`, `scripts.pr:ready-state:test`,
-`scripts.lockfile:lint`, or `scripts.lockfile:lint:test`; the gate treats that
-as tooling-only and runs an entrypoint validator plus the gate/prewarm/PR-ready
-regression tests instead of the package-script refusal path. Existing changed
-paths run targeted Trunk checks for faster local iteration. Deleted paths,
+`scripts.agent:autoreview`, `scripts.pr:ready-state`, `scripts.pr:ready-state:test`,
+`scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`, or
+`scripts.lockfile:lint:test`; the gate treats that as tooling-only and runs an
+entrypoint validator plus the gate/prewarm/PR-ready/Terraform-stack regression
+tests instead of the package-script refusal path. Existing changed paths run
+targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, and package-manager or package-manifest changes still run
 full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
 PR.
+
+For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
+the structured closeout review after the mapped gate and before pushing:
+
+```bash
+pnpm agent:autoreview
+```
+
+Use it as a batch-boundary verifier. Verify every accepted finding in the real
+code before editing, rerun focused checks after review-triggered fixes, and
+rerun autoreview once for that fixed batch. This adapter expects the global
+`~/.agents/skills/autoreview` skill and does not replace the final PR readiness
+probe.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -189,6 +203,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
+pnpm agent:autoreview              # Structured closeout review via ~/.agents/skills/autoreview; supports --engine claude
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
@@ -215,6 +230,8 @@ pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
 pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
 
 # Infrastructure (Terraform)
+pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
+pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
 pnpm infra:apply              # Apply infrastructure changes
@@ -223,6 +240,10 @@ pnpm alerts:infra:init / alerts:infra:plan / alerts:infra:apply
 # Grafana metric alert rules (v3 Slack rules):
 pnpm alerts:rules:init / alerts:rules:plan / alerts:rules:apply
 ```
+
+Terraform stack ownership is registered in `terraform.stacks.json` and
+documented in `docs/terraform.md`; do not infer ownership from directory names
+alone.
 
 **Terraform from a worktree** (e.g. `.claude/worktrees/<name>/`): `pnpm infra:*` scripts don't pass `-var-file`, and `terraform.tfvars` only lives in the main checkout (gitignored). Either run the commands from the main checkout, or from inside the worktree's `terraform/`:
 
@@ -237,16 +258,16 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 
 Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via symlink). Open the relevant file for package-specific rules, gotchas, and verification.
 
-| Package           | What it does                                                                                                                                                                                                                                                              | Read                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `aegis/`          | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns Aegis Grafana dashboards/alerts (`aegis/terraform/`)                                                                                                                                   | [`aegis/AGENTS.md`](aegis/AGENTS.md)                   |
-| `shared-config/`  | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace. | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)   |
-| `indexer-envio/`  | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM + v2 Broker. Schema in `schema.graphql`. Handler entry point is `src/EventHandlers.ts` (imports under `src/handlers/`).                                                                                                 | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)   |
-| `ui-dashboard/`   | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                               | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)     |
-| `metrics-bridge/` | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md) |
-| `terraform/`      | Vercel project + Upstash Redis + env vars + Cloud Run services. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                   | [`terraform/AGENTS.md`](terraform/AGENTS.md)           |
-| `alerts/`         | All alert plumbing. `alerts/rules/` = v3 Grafana metric alert rules (Slack-only); `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Discord + Sentry→Discord bridge + Discord channel/webhook mgmt). `alerts/infra/onchain-event-handler/` is the TS pnpm pkg.  | [`alerts/infra/README.md`](alerts/infra/README.md)     |
-| `scripts/`        | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                        | [`scripts/AGENTS.md`](scripts/AGENTS.md)               |
+| Package           | What it does                                                                                                                                                                                                                                                                                                           | Read                                                   |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `aegis/`          | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns the Aegis Grafana dashboard and service-health alert (`aegis/terraform/`)                                                                                                                                                           | [`aegis/AGENTS.md`](aegis/AGENTS.md)                   |
+| `shared-config/`  | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace.                                              | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)   |
+| `indexer-envio/`  | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM + v2 Broker. Schema in `schema.graphql`. Handler entry point is `src/EventHandlers.ts` (imports under `src/handlers/`).                                                                                                                                              | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)   |
+| `ui-dashboard/`   | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                                                                            | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)     |
+| `metrics-bridge/` | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                                                             | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md) |
+| `terraform/`      | Vercel project + Upstash Redis + env vars + Cloud Run services. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                                                                | [`terraform/AGENTS.md`](terraform/AGENTS.md)           |
+| `alerts/`         | All alert plumbing. `alerts/rules/` = protocol Grafana metric alert rules plus global Grafana routing/contact points/templates; `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Discord + Sentry→Discord bridge + Discord channel/webhook mgmt). `alerts/infra/onchain-event-handler/` is the TS pnpm pkg. | [`alerts/infra/README.md`](alerts/infra/README.md)     |
+| `scripts/`        | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                                                                     | [`scripts/AGENTS.md`](scripts/AGENTS.md)               |
 
 ### PR Review Guidance (Dashboard Scale)
 
@@ -273,17 +294,27 @@ Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code 
 | Command                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to `localhost:3000`; pass `prod` to verify against `monitoring.mento.org`.                                                                                                                                                                                                                                                                          |
+| `/autoreview [args]`                 | Run the shared structured closeout review helper (`pnpm agent:autoreview`) from Claude Code. Defaults to Codex as the review engine; pass `--engine claude` only when Claude review is explicitly wanted.                                                                                                                                                                                                                                                                                                                                                 |
 | `/babysit-indexer-deploy [<commit>]` | Arm a `Monitor` that polls Envio's deployment registry every 45s internally but only emits on state change (`REGISTERED` / `READY_TO_PROMOTE` / `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR`). Prompts for `pnpm deploy:indexer:promote <commit>` once every chain is caught up — never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. Replaces the prior `/loop 5m` cron version, which produced ~12 idle macOS notifications per sync. |
 
 To use them you need [Claude Code](https://claude.com/claude-code). Personal/local-only commands belong in your own `~/.claude/commands/` (or in `.git/info/exclude` if you want to keep them in this directory but not share).
 
 ## Codex Agent Skills
 
-Repo-tracked Codex skills live under `.agents/skills/`. Keep durable,
-team-shareable agent workflows there instead of relying on local-only
-`~/.codex` or `~/.claude` state. Project-level Codex MCP config lives in
-`.codex/config.toml`; local personal Codex settings still belong in
+Repo-tracked project skills live under `.agents/skills/`. Keep durable,
+team-shareable project workflows there instead of relying on local-only
+`~/.codex` or `~/.claude` state. Cross-project personal skills belong in
+`~/.agents/skills` and should be exposed to both agents through the
+`~/.codex/skills` and `~/.claude/skills` mirrors. Project-level Codex MCP config
+lives in `.codex/config.toml`; local personal Codex settings still belong in
 `~/.codex/config.toml`.
+
+`autoreview` is a cross-project global skill sourced from
+`~/.agents/skills/autoreview`. This repo exposes it through
+`pnpm agent:autoreview`, and Claude Code also has `/autoreview` as a thin
+command shim. Do not add repo-local `.agents/skills/autoreview` or
+`.claude/skills/autoreview` copies unless the global skill is intentionally
+forked.
 
 ### SessionEnd hook (reflect nudge)
 

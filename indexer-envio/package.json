@@ -25,7 +25,6 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "typecheck": "tsc --noEmit",
-    "typecheck:strict": "tsc --noEmit -p tsconfig.strict-dry-run.json",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",

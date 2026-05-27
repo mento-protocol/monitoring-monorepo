@@ -55,7 +55,7 @@ export function AggregatorBreakdownSection({
   isLoading: boolean;
   hasError: boolean;
   isCapHit: boolean;
-  chart?: AggregatorChartProps;
+  chart?: AggregatorChartProps | undefined;
 }) {
   return (
     <section className="space-y-3">
@@ -271,7 +271,7 @@ export function AggregatorLabel({
   label = name,
 }: {
   name: string;
-  label?: string;
+  label?: string | undefined;
 }) {
   const meta = getClusterMetadata(name);
   return (
