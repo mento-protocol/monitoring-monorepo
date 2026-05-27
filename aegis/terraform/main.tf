@@ -25,8 +25,3 @@ module "grafana_dashboard" {
   grafana_service_account_token = var.grafana_service_account_token
   aegis_folder                  = grafana_folder.aegis
 }
-
-moved {
-  from = module.grafana_alerts.grafana_rule_group.aegis_service_alerts
-  to   = grafana_rule_group.aegis_service_alerts
-}

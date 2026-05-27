@@ -42,9 +42,9 @@ the landed mechanism + severities.
 
 The initial Lighthouse CI gate landed in PR #451 with desktop performance + accessibility budgets. Remaining work to graduate it from advisory to fully-trusted:
 
-- [ ] **Architect a reliable Vercel deployment-protection bypass for lhci.** PR #451 shipped with bypass-via-header, but lhci's puppeteer-launched Chrome appears to redirect to the Vercel SSO interstitial despite the `x-vercel-protection-bypass` header — verified empirically (lhci audited `vercel.com/login?next=...` URLs instead of the dashboard). The query-param form works but embeds the secret in the publicly-readable lhci report (`temporary-public-storage`). Options to evaluate: (a) configure Vercel project to disable preview protection (Vercel project setting, may need governance approval); (b) gate the secret-bearing audit to a separate `workflow_run`-triggered job that runs from trusted base ref; (c) deploy a CDN-fronted preview alias that's unprotected for crawlers but auth-gated for browsers; (d) self-host lhci on a runner that talks to Vercel's API directly and uses a different auth flow. Once a reliable bypass lands, **promote accessibility from `warn` to `error` in `.lighthouserc.cjs`** so regressions block.
-- [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance. Depends on the bypass mechanism above — performance numbers from the SSO interstitial are not meaningful.
+- [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance.
 - [ ] Add INP (interaction-to-next-paint) coverage via lhci's user-flow mode with scripted interactions on the dashboard pages. Lighthouse's default navigation mode never produces an INP numeric value, so the budget was intentionally omitted in PR #451 to avoid silent-pass false confidence. User-flow mode would script the typical "open page, hover a chart, click a filter" interaction and run an INP audit on the scripted timespan.
+- [ ] **Graduate the audited-page guard from grep to manifest check.** PR (this one) added a stdout grep for `vercel.com/login` after `lhci autorun` as a fail-closed safety net so a bypass regression is loud, not silent. Once 5+ runs of empirical evidence confirm the cookie-based bypass works, replace the grep with a structural check against lhci's report manifest: parse `.lighthouseci/manifest.json` (or each report's `finalUrl`) and fail if any audited URL's host isn't the Vercel preview host, or if its path isn't `/` or `/pools`. Catches non-SSO interstitials too (e.g. Vercel error pages, mid-deploy 503s).
 
 ### React Compiler Evaluation
 
@@ -100,13 +100,6 @@ after skipping blanks and comments. Refresh before starting a split.
 
 - [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.
 
-## Indexer-envio defensive-hardening follow-ups (from rpc + bridge PR)
-
-The rpc-trust + bridge-attribution hardening PR (`indexer-envio-rpc-bridge-hardening`, PR #533) landed two interim guards — a structured warn at the breaker-kind default site, and a chainId in the BridgeAttestation id — and pointed at stricter long-term fixes. Track those here.
-
-- [ ] **Positive MARKET_HOURS identification in `fetchBreakerKind`.** Today, when both MedianDelta and ValueDelta selector probes return absent, the function defaults to `MARKET_HOURS` and caches the result via `breakerKindEffect`. The default also catches future breaker kinds, proxy-upgraded breakers, and EOAs added via governance or RPC poisoning — they'd persist as MARKET_HOURS until manual eviction. The `breakers.fetchBreakerKind.market_hours_default` structured warn already surfaces these via Loki → Grafana for operator review, but the misclassification still ships. Real fix: add a positive MARKET_HOURS probe (e.g. a selector unique to MarketHoursBreaker) OR change the cache policy to only persist on positive identification — negative defaults retry next time, trading false-positive cache cost for fresh probes.
-- [ ] **Transceiver filter on the Wormhole `transferRedeemed` fallback drain.** When `MessageAttestedTo` does not fire before `TransferRedeemed` (HyperSync drops the attest log, historical backfill, replay), the fallback drain pairs the nearest scratch row in the same tx with no transceiver-identity check. In a multi-NTT-inbound same-tx the source identity gets mis-stamped onto this transfer. The `wormhole.transferRedeemed.fallback_drain` structured warn surfaces these via Loki → Grafana. Real fix: require a positive transceiver match against the peer registry on the fallback path, OR only fall back when exactly one scratch row exists in the tx (cheaper but doesn't help multi-bridge same-tx cases).
-
 ## Claude Code permissions hardening
 
 - [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
@@ -159,7 +152,7 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-- [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump or targeted live-plan validation; do not silence the whole `victorops` block with `ignore_changes`, because that would hide real Splunk URL/title/message drift.
+_None remaining._ The `splunk_on_call` "1 to change" drift was fixed by bumping `grafana/grafana` from `3.7.0` to `3.25.9`, which picks up upstream PR [#2123](https://github.com/grafana/terraform-provider-grafana/pull/2123) (v3.22.3) marking `victorops.url` as `Sensitive` and packing it from state on refresh. Side effect to be aware of: out-of-band changes to the webhook URL itself are now invisible to plan, the same way Slack tokens and PagerDuty integration keys already are; title/description still drift-detect.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 

@@ -200,17 +200,61 @@ jobs:
           # `.lighthouserc.cjs` from reading it. The fork + Dependabot guards
           # in `decide` ensure this step only runs for trusted, secret-bearing
           # contexts.
+          #
+          # `x-vercel-set-bypass-cookie: true` is required for in-browser
+          # tooling (puppeteer, Playwright, lhci). Without it, the header
+          # bypass authorizes the first request but Chrome strips custom
+          # headers on cross-origin navigation (e.g. the SSO redirect Vercel
+          # issues on subresources), so the audit lands on the SSO interstitial
+          # instead of the dashboard. With the cookie-set header, Vercel
+          # responds Set-Cookie on the first 200 and Chrome carries the
+          # bypass cookie across all subsequent requests. This matches
+          # Vercel's documented Playwright pattern.
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: |
           set -eo pipefail
-          PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'"}'
+          # jq -nc builds the JSON safely. The shell-concat form was fragile —
+          # a literal `"` or `\` in BYPASS_SECRET would silently malform the
+          # JSON. Vercel secrets are UUIDs today so this is defensive, not a
+          # current bug. `--arg secret` shell-quotes the secret as a JSON
+          # string; the cookie value stays the literal string `"true"` since
+          # HTTP header values are strings.
+          BYPASS_HEADER=$(jq -nc --arg secret "${BYPASS_SECRET}" \
+            '{"x-vercel-protection-bypass":$secret,"x-vercel-set-bypass-cookie":"true"}')
           unset BYPASS_SECRET
           pnpm exec lhci autorun \
             --collect.url="${PREVIEW_URL}/" \
             --collect.url="${PREVIEW_URL}/pools" \
             --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
+
+      - name: Assert Lighthouse audited the dashboard (not the SSO interstitial)
+        # The accessibility budget is `error`-severity (blocking). If the
+        # deployment-protection bypass silently regresses, lhci will happily
+        # audit Vercel's SSO interstitial (`vercel.com/login?next=...`) — a
+        # minimal page that scores 0.94+ on accessibility — and the gate
+        # passes with false confidence. Fail closed if the audited URL set
+        # contains an SSO redirect, so a bypass regression is loud, not silent.
+        # Verified failure mode: PR-#451 main-branch runs (pre this PR) all
+        # audited `vercel.com/login` and silently passed at warn-severity.
+        #
+        # `always()` keeps this guard running even when `lhci autorun` exits
+        # non-zero. Without it, a hard performance-budget failure (once those
+        # graduate from `warn` to `error`) would skip the SSO diagnostic and
+        # leave the engineer staring at a generic assertion failure.
+        if: steps.decide.outputs.run == 'true' && always()
+        run: |
+          if [ ! -f /tmp/lhci-output.txt ]; then
+            echo "::error::lhci-output.txt not found — lhci likely crashed before writing output; cannot verify audited URL. Failing closed to match the guard's documented contract."
+            exit 1
+          fi
+          if grep -q 'vercel\.com/login' /tmp/lhci-output.txt; then
+            echo "::error::Lighthouse audited Vercel's SSO interstitial instead of the dashboard."
+            echo "::error::Deployment-protection bypass likely regressed — check x-vercel-protection-bypass + x-vercel-set-bypass-cookie headers."
+            exit 1
+          fi
+          echo "Audited-page guard passed: no SSO interstitial URLs in lhci output."
 
       - name: Post Lighthouse results as PR comment
         if: steps.decide.outputs.run == 'true' && always()

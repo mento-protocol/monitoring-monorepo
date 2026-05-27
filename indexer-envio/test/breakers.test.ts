@@ -177,6 +177,96 @@ describe("fetchBreakerKind RPC selector probes", () => {
     assert.deepEqual(functionNames, ["medianRatesEMA", "referenceValues"]);
   });
 
+  // Construct a viem-shaped error: the production heuristic keys on
+  // `err.name === "ContractFunctionExecutionError"` and the `shortMessage`
+  // property. Tests that throw bare `Error` would skip that branch.
+  function viemExecError(shortMessage: string): Error {
+    const err = new Error(`${shortMessage}\n\nContract Call:\n  …`);
+    err.name = "ContractFunctionExecutionError";
+    (err as unknown as { shortMessage: string }).shortMessage = shortMessage;
+    return err;
+  }
+
+  it("treats viem's bare 'reverted.' dispatcher revert as a selector miss", async () => {
+    // Production reality (verified against forno.celo.org + viem 2.x): when
+    // a modern Solidity contract is called with a selector not in its
+    // dispatcher, viem throws `ContractFunctionExecutionError` whose
+    // shortMessage is `The contract function "X" reverted.` — there is no
+    // "returned no data" substring. Without this branch the probe would
+    // classify every live MD/VD/MH breaker probe as a transient RPC error
+    // and `fetchBreakerKind` would return null for every unknown breaker.
+    const functionNames: string[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const fn = (args as { functionName: string }).functionName;
+        functionNames.push(fn);
+        throw viemExecError(`The contract function "${fn}" reverted.`);
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
+
+    assert.equal(kind, "MARKET_HOURS");
+    assert.deepEqual(functionNames, ["medianRatesEMA", "referenceValues"]);
+  });
+
+  it("classifies 'reverted with the following reason: ...' as rpc_error, not missing", async () => {
+    // A live require() failure inside the function body MUST NOT be misread
+    // as a missing selector. The MD breaker's `shouldTrigger` reverts with
+    // "Caller must be the BreakerBox contract" when probed from a non-BB
+    // address — that's a function-exists-but-failed signal. Returning null
+    // here lets the next event retry; returning "MARKET_HOURS" would lock
+    // in the wrong kind for the rest of the indexer's life.
+    const calls: { fn: string }[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const fn = (args as { functionName: string }).functionName;
+        calls.push({ fn });
+        throw viemExecError(
+          `The contract function "${fn}" reverted with the following reason: Caller must be the BreakerBox contract.`,
+        );
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
+
+    assert.equal(kind, null);
+    // Probe order halts at the first rpc_error (MD probe).
+    assert.deepEqual(
+      calls.map((c) => c.fn),
+      ["medianRatesEMA"],
+    );
+  });
+
+  it("classifies a custom-error revert as rpc_error, not missing", async () => {
+    // Future-proofs the heuristic against probe targets that use typed
+    // custom errors. viem formats those as:
+    //   `…reverted with the following signature: 0x12345678`
+    //   `…reverted with custom error '0x…'`
+    // Neither ends with `reverted.`, so the suffix-anchored check below
+    // routes them to rpc_error (function-exists-but-failed) rather than
+    // misclassifying the call as a missing selector and pinning a
+    // permanent MARKET_HOURS.
+    const calls: { fn: string }[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const fn = (args as { functionName: string }).functionName;
+        calls.push({ fn });
+        throw viemExecError(
+          `The contract function "${fn}" reverted with the following signature:\n0xdeadbeef\n\nUnable to decode signature "0xdeadbeef" as it was not found on the provided ABI.`,
+        );
+      },
+    });
+
+    const kind = await fetchBreakerKind(CHAIN_ID, BREAKER, noopLogger);
+
+    assert.equal(kind, null);
+    assert.deepEqual(
+      calls.map((c) => c.fn),
+      ["medianRatesEMA"],
+    );
+  });
+
   it("emits a structured warn when defaulting an unknown breaker to MARKET_HOURS", async () => {
     const warnings: string[] = [];
     const spyLogger = {

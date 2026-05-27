@@ -11,7 +11,7 @@ templates for Mento monitoring.
 
 ## State
 
-Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terraform-tfstate-6ed6/alerts-rules`. See [`docs/terraform.md`](../../docs/terraform.md) for the stack registry and the one-time Aegis-to-alerts state migration runbook.
+Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terraform-tfstate-6ed6/alerts-rules`. See [`docs/terraform.md`](../../docs/terraform.md) for the stack registry and completed Aegis-to-alerts state migration record.
 
 ## Prerequisites
 
