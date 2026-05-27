@@ -2,21 +2,80 @@
   "patterns": [
     {
       "rule_name": "auth_secret_literal",
-      "regex": "AUTH_SECRET\\s*=\\s*[\"'][A-Za-z0-9+/=_-]{16,}[\"']",
-      "exclude_paths": ["**/*.example", "**/.env*.example"],
+      "regex": "AUTH_SECRET\\s*=\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
       "reminder": "AUTH_SECRET assigned a literal value. Load from env at runtime; never inline. Generate with `openssl rand -hex 32`."
     },
     {
       "rule_name": "upstash_token_literal",
-      "regex": "KV_REST_API_(READ_ONLY_)?TOKEN\\s*=\\s*[\"'][A-Za-z0-9_-]{20,}[\"']",
-      "exclude_paths": ["**/*.example", "**/.env*.example"],
+      "regex": "KV_REST_API_(READ_ONLY_)?TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
       "reminder": "Upstash REST token inlined. Move to `.env.local` or Vercel env vars. Rotate immediately if this leaks."
     },
     {
       "rule_name": "envio_hasura_token_literal",
-      "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*=\\s*[\"'][A-Za-z0-9_-]{20,}[\"']",
-      "exclude_paths": ["**/*.example", "**/.env*.example"],
+      "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
       "reminder": "Envio Hasura token inlined. Read from env at runtime; never commit."
+    },
+    {
+      "rule_name": "sentry_auth_token_literal",
+      "regex": "SENTRY_AUTH_TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
+      "reminder": "Sentry auth token inlined. Read from env; never commit. Rotate via Sentry org auth tokens page if this leaks."
+    },
+    {
+      "rule_name": "dune_api_key_literal",
+      "regex": "DUNE_API_KEY\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
+      "reminder": "Dune API key inlined. Read from env; never commit. Rotate via dune.com → Settings → API."
+    },
+    {
+      "rule_name": "arkham_api_key_literal",
+      "regex": "ARKHAM_API_KEY\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
+      "reminder": "Arkham API key inlined. Read from env; never commit. Rotate via intel.arkm.com → Settings if this leaks."
+    },
+    {
+      "rule_name": "slack_bot_token_env_literal",
+      "regex": "[A-Z][A-Z0-9_]*SLACK_BOT_TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*"
+      ],
+      "reminder": "Slack bot token inlined in an env assignment. Read from env; never commit. Rotate via Slack app settings if this leaks."
     },
     {
       "rule_name": "slack_bot_token",
@@ -67,26 +126,29 @@
     },
     {
       "rule_name": "indexer_handler_throw",
-      "regex": "throw\\s+new\\s+Error",
-      "paths": ["**/indexer-envio/src/handlers/**/*.ts"],
+      "regex": "\\bthrow\\b",
+      "paths": [
+        "**/indexer-envio/src/handlers/*.ts",
+        "**/indexer-envio/src/handlers/**/*.ts"
+      ],
       "exclude_paths": [
         "**/indexer-envio/src/handlers/**/__tests__/**",
         "**/indexer-envio/src/handlers/**/config.ts",
         "**/indexer-envio/test/**"
       ],
-      "reminder": "Throwing from an Envio handler halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
+      "reminder": "Throwing from an Envio handler (any form — Error, TypeError, custom, re-throw) halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
     },
     {
       "rule_name": "number_coerce_onchain_value",
-      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|netflow0|netflow1|netflowGlobal|limit0|limit1|limitGlobal|value)\\b",
+      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|limit|value)",
       "paths": ["**/indexer-envio/src/**/*.ts"],
-      "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge."
+      "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge. Matches suffixed forms too (amount0In, reserve1, netflowGlobal, limit0, etc.)."
     },
     {
       "rule_name": "workflow_action_unpinned",
-      "regex": "uses:\\s*(?!actions/|github/)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@(v\\d+|main|master)\\b",
+      "regex": "uses:\\s*(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
       "paths": ["**/.github/workflows/**"],
-      "reminder": "Third-party Actions must be SHA-pinned, not tag-pinned. Use the full commit SHA followed by a `# tag` comment."
+      "reminder": "Third-party Actions must be SHA-pinned, not tag- or branch-pinned. Use the full 40-char commit SHA followed by a `# tag` comment. Catches @v1, @v1.2.3, @main, @latest, @stable, and subdirectory actions (owner/repo/path@ref)."
     },
     {
       "rule_name": "workflow_pr_write_permission",
