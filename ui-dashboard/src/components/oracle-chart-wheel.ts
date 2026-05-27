@@ -105,10 +105,14 @@ export function attachOracleWheelHandler(graphDiv: HTMLElement): () => void {
     const overYAxis = xPos < area.plotL && inYBounds;
     const overPlot = xPos >= area.plotL && xPos <= area.plotR && inYBounds;
     if (!overYAxis && !overPlot) return;
-
-    e.preventDefault();
     const delta = e.deltaY + e.deltaX;
+    // Tiny deltas (common at the start/end of a trackpad gesture) are
+    // dropped: we early-return BEFORE preventDefault so the browser still
+    // gets to do whatever it normally would with sub-pixel scroll noise,
+    // matching this module's "preventDefault only when we actually handle
+    // the event" promise.
     if (Math.abs(delta) < 1) return;
+    e.preventDefault();
 
     const ctx: ZoomContext = { Plotly, graphDiv, area, delta };
     if (overYAxis) {
