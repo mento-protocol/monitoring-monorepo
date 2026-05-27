@@ -17,11 +17,17 @@
 
 set -euo pipefail
 
-restore_cursor() {
+# Single cleanup function for all exit paths. Conditionally removes
+# PUSH_OUTPUT_FILE (set later) and always restores the cursor. Bash only
+# keeps the last EXIT trap; consolidating here prevents the cursor-restore
+# from being silently dropped by a future trap registration.
+PUSH_OUTPUT_FILE=""
+cleanup() {
+  [[ -n "$PUSH_OUTPUT_FILE" ]] && rm -f "$PUSH_OUTPUT_FILE"
   tput cnorm 2>/dev/null || true
 }
 
-trap restore_cursor EXIT
+trap cleanup EXIT
 
 VALID_NETWORKS=(celo-sepolia celo-mainnet monad-testnet monad-mainnet)
 ENVIO_ORG="mento-protocol"
@@ -104,25 +110,63 @@ fi
 # points at HEAD, git does not contact the remote, no push event is fired,
 # and Envio's webhook never runs — but the script otherwise looks successful.
 # Surface the case loudly so callers don't sit watching a non-existent build.
+# LC_ALL=C forces English output so the grep sentinel below isn't broken
+# by a non-English shell locale (gettext localises "Everything up-to-date").
 PUSH_OUTPUT_FILE=$(mktemp)
-trap 'rm -f "$PUSH_OUTPUT_FILE"; restore_cursor' EXIT
-if ! git push --no-verify --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH" 2>&1 | tee "$PUSH_OUTPUT_FILE"; then
+if ! LC_ALL=C git push --no-verify --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH" 2>&1 | tee "$PUSH_OUTPUT_FILE"; then
   echo "❌ Push to $DEPLOY_BRANCH failed."
   exit 1
 fi
 
 if grep -q "Everything up-to-date" "$PUSH_OUTPUT_FILE"; then
-  echo ""
-  echo "⚠️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT."
-  echo "   Envio's GitHub App webhook only fires on real ref updates, so NO new"
-  echo "   build will be triggered. If you intended to retrigger a deploy that"
-  echo "   never registered, push a commit with a different SHA:"
-  echo ""
-  echo "     git commit --allow-empty -m 'chore: re-trigger envio webhook'"
-  echo "     pnpm deploy:indexer --yes"
-  echo ""
-  echo "   Otherwise, the existing deployment at $COMMIT_SHORT is what's live."
-  exit 2
+  # No-op push has two distinct meanings depending on whether Envio already
+  # has a registered deployment for this SHA:
+  #   (a) registered → legitimate idempotent re-run (interrupted babysit /
+  #       fresh shell wanting to resume status/promote). Continue to the
+  #       post-deploy checklist; the operator already has a deployment to
+  #       watch / promote.
+  #   (b) not registered → the webhook missed the original push event and
+  #       there's nothing for Envio to react to. Stop and tell the operator
+  #       to retrigger with a fresh-SHA empty commit.
+  # The multichain `envio` branch maps to the `mento` indexer; legacy
+  # per-network deploy branches each have their own `mento-v3-<network>`
+  # indexer. Probe the right one.
+  if [[ -z "$NETWORK" ]]; then
+    PROBE_INDEXER="$ENVIO_INDEXER"
+  else
+    PROBE_INDEXER="mento-v3-$NETWORK"
+  fi
+  REGISTERED_FOR_SHA=$(pnpm exec envio-cloud indexer get "$PROBE_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null \
+    | jq -r --arg target "$COMMIT_SHORT" \
+        'first(.data.deployments[]? | select(.commit_hash | startswith($target)) | .commit_hash) // ""')
+
+  if [[ -n "$REGISTERED_FOR_SHA" ]]; then
+    echo ""
+    echo "ℹ️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT."
+    echo "   Envio already has a registered deployment for this commit, so this is a"
+    echo "   legitimate re-run (e.g. resuming after an interrupted babysit). Continuing"
+    echo "   with the post-deploy checklist so you can watch / promote the existing"
+    echo "   deployment."
+    echo ""
+  else
+    echo ""
+    echo "⚠️  Push was a no-op — '$DEPLOY_BRANCH' already at $COMMIT_SHORT,"
+    echo "   and Envio has NO registered deployment for this commit. Their webhook"
+    echo "   missed the original push event; pushing the same SHA again won't help"
+    echo "   because git skips the ref-update over the wire. Retrigger with a"
+    echo "   fresh-SHA empty commit:"
+    echo ""
+    echo "     git commit --allow-empty -m 'chore: re-trigger envio webhook'"
+    if [[ -z "$NETWORK" ]]; then
+      echo "     pnpm deploy:indexer --yes"
+    else
+      echo "     pnpm deploy:indexer $NETWORK --yes"
+    fi
+    echo ""
+    echo "   If Envio's webhook keeps dropping events, escalate via"
+    echo "   https://discord.gg/envio — the CLI has no manual build-trigger."
+    exit 2
+  fi
 fi
 
 echo ""

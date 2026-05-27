@@ -80,6 +80,11 @@ wait_for_deployment_registration() {
         echo "   Will keep polling until ${REGISTRATION_TIMEOUT_SECONDS}s then give up." >&2
         echo "" >&2
         warned_slow=true
+      elif [[ "$warned_slow" == "true" ]]; then
+        # Keep the warning context visible in scroll-back so the operator
+        # doesn't lose track of the suspect state once the polling line
+        # restarts and the diagnostic block scrolls off.
+        echo "⏳ Deployment $target not registered yet (${elapsed}s elapsed; webhook suspect — see warning above); checking again in ${REGISTRATION_POLL_SECONDS}s..." >&2
       else
         echo "⏳ Deployment $target not registered yet (${elapsed}s elapsed); checking again in ${REGISTRATION_POLL_SECONDS}s..." >&2
       fi
