@@ -1,6 +1,6 @@
 resource "grafana_rule_group" "trading_modes" {
   name             = "Trading Mode Alerts"
-  folder_uid       = var.trading_modes_folder.uid
+  folder_uid       = grafana_folder.trading_modes.uid
   interval_seconds = 120
 
   dynamic "rule" {
