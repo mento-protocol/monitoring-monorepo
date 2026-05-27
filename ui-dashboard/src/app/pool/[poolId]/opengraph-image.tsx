@@ -99,10 +99,10 @@ function Tile({
 }: {
   label: string;
   value: string;
-  valueColor?: string;
-  subline?: string;
-  sublineColor?: string;
-  chart?: React.ReactNode;
+  valueColor?: string | undefined;
+  subline?: string | undefined;
+  sublineColor?: string | undefined;
+  chart?: React.ReactNode | undefined;
 }) {
   return (
     // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style

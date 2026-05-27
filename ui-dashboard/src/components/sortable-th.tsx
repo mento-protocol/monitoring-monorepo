@@ -6,8 +6,8 @@ interface SortableThProps<K extends string> {
   activeSortKey: K;
   sortDir: SortDir;
   onSort: (key: K) => void;
-  align?: "left" | "right";
-  className?: string;
+  align?: "left" | "right" | undefined;
+  className?: string | undefined;
   children: ReactNode;
 }
 

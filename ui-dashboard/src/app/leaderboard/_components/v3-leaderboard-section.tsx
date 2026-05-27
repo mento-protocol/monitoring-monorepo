@@ -46,7 +46,7 @@ export function V3LeaderboardSection({
   aggIsLoading: boolean;
   aggHasError: boolean;
   isAggregatorCapHit: boolean;
-  chart?: AggregatorChartProps;
+  chart?: AggregatorChartProps | undefined;
 }) {
   return (
     <>

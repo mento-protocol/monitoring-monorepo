@@ -37,7 +37,6 @@ the landed mechanism + severities.
 
 - [ ] Promote dashboard + indexer mutation gates from advisory (`break: null`) to PR-blocking once the same "runtime + noise sane in CI" + survivor-triage evidence we collected for bridge in PR 436 is captured for each. Pattern: trigger the workflow manually on `main`, confirm runtime ≤ 1 min, triage every survivor (add tests for real gaps; classify equivalents in `docs/mutation-testing.md`), then flip `break` to the post-triage rounded floor with a 2-pt margin, and add a new always-runs job (with inline `filter` + `decide` + `continue-on-error` shape) for that package — NOT a workflow-level `pull_request.paths` filter, since required-status checks must keep the trigger unfiltered (see `AGENTS.md`).
 - [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** so it was deferred. Fix incrementally — start with `lib/**` (pure logic), then `hooks/**`, then `components/**`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check.
-- [ ] Enable `exactOptionalPropertyTypes: true` on `ui-dashboard/tsconfig.json`. The flag is already on for `shared-config` (PR #443), `indexer-envio`, and `metrics-bridge`. Dashboard had ~107 errors at last scout, dominated by TS2375/TS2379 (object literals with `key: value | undefined`). Pattern: prefer changing the destination type from `?: T` to `?: T | undefined` once per `Props`/option type (one edit unlocks every caller) rather than wrapping each call site in `...(val !== undefined && { key: val })`. Reserve the spread form for payloads that get serialized (URL params, GraphQL variables, fetch bodies) where absent key vs `"key": null` is materially different.
 
 ### Lighthouse CI Follow-Ups
 
@@ -99,10 +98,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 701 |   435 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
-
-## Envio v3 Migration Follow-Ups
-
-- [ ] **Validate the Envio v3 backfill speedup against production sync time.** Baseline before the migration was roughly 15-40 minutes per push. After deploy, compare wall-clock from indexer deploy to caught-up sync and decide whether the medium-tier cache upgrade can remain deferred.
 
 ## Claude Code permissions hardening
 

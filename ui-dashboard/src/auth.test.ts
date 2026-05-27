@@ -80,7 +80,7 @@ describe("Google provider checks config", () => {
 
 describe("auth signIn callback", () => {
   type ProfileOverrides = {
-    email?: string;
+    email?: string | undefined;
     hd?: string | undefined;
     email_verified?: boolean | undefined;
   };
@@ -99,7 +99,6 @@ describe("auth signIn callback", () => {
       account,
       profile,
       user: {},
-      credentials: undefined,
     });
   }
 

@@ -43,9 +43,15 @@ export function isWeekend(now = new Date()): boolean {
  * (health.ts → weekend.ts). Callers should pass `isOracleFresh` from health.ts.
  */
 export function isWeekendOracleStale(
-  pool: { oracleTimestamp?: string; oracleExpiry?: string },
+  pool: {
+    oracleTimestamp?: string | undefined;
+    oracleExpiry?: string | undefined;
+  },
   isOracleFreshFn: (
-    pool: { oracleTimestamp?: string; oracleExpiry?: string },
+    pool: {
+      oracleTimestamp?: string | undefined;
+      oracleExpiry?: string | undefined;
+    },
     nowSeconds?: number,
     chainId?: number,
   ) => boolean,

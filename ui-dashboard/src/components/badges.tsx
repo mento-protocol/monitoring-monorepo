@@ -52,7 +52,7 @@ export function SourceBadge({
   wrappedExchangeId,
 }: {
   source: string;
-  wrappedExchangeId?: string | null;
+  wrappedExchangeId?: string | null | undefined;
 }) {
   // Healed VirtualPools intentionally retain `fpmm_*` source for
   // pickPreferredSource priority alignment; `wrappedExchangeId` is the

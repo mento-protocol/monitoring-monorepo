@@ -1,13 +1,13 @@
-name: Alerts Infra
+name: Alerts Rules
 
-# Terraform plan-on-PR + apply-on-merge for `alerts/infra/` — the event-driven
-# alert delivery stack (Cloud Function + Discord channels + Sentry bridge +
-# QuickNode webhooks). The stack's GCS backend and google provider both
-# impersonate `org-terraform@mento-terraform-seed-ffac` (see versions.tf and
-# providers.tf), so the CI deployer SA needs `roles/iam.serviceAccountTokenCreator`
-# on `org-terraform`. That grant lives in `terraform/ci-wif.tf`
-# (resource `ci_alerts_org_terraform_token_creator`, shared with `alerts/rules/`)
-# and must be applied from the top-level stack before this workflow can succeed.
+# Terraform plan-on-PR + apply-on-merge for `alerts/rules/` — the Grafana
+# alert rule + contact point + notification policy stack. The stack's GCS
+# backend impersonates `org-terraform@mento-terraform-seed-ffac` (see
+# `alerts/rules/versions.tf`), so the CI deployer SA needs
+# `roles/iam.serviceAccountTokenCreator` on `org-terraform`. That grant lives
+# in `terraform/ci-wif.tf` (resource `ci_alerts_org_terraform_token_creator`,
+# shared with `alerts/infra/`) and must be applied from the top-level stack
+# before this workflow can succeed.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -22,25 +22,15 @@ name: Alerts Infra
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
-# TF_VAR_* env block here carries production Sentry/Discord/QuickNode/
-# Slack/GitHub credentials. Uploading the binary plan as a workflow
-# artifact would expose those secrets to anyone with `actions:read`.
-# Instead the apply job re-plans at gate-approval time — the trade-off
-# is the brief "between approval and apply" drift window, which the
-# reviewer can detect by checking the apply-job's plan output before
-# approving.
-#
-# Known limitation: `alerts/infra` includes a `local_file.env_file`
-# resource that writes `.env` for local dev. Fresh-checkout CI runners
-# don't have that file on disk, so terraform always shows it as needing
-# creation (exit 2) regardless of remote infra state. This means alerts/
-# infra merges still trigger the environment approval prompt even when
-# the only "change" is the local file recreation. Tracked as a follow-up
-# to either remove the resource from terraform or add an
-# `ignore_changes` lifecycle.
+# TF_VAR_* env block here carries production Grafana/Slack/Splunk/Discord
+# credentials. Uploading the binary plan as a workflow artifact would
+# expose those secrets to anyone with `actions:read`. Instead the apply
+# job re-plans at gate-approval time — the trade-off is the brief
+# "between approval and apply" drift window, which the reviewer can
+# detect by checking the apply-job's plan output before approving.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
-# (matrix module `alerts/infra`). This workflow adds the plan diff comment +
+# (matrix module `alerts-rules`). This workflow adds the plan diff comment +
 # the apply gate.
 
 on:
@@ -48,13 +38,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - alerts/infra/**
-      - .github/workflows/alerts-infra.yml
+      - alerts/rules/**
+      - .github/workflows/alerts-rules.yml
   push:
     branches: [main]
     paths:
-      - alerts/infra/**
-      - .github/workflows/alerts-infra.yml
+      - alerts/rules/**
+      - .github/workflows/alerts-rules.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
 # is fine — a newer plan supersedes an older one).
@@ -63,8 +53,9 @@ on:
 # `cancel-in-progress: false`, so concurrent merges queue and apply
 # strictly in order. Without this, a SHA-unique group would let two
 # close-together merges run `terraform apply` in parallel and the older
-# one could roll the state back to stale config (Cloud Function source +
-# QuickNode webhooks + Discord channels are all order-sensitive).
+# one could roll the state back to stale config (Grafana alert rules and
+# notification policies are order-sensitive: a stale routing tree can drop
+# pages on the floor).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -84,7 +75,7 @@ permissions: read-all
 
 jobs:
   plan:
-    name: Terraform Plan (alerts/infra)
+    name: Terraform Plan (alerts/rules)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
     # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
@@ -104,25 +95,25 @@ jobs:
       actions: read
     defaults:
       run:
-        working-directory: alerts/infra
+        working-directory: alerts/rules
     outputs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
     env:
-      # Sentry
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # Discord
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      # GCP
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
-      # QuickNode
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
-      # Slack (for restapi.slack provider — creates/archives Sentry alert channels)
+      # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      # Slack bot token (drives `grafana_contact_point.slack_*` resources)
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      # GitHub (for github_actions_secret resources that self-manage these secrets)
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+      # Splunk On-Call / VictorOps webhook (drives `grafana_contact_point.splunk_on_call`)
+      TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
+      # Legacy Discord webhooks — still wired for the per-domain contact points
+      TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
+      TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_PROD }}
+      TF_VAR_discord_alerts_webhook_url_trading_limits: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_LIMITS }}
+      TF_VAR_discord_alerts_webhook_url_aegis: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_AEGIS }}
+      TF_VAR_discord_alerts_webhook_url_catch_all: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_CATCH_ALL }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -207,10 +198,11 @@ jobs:
               ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
               : "(Plan did not produce output — check the workflow logs.)";
 
-            // GitHub PR comment hard cap is ~65KB. A fresh alerts/infra plan
-            // (Cloud Function + Discord channels + Sentry + QuickNode) can
-            // easily blow past that. Tail the last 50KB so the apply/destroy
-            // summary stays visible and link to the run for the full log.
+            // GitHub PR comment hard cap is ~65KB. A fresh alerts/rules plan
+            // (folders + dozens of alert rules + contact points + notification
+            // policy tree) can easily blow past that. Tail the last 50KB so
+            // the apply/destroy summary stays visible and link to the run for
+            // the full log.
             const MAX = 50_000;
             const truncated = planOutput.length > MAX;
             const planBody = truncated
@@ -231,13 +223,13 @@ jobs:
               `/actions/runs/${context.runId}`;
 
             const body =
-              `## Terraform Plan — \`alerts/infra/\`\n\n` +
+              `## Terraform Plan — \`alerts/rules/\`\n\n` +
               `**Status:** ${statusIcon} ${statusText}\n\n` +
               `[Full workflow logs](${runUrl})\n\n` +
               `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
               `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
               `</details>\n\n` +
-              `<!-- alerts-infra-plan-comment -->`;
+              `<!-- alerts-rules-plan-comment -->`;
 
             // Paginate through all PR comments to find the existing
             // plan-sticky marker. `listComments` caps at 100 per page;
@@ -255,7 +247,7 @@ jobs:
             );
 
             const existing = comments.find(c =>
-              c.body && c.body.includes("<!-- alerts-infra-plan-comment -->"),
+              c.body && c.body.includes("<!-- alerts-rules-plan-comment -->"),
             );
 
             if (existing) {
@@ -278,7 +270,7 @@ jobs:
         if: always()
 
   apply:
-    name: Terraform Apply (alerts/infra)
+    name: Terraform Apply (alerts/rules)
     needs: plan
     # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
     # there are real changes. When `has-changes=false` the job is skipped
@@ -289,7 +281,7 @@ jobs:
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
     # Reuses the existing `production` environment shared with metrics-bridge,
-    # aegis, and alerts/rules. The required-reviewer rule on that environment
+    # aegis, and alerts/infra. The required-reviewer rule on that environment
     # gates each apply behind manual approval.
     environment:
       name: production
@@ -302,20 +294,22 @@ jobs:
       actions: read
     defaults:
       run:
-        working-directory: alerts/infra
+        working-directory: alerts/rules
     env:
       # Provider auth env vars still need to be present at apply time — saved
       # plans don't serialize provider configuration, so init re-evaluates
-      # the provider blocks against these values to talk to the upstream APIs.
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+      # the provider blocks against these values to talk to Grafana/Slack/etc.
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+      TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
+      TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
+      TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_PROD }}
+      TF_VAR_discord_alerts_webhook_url_trading_limits: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_LIMITS }}
+      TF_VAR_discord_alerts_webhook_url_aegis: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_AEGIS }}
+      TF_VAR_discord_alerts_webhook_url_catch_all: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_CATCH_ALL }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -341,9 +335,7 @@ jobs:
         # production-environment gate should read this job's plan output
         # before approving — it's the ground truth for what lands.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
-        # lock rather than failing the deploy. `local_file.env_file`
-        # recreates on every fresh-checkout apply (writes the local-dev
-        # `.env`) — expected, ephemeral, not state drift.
+        # lock rather than failing the deploy.
         run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0

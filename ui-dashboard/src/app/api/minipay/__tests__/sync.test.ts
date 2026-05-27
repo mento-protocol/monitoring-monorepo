@@ -49,7 +49,7 @@ beforeEach(() => {
 function makeReq(bearer?: string): NextRequest {
   return new NextRequest(new URL("http://localhost/api/minipay/sync"), {
     method: "GET",
-    headers: bearer ? { authorization: `Bearer ${bearer}` } : undefined,
+    ...(bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {}),
   });
 }
 

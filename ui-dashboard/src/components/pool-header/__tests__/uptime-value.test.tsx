@@ -18,8 +18,8 @@ type DailyAnchorRow = {
 };
 
 type RollupResult = {
-  data?: { Pool: RollupRow[] };
-  error?: Error;
+  data?: { Pool: RollupRow[] } | undefined;
+  error?: Error | undefined;
 };
 type HealthCursorResult = {
   data?: { Pool: HealthCursorRow[] };

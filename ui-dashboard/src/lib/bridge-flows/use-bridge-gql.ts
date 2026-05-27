@@ -37,7 +37,7 @@ export function useBridgeGQL<T>(
     () =>
       client!.request<T>({
         document: query!,
-        variables,
+        ...(variables !== undefined ? { variables } : {}),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),
     {

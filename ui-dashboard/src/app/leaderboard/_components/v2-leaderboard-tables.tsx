@@ -283,8 +283,8 @@ function ViaCell({
   routes: readonly BrokerTraderViaRoute[] | undefined;
   isLoading: boolean;
   hasError: boolean;
-  errorReason?: string;
-  unavailableReason?: string;
+  errorReason?: string | undefined;
+  unavailableReason?: string | undefined;
 }) {
   if (isLoading) {
     return (
