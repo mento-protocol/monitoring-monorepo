@@ -32,7 +32,11 @@ import {
   getBreakerConfigsByFeed,
 } from "../rpc.js";
 import { reportExpiryEffect } from "../rpc/effects.js";
-import { bootstrapFeedBreakerConfigs, nextMedianEMA } from "../breakers.js";
+import {
+  bootstrapFeedBreakerConfigs,
+  nextMedianEMA,
+  resolveBreakerSnapshotFields,
+} from "../breakers.js";
 
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
@@ -56,6 +60,18 @@ indexer.onEvent(
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     const oracleTimestamp = event.params.timestamp;
+
+    // Resolve once per event so every per-pool snapshot row captures the
+    // same baseline/threshold pair. Reads BreakerConfig.medianRatesEMA
+    // (MEDIAN_DELTA) or referenceValue (VALUE_DELTA) + the linked Breaker's
+    // effective threshold. Returns null when no trip-able breaker is
+    // configured (or EMA is unseeded) — chart consumers fall back to the
+    // current band for those rows. See resolveBreakerSnapshotFields doc.
+    const breakerSnapshotFields = await resolveBreakerSnapshotFields(
+      context,
+      event.chainId,
+      rateFeedID,
+    );
 
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
     // writes don't race. Fan out in parallel — on a rate feed shared by 5-10
@@ -247,6 +263,13 @@ indexer.onEvent(
           source: "oracle_reported",
           blockNumber,
           txHash: event.transaction.hash,
+          // No breaker, or unseeded EMA / unconfigured referenceValue →
+          // undefined (Envio's nullable codegen). The chart consumer falls
+          // back to the current band for these rows.
+          breakerBaselineAtSnapshot:
+            breakerSnapshotFields?.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot:
+            breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);
@@ -304,6 +327,19 @@ indexer.onEvent(
 
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    // Resolve breaker baseline/threshold BEFORE the per-pool fan-out so
+    // every snapshot row reads the SAME pre-event EMA — the comparator the
+    // contract used to evaluate this median update. The mirror loop below
+    // recomputes EMA AFTER all snapshot writes, which is what we want:
+    // historical snapshots capture the EMA-at-evaluation-time, not the
+    // post-blend value. Returns null when no trip-able breaker exists or
+    // EMA is unseeded — chart falls back to current band for those rows.
+    const breakerSnapshotFields = await resolveBreakerSnapshotFields(
+      context,
+      event.chainId,
+      rateFeedID,
+    );
 
     await Promise.all(
       // eslint-disable-next-line max-lines-per-function -- Existing per-pool fan-out preserves oracle, breach, health, and snapshot updates together.
@@ -534,6 +570,13 @@ indexer.onEvent(
           source: "oracle_median_updated",
           blockNumber,
           txHash: event.transaction.hash,
+          // Pre-event EMA + effective threshold. See the resolve call above
+          // for why this captures the comparator the contract evaluated
+          // against, not the post-blend EMA.
+          breakerBaselineAtSnapshot:
+            breakerSnapshotFields?.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot:
+            breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);

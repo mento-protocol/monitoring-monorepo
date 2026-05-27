@@ -232,6 +232,14 @@ indexer.onEvent(
           source: "update_reserves",
           blockNumber,
           txHash: event.transaction.hash,
+          // `update_reserves` measures pool-internal post-swap deviation,
+          // not oracle deviation — the BreakerBox never evaluates this
+          // path. Leave undefined so the chart's per-point breaker verdict
+          // falls through to "no band check" for these rows even if a
+          // future filter relaxation lets them through. See
+          // reference_oracle_snapshot_sources memory.
+          breakerBaselineAtSnapshot: undefined,
+          breakerThresholdAtSnapshot: undefined,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);
@@ -478,6 +486,12 @@ indexer.onEvent(
           source: "rebalanced",
           blockNumber,
           txHash: event.transaction.hash,
+          // `rebalanced` rows measure post-rebalance pool-internal
+          // deviation, not oracle deviation — same rationale as
+          // `update_reserves`. Leave undefined so the chart's per-point
+          // breaker verdict falls through to "no band check".
+          breakerBaselineAtSnapshot: undefined,
+          breakerThresholdAtSnapshot: undefined,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);

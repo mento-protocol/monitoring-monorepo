@@ -326,6 +326,76 @@ export function effectiveThreshold(
     : breaker.defaultRateChangeThreshold;
 }
 
+/** Reads BreakerConfig + Breaker for the given (chainId, rateFeedID) and
+ * returns the per-snapshot baseline + effective threshold to persist on an
+ * `OracleSnapshot` row. The chart consumer reads these to render a per-point
+ * "would have tripped at the time" verdict instead of comparing every
+ * historical point against the current EMA (which drifts on MEDIAN_DELTA
+ * feeds — see PR #624 follow-up).
+ *
+ * Selection rules — match the dashboard's `BREAKER_CONFIG_FOR_RATE_FEED`
+ * query so historical + current verdicts stay in sync:
+ *   - exclude MARKET_HOURS (schedule halt, not a deviation comparator)
+ *   - only `enabled` configs
+ *   - deterministic pick when a feed has multiple matches (sort by id asc).
+ *
+ * Returns null when:
+ *   - no trip-able config exists for the feed,
+ *   - the referenced Breaker entity isn't loaded yet (bootstrap race),
+ *   - MEDIAN_DELTA baseline is the `0n` "unseeded" sentinel
+ *     (see BreakerConfig.medianRatesEMA doc; treating it as `baseline = 0`
+ *     would corrupt the chart's verdict math),
+ *   - VALUE_DELTA `referenceValue` is null (breaker not yet configured).
+ */
+export async function resolveBreakerSnapshotFields(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<{
+  breakerBaselineAtSnapshot: bigint;
+  breakerThresholdAtSnapshot: bigint;
+} | null> {
+  // Same chainId-in-memory filter rationale as `getBreakerConfigsByFeed`.
+  const configs = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: rateFeedID },
+  });
+  // Filter to trip-able configs (excludes MARKET_HOURS, disabled) +
+  // resolve the linked Breaker. We need the Breaker so we can resolve the
+  // sentinel-0 threshold to its inherited default. Bounded fan-out: ≤1
+  // trip-able config per feed in production.
+  let selected: {
+    cfg: BreakerConfig;
+    breaker: Breaker;
+    kind: BreakerKindRpc;
+  } | null = null;
+  // Sort for deterministic pick when (rare) multiple trip-ables exist.
+  const sortedConfigs = [...configs]
+    .filter((c) => c.chainId === chainId && c.enabled)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const cfg of sortedConfigs) {
+    const breaker = await context.Breaker.get(cfg.breaker_id);
+    if (!breaker) continue;
+    if (breaker.kind === "MARKET_HOURS") continue;
+    selected = { cfg, breaker, kind: breaker.kind };
+    break;
+  }
+  if (!selected) return null;
+  const { cfg, breaker, kind } = selected;
+  const baseline =
+    kind === "VALUE_DELTA" ? cfg.referenceValue : cfg.medianRatesEMA;
+  // 0n EMA = MedianRateEMAReset's unseeded sentinel; null referenceValue =
+  // VALUE_DELTA not configured. Either way the breaker has no usable
+  // comparator, so don't persist a misleading baseline.
+  if (baseline == null || baseline === 0n) return null;
+  return {
+    breakerBaselineAtSnapshot: baseline,
+    breakerThresholdAtSnapshot: effectiveThreshold(
+      breaker,
+      cfg.rateChangeThreshold,
+    ),
+  };
+}
+
 /** Refresh `BreakerConfig.cooldownEndsAt` after a cooldown-related field
  * change. The pre-rolled `cooldownEndsAt = lastStatusUpdatedAt +
  * cooldownTime` formula uses the EFFECTIVE cooldown (per-feed override else

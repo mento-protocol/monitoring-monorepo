@@ -4,6 +4,7 @@ import {
   effectiveCooldown,
   effectiveThreshold,
   nextMedianEMA,
+  resolveBreakerSnapshotFields,
 } from "../src/breakers.ts";
 import {
   _clearBreakerKindIndex,
@@ -86,6 +87,291 @@ describe("effectiveCooldown / effectiveThreshold — sentinel-0 inheritance", ()
   it("threshold inherits the same way", () => {
     assert.equal(effectiveThreshold(breaker, 0n), 4n * 10n ** 22n);
     assert.equal(effectiveThreshold(breaker, 1n * 10n ** 22n), 1n * 10n ** 22n);
+  });
+});
+
+describe("resolveBreakerSnapshotFields — per-snapshot breaker baseline + threshold", () => {
+  const CHAIN_ID = 42220;
+  const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+
+  // Construct a minimal EvmOnEventContext stub exposing only the entity
+  // reads the resolver uses. Tests are pure (no RPC, no effects), so we
+  // skip the test harness and exercise the helper directly. Envio's
+  // `getWhere` is a callable taking a `{ field: { _eq } }` filter and
+  // returning a Promise<Entity[]> (per envio.d.ts) — the stub mirrors
+  // that shape so the implementation can be swapped to the real API
+  // without changing the helper's call sites.
+  function ctx({
+    configs = [],
+    breakers = {},
+  }: {
+    configs?: Array<Record<string, unknown>>;
+    breakers?: Record<string, Record<string, unknown>>;
+  }) {
+    return {
+      BreakerConfig: {
+        getWhere: async (filter: { rateFeedID: { _eq: string } }) =>
+          configs.filter((c) => c.rateFeedID === filter.rateFeedID._eq),
+      },
+      Breaker: {
+        get: async (id: string) => breakers[id],
+      },
+    } as unknown as Parameters<typeof resolveBreakerSnapshotFields>[0];
+  }
+
+  it("returns MEDIAN_DELTA EMA + effective threshold", async () => {
+    const ema = 1_171_560_280_196_965_000_000_000n; // 1.171… Fixidity
+    const perFeedThreshold = 3n * 10n ** 22n; // 3% override
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xbreaker-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xbreaker`,
+            rateChangeThreshold: perFeedThreshold,
+            medianRatesEMA: ema,
+            referenceValue: undefined,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n, // 4% — not used
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.deepStrictEqual(result, {
+      breakerBaselineAtSnapshot: ema,
+      breakerThresholdAtSnapshot: perFeedThreshold, // override beats default
+    });
+  });
+
+  it("falls back to breaker default threshold when per-feed is sentinel 0", async () => {
+    // Mirrors the canonical `effectiveThreshold` resolution; the helper
+    // must apply it here so consumers can render the band without
+    // re-resolving the sentinel themselves.
+    const ema = 10n ** 24n;
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xbreaker-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xbreaker`,
+            rateChangeThreshold: 0n, // sentinel — inherit
+            medianRatesEMA: ema,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result?.breakerThresholdAtSnapshot, 4n * 10n ** 22n);
+  });
+
+  it("uses referenceValue for VALUE_DELTA configs", async () => {
+    const peg = (10n ** 24n * 998n) / 1000n; // 0.998 reference
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xvalue-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xvalue`,
+            rateChangeThreshold: 2n * 10n ** 22n,
+            medianRatesEMA: undefined,
+            referenceValue: peg,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xvalue`]: {
+            kind: "VALUE_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result?.breakerBaselineAtSnapshot, peg);
+  });
+
+  it("returns null when MEDIAN_DELTA EMA is the unseeded 0n sentinel", async () => {
+    // Writing 0n as a baseline would produce NaN/Inf in the chart's
+    // verdict math (|p - 0|/0). Force-null + fall back to "no band".
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xbreaker-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xbreaker`,
+            rateChangeThreshold: 3n * 10n ** 22n,
+            medianRatesEMA: 0n, // unseeded after MedianRateEMAReset
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result, null);
+  });
+
+  it("returns null when VALUE_DELTA referenceValue is missing", async () => {
+    // Less common but symmetric: a VALUE_DELTA without a configured peg
+    // has no comparator either — chart falls through to "no band check."
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xvalue-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xvalue`,
+            rateChangeThreshold: 2n * 10n ** 22n,
+            referenceValue: undefined,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xvalue`]: {
+            kind: "VALUE_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result, null);
+  });
+
+  it("skips disabled configs", async () => {
+    // Match dashboard's BREAKER_CONFIG_FOR_RATE_FEED `enabled: true` filter.
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xbreaker-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: false,
+            breaker_id: `${CHAIN_ID}-0xbreaker`,
+            rateChangeThreshold: 3n * 10n ** 22n,
+            medianRatesEMA: 10n ** 24n,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result, null);
+  });
+
+  it("skips MARKET_HOURS breakers (schedule halt, no per-feed comparator)", async () => {
+    // MarketHoursBreaker has no BreakerConfig in production (per schema
+    // comment); even if a config somehow joined to it, MARKET_HOURS isn't
+    // a deviation comparator — the chart's band check would be meaningless.
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `${CHAIN_ID}-0xmh-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xmh`,
+            rateChangeThreshold: 0n,
+            medianRatesEMA: 10n ** 24n,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xmh`]: {
+            kind: "MARKET_HOURS",
+            defaultRateChangeThreshold: 0n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result, null);
+  });
+
+  it("filters by chainId in memory (same rateFeedID can exist on multiple chains)", async () => {
+    // `BreakerConfig.getWhere({rateFeedID})` doesn't filter by chainId —
+    // the same feed string can collide cross-chain on Celo + Monad.
+    // Helper must filter in memory or it can mix Monad's EMA into a Celo
+    // snapshot.
+    const celoEma = 10n ** 24n;
+    const monadEma = 5n * 10n ** 23n;
+    const result = await resolveBreakerSnapshotFields(
+      ctx({
+        configs: [
+          {
+            id: `143-0xbreaker-${FEED}`,
+            chainId: 143,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `143-0xbreaker`,
+            rateChangeThreshold: 3n * 10n ** 22n,
+            medianRatesEMA: monadEma,
+          },
+          {
+            id: `${CHAIN_ID}-0xbreaker-${FEED}`,
+            chainId: CHAIN_ID,
+            rateFeedID: FEED,
+            enabled: true,
+            breaker_id: `${CHAIN_ID}-0xbreaker`,
+            rateChangeThreshold: 3n * 10n ** 22n,
+            medianRatesEMA: celoEma,
+          },
+        ],
+        breakers: {
+          [`${CHAIN_ID}-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+          [`143-0xbreaker`]: {
+            kind: "MEDIAN_DELTA",
+            defaultRateChangeThreshold: 4n * 10n ** 22n,
+          },
+        },
+      }),
+      CHAIN_ID,
+      FEED,
+    );
+    assert.equal(result?.breakerBaselineAtSnapshot, celoEma);
   });
 });
 

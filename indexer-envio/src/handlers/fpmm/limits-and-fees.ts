@@ -30,6 +30,7 @@ import {
   pickActiveThreshold,
 } from "../../priceDifference.js";
 import { recordHealthSample } from "../../healthScore.js";
+import { resolveBreakerSnapshotFields } from "../../breakers.js";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -383,6 +384,15 @@ indexer.onEvent(
       // may be 0 / stale, so the row would mix a fresh deviation with an
       // unrelated displayed oracle price.
       if (medianFresh) {
+        // Read breaker baseline + effective threshold so the chart can
+        // render a per-point verdict against the band that was actually
+        // armed when this snapshot landed (not the current EMA — which
+        // drifts on MEDIAN_DELTA feeds). See resolveBreakerSnapshotFields.
+        const breakerSnapshotFields = await resolveBreakerSnapshotFields(
+          context,
+          event.chainId,
+          existing.referenceRateFeedID,
+        );
         const snapshot: OracleSnapshot = {
           id: eventId(event.chainId, event.block.number, event.logIndex),
           chainId: event.chainId,
@@ -401,6 +411,10 @@ indexer.onEvent(
           source: "threshold_updated",
           blockNumber,
           txHash: event.transaction.hash,
+          breakerBaselineAtSnapshot:
+            breakerSnapshotFields?.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot:
+            breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);

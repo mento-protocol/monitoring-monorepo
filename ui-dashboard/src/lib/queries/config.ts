@@ -91,6 +91,13 @@ export const ORACLE_SNAPSHOTS_CHART = `
       txHash
       deviationRatio
       hasHealthData
+      # Persisted-at-write breaker reference, so the chart can render the
+      # historically accurate band per point instead of comparing every
+      # row against the current EMA (which drifts on MEDIAN_DELTA feeds).
+      # Nullable for pre-deploy rows + unseeded EMA — the chart falls back
+      # to the current band in those cases.
+      breakerBaselineAtSnapshot
+      breakerThresholdAtSnapshot
     }
   }
 `;

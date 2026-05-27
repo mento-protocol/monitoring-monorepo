@@ -151,6 +151,14 @@ export type OracleSnapshot = {
   txHash: string;
   deviationRatio?: string;
   hasHealthData?: boolean;
+  // Per-snapshot breaker reference captured AT WRITE TIME by the indexer.
+  // Fixidity 1e24 strings ride as Hasura BigInt → string here. Nullable:
+  // pre-deploy rows + rows from non-oracle-driven sources (update_reserves,
+  // rebalanced) + rows written while the breaker EMA was unseeded all
+  // serialize to null. Chart consumers should prefer these when present
+  // and fall back to the current breaker config otherwise.
+  breakerBaselineAtSnapshot?: string | null;
+  breakerThresholdAtSnapshot?: string | null;
 };
 
 type VirtualPoolLifecycleAction = "DEPLOYED" | "DEPRECATED";
