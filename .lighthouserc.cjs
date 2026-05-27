@@ -24,7 +24,7 @@
 // WARN → ERROR PROMOTION:
 //   Once the CI infrastructure has collected 5+ stable runs and a representative
 //   percentile distribution is known, promote performance budgets from `warn`
-//   to `error`. Track in BACKLOG under "Lighthouse CI — promote budgets to error".
+//   to `error`. Tracked in BACKLOG under "Lighthouse CI Follow-Ups".
 //
 // PAGES AUDITED:
 //   Injected at workflow runtime from LHCI_URLS env var (comma-separated).
@@ -60,16 +60,22 @@ module.exports = {
         // Performance score: warn below 0.75 (desktop SSR, production baseline ~0.80)
         "categories:performance": ["warn", { minScore: 0.75 }],
 
-        // Accessibility score: warn below 0.94
+        // Accessibility score: error below 0.94
         // Production measured at 0.94 on 2026-05-18. Threshold matches
-        // baseline so any regression is surfaced in the PR comment.
+        // baseline so any regression blocks the PR.
         //
-        // This is intentionally `warn` (non-blocking) rather than `error`
-        // because lhci's Vercel deployment-protection bypass mechanism is
-        // not yet reliable enough to guarantee the audit hits the dashboard
-        // rather than the SSO interstitial. Promote to `error` once the
-        // bypass mechanism is properly architected (BACKLOG item).
-        "categories:accessibility": ["warn", { minScore: 0.94 }],
+        // Blocking is safe because (a) Lighthouse's accessibility category
+        // is deterministic across runs — it only changes on real code
+        // diffs — (b) the deployment-protection bypass now reliably
+        // delivers Lighthouse to the dashboard rather than the SSO
+        // interstitial (the workflow's extraHeaders include
+        // `x-vercel-set-bypass-cookie: true` so the auth cookie is set on
+        // the first response and carries across subresources), and
+        // (c) the workflow includes a fail-closed audited-page guard
+        // (greps lhci stdout for `vercel.com/login` — a bypass regression
+        // is loud, not silent). Promotion to a manifest-based finalUrl
+        // check is tracked in BACKLOG.
+        "categories:accessibility": ["error", { minScore: 0.94 }],
 
         // Largest Contentful Paint: warn above 1 700 ms
         // Baseline ~1 200 ms desktop + 500 ms headroom.
@@ -84,8 +90,8 @@ module.exports = {
         // interactions) never produces an INP numeric value, so an assertion
         // would silently pass on every run and give false confidence. Adding
         // INP coverage requires switching to lhci's user-flow mode with
-        // scripted interactions. Tracked in BACKLOG under "Lighthouse CI —
-        // add INP coverage via user-flow mode".
+        // scripted interactions. Tracked in BACKLOG under "Lighthouse CI
+        // Follow-Ups".
       },
     },
     upload: {
