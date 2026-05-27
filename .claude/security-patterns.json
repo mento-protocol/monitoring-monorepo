@@ -7,7 +7,8 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
       "reminder": "AUTH_SECRET assigned a literal value. Load from env at runtime; never inline. Generate with `openssl rand -hex 32`."
     },
@@ -18,7 +19,8 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
       "reminder": "Upstash REST token inlined. Move to `.env.local` or Vercel env vars. Rotate immediately if this leaks."
     },
@@ -29,7 +31,8 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
       "reminder": "Envio Hasura token inlined. Read from env at runtime; never commit."
     },
@@ -40,7 +43,8 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
       "reminder": "Sentry auth token inlined. Read from env; never commit. Rotate via Sentry org auth tokens page if this leaks."
     },
@@ -51,9 +55,10 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
-      "reminder": "Dune API key inlined. Read from env; never commit. Rotate via dune.com → Settings → API."
+      "reminder": "Dune API key inlined. Read from env; never commit. Rotate via dune.com \u2192 Settings \u2192 API."
     },
     {
       "rule_name": "arkham_api_key_literal",
@@ -62,9 +67,10 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
-      "reminder": "Arkham API key inlined. Read from env; never commit. Rotate via intel.arkm.com → Settings if this leaks."
+      "reminder": "Arkham API key inlined. Read from env; never commit. Rotate via intel.arkm.com \u2192 Settings if this leaks."
     },
     {
       "rule_name": "slack_bot_token_env_literal",
@@ -73,19 +79,22 @@
         "**/*.example",
         "**/.env*.example",
         "**/.env",
-        "**/.env.*"
+        "**/.env.*",
+        "**/.claude/**"
       ],
       "reminder": "Slack bot token inlined in an env assignment. Read from env; never commit. Rotate via Slack app settings if this leaks."
     },
     {
       "rule_name": "slack_bot_token",
       "substrings": ["xoxb-", "xoxe.xoxp-", "xoxa-2-", "xoxp-"],
-      "reminder": "Slack token literal detected. Move to env. Rotate via Slack app settings if this commits."
+      "reminder": "Slack token literal detected. Move to env. Rotate via Slack app settings if this commits.",
+      "exclude_paths": ["**/.claude/**"]
     },
     {
       "rule_name": "aws_access_key",
       "regex": "(AKIA|ASIA)[A-Z2-7]{16}",
-      "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials."
+      "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials.",
+      "exclude_paths": ["**/.claude/**"]
     },
     {
       "rule_name": "private_key_literal",
@@ -100,7 +109,7 @@
         "**/mock*/**",
         "**/.claude/**"
       ],
-      "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars — if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
+      "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars \u2014 if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
     },
     {
       "rule_name": "hasura_aggregate_query",
@@ -122,7 +131,7 @@
         "**/aegis/**/*.ts",
         "**/metrics-bridge/**/*.ts"
       ],
-      "reminder": "App code is shelling out to gcloud. Use the GCP client libraries with workload identity instead — CLI calls won't work in Vercel/Cloud Run."
+      "reminder": "App code is shelling out to gcloud. Use the GCP client libraries with workload identity instead \u2014 CLI calls won't work in Vercel/Cloud Run."
     },
     {
       "rule_name": "indexer_handler_throw",
@@ -136,7 +145,7 @@
         "**/indexer-envio/src/handlers/**/config.ts",
         "**/indexer-envio/test/**"
       ],
-      "reminder": "Throwing from an Envio handler (any form — Error, TypeError, custom, re-throw) halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
+      "reminder": "Throwing from an Envio handler (any form \u2014 Error, TypeError, custom, re-throw) halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
     },
     {
       "rule_name": "number_coerce_onchain_value",
@@ -174,7 +183,7 @@
         "**/validate-payload.ts",
         "**/check-payload-size.ts"
       ],
-      "reminder": "QuickNode webhook handler reads request body — verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early. (check-payload-size.ts is the intentional pre-sig DoS-rejection gate and is excluded from this rule.)"
+      "reminder": "QuickNode webhook handler reads request body \u2014 verify the signature with `verify-quicknode-signature.ts` BEFORE parsing the body, not after. Reject unauthenticated requests early. (check-payload-size.ts is the intentional pre-sig DoS-rejection gate and is excluded from this rule.)"
     }
   ]
 }
