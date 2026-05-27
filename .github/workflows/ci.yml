@@ -121,6 +121,7 @@ jobs:
               - aegis/terraform/**
               - terraform.stacks.json
               - scripts/tf-stacks.mjs
+              - .github/workflows/alerts-infra.yml
               - .github/workflows/infra.yml
               - .github/workflows/ci.yml
             alerts:

@@ -11,6 +11,7 @@ on:
       - aegis/terraform/**
       - terraform.stacks.json
       - scripts/tf-stacks.mjs
+      - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
   pull_request:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - aegis/terraform/**
       - terraform.stacks.json
       - scripts/tf-stacks.mjs
+      - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
 
 # See ci.yml for the concurrency rationale: PR runs cancel on new pushes

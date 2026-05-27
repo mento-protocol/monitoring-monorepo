@@ -42,6 +42,7 @@ function loadRegistry() {
       "providers",
       "ci",
       "applyPolicy",
+      "changedPathPatterns",
     ]) {
       if (stack[field] === undefined) {
         throw new Error(`stack is missing ${field}: ${JSON.stringify(stack)}`);
@@ -121,8 +122,18 @@ function printList(args) {
 }
 
 function patternMatches(pattern, changedPath) {
-  if (pattern.endsWith("/**")) {
-    const prefix = pattern.slice(0, -3);
+  const isPrefixPattern = pattern.endsWith("/**");
+  const literalPart = isPrefixPattern ? pattern.slice(0, -3) : pattern;
+  if (
+    ["*", "?", "{", "}", "[", "]"].some((char) => literalPart.includes(char))
+  ) {
+    throw new Error(
+      `unsupported glob pattern in changedPathPatterns: ${pattern}`,
+    );
+  }
+
+  if (isPrefixPattern) {
+    const prefix = literalPart;
     return changedPath === prefix || changedPath.startsWith(`${prefix}/`);
   }
   return changedPath === pattern;

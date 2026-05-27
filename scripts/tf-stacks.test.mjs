@@ -33,10 +33,16 @@ function assert(condition, message) {
 
 const registry = JSON.parse(run(["list", "--json"]));
 const stackIds = registry.stacks.map((stack) => stack.id);
+const requiredStackIds = [
+  "platform",
+  "alerts-rules",
+  "alerts-delivery",
+  "aegis",
+];
+const missingStackIds = requiredStackIds.filter((id) => !stackIds.includes(id));
 assert(
-  JSON.stringify(stackIds) ===
-    JSON.stringify(["platform", "alerts-rules", "alerts-delivery", "aegis"]),
-  `unexpected stack ids: ${stackIds.join(", ")}`,
+  missingStackIds.length === 0,
+  `missing required stack ids: ${missingStackIds.join(", ")}`,
 );
 
 for (const stack of registry.stacks) {

@@ -69,8 +69,7 @@ once. Do not run `terraform apply` as part of this migration.
 ```bash
 set -euo pipefail
 
-MIGRATION_DIR="/private/tmp/mento-grafana-alert-state-$(date +%Y%m%d%H%M%S)"
-mkdir -p "$MIGRATION_DIR"
+MIGRATION_DIR="$(mktemp -d -t mento-grafana-alert-state-XXXXXXXXXX)"
 
 terraform -chdir=aegis/terraform init
 terraform -chdir=alerts/rules init
