@@ -57,15 +57,12 @@ provider "google" {
 }
 
 # GitHub provider — used solely to mirror Vercel-managed secrets (e.g.
-# `VERCEL_AUTOMATION_BYPASS_SECRET`) into GitHub Actions org secrets so CI
-# workflows can read them. `var.github_token` should be a fine-grained PAT
-# scoped to `mento-protocol` with `Organization secrets: Read/write` —
-# that's the least-privilege grant for managing org-level Actions secrets.
-# A classic PAT with `admin:org` also works but grants org-admin-level
-# access (manage teams, members, webhooks, etc.) — far wider than needed
-# and a much larger blast radius if leaked, so prefer fine-grained.
-# Repo-level Actions secrets live in `alerts/infra/` instead and use a
-# separate, narrower token.
+# `VERCEL_AUTOMATION_BYPASS_SECRET`) into GitHub Actions secrets on
+# `monitoring-monorepo` so CI workflows can read them. `var.github_token`
+# should be a fine-grained PAT scoped to `mento-protocol/monitoring-monorepo`
+# with Repository → Secrets: Read/write. That matches the narrow PAT
+# `alerts/infra/` already uses and avoids the org-admin scope that an
+# org-level secret would force.
 provider "github" {
   owner = var.github_owner
   token = var.github_token

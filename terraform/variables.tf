@@ -14,24 +14,24 @@ variable "vercel_team_id" {
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
 # Used to mirror Vercel-managed secrets (e.g. `VERCEL_AUTOMATION_BYPASS_SECRET`)
-# into GitHub Actions org secrets so CI can consume them. Repo-level secrets
-# managed by `alerts/infra/` use a different, narrower token.
+# into the `monitoring-monorepo` GitHub Actions secrets so CI can consume
+# them. `alerts/infra/` uses a separate token of the same shape for its own
+# `TF_VAR_*` repo-secret mirrors.
 
 variable "github_owner" {
-  description = "GitHub organization that owns the org secrets managed by this stack."
+  description = "GitHub organization that owns the repo whose Actions secrets this stack manages."
   type        = string
   default     = "mento-protocol"
 }
 
 variable "github_token" {
   description = <<-EOT
-    GitHub PAT for writing organization-level Actions secrets. Prefer a
-    fine-grained PAT scoped to mento-protocol with `Organization secrets:
-    Read/write` — least-privilege for this stack's use case. A classic PAT
-    with `admin:org` also works as a fallback but grants org-admin-level
-    access (manage teams, members, webhooks, etc.), so blast radius if
-    leaked is much wider. Used only by
-    `github_actions_organization_secret` resources in this stack.
+    GitHub PAT for writing repository Actions secrets on
+    `mento-protocol/monitoring-monorepo`. Fine-grained PAT scoped to that
+    repo with Repository → Secrets: Read/write — least-privilege for this
+    stack's use case (org-admin scope is NOT needed because the secrets
+    managed here are repo-level, not org-level). Used only by
+    `github_actions_secret` resources in this stack.
   EOT
   type        = string
   sensitive   = true
