@@ -246,8 +246,8 @@ jobs:
         if: steps.decide.outputs.run == 'true' && always()
         run: |
           if [ ! -f /tmp/lhci-output.txt ]; then
-            echo "::warning::lhci-output.txt not found — lhci likely crashed before writing output; cannot verify audited URL."
-            exit 0
+            echo "::error::lhci-output.txt not found — lhci likely crashed before writing output; cannot verify audited URL. Failing closed to match the guard's documented contract."
+            exit 1
           fi
           if grep -q 'vercel\.com/login' /tmp/lhci-output.txt; then
             echo "::error::Lighthouse audited Vercel's SSO interstitial instead of the dashboard."
