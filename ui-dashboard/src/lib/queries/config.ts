@@ -95,37 +95,6 @@ export const ORACLE_SNAPSHOTS_CHART = `
   }
 `;
 
-// The active deviation breaker for the pool's rate feed. There's typically
-// one enabled MEDIAN_DELTA or VALUE_DELTA per feed (MARKET_HOURS is a
-// schedule halt, not a deviation comparator — excluded here). All numeric
-// fields ride as Fixidity 1e24 strings; divide by 1e24 to get the float.
-export const BREAKER_CONFIG_FOR_RATE_FEED = `
-  query BreakerConfigForRateFeed($rateFeedID: String!, $chainId: Int!) {
-    BreakerConfig(
-      where: {
-        rateFeedID: { _eq: $rateFeedID }
-        chainId: { _eq: $chainId }
-        enabled: { _eq: true }
-        breaker: { kind: { _neq: MARKET_HOURS } }
-      }
-      # Deterministic pick when a feed somehow ends up with two enabled
-      # non-MARKET_HOURS breakers — the chart reads [0] downstream.
-      order_by: { id: asc }
-      limit: 2
-    ) {
-      id
-      breaker { kind defaultRateChangeThreshold }
-      rateChangeThreshold
-      referenceValue
-      medianRatesEMA
-      lastMedianRate
-      status
-      lastTripAt
-      cooldownTime
-    }
-  }
-`;
-
 export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
   query OracleSnapshotsCountPage($poolId: String!, $limit: Int!, $offset: Int!) {
     OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {

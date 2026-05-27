@@ -20,15 +20,22 @@ import {
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
-  BREAKER_CONFIG_FOR_RATE_FEED,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
+  POOL_BREAKER_CONFIG,
 } from "@/lib/queries";
+import { effectiveThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
-import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
+import {
+  type BreakerConfig,
+  type BreakerTripEvent,
+  isVirtualPool,
+  type OracleSnapshot,
+  type Pool,
+} from "@/lib/types";
 import { useCallback, useMemo, useState } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
@@ -133,7 +140,10 @@ export function OracleTab(props: OracleTabProps) {
   // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
   // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as
   // baseline and `rateChangeThreshold` as the trip band — none of which are
-  // on OracleSnapshot.
+  // on OracleSnapshot. We share `POOL_BREAKER_CONFIG` (and its SWR cache key)
+  // with `<BreakerPanel />` and `<MarketHoursPill />` so the page issues a
+  // single Hasura round-trip for breaker state; the picker below filters out
+  // MARKET_HOURS so the chart sees the same trip-able config the panel does.
   const rateFeedID = pool?.referenceRateFeedID?.toLowerCase();
   const chainId = pool?.chainId;
   const {
@@ -141,39 +151,22 @@ export function OracleTab(props: OracleTabProps) {
     isLoading: isBreakerLoading,
     error: breakerError,
   } = useGQL<{
-    BreakerConfig: Array<{
-      id: string;
-      breaker: {
-        kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
-        defaultRateChangeThreshold: string;
-      };
-      rateChangeThreshold: string;
-      referenceValue: string | null;
-      medianRatesEMA: string | null;
-      lastMedianRate: string | null;
-      status: "OK" | "TRIPPED";
-      lastTripAt: string | null;
-      cooldownTime: string;
-    }>;
+    BreakerConfig: BreakerConfig[];
+    BreakerTripEvent: BreakerTripEvent[];
   }>(
-    rateFeedID && chainId ? BREAKER_CONFIG_FOR_RATE_FEED : null,
-    rateFeedID && chainId ? { rateFeedID, chainId } : undefined,
+    rateFeedID && chainId ? POOL_BREAKER_CONFIG : null,
+    rateFeedID && chainId ? { chainId, rateFeedID } : undefined,
   );
   const breakerConfig = useMemo(() => {
-    const row = breakerData?.BreakerConfig?.[0];
+    const configs = breakerData?.BreakerConfig ?? [];
+    const row = pickTrippableConfig(configs);
     if (!row) return null;
     // Per-feed `rateChangeThreshold` is a sentinel `0` when the feed inherits
-    // the breaker default (see `effectiveThreshold` in breaker-panel.tsx) —
-    // resolve it here so the chart band reflects the truly-applied limit
-    // instead of collapsing to 0.
-    const perFeed = row.rateChangeThreshold;
-    const effectiveThreshold =
-      perFeed && perFeed !== "0"
-        ? perFeed
-        : row.breaker.defaultRateChangeThreshold;
+    // the breaker default; `effectiveThreshold` resolves that so the chart
+    // band reflects the truly-applied limit instead of collapsing to 0.
     return {
       breakerKind: row.breaker.kind,
-      rateChangeThreshold: effectiveThreshold,
+      rateChangeThreshold: effectiveThreshold(row).toString(),
       referenceValue: row.referenceValue,
       medianRatesEMA: row.medianRatesEMA,
       status: row.status,
