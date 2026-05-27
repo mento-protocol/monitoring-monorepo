@@ -121,19 +121,26 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
   ]
 }
 
-# Allows the CI deployer SA to mint short-lived tokens for `org-terraform`, the
-# seed-project SA used by `alerts/infra/` for both its GCS backend
-# (`impersonate_service_account` in `alerts/infra/versions.tf`) and its google
-# provider (`alerts/infra/providers.tf`). Without this grant, the CI workflow
-# `alerts-infra.yml` fails at `terraform init` with a 403 from STS — the
-# deployer SA is authorized via WIF but can't impersonate `org-terraform`.
+# Allows the CI deployer SA to mint short-lived tokens for `org-terraform`,
+# the seed-project SA used by BOTH `alerts/infra/` and `alerts/rules/` for
+# their GCS backend impersonation (and, for `alerts/infra/`, also its google
+# provider). Without this grant, `alerts-infra.yml` / `alerts-rules.yml` fail
+# at `terraform init` with a 403 from STS — the deployer SA is authorized
+# via WIF but can't impersonate `org-terraform`.
+#
+# `google_service_account_iam_member` is keyed on the (service_account_id,
+# role, member) triple — one Terraform resource per triple, not per
+# consumer. A second resource with the same triple wouldn't create a second
+# binding; it would shadow this one, and removing either would revoke the
+# underlying grant and break BOTH stacks until the next apply. So this
+# single resource covers every CI stack that impersonates `org-terraform`.
 #
 # The binding lives on `org-terraform` in the seed project, NOT in
 # `mento-monitoring`. `google_service_account_iam_member` makes the target
 # explicit (vs. a project-level binding) so the blast radius is one SA, not
 # the whole seed project. `org-terraform` already has the rights it needs in
 # the seed project to grant this binding on itself.
-resource "google_service_account_iam_member" "ci_alerts_infra_org_terraform_token_creator" {
+resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
   # `service_account_id` must use the fully-qualified
   # `projects/<project>/serviceAccounts/<email>` form — the google provider
   # rejects the email-only form at apply-time with a regex validation
@@ -144,12 +151,12 @@ resource "google_service_account_iam_member" "ci_alerts_infra_org_terraform_toke
   member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
 
-# Same grant for `alerts/rules/` — its GCS backend impersonates `org-terraform`
-# (see `alerts/rules/versions.tf`) so `alerts-rules.yml` also needs the CI SA
-# to mint tokens for that target. Separate resource (not for_each) so each
-# stack's grant can be audited and removed independently.
-resource "google_service_account_iam_member" "ci_alerts_rules_org_terraform_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+# Rename from `ci_alerts_infra_...` once `alerts/rules/` joined `alerts/infra/`
+# as a second consumer of the same impersonation grant. `moved` lets `apply`
+# pick up the rename without destroying and re-creating the underlying IAM
+# binding (which would leave a brief window where both stacks 403). Safe to
+# remove this block after one full apply cycle has propagated the move.
+moved {
+  from = google_service_account_iam_member.ci_alerts_infra_org_terraform_token_creator
+  to   = google_service_account_iam_member.ci_alerts_org_terraform_token_creator
 }
