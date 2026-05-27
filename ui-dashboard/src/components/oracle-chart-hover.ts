@@ -75,8 +75,6 @@ export function formatOracleChartHoverText({
     // and `source` is a DB-sourced string — even though the chart's GQL
     // query currently restricts it to a fixed value, the rule is to escape
     // at the render boundary (see `escapePlotText` doc).
-    (snapshot.source
-      ? `<br>Source: ${escapePlotText(snapshot.source)}`
-      : "")
+    (snapshot.source ? `<br>Source: ${escapePlotText(snapshot.source)}` : "")
   );
 }
