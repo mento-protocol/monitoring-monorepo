@@ -66,10 +66,16 @@ variable "sentry_slack_critical_channel_id" {
 
   validation {
     condition = (
-      var.sentry_slack_critical_channel == "#alerts-critical"
-      || var.sentry_slack_critical_channel_id != "C0AURREPNDU"
+      (
+        var.sentry_slack_critical_channel == "#alerts-critical"
+        && var.sentry_slack_critical_channel_id == "C0AURREPNDU"
+      )
+      || (
+        var.sentry_slack_critical_channel != "#alerts-critical"
+        && var.sentry_slack_critical_channel_id != "C0AURREPNDU"
+      )
     )
-    error_message = "When sentry_slack_critical_channel is changed from #alerts-critical, sentry_slack_critical_channel_id must also be set to the matching Slack channel ID."
+    error_message = "sentry_slack_critical_channel and sentry_slack_critical_channel_id must be changed together when rerouting critical fan-out."
   }
 }
 
