@@ -16,9 +16,9 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
-  token0Symbol?: string;
-  token1Symbol?: string;
-  breachStartedAt?: string | null;
+  token0Symbol?: string | undefined;
+  token1Symbol?: string | undefined;
+  breachStartedAt?: string | null | undefined;
 }
 
 export function OracleChart({

@@ -29,18 +29,18 @@ interface PoolRowProps {
   entry: GlobalPoolEntry;
   showVirtualPoolSource: boolean;
   tvlByKey: Map<string, number | null>;
-  volume24hByKey?: Map<string, number | null | undefined>;
+  volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume24hLoading: boolean;
   volume24hError: boolean;
-  volume7dByKey?: Map<string, number | null | undefined>;
+  volume7dByKey?: Map<string, number | null | undefined> | undefined;
   volume7dLoading: boolean;
   volume7dError: boolean;
   totalVolumeByKey: Map<string, number | null>;
-  tvlChangeWoWByKey?: Map<string, number | null>;
-  tradingLimitsByKey?: Map<string, TradingLimit[]>;
-  olsPoolKeys?: Set<string>;
-  cdpPoolKeys?: Set<string>;
-  reservePoolKeys?: Set<string>;
+  tvlChangeWoWByKey?: Map<string, number | null> | undefined;
+  tradingLimitsByKey?: Map<string, TradingLimit[]> | undefined;
+  olsPoolKeys?: Set<string> | undefined;
+  cdpPoolKeys?: Set<string> | undefined;
+  reservePoolKeys?: Set<string> | undefined;
 }
 
 export function PoolRow({

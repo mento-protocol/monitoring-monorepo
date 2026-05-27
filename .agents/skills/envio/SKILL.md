@@ -160,7 +160,7 @@ Notes:
 ## Gotchas
 
 - **Hasura silently caps queries at 1000 rows.** Aggregate functions are disabled on the hosted service. For large pulls, use the offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts` exports `fetchAllFeeSnapshotPages`) or do rollups indexer-side — do not rely on `limit: 10000` working.
-- **Free tier auto-deletes after 30 days** (or 7 days idle, or 20GB storage, or 100k events). Paid tiers lift this; the mento indexer is on the `small` tier. Don't confuse "deployment disappeared" with "build failed" — check `indexer get` first.
+- **Free tier auto-deletes after 30 days** (or 7 days idle, or 20GB storage, or 100k events). Paid tiers lift this; the mento indexer is on the `medium` tier. Don't confuse "deployment disappeared" with "build failed" — check `indexer get` first.
 - **Re-index on every push.** Schema changes, handler edits, ABI bumps, and config tweaks all invalidate cache. Budget sync time before any deploy (the mento indexer takes ~15–40 min depending on how far behind head).
 - **`has_processed_to_end_block: false` is not a failure.** Live indexers have `end_block: 0` so this flag can never flip. Use `timestamp_caught_up_to_head_or_endblock` instead.
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).

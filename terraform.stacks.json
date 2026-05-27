@@ -41,16 +41,17 @@
       "providers": ["grafana"],
       "ci": {
         "validate": "changed-paths",
-        "plan": "manual",
-        "apply": "manual"
+        "plan": "pull-request",
+        "apply": "push-main-production-environment"
       },
-      "applyPolicy": "human-review-required",
+      "applyPolicy": "ci-production-environment-approved",
       "changedPathPatterns": [
         "alerts/rules/**",
         "terraform.stacks.json",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml"
+        ".github/workflows/infra.yml",
+        ".github/workflows/alerts-rules.yml"
       ],
       "aliases": [
         "pnpm alerts:rules:init",

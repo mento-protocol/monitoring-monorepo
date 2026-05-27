@@ -204,6 +204,11 @@ export function TimeSeriesChartCard({
     containerRef,
   });
   const { traces, layout } = useMemo(() => {
+    // Plotly's own legend renders only when there's a breakdown AND the
+    // host isn't drawing its own sibling legend. Hoisted so the layout's
+    // `showlegend`, the conditional `legend` spread, and the bottom-margin
+    // reservation stay in lockstep.
+    const showPlotlyLegend = hasBreakdown && !useCustomLegend;
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
     );
@@ -213,7 +218,7 @@ export function TimeSeriesChartCard({
       : {
           x: xs,
           y: ys,
-          name: hasBreakdown ? "Total" : undefined,
+          ...(hasBreakdown ? { name: "Total" } : {}),
           type: "scatter" as const,
           mode: "lines" as const,
           line: { color: "#6366f1", width: 2 },
@@ -335,23 +340,24 @@ export function TimeSeriesChartCard({
             : { range: yRange }),
           fixedrange: true,
         },
-        showlegend: hasBreakdown && !useCustomLegend,
-        legend:
-          hasBreakdown && !useCustomLegend
-            ? {
+        showlegend: showPlotlyLegend,
+        ...(showPlotlyLegend
+          ? {
+              legend: {
                 orientation: "h" as const,
                 y: -0.15,
                 x: 0,
                 font: { color: "#94a3b8", size: 11 },
                 bgcolor: "transparent",
-              }
-            : undefined,
+              },
+            }
+          : {}),
         margin: {
           t: 8,
           r: 8,
           // Custom legend is rendered as a sibling below the Plot — no
           // need to reserve plot-margin space for Plotly's own legend.
-          b: hasBreakdown && !useCustomLegend ? 48 : 24,
+          b: showPlotlyLegend ? 48 : 24,
           l: 8,
         },
         autosize: true,

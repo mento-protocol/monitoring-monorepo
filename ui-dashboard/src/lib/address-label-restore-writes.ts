@@ -24,13 +24,13 @@ import {
 } from "@/lib/redis-hash";
 
 type SnapshotHashReplacement = {
-  labels?: Record<string, AddressEntry>;
-  reports?: Record<string, AddressReport>;
-  intelDeep?: Record<string, IntelDeepRecord>;
-  intelTransfers?: Record<string, IntelTransfersRecord>;
-  intelWealth?: Record<string, IntelWealthRecord>;
-  intelEntities?: Record<string, IntelEntityRecord>;
-  intelEntityCps?: Record<string, IntelEntityCpsRecord>;
+  labels?: Record<string, AddressEntry> | undefined;
+  reports?: Record<string, AddressReport> | undefined;
+  intelDeep?: Record<string, IntelDeepRecord> | undefined;
+  intelTransfers?: Record<string, IntelTransfersRecord> | undefined;
+  intelWealth?: Record<string, IntelWealthRecord> | undefined;
+  intelEntities?: Record<string, IntelEntityRecord> | undefined;
+  intelEntityCps?: Record<string, IntelEntityCpsRecord> | undefined;
 };
 
 export async function replaceSnapshotHashes(

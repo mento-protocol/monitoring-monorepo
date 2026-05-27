@@ -39,12 +39,12 @@ const ARROW = {
 } as const;
 
 type RollupRow = {
-  healthBinarySeconds?: string;
-  healthTotalSeconds?: string;
+  healthBinarySeconds?: string | undefined;
+  healthTotalSeconds?: string | undefined;
 };
 type HealthCursorRow = {
-  lastOracleSnapshotTimestamp?: string;
-  lastDeviationRatio?: string;
+  lastOracleSnapshotTimestamp?: string | undefined;
+  lastDeviationRatio?: string | undefined;
 };
 type DailyAnchorRow = {
   // Read by computeWindowUptimePct's freshness gate (rejects anchors >8d
@@ -52,9 +52,9 @@ type DailyAnchorRow = {
   // this type, the gate silently disables (anchorTs defaults to 0 →
   // "no freshness check") and stale anchors quietly broaden the window
   // past the "last 7d" label. Keep both in lockstep with the helper.
-  timestamp?: string;
-  cumulativeHealthBinarySeconds?: string;
-  cumulativeHealthTotalSeconds?: string;
+  timestamp?: string | undefined;
+  cumulativeHealthBinarySeconds?: string | undefined;
+  cumulativeHealthTotalSeconds?: string | undefined;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {

@@ -174,10 +174,10 @@ export async function upsertReport(
   address: string,
   payload: {
     body: string;
-    title?: string;
-    authorEmail?: string;
-    source?: AddressReport["source"];
-    baseVersion?: number;
+    title?: string | undefined;
+    authorEmail?: string | undefined;
+    source?: AddressReport["source"] | undefined;
+    baseVersion?: number | undefined;
   },
 ): Promise<AddressReport> {
   const redis = getRedis();

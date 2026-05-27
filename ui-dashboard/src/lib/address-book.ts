@@ -20,14 +20,14 @@ export type AddressBookRow = {
   address: string;
   name: string;
   tags: string[];
-  kind?: "contract" | "custom" | "report";
+  kind?: "contract" | "custom" | "report" | undefined;
   isCustom: boolean;
   /** Provenance — `"arkham"` for cron-enriched entries, undefined for manual. */
-  source?: string;
+  source?: string | undefined;
   /** ISO timestamp of first write; undefined for static contract rows. */
-  createdAt?: string;
+  createdAt?: string | undefined;
   /** ISO timestamp of most recent write; undefined for static contract rows. */
-  updatedAt?: string;
+  updatedAt?: string | undefined;
   /**
    * Display network. Custom rows reuse a default network for explorer-link
    * fallback; contract rows carry their own chain. Callers that need to
