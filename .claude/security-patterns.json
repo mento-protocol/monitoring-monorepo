@@ -25,8 +25,8 @@
     },
     {
       "rule_name": "aws_access_key",
-      "substrings": ["AKIA", "ASIA"],
-      "reminder": "AWS access-key prefix detected. Use workload identity / instance profiles, not literal credentials."
+      "regex": "(AKIA|ASIA)[A-Z2-7]{16}",
+      "reminder": "AWS access-key literal detected. Use workload identity / instance profiles, not literal credentials."
     },
     {
       "rule_name": "private_key_literal",
