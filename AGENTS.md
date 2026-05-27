@@ -227,7 +227,8 @@ pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
 pnpm aegis:agent:seed-secrets # Seed/rotate Grafana Agent Secret Manager versions
 pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
-pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
+pnpm aegis:tf:init / aegis:tf:plan
+# Apply runs in CI on merge to main (aegis-terraform.yml; production gate).
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json

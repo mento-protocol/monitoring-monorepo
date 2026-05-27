@@ -99,12 +99,15 @@ versions in a fresh project, then follow the instructions in
 ### Deploying Grafana Resources
 
 Aegis Grafana dashboards and Aegis service-health alerts are managed in
-`aegis/terraform` and can be planned/applied via:
+`aegis/terraform`. Preview locally with:
 
 ```sh
 pnpm aegis:tf:plan
-pnpm aegis:tf:apply
 ```
+
+Apply runs in CI on merge to main via
+[`.github/workflows/aegis-terraform.yml`](../.github/workflows/aegis-terraform.yml),
+gated by the `production` GitHub Environment required-reviewer rule.
 
 Protocol alert rules and global Grafana notification routing live in
 `alerts/rules` (`pnpm alerts:rules:plan`). See `docs/terraform.md` for the
@@ -260,7 +263,7 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
    1. From there, it should have the option to export as `JSON`, `YAML`, or `Terraform (HCL)` — pick **Terraform (HCL)**
 1. Add your export to [./terraform/grafana-dashboard/dashboard.tf](./terraform/grafana-dashboard/dashboard.tf) to the appropriate section
    1. Finding the right place can be a bit annoying as the exported config is quite verbose. AI is your friend here. You can copy/paste the existing `dashboard.tf` into your LLM of choice and then ask it to insert your newly exported visualization into the right place.
-1. Deploy your new Grafana visualization into the main Aegis dashboard via `pnpm aegis:tf:plan` and, after reviewing the plan, `pnpm aegis:tf:apply`
+1. Open a PR with your changes. The Aegis Terraform workflow will plan against the new code and post a sticky comment with the diff. Review the plan, then merge to main — CI auto-applies (production gate enforces required-reviewer approval).
 1. Ensure that it worked by reviewing the main Aegis dashboard in Grafana
 1. If anything went wrong, roll back your changes to `dashboard.tf` and keep editing until you get it right :)
 
@@ -328,7 +331,7 @@ pnpm --filter @mento-protocol/aegis grafana
 
 We are using Terraform to deploy a Grafana Dashboard containing visualizations for all configured metrics.
 
-To update the dashboard, make the desired changes in [./terraform/grafana-dashboard](./terraform/grafana-dashboard), run `pnpm aegis:tf:plan`, and apply only after reviewing the plan.
+To update the dashboard, make the desired changes in [./terraform/grafana-dashboard](./terraform/grafana-dashboard) and open a PR. CI plans against the change and posts a sticky comment; review, then merge to apply (production gate).
 
 ### Grafana Alerts
 
@@ -338,10 +341,10 @@ rules, reserve-balance rules, trading-mode rules, and trading-limit rules live
 in `alerts/rules`.
 
 To update Aegis service-health alert thresholds, edit
-[`terraform/aegis-service-alerts.tf`](./terraform/aegis-service-alerts.tf), run
-`pnpm aegis:tf:plan`, and apply only after reviewing the plan. To update
-protocol alerts or global routing, edit `../alerts/rules` and run
-`pnpm alerts:rules:plan`.
+[`terraform/aegis-service-alerts.tf`](./terraform/aegis-service-alerts.tf) and
+open a PR — CI plans and the production gate enforces review-before-apply.
+To update protocol alerts or global routing, edit `../alerts/rules` and run
+`pnpm alerts:rules:plan` (same auto-apply flow there).
 
 Grafana uses the following concepts for managing alerts:
 
