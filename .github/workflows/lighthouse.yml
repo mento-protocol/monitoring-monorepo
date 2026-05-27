@@ -256,6 +256,31 @@ jobs:
           fi
           echo "Audited-page guard passed: no SSO interstitial URLs in lhci output."
 
+      - name: Install Playwright Chromium (for INP measurement)
+        # The INP step uses `@playwright/test`'s chromium (the dashboard's
+        # existing browser-test infra) rather than puppeteer-core + lighthouse
+        # user-flow because (a) zero new workspace deps, (b) web-vitals
+        # delivers the same Event-Timing-API INP a real user would see —
+        # Lighthouse timespan mode estimates it from main-thread timing.
+        if: steps.decide.outputs.run == 'true'
+        working-directory: ui-dashboard
+        run: pnpm exec playwright install chromium
+
+      - name: Measure INP (Playwright + web-vitals)
+        # Drives the /pools client surface through a scripted interaction
+        # (focus filter input → type → click Apply), captures INP via the
+        # web-vitals library injected into the page, and fails the workflow
+        # if INP > INP_BUDGET_MS (default 200 — web-vitals' "good"
+        # threshold). The script reuses the same bypass headers the lhci
+        # step uses; the chromium it launches inherits @playwright/test's
+        # multi-process setup (no sandbox single-process workaround needed
+        # on GHA runners).
+        if: steps.decide.outputs.run == 'true'
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
+        run: node ui-dashboard/scripts/measure-inp.mjs
+
       - name: Post Lighthouse results as PR comment
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
