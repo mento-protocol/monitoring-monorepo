@@ -214,6 +214,11 @@ async function probeFunction(
     // Reverts WITH a reason/signature/custom-error suffix mean the
     // function exists but failed (require/typed-revert) — those must
     // route to rpc_error so the caller can retry on the next event.
+    // INVARIANT for probe callers: only probe pure view functions whose
+    // valid-input path cannot bare-revert (`revert()`/`require(false)` with
+    // no reason). Today's probes (`medianRatesEMA`, `referenceValues`) are
+    // storage getters that return 0 when unset; a future probe that can
+    // bare-revert on inputs would mis-classify the breaker kind here.
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("returned no data")) return "missing";
     const shortMessage =

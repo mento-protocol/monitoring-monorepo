@@ -433,7 +433,7 @@ indexer.onEvent(
     // nttManager has exactly one transceiver in `config/nttAddresses.json`.
     // Passing it to `drainDestPending` restricts the backward walk to
     // scratch rows whose `destTransceiver` matches — preventing source
-    // mis-attribution in a multi-NTT-inbound same-tx (e.g. CHFm + EURm
+    // mis-attribution in a multi-NTT-inbound same-tx (e.g. CHFm + USDm
     // redeemed in the same Monad block). If the manifest entry is missing
     // (yaml drift), `mgr` is null and the drain falls back to the legacy
     // unfiltered walk; the manifest-miss warn at `ensureNttManagerSeed`
