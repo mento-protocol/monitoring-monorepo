@@ -81,6 +81,15 @@ module "discord_channels" {
   discord_category_id = var.discord_category_id
 }
 
+# Create Slack channels for on-chain alerts and events.
+module "slack_channels" {
+  source = "./channels/slack-channels"
+
+  providers = {
+    restapi.slack = restapi.slack
+  }
+}
+
 # Forward Sentry errors to Slack (per-project channel + critical fan-out).
 module "sentry_bridge" {
   source = "./channels/sentry-bridge"
@@ -109,20 +118,21 @@ module "onchain_event_handler" {
 
   quicknode_signing_secret = var.quicknode_signing_secret
 
-  # Dynamic webhook configuration based on ALL multisigs (across all chains)
-  # All multisigs share the same two webhook URLs
-  multisig_webhooks = {
+  # Dynamic notification configuration based on ALL multisigs (across all chains)
+  # All multisigs share the same two Slack destination channels.
+  multisig_notifications = {
     for key, multisig in var.multisigs : key => {
-      address        = multisig.address
-      name           = multisig.name
-      chain          = multisig.chain
-      alerts_webhook = module.discord_channels.webhook_urls.alerts
-      events_webhook = module.discord_channels.webhook_urls.events
+      address           = multisig.address
+      name              = multisig.name
+      chain             = multisig.chain
+      alerts_channel_id = module.slack_channels.channel_ids.alerts
+      events_channel_id = module.slack_channels.channel_ids.events
     }
   }
+  slack_bot_token = var.slack_bot_token
 
   depends_on = [
-    module.discord_channels,
+    module.slack_channels,
     module.project_factory,
     google_service_account.project_sa
   ]
@@ -171,7 +181,7 @@ module "onchain_event_listeners" {
 # GitHub UI would surface as a TF diff. Secrets in state are
 # encrypted at rest in GCS and gated by `org-terraform` impersonation
 # (same gate as every other secret already managed here, e.g. the
-# Sentry / Discord / QuickNode tokens above).
+# Sentry / Discord / Slack / QuickNode tokens above).
 #
 # Map: tfvars variable → secret name. Mirrors the env: block in
 # alerts-infra.yml.
@@ -193,12 +203,13 @@ locals {
     "TF_VAR_QUICKNODE_API_KEY",
     "TF_VAR_QUICKNODE_SIGNING_SECRET",
     # Slack bot OAuth token (xoxb-...) consumed by the restapi.slack provider
-    # in `providers.tf` to create + archive the per-Sentry-project Slack
-    # channels. Same chicken-and-egg pattern as TF_VAR_GITHUB_TOKEN below —
-    # the first time this secret is needed by CI, it has to be bootstrapped
-    # manually via `gh secret set TF_VAR_SLACK_BOT_TOKEN` (done before this
-    # commit landed). Subsequent rotations: update tfvars, re-apply, the
-    # github_actions_secret resource keeps GH Actions in sync.
+    # to create/archive Slack channels and by the Cloud Function to post
+    # on-chain event notifications. Same chicken-and-egg pattern as
+    # TF_VAR_GITHUB_TOKEN below — the first time this secret is needed by CI,
+    # it has to be bootstrapped manually via `gh secret set
+    # TF_VAR_SLACK_BOT_TOKEN` (done before this commit landed). Subsequent
+    # rotations: update tfvars, re-apply, the github_actions_secret resource
+    # keeps GH Actions in sync.
     "TF_VAR_SLACK_BOT_TOKEN",
     # Self-managed: the github provider's own PAT also lives in repo
     # secrets so CI can `terraform plan/apply` this stack (which manages
@@ -224,21 +235,9 @@ locals {
   }
 }
 
-# trunk-ignore-begin(checkov/CKV_GIT_4): CKV_GIT_4 prefers `encrypted_value`
-# (pre-libsodium-encrypted against the repo's public key) over the plaintext
-# `value` field. The encrypted path requires an external libsodium step
-# outside Terraform — non-trivial complexity for marginal benefit here: the
-# state file is already encrypted at rest in GCS, gated by `org-terraform`
-# impersonation (same gate that already protects sentry_auth_token /
-# discord_bot_token / quicknode_signing_secret in this same state). The
-# provider handles libsodium server-side against GitHub's public key on its
-# way to the API. If the threat model ever shifts (state exposed to a wider
-# audience), revisit — `gh secret set` and `data.github_actions_public_key`
-# can build an `encrypted_value` pipeline.
 resource "github_actions_secret" "alerts_infra_tf_vars" {
   for_each    = local.alerts_infra_ci_secret_names
   repository  = "monitoring-monorepo"
   secret_name = each.key
   value       = local.alerts_infra_ci_secret_values[each.key]
 }
-# trunk-ignore-end(checkov/CKV_GIT_4)

@@ -2,12 +2,12 @@
  * Formatters for module management events (EnabledModule, DisabledModule)
  */
 
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "../types";
+import type { NotificationField, QuickNodeDecodedLog } from "../types";
 
 export async function formatModuleEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.module && typeof log.module === "string") {
     fields.push({

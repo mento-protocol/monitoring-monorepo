@@ -14,7 +14,7 @@ resource "local_file" "env_file" {
 # GCP Project Configuration
 GCP_PROJECT_ID=${var.project_id}
 
-# Multisig Configuration (JSON format, without webhooks)
+# Multisig Configuration (JSON format, without notification destinations)
 MULTISIG_CONFIG=${jsonencode(local.multisig_config_for_json)}
 
 # Supported Chains (comma-separated)
@@ -27,8 +27,11 @@ QUICKNODE_SIGNING_SECRET=${var.quicknode_signing_secret}
 # replay persistence against GCS.
 QUICKNODE_REPLAY_BUCKET=local-quicknode-replay-nonces
 
-# Discord Webhook URLs (shared across all multisigs)
-DISCORD_WEBHOOK_ALERTS=${local.shared_webhook_urls.alerts}
-DISCORD_WEBHOOK_EVENTS=${local.shared_webhook_urls.events}
+# Slack Configuration (shared across all multisigs)
+SLACK_BOT_TOKEN=${var.slack_bot_token}
+SLACK_CHANNEL_ALERTS=${local.shared_channel_ids.alerts}
+SLACK_CHANNEL_EVENTS=${local.shared_channel_ids.events}
   EOT
+
+  file_permission = "0600"
 }

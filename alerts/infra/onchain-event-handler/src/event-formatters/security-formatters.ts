@@ -2,12 +2,12 @@
  * Formatters for security-related events
  */
 
-import type { DiscordEmbedField, QuickNodeDecodedLog } from "../types";
+import type { NotificationField, QuickNodeDecodedLog } from "../types";
 
 export async function formatThresholdEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.threshold !== undefined) {
     const threshold =
@@ -26,8 +26,8 @@ export async function formatThresholdEvent(
 
 export async function formatFallbackHandlerEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.handler && typeof log.handler === "string") {
     fields.push({
@@ -42,8 +42,8 @@ export async function formatFallbackHandlerEvent(
 
 export async function formatGuardEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.guard && typeof log.guard === "string") {
     fields.push({
@@ -58,8 +58,8 @@ export async function formatGuardEvent(
 
 export async function formatApproveHashEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   // ABI field name is `approvedHash` (per safe-abi.json); QuickNode passes
   // through the ABI input name on decoded logs. Reading `log.hash` would
@@ -86,8 +86,8 @@ export async function formatApproveHashEvent(
 
 export async function formatSignMsgEvent(
   log: QuickNodeDecodedLog,
-): Promise<DiscordEmbedField[]> {
-  const fields: DiscordEmbedField[] = [];
+): Promise<NotificationField[]> {
+  const fields: NotificationField[] = [];
 
   if (log.msgHash && typeof log.msgHash === "string") {
     fields.push({

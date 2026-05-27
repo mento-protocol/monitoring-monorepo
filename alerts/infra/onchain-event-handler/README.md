@@ -1,6 +1,6 @@
 # Onchain Event Handler Module
 
-Terraform module for deploying the Cloud Function that processes QuickNode webhooks and routes Safe multisig events to Discord.
+Terraform module for deploying the Cloud Function that processes QuickNode webhooks and routes Safe multisig events to Slack.
 
 ## Overview
 
@@ -9,7 +9,7 @@ This module:
 1. Builds and packages the TypeScript source code
 2. Creates a Cloud Storage bucket for the function source
 3. Deploys a Cloud Function
-4. Configures environment variables for Discord webhooks
+4. Configures environment variables and Secret Manager access for Slack delivery
 5. Sets up IAM permissions for public invocation (by QuickNode Webhooks)
 
 ## Prerequisites
@@ -30,32 +30,34 @@ module "onchain_event_handler" {
 
   quicknode_signing_secret = var.quicknode_signing_secret
 
-  # All multisigs share the same two webhook URLs (alerts and events channels)
-  multisig_webhooks = {
+  # All multisigs share the same two Slack destinations (alerts and events channels)
+  multisig_notifications = {
     for key, multisig in var.multisigs : key => {
-      address        = multisig.address
-      name           = multisig.name
-      chain          = multisig.chain
-      alerts_webhook = module.discord_channels.webhook_urls.alerts
-      events_webhook = module.discord_channels.webhook_urls.events
+      address           = multisig.address
+      name              = multisig.name
+      chain             = multisig.chain
+      alerts_channel_id = module.slack_channels.channel_ids.alerts
+      events_channel_id = module.slack_channels.channel_ids.events
     }
   }
+  slack_bot_token = var.slack_bot_token
 }
 ```
 
 ## Inputs
 
-| Name                       | Description                                              | Type     | Default                   | Required |
-| -------------------------- | -------------------------------------------------------- | -------- | ------------------------- | -------- |
-| `project_id`               | GCP project ID                                           | `string` | -                         | yes      |
-| `region`                   | GCP region                                               | `string` | `"europe-west1"`          | no       |
-| `function_name`            | Function name                                            | `string` | `"onchain-event-handler"` | no       |
-| `memory_mb`                | Memory in MB                                             | `number` | `256`                     | no       |
-| `timeout_seconds`          | Timeout in seconds                                       | `number` | `300`                     | no       |
-| `max_instances`            | Max instances                                            | `number` | `10`                      | no       |
-| `min_instances`            | Min instances                                            | `number` | `0`                       | no       |
-| `quicknode_signing_secret` | QuickNode signing secret                                 | `string` | -                         | yes      |
-| `multisig_webhooks`        | Map of multisig configs with shared Discord webhook URLs | `map`    | -                         | yes      |
+| Name                       | Description                                           | Type     | Default                   | Required |
+| -------------------------- | ----------------------------------------------------- | -------- | ------------------------- | -------- |
+| `project_id`               | GCP project ID                                        | `string` | -                         | yes      |
+| `region`                   | GCP region                                            | `string` | `"europe-west1"`          | no       |
+| `function_name`            | Function name                                         | `string` | `"onchain-event-handler"` | no       |
+| `memory_mb`                | Memory in MB                                          | `number` | `256`                     | no       |
+| `timeout_seconds`          | Timeout in seconds                                    | `number` | `300`                     | no       |
+| `max_instances`            | Max instances                                         | `number` | `10`                      | no       |
+| `min_instances`            | Min instances                                         | `number` | `0`                       | no       |
+| `quicknode_signing_secret` | QuickNode signing secret                              | `string` | -                         | yes      |
+| `multisig_notifications`   | Map of multisig configs with shared Slack channel IDs | `map`    | -                         | yes      |
+| `slack_bot_token`          | Slack bot OAuth token for `chat.postMessage`          | `string` | -                         | yes      |
 
 ## Outputs
 
@@ -181,10 +183,10 @@ For local development, you'll need to set up environment variables. The function
    npm run generate:env
    ```
 
-   Creates `.env` with: `MULTISIG_CONFIG`, `DISCORD_WEBHOOK_ALERTS`,
-   `DISCORD_WEBHOOK_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
-   `QUICKNODE_REPLAY_BUCKET`, `FUNCTION_TIMEOUT_SECONDS`,
-   `SUPPORTED_CHAINS`.
+   Creates `.env` with: `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
+   `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`,
+   `QUICKNODE_SIGNING_SECRET`, `QUICKNODE_REPLAY_BUCKET`,
+   `FUNCTION_TIMEOUT_SECONDS`, `SUPPORTED_CHAINS`.
 
 2. **Run locally:**
 

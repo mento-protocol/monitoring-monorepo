@@ -17,8 +17,6 @@ import { privateKeyToAccount } from "viem/accounts";
 // - AMBIGUOUS: 0xccc... on both celo + ethereum
 vi.mock("./config", () => ({
   default: {
-    DISCORD_WEBHOOK_ALERTS: "https://discord.com/api/webhooks/test/alerts",
-    DISCORD_WEBHOOK_EVENTS: "https://discord.com/api/webhooks/test/events",
     MULTISIG_CONFIG: JSON.stringify({
       SOLO_CELO: {
         address: "0xAAaaaAAaAaAaAaaAaaAaaaaAaaAAaAAaAAaAaaAA",
@@ -42,6 +40,9 @@ vi.mock("./config", () => ({
       },
     }),
     QUICKNODE_SIGNING_SECRET: "test-secret",
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CHANNEL_ALERTS: "Calerts",
+    SLACK_CHANNEL_EVENTS: "Cevents",
   },
 }));
 

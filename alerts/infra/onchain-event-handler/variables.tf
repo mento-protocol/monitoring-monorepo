@@ -28,7 +28,7 @@ variable "memory_mb" {
 }
 
 variable "timeout_seconds" {
-  description = "Function timeout in seconds. Bumped from 60s to 300s to reduce QuickNode batch-retry duplicates: each webhook event can issue multiple 5s RPC calls + a 10s Discord POST, and large batches running in parallel under Promise.all could blow the old 60s ceiling. A 300s ceiling gives substantial headroom; the proper cooperative wall-clock budget guard is tracked in BACKLOG.md."
+  description = "Function timeout in seconds. Bumped from 60s to 300s to reduce QuickNode batch-retry duplicates: each webhook event can issue multiple 5s RPC calls + a 10s notification POST, and large batches used to run in parallel under Promise.all could blow the old 60s ceiling. A 300s ceiling gives substantial headroom."
   type        = number
   default     = 300
 }
@@ -56,23 +56,23 @@ variable "quicknode_signing_secret" {
   }
 }
 
-# Dynamic multisig webhook configuration
-# This replaces hardcoded individual webhook variables with a flexible structure
+# Dynamic multisig notification configuration
+# This replaces hardcoded individual destination variables with a flexible structure
 # Supports multisigs from multiple chains in a single deployment
-variable "multisig_webhooks" {
-  description = "Map of multisig configurations with their Discord webhook URLs (can include multiple chains)"
+variable "multisig_notifications" {
+  description = "Map of multisig configurations with their Slack destination channel IDs (can include multiple chains)"
   type = map(object({
-    address        = string
-    name           = string
-    chain          = string
-    alerts_webhook = string
-    events_webhook = string
+    address           = string
+    name              = string
+    chain             = string
+    alerts_channel_id = string
+    events_channel_id = string
   }))
   sensitive = true
 
   validation {
     condition = alltrue([
-      for k, v in var.multisig_webhooks :
+      for k, v in var.multisig_notifications :
       can(regex("^0x[a-fA-F0-9]{40}$", v.address))
     ])
     error_message = "All multisig addresses must be valid Ethereum addresses."
@@ -80,11 +80,22 @@ variable "multisig_webhooks" {
 
   validation {
     condition = alltrue([
-      for k, v in var.multisig_webhooks :
-      can(regex("^https://discord.com/api/webhooks/", v.alerts_webhook)) &&
-      can(regex("^https://discord.com/api/webhooks/", v.events_webhook))
+      for k, v in var.multisig_notifications :
+      can(regex("^[CG][A-Z0-9]+$", v.alerts_channel_id)) &&
+      can(regex("^[CG][A-Z0-9]+$", v.events_channel_id))
     ])
-    error_message = "All webhook URLs must be valid Discord webhook URLs."
+    error_message = "All Slack channel IDs must start with C or G and contain only uppercase letters or numbers."
+  }
+}
+
+variable "slack_bot_token" {
+  description = "Slack bot OAuth token used by the Cloud Function to post on-chain event notifications with chat.postMessage."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = startswith(var.slack_bot_token, "xoxb-")
+    error_message = "slack_bot_token must be a Slack bot OAuth token starting with 'xoxb-'."
   }
 }
 
@@ -105,4 +116,3 @@ variable "secret_name" {
   type        = string
   default     = "quicknode-signing-secret"
 }
-

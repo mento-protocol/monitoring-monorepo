@@ -1,6 +1,7 @@
 import type { EventContext } from "./build-event-context";
-import { formatDiscordMessage, sendToDiscord } from "./discord";
+import config from "./config";
 import { logger } from "./logger";
+import { formatSlackMessage, sendToSlack } from "./slack";
 import type {
   ProcessedEvent,
   QuickNodeDecodedLog,
@@ -10,7 +11,7 @@ import {
   findChainForAddress,
   findChainFromBlockHash,
   getMultisigKey,
-  getWebhookUrl,
+  getNotificationChannelId,
   isSecurityEvent,
 } from "./utils";
 
@@ -85,7 +86,7 @@ export async function processEvents(
       // otherwise reach processEvent → validateLog → the per-event catch (all
       // of which read fields like `transactionHash`) and throw a TypeError that
       // rejects Promise.all → HTTP 500 → QuickNode retries the whole batch →
-      // duplicate Discord deliveries for events that already succeeded.
+      // duplicate notification deliveries for events that already succeeded.
       return logEntry !== null && typeof logEntry === "object";
     })
     .sort(
@@ -244,7 +245,7 @@ function logProcessingError(
   // (e.g. a primitive that slipped past the filter's object check).
   // Guard property reads so a logger call can't throw on top of the
   // original error. Returning 200 to QuickNode avoids replaying the whole
-  // batch and duplicating Discord deliveries that already succeeded.
+  // batch and duplicating notification deliveries that already succeeded.
   const safe: Partial<QuickNodeDecodedLog> =
     logEntry !== null && typeof logEntry === "object" ? logEntry : {};
   logger.error("Error processing log", {
@@ -322,7 +323,7 @@ function validateLog(log: QuickNodeWebhookPayload["result"][0]): {
 }
 
 /**
- * Process a single event log and send to Discord
+ * Process a single event log and send to Slack
  *
  * @param logEntry - The decoded log entry from QuickNode webhook
  * @param txHashMap - Map of transactionHash -> Safe txHash for linking transactions
@@ -400,18 +401,18 @@ async function processEvent(
   const isSecurity = isSecurityEvent(eventName);
   const channelType = isSecurity ? "alerts" : "events";
 
-  // 5. Get webhook URL
-  const webhookUrl = getWebhookUrl(multisigKey, channelType);
-  if (!webhookUrl) {
-    logger.error("No webhook URL found", {
+  // 5. Get destination channel
+  const channelId = getNotificationChannelId(multisigKey, channelType);
+  if (!channelId) {
+    logger.error("No notification channel found", {
       multisigKey,
       channelType,
     });
     return null;
   }
 
-  // 6. Format Discord message
-  const discordMessage = await formatDiscordMessage(
+  // 6. Format Slack message
+  const slackMessage = await formatSlackMessage(
     eventName,
     logEntry,
     multisigKey,
@@ -419,8 +420,8 @@ async function processEvent(
     signal,
   );
 
-  // 7. Send to Discord
-  await sendToDiscord(webhookUrl, discordMessage, signal);
+  // 7. Send to Slack
+  await sendToSlack(config.SLACK_BOT_TOKEN, channelId, slackMessage, signal);
 
   logger.info("Event processed successfully", {
     multisigKey,

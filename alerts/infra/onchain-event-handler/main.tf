@@ -1,4 +1,4 @@
-# This module deploys the TypeScript Cloud Function that processes QuickNode webhooks and routes them to Discord
+# This module deploys the TypeScript Cloud Function that processes QuickNode webhooks and routes them to Slack
 
 
 ##################
@@ -38,7 +38,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     # carries `roles/cloudbuild.builds.builder` + GCS source bucket read —
     # if the public HTTP function were compromised with that identity, an
     # attacker could trigger Cloud Builds and modify build configs. The
-    # runtime SA only gets `roles/secretmanager.secretAccessor` on the three
+    # runtime SA only gets `roles/secretmanager.secretAccessor` on the two
     # secrets it needs to read.
     service_account_email          = google_service_account.function_runtime.email
     environment_variables          = local.all_env_vars
@@ -53,28 +53,22 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
       version    = "latest"
     }
 
-    # Discord webhook URLs are credentials too: anyone with `gcloud functions
-    # describe` on the project could otherwise read them and post arbitrary
-    # messages to the monitored channels. Keep them in Secret Manager next
+    # Slack bot token is a credential: anyone with `gcloud functions describe`
+    # on the project could otherwise read it and post arbitrary messages to
+    # any channel covered by the bot scopes. Keep it in Secret Manager next
     # to QUICKNODE_SIGNING_SECRET.
     secret_environment_variables {
-      key        = "DISCORD_WEBHOOK_ALERTS"
+      key        = "SLACK_BOT_TOKEN"
       project_id = var.project_id
-      secret     = google_secret_manager_secret.discord_webhook_alerts.secret_id
-      version    = "latest"
-    }
-    secret_environment_variables {
-      key        = "DISCORD_WEBHOOK_EVENTS"
-      project_id = var.project_id
-      secret     = google_secret_manager_secret.discord_webhook_events.secret_id
+      secret     = google_secret_manager_secret.slack_bot_token.secret_id
       version    = "latest"
     }
   }
 
   lifecycle {
     precondition {
-      condition     = length(var.multisig_webhooks) > 0
-      error_message = "At least one multisig webhook configuration must be provided."
+      condition     = length(var.multisig_notifications) > 0
+      error_message = "At least one multisig notification configuration must be provided."
     }
 
     ignore_changes = [
@@ -88,16 +82,14 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     # Force redeploy when secret version changes or source code changes
     replace_triggered_by = [
       google_secret_manager_secret_version.quicknode_signing_secret,
-      google_secret_manager_secret_version.discord_webhook_alerts,
-      google_secret_manager_secret_version.discord_webhook_events,
+      google_secret_manager_secret_version.slack_bot_token,
       google_storage_bucket_object.function_source
     ]
   }
 
   depends_on = [
     google_secret_manager_secret_version.quicknode_signing_secret,
-    google_secret_manager_secret_version.discord_webhook_alerts,
-    google_secret_manager_secret_version.discord_webhook_events,
+    google_secret_manager_secret_version.slack_bot_token,
     # IAM grants for the Cloud Build SA must propagate before the function's
     # build step kicks off, otherwise the build can race ahead and fail
     # even though the IAM resources are in the same plan.
@@ -105,8 +97,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     google_storage_bucket_iam_member.cloud_build_storage_access,
     # Runtime SA needs per-secret Secret Manager access before boot.
     google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
-    google_secret_manager_secret_iam_member.runtime_discord_webhook_alerts,
-    google_secret_manager_secret_iam_member.runtime_discord_webhook_events,
+    google_secret_manager_secret_iam_member.runtime_slack_bot_token,
     google_storage_bucket_iam_member.runtime_replay_nonce_creator,
   ]
 
@@ -351,12 +342,11 @@ resource "google_secret_manager_secret_version" "quicknode_signing_secret" {
   }
 }
 
-# Discord webhook URLs (alerts + events channels). Stored as Secret Manager
-# secrets rather than plaintext env vars so they aren't visible to anyone
-# with `gcloud functions describe` on the project.
-resource "google_secret_manager_secret" "discord_webhook_alerts" {
+# Slack bot token. Stored as a Secret Manager secret rather than a plaintext
+# env var so it isn't visible to anyone with `gcloud functions describe`.
+resource "google_secret_manager_secret" "slack_bot_token" {
   project   = var.project_id
-  secret_id = "${var.secret_name}-discord-alerts"
+  secret_id = "${var.secret_name}-slack-bot-token"
 
   replication {
     auto {}
@@ -365,29 +355,9 @@ resource "google_secret_manager_secret" "discord_webhook_alerts" {
   labels = var.common_labels
 }
 
-resource "google_secret_manager_secret_version" "discord_webhook_alerts" {
-  secret      = google_secret_manager_secret.discord_webhook_alerts.id
-  secret_data = local.shared_webhook_urls.alerts
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "google_secret_manager_secret" "discord_webhook_events" {
-  project   = var.project_id
-  secret_id = "${var.secret_name}-discord-events"
-
-  replication {
-    auto {}
-  }
-
-  labels = var.common_labels
-}
-
-resource "google_secret_manager_secret_version" "discord_webhook_events" {
-  secret      = google_secret_manager_secret.discord_webhook_events.id
-  secret_data = local.shared_webhook_urls.events
+resource "google_secret_manager_secret_version" "slack_bot_token" {
+  secret      = google_secret_manager_secret.slack_bot_token.id
+  secret_data = var.slack_bot_token
 
   lifecycle {
     create_before_destroy = true
@@ -415,16 +385,9 @@ resource "google_secret_manager_secret_iam_member" "runtime_quicknode_signing_se
   member    = "serviceAccount:${google_service_account.function_runtime.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "runtime_discord_webhook_alerts" {
+resource "google_secret_manager_secret_iam_member" "runtime_slack_bot_token" {
   project   = var.project_id
-  secret_id = google_secret_manager_secret.discord_webhook_alerts.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.function_runtime.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "runtime_discord_webhook_events" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.discord_webhook_events.secret_id
+  secret_id = google_secret_manager_secret.slack_bot_token.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.function_runtime.email}"
 }

@@ -23,11 +23,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // `./constants` evaluates `./config` at import time, which calls
-// `envSchema(...)` and throws if any of DISCORD_WEBHOOK_ALERTS /
-// DISCORD_WEBHOOK_EVENTS / MULTISIG_CONFIG / QUICKNODE_SIGNING_SECRET is
-// missing. CI runners don't have these env vars set, and tests should not
-// depend on a real .env file. Mocking the module short-circuits the import
-// chain so `await import("./index")` below doesn't trigger envSchema.
+// `envSchema(...)` and throws if any required Slack / multisig / QuickNode
+// env vars are missing. CI runners don't have these env vars set, and tests
+// should not depend on a real .env file. Mocking the module short-circuits
+// the import chain so `await import("./index")` below doesn't trigger
+// envSchema.
 //
 // MULTISIG_CONFIG_ERROR is read at index.ts:74 as a truthy/falsy gate —
 // `null` keeps the test on the happy path. Tests that need to exercise the
@@ -77,8 +77,6 @@ describe("processQuicknodeWebhook", () => {
     vi.clearAllMocks();
     mocks.config.FUNCTION_TIMEOUT_SECONDS = undefined;
     process.env.NODE_ENV = "production";
-    process.env.DISCORD_WEBHOOK_ALERTS = "https://discord.test/alerts";
-    process.env.DISCORD_WEBHOOK_EVENTS = "https://discord.test/events";
     process.env.MULTISIG_CONFIG = JSON.stringify({
       celoGovernance: {
         address: "0x0000000000000000000000000000000000000001",
@@ -87,6 +85,9 @@ describe("processQuicknodeWebhook", () => {
       },
     });
     process.env.QUICKNODE_SIGNING_SECRET = "test-secret";
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_CHANNEL_ALERTS = "Calerts";
+    process.env.SLACK_CHANNEL_EVENTS = "Cevents";
     mocks.validateQuickNodeWebhook.mockResolvedValue({
       valid: true,
       nonce: "nonce-1",

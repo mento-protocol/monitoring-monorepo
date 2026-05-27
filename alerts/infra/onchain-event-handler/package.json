@@ -2,7 +2,7 @@
   "name": "@mento-protocol/alerts-onchain-event-handler",
   "version": "1.0.0",
   "private": true,
-  "description": "Routes QuickNode webhook events to Discord for Safe multisig monitoring",
+  "description": "Routes QuickNode webhook events to Slack for Safe multisig monitoring",
   "main": "dist/index.js",
   "engines": {
     "node": ">=22"

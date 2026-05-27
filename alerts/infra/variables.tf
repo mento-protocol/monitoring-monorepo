@@ -55,7 +55,7 @@ variable "sentry_slack_critical_channel" {
 }
 
 variable "slack_bot_token" {
-  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive Sentry alert channels via conversations.create / conversations.archive. Needs scopes: channels:read, channels:manage, channels:join. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration, this token is only for Terraform-managed channel lifecycle."
+  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels and by the on-chain event handler to post via chat.postMessage. Needs scopes: channels:read, channels:manage, channels:join, chat:write. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
   type        = string
   sensitive   = true
 

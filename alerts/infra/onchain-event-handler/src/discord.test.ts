@@ -9,8 +9,6 @@ import type { QuickNodeDecodedLog } from "./types";
 // Mock the config module to avoid requiring environment variables
 vi.mock("./config", () => ({
   default: {
-    DISCORD_WEBHOOK_ALERTS: "https://discord.com/api/webhooks/test/alerts",
-    DISCORD_WEBHOOK_EVENTS: "https://discord.com/api/webhooks/test/events",
     MULTISIG_CONFIG: JSON.stringify({
       "test-multisig": {
         address: "0x123",
@@ -19,6 +17,9 @@ vi.mock("./config", () => ({
       },
     }),
     QUICKNODE_SIGNING_SECRET: "test-secret",
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_CHANNEL_ALERTS: "Calerts",
+    SLACK_CHANNEL_EVENTS: "Cevents",
   },
 }));
 

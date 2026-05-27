@@ -106,7 +106,7 @@ Filter Function (JavaScript)
     ↓ (only matching events)
 Cloud Function Endpoint
     ↓
-Process & Route to Discord
+Process & Route to Slack
 ```
 
 ## Filter Function
@@ -342,13 +342,13 @@ module "onchain_event_listeners" {
 
 ## Performance
 
-- Latency: ~2-3 seconds from blockchain event to Discord notification
+- Latency: ~2-3 seconds from blockchain event to Slack notification
 - Throughput: Handles multiple events per block
 - Reliability: Filter function prevents webhook failures
 
 ## Related Modules
 
-- [`channels/discord-channels`](../channels/discord-channels/README.md) - Creates Discord channels and webhooks
+- [`channels/slack-channels`](../channels/slack-channels/README.md) - Creates Slack channels for on-chain event notifications
 - [`onchain-event-handler`](../onchain-event-handler/README.md) - Processes webhooks
 - [`channels/sentry-bridge`](../channels/sentry-bridge/README.md) - Sentry → Slack bridge (application error monitoring)
 

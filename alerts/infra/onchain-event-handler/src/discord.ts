@@ -1,27 +1,15 @@
 /**
- * Discord message formatting and sending
+ * Discord message formatting.
+ *
+ * Kept as a formatting adapter while the infrastructure finishes moving
+ * on-chain event delivery to Slack.
  */
 
-import axios, { AxiosError } from "axios";
-import { DISCORD_COLORS, DISCORD_WEBHOOK_TIMEOUT_MS } from "./constants";
-import { logger } from "./logger";
+import { formatNotificationContent } from "./notifier";
 import type { DiscordMessage, QuickNodeDecodedLog } from "./types";
-import {
-  decodeEventData,
-  getBlockExplorer,
-  getMultisigChainInfo,
-  getMultisigName,
-  getSafeUiUrl,
-  isSecurityEvent,
-} from "./utils";
 
 /**
- * Format a Discord message from a log event
- * @param eventName - The Safe event name (e.g., "AddedOwner", "ExecutionSuccess")
- * @param log - QuickNode decoded log entry containing transaction data
- * @param multisigKey - Multisig identifier key (e.g., "mento-labs")
- * @param txHashMap - Map of transactionHash -> txHash from ExecutionSuccess events
- * @returns Formatted Discord message with embeds
+ * Format a Discord message from a log event.
  */
 export async function formatDiscordMessage(
   eventName: string,
@@ -30,264 +18,23 @@ export async function formatDiscordMessage(
   txHashMap: Map<string, string>,
   signal?: AbortSignal,
 ): Promise<DiscordMessage> {
-  const isSecurity = isSecurityEvent(eventName);
-  const color = isSecurity ? DISCORD_COLORS.ALERT : DISCORD_COLORS.EVENT;
-  const multisigName = getMultisigName(multisigKey);
+  const content = await formatNotificationContent(
+    eventName,
+    log,
+    multisigKey,
+    txHashMap,
+    signal,
+  );
 
-  // Get chain info - fail if not found
-  const chainInfo = getMultisigChainInfo(multisigKey);
-  if (!chainInfo) {
-    throw new Error(`Chain info not found for multisig: ${multisigKey}`);
-  }
-
-  // Capitalize chain name
-  const chainDisplay =
-    chainInfo.chain.charAt(0).toUpperCase() + chainInfo.chain.slice(1);
-  const chainName = chainInfo.chain;
-
-  // Prefer txHash (Safe transaction hash) if available in the log,
-  // otherwise look it up from ExecutionSuccess events via txHashMap,
-  // finally fall back to transactionHash (on-chain tx hash)
-  const txHashForSafe =
-    log.txHash && typeof log.txHash === "string"
-      ? log.txHash
-      : txHashMap.get(log.transactionHash.toLowerCase()) || log.transactionHash;
-  const safeUiUrl = getSafeUiUrl(log.address, txHashForSafe, multisigKey);
-
-  // Get chain-specific block explorer
-  const blockExplorer = getBlockExplorer(chainName);
-
-  const fields = [
-    {
-      name: "Transaction Hash",
-      value: `[${log.transactionHash}](${blockExplorer.tx(log.transactionHash)})`,
-      inline: false,
-    },
-    {
-      name: "Safe UI Link",
-      value: `[Open TX in Safe UI](${safeUiUrl})`,
-      inline: false,
-    },
-    ...(await decodeEventData(
-      eventName,
-      log,
-      txHashForSafe,
-      chainName,
-      signal,
-    )),
-  ];
-
-  // Build title: "Mento Labs Multisig [Celo]"
-  const title = `${multisigName} [${chainDisplay}]`;
-
-  // Build description: "AddedOwner event detected on Mento Labs Multisig on Celo"
-  const description = `\`${eventName}\` event detected on ${multisigName} on ${chainDisplay}`;
-
-  // Use current timestamp since block timestamp isn't in decoded log
   return {
     embeds: [
       {
-        title,
-        description,
-        color,
-        fields,
-        timestamp: new Date().toISOString(),
+        title: content.title,
+        description: content.description,
+        color: content.color,
+        fields: content.fields,
+        timestamp: content.timestamp,
       },
     ],
   };
-}
-
-/**
- * Retry configuration for Discord webhook requests
- */
-const DISCORD_RETRY_CONFIG = {
-  maxRetries: 3,
-  retryDelayMs: 1000, // Start with 1 second
-  retryableStatusCodes: [429, 500, 502, 503, 504] as number[], // Rate limit and server errors
-} as const;
-
-/**
- * Check if an error is retryable.
- *
- * Discord webhooks have no idempotency key, so retrying after the message
- * may have been accepted server-side produces duplicates. To bound that:
- *
- * - Client-side timeouts (`ECONNABORTED`): NOT retryable. The connection
- *   was cut after we sent the request; Discord may have processed it.
- *   A retry could duplicate the message. Accept the risk of a rare lost
- *   alert over the certainty of duplicate spam in #multisig-alerts.
- * - Pre-send connection failures (ECONNREFUSED, ENOTFOUND, etc.):
- *   retryable. The request never left the box.
- * - 5xx / 429 responses: retryable. The server told us to retry.
- * - Other 4xx: not retryable.
- */
-function isRetryableError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  if (isAbortError(error)) {
-    return false;
-  }
-
-  const axiosError = error as AxiosError;
-  const status = axiosError.response?.status;
-
-  if (!status) {
-    if (axiosError.code === "ERR_CANCELED") {
-      return false;
-    }
-    // Client-side timeout: don't retry — Discord may have processed it.
-    if (axiosError.code === "ECONNABORTED") {
-      return false;
-    }
-    // Other network errors (pre-send) are safe to retry.
-    return true;
-  }
-
-  return DISCORD_RETRY_CONFIG.retryableStatusCodes.includes(status);
-}
-
-/**
- * Calculate exponential backoff delay
- */
-function calculateRetryDelay(attempt: number): number {
-  return DISCORD_RETRY_CONFIG.retryDelayMs * Math.pow(2, attempt);
-}
-
-/**
- * Send message to Discord webhook with retry logic
- * @param webhookUrl - Discord webhook URL to send the message to
- * @param message - Formatted Discord message with embeds
- * @throws {AxiosError} If the webhook request fails after all retries
- */
-export async function sendToDiscord(
-  webhookUrl: string,
-  message: DiscordMessage,
-  signal?: AbortSignal,
-): Promise<void> {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= DISCORD_RETRY_CONFIG.maxRetries; attempt++) {
-    try {
-      await axios.post(webhookUrl, message, {
-        headers: { "Content-Type": "application/json" },
-        timeout: DISCORD_WEBHOOK_TIMEOUT_MS,
-        signal,
-      });
-
-      // Extract key info for logging
-      const embed = message.embeds[0];
-      const description = embed.description || "";
-      const txField = embed.fields.find((f) => f.name === "Transaction Hash");
-      const txHash = txField?.value.match(/\[([^\]]+)\]/)?.[1] || "unknown";
-
-      if (attempt > 0) {
-        logger.info("Discord message sent after retry", {
-          description,
-          transactionHash: txHash,
-          attempt: attempt + 1,
-        });
-      } else {
-        logger.info("Discord message sent", {
-          description,
-          transactionHash: txHash,
-        });
-      }
-
-      return; // Success, exit function
-    } catch (error) {
-      lastError = error;
-
-      const axiosError = error as AxiosError;
-      const isLastAttempt = attempt === DISCORD_RETRY_CONFIG.maxRetries;
-
-      // Log error details
-      logger.warn("Discord webhook attempt failed", {
-        attempt: attempt + 1,
-        maxRetries: DISCORD_RETRY_CONFIG.maxRetries + 1,
-        error:
-          axiosError instanceof Error
-            ? {
-                name: axiosError.name,
-                message: axiosError.message,
-              }
-            : String(axiosError),
-        status: axiosError.response?.status,
-        statusText: axiosError.response?.statusText,
-      });
-
-      // Check if we should retry
-      if (!isLastAttempt && isRetryableError(error)) {
-        const delay = calculateRetryDelay(attempt);
-        logger.info("Retrying Discord webhook request", {
-          attempt: attempt + 2,
-          delayMs: delay,
-        });
-        await sleep(delay, signal);
-        continue; // Retry
-      }
-
-      // Not retryable or last attempt, break and throw
-      break;
-    }
-  }
-
-  // All retries exhausted, log final error and throw
-  const axiosError = lastError as AxiosError;
-  logger.error("Discord webhook failed after all retries", {
-    error:
-      axiosError instanceof Error
-        ? {
-            name: axiosError.name,
-            message: axiosError.message,
-            stack: axiosError.stack,
-          }
-        : String(axiosError),
-    status: axiosError.response?.status,
-    statusText: axiosError.response?.statusText,
-    data: axiosError.response?.data,
-  });
-
-  throw lastError;
-}
-
-function sleep(delayMs: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    return new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
-  if (signal.aborted) {
-    return Promise.reject(createAbortError());
-  }
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, delayMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(createAbortError());
-    };
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-function isAbortError(error: Error): boolean {
-  const maybeCode = (error as Error & { code?: string }).code;
-  return (
-    error.name === "AbortError" ||
-    maybeCode === "ERR_CANCELED" ||
-    error.message === "Operation aborted"
-  );
-}
-
-function createAbortError(): Error & { code: string } {
-  return Object.assign(new Error("Operation aborted"), {
-    code: "ERR_CANCELED",
-  });
 }

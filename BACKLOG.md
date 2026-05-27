@@ -186,13 +186,12 @@ Items below are net-new functionality or polish, not migration blockers.
 
 ### Tier 1 — Next-phase work
 
-- [ ] **Slack adapter + Sentry bridge retirement** — split
-      `onchain-event-handler/src/discord.ts` into
-      `src/{notifier,discord,slack}.ts`; add
-      `alerts/infra/channels/slack-channels/` parallel module; route by env;
-      then drop `channels/sentry-bridge/` Discord wiring. Sentry's native
-      Slack integration is already configured, so these should ship as one
-      migration batch.
+- [ ] **Retire legacy on-chain Discord resources after Slack soak** — once the
+      Slack adapter apply has run and `#multisig-alerts` / `#multisig-events`
+      receive production events, remove `module.discord_channels`, the root
+      Discord provider/variables/GitHub secrets, and
+      `channels/discord-channels/`. Keep the provider available until the
+      first destroy apply can cleanly archive/delete the Discord-managed state.
 - [ ] **Workspace/lockfile consolidation** — `alerts/infra/onchain-event-handler/package-lock.json` exists for Cloud Build's `npm ci`, but the package is also a pnpm workspace member (uses root `pnpm-lock.yaml` for local dev). Either switch Cloud Build to pnpm (via `pnpm deploy` bundle or buildpack pnpm-lock.yaml detection) and drop the npm lockfile, or remove the package from the pnpm workspace.
 - [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by HMAC-SHA256 signature verification. Accepted risk for now (matches vendored upstream). Revisit if QuickNode publishes a stable egress IP range (or supports OIDC-signed delivery): switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
 
@@ -203,11 +202,9 @@ Items below are net-new functionality or polish, not migration blockers.
 ### Tier 3 — Hygiene / cosmetic
 
 - [ ] **Cloud Run `metrics_bridge` drift** — every `tf apply` re-applies `revision` / `client` / `client_version` / `scaling[0].manual_instance_count` / `scaling[0].min_instance_count` after `gcloud run deploy` from CI. Cosmetic — apply always succeeds. Suppress by adding `lifecycle { ignore_changes = [client, client_version, scaling[0].manual_instance_count, scaling[0].min_instance_count, template[0].revision] }` to `google_cloud_run_v2_service.metrics_bridge` in `terraform/main.tf`.
-- [ ] **Tighten `local_file.env_file` permissions** — `alerts/infra/onchain-event-handler/main.tf` writes the runtime env file at `0777`. The file is gitignored and machine-local, but secret-bearing. Drop to `0600`.
 - [ ] **Orphan GCS state files** — after PR #556 renamed backend prefixes to `alerts-infra` + `alerts-rules`, the old paths (`gs://<state-bucket>/alerts/default.tfstate` and `gs://<state-bucket>/monitoring-monorepo-alerts/default.tfstate`) still exist on GCS. No functional impact, pennies/month storage. Delete with `gcloud storage rm` on next cleanup pass.
 
 ### Sentry → Slack follow-ups (post #561 + #570)
 
 - [ ] **Zero-default-monitor edge case in `data.sentry_project_issue_stream_monitor`** — if a brand-new Sentry project lands in the org before its default issue-stream monitor has been provisioned (rare — Sentry creates it eagerly), the per-project data source lookup fails and the `for_each` plan errors out for ALL projects in the same apply. Documented as a "Known limitation" in `alerts/infra/channels/sentry-bridge/README.md`. Promote to a structural fix when this actually bites — options: (a) two-phase apply with `data.sentry_project_issue_stream_monitor` re-resolved between phases; (b) pre-flight script that polls Sentry until each new project's default monitor is present; (c) filter `local.projects` to projects with monitors via a separate data source check.
 - [ ] **`slack_critical_fanout` action missing `channel_id`** — the per-project `slack_default` action passes both `channel_name` and `channel_id` (rate-limit-safe lookup), but the critical fan-out to `#alerts-critical` only passes `channel_name`. Adding `channel_id` requires a new `var.slack_critical_channel_id` (looked up once by an operator from Slack admin → `#alerts-critical` → About → Channel ID). Same rate-limit hazard as `slack_default` — defer to a follow-up if `#alerts-critical` posts ever throttle.
-- [ ] **Drop the now-unused `discord` provider declaration from `channels/sentry-bridge/`** — `versions.tf` `required_providers.discord` and `alerts/infra/main.tf` `providers = { discord = discord }` were intentionally retained through the migration apply so Terraform could destroy the Discord-typed resources cleanly. Once the apply lands and state no longer references Discord-typed resources, both blocks (and the cross-link comments) can be removed in a tiny follow-up PR.
