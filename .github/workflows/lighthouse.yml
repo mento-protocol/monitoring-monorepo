@@ -200,11 +200,21 @@ jobs:
           # `.lighthouserc.cjs` from reading it. The fork + Dependabot guards
           # in `decide` ensure this step only runs for trusted, secret-bearing
           # contexts.
+          #
+          # `x-vercel-set-bypass-cookie: true` is required for in-browser
+          # tooling (puppeteer, Playwright, lhci). Without it, the header
+          # bypass authorizes the first request but Chrome strips custom
+          # headers on cross-origin navigation (e.g. the SSO redirect Vercel
+          # issues on subresources), so the audit lands on the SSO interstitial
+          # instead of the dashboard. With the cookie-set header, Vercel
+          # responds Set-Cookie on the first 200 and Chrome carries the
+          # bypass cookie across all subsequent requests. This matches
+          # Vercel's documented Playwright pattern.
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: |
           set -eo pipefail
-          PREVIEW_URL="${{ steps.vercel-url.outputs.preview_url }}"
-          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'"}'
+          BYPASS_HEADER='{"x-vercel-protection-bypass":"'"${BYPASS_SECRET}"'","x-vercel-set-bypass-cookie":"true"}'
           unset BYPASS_SECRET
           pnpm exec lhci autorun \
             --collect.url="${PREVIEW_URL}/" \
