@@ -10,15 +10,19 @@ vercel_token = "vcp_..."
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
 # PAT for writing organization-level Actions secrets (used by the
-# Vercel-bypass mirror in `github-secrets.tf`). Either a classic PAT with
-# `admin:org` scope, or a fine-grained PAT scoped to mento-protocol with
-# `Organization secrets: Read/write` permission.
+# Vercel-bypass mirror in `github-secrets.tf`). Prefer a fine-grained PAT
+# scoped to mento-protocol with `Organization secrets: Read/write` — that's
+# least-privilege for managing org-level Actions secrets. A classic PAT
+# with `admin:org` works as a fallback but grants org-admin access (teams,
+# members, webhooks, etc.) so blast radius if leaked is much wider.
 #
 # Create at:
-#   - Classic: https://github.com/settings/tokens/new (scope: admin:org)
-#   - Fine-grained: https://github.com/settings/personal-access-tokens/new
-#     (Resource owner: mento-protocol; Permissions: Organization → Secrets:
-#     Read/write)
+#   - Fine-grained (preferred):
+#     https://github.com/settings/personal-access-tokens/new
+#     Resource owner: mento-protocol;
+#     Permissions: Organization → Secrets: Read/write.
+#   - Classic (fallback): https://github.com/settings/tokens/new
+#     Scope: `admin:org`.
 github_token = "ghp_..."
 
 # Owner default is already set in variables.tf; override only if managing a

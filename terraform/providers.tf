@@ -27,8 +27,13 @@ terraform {
       version = "~> 6.11"
     }
     github = {
-      source  = "integrations/github"
-      version = "~> 6.6"
+      source = "integrations/github"
+      # `~> 6.12` because `github_actions_organization_secret.value` was
+      # renamed from `plaintext_value` in 6.12.0. The looser `~> 6.6`
+      # constraint would let a fresh `terraform init` install 6.6.x–6.11.x,
+      # which doesn't know about `value` and fails with an unknown-attribute
+      # error.
+      version = "~> 6.12"
     }
   }
 }
@@ -53,11 +58,14 @@ provider "google" {
 
 # GitHub provider — used solely to mirror Vercel-managed secrets (e.g.
 # `VERCEL_AUTOMATION_BYPASS_SECRET`) into GitHub Actions org secrets so CI
-# workflows can read them. `var.github_token` must be an org-admin PAT
-# scoped to `admin:org` (or fine-grained with `Organization secrets:
-# Read/write`) so `github_actions_organization_secret` can manage org-level
-# secrets. Repo-level Actions secrets live in `alerts/infra/` instead and
-# use a separate, narrower token.
+# workflows can read them. `var.github_token` should be a fine-grained PAT
+# scoped to `mento-protocol` with `Organization secrets: Read/write` —
+# that's the least-privilege grant for managing org-level Actions secrets.
+# A classic PAT with `admin:org` also works but grants org-admin-level
+# access (manage teams, members, webhooks, etc.) — far wider than needed
+# and a much larger blast radius if leaked, so prefer fine-grained.
+# Repo-level Actions secrets live in `alerts/infra/` instead and use a
+# separate, narrower token.
 provider "github" {
   owner = var.github_owner
   token = var.github_token

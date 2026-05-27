@@ -25,9 +25,12 @@ variable "github_owner" {
 
 variable "github_token" {
   description = <<-EOT
-    GitHub PAT for writing organization-level Actions secrets. Either a classic
-    PAT with `admin:org` scope, or a fine-grained PAT scoped to mento-protocol
-    with `Organization secrets: Read/write`. Used only by
+    GitHub PAT for writing organization-level Actions secrets. Prefer a
+    fine-grained PAT scoped to mento-protocol with `Organization secrets:
+    Read/write` — least-privilege for this stack's use case. A classic PAT
+    with `admin:org` also works as a fallback but grants org-admin-level
+    access (manage teams, members, webhooks, etc.), so blast radius if
+    leaked is much wider. Used only by
     `github_actions_organization_secret` resources in this stack.
   EOT
   type        = string
