@@ -2,7 +2,7 @@
   "patterns": [
     {
       "rule_name": "auth_secret_literal",
-      "regex": "AUTH_SECRET\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
+      "regex": "(?i)AUTH_SECRET\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -14,7 +14,7 @@
     },
     {
       "rule_name": "upstash_token_literal",
-      "regex": "(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -26,7 +26,7 @@
     },
     {
       "rule_name": "envio_hasura_token_literal",
-      "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)ENVIO_HASURA_(ADMIN_)?TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -38,7 +38,7 @@
     },
     {
       "rule_name": "sentry_auth_token_literal",
-      "regex": "SENTRY_AUTH_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)SENTRY_AUTH_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -50,7 +50,7 @@
     },
     {
       "rule_name": "dune_api_key_literal",
-      "regex": "DUNE_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)DUNE_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -62,7 +62,7 @@
     },
     {
       "rule_name": "arkham_api_key_literal",
-      "regex": "ARKHAM_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)ARKHAM_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -74,7 +74,7 @@
     },
     {
       "rule_name": "slack_bot_token_env_literal",
-      "regex": "[A-Z][A-Z0-9_]*SLACK_BOT_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(?i)[A-Z][A-Z0-9_]*SLACK_BOT_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -86,7 +86,6 @@
     },
     {
       "rule_name": "slack_bot_token",
-      "substrings": ["xoxb-", "xoxe.xoxp-", "xoxa-2-", "xoxp-"],
       "reminder": "Slack token literal detected. Move to env. Rotate via Slack app settings if this commits.",
       "exclude_paths": [
         "**/*.example",
@@ -100,7 +99,8 @@
         "**/*.test.ts",
         "**/*.spec.ts",
         "**/fixtures/**"
-      ]
+      ],
+      "regex": "(xoxb-|xoxe\\.xoxp-|xoxa-2-|xoxp-)[A-Za-z0-9_-]{8,}-[A-Za-z0-9_-]{8,}"
     },
     {
       "rule_name": "aws_access_key",
@@ -137,7 +137,15 @@
         "**/alerts/infra/**/*.yaml",
         "**/alerts/infra/**/*.yml",
         "**/alerts/infra/**/test-payloads/**",
-        "**/alerts/infra/onchain-event-listeners/**"
+        "**/alerts/infra/onchain-event-listeners/**",
+        "**/*.test.tsx",
+        "**/*.spec.tsx",
+        "**/alerts/infra/onchain-event-handler/scripts/test-payload.json",
+        "**/alerts/infra/onchain-event-handler/scripts/**",
+        "**/.env",
+        "**/.env.*",
+        "**/.env*.example",
+        "**/*.example"
       ],
       "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars \u2014 if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
     },
@@ -147,13 +155,18 @@
       "paths": [
         "**/ui-dashboard/**/*.ts",
         "**/ui-dashboard/**/*.tsx",
-        "**/ui-dashboard/**/*.graphql"
+        "**/ui-dashboard/**/*.graphql",
+        "**/scripts/**/*.ts",
+        "**/scripts/**/*.tsx",
+        "**/scripts/**/*.graphql",
+        "**/ui-dashboard/**/*.gql",
+        "**/scripts/**/*.gql"
       ],
       "reminder": "Hasura `_aggregate` queries are unbounded on prod and have caused 429 storms. Use a pre-rolled snapshot entity or paginate + count client-side."
     },
     {
       "rule_name": "bare_gcloud_in_app",
-      "regex": "(spawn|exec|execSync|execFile|spawnSync)\\([`\"']gcloud",
+      "regex": "(spawn|exec|execSync|execFile|execFileSync|spawnSync)\\([`\"\\']gcloud",
       "paths": [
         "**/indexer-envio/**/*.ts",
         "**/ui-dashboard/**/*.ts",
@@ -186,7 +199,7 @@
     },
     {
       "rule_name": "workflow_action_unpinned",
-      "regex": "uses:\\s*(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
+      "regex": "uses:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
       "paths": ["**/.github/workflows/**"],
       "reminder": "Third-party Actions must be SHA-pinned, not tag- or branch-pinned. Use the full 40-char commit SHA followed by a `# tag` comment. Catches @v1, @v1.2.3, @main, @latest, @stable, and subdirectory actions (owner/repo/path@ref)."
     },
@@ -198,7 +211,7 @@
     },
     {
       "rule_name": "webhook_no_hmac_check",
-      "regex": "(req\\.body|request\\.body|await\\s+req\\.json|await\\s+request\\.json)",
+      "regex": "(req\\.body|request\\.body|req\\.rawBody|request\\.rawBody|await\\s+req\\.json|await\\s+request\\.json)",
       "paths": [
         "**/alerts/infra/onchain-event-handler/src/*.ts",
         "**/alerts/infra/onchain-event-handler/src/**/*.ts"
