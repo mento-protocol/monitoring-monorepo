@@ -26,7 +26,7 @@ resource "github_actions_organization_secret" "vercel_automation_bypass" {
   # impersonation that protects every other sensitive value in this stack.
   # Same trade-off applied in `alerts/infra/main.tf` for the TF_VAR_* repo
   # secrets. If/when the threat model widens, swap to `encrypted_value`.
-  secret_name     = "VERCEL_AUTOMATION_BYPASS_SECRET"
-  visibility      = "all"
-  plaintext_value = vercel_project.dashboard.protection_bypass_for_automation_secret
+  secret_name = "VERCEL_AUTOMATION_BYPASS_SECRET"
+  visibility  = "all"
+  value       = vercel_project.dashboard.protection_bypass_for_automation_secret
 }
