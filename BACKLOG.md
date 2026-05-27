@@ -153,7 +153,7 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-- [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump or targeted live-plan validation; do not silence the whole `victorops` block with `ignore_changes`, because that would hide real Splunk URL/title/message drift.
+_None remaining._ The `splunk_on_call` "1 to change" drift was fixed by bumping `grafana/grafana` from `3.7.0` to `3.25.9`, which picks up upstream PR [#2123](https://github.com/grafana/terraform-provider-grafana/pull/2123) (v3.22.3) marking `victorops.url` as `Sensitive` and packing it from state on refresh. Side effect to be aware of: out-of-band changes to the webhook URL itself are now invisible to plan, the same way Slack tokens and PagerDuty integration keys already are; title/description still drift-detect.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 
