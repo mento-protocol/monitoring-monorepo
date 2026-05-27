@@ -45,6 +45,7 @@ The initial Lighthouse CI gate landed in PR #451 with desktop performance + acce
 
 - [ ] Promote performance budgets from `warn` to `error` in `.lighthouserc.cjs` once 5+ stable runs and a representative percentile distribution are collected. Drop the budget to the post-distribution floor with conservative headroom and confirm the gate doesn't flake on CI runner load variance.
 - [ ] Add INP (interaction-to-next-paint) coverage via lhci's user-flow mode with scripted interactions on the dashboard pages. Lighthouse's default navigation mode never produces an INP numeric value, so the budget was intentionally omitted in PR #451 to avoid silent-pass false confidence. User-flow mode would script the typical "open page, hover a chart, click a filter" interaction and run an INP audit on the scripted timespan.
+- [ ] **Graduate the audited-page guard from grep to manifest check.** PR (this one) added a stdout grep for `vercel.com/login` after `lhci autorun` as a fail-closed safety net so a bypass regression is loud, not silent. Once 5+ runs of empirical evidence confirm the cookie-based bypass works, replace the grep with a structural check against lhci's report manifest: parse `.lighthouseci/manifest.json` (or each report's `finalUrl`) and fail if any audited URL's host isn't the Vercel preview host, or if its path isn't `/` or `/pools`. Catches non-SSO interstitials too (e.g. Vercel error pages, mid-deploy 503s).
 
 ### React Compiler Evaluation
 

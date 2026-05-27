@@ -66,11 +66,15 @@ module.exports = {
         //
         // Blocking is safe because (a) Lighthouse's accessibility category
         // is deterministic across runs — it only changes on real code
-        // diffs — and (b) the deployment-protection bypass now reliably
+        // diffs — (b) the deployment-protection bypass now reliably
         // delivers Lighthouse to the dashboard rather than the SSO
         // interstitial (the workflow's extraHeaders include
         // `x-vercel-set-bypass-cookie: true` so the auth cookie is set on
-        // the first response and carries across subresources).
+        // the first response and carries across subresources), and
+        // (c) the workflow includes a fail-closed audited-page guard
+        // (greps lhci stdout for `vercel.com/login` — a bypass regression
+        // is loud, not silent). Promotion to a manifest-based finalUrl
+        // check is tracked in BACKLOG.
         "categories:accessibility": ["error", { minScore: 0.94 }],
 
         // Largest Contentful Paint: warn above 1 700 ms

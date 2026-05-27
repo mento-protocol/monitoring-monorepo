@@ -222,6 +222,24 @@ jobs:
             --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
 
+      - name: Assert Lighthouse audited the dashboard (not the SSO interstitial)
+        # The accessibility budget is `error`-severity (blocking). If the
+        # deployment-protection bypass silently regresses, lhci will happily
+        # audit Vercel's SSO interstitial (`vercel.com/login?next=...`) — a
+        # minimal page that scores 0.94+ on accessibility — and the gate
+        # passes with false confidence. Fail closed if the audited URL set
+        # contains an SSO redirect, so a bypass regression is loud, not silent.
+        # Verified failure mode: PR-#451 main-branch runs (pre this PR) all
+        # audited `vercel.com/login` and silently passed at warn-severity.
+        if: steps.decide.outputs.run == 'true'
+        run: |
+          if grep -qi 'vercel\.com/login' /tmp/lhci-output.txt; then
+            echo "::error::Lighthouse audited Vercel's SSO interstitial instead of the dashboard."
+            echo "::error::Deployment-protection bypass likely regressed — check x-vercel-protection-bypass + x-vercel-set-bypass-cookie headers."
+            exit 1
+          fi
+          echo "Audited-page guard passed: no SSO interstitial URLs in lhci output."
+
       - name: Post Lighthouse results as PR comment
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
