@@ -989,7 +989,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
             "((time() - mento_pool_deviation_breach_start) > 3600)",
             "((time() - mento_pool_last_rebalanced_at) > 1800)",
           ]),
-          local.fx_weekend_suppressed_breach_start_promql,
+          local.fx_rebalancer_stale_suppressed_breach_start_promql,
         )
         instant = true
       })
