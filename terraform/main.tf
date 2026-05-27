@@ -533,9 +533,9 @@ resource "google_service_account_iam_member" "grafana_agent_cloudbuild_appengine
 # Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
 # runs `gcloud run services update metrics-bridge --image=<digest>` after
 # Cloud Build pushes a new revision. Terraform owns the *shape* of the
-# service (probes, env, template scaling, memory) and ignores image plus
-# Cloud Run API bookkeeping drift via `lifecycle.ignore_changes` so running
-# `pnpm infra:apply` never reverts the deployed revision or re-applies
+# service (probes, env, template scaling, memory) and ignores image plus the
+# observed Cloud Run API bookkeeping drift via `lifecycle.ignore_changes` so
+# running `pnpm infra:apply` never reverts the deployed revision or re-applies
 # cosmetic deploy metadata.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
@@ -545,6 +545,12 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   deletion_protection = true
 
   depends_on = [google_project_service.run]
+
+  scaling {
+    # Service-level mode stays managed; only API-filled zero count fields below
+    # are ignored as bookkeeping drift.
+    scaling_mode = "AUTOMATIC"
+  }
 
   template {
     scaling {
@@ -604,7 +610,8 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
     ignore_changes = [
       client,
       client_version,
-      scaling, # service-level bookkeeping block; template[0].scaling stays managed.
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
       template[0].containers[0].image,
       # Suppresses live revision-name drift from gcloud rollouts. Remove or
       # re-audit this ignore entry in any PR that intentionally changes the
