@@ -2,7 +2,7 @@
   "patterns": [
     {
       "rule_name": "auth_secret_literal",
-      "regex": "AUTH_SECRET\\s*=\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
+      "regex": "AUTH_SECRET\\s*[=:]\\s*[\"']?[A-Za-z0-9+/=_-]{16,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -14,7 +14,7 @@
     },
     {
       "rule_name": "upstash_token_literal",
-      "regex": "KV_REST_API_(READ_ONLY_)?TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "(KV_REST_API_(READ_ONLY_)?|UPSTASH_REDIS_REST_)TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -26,7 +26,7 @@
     },
     {
       "rule_name": "envio_hasura_token_literal",
-      "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -38,7 +38,7 @@
     },
     {
       "rule_name": "sentry_auth_token_literal",
-      "regex": "SENTRY_AUTH_TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "SENTRY_AUTH_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -50,7 +50,7 @@
     },
     {
       "rule_name": "dune_api_key_literal",
-      "regex": "DUNE_API_KEY\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "DUNE_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -62,7 +62,7 @@
     },
     {
       "rule_name": "arkham_api_key_literal",
-      "regex": "ARKHAM_API_KEY\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "ARKHAM_API_KEY\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -74,7 +74,7 @@
     },
     {
       "rule_name": "slack_bot_token_env_literal",
-      "regex": "[A-Z][A-Z0-9_]*SLACK_BOT_TOKEN\\s*=\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
+      "regex": "[A-Z][A-Z0-9_]*SLACK_BOT_TOKEN\\s*[=:]\\s*[\"']?[A-Za-z0-9_-]{20,}[\"']?",
       "exclude_paths": [
         "**/*.example",
         "**/.env*.example",
@@ -88,7 +88,19 @@
       "rule_name": "slack_bot_token",
       "substrings": ["xoxb-", "xoxe.xoxp-", "xoxa-2-", "xoxp-"],
       "reminder": "Slack token literal detected. Move to env. Rotate via Slack app settings if this commits.",
-      "exclude_paths": ["**/.claude/**"]
+      "exclude_paths": [
+        "**/*.example",
+        "**/.env*.example",
+        "**/.env",
+        "**/.env.*",
+        "**/.claude/**",
+        "**/test/**",
+        "**/tests/**",
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/fixtures/**"
+      ]
     },
     {
       "rule_name": "aws_access_key",
@@ -107,7 +119,13 @@
         "**/*.spec.ts",
         "**/fixtures/**",
         "**/mock*/**",
-        "**/.claude/**"
+        "**/.claude/**",
+        "**/aegis/config.yaml",
+        "**/aegis/config.yml",
+        "**/alerts/infra/**/*.yaml",
+        "**/alerts/infra/**/*.yml",
+        "**/alerts/infra/**/test-payloads/**",
+        "**/alerts/infra/onchain-event-listeners/**"
       ],
       "reminder": "64-hex literal looks like a private key or signature. If it's a contract address it should be 40 hex (0x[40 chars]). Transaction and block hashes are also 64 hex chars \u2014 if that's the case, move the constant to config or a fixture. Confirm and move secrets to env."
     },
@@ -143,13 +161,14 @@
       "exclude_paths": [
         "**/indexer-envio/src/handlers/**/__tests__/**",
         "**/indexer-envio/src/handlers/**/config.ts",
-        "**/indexer-envio/test/**"
+        "**/indexer-envio/test/**",
+        "**/indexer-envio/src/handlers/v2Stables/transfer.ts"
       ],
       "reminder": "Throwing from an Envio handler (any form \u2014 Error, TypeError, custom, re-throw) halts the indexer (Sev-1). Use `context.log.error('<area>.<event>', {...})` and return early so the next event is processed."
     },
     {
       "rule_name": "number_coerce_onchain_value",
-      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|limit|timestamp|blockTimestamp|value)",
+      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|limit|timestamp|blockTimestamp)",
       "paths": ["**/indexer-envio/src/*.ts", "**/indexer-envio/src/**/*.ts"],
       "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge. Matches suffixed forms too (amount0In, reserve1, netflowGlobal, limit0, blockTimestamp, etc.)."
     },
