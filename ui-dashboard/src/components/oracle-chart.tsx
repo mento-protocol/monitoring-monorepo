@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRef } from "react";
 import type { OracleSnapshot } from "@/lib/types";
 import { parseOraclePriceToNumber } from "@/lib/format";
 import {
@@ -149,6 +150,11 @@ export function OracleChart({
     ? fixidityToFloat(breakerConfig.rateChangeThreshold)
     : null;
 
+  // Stash the wheel-listener cleanup so we can detach when react-plotly tears
+  // the chart down (onPurge) or remounts it. Without this, stacked listeners
+  // on re-init would amplify scroll deltas.
+  const cleanupWheelRef = useRef<(() => void) | null>(null);
+
   const plotData = buildOraclePlotData({
     snapshots,
     token0Symbol,
@@ -187,7 +193,14 @@ export function OracleChart({
         style={{ width: "100%", height: 420 }}
         useResizeHandler
         onInitialized={(_figure, graphDiv) => {
-          attachOracleWheelHandler(graphDiv as unknown as HTMLElement);
+          cleanupWheelRef.current?.();
+          cleanupWheelRef.current = attachOracleWheelHandler(
+            graphDiv as unknown as HTMLElement,
+          );
+        }}
+        onPurge={() => {
+          cleanupWheelRef.current?.();
+          cleanupWheelRef.current = null;
         }}
       />
     </div>

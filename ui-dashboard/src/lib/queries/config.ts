@@ -105,6 +105,9 @@ export const BREAKER_CONFIG_FOR_RATE_FEED = `
         enabled: { _eq: true }
         breaker: { kind: { _neq: "MARKET_HOURS" } }
       }
+      # Deterministic pick when a feed somehow ends up with two enabled
+      # non-MARKET_HOURS breakers — the chart reads [0] downstream.
+      order_by: { id: asc }
       limit: 2
     ) {
       id
