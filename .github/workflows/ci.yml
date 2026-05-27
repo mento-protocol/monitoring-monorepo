@@ -530,10 +530,11 @@ jobs:
             exit 0
           fi
 
-          node -e 'const m = JSON.parse(process.argv[1]); for (const s of m.include) console.log(s.id)' "$matrix" \
-            | while IFS= read -r stack; do
-                node scripts/tf-stacks.mjs validate "$stack"
-              done
+          stack_ids="$(node -e 'const m = JSON.parse(process.argv[1]); for (const s of m.include) console.log(s.id)' "$matrix")"
+          while IFS= read -r stack; do
+            [[ -n "$stack" ]] || continue
+            node scripts/tf-stacks.mjs validate "$stack"
+          done <<< "$stack_ids"
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
