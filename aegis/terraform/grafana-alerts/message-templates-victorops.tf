@@ -105,7 +105,7 @@ resource "grafana_message_template" "victorops_trading_mode_alert_message" {
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $rateFeedWithHyphen := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
-{{ $chainlinkSlug := $rateFeedWithHyphen | lower -}}
+{{ $chainlinkSlug := $rateFeedWithHyphen | toLower -}}
 {{ $chain := .Labels.chain | title -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
