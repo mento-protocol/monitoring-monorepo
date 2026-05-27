@@ -236,6 +236,17 @@ locals {
   }
 }
 
+# `github_actions_secret` uses `value` intentionally. CKV_GIT_4 prefers `encrypted_value`
+# (pre-libsodium-encrypted against the repo's public key) over the plaintext
+# `value` field. The encrypted path requires an external libsodium step
+# outside Terraform — non-trivial complexity for marginal benefit here: the
+# state file is already encrypted at rest in GCS, gated by `org-terraform`
+# impersonation (same gate that already protects sentry_auth_token /
+# discord_bot_token / quicknode_signing_secret in this same state). The
+# provider handles libsodium server-side against GitHub's public key on its
+# way to the API. If the threat model ever shifts (state exposed to a wider
+# audience), revisit — `gh secret set` and `data.github_actions_public_key`
+# can build an `encrypted_value` pipeline.
 resource "github_actions_secret" "alerts_infra_tf_vars" {
   for_each    = local.alerts_infra_ci_secret_names
   repository  = "monitoring-monorepo"

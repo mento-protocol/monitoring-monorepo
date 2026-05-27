@@ -2,8 +2,8 @@
 
 This module configures Sentry → **Slack** error monitoring for every project
 in the `mento-labs` Sentry organization. Discord support was retired when the
-team's alert taxonomy migrated to Slack; see `aegis/terraform/grafana-alerts/`
-for the sibling Grafana → Slack setup.
+team's alert taxonomy migrated to Slack; see `alerts/rules/` for the sibling
+Grafana → Slack setup.
 
 ## What it does
 

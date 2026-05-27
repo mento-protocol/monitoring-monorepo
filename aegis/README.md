@@ -98,12 +98,17 @@ versions in a fresh project, then follow the instructions in
 
 ### Deploying Grafana Resources
 
-The [Grafana Dashboard](#grafana-dashboard) and [Grafana Alerts](#grafana-alerts) are managed via Terraform and can be deployed via:
+Aegis Grafana dashboards and Aegis service-health alerts are managed in
+`aegis/terraform` and can be planned/applied via:
 
 ```sh
 pnpm aegis:tf:plan
 pnpm aegis:tf:apply
 ```
+
+Protocol alert rules and global Grafana notification routing live in
+`alerts/rules` (`pnpm alerts:rules:plan`). See `docs/terraform.md` for the
+stack registry.
 
 ### How to deploy a new rate feed
 
@@ -113,13 +118,13 @@ pnpm aegis:tf:apply
    - Add the new rate feeds as variants to the `BreakerBox.getRateFeedTradingMode()` metric
    - Add the new relayer signer as variants to the `CELOToken.balanceOf()` metric
 1. [optional] If it's an FX rate feed with disabled trading on weekends because we don't get new price data on weekends:
-   - Add the rate feed name to the `weekend_disabled_feeds` array in [grafana-alerts/locals.tf](./terraform/grafana-alerts/locals.tf#L7)
+   - Add the rate feed name to the `weekend_disabled_feeds` array in [alerts/rules/protocol-routing-locals.tf](../alerts/rules/protocol-routing-locals.tf)
 1. Test the new config locally by running `pnpm start` and checking for any errors in the logs
 1. After code review, deploy the new config via `pnpm aegis:deploy` (this rebuilds and stages the service before upload)
 1. After successful deployment, check the logs for any errors via `pnpm aegis:logs`
 1. Check that the new metrics appear in the Grafana Dashboard: `pnpm --filter @mento-protocol/aegis grafana`
    - New rate feeds should be picked up automatically, it might take a few minutes after they show up
-1. Check that new [Oracle Relayer Grafana Alerts](https://clabsmento.grafana.net/alerting/list) have been added for the new Relayer Signer Wallets' CELO Balance
+1. Check that new [Oracle Relayer Grafana Alerts](https://clabsmento.grafana.net/alerting/list) have been added for the new Relayer Signer Wallets' CELO Balance after `alerts/rules` has been planned and applied.
 
 ## Checking the Logs
 
@@ -261,12 +266,14 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
 
 ## Terraform for Grafana
 
-We use Terraform to deploy Grafana Dashboards and Grafana Alerts. The end-to-end Aegis flow is as follows:
+We use Terraform to deploy the Aegis Grafana dashboard and Aegis service-health
+alerts. Protocol alert rules and global notification routing are managed in
+`alerts/rules`. The end-to-end Aegis flow is as follows:
 
 1. The Aegis service executes view calls and forwards the results to Prometheus
 1. Grafana ingests Prometheus metrics and allow us to visualize and react to them
 1. Terraform deploys our metric visualizations into Grafana dashboards
-1. Terraform also deploys our alert rules based on these metrics
+1. Terraform also deploys the Aegis service-health alert rules based on these metrics
 
 ### Set up Terraform
 
@@ -299,36 +306,11 @@ We use Terraform to deploy Grafana Dashboards and Grafana Alerts. The end-to-end
    # terraform.tfvars #
    ####################
 
-   # Get this from LastPass
+   # Grafana Cloud service account token for Aegis dashboards/service-health alerts.
    grafana_service_account_token =
-
-   # Get this from the Discord channel integration settings of #🚨︱stg-oracle-relayers
-   discord_alerts_webhook_url_staging =
-
-   # Get this from the Discord channel integration settings of #🚨︱prod-oracle-relayers
-   discord_alerts_webhook_url_prod =
-
-   # Get this from the Discord channel integration settings of #🏦︱reserve-alerts
-   discord_alerts_webhook_url_reserve =
-
-   # Get this from the Discord channel integration settings of #🚨︱trading-modes-sepolia
-   discord_alerts_webhook_url_trading_modes_staging =
-
-   # Get this from the Discord channel integration settings of #🚨︱trading-modes-celo
-   discord_alerts_webhook_url_trading_modes_prod =
-
-   # Get this from the Discord channel integration settings of #🚨︱trading-limits-celo
-   discord_alerts_webhook_url_trading_limits =
-
-   # Get this from the Discord channel integration settings of #🚨︱aegis
-   discord_alerts_webhook_url_aegis =
-
-   # Get this from the Discord channel integration settings of #alerts-catch-all
-   discord_alerts_webhook_url_catch_all =
-
-   # Get this from [our VictorOps dashboard](https://portal.victorops.com/dash/mento-labs-gmbh#/advanced/grafana) (find the routing key under ["settings"](https://portal.victorops.com/dash/mento-labs-gmbh#/routekeys))
-   splunk_on_call_alerts_webhook_url =
    ```
+
+   Discord/Splunk routing variables moved to `alerts/rules/terraform.tfvars`.
 
 1. Check that it's set up correctly
 
@@ -350,9 +332,16 @@ To update the dashboard, make the desired changes in [./terraform/grafana-dashbo
 
 ### Grafana Alerts
 
-We are using Terraform to deploy Discord and On-Call Alerts based on the Aegis metrics.
+Aegis owns only the Aegis service-health rule group (`service=aegis`) in this
+stack. Global contact points, Discord/Splunk/Slack routing, oracle-relayer
+rules, reserve-balance rules, trading-mode rules, and trading-limit rules live
+in `alerts/rules`.
 
-To update the alerts, make the desired changes in [./terraform/grafana-alerts](./terraform/grafana-alerts), run `pnpm aegis:tf:plan`, and apply only after reviewing the plan.
+To update Aegis service-health alert thresholds, edit
+[`terraform/aegis-service-alerts.tf`](./terraform/aegis-service-alerts.tf), run
+`pnpm aegis:tf:plan`, and apply only after reviewing the plan. To update
+protocol alerts or global routing, edit `../alerts/rules` and run
+`pnpm alerts:rules:plan`.
 
 Grafana uses the following concepts for managing alerts:
 
@@ -361,6 +350,8 @@ Grafana uses the following concepts for managing alerts:
 - [**Notification Policies**](https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/notification-policies/): Routing rules to determine which alerts get routed to what contact points.
 
 #### Current Alerts
+
+The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 
 **Oracle Relayer Alerts** (`service=oracle-relayers`):
 

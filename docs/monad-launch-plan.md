@@ -92,7 +92,8 @@ Add to `terraform/terraform.tfvars`:
 hasura_url_monad_testnet = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
 ```
 
-Add to `terraform/main.tf` (same pattern as the Sepolia block):
+Add to `terraform/dashboard.tf` in the `platform` stack (same pattern as the
+Sepolia block):
 
 ```hcl
 resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
@@ -107,8 +108,8 @@ resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
 Then apply:
 
 ```bash
-pnpm infra:plan   # preview
-pnpm infra:apply  # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET in Vercel
+pnpm tf plan platform   # preview
+pnpm infra:apply        # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET in Vercel
 ```
 
 #### Step 4 — Verify (~5 min)

@@ -18,7 +18,7 @@ function isHealthy(): boolean {
 }
 
 export function handleRequest(
-  req: { url?: string; method?: string },
+  req: { url?: string | undefined; method?: string | undefined },
   res: {
     writeHead: (status: number, headers?: Record<string, string>) => void;
     end: (body: string) => void;

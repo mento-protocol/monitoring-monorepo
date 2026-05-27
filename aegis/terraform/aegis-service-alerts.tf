@@ -1,6 +1,6 @@
 resource "grafana_rule_group" "aegis_service_alerts" {
   name             = "Aegis service alerts"
-  folder_uid       = var.aegis_folder.uid
+  folder_uid       = grafana_folder.aegis.uid
   interval_seconds = 60
 
   rule {

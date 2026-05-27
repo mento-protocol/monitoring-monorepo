@@ -42,7 +42,7 @@ jobs:
       bridge: ${{ steps.filter.outputs.bridge }}
       aegis: ${{ steps.filter.outputs.aegis }}
       alerts: ${{ steps.filter.outputs.alerts }}
-      alertsRules: ${{ steps.filter.outputs.alertsRules }}
+      terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
     steps:
@@ -114,8 +114,15 @@ jobs:
               - .github/workflows/ci.yml
               - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
-            alertsRules:
+            terraform:
+              - terraform/**
               - alerts/rules/**
+              - alerts/infra/**
+              - aegis/terraform/**
+              - terraform.stacks.json
+              - scripts/tf-stacks.mjs
+              - .github/workflows/alerts-infra.yml
+              - .github/workflows/infra.yml
               - .github/workflows/ci.yml
             alerts:
               - alerts/infra/onchain-event-handler/**
@@ -157,6 +164,7 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              - terraform.stacks.json
               - eslint.config.mjs
               - .dependency-cruiser.cjs
               - pnpm-lock.yaml
@@ -482,31 +490,52 @@ jobs:
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
-  # Standalone terraform validate for alerts/rules. The `Infra` workflow's
-  # matrix also validates this stack, but that workflow is NOT part of the
-  # `ci` sentinel, so a PR touching only `alerts/rules/**` would otherwise
-  # leave the required `CI / ci` check passing without validating any of
-  # the Grafana rule changes.
-  alerts-rules:
-    name: Terraform Validate (alerts/rules)
+  # Registry-backed Terraform validation inside the required `ci` sentinel.
+  # The separate `Infra` workflow prints richer stack summaries and validates
+  # the same roots, but it is not part of the branch-protection sentinel.
+  terraform:
+    name: Terraform Validate (registry)
     needs: changes
-    if: needs.changes.outputs.alertsRules == 'true'
+    if: needs.changes.outputs.terraform == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
-    defaults:
-      run:
-        working-directory: alerts/rules
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.14.6
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false -input=false
-      - run: terraform validate -no-color
+      - name: Validate changed stacks
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            matrix="$(node scripts/tf-stacks.mjs changed --base "origin/${BASE_REF}" --head HEAD --json)"
+          elif [[ "$EVENT_NAME" == "push" && -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            matrix="$(node scripts/tf-stacks.mjs changed --base "$BEFORE_SHA" --head HEAD --json)"
+          else
+            matrix="$(node scripts/tf-stacks.mjs changed --json)"
+          fi
+
+          count="$(node -e 'const m = JSON.parse(process.argv[1]); console.log(m.include.length)' "$matrix")"
+          if [[ "$count" == "0" ]]; then
+            echo "No Terraform stacks changed."
+            exit 0
+          fi
+
+          stack_ids="$(node -e 'const m = JSON.parse(process.argv[1]); for (const s of m.include) console.log(s.id)' "$matrix")"
+          while IFS= read -r stack; do
+            [[ -n "$stack" ]] || continue
+            node scripts/tf-stacks.mjs validate "$stack"
+          done <<< "$stack_ids"
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -561,15 +590,6 @@ jobs:
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: 1.14.6
-      - name: Terraform format check
-        run: terraform -chdir=aegis/terraform fmt -check -recursive
-      - name: Terraform init (no backend)
-        run: terraform -chdir=aegis/terraform init -backend=false -input=false
-      - name: Terraform validate
-        run: terraform -chdir=aegis/terraform validate -no-color
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -593,6 +613,8 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Terraform stack registry suite
+        run: pnpm tf:test
       - name: ESLint baseline-diff semantic suite
         # Direct behavioral coverage of scripts/eslint-baseline-diff.mjs
         # (matching, growth detection, line-proximity absorption, merge-base
@@ -637,7 +659,7 @@ jobs:
         bridge,
         aegis,
         alerts,
-        alerts-rules,
+        terraform,
         deps,
         scripts,
       ]
@@ -651,6 +673,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,aegis,alerts,alerts-rules,deps,scripts
+          allowed-skips: shared,ui,indexer,bridge,aegis,alerts,terraform,deps,scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

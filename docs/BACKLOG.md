@@ -227,7 +227,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 - [x] **Schema-lag fallback removed** — post-#212 deploy-order race mooted once Envio redeploy promoted (PR #219)
 - [x] **Grafana Agent scrape target** — polls `metrics-bridge` `/metrics` every 30s (aegis PR #48)
 - [x] **Grafana Agent container hardening chain** — Alpine→Debian (#51), UID/GID 1000 (#52), deprecated `server:` block (#53), WAL-dir perms under non-root (#54)
-- [x] **First v3 Slack alert rules** in `terraform/alerts/` — 5 groups / 9 rules across `service=fpmms` + `service=metrics-bridge` (PR #206)
+- [x] **First v3 Slack alert rules** in `alerts/rules/` — 5 groups / 9 rules across `service=fpmms` + `service=metrics-bridge` (PR #206)
 - [x] **Rebalance effectiveness alert** — `mento_pool_rebalance_effectiveness` gauge + Approach B (`avg_over_time < 0.2 AND deviation_ratio >= 1 AND increase(rebalance_count_total) > 0`, `for=15m`) (PR #212)
 - [x] **Slack UX** — pool pair labels populated (PR #209), tightened copy w/ oracle age (PR #211), channel name corrected to `#alerts-warnings` (PR #210)
 - [x] **Channel structure decision** — severity-split (`#alerts-critical` + `#alerts-warnings`) rather than domain-split (`#alerts-v3`); routing via rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy

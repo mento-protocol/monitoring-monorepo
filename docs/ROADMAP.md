@@ -84,7 +84,7 @@ Last updated: 2026-05-18
 
 Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state via RPC view calls and exposes Prometheus metrics that Grafana Cloud ingests.
 
-**Live alert rules** (Terraform-managed in `aegis/terraform/grafana-alerts/`):
+**Live protocol alert rules** (Terraform-managed in `alerts/rules/`; Aegis service-health stays in `aegis/terraform/`):
 
 | Alert Group      | What it monitors                                        | Channels                                                                   |
 | ---------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -239,22 +239,23 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 ## Key Files
 
-| What                | Where                                                                            |
-| ------------------- | -------------------------------------------------------------------------------- |
-| Indexer schema      | `indexer-envio/schema.graphql`                                                   |
-| Event handlers      | `indexer-envio/src/EventHandlers.ts`                                             |
-| Multichain config   | `indexer-envio/config.multichain.mainnet.yaml`                                   |
-| Mainnet config      | `indexer-envio/config.multichain.mainnet.yaml`                                   |
-| Dashboard app       | `ui-dashboard/src/app/`                                                          |
-| Network defs        | `ui-dashboard/src/lib/networks.ts`                                               |
-| GraphQL queries     | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
-| Pool type helper    | `ui-dashboard/src/lib/tokens.ts`                                                 |
-| FX calendar         | `shared-config/fx-calendar.json`                                                 |
-| Technical spec      | `SPEC.md`                                                                        |
-| Deployment guide    | `docs/deployment.md`                                                             |
-| Aegis config        | `aegis/config.yaml`                                                              |
-| Aegis alert rules   | `aegis/terraform/grafana-alerts/`                                                |
-| Aegis dashboards    | `aegis/terraform/grafana-dashboard/`                                             |
-| v3 metrics bridge   | `metrics-bridge/`                                                                |
-| v3 agent scrape cfg | `aegis/grafana-agent/agent.yaml.tmpl`                                            |
-| v3 alert rules      | `alerts/rules/`                                                                  |
+| What                 | Where                                                                            |
+| -------------------- | -------------------------------------------------------------------------------- |
+| Indexer schema       | `indexer-envio/schema.graphql`                                                   |
+| Event handlers       | `indexer-envio/src/EventHandlers.ts`                                             |
+| Multichain config    | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Mainnet config       | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Dashboard app        | `ui-dashboard/src/app/`                                                          |
+| Network defs         | `ui-dashboard/src/lib/networks.ts`                                               |
+| GraphQL queries      | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
+| Pool type helper     | `ui-dashboard/src/lib/tokens.ts`                                                 |
+| FX calendar          | `shared-config/fx-calendar.json`                                                 |
+| Technical spec       | `SPEC.md`                                                                        |
+| Deployment guide     | `docs/deployment.md`                                                             |
+| Aegis config         | `aegis/config.yaml`                                                              |
+| Protocol alert rules | `alerts/rules/`                                                                  |
+| Aegis service alert  | `aegis/terraform/aegis-service-alerts.tf`                                        |
+| Aegis dashboards     | `aegis/terraform/grafana-dashboard/`                                             |
+| v3 metrics bridge    | `metrics-bridge/`                                                                |
+| v3 agent scrape cfg  | `aegis/grafana-agent/agent.yaml.tmpl`                                            |
+| v3 alert rules       | `alerts/rules/`                                                                  |
