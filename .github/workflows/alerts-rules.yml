@@ -9,10 +9,29 @@ name: Alerts Rules
 # shared with `alerts/infra/`) and must be applied from the top-level stack
 # before this workflow can succeed.
 #
+# Plan/apply split:
+#   - `plan` job runs on every PR + push/dispatch to main. It runs
+#     `terraform plan -detailed-exitcode` and emits a `has-changes` job
+#     output. On PRs it posts a sticky comment with the plan diff.
+#   - `apply` job only runs on push/dispatch to main AND only when the plan
+#     reported actual changes. When there are no changes the apply job is
+#     skipped entirely, which means the `production` Environment's
+#     required-reviewer prompt only fires on real-change merges.
+#
+# Note: we intentionally do NOT save the plan as a binary artifact for
+# cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
+# sensitive data in cleartext in the plan file"
+# (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
+# TF_VAR_* env block here carries production Grafana/Slack/Splunk/Discord
+# credentials. Uploading the binary plan as a workflow artifact would
+# expose those secrets to anyone with `actions:read`. Instead the apply
+# job re-plans at gate-approval time — the trade-off is the brief
+# "between approval and apply" drift window, which the reviewer can
+# detect by checking the apply-job's plan output before approving.
+#
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
-# (matrix module `alerts-rules`). This workflow adds `terraform plan` on PRs
-# (with a sticky comment of the diff) and `terraform apply` on merge to main,
-# gated by the `production` GitHub Environment for human approval.
+# (matrix module `alerts-rules`). This workflow adds the plan diff comment +
+# the apply gate.
 
 on:
   workflow_dispatch:
@@ -60,11 +79,13 @@ jobs:
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
     # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
-    # secrets are available. Internal PRs run as usual.
+    # secrets are available. Internal PRs + main pushes run.
     if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.fork == false &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.fork == false
+        && github.event.pull_request.user.login != 'dependabot[bot]')
+      || (github.ref == 'refs/heads/main'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -75,6 +96,8 @@ jobs:
     defaults:
       run:
         working-directory: alerts/rules
+    outputs:
+      has-changes: ${{ steps.detect.outputs.has-changes }}
     env:
       # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
@@ -119,16 +142,43 @@ jobs:
 
       - name: Plan
         id: plan
-        # `set -o pipefail` so a terraform failure propagates even when piped
-        # to `tee`. Default exit semantics (0 success, 1 error) are fine here;
-        # we want green plans regardless of diff presence — comment-then-pass.
+        # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.
+        # `set +e` around terraform so exit-2 (changes) doesn't fail the step;
+        # capture terraform's exit (not tee's) via PIPESTATUS, emit as a step
+        # output for `detect`, and only `exit 1` on real errors.
+        # Plan output is teed to `/tmp/tf-plan.txt` for the sticky comment.
+        # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
+        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # `-lock-timeout=2m`: speculative PR plans can race a main-branch
+        # apply (separate concurrency groups). 2m is short enough not to stall
+        # CI on a long apply, long enough to absorb typical lock holds.
         run: |
-          set -o pipefail
-          # `-lock-timeout=2m`: speculative PR plans can race a main-branch
-          # apply (separate concurrency groups). 2m is short enough not to
-          # stall CI on a long apply, long enough to absorb typical lock
-          # holds (init/refresh).
-          terraform plan -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
+          set +e
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
+          EXITCODE=${PIPESTATUS[0]}
+          set -e
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          case "$EXITCODE" in
+            0) echo "Plan: no changes" ;;
+            2) echo "Plan: changes detected" ;;
+            *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;
+          esac
+
+      - name: Detect changes
+        id: detect
+        if: success()
+        env:
+          # `exitcode` is a system-controlled enum (0/2 here — 1 already
+          # bailed in the previous step). Passing through `env:` rather than
+          # inlining `${{ ... }}` in `run:` keeps this aligned with the
+          # GitHub Actions workflow-injection hardening pattern.
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          if [ "$EXITCODE" = "2" ]; then
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
@@ -140,6 +190,7 @@ jobs:
           # enum controlled by Actions, but env-based passing is the standard
           # hardening pattern).
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
         with:
           script: |
             const fs = require("fs");
@@ -159,7 +210,13 @@ jobs:
               : planOutput;
 
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
-            const statusIcon = planOutcome === "success" ? "✅" : "❌";
+            const hasChanges = process.env.HAS_CHANGES === "true";
+            const statusIcon = planOutcome === "success"
+              ? (hasChanges ? "📝" : "✅")
+              : "❌";
+            const statusText = planOutcome === "success"
+              ? (hasChanges ? "changes detected — merge will trigger apply" : "no changes — merge will skip apply")
+              : "plan failed";
 
             const runUrl =
               `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
@@ -167,7 +224,7 @@ jobs:
 
             const body =
               `## Terraform Plan — \`alerts/rules/\`\n\n` +
-              `**Status:** ${statusIcon} ${planOutcome}\n\n` +
+              `**Status:** ${statusIcon} ${statusText}\n\n` +
               `[Full workflow logs](${runUrl})\n\n` +
               `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
               `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
@@ -214,8 +271,15 @@ jobs:
 
   apply:
     name: Terraform Apply (alerts/rules)
-    # Guard against workflow_dispatch from non-main refs.
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: plan
+    # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
+    # there are real changes. When `has-changes=false` the job is skipped
+    # entirely — the production-environment approval prompt never fires for
+    # no-op merges (the gap that motivated the saved-plan refactor).
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.plan.outputs.has-changes == 'true'
     # Reuses the existing `production` environment shared with metrics-bridge,
     # aegis, and alerts/infra. The required-reviewer rule on that environment
     # gates each apply behind manual approval.
@@ -232,13 +296,12 @@ jobs:
       run:
         working-directory: alerts/rules
     env:
-      # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
+      # Provider auth env vars still need to be present at apply time — saved
+      # plans don't serialize provider configuration, so init re-evaluates
+      # the provider blocks against these values to talk to Grafana/Slack/etc.
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      # Slack bot token (drives `grafana_contact_point.slack_*` resources)
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      # Splunk On-Call / VictorOps webhook (drives `grafana_contact_point.splunk_on_call`)
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
-      # Legacy Discord webhooks — still wired for the per-domain contact points
       TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
       TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
       TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
@@ -268,9 +331,11 @@ jobs:
         run: terraform init -input=false
 
       - name: Apply
-        # `-lock-timeout=10m`: apply absolutely must wait for any in-progress
-        # lock to clear rather than failing the deploy. 10m covers a typical
-        # alerts/rules plan+apply round trip with margin.
+        # Re-plans + applies in a single step. The reviewer at the
+        # production-environment gate should read this job's plan output
+        # before approving — it's the ground truth for what lands.
+        # `-lock-timeout=10m`: apply must wait for any in-progress state
+        # lock rather than failing the deploy.
         run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
