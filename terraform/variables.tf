@@ -12,6 +12,28 @@ variable "vercel_team_id" {
   default     = "team_4l4TPoxnWEcusT8VeXkHbzF2"
 }
 
+# ── GitHub ────────────────────────────────────────────────────────────────────
+# Used to mirror Vercel-managed secrets (e.g. `VERCEL_AUTOMATION_BYPASS_SECRET`)
+# into GitHub Actions org secrets so CI can consume them. Repo-level secrets
+# managed by `alerts/infra/` use a different, narrower token.
+
+variable "github_owner" {
+  description = "GitHub organization that owns the org secrets managed by this stack."
+  type        = string
+  default     = "mento-protocol"
+}
+
+variable "github_token" {
+  description = <<-EOT
+    GitHub PAT for writing organization-level Actions secrets. Either a classic
+    PAT with `admin:org` scope, or a fine-grained PAT scoped to mento-protocol
+    with `Organization secrets: Read/write`. Used only by
+    `github_actions_organization_secret` resources in this stack.
+  EOT
+  type        = string
+  sensitive   = true
+}
+
 # ── Upstash ───────────────────────────────────────────────────────────────────
 
 variable "upstash_email" {
