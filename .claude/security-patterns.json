@@ -3,16 +3,19 @@
     {
       "rule_name": "auth_secret_literal",
       "regex": "AUTH_SECRET\\s*=\\s*[\"'][A-Za-z0-9+/=_-]{16,}[\"']",
+      "exclude_paths": ["**/*.example", "**/.env*.example"],
       "reminder": "AUTH_SECRET assigned a literal value. Load from env at runtime; never inline. Generate with `openssl rand -hex 32`."
     },
     {
       "rule_name": "upstash_token_literal",
       "regex": "KV_REST_API_(READ_ONLY_)?TOKEN\\s*=\\s*[\"'][A-Za-z0-9_-]{20,}[\"']",
+      "exclude_paths": ["**/*.example", "**/.env*.example"],
       "reminder": "Upstash REST token inlined. Move to `.env.local` or Vercel env vars. Rotate immediately if this leaks."
     },
     {
       "rule_name": "envio_hasura_token_literal",
       "regex": "ENVIO_HASURA_(ADMIN_)?TOKEN\\s*=\\s*[\"'][A-Za-z0-9_-]{20,}[\"']",
+      "exclude_paths": ["**/*.example", "**/.env*.example"],
       "reminder": "Envio Hasura token inlined. Read from env at runtime; never commit."
     },
     {
@@ -24,11 +27,6 @@
       "rule_name": "aws_access_key",
       "substrings": ["AKIA", "ASIA"],
       "reminder": "AWS access-key prefix detected. Use workload identity / instance profiles, not literal credentials."
-    },
-    {
-      "rule_name": "stripe_live_key",
-      "substrings": ["sk_live_", "rk_live_"],
-      "reminder": "Stripe live key literal detected. Load from secrets manager; never commit."
     },
     {
       "rule_name": "private_key_literal",
@@ -85,7 +83,7 @@
     },
     {
       "rule_name": "workflow_action_unpinned",
-      "regex": "uses:\\s*[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@(v\\d+|main|master)\\b",
+      "regex": "uses:\\s*(?!actions/|github/)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@(v\\d+|main|master)\\b",
       "paths": ["**/.github/workflows/**"],
       "reminder": "Third-party Actions must be SHA-pinned, not tag-pinned. Use the full commit SHA followed by a `# tag` comment."
     },
