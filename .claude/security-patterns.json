@@ -140,9 +140,9 @@
     },
     {
       "rule_name": "number_coerce_onchain_value",
-      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|limit|value)",
-      "paths": ["**/indexer-envio/src/**/*.ts"],
-      "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge. Matches suffixed forms too (amount0In, reserve1, netflowGlobal, limit0, etc.)."
+      "regex": "Number\\([^)]*\\b(amount|balance|supply|totalSupply|reserve|debt|deposit|withdrawal|netflow|limit|timestamp|blockTimestamp|value)",
+      "paths": ["**/indexer-envio/src/*.ts", "**/indexer-envio/src/**/*.ts"],
+      "reminder": "Coercing an on-chain bigint to Number loses precision above 2^53. Keep it as bigint, or format for display only at the very edge. Matches suffixed forms too (amount0In, reserve1, netflowGlobal, limit0, blockTimestamp, etc.)."
     },
     {
       "rule_name": "workflow_action_unpinned",
@@ -159,7 +159,10 @@
     {
       "rule_name": "webhook_no_hmac_check",
       "regex": "(req\\.body|request\\.body|await\\s+req\\.json|await\\s+request\\.json)",
-      "paths": ["**/alerts/infra/onchain-event-handler/src/**/*.ts"],
+      "paths": [
+        "**/alerts/infra/onchain-event-handler/src/*.ts",
+        "**/alerts/infra/onchain-event-handler/src/**/*.ts"
+      ],
       "exclude_paths": [
         "**/test/**",
         "**/tests/**",
