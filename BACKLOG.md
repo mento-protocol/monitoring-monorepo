@@ -160,8 +160,7 @@ Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`.
 
 ### Loose ends carried in from the migration session
 
-- [ ] **Vercel `protection_bypass_for_automation` was removed** during the same root-stack apply. If lhci or curl-based preview verification breaks, that's why — restore by re-adding the field to `vercel_project.dashboard` if needed.
-- [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump.
+- [ ] **`splunk_on_call` always shows "1 to change" on every aegis plan** — known terraform-provider-grafana quirk with sensitive `victorops {}` blocks (provider can't no-op-diff). Pre-dates this migration; harmless but annoying. Track for a future provider-bump or targeted live-plan validation; do not silence the whole `victorops` block with `ignore_changes`, because that would hide real Splunk URL/title/message drift.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 
@@ -186,7 +185,7 @@ Items below are net-new functionality or polish, not migration blockers.
       Discord provider/variables/GitHub secrets, and
       `channels/discord-channels/`. Keep the provider available until the
       first destroy apply can cleanly archive/delete the Discord-managed state.
-- [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by HMAC-SHA256 signature verification. Accepted risk for now (matches vendored upstream). Revisit if QuickNode publishes a stable egress IP range (or supports OIDC-signed delivery): switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
+- [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by QuickNode HMAC-SHA256 signature verification, timestamp tolerance, and nonce replay protection. Accepted risk for now (matches vendored upstream). Revisit only with verified QuickNode stable egress IPs or OIDC-signed delivery: switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
 
 ### Tier 2 — Gated on external work
 
