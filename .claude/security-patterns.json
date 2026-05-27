@@ -185,7 +185,7 @@
     },
     {
       "rule_name": "private_key_literal",
-      "regex": "[\"']0x[a-fA-F0-9]{64}[\"']",
+      "regex": "[`\"\\']0x[a-fA-F0-9]{64}[`\"\\']",
       "exclude_paths": [
         "**/test/**",
         "**/tests/**",
@@ -223,20 +223,24 @@
       "rule_name": "hasura_aggregate_query",
       "regex": "_aggregate\\s*[({]",
       "paths": [
-        "**/ui-dashboard/**/*.ts",
-        "**/ui-dashboard/**/*.tsx",
-        "**/ui-dashboard/**/*.graphql",
+        "**/scripts/**/*.gql",
+        "**/scripts/**/*.graphql",
+        "**/scripts/**/*.js",
+        "**/scripts/**/*.mjs",
         "**/scripts/**/*.ts",
         "**/scripts/**/*.tsx",
-        "**/scripts/**/*.graphql",
         "**/ui-dashboard/**/*.gql",
-        "**/scripts/**/*.gql"
+        "**/ui-dashboard/**/*.graphql",
+        "**/ui-dashboard/**/*.js",
+        "**/ui-dashboard/**/*.mjs",
+        "**/ui-dashboard/**/*.ts",
+        "**/ui-dashboard/**/*.tsx"
       ],
       "reminder": "Hasura `_aggregate` queries are unbounded on prod and have caused 429 storms. Use a pre-rolled snapshot entity or paginate + count client-side."
     },
     {
       "rule_name": "bare_gcloud_in_app",
-      "regex": "(spawn|exec|execSync|execFile|execFileSync|spawnSync)\\([`\"\\']gcloud",
+      "regex": "(spawn|exec|execSync|execFile|execFileSync|spawnSync)\\(\\s*[`\"\\']gcloud",
       "paths": [
         "**/indexer-envio/**/*.ts",
         "**/ui-dashboard/**/*.ts",
@@ -270,13 +274,13 @@
     {
       "rule_name": "workflow_action_unpinned",
       "regex": "uses:\\s*[\"\\']?(?!actions/|github/)[A-Za-z0-9._/-]+@(?![a-fA-F0-9]{40}\\b)\\S+",
-      "paths": ["**/.github/workflows/**"],
+      "paths": ["**/.github/workflows/**", ".github/workflows/**"],
       "reminder": "Third-party Actions must be SHA-pinned, not tag- or branch-pinned. Use the full 40-char commit SHA followed by a `# tag` comment. Catches @v1, @v1.2.3, @main, @latest, @stable, and subdirectory actions (owner/repo/path@ref)."
     },
     {
       "rule_name": "workflow_pr_write_permission",
       "regex": "(pull-requests|contents):\\s*[\\\"']?write[\\\"']?",
-      "paths": ["**/.github/workflows/**"],
+      "paths": ["**/.github/workflows/**", ".github/workflows/**"],
       "reminder": "Workflow grants write permission. If this workflow has a `pull_request` trigger, confirm it gates on `github.event.pull_request.head.repo.full_name == github.repository` so forks don't get write tokens. (workflow_dispatch-only or push-only workflows can ignore this.)",
       "exclude_paths": [
         "**/.github/workflows/update-snapshots.yml",
