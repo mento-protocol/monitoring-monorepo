@@ -16,52 +16,56 @@ locals {
   #   symbol          → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
   #   threshold       → low-balance alert threshold, in whole tokens
   #   explorer        → block-explorer host for address links in alert copy
-  #   chain_id        → EVM chain ID; used to build pool URLs like
-  #                     `monitoring.mento.org/pool/<chain_id>-<pool_address>`
-  #   chainlink_chain → `data.chain.link/feeds/<chainlink_chain>/mainnet/...` path
-  #                     component. Empty when Chainlink doesn't publish feeds for
-  #                     this chain (testnets) — gates the Chainlink-feed link in
-  #                     the trading-mode template.
+  #   chain_id            → EVM chain ID; used to build pool URLs like
+  #                         `monitoring.mento.org/pool/<chain_id>-<pool_address>`
+  #   chainlink_feed_path → `data.chain.link/feeds/<chainlink_feed_path>/...` two-segment
+  #                         path component. Celo uses `celo/mainnet`, Monad uses
+  #                         `monad/monad` (the network segment is the literal "monad",
+  #                         not "mainnet" — verified in `ui-dashboard/src/lib/tokens.ts`
+  #                         CHAINLINK_FEEDS map and confirmed against the live pages).
+  #                         Empty when Chainlink doesn't publish feeds for this chain
+  #                         (testnets) — gates the Chainlink-feed link in the
+  #                         trading-mode template.
   chains = {
     "celo" = {
-      title           = "Celo"
-      env             = "prod"
-      metric          = "CELOToken_balanceOf"
-      symbol          = "CELO"
-      threshold       = 10
-      explorer        = "celoscan.io"
-      chain_id        = "42220"
-      chainlink_chain = "celo"
+      title               = "Celo"
+      env                 = "prod"
+      metric              = "CELOToken_balanceOf"
+      symbol              = "CELO"
+      threshold           = 10
+      explorer            = "celoscan.io"
+      chain_id            = "42220"
+      chainlink_feed_path = "celo/mainnet"
     }
     "celo-sepolia" = {
-      title           = "Celo-Sepolia"
-      env             = "staging"
-      metric          = "CELOToken_balanceOf"
-      symbol          = "CELO"
-      threshold       = 10
-      explorer        = "sepolia.celoscan.io"
-      chain_id        = "11142220"
-      chainlink_chain = ""
+      title               = "Celo-Sepolia"
+      env                 = "staging"
+      metric              = "CELOToken_balanceOf"
+      symbol              = "CELO"
+      threshold           = 10
+      explorer            = "sepolia.celoscan.io"
+      chain_id            = "11142220"
+      chainlink_feed_path = ""
     }
     "monad" = {
-      title           = "Monad"
-      env             = "prod"
-      metric          = "Native_balanceOf"
-      symbol          = "MON"
-      threshold       = 50
-      explorer        = "monadscan.com"
-      chain_id        = "143"
-      chainlink_chain = "monad"
+      title               = "Monad"
+      env                 = "prod"
+      metric              = "Native_balanceOf"
+      symbol              = "MON"
+      threshold           = 50
+      explorer            = "monadscan.com"
+      chain_id            = "143"
+      chainlink_feed_path = "monad/monad"
     }
     "monad-testnet" = {
-      title           = "Monad-Testnet"
-      env             = "staging"
-      metric          = "Native_balanceOf"
-      symbol          = "MON"
-      threshold       = 50
-      explorer        = "testnet.monadscan.com"
-      chain_id        = "10143"
-      chainlink_chain = ""
+      title               = "Monad-Testnet"
+      env                 = "staging"
+      metric              = "Native_balanceOf"
+      symbol              = "MON"
+      threshold           = 50
+      explorer            = "testnet.monadscan.com"
+      chain_id            = "10143"
+      chainlink_feed_path = ""
     }
   }
 
@@ -240,9 +244,9 @@ locals {
     format("{{ if eq .Labels.chain %q -}}{{ $chainId = %q -}}{{ end -}}", k, c.chain_id)
   ])
 
-  chainlink_chain_branches = join("\n", [
+  chainlink_feed_path_branches = join("\n", [
     for k, c in local.chains :
-    format("{{ if eq .Labels.chain %q -}}{{ $chainlinkChain = %q -}}{{ end -}}", k, c.chainlink_chain)
+    format("{{ if eq .Labels.chain %q -}}{{ $chainlinkFeedPath = %q -}}{{ end -}}", k, c.chainlink_feed_path)
   ])
 
   # Each entry maps alertnames → three template families:

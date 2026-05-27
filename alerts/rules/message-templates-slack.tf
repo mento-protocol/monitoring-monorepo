@@ -131,8 +131,10 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   # fragments (one independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see
   # locals.tf). When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
   # otherwise we fall back to the Grafana alert-details URL so the bullet still resolves.
-  # Chainlink URL: gated by `$chainlinkChain` (empty for testnets where Chainlink doesn't
-  # publish feeds) so the line only renders when there's a real feed page to link to.
+  # Chainlink URL: gated by `$chainlinkFeedPath` (empty for testnets where Chainlink doesn't
+  # publish feeds) — the path is a full two-segment slug because Chainlink's URLs aren't
+  # uniform: Celo uses `celo/mainnet`, Monad uses `monad/monad`. Source of truth for the
+  # mapping: `ui-dashboard/src/lib/tokens.ts` CHAINLINK_FEEDS.
   template = <<-EOT
 {{ define "slack.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -142,8 +144,8 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
 {{ $chain := .Labels.chain | title -}}
 {{ $chainId := "" -}}
 ${local.chain_id_branches}
-{{ $chainlinkChain := "" -}}
-${local.chainlink_chain_branches}
+{{ $chainlinkFeedPath := "" -}}
+${local.chainlink_feed_path_branches}
 {{ $pool := "" -}}
 {{ if eq .Labels.chain "celo" -}}
 ${local.celo_pool_branches}
@@ -154,8 +156,8 @@ ${local.monad_pool_branches}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 *Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*
-- Check for tripped breakers on the <{{ $poolURL }}|{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}>{{ if $chainlinkChain }}
-- Check the <https://data.chain.link/feeds/{{ $chainlinkChain }}/mainnet/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
+- Check for tripped breakers on the <{{ $poolURL }}|{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}>{{ if $chainlinkFeedPath }}
+- Check the <https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
