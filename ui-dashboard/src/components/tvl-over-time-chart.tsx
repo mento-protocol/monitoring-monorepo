@@ -195,7 +195,7 @@ function collectTvlInputs(networkData: NetworkData[]): TvlInputs {
           r1: snapshot.reserves1,
         }))
         .sort((a, b) => a.ts - b.ts);
-      earliestTs = Math.min(earliestTs, points[0].ts);
+      earliestTs = Math.min(earliestTs, points[0]!.ts);
       histories.push({
         pool,
         network: netData.network,
@@ -261,15 +261,15 @@ function computeHistoricalBucket(
   const perChainTvl = new Map<string, number>();
 
   for (let i = 0; i < histories.length; i++) {
-    const history = histories[i];
+    const history = histories[i]!;
     while (
-      cursors[i] + 1 < history.points.length &&
-      history.points[cursors[i] + 1].ts < timestamp + bucketSeconds
+      cursors[i]! + 1 < history.points.length &&
+      history.points[cursors[i]! + 1]!.ts < timestamp + bucketSeconds
     ) {
-      cursors[i]++;
+      cursors[i] = cursors[i]! + 1;
     }
-    if (cursors[i] < 0) continue;
-    const point = history.points[cursors[i]];
+    if (cursors[i]! < 0) continue;
+    const point = history.points[cursors[i]!]!;
     const poolTvl = poolTvlUSD(
       { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
       history.network,

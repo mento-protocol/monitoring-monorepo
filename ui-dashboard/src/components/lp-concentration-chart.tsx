@@ -132,7 +132,7 @@ export function LpConcentrationChart({
     positions.length > 0
       ? (
           Number(
-            (positions[0].netLiquidity * BigInt(10_000)) / totalLiquidity,
+            (positions[0]!.netLiquidity * BigInt(10_000)) / totalLiquidity,
           ) / 100
         ).toFixed(1)
       : "0";
@@ -224,7 +224,7 @@ export function LpConcentrationChart({
                       />
                       <span className="truncate">{label}</span>
                       <span className="ml-auto shrink-0 font-mono tabular-nums text-slate-500">
-                        {(values[i] * 100).toFixed(1)}%
+                        {((values[i] ?? 0) * 100).toFixed(1)}%
                       </span>
                     </li>
                   );

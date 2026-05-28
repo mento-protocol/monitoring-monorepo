@@ -76,7 +76,7 @@ export function TagInput({
     if (e.key === "Enter") {
       e.preventDefault();
       if (highlightIndex >= 0 && highlightIndex < filtered.length) {
-        addTag(filtered[highlightIndex]);
+        addTag(filtered[highlightIndex]!);
       } else if (input.trim()) {
         addTag(input);
       }
@@ -89,7 +89,7 @@ export function TagInput({
     } else if (e.key === "Escape") {
       setShowDropdown(false);
     } else if (e.key === "Backspace" && !input && tags.length > 0) {
-      removeTag(tags[tags.length - 1]);
+      removeTag(tags[tags.length - 1]!);
     }
   }
 

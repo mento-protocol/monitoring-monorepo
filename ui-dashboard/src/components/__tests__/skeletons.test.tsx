@@ -56,7 +56,10 @@ describe("TableSkeleton", () => {
   it("renders one header row plus the requested number of data rows", () => {
     render(<TableSkeleton rows={3} cols={4} />);
     const table = getTableSkeleton();
-    const [header, body] = Array.from(table.children) as HTMLElement[];
+    const [header, body] = Array.from(table.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
     expect(header.children).toHaveLength(4);
     expect(body.children).toHaveLength(3);
     Array.from(body.children).forEach((row) => {
@@ -66,18 +69,20 @@ describe("TableSkeleton", () => {
 
   it("uses defaults of 8 rows × 5 cols when props omitted", () => {
     render(<TableSkeleton />);
-    const [header, body] = Array.from(
-      getTableSkeleton().children,
-    ) as HTMLElement[];
+    const [header, body] = Array.from(getTableSkeleton().children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
     expect(header.children).toHaveLength(5);
     expect(body.children).toHaveLength(8);
   });
 
   it("handles rows=0 by rendering only the header row", () => {
     render(<TableSkeleton rows={0} cols={3} />);
-    const [header, body] = Array.from(
-      getTableSkeleton().children,
-    ) as HTMLElement[];
+    const [header, body] = Array.from(getTableSkeleton().children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
     expect(header.children).toHaveLength(3);
     expect(body.children).toHaveLength(0);
   });
@@ -136,7 +141,7 @@ describe("PageShellSkeleton", () => {
     render(<PageShellSkeleton />);
     const regions = container.querySelectorAll('[aria-live="polite"]');
     expect(regions).toHaveLength(1);
-    expect(regions[0].getAttribute("aria-label")).toBe("Loading");
+    expect(regions[0]!.getAttribute("aria-label")).toBe("Loading");
   });
 
   it("inner skeletons are presentational (no nested role=status)", () => {

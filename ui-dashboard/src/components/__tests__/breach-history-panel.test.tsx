@@ -270,7 +270,7 @@ function setupGQL(routes: {
 function pageVarsFromCalls(): Record<string, unknown> | null {
   // Walk from the end so we get the LATEST page call after a state change.
   for (let i = mockUseGQL.mock.calls.length - 1; i >= 0; i--) {
-    const call = mockUseGQL.mock.calls[i];
+    const call = mockUseGQL.mock.calls[i]!;
     const q = String(call[0] ?? "").trim();
     if (q.startsWith("query PoolDeviationBreachesPage")) {
       return (call[1] as Record<string, unknown>) ?? null;
@@ -281,7 +281,7 @@ function pageVarsFromCalls(): Record<string, unknown> | null {
 
 function countVarsFromCalls(): Record<string, unknown> | null {
   for (let i = mockUseGQL.mock.calls.length - 1; i >= 0; i--) {
-    const call = mockUseGQL.mock.calls[i];
+    const call = mockUseGQL.mock.calls[i]!;
     const q = String(call[0] ?? "").trim();
     if (q.startsWith("query PoolDeviationBreachesCount")) {
       return (call[1] as Record<string, unknown>) ?? null;
@@ -292,7 +292,7 @@ function countVarsFromCalls(): Record<string, unknown> | null {
 
 function allVarsFromCalls(): Record<string, unknown> | null {
   for (let i = mockUseGQL.mock.calls.length - 1; i >= 0; i--) {
-    const call = mockUseGQL.mock.calls[i];
+    const call = mockUseGQL.mock.calls[i]!;
     const q = String(call[0] ?? "").trim();
     if (q.startsWith("query PoolDeviationBreachesAll")) {
       return (call[1] as Record<string, unknown>) ?? null;
