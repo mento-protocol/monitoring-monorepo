@@ -5,7 +5,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { buildPoolDetailHref, buildPoolsFilterUrl } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
-import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import {
+  useAllNetworksData,
+  type NetworkData,
+} from "@/hooks/use-all-networks-data";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
 import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
@@ -35,17 +38,31 @@ import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
 
-export function PoolsPageClient() {
+export function PoolsPageClient({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[] | undefined;
+}) {
   return (
     <Suspense>
-      <PoolsContent />
+      <PoolsContent initialNetworkData={initialNetworkData} />
     </Suspense>
   );
 }
 
 // eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging.
-function PoolsContent() {
-  const { networkData, isLoading: poolsLoading } = useAllNetworksData();
+function PoolsContent({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[] | undefined;
+}) {
+  // `initialNetworkData` lets first paint render the full pools table from
+  // SSR data instead of a 3-row `<Skeleton />` — fixes the 0.49 CLS that
+  // lhci flagged on this route (BACKLOG "Lighthouse CI Follow-Ups"). The
+  // hook's `fallbackData` branch turns off mount revalidation on a cold
+  // SWR cache, so the first paint also fires zero client GraphQL requests.
+  const { networkData, isLoading: poolsLoading } =
+    useAllNetworksData(initialNetworkData);
   const searchParams = useSearchParams();
   const { replace } = useRouter();
 
