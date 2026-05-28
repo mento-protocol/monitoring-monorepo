@@ -138,7 +138,6 @@ jobs:
               - indexer-envio/schema.graphql
               - indexer-envio/stryker.config.mjs
               - indexer-envio/vitest.mutation.config.ts
-              - indexer-envio/vitest.config.ts
               - indexer-envio/package.json
               - indexer-envio/tsconfig.json
               # Upstream workspace deps: handlers (transitively reachable
