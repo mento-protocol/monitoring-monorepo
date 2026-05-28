@@ -236,32 +236,54 @@ jobs:
             --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
 
-      - name: Assert Lighthouse audited the dashboard (not the SSO interstitial)
+      - name: Assert every Lighthouse report's finalUrl matches the dashboard
         # The accessibility budget is `error`-severity (blocking). If the
         # deployment-protection bypass silently regresses, lhci will happily
-        # audit Vercel's SSO interstitial (`vercel.com/login?next=...`) — a
-        # minimal page that scores 0.94+ on accessibility — and the gate
-        # passes with false confidence. Fail closed if the audited URL set
-        # contains an SSO redirect, so a bypass regression is loud, not silent.
-        # Verified failure mode: PR-#451 main-branch runs (pre this PR) all
-        # audited `vercel.com/login` and silently passed at warn-severity.
+        # audit Vercel's SSO interstitial — a minimal page that scores
+        # 0.94+ on accessibility — and the gate passes with false confidence.
+        #
+        # The check parses `.lighthouseci/manifest.json` and each report's
+        # `finalUrl`, then asserts every audited URL's host matches the
+        # preview host AND its pathname is one of `/` or `/pools`. This
+        # catches more than just the SSO interstitial: a Vercel error page,
+        # a mid-deploy 503, a wrong-project deployment, or any redirect to
+        # an unexpected path all fail closed. Previously a stdout grep for
+        # `vercel.com/login` only caught the SSO case.
         #
         # `always()` keeps this guard running even when `lhci autorun` exits
         # non-zero. Without it, a hard performance-budget failure (once those
         # graduate from `warn` to `error`) would skip the SSO diagnostic and
         # leave the engineer staring at a generic assertion failure.
         if: steps.decide.outputs.run == 'true' && always()
-        run: |
-          if [ ! -f /tmp/lhci-output.txt ]; then
-            echo "::error::lhci-output.txt not found — lhci likely crashed before writing output; cannot verify audited URL. Failing closed to match the guard's documented contract."
-            exit 1
-          fi
-          if grep -q 'vercel\.com/login' /tmp/lhci-output.txt; then
-            echo "::error::Lighthouse audited Vercel's SSO interstitial instead of the dashboard."
-            echo "::error::Deployment-protection bypass likely regressed — check x-vercel-protection-bypass + x-vercel-set-bypass-cookie headers."
-            exit 1
-          fi
-          echo "Audited-page guard passed: no SSO interstitial URLs in lhci output."
+        env:
+          PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
+        run: node ui-dashboard/scripts/assert-lhci-finalurl.mjs
+
+      - name: Cache Playwright Chromium
+        # `playwright install chromium` re-downloads ~130 MB on every run
+        # otherwise. The cache key hashes BOTH `ui-dashboard/package.json`
+        # (the version range, e.g. `^1.60.0`) AND `pnpm-lock.yaml` (the
+        # resolved version pnpm actually picks). Keying on package.json
+        # alone misses lockfile-only `@playwright/test` updates within the
+        # caret range — in that case the key would stay constant while
+        # the Chromium revision Playwright wants flips, so every run
+        # restores the stale cache, the install step re-downloads, but
+        # actions/cache won't re-save under the already-hit key, so the
+        # next run re-downloads again indefinitely. Hashing the lockfile
+        # makes the key flip on any real Playwright version bump.
+        if: steps.decide.outputs.run == 'true' && always()
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          # `restore-keys` lets an unrelated lockfile or `package.json`
+          # edit still reuse the most recent chromium cache instead of
+          # triggering a ~130 MB fresh download. `playwright install` then fast-
+          # validates the existing binary against the version it wants
+          # (no-op on match, re-download only on a real Playwright
+          # version bump).
+          restore-keys: |
+            playwright-chromium-
 
       - name: Install Playwright Chromium (for INP measurement)
         # The INP step uses `@playwright/test`'s chromium (the dashboard's
@@ -273,6 +295,9 @@ jobs:
         # `always()` keeps the INP gate independent of the lhci step's
         # outcome: an accessibility regression (already blocking) shouldn't
         # silently skip the INP step and mask a simultaneous INP regression.
+        #
+        # On a cache hit (see prior step) this is a fast no-op that just
+        # verifies the chromium binary is present.
         if: steps.decide.outputs.run == 'true' && always()
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
