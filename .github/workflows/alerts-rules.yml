@@ -192,9 +192,10 @@ jobs:
         working-directory: /tmp
         run: |
           if [ -f tf-plan.txt ]; then
-            grep -vE '^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after' tf-plan.txt \
-              | awk 'NF || found {found=1; print}' \
-              | cat -s > tf-plan.clean.txt
+            awk '
+              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
+              NF || found { found=1; print }
+            ' tf-plan.txt | cat -s > tf-plan.clean.txt
             mv tf-plan.clean.txt tf-plan.txt
           fi
 
@@ -410,9 +411,10 @@ jobs:
         working-directory: /tmp
         run: |
           if [ -f tf-apply.txt ]; then
-            grep -vE '^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after' tf-apply.txt \
-              | awk 'NF || found {found=1; print}' \
-              | cat -s > tf-apply.clean.txt
+            awk '
+              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
+              NF || found { found=1; print }
+            ' tf-apply.txt | cat -s > tf-apply.clean.txt
             mv tf-apply.clean.txt tf-apply.txt
           fi
 
