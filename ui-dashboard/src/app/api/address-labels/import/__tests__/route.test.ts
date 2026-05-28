@@ -109,7 +109,7 @@ describe("POST /api/address-labels/import", () => {
     const counts = await getImported(res);
     expect(counts.addresses).toBe(1);
     expect(importLabels).toHaveBeenCalledTimes(1);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].name).toBe("Alice");
   });
 
@@ -224,7 +224,7 @@ describe("POST /api/address-labels/import", () => {
     expect(importReports).not.toHaveBeenCalled();
     expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
     const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
-      .mock.calls[0];
+      .mock.calls[0]!;
     const reportArg = snapshotArg.reports;
     expect(reportArg).toBeDefined();
     const restored = reportArg[validAddress.toLowerCase()];
@@ -260,7 +260,7 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(200);
     expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
     const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
-      .mock.calls[0];
+      .mock.calls[0]!;
     const reportArg = snapshotArg.reports;
     expect(reportArg).toBeDefined();
     const restored = reportArg[validAddress.toLowerCase()];
@@ -293,7 +293,7 @@ describe("POST /api/address-labels/import", () => {
     expect(importReports).not.toHaveBeenCalled();
     expect(importSnapshotHashes).toHaveBeenCalledTimes(1);
     const [snapshotArg] = (importSnapshotHashes as ReturnType<typeof vi.fn>)
-      .mock.calls[0];
+      .mock.calls[0]!;
     expect(snapshotArg.labels).toBeUndefined();
     expect(snapshotArg.reports[validAddress.toLowerCase()].body).toBe(
       "Investigation only",
@@ -498,7 +498,7 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].tags).toEqual(["whale"]);
     expect(arg[validAddress.toLowerCase()].source).toBeUndefined();
   });
@@ -517,7 +517,7 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].source).toBeUndefined();
   });
 
@@ -543,7 +543,7 @@ describe("POST /api/address-labels/import", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].notes).toBe("carry me");
     expect(arg[validAddress.toLowerCase()].isPublic).toBe(true);
     expect(arg[validAddress.toLowerCase()].name).toBe("New");
@@ -578,7 +578,7 @@ describe("POST /api/address-labels/import — CSV", () => {
     expect(res.status).toBe(200);
     const counts = await getImported(res);
     expect(counts.addresses).toBe(1);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].tags).toEqual(["whale", "defi"]);
   });
 
@@ -612,7 +612,7 @@ describe("POST /api/address-labels/import — CSV", () => {
     expect(res.status).toBe(200);
     const counts = await getImported(res);
     expect(counts.addresses).toBe(1);
-    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [arg] = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(arg[validAddress.toLowerCase()].name).toBe("Second");
   });
 
