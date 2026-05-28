@@ -271,6 +271,8 @@ function isClaudeSessionEndCommand(command) {
   return directInvocation.test(command) || guardedInvocation.test(command);
 }
 
+// Keep this in sync with `.claude/settings.json`: the context check enforces
+// that every pre-approved `Bash(bash scripts/...)` permission appears here.
 const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash scripts/agent-quality-gate.sh:*)",
   "Bash(bash ./scripts/agent-quality-gate.sh:*)",

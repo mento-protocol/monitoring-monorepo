@@ -248,6 +248,24 @@ function runApplyGuardTests(tempDir) {
   );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
+  result = runFail(["apply", "alerts-rules"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_ORIGIN_MAIN_MISSING: "1",
+    },
+  });
+  assertApplyRefused(result);
+  assertIncludes(
+    result.stderr,
+    "Could not verify checkout safety",
+    "refusal should surface git verification errors",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "unverifiable guarded apply must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
   run(["apply", "alerts-rules", "--force-local-apply", "-auto-approve"], {
     env: {
       ...baseEnv,
