@@ -115,8 +115,7 @@ for (const reportPath of reports) {
   // preview, but `statusCode >= 400` is the giveaway. If the network-
   // requests audit is unavailable (older lhci, plugin disabled) we skip
   // this gate rather than failing closed on an absent signal.
-  const networkItems =
-    lhr.audits?.["network-requests"]?.details?.items ?? null;
+  const networkItems = lhr.audits?.["network-requests"]?.details?.items ?? null;
   let statusCode = null;
   let statusOk = true;
   if (Array.isArray(networkItems) && networkItems.length > 0) {
