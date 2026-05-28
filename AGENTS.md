@@ -216,8 +216,8 @@ detailed rules in the checklist.
 # Install all deps (gated: pnpm refuses registry versions <3 days old via
 # minimumReleaseAge in pnpm-workspace.yaml; @mento-protocol/* is exempted.
 # Frozen-lockfile installs are unaffected.)
-pnpm install
-./scripts/codex-cloud-setup.sh    # Codex Cloud environment setup script
+pnpm install                       # Local/worktree setup
+./scripts/codex-cloud-setup.sh     # Codex Cloud setup; replaces local install
 
 # Indexer
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)

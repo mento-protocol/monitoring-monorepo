@@ -19,7 +19,8 @@ git config core.hooksPath .trunk/hooks
 echo "==> Activating package manager from package.json"
 if command -v corepack >/dev/null 2>&1; then
   corepack enable
-  corepack prepare pnpm@10.30.3 --activate
+  PNPM_VERSION="$(node -p "require('./package.json').packageManager.split('@')[1]")"
+  corepack prepare "pnpm@${PNPM_VERSION}" --activate
 fi
 pnpm --version
 
