@@ -216,7 +216,8 @@ detailed rules in the checklist.
 # Install all deps (gated: pnpm refuses registry versions <3 days old via
 # minimumReleaseAge in pnpm-workspace.yaml; @mento-protocol/* is exempted.
 # Frozen-lockfile installs are unaffected.)
-pnpm install
+pnpm install                       # Local/worktree setup
+./scripts/codex-cloud-setup.sh     # Codex Cloud setup; replaces local install
 
 # Indexer
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
@@ -354,6 +355,19 @@ command shim. Do not add repo-local `.agents/skills/autoreview` or
 `.claude/skills/autoreview` copies unless the global skill is intentionally
 forked.
 
+Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
+`~/.claude` directories. Configure the Codex Cloud environment setup script as:
+
+```bash
+./scripts/codex-cloud-setup.sh
+```
+
+For workflow continuity, this repo includes thin repo-local `ship` and
+`babysit-pr` skill adapters under `.agents/skills/` with matching
+`.claude/skills/` mirrors. They preserve the familiar command names while
+backing the behavior with repo-visible commands: `pnpm agent:quality-gate`,
+`pnpm agent:autoreview` when available, and `pnpm pr:ready-state`.
+
 ### SessionEnd hook (reflect nudge)
 
 `scripts/agent-session-end-hook.sh` runs on SessionEnd for both Claude Code and Codex. When the session left commits or unstaged changes in the tree, it prints a one-line nudge to run `/reflect` so any new learnings get captured in memory / `AGENTS.md` / `CLAUDE.md` before context is lost. Silent on no-op sessions.
@@ -365,6 +379,10 @@ forked.
 
 For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.
 
+When `Monitor` is not available, such as in a Codex Cloud task, use the
+repo-local `babysit-pr` skill or `pnpm pr:ready-state --pr <number> --watch
+--compact` as the foreground watch loop.
+
 ## New Worktree / Clone Setup
 
 After creating a new worktree or cloning the repo, run:
@@ -374,6 +392,12 @@ After creating a new worktree or cloning the repo, run:
 ```
 
 This installs deps and runs Envio codegen (required for `indexer-envio` TypeScript to compile — the `generated/` dir is gitignored).
+
+For Codex Cloud, set the environment setup command to
+`./scripts/codex-cloud-setup.sh` instead of the local worktree script. Cloud
+setup runs in a hosted container with setup-time internet access and must be
+self-contained; do not rely on untracked local files, shell aliases, or personal
+home-directory skills being present.
 
 ## Pre-Push Checklist (MANDATORY for server-side work)
 

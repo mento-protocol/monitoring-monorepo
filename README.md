@@ -59,6 +59,15 @@ postinstall hooks, and Envio codegen all run in one place:
 ./scripts/setup.sh
 ```
 
+For a Codex Cloud environment, configure the environment setup script to run:
+
+```bash
+./scripts/codex-cloud-setup.sh
+```
+
+That path performs the frozen install, Envio codegen, and agent-context check
+inside the cloud container, while relying only on repo-visible files.
+
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:
 
