@@ -170,7 +170,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.snapshotsError).toBeNull();
     expect(result.snapshots30dError).toBeNull();
     expect(result.pools).toHaveLength(1);
-    expect(result.pools[0].id).toBe("pool-1");
+    expect(result.pools[0]!.id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toHaveLength(5);
     expect(result.rates).toBeInstanceOf(Map);
@@ -181,8 +181,10 @@ describe("fetchNetworkData — happy path", () => {
       .mock.calls;
     const byQuery = (needle: string) =>
       calls.filter((args) => extractQuery(args[0]).includes(needle));
-    const varsFor = (needle: string) =>
-      extractVariables(byQuery(needle)[0][0], byQuery(needle)[0][1]);
+    const varsFor = (needle: string) => {
+      const call = byQuery(needle)[0]!;
+      return extractVariables(call[0], call[1]);
+    };
 
     // One pool query, one fee-snapshot pagination call, one LP query.
     expect(varsFor("Pool(")).toEqual({ chainId: 42220 });
@@ -198,7 +200,8 @@ describe("fetchNetworkData — happy path", () => {
     // after the first page. Assert that page was requested with limit + offset=0.
     const snapshotCalls = byQuery("PoolDailySnapshot");
     expect(snapshotCalls).toHaveLength(1);
-    expect(extractVariables(snapshotCalls[0][0], snapshotCalls[0][1])).toEqual({
+    const snapshotCall = snapshotCalls[0]!;
+    expect(extractVariables(snapshotCall[0], snapshotCall[1])).toEqual({
       poolIds: ["pool-1"],
       limit: 1000,
       offset: 0,
@@ -251,7 +254,7 @@ describe("fetchNetworkData — happy path", () => {
     });
 
     const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+      .calls[0]!;
     expect(constructorArgs[1]).toBeUndefined();
   });
 });
@@ -456,14 +459,14 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     await fetchNetworkData(MOCK_NETWORK, windows);
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
     expect(
-      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[0][1].tags
+      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1].tags
         .network,
     ).toBe("celo-mainnet");
 
     await fetchNetworkData(MOCK_NETWORK_2, windows);
     expect(Sentry.captureMessage).toHaveBeenCalledTimes(2);
     expect(
-      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[1][1].tags
+      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[1]![1].tags
         .network,
     ).toBe("celo-sepolia-local");
 
@@ -917,8 +920,8 @@ describe("fetchAllNetworks — orchestration", () => {
     const results = await fetchAllNetworks();
 
     expect(results).toHaveLength(2);
-    expect(results[0].network.id).toBe("celo-mainnet");
-    expect(results[1].network.id).toBe("monad-mainnet");
+    expect(results[0]!.network.id).toBe("celo-mainnet");
+    expect(results[1]!.network.id).toBe("monad-mainnet");
   });
 
   it("fulfilled network has correct pools and no error", async () => {
@@ -940,7 +943,7 @@ describe("fetchAllNetworks — orchestration", () => {
 
     expect(mainnet.error).toBeNull();
     expect(mainnet.pools).toHaveLength(1);
-    expect(mainnet.pools[0].id).toBe("pool-main");
+    expect(mainnet.pools[0]!.id).toBe("pool-main");
   });
 
   it("rejected network maps error and preserves network metadata", async () => {

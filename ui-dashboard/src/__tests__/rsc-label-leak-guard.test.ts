@@ -142,7 +142,7 @@ function countRuntimeRefs(content: string, filePath: string): number {
   let count = 0;
   for (const pattern of patterns) {
     for (const match of content.matchAll(pattern)) {
-      if (refersToLabelModule(match[1], importerDir)) count += 1;
+      if (refersToLabelModule(match[1]!, importerDir)) count += 1;
     }
   }
   return count;

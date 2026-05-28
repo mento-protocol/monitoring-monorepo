@@ -418,7 +418,7 @@ describe("useProtocolFees — hasura URL guard", () => {
     const results = await runFetcher();
 
     expect(results).toHaveLength(1);
-    const celo = results[0];
+    const celo = results[0]!;
     expect(celo.error).not.toBeNull();
     expect(celo.error?.message).toContain("Hasura URL not configured");
     expect(celo.error?.message).toContain("Celo No URL");
@@ -454,7 +454,7 @@ describe("useProtocolFees — hasura URL guard", () => {
     expect(monad.feeSnapshots).toHaveLength(0);
 
     expect(GraphQLClient).toHaveBeenCalledTimes(1);
-    expect((GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+    expect((GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe(
       DEFAULT_CELO.hasuraUrl,
     );
   });

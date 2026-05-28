@@ -133,7 +133,7 @@ describe("BridgeStatusFilter a11y", () => {
       (r) => r.getAttribute("aria-checked") === "true",
     );
     expect(checked).toHaveLength(1);
-    expect(checked[0].textContent).toContain("Delivered");
+    expect(checked[0]!.textContent).toContain("Delivered");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
@@ -172,7 +172,7 @@ describe("BridgeStatusFilter a11y", () => {
       const untabbable = radios().filter((r) => r.tabIndex === -1);
       expect(tabbable).toHaveLength(1);
       expect(untabbable).toHaveLength(STATUS_OPTIONS.length); // (N+1) - 1
-      expect(tabbable[0].textContent).toContain("Attested");
+      expect(tabbable[0]!.textContent).toContain("Attested");
     });
 
     it("when selected=null, the 'All' pill holds the single tab stop", () => {
@@ -185,7 +185,7 @@ describe("BridgeStatusFilter a11y", () => {
       );
       const tabbable = radios().filter((r) => r.tabIndex === 0);
       expect(tabbable).toHaveLength(1);
-      expect(tabbable[0].textContent?.trim()).toBe("All");
+      expect(tabbable[0]!.textContent?.trim()).toBe("All");
     });
 
     it("ArrowRight moves focus to the next pill AND fires onChange with that value", () => {
@@ -316,7 +316,7 @@ describe("BridgeStatusFilter a11y", () => {
       // Tab stop is now exclusively on "Pending"; "All" and the rest are -1.
       const tabbable = radios().filter((r) => r.tabIndex === 0);
       expect(tabbable).toHaveLength(1);
-      expect(tabbable[0].textContent?.trim()).toBe("Pending");
+      expect(tabbable[0]!.textContent?.trim()).toBe("Pending");
     });
 
     it("axe still passes after the keyboard contract is in place", async () => {
@@ -382,7 +382,7 @@ describe("BucketFilter a11y", () => {
     const untabbable = radios().filter((r) => r.tabIndex === -1);
     expect(tabbable).toHaveLength(1);
     expect(untabbable).toHaveLength(4);
-    expect(tabbable[0].textContent?.trim()).toBe("Over 1d");
+    expect(tabbable[0]!.textContent?.trim()).toBe("Over 1d");
   });
 
   it("ArrowRight moves focus + selection to the next bucket", () => {
@@ -482,8 +482,8 @@ describe("PoolTablist a11y (real component)", () => {
       (t) => t.getAttribute("aria-selected") === "true",
     );
     expect(selected).toHaveLength(1);
-    expect(selected[0].id).toBe("tab-rebalances");
-    expect(selected[0].getAttribute("aria-controls")).toBe("panel-rebalances");
+    expect(selected[0]!.id).toBe("tab-rebalances");
+    expect(selected[0]!.getAttribute("aria-controls")).toBe("panel-rebalances");
     const tablist = container.querySelector('[role="tablist"]');
     expect(tablist?.getAttribute("aria-label")).toBe("Pool data tabs");
     const results = await axe(container);
@@ -591,7 +591,7 @@ describe("PoolTablist a11y (real component)", () => {
       const untabbable = tabs().filter((t) => t.tabIndex === -1);
       expect(tabbable).toHaveLength(1);
       expect(untabbable).toHaveLength(TABS.length - 1);
-      expect(tabbable[0].id).toBe("tab-rebalances");
+      expect(tabbable[0]!.id).toBe("tab-rebalances");
     });
 
     it("ArrowRight moves focus to the next tab WITHOUT activating it", () => {
@@ -629,7 +629,7 @@ describe("PoolTablist a11y (real component)", () => {
 
     it("ArrowRight from the last tab wraps focus to the first tab (no activation)", () => {
       const onSelect = vi.fn();
-      const last = TABS[TABS.length - 1];
+      const last = TABS[TABS.length - 1]!;
       renderTablist(last, onSelect);
       const start = tabById(`tab-${last}`);
       start.focus();
@@ -670,14 +670,14 @@ describe("PoolTablist a11y (real component)", () => {
       // Initial: only "rebalances" is the tab stop.
       const initialTabbable = tabs().filter((t) => t.tabIndex === 0);
       expect(initialTabbable).toHaveLength(1);
-      expect(initialTabbable[0].id).toBe("tab-rebalances");
+      expect(initialTabbable[0]!.id).toBe("tab-rebalances");
       // ArrowLeft → focus moves to "reserves"; tab stop moves with it.
       const start = tabById("tab-rebalances");
       start.focus();
       dispatch(start, "ArrowLeft");
       const movedTabbable = tabs().filter((t) => t.tabIndex === 0);
       expect(movedTabbable).toHaveLength(1);
-      expect(movedTabbable[0].id).toBe("tab-reserves");
+      expect(movedTabbable[0]!.id).toBe("tab-reserves");
       expect(tabById("tab-rebalances").tabIndex).toBe(-1);
       // `active` (and therefore `aria-selected`) is unchanged.
       expect(onSelect).not.toHaveBeenCalled();
