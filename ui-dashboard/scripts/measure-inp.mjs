@@ -118,11 +118,11 @@ const SURFACES = [
     async interact(page) {
       // The leaderboard ships with one window active by default; clicking
       // a sibling triggers a `window.history.replaceState`-backed re-render
-      // via `updateRange` (NOT `router.replace` — see `_lib/url-state.ts`
-      // and the CLAUDE.md rule on URL-as-state writes). The click is a
-      // qualifying Event-Timing interaction. We pick an explicit
-      // alternative window so the click flips state even when the default
-      // changes.
+      // via `updateRange` (see `_lib/url-state.ts` — `router.replace` was
+      // deliberately avoided here because it measured ~700 ms on the
+      // homepage in PR #314). The click is a qualifying Event-Timing
+      // interaction. We pick an explicit alternative window so the click
+      // flips state even when the default changes.
       const buttons = page.locator(
         '[role="group"][aria-label="Time window"] button',
       );
