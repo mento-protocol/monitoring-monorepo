@@ -1,5 +1,15 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -x \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\" ]; then \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\"; fi"
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [

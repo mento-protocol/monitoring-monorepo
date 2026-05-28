@@ -11,8 +11,9 @@ last_verified: 2026-05-28
 # Babysit PR
 
 Use this repo-local adapter when the user's personal `babysit-pr` skill or
-Claude `Monitor` tool is not available. The readiness source of truth is the
-repo command, not a hand-rolled interpretation of green checks.
+Claude `Monitor` tool is not available (for example, on Claude Code on the web
+or Codex Cloud). The readiness source of truth is the repo command, not a
+hand-rolled interpretation of green checks.
 
 ## Resolve Target
 
