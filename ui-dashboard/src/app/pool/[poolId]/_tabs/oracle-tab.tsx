@@ -31,7 +31,6 @@ import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
 import {
   type BreakerConfig,
-  type BreakerTripEvent,
   isVirtualPool,
   type OracleSnapshot,
   type Pool,
@@ -155,8 +154,10 @@ export function OracleTab(props: OracleTabProps) {
     isLoading: isBreakerLoading,
     error: breakerError,
   } = useGQL<{
+    // POOL_BREAKER_CONFIG also returns BreakerTripEvent[], but this consumer
+    // only reads BreakerConfig — typing the unread selection out keeps the
+    // local shape honest. <BreakerPanel /> consumes the trip events.
     BreakerConfig: BreakerConfig[];
-    BreakerTripEvent: BreakerTripEvent[];
   }>(
     rateFeedID && chainId ? POOL_BREAKER_CONFIG : null,
     rateFeedID && chainId ? { chainId, rateFeedID } : undefined,
