@@ -16,9 +16,11 @@ closed. Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`,
 ## Thoughtworks Technology Radar Follow-Ups
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
-DORA metrics and Dev Containers remain intentionally excluded. CodeScene is covered
-through the OSS quality-check follow-ups below rather than by adopting the
-commercial product.
+DORA metrics and Dev Containers remain intentionally excluded. CodeScene-equivalent
+OSS quality checks have shipped (knip, dependency-cruiser, ESLint complexity
+budgets, jscpd, code-health history, indexer `no-unsafe-*`, three blocking
+mutation gates); residual `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
+is now tracked as GitHub issues #666–#671.
 
 ### `mise` Toolchain Management Trial
 
@@ -35,23 +37,6 @@ agent sessions.
 
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
-
-### CodeScene-Equivalent OSS Quality Checks — Remaining Follow-Ups
-
-The 5-PR rollout (#422/#423/#424/#425/#426) shipped knip, dependency-cruiser,
-ESLint complexity budgets (diff-aware baseline), jscpd duplication detection,
-the code-health history report, and `indexer-envio` `no-unsafe-*`. See
-`AGENTS.md` "Code health budgets" and `docs/pr-checklists/code-health.md` for
-the landed mechanism + severities.
-
-- [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** when deferred, **437 as of 2026-05-28** before partial burn-down. Flag stays OFF until errors hit zero; verify locally with `cd ui-dashboard && pnpm exec tsc --noEmit --noUncheckedIndexedAccess`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check. Remaining sub-items (counts after the lib/\*\* PR landed):
-  - [x] `lib/**` production (was 53 errors across 12 files)
-  - [ ] `lib/**/__tests__/` (115 test errors)
-  - [ ] `hooks/**` (~21 errors)
-  - [ ] `app/**` (~75 errors)
-  - [ ] `components/**` (~152 errors)
-  - [ ] root `tests/` + remaining `__tests__/` (~21 errors)
-  - [ ] Flip the flag in `ui-dashboard/tsconfig.json` and drop the deferral notes from `docs/pr-checklists/recurring-review-patterns.md` + `docs/pr-checklists/code-health.md`.
 
 ### React Compiler Evaluation
 
