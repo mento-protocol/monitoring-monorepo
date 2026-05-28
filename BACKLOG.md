@@ -158,7 +158,7 @@ _Auto-apply design decision resolved 2026-05-27._ `alerts/rules/` and `alerts/in
 
 ## Terraform CI/CD audit follow-ups (post-#622)
 
-PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. The audit surfaced four follow-up items beyond what landed.
+PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. The audit surfaced the seven follow-up items below: 3 hardening/coverage tasks, 2 quality-of-life fixes, and 2 deferred deeper-investment items.
 
 ### Tier 1 — Hardening + coverage
 
@@ -169,7 +169,7 @@ PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environme
 ### Tier 2 — Quality-of-life
 
 - [ ] **`alerts/infra/onchain-event-handler/local-dotenv-file.tf` exit-2 false positive.** The `local_file.env_file` resource always plans as "create" on fresh-checkout CI runners (the file is gitignored and absent on clean clone). Defeats the skip-when-no-changes optimization for alerts-infra — production gate fires on every merge. Fix: replace with `terraform_data` + `local-exec` provisioner so refresh has no on-disk state to drift against. `removed { lifecycle { destroy = false } }` block detaches the old resource without nuking local `.env` files.
-- [ ] **PR #609 follow-up — mixed-state trading-mode visibility (`claude:followup v1` on `r3310573803`).** When firing AND resolved trading-mode alerts arrive in the same Grafana group notification, the title's global `🚨` masks the resolved entries. Fix: switch the trading-mode title to the count-summary pattern proven in `slack.trading_limits_alert_title` (`[N FIRING | M RESOLVED] {{ .CommonLabels.alertname }}`) + embed per-alert emoji inline in body bold heading. Slack + Discord parity; in-place template updates only.
+- [ ] **PR #609 follow-up — mixed-state trading-mode visibility.** When firing AND resolved trading-mode alerts arrive in the same Grafana group notification, the title's global `🚨` masks the resolved entries. Fix: switch the trading-mode title to the count-summary pattern proven in `slack.trading_limits_alert_title` (`[N FIRING | M RESOLVED] {{ .CommonLabels.alertname }}`) + embed per-alert emoji inline in body bold heading. Slack + Discord parity; in-place template updates only.
 
 ### Tier 3 — Deferred
 

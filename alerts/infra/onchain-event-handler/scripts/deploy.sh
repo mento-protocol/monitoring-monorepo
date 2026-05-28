@@ -323,8 +323,8 @@ main() {
 	if [[ -z ${service_account_email} ]]; then
 		error "Runtime service account not found in Terraform state."
 		error "Apply alerts/infra first so module.onchain_event_handler.google_service_account.function_runtime exists."
-		error "  - Normal flow: merge a trivial alerts/infra change to main; .github/workflows/alerts-infra.yml will apply."
-		error "  - First-time bootstrap: run 'terraform -chdir=alerts/infra apply' from a clean main checkout."
+		error "  - If an alerts/infra change is already pending on main: it will apply via .github/workflows/alerts-infra.yml after production-environment review."
+		error "  - First-time bootstrap (or empty state): run 'terraform -chdir=alerts/infra apply' from a clean main checkout."
 		exit 1
 	fi
 
