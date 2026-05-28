@@ -51,6 +51,22 @@ const fixidityToFloat = (v: string | null | undefined): number | null => {
 
 type BreakerConfigStatus = "loading" | "ready" | "missing";
 
+// Pure helper extracted from `buildOraclePlotData` so the verdict logic is
+// unit-testable in isolation. Returns `null` when we can't make a verdict
+// (config not ready, baseline/threshold missing, or non-finite price); `true`
+// when the price would trip the breaker; `false` when it sits within band.
+function isOutOfBand(
+  price: number,
+  baseline: number | null,
+  thresholdRatio: number | null,
+  breakerConfigStatus: BreakerConfigStatus,
+): boolean | null {
+  if (breakerConfigStatus !== "ready") return null;
+  if (!baseline || !thresholdRatio) return null;
+  if (!Number.isFinite(price)) return null;
+  return Math.abs(price - baseline) / baseline > thresholdRatio;
+}
+
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
   token0Symbol?: string | undefined;
@@ -171,8 +187,6 @@ function buildOraclePlotData({
   thresholdRatio: number | null;
   breakerConfigStatus: BreakerConfigStatus;
 }): OraclePlotData {
-  const haveBand =
-    breakerConfigStatus === "ready" && baseline && thresholdRatio;
   const isSparse = snapshots.length < 20;
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
@@ -193,24 +207,22 @@ function buildOraclePlotData({
   // band to compare against, so the verdict is genuinely unknown — return
   // null and let the caller render the marker in a neutral state instead
   // of greenwashing it.
-  const isOutOfBand = (price: number): boolean | null => {
-    if (!haveBand || !Number.isFinite(price)) return null;
-    return Math.abs(price - baseline!) / baseline! > thresholdRatio!;
-  };
+  const verdict = (price: number): boolean | null =>
+    isOutOfBand(price, baseline, thresholdRatio, breakerConfigStatus);
 
   const markerColors = snapshots.map((s, i) => {
     if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
     const p = prices[i];
     if (!Number.isFinite(p)) return "#64748b";
-    const verdict = isOutOfBand(p);
-    if (verdict === null) return "#64748b"; // unknown band — neutral
-    return verdict ? "#ef4444" : "#22c55e";
+    const v = verdict(p);
+    if (v === null) return "#64748b"; // unknown band — neutral
+    return v ? "#ef4444" : "#22c55e";
   });
   const markerSizes = snapshots.map((s, i) => {
     if (!s.oracleOk) return isSparse ? 12 : 9;
     const p = prices[i];
     if (!Number.isFinite(p)) return isSparse ? 8 : 4;
-    return isOutOfBand(p) === true ? (isSparse ? 12 : 8) : isSparse ? 8 : 4;
+    return verdict(p) === true ? (isSparse ? 12 : 8) : isSparse ? 8 : 4;
   });
 
   const hoverText = snapshots.map((s, i) =>
@@ -565,3 +577,13 @@ function OracleChartLegend({
     </div>
   );
 }
+
+// Test-only surface — keeps these helpers out of the module's public API
+// while letting `__tests__/oracle-chart.test.ts` import them directly. Do
+// not import this from production code.
+export const __test__ = {
+  buildOracleShapes,
+  buildOracleXaxis,
+  buildOraclePlotData,
+  isOutOfBand,
+};
