@@ -22,9 +22,12 @@ fi
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SETUP_SCRIPT="$REPO_ROOT/scripts/claude-code-web-setup.sh"
 
-if [ ! -x "$SETUP_SCRIPT" ]; then
-  echo "claude-code-web SessionStart: $SETUP_SCRIPT missing or not executable; skipping bootstrap." >&2
+if [ ! -f "$SETUP_SCRIPT" ]; then
+  echo "claude-code-web SessionStart: $SETUP_SCRIPT missing; skipping bootstrap." >&2
   exit 0
 fi
 
-exec "$SETUP_SCRIPT"
+# Invoke via `bash` so the executable bit on the script does not matter — the
+# repo is sometimes checked out with mode 0644 (e.g. when pushed via the
+# GitHub Contents API instead of `git push`).
+exec bash "$SETUP_SCRIPT"

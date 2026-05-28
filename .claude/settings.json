@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -x \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\" ]; then \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\"; fi"
+            "command": "if [ -f \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\" ]; then bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\"; fi"
           }
         ]
       }
