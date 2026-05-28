@@ -23,7 +23,11 @@ name: Alerts Infra
 #     keeps the PR plan to a config-vs-last-state diff needing only state read +
 #     the token mint the read-only CI SA already holds — zero new IAM. Tradeoff:
 #     the PR plan won't surface out-of-band drift; that's `terraform-drift.yml`'s
-#     job (full refresh, write SA) and the apply-time re-plan's.
+#     job (full refresh, write SA) and the apply-time re-plan's. The read-only +
+#     `-refresh=false` treatment is gated on `github.event_name == 'pull_request'`:
+#     the same plan job on push / workflow_dispatch keeps the write deployer SA +
+#     full refresh + locking, so the apply-gating plan (incl. drift reconciled via
+#     manual dispatch) still synchronizes remote state before deciding changes.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -127,12 +131,13 @@ jobs:
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
       # GCP
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
-      # Plan-job-only: point the google provider at the read-only seed SA so
-      # provider init impersonates an identity the plan-readonly CI SA can mint
-      # a token for. With `-refresh=false` (see Plan step) the provider makes no
-      # GCP API calls at plan time, so objectViewer-on-state suffices. The apply
-      # job omits this and keeps the write-capable `org-terraform@…seed` default.
-      TF_VAR_terraform_service_account: org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com
+      # On PRs, point the google provider at the read-only seed SA so provider
+      # init impersonates an identity the plan-readonly CI SA can mint a token
+      # for; with `-refresh=false` (see Plan step) the provider makes no GCP API
+      # calls at plan time, so objectViewer-on-state suffices. On push /
+      # workflow_dispatch this resolves to the write-capable `org-terraform@…seed`
+      # (= the variable default) — those runs full-refresh to gate apply.
+      TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
       # QuickNode
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
@@ -173,11 +178,12 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          # Read-only plan SA: PR plan jobs authenticate as the plan-readonly
-          # CI SA so a malicious PR's plan-time data source can't mint tokens
-          # for the write-capable deployer. The apply job below keeps
-          # `GCP_SERVICE_ACCOUNT`. See file header + `terraform/ci-wif.tf`.
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
+          # On PRs, authenticate as the read-only plan SA so a malicious PR's
+          # plan-time data source can't mint tokens for the write-capable
+          # deployer. push / workflow_dispatch (the apply-gating path, incl.
+          # drift reconcile) and the apply job keep `GCP_SERVICE_ACCOUNT`.
+          # See file header + `terraform/ci-wif.tf`.
+          service_account: ${{ github.event_name == 'pull_request' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -191,13 +197,22 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Init
-        # Override the backend impersonation (hardcoded to the write-capable
-        # `org-terraform@…seed` in versions.tf, used by the apply job) to the
-        # read-only `org-terraform-plan-readonly@…seed` SA, which holds only
-        # `roles/storage.objectViewer` on the state bucket. `-backend-config`
-        # takes precedence over the backend block; fresh CI runners have no
-        # cached `.terraform`, so no `-reconfigure` is needed.
-        run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+        # On PRs, override the backend impersonation (hardcoded to the
+        # write-capable `org-terraform@…seed` in versions.tf, used by the apply
+        # job + non-PR plans) to the read-only `org-terraform-plan-readonly@…seed`
+        # SA, which holds only `roles/storage.objectViewer` on the state bucket.
+        # `-backend-config` takes precedence over the backend block; fresh CI
+        # runners have no cached `.terraform`, so no `-reconfigure` is needed.
+        # push / workflow_dispatch keep the default (write) backend impersonation
+        # so the apply-gating plan can full-refresh.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+          else
+            terraform init -input=false
+          fi
 
       - name: Validate
         run: terraform validate -no-color
@@ -214,16 +229,26 @@ jobs:
         # Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
-        # `-lock=false`: the read-only plan SA (objectViewer only) can't write
-        # the GCS lock object. `-refresh=false`: this stack's google provider
-        # would otherwise refresh GCP resources the read-only seed SA can't read
-        # (no project roles); skipping refresh keeps the PR plan to a
-        # config-vs-last-state diff needing only state read. Drift detection
-        # (full refresh) is `terraform-drift.yml`'s job; apply re-plans with the
-        # write SA + full refresh. The apply job below keeps locking + refresh.
+        # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
+        # only, can't write the GCS lock object) + `-refresh=false` (this stack's
+        # google provider would otherwise refresh GCP resources the read-only seed
+        # SA can't read — no project roles). `-refresh=false` also means the `http`
+        # data sources in ci-failures-channel.tf (Slack @eng usergroup lookup)
+        # coast on last-known state values on PRs rather than re-fetching — no auth
+        # risk (Slack token, not GCP), same acceptable drift trade-off.
+        # push / workflow_dispatch (the apply-gating path, incl. drift reconcile)
+        # keep full refresh + locking on the write SA, so they detect out-of-band
+        # drift and set `has-changes` correctly. Drift detection also runs in
+        # `terraform-drift.yml` (full refresh, write SA); apply re-plans fully.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false > /tmp/tf-plan.raw 2>&1
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false > /tmp/tf-plan.raw 2>&1
+          else
+            terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          fi
           EXITCODE=$?
           set -e
           "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
