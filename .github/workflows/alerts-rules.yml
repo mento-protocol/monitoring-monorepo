@@ -2,12 +2,23 @@ name: Alerts Rules
 
 # Terraform plan-on-PR + apply-on-merge for `alerts/rules/` — the Grafana
 # alert rule + contact point + notification policy stack. The stack's GCS
-# backend impersonates `org-terraform@mento-terraform-seed-ffac` (see
-# `alerts/rules/versions.tf`), so the CI deployer SA needs
-# `roles/iam.serviceAccountTokenCreator` on `org-terraform`. That grant lives
-# in `terraform/ci-wif.tf` (resource `ci_alerts_org_terraform_token_creator`,
-# shared with `alerts/infra/`) and must be applied from the top-level stack
-# before this workflow can succeed.
+# backend impersonates a seed-project SA (see `alerts/rules/versions.tf`).
+# The plan and apply jobs use a read/write split for plan-time blast-radius
+# reduction:
+#   - apply (on merge) authenticates as the write-capable CI deployer SA
+#     (`GCP_SERVICE_ACCOUNT`) and impersonates `org-terraform@…seed` for the
+#     backend (state writes + locking via `storage.admin`). The deployer SA's
+#     `roles/iam.serviceAccountTokenCreator` grant on `org-terraform` lives in
+#     `terraform/ci-wif.tf` (`ci_alerts_org_terraform_token_creator`, shared
+#     with `alerts/infra/`).
+#   - plan (on PR) authenticates as the read-only CI SA
+#     (`GCP_SERVICE_ACCOUNT_PLAN`) and overrides the backend impersonation to
+#     `org-terraform-plan-readonly@…seed` via `-backend-config`. That seed SA
+#     holds only `roles/storage.objectViewer` on the state bucket, so plan
+#     passes `-lock=false` (it can't write the GCS lock object). This keeps a
+#     malicious PR's plan-time data source off the write-capable SA chain.
+#     Both grants live in `terraform/ci-wif.tf`. The grafana provider auths via
+#     `TF_VAR_grafana_service_account_token`, unaffected by the SA swap.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -150,7 +161,11 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          # Read-only plan SA: PR plan jobs authenticate as the plan-readonly
+          # CI SA so a malicious PR's plan-time data source can't mint tokens
+          # for the write-capable deployer. The apply job below keeps
+          # `GCP_SERVICE_ACCOUNT`. See file header + `terraform/ci-wif.tf`.
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -164,7 +179,13 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Init
-        run: terraform init -input=false
+        # Override the backend impersonation (hardcoded to the write-capable
+        # `org-terraform@…seed` in versions.tf, used by the apply job) to the
+        # read-only `org-terraform-plan-readonly@…seed` SA, which holds only
+        # `roles/storage.objectViewer` on the state bucket. `-backend-config`
+        # takes precedence over the backend block; fresh CI runners have no
+        # cached `.terraform`, so no `-reconfigure` is needed.
+        run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
 
       - name: Validate
         run: terraform validate -no-color
@@ -181,12 +202,14 @@ jobs:
         # tee raw Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
-        # `-lock-timeout=2m`: speculative PR plans can race a main-branch
-        # apply (separate concurrency groups). 2m is short enough not to stall
-        # CI on a long apply, long enough to absorb typical lock holds.
+        # `-lock=false`: the read-only plan SA (objectViewer only) can't
+        # create/delete the GCS lock object, so plan must skip locking. Safe
+        # because plan only reads state and re-runs on every push; a skipped
+        # lock can't drop work the way a missed apply could. The apply job
+        # below keeps locking via the write-capable SA.
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
           EXITCODE=$?
           set -e
           "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
