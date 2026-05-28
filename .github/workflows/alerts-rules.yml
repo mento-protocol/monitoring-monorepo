@@ -201,7 +201,11 @@ jobs:
                 echo '**Status:** ✅ no changes — merge will skip apply'
               fi
             else
-              echo '**Status:** ❌ plan failed'
+              case "$PLAN_OUTCOME" in
+                cancelled) echo '**Status:** ⚠️ plan cancelled' ;;
+                skipped)   echo '**Status:** ⚠️ plan skipped' ;;
+                *)         echo '**Status:** ❌ plan failed' ;;
+              esac
             fi
             echo
             echo '<details open><summary>Plan output</summary>'
@@ -400,7 +404,7 @@ jobs:
             echo
             echo '<details open><summary>Apply output</summary>'
             echo
-            echo '```hcl'
+            echo '```terraform'
             tail -c 50000 /tmp/tf-apply.txt 2>/dev/null || echo '(no apply output captured)'
             echo '```'
             echo '</details>'
