@@ -183,17 +183,20 @@ const SURFACES = [
     // hardcoding is safe; if the pool is ever retired the surface will
     // fail fast on the readySelector and the gate will surface it.
     path: "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
-    // The `TimeSeriesChartCard` from `components/time-series-chart-card.tsx`
-    // tags its range `<div role="group">` with the chart's `rangeAriaLabel`
-    // — for the pool TVL chart that's "Pool TVL chart time range" (see
-    // `components/pool-tvl-over-time-chart.tsx`). Waiting on the range
-    // buttons is the right "chart is mounted" anchor: they only render
-    // after `TimeSeriesChartCard` resolves its loading branch, which
-    // requires the pool detail fetch to land. Clicking earlier would
-    // measure a cheap setState over an empty series instead of the
-    // re-aggregation+re-render the gate is meant to protect.
+    // Anchor readiness on the actual Plotly plot inside the TVL card —
+    // NOT on the range buttons alone. The `TimeSeriesChartCard`
+    // (`components/time-series-chart-card.tsx:465-493`) renders its range
+    // `<div role="group">` OUTSIDE the `isLoading` branch, so the buttons
+    // are visible while `PlotSkeleton` is still rendered. Clicking before
+    // Plotly mounts would measure a cheap `useState<RangeKey>` flip over
+    // an empty/filtered-empty series instead of the
+    // `filterSeriesByRange` + Plotly re-render this gate is meant to
+    // protect. The CSS `section:has(range-group):has(.js-plotly-plot)`
+    // anchor only matches once both have rendered in the same TVL card —
+    // `.js-plotly-plot` is `react-plotly.js`'s root class, added by the
+    // Plotly library once `Plotly.newPlot()` completes.
     readySelector:
-      '[role="group"][aria-label="Pool TVL chart time range"] button',
+      'section:has([role="group"][aria-label="Pool TVL chart time range"]):has(.js-plotly-plot)',
     async interact(page) {
       // The chart's default range is "all"; clicking a sibling range
       // (1D / 7D / 30D / 90D) flips `useState<RangeKey>` and triggers a
