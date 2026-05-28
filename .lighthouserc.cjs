@@ -116,12 +116,12 @@ module.exports = {
         // INP is asserted in a separate workflow step that runs
         // `ui-dashboard/scripts/measure-inp.mjs` — Playwright drives a
         // set of scripted interactions on /pools (filter input + Apply
-        // click) and /leaderboard (time-window switch, column sort), and
-        // the web-vitals library reports the real Event-Timing-API INP
-        // for each. Each surface is asserted independently against the
-        // INP_BUDGET_MS budget (default 200 ms, web-vitals "good"
-        // threshold). Pool-detail chart hover coverage is tracked in
-        // BACKLOG.
+        // click), /leaderboard (time-window switch, column sort), and
+        // /pool/[poolId] (TVL chart range button click on the canonical
+        // Celo USDC/USDm pool), and the web-vitals library reports the
+        // real Event-Timing-API INP for each. Each surface is asserted
+        // independently against the INP_BUDGET_MS budget (default 200 ms,
+        // web-vitals "good" threshold).
       },
     },
     upload: {
