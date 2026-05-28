@@ -12,7 +12,8 @@
 
 import type { Request } from "@google-cloud/functions-framework";
 import { encodeAbiParameters, parseAbiParameters } from "viem";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "./logger";
 import { validatePayload } from "./validate-payload";
 
 vi.mock("./logger", () => ({
@@ -98,6 +99,10 @@ const sampleMatchingReceipt = {
 };
 
 describe("validatePayload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("accepts { result: [...] } envelope", () => {
     const result = validatePayload(makeReq({ result: [sampleLog] }));
     expect(result.valid).toBe(true);
@@ -141,7 +146,68 @@ describe("validatePayload", () => {
           "0xa8bd7e19090ccb95764fb84f08a105c661fd8b7a47620d57fe8ebc92f3230978",
         payment: "0",
       });
+      expect(logger.warn).not.toHaveBeenCalled();
     }
+  });
+
+  it("warns and drops decoded Safe logs that are missing required metadata", () => {
+    const receiptWithMissingLogIndex = {
+      ...sampleMatchingReceipt,
+      logs: [
+        {
+          ...sampleMatchingReceipt.logs[0],
+          logIndex: undefined,
+        },
+      ],
+    };
+
+    const result = validatePayload(
+      makeReq({ matchingReceipts: [receiptWithMissingLogIndex] }),
+    );
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.result).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Dropping Safe log: missing required metadata fields",
+      expect.objectContaining({
+        address: "0x655133d8e90f8190ed5c1f0f3710f602800c0150",
+        topic0:
+          "0x66753cd2356569ee081232e3be8909b950e0a76c1f8460c3a5e3c2be32b11bed",
+        hasTransactionHash: true,
+        hasBlockHash: true,
+        hasBlockNumber: true,
+        hasLogIndex: false,
+      }),
+    );
+  });
+
+  it("warns and drops Safe ABI decode errors other than non-Safe topic misses", () => {
+    const receiptWithMalformedSafeLog = {
+      ...sampleMatchingReceipt,
+      logs: [
+        {
+          ...sampleMatchingReceipt.logs[0],
+          data: "0x1234",
+        },
+        sampleMatchingReceipt.logs[1],
+      ],
+    };
+
+    const result = validatePayload(
+      makeReq({ matchingReceipts: [receiptWithMalformedSafeLog] }),
+    );
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.result).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Unexpected error decoding log against Safe ABI",
+      expect.objectContaining({
+        address: "0x655133d8e90f8190ed5c1f0f3710f602800c0150",
+        topic0:
+          "0x66753cd2356569ee081232e3be8909b950e0a76c1f8460c3a5e3c2be32b11bed",
+      }),
+    );
   });
 
   it("prefers result over data when both are present", () => {

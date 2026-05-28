@@ -1,5 +1,10 @@
 import type { Request } from "@google-cloud/functions-framework";
-import { decodeEventLog, type Abi, type Hex } from "viem";
+import {
+  AbiEventSignatureNotFoundError,
+  decodeEventLog,
+  type Abi,
+  type Hex,
+} from "viem";
 import { logger } from "./logger";
 import type { QuickNodeWebhookPayload } from "./types";
 import safeAbi from "./safe-abi.json";
@@ -149,21 +154,43 @@ function decodeRawSafeLog(
     const logIndex = pickString(rawLog.logIndex);
 
     if (!transactionHash || !blockHash || !blockNumber || !logIndex) {
+      logger.warn("Dropping Safe log: missing required metadata fields", {
+        address: rawLog.address,
+        topic0: rawLog.topics[0],
+        hasTransactionHash: Boolean(transactionHash),
+        hasBlockHash: Boolean(blockHash),
+        hasBlockNumber: Boolean(blockNumber),
+        hasLogIndex: Boolean(logIndex),
+      });
       return null;
     }
 
     return {
+      ...normalizeDecodedArgs(decoded.args),
       address: rawLog.address,
       name: decoded.eventName,
       transactionHash,
       blockHash,
       blockNumber,
       logIndex,
-      ...normalizeDecodedArgs(decoded.args),
     };
-  } catch {
+  } catch (err) {
+    if (!isExpectedNonSafeEventError(err)) {
+      logger.warn("Unexpected error decoding log against Safe ABI", {
+        error: err instanceof Error ? err.message : String(err),
+        address: rawLog.address,
+        topic0: rawLog.topics[0],
+      });
+    }
     return null;
   }
+}
+
+function isExpectedNonSafeEventError(err: unknown): boolean {
+  return (
+    err instanceof AbiEventSignatureNotFoundError ||
+    (err instanceof Error && err.name === "AbiEventSignatureNotFoundError")
+  );
 }
 
 function normalizeDecodedArgs(args: unknown): Record<string, unknown> {
