@@ -138,8 +138,8 @@ jobs:
         # stderr, sanitize it, then write `/tmp/tf-plan.txt` for logs and the
         # issue body. `set +e` so a non-zero exit doesn't fail the step.
         # Never tee raw Terraform output: drift can include destroy-time
-        # provider state for legacy Discord webhooks or QuickNode security
-        # tokens.
+        # provider state for legacy Discord/Splunk webhooks or QuickNode
+        # security tokens.
         #
         # `matrix.id` is passed through `env:` rather than inlining via
         # `${{ }}` in the `run:` block, matching the workflow-injection
@@ -155,6 +155,7 @@ jobs:
           set -e
           sed -E \
             -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
+            -e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
             -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
             -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
             -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
