@@ -56,7 +56,11 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: write
+      # Required for the sticky Lighthouse PR comment, which uses the
+      # GitHub Issues comments API even on pull requests.
+      issues: write
+      # Required by dorny/paths-filter in pull_request mode.
+      pull-requests: read
       # `deployments: read` lets the job query the GitHub Deployments API to
       # find the Vercel preview URL without needing a Vercel API token.
       deployments: read

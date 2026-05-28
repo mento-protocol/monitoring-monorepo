@@ -102,6 +102,20 @@ run_context_check_expect_failure() {
     fail "expected agent context check to fail, but it exited 0"
 }
 
+append_claude_allow() {
+  node - "$1" <<'NODE'
+const fs = require("node:fs");
+const permission = process.argv[2];
+const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+settings.permissions = settings.permissions || {};
+settings.permissions.allow = Array.isArray(settings.permissions.allow)
+  ? settings.permissions.allow
+  : [];
+settings.permissions.allow.push(permission);
+fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
+NODE
+}
+
 line_number() {
   local needle="$1"
   needle="$(normalize_expected_command "$needle")"
@@ -1571,6 +1585,26 @@ fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\
 NODE
 run_context_check_expect_failure
 assert_contains '.claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
+restore_hook_configs
+
+append_claude_allow "Bash(until *)"
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: permissions.allow must not allow shell-loop commands: Bash(until *)"
+restore_hook_configs
+
+append_claude_allow "Bash(bash scripts/*)"
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: unexpected bash scripts allow: Bash(bash scripts/*)"
+restore_hook_configs
+
+append_claude_allow "Bash(bash ./scripts/*)"
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: unexpected bash scripts allow: Bash(bash ./scripts/*)"
+restore_hook_configs
+
+append_claude_allow "Bash(bash ./scripts/deploy-dashboard.sh:*)"
+run_context_check_expect_failure
+assert_contains ".claude/settings.json: must not allow deploy/promote scripts: Bash(bash ./scripts/deploy-dashboard.sh:*)"
 restore_hook_configs
 
 run_gate "docs/deleted.md"
