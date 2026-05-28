@@ -85,7 +85,7 @@ describe("rollupByToken", () => {
       }),
     ];
     const rollup = rollupByToken(snapshots, new Map(), NOW_TS);
-    const agg = Array.from(rollup.values())[0];
+    const agg = Array.from(rollup.values())[0]!;
     expect(agg.totalSupplyUsdLatest).toBeNull();
     expect(agg.netChange7dUsd).toBeNull();
   });

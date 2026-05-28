@@ -166,7 +166,7 @@ function PoolsContent({
     setURL("", limit);
   }, [limit, setURL]);
 
-  const latestBlock = swaps.length > 0 ? swaps[0].blockNumber : null;
+  const latestBlock = swaps.length > 0 ? swaps[0]!.blockNumber : null;
 
   return (
     <div className="space-y-8">

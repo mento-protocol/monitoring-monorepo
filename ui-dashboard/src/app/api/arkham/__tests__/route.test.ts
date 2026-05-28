@@ -338,7 +338,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     );
     mockEnrichBatch.mockImplementation(async () => {
       currentLabels["0xark"] = {
-        ...currentLabels["0xark"],
+        ...currentLabels["0xark"]!,
         notes: "edited during refresh",
         tags: ["exchange", "user-curated"],
         isPublic: true,

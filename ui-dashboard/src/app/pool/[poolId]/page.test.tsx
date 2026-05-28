@@ -1155,7 +1155,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
   it("renders em-dash when rebalanceThreshold is 0 (indexer sentinel)", () => {
     const cells = renderRebalanceCells([
       {
-        ...rebalances[0],
+        ...rebalances[0]!,
         id: "rebalance-zero-threshold",
         rebalanceThreshold: 0,
         effectivenessRatio: "",
@@ -1168,7 +1168,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
   it("renders em-dash when rebalanceThreshold is missing (pre-schema-bump row)", () => {
     const cells = renderRebalanceCells([
       {
-        ...rebalances[0],
+        ...rebalances[0]!,
         id: "rebalance-null-threshold",
         // rebalanceThreshold omitted (legacy row) — types.ts makes it optional
         rebalanceThreshold: undefined as unknown as number,
@@ -1184,7 +1184,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     // Distinct from the empty-string degenerate sentinel.
     const cells = renderRebalanceCells([
       {
-        ...rebalances[0],
+        ...rebalances[0]!,
         id: "rebalance-genuine-zero",
         rebalanceThreshold: 50,
         effectivenessRatio: "0.0000",
@@ -1232,7 +1232,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     overrideRebalancesWithUsdExt(
       [
         {
-          ...rebalances[0],
+          ...rebalances[0]!,
           id: "rebalance-with-reward",
           amount0Delta: "1000000000000000000000",
           amount1Delta: "-500000000000000000000",
@@ -1253,7 +1253,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
 
   it("renders em-dash when EXT query errors (Hasura schema lag)", () => {
     overrideRebalancesWithUsdExt(
-      [{ ...rebalances[0], id: "rebalance-ext-failed" }],
+      [{ ...rebalances[0]!, id: "rebalance-ext-failed" }],
       "error",
     );
     const html = renderWithParams({ tab: "rebalances" });
@@ -1270,7 +1270,7 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     overrideRebalancesWithUsdExt(
       [
         {
-          ...rebalances[0],
+          ...rebalances[0]!,
           id: "rebalance-empty-reward",
           rewardUsd: "",
           notionalUsd: "",
