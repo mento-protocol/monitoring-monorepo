@@ -16,9 +16,11 @@ closed. Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`,
 ## Thoughtworks Technology Radar Follow-Ups
 
 Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
-DORA metrics and Dev Containers remain intentionally excluded. CodeScene is covered
-through the OSS quality-check follow-ups below rather than by adopting the
-commercial product.
+DORA metrics and Dev Containers remain intentionally excluded. CodeScene-equivalent
+OSS quality checks have shipped (knip, dependency-cruiser, ESLint complexity
+budgets, jscpd, code-health history, indexer `no-unsafe-*`, three blocking
+mutation gates); residual `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
+is now tracked as GitHub issues #666–#671.
 
 ### `mise` Toolchain Management Trial
 
@@ -35,26 +37,6 @@ agent sessions.
 
 Acceptance: setup becomes simpler than today. Reject if it just adds another
 version source of truth.
-
-### CodeScene-Equivalent OSS Quality Checks — Remaining Follow-Ups
-
-The 5-PR rollout (#422/#423/#424/#425/#426) shipped knip, dependency-cruiser,
-ESLint complexity budgets (diff-aware baseline), jscpd duplication detection,
-the code-health history report, and `indexer-envio` `no-unsafe-*`. See
-`AGENTS.md` "Code health budgets" and `docs/pr-checklists/code-health.md` for
-the landed mechanism + severities.
-
-- [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** when deferred, **437 as of 2026-05-28** (count grew with new code). Fix incrementally — start with `lib/**` (pure logic), then `hooks/**`, then `components/**`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check.
-
-### Lighthouse CI Follow-Ups
-
-The initial Lighthouse CI gate landed in PR #451 with desktop performance + accessibility budgets. Remaining work to graduate it from advisory to fully-trusted:
-
-- [ ] **Switch INP gate from single-run to multi-run median if it flakes.** `ui-dashboard/scripts/measure-inp.mjs` takes one INP sample per CI run. `lhci` uses `numberOfRuns: 3` + median precisely because lab CWV measurements are noisy under runner-load variance (GC pauses, V8 JIT warmup). The current 200 ms budget has substantial headroom (typical INP on blacksmith-4vcpu is 40–80 ms), so single-run flakes should be rare in practice. If the gate flakes more than ~1 in 50 runs once it's been live for a week, run the `goto + interact + flush` loop N times (3) on separate page instances and assert `median(measurements) ≤ budget`.
-- [ ] **Move Lighthouse + INP secret-handling into a trusted workflow_run trigger.** Both `.github/workflows/lighthouse.yml`'s lhci step and its INP step hand the `VERCEL_AUTOMATION_BYPASS_SECRET` to PR-controlled code (`.lighthouserc.cjs` consumes `extraHeaders` and could exfiltrate via a custom `upload.target`; `ui-dashboard/scripts/measure-inp.mjs` receives the headers JSON as env). The fork+Dependabot guards in `decide` mitigate this for outside contributors, but same-repo PRs still expose the secret to PR-controlled Node + config. The architectural fix is a `workflow_run`-triggered job that runs the secret-bearing audit from the trusted base ref's workflow YAML, similar to how the original PR #451 BACKLOG entry framed option (b). Cost: ~2–3 days to split the workflow + plumb the preview URL / PR number across the trigger boundary, plus rework of the sticky-PR-comment posting. Same-repo PR exposure has been accepted on #605/#451 for the past ~10 days; this item closes that gap properly.
-- [ ] **Harden SSR initial-data props for `useAllNetworksData` callsites (homepage + /pools).** Two cross-cutting concerns surfaced when the /pools CLS-fix PR mirrored the homepage SSR pattern; both apply equally to `app/page.tsx`/`app/page-client.tsx` (shipped since PR #207) and `app/pools/page.tsx`/`app/pools/_components/pools-page-client.tsx`. Fix in the shared hook + fetcher so both pages benefit:
-  1. **Skeleton hides partial SSR data during degraded reloads.** When `fetchAllNetworks()` returns a payload with any per-network error, `useAllNetworksData(initialNetworkData)` switches to `revalidateOnMount: true`. SWR's `getSnapshot` sets `isLoading: true` on that first render even though `fallbackData` already populated `networkData`, so the `isLoading ? <Skeleton/>` branch in both pages briefly hides the healthy networks' rows and re-introduces a layout shift during the retry. Fix candidates: (a) gate the skeleton on `isLoading && networkData.length === 0`, applied uniformly across `page-client.tsx:417` and `pools-page-client.tsx:202`; (b) thread an `isValidating` distinction back from the hook so callers can disambiguate first-load-no-data from background-revalidate-with-data.
-  2. **`Error`/`Map`/`Set` instances cross the RSC boundary as props.** `NetworkData` carries `Error` instances on `error`/`ratesError`/`snapshotsAllDailyError`/`brokerSnapshotsAllDailyError`/`feeSnapshotsError`/`snapshots7dError`/`snapshots30dError`/`snapshotsError`/`lpError`, plus `Set` (`olsPoolIds`/`cdpPoolIds`/`reservePoolIds`) and `Map` (`poolLabels`/`rates`) instances. React's RSC serializer accepts all three as built-ins (no hard crash), but `Error` instances opaque to a generic "An error occurred in the Server Components render. The specific message is omitted in production builds…" placeholder on the client in production — which is then rendered into `<ErrorBox message={…${net.error?.message}}/>` instead of the real cause. Fix in `fetchAllNetworks` to convert errors to `{ message }` plain objects (and update the consumers + types) before crossing the boundary; consider whether `Set`/`Map` are worth flattening to arrays/records at the same time for prop hygiene.
 
 ### React Compiler Evaluation
 
@@ -105,14 +87,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 701 |   435 | `indexer-envio/src/handlers/sortedOracles.ts`   | Watch; split only with related oracle-handler work.                                      |
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
-
-## Slack alert cleanup follow-up
-
-Slack is now the active delivery path for protocol, Aegis service-health,
-Sentry, and on-chain multisig alerts. After the first `alerts/infra` cleanup
-apply confirms the legacy Discord channel/webhook resources are gone from
-Terraform state, remove the temporary Discord provider, variables, GitHub
-Actions secrets, and provider lockfile entries.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 

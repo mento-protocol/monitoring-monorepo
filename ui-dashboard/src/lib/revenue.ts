@@ -12,7 +12,7 @@
  */
 
 import { parseWei } from "./format";
-import { UNRESOLVED_SYMBOLS } from "./protocol-fees";
+import { UNRESOLVED_SYMBOLS, iterateFeeSnapshotTokens } from "./protocol-fees";
 import { isUsdPegged, tokenToUSD } from "./tokens";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { TimeRange } from "./volume";
@@ -69,11 +69,10 @@ function priceFeeSnapshotInUsd(
   // FX side: price each non-pegged slot via the oracle rate map. Skip
   // pegged symbols (already counted in `feesUsdWei`) and indexer
   // placeholders.
-  for (let i = 0; i < s.tokenSymbols.length; i++) {
-    const sym = s.tokenSymbols[i];
+  for (const { sym, rawAmount, decimals } of iterateFeeSnapshotTokens(s)) {
     if (UNRESOLVED_SYMBOLS.has(sym)) continue;
     if (isUsdPegged(sym)) continue;
-    const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+    const amount = parseWei(rawAmount, decimals);
     const priced = tokenToUSD(sym, amount, rates);
     if (priced === null) continue;
     usd += priced;

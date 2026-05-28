@@ -97,9 +97,6 @@ jobs:
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
@@ -138,8 +135,8 @@ jobs:
         # stderr, sanitize it, then write `/tmp/tf-plan.txt` for logs and the
         # issue body. `set +e` so a non-zero exit doesn't fail the step.
         # Never tee raw Terraform output: drift can include destroy-time
-        # provider state for legacy Discord/Splunk webhooks or QuickNode
-        # security tokens.
+        # provider state for Splunk webhooks or QuickNode security_token[...] fields.
+        # The shared sanitizer below carries the concrete redaction regexes.
         #
         # `matrix.id` is passed through `env:` rather than inlining via
         # `${{ }}` in the `run:` block, matching the workflow-injection

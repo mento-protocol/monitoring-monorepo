@@ -19,7 +19,11 @@ import { parseWei } from "./format";
 import { normalizePoolIdForChain } from "./pool-id";
 import { isUsdPegged, tokenToUSD, type OracleRateMap } from "./tokens";
 import type { PoolDailyFeeSnapshot } from "./types";
-import { UNRESOLVED_SYMBOLS, type PoolFeeEntry } from "./protocol-fees";
+import {
+  UNRESOLVED_SYMBOLS,
+  iterateFeeSnapshotTokens,
+  type PoolFeeEntry,
+} from "./protocol-fees";
 
 const SECS_PER_DAY = 86_400;
 
@@ -84,14 +88,13 @@ export function aggregateFeeSnapshotsByPool(
     // `unpriced` for the all-time column AND scope the per-window flags to
     // the windows whose cutoffs include this snapshot's day — so an old
     // unpriced day doesn't pollute the recent 24h/7d/30d cells.
-    for (let i = 0; i < s.tokenSymbols.length; i++) {
-      const sym = s.tokenSymbols[i];
+    for (const { sym, rawAmount, decimals } of iterateFeeSnapshotTokens(s)) {
       if (UNRESOLVED_SYMBOLS.has(sym)) {
         markUnpriced(entry, in24h, in7d, in30d);
         continue;
       }
       if (isUsdPegged(sym)) continue;
-      const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+      const amount = parseWei(rawAmount, decimals);
       const usd = tokenToUSD(sym, amount, rates);
       if (usd === null) {
         markUnpriced(entry, in24h, in7d, in30d);

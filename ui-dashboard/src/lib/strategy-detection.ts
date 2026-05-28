@@ -192,7 +192,7 @@ export async function detectProbedStrategies(
       // A Pool.id is "{chainId}-{poolAddress}" — the RPC probe needs only
       // the address half. Any pool in the group works since getCDPConfig
       // takes the pool address purely as a CDP-specific ABI selector.
-      const samplePoolAddress = group[0].id.split("-")[1];
+      const samplePoolAddress = group[0]?.id.split("-")[1];
       if (!samplePoolAddress || !isAddress(samplePoolAddress)) return;
       // Track the timeout so we can cancel it if the probe wins the race.
       // Without `clearTimeout` the timer keeps the event loop alive in a

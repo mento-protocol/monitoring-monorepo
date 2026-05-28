@@ -62,7 +62,7 @@ A new script [`scripts/fix-webhook-state.sh`](../scripts/fix-webhook-state.sh) h
 debug = var.debug_mode  # default: false
 ```
 
-**Why:** Per-resource debug logging on the restapi provider includes the full request/response — secrets land in `TF_LOG=DEBUG` transcripts. `var.debug_mode` is wired through to the QuickNode, Slack, and temporary Discord cleanup providers in `alerts/infra/providers.tf`, so flipping it on leaks API tokens and webhook secrets. Default `false`; only flip from the root when actively debugging. Don't enable in CI or share apply logs that ran with it on.
+**Why:** Per-resource debug logging on the restapi provider includes the full request/response — secrets land in `TF_LOG=DEBUG` transcripts. `var.debug_mode` is wired through to the QuickNode and Slack providers in `alerts/infra/providers.tf`, so flipping it on leaks API tokens and webhook secrets. Default `false`; only flip from the root when actively debugging. Don't enable in CI or share apply logs that ran with it on.
 
 ## How to Fix Current 404 Errors
 

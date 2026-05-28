@@ -15,8 +15,10 @@ name: Alerts Rules
 #     output. On PRs it posts a sticky comment with the plan diff.
 #   - `apply` job only runs on push/dispatch to main, only when the plan
 #     reported actual changes, and only for stack-root changes or explicit
-#     workflow_dispatch. Workflow/notifier-only edits can still plan, but they
-#     do not open the `production` Environment gate for unrelated drift.
+#     workflow_dispatch. No-change merges skip apply entirely, so the
+#     `production` Environment approval only fires on eligible real-change
+#     merges. Workflow/notifier-only edits can still plan, but they do not open
+#     the gate for unrelated drift.
 #   - During the legacy Discord cleanup, the apply job first targets the
 #     notification policy when old Discord contact points are still planned for
 #     destroy. Grafana rejects contact-point deletes while a policy still
@@ -174,9 +176,9 @@ jobs:
         # capture terraform's exit before sanitizing output, emit as a step
         # output for `detect`, and only `exit 1` on real errors.
         # Plan output is captured raw, sanitized, then written to
-        # `/tmp/tf-plan.txt` for logs and the sticky comment. Destroying legacy
-        # Discord/Splunk contact points can print provider state such as
-        # webhook URLs, so never tee raw Terraform output to GitHub logs.
+        # `/tmp/tf-plan.txt` for logs and the sticky comment. Destroying Splunk
+        # contact points can print provider state such as webhook URLs, so never
+        # tee raw Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
         # `-lock-timeout=2m`: speculative PR plans can race a main-branch
@@ -435,46 +437,6 @@ jobs:
       - name: Init
         run: terraform init -input=false
 
-      - name: Pre-apply notification policy migration
-        # Legacy Discord contact points can only be deleted after Grafana's
-        # singleton notification policy no longer references them. The removed
-        # contact-point resources have no config dependency edge, so force that
-        # policy update first when the full plan still includes their deletes.
-        run: |
-          set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=10m > /tmp/tf-preapply-plan.raw 2>&1
-          PLAN_EXITCODE=$?
-          set -e
-          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-preapply-plan.raw /tmp/tf-preapply-plan.txt
-          cat /tmp/tf-preapply-plan.txt
-
-          case "$PLAN_EXITCODE" in
-            0)
-              echo "Pre-apply migration: no changes detected."
-              exit 0
-              ;;
-            2)
-              ;;
-            *)
-              echo "::error::terraform pre-apply plan failed with exit code $PLAN_EXITCODE"
-              exit 1
-              ;;
-          esac
-
-          if ! grep -Eq 'grafana_contact_point\.discord_channel_[^[:space:]]+( \([^)]+\))? will be destroyed' /tmp/tf-preapply-plan.txt; then
-            echo "Pre-apply migration: no legacy Discord contact-point deletes detected."
-            exit 0
-          fi
-
-          echo "Pre-apply migration: updating Grafana notification policy before deleting legacy Discord contact points."
-          set +e
-          terraform apply -target=grafana_notification_policy.all -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-policy-preapply.raw 2>&1
-          APPLY_EXITCODE=$?
-          set -e
-          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-policy-preapply.raw /tmp/tf-policy-preapply.txt
-          cat /tmp/tf-policy-preapply.txt
-          exit "$APPLY_EXITCODE"
-
       - name: Apply
         id: apply
         # Re-plans + applies in a single step. The reviewer at the
@@ -486,8 +448,8 @@ jobs:
         # summary step renders cleanly in the job summary markdown.
         # Apply output is captured raw, sanitized, then written to
         # `/tmp/tf-apply.txt` for logs and the apply summary. Destroying
-        # legacy Discord/Splunk contact points can print provider state such
-        # as webhook URLs, so never tee raw Terraform output to GitHub logs.
+        # Splunk contact points can print provider state such as webhook URLs,
+        # so never tee raw Terraform output to GitHub logs.
         run: |
           set +e
           terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1

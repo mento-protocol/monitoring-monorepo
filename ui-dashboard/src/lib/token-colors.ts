@@ -58,7 +58,7 @@ function tokenColor(symbol: string): string {
   for (let i = 0; i < symbol.length; i++) {
     hash = (hash * 31 + symbol.charCodeAt(i)) | 0;
   }
-  return FALLBACK[Math.abs(hash) % FALLBACK.length];
+  return FALLBACK[Math.abs(hash) % FALLBACK.length] ?? "#94a3b8";
 }
 
 // Source overrides: when the same symbol maps to two on-chain contracts
