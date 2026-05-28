@@ -1,0 +1,78 @@
+name: Agent task
+description: Scoped work item that an agent can claim and implement
+title: "[Agent task] "
+labels:
+  - needs-grooming
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for work that should be picked up by an agent. Do not include @claude unless you intentionally want the Claude workflow to run.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true when this work is done?
+      placeholder: Add a bounded, outcome-oriented task description.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and links
+      description: Link related PRs, docs, code, incidents, dashboards, or prior notes.
+      placeholder: Source context, constraints, and links.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable requirements the implementation must satisfy.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: Expected files or package area
+      description: Name the likely ownership area. This can be approximate.
+      placeholder: ui-dashboard/, indexer-envio/, alerts/, scripts/, docs/...
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification commands
+      description: Commands or checks the agent should run before opening/updating a PR.
+      placeholder: |
+        pnpm agent:quality-gate --run
+        pnpm --filter @mento-protocol/... test
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks, non-goals, and do-not-touch
+      description: Call out sensitive areas, sequencing hazards, and explicit out-of-scope work.
+      placeholder: Do not change ...; production sequencing requires ...
+    validations:
+      required: true
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Dependencies or blockers
+      description: Note external approvals, secrets, deploy state, product decisions, or upstream PRs.
+      placeholder: None, or list the blocker and owner.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done means
+      description: Say exactly when this issue can be closed and which issue numbers a PR may close.
+      placeholder: "A PR may use `Closes #123` only when ..."
+    validations:
+      required: true

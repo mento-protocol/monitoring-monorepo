@@ -9,6 +9,8 @@ const repoRoot = path.resolve(
   "..",
 );
 const registryPath = path.join(repoRoot, "terraform.stacks.json");
+const AUTO_APPLY_CI_POLICY = "push-main-production-environment";
+const FORCE_LOCAL_APPLY_ARG = "--force-local-apply";
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -17,7 +19,7 @@ function usage(exitCode = 0) {
   pnpm tf changed [--base <ref>] [--head <ref>] [--paths-file <file>] [--json]
   pnpm tf validate [<stack-id>]
   pnpm tf plan <stack-id> [terraform args...]
-  pnpm tf apply <stack-id> [terraform args...]
+  pnpm tf apply <stack-id> [--force-local-apply] [terraform args...]
 
 Stack ids come from terraform.stacks.json.
 `);
@@ -86,6 +88,25 @@ function run(command, args, options = {}) {
 
 function runTerraform(stack, args, options = {}) {
   return run("terraform", [`-chdir=${stack.path}`, ...args], options);
+}
+
+function gitOutput(args) {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    throw new Error(
+      `git ${args.join(" ")} failed${stderr ? `: ${stderr}` : ""}`,
+    );
+  }
+  return result.stdout.trim();
 }
 
 function printStacks(json) {
@@ -272,14 +293,86 @@ function validateStacks(stackIds) {
   }
 }
 
+function splitApplyArgs(args) {
+  let forceLocalApply = false;
+  const terraformArgs = [];
+  for (const arg of args) {
+    if (arg === FORCE_LOCAL_APPLY_ARG) {
+      forceLocalApply = true;
+    } else {
+      terraformArgs.push(arg);
+    }
+  }
+  return { forceLocalApply, terraformArgs };
+}
+
+function localApplySafetyStatus() {
+  try {
+    const branch = gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]);
+    const status = gitOutput(["status", "--porcelain"]);
+    const head = gitOutput(["rev-parse", "HEAD"]);
+    const originMain = gitOutput(["rev-parse", "origin/main"]);
+    const clean = status.length === 0;
+    const headMatchesOriginMain = head === originMain;
+
+    return {
+      branch,
+      clean,
+      headMatchesOriginMain,
+      safe: branch === "main" && clean && headMatchesOriginMain,
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      safe: false,
+    };
+  }
+}
+
+function assertLocalApplyAllowed(stack, forceLocalApply) {
+  if (stack.ci.apply !== AUTO_APPLY_CI_POLICY || forceLocalApply) {
+    return;
+  }
+
+  const status = localApplySafetyStatus();
+  if (status.safe) {
+    return;
+  }
+
+  const checkoutDetails = status.error
+    ? `Could not verify checkout safety: ${status.error}`
+    : [
+        `Current checkout: branch=${status.branch}`,
+        `clean=${status.clean ? "yes" : "no"}`,
+        `HEAD==origin/main=${status.headMatchesOriginMain ? "yes" : "no"}`,
+      ].join(", ");
+
+  throw new Error(
+    [
+      `refusing local Terraform apply for auto-applied stack ${stack.id}`,
+      "Expected safe path: merge to main and let GitHub Actions apply through the production environment.",
+      `Override for a deliberate local apply: pass ${FORCE_LOCAL_APPLY_ARG}.`,
+      checkoutDetails,
+    ].join("\n"),
+  );
+}
+
 function runStackCommand(command, args) {
   const stackId = args[0];
   if (!stackId) {
     throw new Error(`${command} requires a stack id`);
   }
   const stack = stackById(stackId);
-  const terraformArgs = args.slice(1);
+  const rawTerraformArgs = args.slice(1);
+  const { forceLocalApply, terraformArgs } =
+    command === "apply"
+      ? splitApplyArgs(rawTerraformArgs)
+      : { forceLocalApply: false, terraformArgs: rawTerraformArgs };
   const initArgs = ["init", "-input=false"];
+
+  if (command === "apply") {
+    assertLocalApplyAllowed(stack, forceLocalApply);
+  }
 
   process.stderr.write(
     `Terraform stack ${stack.id}: path=${stack.path}, state=${stack.state.prefix}, applyPolicy=${stack.applyPolicy}\n`,

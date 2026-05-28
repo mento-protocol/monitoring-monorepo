@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-27
+last_verified: 2026-05-28
 ---
 
 # Terraform Stacks
@@ -13,10 +13,10 @@ Use it instead of inferring ownership from directory names.
 
 | Stack             | Path               | State prefix          | Owns                                                                                                                                      | Plan/apply policy                                                 |
 | ----------------- | ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved apply                                 |
-| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | Manual plan; human-approved apply                                 |
+| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved local apply                           |
+| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | PR plan; `main` apply through the `production` GitHub Environment |
 | `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Discord channel management, Sentry bridge, Slack channel lifecycle, related GCP resources       | PR plan; `main` apply through the `production` GitHub Environment |
-| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | Manual plan; human-approved apply                                 |
+| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
 
@@ -24,7 +24,7 @@ Use it instead of inferring ownership from directory names.
 pnpm tf list
 pnpm tf validate <stack-id>
 pnpm tf plan <stack-id>
-pnpm tf apply <stack-id>
+pnpm tf apply <stack-id> [--force-local-apply]
 ```
 
 Existing aliases remain:
@@ -40,6 +40,14 @@ pnpm aegis:tf:plan
 `terraform fmt -check -recursive`, `terraform init -backend=false`, and
 `terraform validate`.
 
+For stacks where `terraform.stacks.json` declares
+`ci.apply == "push-main-production-environment"`, local
+`pnpm tf apply <stack-id>` is guarded. It runs only when the checkout is on
+`main`, the worktree is clean, and `HEAD == origin/main`, unless the operator
+passes the deliberate override `--force-local-apply`. The expected safe path is
+to merge to `main` and let GitHub Actions apply through the `production`
+Environment approval.
+
 ## CI Model
 
 `.github/workflows/infra.yml` asks `scripts/tf-stacks.mjs` which stacks changed
@@ -52,9 +60,9 @@ validation inside the required `CI / ci` sentinel. Keep Terraform path routing
 in `terraform.stacks.json` rather than duplicating stack ownership in workflow
 YAML.
 
-Only `alerts-delivery` has CI apply behavior, and that remains gated by the
-`production` GitHub Environment. No platform, alerts-rules, or Aegis apply is
-automatic.
+`alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior, and all
+remain gated by the `production` GitHub Environment. The `platform` stack is
+manual apply only.
 
 ## Grafana Alert Ownership Migration
 

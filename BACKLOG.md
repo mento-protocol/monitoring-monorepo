@@ -1,8 +1,17 @@
 # Backlog
 
-Active work only. Remove items from this file once they ship or are closed.
-Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`,
-or tests.
+GitHub Issues are the canonical active-work queue for agent-addressable work.
+Use this query for ready items:
+
+```text
+is:issue is:open label:agent-ready -label:agent-active -label:in-pr
+```
+
+This file is transition storage for backlog items that have not yet been
+migrated. Remove items from this file once they are moved to Issues, shipped, or
+closed. Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`,
+`docs/notes/`, or tests. Workflow details live in
+`docs/notes/agent-issue-workflow.md`.
 
 ## Thoughtworks Technology Radar Follow-Ups
 
@@ -97,11 +106,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
-## Claude Code permissions hardening
-
-- [ ] **Narrow `Bash(bash scripts/*)` in `.claude/settings.json`.** The blanket allow pre-approves production-changing scripts (`deploy-indexer.sh`, `deploy-indexer-promote.sh`, `deploy-dashboard.sh`, `deploy-bridge.sh`). Replace with a per-script allowlist that only covers safe read/test scripts; deploy/promote scripts should keep their permission prompt.
-- [ ] **Remove or narrow `Bash(until *)`.** Pre-approves any shell loop whose first token is `until`, with arbitrary body. Replace with a specific polling-command allow or remove entirely.
-
 ## Intel marathon follow-ups (deferred from PR #488)
 
 One item deferred from the May 2026 marathon PR review.
@@ -157,27 +161,20 @@ Follow-up `alerts/rules/` was moved onto the v4 major (3.25.9 → 4.36.2) by ren
 
 The 2026-05-22/24 weekend exposed several over-paging classes on `#alerts-critical`. PRs #569 / #572 / #574 / #576 fixed the highest-leverage items (reserve thresholds, weekend FX feed mute, Metrics Bridge Poll Errors rule tuning, stale-price Slack template). These are the loose ends.
 
-_Auto-apply design decision resolved 2026-05-27._ `alerts/rules/` and `alerts/infra/` now auto-apply via CI on merge (PRs #619 / #622), gated by the `production` GitHub Environment required-reviewer rule. See Terraform CI/CD audit follow-ups below for the remaining hardening work (read-only plan SA, scheduled drift detection, aegis bring-up).
+_Auto-apply design decision resolved 2026-05-27._ `alerts/rules/`, `alerts/infra/`, and `aegis/terraform/` now auto-apply via CI on merge (PRs #619 / #622 / #629), gated by the `production` GitHub Environment required-reviewer rule. See Terraform CI/CD audit follow-ups below for the remaining hardening work.
 
 ## Terraform CI/CD audit follow-ups (post-#622)
 
-PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. The audit surfaced the seven follow-up items below: 3 hardening/coverage tasks, 2 quality-of-life fixes, and 2 deferred deeper-investment items.
+PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. The remaining follow-ups below are 2 hardening/coverage tasks and 2 deferred deeper-investment items.
 
 ### Tier 1 — Hardening + coverage
 
-- [ ] **Read-only plan SA split.** Currently both plan and apply jobs in `alerts-rules.yml` / `alerts-infra.yml` use `metrics-bridge-deployer@` (impersonates `org-terraform`, write-capable). A malicious PR could add a plan-time `external`/`local-exec` data source to exfiltrate context. Split: new `metrics-bridge-plan-readonly@` SA + new `org-terraform-plan-readonly@` seed-project SA with `roles/storage.objectViewer` on the state bucket only. Plan jobs swap to the read-only chain via `-backend-config="impersonate_service_account=..."` + `-lock=false`; apply jobs unchanged. Two-PR sequence (prep PR for terraform/ wiring → workflow PR). Out-of-scope but useful: `metrics-bridge.yml` and `aegis-app-engine.yml` keep the existing SA (no `terraform apply` step). This does NOT mitigate `TF_VAR_*` cleartext exposure at plan time — providers still need them to refresh.
-- [ ] **Scheduled drift detection workflow.** Daily `terraform plan -detailed-exitcode` for every stack whose `ci.apply == "push-main-production-environment"` in `terraform.stacks.json`. Matrix-driven from the registry (auto-picks up new auto-applied stacks). On exit-2, open or update a GitHub issue labelled `drift-detection` + `stack:<id>` with the plan tail. Single workflow file `.github/workflows/terraform-drift.yml`. Initial version skips `alerts-delivery` until the `local_file.env_file` follow-up below lands (perma-positive otherwise — would kill the signal). Once aegis flips to auto-apply, drift coverage is automatic.
-- [ ] **Bring `aegis/terraform/` under CI auto-apply.** Single Grafana folder + dashboard + service-health alert. Mirror `.github/workflows/alerts-rules.yml` as `.github/workflows/aegis-terraform.yml`. Backend impersonation already wired since PR #443; the existing `ci_alerts_org_terraform_token_creator` IAM binding already covers aegis as a third consumer (same `(SA, role, member)` triple). Single PR (cosmetic rename of the binding to `ci_org_terraform_token_creator` folded via `moved {}` block + new workflow + `terraform.stacks.json` policy flip). Pre-flight: run `pnpm aegis:tf:plan` on a clean main checkout first to surface accumulated manual-apply drift; reconcile before merge.
+- [ ] **Finish the read-only plan SA workflow swap.** PRs #630 / #640 added the `metrics-bridge-plan-readonly@` CI SA and the `org-terraform-plan-readonly@` seed-project SA with `roles/storage.objectViewer` on the state bucket. Remaining work: after that Terraform wiring is applied and `GCP_SERVICE_ACCOUNT_PLAN` is seeded, switch Terraform plan jobs in `alerts-rules.yml`, `alerts-infra.yml`, `aegis-terraform.yml`, and `terraform-drift.yml` to the read-only chain via `-backend-config="impersonate_service_account=..."` + `-lock=false`; apply jobs stay on the write-capable deployer. This does NOT mitigate `TF_VAR_*` cleartext exposure at plan time — providers still need them to refresh.
+- [ ] **Enable `alerts-delivery` in Terraform drift detection.** `.github/workflows/terraform-drift.yml` is live and matrix-driven for auto-applied stacks, but still filters out `alerts-delivery` pending the old `local_file.env_file` false-positive fix. Once the PR #627 state transition has applied cleanly, remove that hard-coded filter so drift coverage includes every stack whose `ci.apply == "push-main-production-environment"` in `terraform.stacks.json`.
 
-### Tier 2 — Quality-of-life
+### Tier 2 — Deferred
 
-- [ ] **`alerts/infra/onchain-event-handler/local-dotenv-file.tf` exit-2 false positive.** The `local_file.env_file` resource always plans as "create" on fresh-checkout CI runners (the file is gitignored and absent on clean clone). Defeats the skip-when-no-changes optimization for alerts-infra — production gate fires on every merge. Fix: replace with `terraform_data` + `local-exec` provisioner so refresh has no on-disk state to drift against. `removed { lifecycle { destroy = false } }` block detaches the old resource without nuking local `.env` files.
-- [ ] **PR #609 follow-up — mixed-state trading-mode visibility.** When firing AND resolved trading-mode alerts arrive in the same Grafana group notification, the title's global `🚨` masks the resolved entries. Fix: switch the trading-mode title to the count-summary pattern proven in `slack.trading_limits_alert_title` (`[N FIRING | M RESOLVED] {{ .CommonLabels.alertname }}`) + embed per-alert emoji inline in body bold heading. Slack + Discord parity; in-place template updates only.
-
-### Tier 3 — Deferred
-
-- [ ] **Saved-plan binding via KMS — deferred.** PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS envelope encryption to recover the "binding plan" property (byte-for-byte equality between PR-time review and apply-time execution). Recommendation: defer. Cost/value analysis: alerts stacks change ~1-2× per month, blast radius is alert delivery (recoverable on 15-min cycle), and the drift window between plan and apply is mitigated by the re-plan at apply gate. **Hard prerequisite to revisit: ship Tier-1 scheduled drift detection above.** Once drift is caught within 24h regardless of which plan ran, the marginal value of binding-plan approaches zero. Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to auto-apply.
-- [ ] **Local TF apply guard for auto-applied stacks.** `scripts/tf-stacks.mjs` apply path could refuse runs against stacks where `ci.apply == "push-main-production-environment"` unless on `main` + clean tree + `HEAD == origin/main`, with a `--force-local-apply` override. The 2026-05-27 alerts/rules ping-pong (local apply from a feature branch fighting CI auto-apply on main) was the proximate motivation; aliases removal alone closes the observed footgun but not the theoretical secondary path via `pnpm tf apply <stack>`.
+- [ ] **Saved-plan binding via KMS — deferred.** PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS envelope encryption to recover the "binding plan" property (byte-for-byte equality between PR-time review and apply-time execution). Recommendation: defer. Cost/value analysis: alerts stacks change ~1-2× per month, blast radius is alert delivery (recoverable on 15-min cycle), and the drift window between plan and apply is mitigated by the re-plan at apply gate. **Hard prerequisite to revisit: ship full Tier-1 drift coverage above.** Once drift is caught within 24h regardless of which plan ran, the marginal value of binding-plan approaches zero. Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to auto-apply.
 
 ## Alerts integration follow-ups
 
@@ -202,7 +199,6 @@ Items below are net-new functionality or polish, not migration blockers.
 
 ### Tier 3 — Hygiene / cosmetic
 
-- [ ] **Tighten `local_file.env_file` permissions** — `alerts/infra/onchain-event-handler/main.tf` writes the runtime env file at `0777`. The file is gitignored and machine-local, but secret-bearing. Drop to `0600`.
 - [ ] **Remove `ci_failures_invite_eng` read-path migration guard** — PR #597 temporarily accepts legacy `channel_not_found` refreshes for old state whose `read_path` still asks Slack for `channel=true` or `channel=false` before persisting the new `/api.test` read path. After the PR #597 apply confirms state is clean, remove that postcondition branch from `alerts/infra/ci-failures-channel.tf`.
 - [ ] **Orphan GCS state files** — after PR #556 renamed backend prefixes to `alerts-infra` + `alerts-rules`, the old paths (`gs://<state-bucket>/alerts/default.tfstate` and `gs://<state-bucket>/monitoring-monorepo-alerts/default.tfstate`) still exist on GCS. No functional impact, pennies/month storage. Delete with `gcloud storage rm` on next cleanup pass.
 

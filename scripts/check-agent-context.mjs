@@ -271,6 +271,57 @@ function isClaudeSessionEndCommand(command) {
   return directInvocation.test(command) || guardedInvocation.test(command);
 }
 
+const allowedClaudeBashScriptPermissions = new Set([
+  "Bash(bash scripts/agent-quality-gate.sh:*)",
+  "Bash(bash ./scripts/agent-quality-gate.sh:*)",
+  "Bash(bash scripts/agent-quality-gate.test.sh:*)",
+  "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
+  "Bash(bash scripts/agent-session-end-hook.sh:*)",
+  "Bash(bash ./scripts/agent-session-end-hook.sh:*)",
+  "Bash(bash scripts/check-agent-quality-gate-package-scripts.sh:*)",
+  "Bash(bash ./scripts/check-agent-quality-gate-package-scripts.sh:*)",
+  "Bash(bash scripts/check-react-doctor-diff.sh:*)",
+  "Bash(bash ./scripts/check-react-doctor-diff.sh:*)",
+  "Bash(bash scripts/check-react-doctor-score.sh:*)",
+  "Bash(bash ./scripts/check-react-doctor-score.sh:*)",
+]);
+
+function isClaudeBashScriptPermission(permission) {
+  return /^Bash\(bash\s+(?:\.\/)?scripts\/[^)]*\)$/.test(permission);
+}
+
+function validateClaudePermissions(settings) {
+  const allow = settings?.permissions?.allow;
+  if (!Array.isArray(allow)) {
+    fail(".claude/settings.json: expected permissions.allow array");
+    return;
+  }
+
+  for (const permission of allow) {
+    if (typeof permission !== "string") continue;
+
+    if (/^Bash\(until\b/.test(permission)) {
+      fail(
+        `.claude/settings.json: permissions.allow must not allow shell-loop commands: ${permission}`,
+      );
+    }
+
+    if (!isClaudeBashScriptPermission(permission)) continue;
+
+    if (!allowedClaudeBashScriptPermissions.has(permission)) {
+      fail(
+        `.claude/settings.json: unexpected bash scripts allow: ${permission}`,
+      );
+    }
+
+    if (/^Bash\(bash\s+(?:\.\/)?scripts\/deploy-[^)]*\)$/.test(permission)) {
+      fail(
+        `.claude/settings.json: must not allow deploy/promote scripts: ${permission}`,
+      );
+    }
+  }
+}
+
 const codexHooks = readJsonRequired(".codex/hooks.json");
 if (codexHooks) {
   const commands = sessionEndCommands(codexHooks, ".codex/hooks.json");
@@ -286,6 +337,8 @@ if (codexHooks) {
 
 const claudeSettings = readJsonRequired(".claude/settings.json");
 if (claudeSettings) {
+  validateClaudePermissions(claudeSettings);
+
   const commands = sessionEndCommands(claudeSettings, ".claude/settings.json");
   if (commands.some((command) => command.includes("/Users/"))) {
     fail(
