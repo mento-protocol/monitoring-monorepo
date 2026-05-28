@@ -180,6 +180,38 @@ jobs:
             echo "has-changes=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Plan summary
+        # Renders the plan diff at the top of the job page so reviewers
+        # don't have to scroll the raw `Plan` step log. Same source data
+        # as the sticky PR comment (`/tmp/tf-plan.txt`), but visible on
+        # `push` runs too where there's no PR to comment on. `if: always()`
+        # so a failed plan still surfaces the error inline.
+        if: always()
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+        run: |
+          {
+            echo '## Terraform Plan — `alerts/rules/`'
+            echo
+            if [ "$PLAN_OUTCOME" = "success" ]; then
+              if [ "$HAS_CHANGES" = "true" ]; then
+                echo '**Status:** 📝 changes detected — merge will trigger apply'
+              else
+                echo '**Status:** ✅ no changes — merge will skip apply'
+              fi
+            else
+              echo '**Status:** ❌ plan failed'
+            fi
+            echo
+            echo '<details open><summary>Plan output</summary>'
+            echo
+            echo '```hcl'
+            tail -c 50000 /tmp/tf-plan.txt 2>/dev/null || echo '(no plan output captured)'
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -331,12 +363,48 @@ jobs:
         run: terraform init -input=false
 
       - name: Apply
+        id: apply
         # Re-plans + applies in a single step. The reviewer at the
         # production-environment gate should read this job's plan output
         # before approving — it's the ground truth for what lands.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
-        run: terraform apply -auto-approve -input=false -lock-timeout=10m
+        # `-no-color`: keep the output free of ANSI escapes so the apply
+        # summary step renders cleanly in the job summary markdown.
+        # Output teed to `/tmp/tf-apply.txt` for the apply summary step;
+        # PIPESTATUS preserves terraform's exit code over tee's.
+        run: |
+          set +e
+          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m 2>&1 | tee /tmp/tf-apply.txt
+          EXITCODE=${PIPESTATUS[0]}
+          set -e
+          exit "$EXITCODE"
+
+      - name: Apply summary
+        # Renders the apply output at the top of the job page so reviewers
+        # don't have to scroll the raw `Apply` step log to confirm what
+        # actually landed. `if: always()` so a failed apply still surfaces
+        # the error inline.
+        if: always()
+        env:
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        run: |
+          {
+            echo '## Terraform Apply — `alerts/rules/`'
+            echo
+            case "$APPLY_OUTCOME" in
+              success) echo '**Status:** ✅ applied' ;;
+              failure) echo '**Status:** ❌ apply failed' ;;
+              *)       printf '**Status:** %s\n' "$APPLY_OUTCOME" ;;
+            esac
+            echo
+            echo '<details open><summary>Apply output</summary>'
+            echo
+            echo '```hcl'
+            tail -c 50000 /tmp/tf-apply.txt 2>/dev/null || echo '(no apply output captured)'
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
