@@ -125,8 +125,8 @@ describe("SortableTh aria-sort wiring", () => {
   it("sets aria-sort=ascending on the active column when sorted asc", async () => {
     renderHeaderRow("value", "asc");
     const headers = Array.from(container.querySelectorAll("th"));
-    expect(headers[0].getAttribute("aria-sort")).toBe("none");
-    expect(headers[1].getAttribute("aria-sort")).toBe("ascending");
+    expect(headers[0]!.getAttribute("aria-sort")).toBe("none");
+    expect(headers[1]!.getAttribute("aria-sort")).toBe("ascending");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
@@ -134,8 +134,8 @@ describe("SortableTh aria-sort wiring", () => {
   it("sets aria-sort=descending on the active column when sorted desc", async () => {
     renderHeaderRow("name", "desc");
     const headers = Array.from(container.querySelectorAll("th"));
-    expect(headers[0].getAttribute("aria-sort")).toBe("descending");
-    expect(headers[1].getAttribute("aria-sort")).toBe("none");
+    expect(headers[0]!.getAttribute("aria-sort")).toBe("descending");
+    expect(headers[1]!.getAttribute("aria-sort")).toBe("none");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
