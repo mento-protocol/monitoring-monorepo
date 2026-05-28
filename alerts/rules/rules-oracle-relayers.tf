@@ -95,7 +95,7 @@ resource "grafana_rule_group" "oracle_relayers" {
       labels = {
         service  = "oracle-relayers"
         severity = rule.value.env == "prod" ? "warning" : "info"
-        # Consumed by the Discord/Slack/VictorOps templates to render
+        # Consumed by the Slack/VictorOps templates to render
         # token-aware copy and per-chain explorer links.
         token    = rule.value.symbol
         explorer = rule.value.explorer

@@ -3,7 +3,7 @@ resource "grafana_rule_group" "trading_limits" {
   folder_uid       = grafana_folder.trading_limits.uid
   interval_seconds = 120
 
-  # L0 Short-term Limit Alert (Discord only)
+  # L0 Short-term Limit Alert (Slack only)
   rule {
     name           = "L0 Trading Limit Alert [Celo]"
     condition      = "limitExceeded"
@@ -125,7 +125,7 @@ resource "grafana_rule_group" "trading_limits" {
     }
   }
 
-  # L1 Medium-term Limit Alert (Discord + VictorOps)
+  # L1 Medium-term Limit Alert (Slack + VictorOps)
   rule {
     name           = "L1 Trading Limit Alert [Celo]"
     condition      = "limitExceeded"
@@ -247,7 +247,7 @@ resource "grafana_rule_group" "trading_limits" {
     }
   }
 
-  # LG Global Lifetime Limit Alert (Discord + VictorOps)
+  # LG Global Lifetime Limit Alert (Slack + VictorOps)
   rule {
     name           = "LG Trading Limit Alert [Celo]"
     condition      = "limitExceeded"

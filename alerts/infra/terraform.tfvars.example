@@ -38,21 +38,16 @@ sentry_slack_workspace_name = "Mento Labs"
 slack_bot_token = "xoxb-..."
 
 #####################
-# Discord Configuration
+# Temporary Discord Cleanup
 #####################
-# Discord is used only for the on-chain multisig event channels.
-# Sentry alerts now route to Slack via the sentry-bridge module.
+# Retained only so the first post-Slack cleanup apply can destroy legacy
+# Terraform-managed Discord resources from state. Remove these after that
+# apply and the follow-up provider/secret cleanup.
 
-# Discord bot token (from Discord Developer Portal)
-# Required permissions: Administrator
 discord_bot_token = "your-bot-token"
 
-# Discord server ID (right-click server with Developer Mode enabled and copy ID)
-# Must be a 17-20 digit snowflake ID
 discord_server_id = "1234567890123456789"
 
-# Discord category ID where alert channels will be created (right-click category and copy ID)
-# Must be a 17-20 digit snowflake ID
 discord_category_id = "1234567890123456789"
 
 #####################
@@ -107,5 +102,5 @@ github_token = "github_pat_..."
 #####################
 
 # Enable debug mode for REST API provider (shows API requests/responses)
-# Useful for troubleshooting Discord/QuickNode API issues
+# Useful for troubleshooting REST API provider issues
 # debug_mode = true

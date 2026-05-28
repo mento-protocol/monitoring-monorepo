@@ -4,11 +4,11 @@ name: Terraform Drift Detection
 # whose `ci.apply == "push-main-production-environment"` in
 # `terraform.stacks.json`. Read-only — never applies. On exit-2 ("changes
 # pending"), opens or updates a GitHub issue labelled `drift-detection` +
-# `stack:<id>` with the plan tail.
+# `stack:<id>` with the sanitized plan tail.
 #
-# Why this exists: auto-applied stacks (alerts/rules, alerts/infra, aegis once
-# PR #629 lands) can still drift when state changes outside Terraform — UI
-# edits in Grafana, manual gcloud changes, Slack admins renaming channels.
+# Why this exists: auto-applied stacks (alerts/rules, alerts/infra, aegis) can
+# still drift when state changes outside Terraform — UI edits in Grafana, manual
+# gcloud changes, Slack admins renaming channels.
 # Without a periodic check, drift can sit invisible for weeks. The 2026-05-27
 # alerts/rules rollout surfaced ~25 template renames worth of accumulated
 # drift; a daily plan job would have caught it days earlier.
@@ -57,11 +57,6 @@ jobs:
         # needed). Matches the pattern in `.github/workflows/infra.yml` +
         # `ci.yml` which also call `node scripts/tf-stacks.mjs` directly.
         #
-        # `alerts-delivery` is skipped here pending PR #627 (local_file.env_file
-        # fix). That stack always reports drift on fresh-checkout CI runners
-        # because `local_file.env_file` stats a gitignored file that never
-        # exists in CI. Perma-positive drift would kill the signal of this
-        # workflow. Remove the filter clause once PR #627 ships.
         run: |
           set -euo pipefail
           node scripts/tf-stacks.mjs list --json \
@@ -70,7 +65,6 @@ jobs:
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
                 .filter(s => s.ci.apply === "push-main-production-environment")
-                .filter(s => s.id !== "alerts-delivery")
                 .map(s => ({ id: s.id, name: s.name, path: s.path }));
               const matrix = JSON.stringify({ include: filtered });
               const hasStacks = filtered.length > 0 ? "true" : "false";
@@ -102,14 +96,14 @@ jobs:
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
-      TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
-      TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
-      TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
-      TF_VAR_discord_alerts_webhook_url_trading_modes_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_STAGING }}
-      TF_VAR_discord_alerts_webhook_url_trading_modes_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_PROD }}
-      TF_VAR_discord_alerts_webhook_url_trading_limits: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_LIMITS }}
-      TF_VAR_discord_alerts_webhook_url_aegis: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_AEGIS }}
-      TF_VAR_discord_alerts_webhook_url_catch_all: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_CATCH_ALL }}
+      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
+      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
+      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
+      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
+      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -140,9 +134,12 @@ jobs:
       - name: Plan
         id: plan
         # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes
-        # (= drift, since main is the deployed code). Capture stdout +
-        # stderr in `/tmp/tf-plan.txt` for the issue body. `set +e` so a
-        # non-zero exit doesn't fail the step; we route based on PIPESTATUS.
+        # (= drift, since main is the deployed code). Capture raw stdout +
+        # stderr, sanitize it, then write `/tmp/tf-plan.txt` for logs and the
+        # issue body. `set +e` so a non-zero exit doesn't fail the step.
+        # Never tee raw Terraform output: drift can include destroy-time
+        # provider state for legacy Discord/Splunk webhooks or QuickNode
+        # security tokens.
         #
         # `matrix.id` is passed through `env:` rather than inlining via
         # `${{ }}` in the `run:` block, matching the workflow-injection
@@ -153,9 +150,19 @@ jobs:
           STACK_ID: ${{ matrix.id }}
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
-          EXITCODE=${PIPESTATUS[0]}
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          EXITCODE=$?
           set -e
+          sed -E \
+            -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
+            -e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
+            -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
+            -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
+            -e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
+            -e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            /tmp/tf-plan.raw > /tmp/tf-plan.txt
+          cat /tmp/tf-plan.txt
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
           case "$EXITCODE" in
             0) echo "No drift in $STACK_ID" ;;

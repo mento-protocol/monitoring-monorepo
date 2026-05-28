@@ -14,9 +14,9 @@ Use it instead of inferring ownership from directory names.
 | Stack             | Path               | State prefix          | Owns                                                                                                                                      | Plan/apply policy                                                 |
 | ----------------- | ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved apply                                 |
-| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | Manual plan; human-approved apply                                 |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Discord channel management, Sentry bridge, Slack channel lifecycle, related GCP resources       | PR plan; `main` apply through the `production` GitHub Environment |
-| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | Manual plan; human-approved apply                                 |
+| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | PR plan; `main` apply through the `production` GitHub Environment |
+| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                   | PR plan; `main` apply through the `production` GitHub Environment |
+| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
 
@@ -52,9 +52,9 @@ validation inside the required `CI / ci` sentinel. Keep Terraform path routing
 in `terraform.stacks.json` rather than duplicating stack ownership in workflow
 YAML.
 
-Only `alerts-delivery` has CI apply behavior, and that remains gated by the
-`production` GitHub Environment. No platform, alerts-rules, or Aegis apply is
-automatic.
+`alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior on
+`main`, gated by the `production` GitHub Environment. The platform stack remains
+manual-plan/manual-apply only.
 
 ## Grafana Alert Ownership Migration
 
@@ -71,8 +71,8 @@ Current ownership:
 
 Local gitignored tfvars files must follow the same ownership:
 
-- `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, Discord
-  webhook URLs, and Splunk On-Call webhook URL.
+- `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, and Splunk
+  On-Call webhook URL.
 - `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
 
 Verify ownership and drift with:
