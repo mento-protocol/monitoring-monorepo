@@ -355,13 +355,19 @@ function buildSnapshotMarkers({
   // Marker is "tripping" if the reported price crosses ITS snapshot's band.
   // When neither persisted nor current band is available, the verdict is
   // genuinely unknown — return null and let the caller render the marker in
-  // a neutral state instead of greenwashing it.
+  // a neutral state instead of greenwashing it. Also guards baseline === 0:
+  // `resolveSnapshotBand` returns whatever `fixidityToFloat` produces, and
+  // `fixidityToFloat("0")` is `0` (finite), which would pass the `!= null`
+  // check and then divide by zero below, turning every marker red. The
+  // indexer's resolver normally writes `null` for an unseeded `0n` baseline,
+  // but a manual DB write or a backfill edge case could still surface zero.
   const isOutOfBand = (
     price: number,
     band: { baseline: number | null; thresholdRatio: number | null },
   ): boolean | null => {
     if (
       band.baseline == null ||
+      band.baseline === 0 ||
       band.thresholdRatio == null ||
       !Number.isFinite(price)
     )
@@ -398,7 +404,12 @@ function buildSnapshotMarkers({
       price: prices[i],
       baseline: perSnapshotBands[i].baseline,
       thresholdRatio: perSnapshotBands[i].thresholdRatio,
-      isHistoricalBand: s.breakerBaselineAtSnapshot != null,
+      // Match `resolveSnapshotBand`'s pair-of-two semantics: a half-populated
+      // row (only one persisted field set) falls back to the current band,
+      // so the hover wording should not say "at the time" for that case.
+      isHistoricalBand:
+        s.breakerBaselineAtSnapshot != null &&
+        s.breakerThresholdAtSnapshot != null,
       token0Symbol,
       token1Symbol,
     }),
@@ -622,16 +633,27 @@ function OracleChartLegend({
   breakerConfig: BreakerConfigForChart | null | undefined;
   breakerConfigStatus: BreakerConfigStatus;
 }) {
-  // When we don't have a breaker to compare against (still loading or
-  // genuinely missing), tell the operator that — don't show "within band"
-  // chips that imply a verdict we can't make.
+  // When we don't have a CURRENT breaker to compare against (still loading or
+  // genuinely missing), the legend cannot describe the current-band shape.
+  // BUT per-snapshot persisted bands are self-contained — they color markers
+  // green/red against the band that was armed at write time, independent of
+  // the current breaker fetch. Show the verdict chips alongside the status
+  // message so operators looking at the colored markers see what they mean.
   if (breakerConfigStatus !== "ready" || !breakerConfig) {
     const msg =
       breakerConfigStatus === "loading"
-        ? "Loading breaker config…"
-        : "No active breaker for this rate feed — band check unavailable";
+        ? "Loading current breaker config…"
+        : "No active breaker for this rate feed — current band check unavailable";
     return (
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+          Within band when evaluated
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+          Outside band — breaker would trip
+        </span>
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
           {msg}

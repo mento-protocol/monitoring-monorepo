@@ -91,11 +91,29 @@ export const ORACLE_SNAPSHOTS_CHART = `
       txHash
       deviationRatio
       hasHealthData
-      # Persisted-at-write breaker reference, so the chart can render the
-      # historically accurate band per point instead of comparing every
-      # row against the current EMA (which drifts on MEDIAN_DELTA feeds).
-      # Nullable for pre-deploy rows + unseeded EMA — the chart falls back
-      # to the current band in those cases.
+    }
+  }
+`;
+
+// Companion query for the persisted-at-write breaker fields. Isolated from
+// `ORACLE_SNAPSHOTS_CHART` for the same schema-lag reason as `POOL_CONFIG_EXT`
+// — they ship with the indexer resync, so during the deploy+promote window
+// hosted Hasura rejects them as "field not found". Keeping them off the
+// primary chart query means a misordered deploy (merge-before-promote)
+// degrades just the per-snapshot band path to the current-band fallback
+// instead of breaking the whole oracle chart. Nullable for pre-deploy rows
+// + unseeded EMA — the chart falls back to the current band in those cases.
+export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
+  query OracleSnapshotsChartBandsExt($poolId: String!, $limit: Int!) {
+    OracleSnapshot(
+      where: {
+        poolId: { _eq: $poolId }
+        source: { _eq: "oracle_median_updated" }
+      }
+      order_by: { timestamp: desc }
+      limit: $limit
+    ) {
+      id
       breakerBaselineAtSnapshot
       breakerThresholdAtSnapshot
     }

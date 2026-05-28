@@ -236,8 +236,7 @@ indexer.onEvent(
           // not oracle deviation — the BreakerBox never evaluates this
           // path. Leave undefined so the chart's per-point breaker verdict
           // falls through to "no band check" for these rows even if a
-          // future filter relaxation lets them through. See
-          // reference_oracle_snapshot_sources memory.
+          // future filter relaxation lets them through.
           breakerBaselineAtSnapshot: undefined,
           breakerThresholdAtSnapshot: undefined,
           ...snapshotFields,
