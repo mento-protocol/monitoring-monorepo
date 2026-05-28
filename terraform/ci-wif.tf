@@ -14,28 +14,21 @@
 #   gh secret set GCP_SERVICE_ACCOUNT_PLAN \
 #     --body="$(terraform -chdir=terraform output -raw ci_plan_readonly_email)"
 #
-# PREREQUISITE (one-time, before `pnpm infra:apply`):
-#   The `org-terraform-plan-readonly@mento-terraform-seed-ffac` seed-project
-#   SA must already exist + have `roles/storage.objectViewer` on the state
-#   bucket `gs://mento-terraform-tfstate-6ed6`. Create it manually:
+# The seed-project `org-terraform-plan-readonly@` SA is now managed by
+# terraform (see `org_terraform_plan_readonly` resource below) — no manual
+# gcloud bootstrap step required. Apply ordering inside one `pnpm infra:apply`:
+#   1. `google_service_account.org_terraform_plan_readonly` (created in seed)
+#   2. `google_storage_bucket_iam_member.state_bucket_plan_readonly` (grants
+#      objectViewer on the state bucket)
+#   3. `google_service_account_iam_member.ci_plan_readonly_*_token_creator`
+#      (binds the new CI SA as tokenCreator on the new seed SA)
 #
-#     gcloud iam service-accounts create org-terraform-plan-readonly \
-#       --project=mento-terraform-seed-ffac \
-#       --description="Read-only impersonation target for CI plan jobs" \
-#       --display-name="Org Terraform (plan-readonly)" \
-#       --impersonate-service-account="org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
-#
-#     gcloud storage buckets add-iam-policy-binding \
-#       gs://mento-terraform-tfstate-6ed6 \
-#       --member="serviceAccount:org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com" \
-#       --role="roles/storage.objectViewer" \
-#       --impersonate-service-account="org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
-#
-#   The token-creator binding below targets that SA; apply will 403 if it
-#   doesn't exist yet. The monitoring stack doesn't manage the seed SA
-#   because `org-terraform` self-administers in seed, and adding cross-
-#   project SA-create permission to this stack would broaden the blast
-#   radius beyond what this hardening PR aims to gain.
+# The google provider in this stack impersonates `org-terraform@seed` (see
+# providers.tf). For the SA-create + state-bucket binding to land, the
+# `org-terraform` SA must have `iam.serviceAccountAdmin` on the seed
+# project and `storage.admin` on the state bucket. Both are existing perms
+# (`org-terraform` already manages other resources in seed) — if apply 403s
+# on this resource, the failure tells us which role is missing.
 #
 # WORKFLOW-PR NOTE (`storage.objectViewer` + state locking):
 #   `roles/storage.objectViewer` lets the plan SA read state but NOT
@@ -231,19 +224,32 @@ resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/mento-protocol/monitoring-monorepo"
 }
 
-# Email of the seed-project SA that the plan-readonly CI SA impersonates.
-# Extracted to a local so this address appears once (the prerequisite
-# instructions in the file header reference the same identity).
-locals {
-  org_terraform_plan_readonly_email = "org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+# The seed-project SA that the plan-readonly CI SA impersonates. Created
+# in the `mento-terraform-seed-ffac` seed project (not `mento-monitoring`),
+# so this resource overrides the provider's default project. No project-level
+# roles granted — only `roles/storage.objectViewer` on the state bucket,
+# scoped via the resource binding below.
+resource "google_service_account" "org_terraform_plan_readonly" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "org-terraform-plan-readonly"
+  display_name = "Org Terraform (plan-readonly)"
+  description  = "Read-only impersonation target for CI plan jobs; sibling of org-terraform with state-bucket read access only."
+}
+
+# State-bucket read access for the plan-readonly seed SA. `objectViewer` is
+# sufficient for `terraform plan` because plan jobs pass `-lock=false` (see
+# WORKFLOW-PR NOTE in the file header — the GCS backend's lock-object
+# create/delete requires `objectAdmin`, which we deliberately don't grant).
+resource "google_storage_bucket_iam_member" "state_bucket_plan_readonly" {
+  bucket = "mento-terraform-tfstate-6ed6"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.org_terraform_plan_readonly.email}"
 }
 
 # Grants the plan-readonly CI SA the ability to mint tokens for the
 # `org-terraform-plan-readonly@seed` SA (read-only sibling of `org-terraform`).
-# That seed SA must already exist with state-bucket `objectViewer` — see the
-# PREREQUISITE block in the file header.
 resource "google_service_account_iam_member" "ci_plan_readonly_org_terraform_plan_readonly_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${local.org_terraform_plan_readonly_email}"
+  service_account_id = google_service_account.org_terraform_plan_readonly.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.metrics_bridge_plan_readonly.email}"
 }
