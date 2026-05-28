@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     warn: vi.fn(),
   },
   processEvents: vi.fn(),
+  reserveQuickNodeNonce: vi.fn(),
   config: {
     FUNCTION_TIMEOUT_SECONDS: undefined as string | undefined,
   },
@@ -45,6 +46,9 @@ vi.mock("./health-check", () => ({
 }));
 vi.mock("./logger", () => ({ logger: mocks.logger }));
 vi.mock("./process-events", () => ({ processEvents: mocks.processEvents }));
+vi.mock("./quicknode-replay-protection", () => ({
+  reserveQuickNodeNonce: mocks.reserveQuickNodeNonce,
+}));
 vi.mock("./validate-payload", () => ({
   validatePayload: mocks.validatePayload,
 }));
@@ -97,11 +101,12 @@ describe("processQuicknodeWebhook", () => {
       valid: true,
       payload: { result: [] },
     });
+    mocks.reserveQuickNodeNonce.mockResolvedValue({ valid: true });
     mocks.processEvents.mockResolvedValue({ processedEvents: [], skipped: 0 });
   });
 
   it("acknowledges duplicate webhook nonces without processing them", async () => {
-    mocks.validateQuickNodeWebhook.mockResolvedValue({
+    mocks.reserveQuickNodeNonce.mockResolvedValue({
       valid: false,
       status: 200,
       message: "Duplicate webhook nonce already processed",
@@ -113,10 +118,31 @@ describe("processQuicknodeWebhook", () => {
     await processQuicknodeWebhook(request(), res);
 
     expect(mocks.processEvents).not.toHaveBeenCalled();
+    expect(mocks.reserveQuickNodeNonce).toHaveBeenCalledWith(
+      "nonce-1",
+      "1700000000",
+    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.send).toHaveBeenCalledWith(
       "Duplicate webhook nonce already processed",
     );
+  });
+
+  it("does not reserve a nonce for an invalid payload", async () => {
+    mocks.validatePayload.mockReturnValue({
+      valid: false,
+      status: 400,
+      error: { error: "bad payload" },
+    });
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+
+    await processQuicknodeWebhook(request(), res);
+
+    expect(mocks.reserveQuickNodeNonce).not.toHaveBeenCalled();
+    expect(mocks.processEvents).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: "bad payload" });
   });
 
   it("returns 500 when downstream processing fails after validation claimed the nonce", async () => {

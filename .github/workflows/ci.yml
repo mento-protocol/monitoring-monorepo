@@ -35,6 +35,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # dorny/paths-filter reads PR file lists through the Pulls API.
+      pull-requests: read
     outputs:
       shared: ${{ steps.filter.outputs.shared }}
       ui: ${{ steps.filter.outputs.ui }}

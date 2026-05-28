@@ -91,6 +91,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # The sticky plan comment uses `github.rest.issues.*` because PR
+      # comments are issue comments in GitHub's REST API.
+      issues: write
       pull-requests: write
       actions: read
     defaults:

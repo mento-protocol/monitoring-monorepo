@@ -6,6 +6,7 @@ import { MULTISIG_CONFIG_ERROR } from "./constants";
 import { handleHealthCheck } from "./health-check";
 import { logger } from "./logger";
 import { processEvents } from "./process-events";
+import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { validatePayload } from "./validate-payload";
 import { validateQuickNodeWebhook } from "./validate-quicknode-webhook";
 
@@ -65,6 +66,8 @@ export const processQuicknodeWebhook = async (
     // 2. Verify webhook signature (skip in local development)
     const isProduction = process.env.NODE_ENV !== "development";
 
+    let validatedWebhook: { nonce: string; timestamp: string } | null = null;
+
     if (isProduction) {
       const requestValidation = await validateQuickNodeWebhook(req);
       if (!requestValidation.valid) {
@@ -75,6 +78,7 @@ export const processQuicknodeWebhook = async (
         res.status(requestValidation.status).send(requestValidation.message);
         return;
       }
+      validatedWebhook = requestValidation;
     }
 
     // 3. Validate payload structure
@@ -88,6 +92,26 @@ export const processQuicknodeWebhook = async (
       return;
     }
 
+    // 4. Reserve the nonce only after the payload is structurally valid. If
+    // QuickNode sends an envelope we do not understand, reserving first would
+    // make its retry look like a duplicate and permanently hide the producer
+    // bug instead of giving the fixed handler another chance to process it.
+    if (validatedWebhook) {
+      const replayValidation = await reserveQuickNodeNonce(
+        validatedWebhook.nonce,
+        validatedWebhook.timestamp,
+      );
+      if (!replayValidation.valid) {
+        logger.warn("Webhook replay validation failed", {
+          status: replayValidation.status,
+          message: replayValidation.message,
+          replayed: replayValidation.replayed,
+        });
+        res.status(replayValidation.status).send(replayValidation.message);
+        return;
+      }
+    }
+
     const webhookPayload = payloadValidation.payload;
     const webhookData = webhookPayload.result;
 
@@ -95,11 +119,11 @@ export const processQuicknodeWebhook = async (
       logCount: webhookData.length,
     });
 
-    // 4. Build context needed for processing
+    // 5. Build context needed for processing
     // We need this context BEFORE processing to correctly skip ExecutionSuccess duplicates
     const context = buildEventContext(webhookData);
 
-    // 5. Process events with complete context
+    // 6. Process events with complete context
     const results = await processEvents(webhookData, context, {
       budgetMs: getProcessingBudgetMs(),
       startedAtMs: requestStartedAtMs,
@@ -111,7 +135,7 @@ export const processQuicknodeWebhook = async (
       total: webhookData.length,
     });
 
-    // 6. Return success
+    // 7. Return success
     res.status(200).json({
       processed: results.processedEvents.length,
       skipped: results.skipped,
