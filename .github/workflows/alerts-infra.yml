@@ -30,15 +30,6 @@ name: Alerts Infra
 # reviewer can detect by checking the apply-job's plan output before
 # approving.
 #
-# Known limitation: `alerts/infra` includes a `local_file.env_file`
-# resource that writes `.env` for local dev. Fresh-checkout CI runners
-# don't have that file on disk, so terraform always shows it as needing
-# creation (exit 2) regardless of remote infra state. This means alerts/
-# infra merges still trigger the environment approval prompt even when
-# the only "change" is the local file recreation. Tracked as a follow-up
-# to either remove the resource from terraform or add an
-# `ignore_changes` lifecycle.
-#
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix module `alerts/infra`). This workflow adds the plan diff comment +
 # the apply gate.
@@ -341,9 +332,7 @@ jobs:
         # production-environment gate should read this job's plan output
         # before approving — it's the ground truth for what lands.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
-        # lock rather than failing the deploy. `local_file.env_file`
-        # recreates on every fresh-checkout apply (writes the local-dev
-        # `.env`) — expected, ephemeral, not state drift.
+        # lock rather than failing the deploy.
         run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
