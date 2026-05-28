@@ -128,8 +128,20 @@ describe("isOutOfBand", () => {
     expect(isOutOfBand(1.0, null, 0.01, "ready")).toBe(null);
   });
 
+  it("returns null when baseline is zero (falsy guards against div-by-zero)", () => {
+    // Pinned because the implementation uses `if (!baseline || !thresholdRatio)`
+    // rather than an explicit `=== null` check, so 0 must also short-circuit.
+    expect(isOutOfBand(1.0, 0, 0.01, "ready")).toBe(null);
+  });
+
   it("returns null when thresholdRatio is missing", () => {
     expect(isOutOfBand(1.0, 1.0, null, "ready")).toBe(null);
+  });
+
+  it("returns null when thresholdRatio is zero (degenerate zero-width band)", () => {
+    // Same falsy-guard semantics — a 0 threshold would otherwise classify
+    // every non-equal price as out-of-band.
+    expect(isOutOfBand(1.0, 1.0, 0, "ready")).toBe(null);
   });
 
   it("returns null when price is NaN", () => {
@@ -259,8 +271,15 @@ describe("buildOracleShapes", () => {
   it("anchors the upper red rect past max(baseline*10, yMax*2)", () => {
     const shapes = buildOracleShapes(undefined, 1.5, 1.0, 0.01);
     const redAbove = shapes![2];
-    // max(1*10, 1.5*2) = 10.
+    // max(1*10, 1.5*2) = 10 — the `baseline*10` term wins.
     expect(redAbove).toMatchObject({ y1: 10 });
+  });
+
+  it("anchors past yMax*2 when yMax dominates baseline (zoomed-out branch)", () => {
+    const shapes = buildOracleShapes(undefined, 6, 1.0, 0.01);
+    const redAbove = shapes![2];
+    // max(1*10, 6*2) = max(10, 12) = 12 — the `yMax*2` term wins.
+    expect(redAbove).toMatchObject({ y1: 12 });
   });
 });
 

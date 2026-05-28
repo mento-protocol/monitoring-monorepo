@@ -138,8 +138,8 @@ describe("attachOracleWheelHandler", () => {
 
   it("drops sub-pixel scroll noise (|deltaY + deltaX| < 1) without preventDefault", () => {
     // Plot-area cursor but tiny delta — common at trackpad gesture start/end.
-    // This is the PR-624 round-2 fix Cursor Bugbot caught; the early-return
-    // sits BEFORE preventDefault so the page still gets normal scroll noise.
+    // The early-return sits BEFORE preventDefault so the page still gets
+    // normal scroll noise.
     const { preventSpy } = fireWheel({
       clientX: 400,
       clientY: 180,
