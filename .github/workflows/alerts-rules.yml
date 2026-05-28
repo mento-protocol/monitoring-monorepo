@@ -180,6 +180,24 @@ jobs:
             echo "has-changes=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Strip refresh noise from plan output
+        # Terraform's plan output starts with a long `Refreshing state...` /
+        # `Reading...` / `Read complete after` preamble — one line per state
+        # entry, easily dominates the plan view when the stack has dozens of
+        # resources. Strip those lines in-place so the Plan summary and the
+        # sticky PR comment (both downstream of /tmp/tf-plan.txt) show only
+        # the actionable diff. The raw output is still in the workflow log
+        # for debugging refresh failures.
+        if: always()
+        working-directory: /tmp
+        run: |
+          if [ -f tf-plan.txt ]; then
+            grep -vE '^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after' tf-plan.txt \
+              | awk 'NF || found {found=1; print}' \
+              | cat -s > tf-plan.clean.txt
+            mv tf-plan.clean.txt tf-plan.txt
+          fi
+
       - name: Plan summary
         # Renders the plan diff at the top of the job page so reviewers
         # don't have to scroll the raw `Plan` step log. Same source data
@@ -383,6 +401,20 @@ jobs:
           EXITCODE=${PIPESTATUS[0]}
           set -e
           exit "$EXITCODE"
+
+      - name: Strip refresh noise from apply output
+        # Same preamble-stripping treatment as the plan step — terraform
+        # apply also refreshes state before showing the action plan. See the
+        # equivalent step under `plan` for the full rationale.
+        if: always()
+        working-directory: /tmp
+        run: |
+          if [ -f tf-apply.txt ]; then
+            grep -vE '^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after' tf-apply.txt \
+              | awk 'NF || found {found=1; print}' \
+              | cat -s > tf-apply.clean.txt
+            mv tf-apply.clean.txt tf-apply.txt
+          fi
 
       - name: Apply summary
         # Renders the apply output at the top of the job page so reviewers
