@@ -35,7 +35,7 @@ describe("replaceSnapshotHashes — intel hashes", () => {
     ];
     const deepReplacement = replacements.find((r) => r.key === INTEL_DEEP_KEY);
     expect(deepReplacement).toBeDefined();
-    expect(JSON.parse(deepReplacement!.fields["0xaaa"])).toEqual(record);
+    expect(JSON.parse(deepReplacement!.fields["0xaaa"]!)).toEqual(record);
   });
 
   it("passes intelTransfers fields as JSON-encoded hash", async () => {
@@ -55,7 +55,7 @@ describe("replaceSnapshotHashes — intel hashes", () => {
     ];
     const r = replacements.find((x) => x.key === INTEL_TRANSFERS_KEY);
     expect(r).toBeDefined();
-    expect(JSON.parse(r!.fields["0xbbb"])).toEqual(record);
+    expect(JSON.parse(r!.fields["0xbbb"]!)).toEqual(record);
   });
 
   it("passes intelWealth fields as JSON-encoded hash", async () => {
@@ -75,7 +75,7 @@ describe("replaceSnapshotHashes — intel hashes", () => {
     ];
     const r = replacements.find((x) => x.key === INTEL_WEALTH_KEY);
     expect(r).toBeDefined();
-    expect(JSON.parse(r!.fields["0xccc"])).toEqual(record);
+    expect(JSON.parse(r!.fields["0xccc"]!)).toEqual(record);
   });
 
   it("passes intelEntities fields as JSON-encoded hash", async () => {
@@ -94,7 +94,7 @@ describe("replaceSnapshotHashes — intel hashes", () => {
     ];
     const r = replacements.find((x) => x.key === INTEL_ENTITIES_KEY);
     expect(r).toBeDefined();
-    expect(JSON.parse(r!.fields["binance"])).toEqual(record);
+    expect(JSON.parse(r!.fields["binance"]!)).toEqual(record);
   });
 
   it("passes intelEntityCps fields as JSON-encoded hash", async () => {
@@ -113,7 +113,7 @@ describe("replaceSnapshotHashes — intel hashes", () => {
     ];
     const r = replacements.find((x) => x.key === INTEL_ENTITY_CPS_KEY);
     expect(r).toBeDefined();
-    expect(JSON.parse(r!.fields["coinbase"])).toEqual(record);
+    expect(JSON.parse(r!.fields["coinbase"]!)).toEqual(record);
   });
 
   it("combines labels + reports + intel hash in a single call", async () => {

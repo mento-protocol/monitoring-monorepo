@@ -602,7 +602,7 @@ describe("validateSnapshotReports", () => {
       { importerEmail: "alice@mentolabs.xyz" },
     );
     if ("error" in result) throw new Error("expected ok");
-    const r = result.reports[ADDR_A];
+    const r = result.reports[ADDR_A]!;
     expect(r.body).toBe("investigation");
     expect(r.title).toBe("Counterparty");
     expect(r.authorEmail).toBe("alice@mentolabs.xyz");
@@ -635,7 +635,7 @@ describe("validateSnapshotReports", () => {
       },
     );
     if ("error" in result) throw new Error("expected ok");
-    const r = result.reports[ADDR_A];
+    const r = result.reports[ADDR_A]!;
     expect(r.body).toBe("investigation");
     expect(r.title).toBe("Counterparty");
     expect(r.authorEmail).toBe("analyst@mentolabs.xyz");
@@ -678,7 +678,7 @@ describe("validateSnapshotReports", () => {
     );
     if ("error" in result) throw new Error("expected ok");
     expect(Object.keys(result.reports)).toEqual([upper.toLowerCase()]);
-    expect(result.reports[upper.toLowerCase()].body).toBe("ok");
+    expect(result.reports[upper.toLowerCase()]!.body).toBe("ok");
   });
 
   it("trims and drops whitespace-only titles (matches sanitizeReportInput)", async () => {
@@ -689,7 +689,7 @@ describe("validateSnapshotReports", () => {
       opts,
     );
     if ("error" in result) throw new Error("expected ok");
-    expect(result.reports[ADDR_A].title).toBeUndefined();
+    expect(result.reports[ADDR_A]!.title).toBeUndefined();
   });
 
   it("rejects non-string title (defensive: type coercion shouldn't happen)", async () => {

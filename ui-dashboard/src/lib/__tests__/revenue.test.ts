@@ -103,9 +103,9 @@ describe("buildDailyFeeSeries", () => {
     const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const result = buildDailyFeeSeries([networkData([feeSnapshot()])], window);
     expect(result).toHaveLength(1);
-    expect(result[0].timestamp).toBe(TODAY_BUCKET);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2); // 1 USDm = $1
-    expect(result[0].lpFeesUSD).toBe(0);
+    expect(result[0]!.timestamp).toBe(TODAY_BUCKET);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(1, 2); // 1 USDm = $1
+    expect(result[0]!.lpFeesUSD).toBe(0);
   });
 
   it("sums multiple snapshots in the same day across pools", () => {
@@ -132,7 +132,7 @@ describe("buildDailyFeeSeries", () => {
     );
     const total = result.reduce((s, p) => s + p.protocolFeesUSD, 0);
     expect(total).toBeCloseTo(6, 2);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(6, 2);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(6, 2);
   });
 
   it("gap-fills missing days with zeros", () => {
@@ -154,10 +154,10 @@ describe("buildDailyFeeSeries", () => {
       window,
     );
     expect(result.length).toBeGreaterThanOrEqual(4);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
-    expect(result[1].protocolFeesUSD).toBe(0);
-    expect(result[2].protocolFeesUSD).toBe(0);
-    expect(result[3].protocolFeesUSD).toBeCloseTo(1, 2);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(1, 2);
+    expect(result[1]!.protocolFeesUSD).toBe(0);
+    expect(result[2]!.protocolFeesUSD).toBe(0);
+    expect(result[3]!.protocolFeesUSD).toBeCloseTo(1, 2);
     const total = result.reduce((s, p) => s + p.protocolFeesUSD, 0);
     expect(total).toBeCloseTo(2, 2);
   });
@@ -179,7 +179,7 @@ describe("buildDailyFeeSeries", () => {
       window,
     );
     expect(result).toHaveLength(1);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(1.3263, 2);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(1.3263, 2);
   });
 
   it("skips UNKNOWN slots silently", () => {
@@ -227,8 +227,8 @@ describe("buildDailyFeeSeries", () => {
     });
     const result = buildDailyFeeSeries([net1, net2], window);
     expect(result).toHaveLength(1);
-    expect(result[0].timestamp).toBe(TODAY_BUCKET);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(2, 2);
+    expect(result[0]!.timestamp).toBe(TODAY_BUCKET);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(2, 2);
   });
 
   it("skips networks with top-level errors", () => {
@@ -240,7 +240,7 @@ describe("buildDailyFeeSeries", () => {
     );
     const result = buildDailyFeeSeries([net1, net2], window);
     expect(result).toHaveLength(1);
-    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
+    expect(result[0]!.protocolFeesUSD).toBeCloseTo(1, 2);
   });
 
   it("contributes nothing from networks with feeSnapshotsError", () => {

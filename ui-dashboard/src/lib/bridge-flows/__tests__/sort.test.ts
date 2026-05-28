@@ -53,7 +53,7 @@ describe("sortTransfers — time branch", () => {
     const a = mk({ id: "a", sentTimestamp: null, firstSeenAt: "5000" });
     const b = mk({ id: "b", sentTimestamp: "3000", firstSeenAt: "0" });
     const out = sortTransfers([a, b], "time", "desc", noRates);
-    expect(out[0].id).toBe("a"); // firstSeenAt 5000 > sentTimestamp 3000
+    expect(out[0]!.id).toBe("a"); // firstSeenAt 5000 > sentTimestamp 3000
   });
 });
 
@@ -84,7 +84,7 @@ describe("sortTransfers — route branch", () => {
     const known = mk({ id: "k", sourceChainId: 42220, destChainId: 143 });
     const unknown = mk({ id: "u", sourceChainId: null, destChainId: null });
     const asc = sortTransfers([unknown, known], "route", "asc", noRates);
-    expect(asc[0].id).toBe("k");
+    expect(asc[0]!.id).toBe("k");
   });
 
   it("sinks unknown chain IDs on descending too", () => {
@@ -113,7 +113,7 @@ describe("sortTransfers — amount branches", () => {
       tokenDecimals: 18,
     });
     const out = sortTransfers([small, big], "amount", "desc", noRates);
-    expect(out[0].id).toBe("big");
+    expect(out[0]!.id).toBe("big");
   });
 
   it("amount null rows sink", () => {
@@ -124,7 +124,7 @@ describe("sortTransfers — amount branches", () => {
     });
     const empty = mk({ id: "empty", amount: null });
     const asc = sortTransfers([empty, sized], "amount", "asc", noRates);
-    expect(asc[0].id).toBe("sized"); // null sinks
+    expect(asc[0]!.id).toBe("sized"); // null sinks
   });
 });
 
@@ -145,7 +145,7 @@ describe("sortTransfers — amountUsd branches", () => {
     });
     // USDm is 1:1 USD via the usd-pegged set; live → 5. pinned → 9999.
     const desc = sortTransfers([live, pinned], "amountUsd", "desc", noRates);
-    expect(desc[0].id).toBe("pinned");
+    expect(desc[0]!.id).toBe("pinned");
   });
 });
 
@@ -181,7 +181,7 @@ describe("sortTransfers — duration branch", () => {
       status: "SENT",
     });
     const asc = sortTransfers([pending, delivered], "duration", "asc", noRates);
-    expect(asc[0].id).toBe("d");
+    expect(asc[0]!.id).toBe("d");
     // Null sinks on desc too — without this, a page of duration-desc
     // sorted rows could start with a block of "pending" cells on top,
     // which is the opposite of the "no-data rows sink" UX contract.
@@ -191,8 +191,8 @@ describe("sortTransfers — duration branch", () => {
       "desc",
       noRates,
     );
-    expect(desc[0].id).toBe("d");
-    expect(desc[1].id).toBe("p");
+    expect(desc[0]!.id).toBe("d");
+    expect(desc[1]!.id).toBe("p");
   });
 });
 
@@ -201,7 +201,7 @@ describe("sortTransfers — string branches sink empty values", () => {
     const named = mk({ id: "named", sender: "0xaaa" });
     const empty = mk({ id: "empty", sender: null });
     const asc = sortTransfers([empty, named], "sender", "asc", noRates);
-    expect(asc[0].id).toBe("named");
+    expect(asc[0]!.id).toBe("named");
   });
 
   it("sorts by status lexically", () => {
@@ -209,6 +209,6 @@ describe("sortTransfers — string branches sink empty values", () => {
     const pending = mk({ id: "p", status: "PENDING" });
     const out = sortTransfers([pending, delivered], "status", "asc", noRates);
     // deriveBridgeStatus(delivered) === "DELIVERED" < "PENDING" lex
-    expect(out[0].id).toBe("d");
+    expect(out[0]!.id).toBe("d");
   });
 });

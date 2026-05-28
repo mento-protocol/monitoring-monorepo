@@ -304,9 +304,9 @@ describe("getAllReports — full hash for backup snapshots", () => {
     const { getAllReports } = await import("@/lib/address-reports");
     const reports = await getAllReports();
     expect(Object.keys(reports)).toEqual(["0xaaa", "0xbbb"]);
-    expect(reports["0xaaa"].body).toBe("Investigation A");
-    expect(reports["0xbbb"].title).toBe("Counterparty");
-    expect(reports["0xbbb"].source).toBe("claude");
+    expect(reports["0xaaa"]!.body).toBe("Investigation A");
+    expect(reports["0xbbb"]!.title).toBe("Counterparty");
+    expect(reports["0xbbb"]!.source).toBe("claude");
     expect(mockHgetall).toHaveBeenCalledWith("reports");
   });
 
@@ -327,10 +327,10 @@ describe("getAllReports — full hash for backup snapshots", () => {
     });
     const { getAllReports } = await import("@/lib/address-reports");
     const reports = await getAllReports();
-    expect(reports["0xccc"].body).toBe("legacy");
-    expect(reports["0xccc"].version).toBe(1);
-    expect(typeof reports["0xccc"].createdAt).toBe("string");
-    expect(typeof reports["0xccc"].updatedAt).toBe("string");
+    expect(reports["0xccc"]!.body).toBe("legacy");
+    expect(reports["0xccc"]!.version).toBe(1);
+    expect(typeof reports["0xccc"]!.createdAt).toBe("string");
+    expect(typeof reports["0xccc"]!.updatedAt).toBe("string");
   });
 });
 
@@ -359,7 +359,7 @@ describe("importReports — restore-from-snapshot bulk write", () => {
     // Keys lowercased; values are JSON-encoded so the on-disk shape matches
     // what the live upsert script writes.
     expect(Object.keys(fields)).toEqual(["0xaaa", "0xbbb"]);
-    expect(JSON.parse((fields as Record<string, string>)["0xaaa"])).toEqual({
+    expect(JSON.parse((fields as Record<string, string>)["0xaaa"]!)).toEqual({
       body: "A",
       createdAt: "2026-05-01T00:00:00Z",
       updatedAt: "2026-05-02T00:00:00Z",

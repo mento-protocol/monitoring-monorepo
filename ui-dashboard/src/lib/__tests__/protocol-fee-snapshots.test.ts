@@ -61,7 +61,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
     expect(entries).toHaveLength(1);
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.poolAddress).toBe(POOL_A);
     expect(a.poolId).toBe(`${CHAIN}-${POOL_A}`);
     expect(a.totalFeesUSD).toBeCloseTo(1.5, 4);
@@ -85,8 +85,8 @@ describe("aggregateFeeSnapshotsByPool", () => {
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
-    expect(entries[0].totalFeesUSD).toBeCloseTo(132.63, 1);
-    expect(entries[0].unpriced).toBe(false);
+    expect(entries[0]!.totalFeesUSD).toBeCloseTo(132.63, 1);
+    expect(entries[0]!.unpriced).toBe(false);
   });
 
   it("doesn't double-count mixed pegged + FX (pegged in feesUsdWei, FX in arrays)", () => {
@@ -106,8 +106,8 @@ describe("aggregateFeeSnapshotsByPool", () => {
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
     // 5 USD + 100 EUR × 1.1455 = 5 + 114.55 = 119.55
-    expect(entries[0].totalFeesUSD).toBeCloseTo(119.55, 1);
-    expect(entries[0].unpriced).toBe(false);
+    expect(entries[0]!.totalFeesUSD).toBeCloseTo(119.55, 1);
+    expect(entries[0]!.unpriced).toBe(false);
   });
 
   it("sums multi-day snapshots in same pool — all-time = sum of per-day rows", () => {
@@ -136,7 +136,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
     expect(entries).toHaveLength(1);
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.fees24hUSD).toBeCloseTo(1, 4);
     expect(a.fees7dUSD).toBeCloseTo(3, 4); // today + 5d
     expect(a.fees30dUSD).toBeCloseTo(7, 4); // today + 5d + 20d
@@ -156,7 +156,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.unpriced).toBe(true);
     expect(a.unpriced24h).toBe(true);
     expect(a.unpriced7d).toBe(true);
@@ -187,7 +187,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.unpriced).toBe(true); // all-time hits the old unpriced day
     expect(a.unpriced24h).toBe(false); // recent windows are clean
     expect(a.unpriced7d).toBe(false);
@@ -209,7 +209,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.unpriced).toBe(true);
     expect(a.unpriced24h).toBe(false);
     expect(a.unpriced7d).toBe(true);
@@ -235,7 +235,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
       ratesWithoutGBP,
       CHAIN,
     );
-    const a = entries[0];
+    const a = entries[0]!;
     expect(a.unpriced).toBe(true);
     expect(a.unpriced24h).toBe(true);
     expect(a.unpriced7d).toBe(true);
@@ -265,10 +265,10 @@ describe("aggregateFeeSnapshotsByPool", () => {
       CHAIN,
       now,
     );
-    expect(entries[0].fees24hUSD).toBe(0);
-    expect(entries[0].fees7dUSD).toBeCloseTo(5, 4);
-    expect(entries[0].fees30dUSD).toBeCloseTo(5, 4);
-    expect(entries[0].totalFeesUSD).toBeCloseTo(5, 4);
+    expect(entries[0]!.fees24hUSD).toBe(0);
+    expect(entries[0]!.fees7dUSD).toBeCloseTo(5, 4);
+    expect(entries[0]!.fees30dUSD).toBeCloseTo(5, 4);
+    expect(entries[0]!.totalFeesUSD).toBeCloseTo(5, 4);
   });
 
   it("emits one entry per (chain, address) tuple", () => {
@@ -309,7 +309,7 @@ describe("aggregateFeeSnapshotsByPool", () => {
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
     expect(entries).toHaveLength(1);
-    expect(entries[0].poolAddress).toBe(POOL_A);
-    expect(entries[0].totalFeesUSD).toBeCloseTo(3, 4);
+    expect(entries[0]!.poolAddress).toBe(POOL_A);
+    expect(entries[0]!.totalFeesUSD).toBeCloseTo(3, 4);
   });
 });
