@@ -1,6 +1,14 @@
 #!/usr/bin/env node
-// Measure Interaction-to-Next-Paint (INP) for the dashboard's interactive
-// surface and fail closed on a regression beyond INP_BUDGET_MS.
+// Measure Interaction-to-Next-Paint (INP) across multiple high-churn
+// dashboard surfaces and fail closed on any regression beyond INP_BUDGET_MS.
+//
+// Each surface runs in its own fresh chromium context so web-vitals state
+// can't leak between interactions: navigate cold → inject web-vitals →
+// drive the scripted interaction(s) → wait for the PerformanceObserver to
+// settle → flush via visibilitychange → read `window.__inp`. Every
+// recorded INP is asserted against INP_BUDGET_MS independently; the
+// script aggregates per-surface results and exits non-zero if any one
+// exceeds the budget.
 //
 // Why not Lighthouse user-flow:
 //   Lighthouse's timespan mode estimates INP from main-thread timing in a
@@ -22,11 +30,12 @@
 //   INP_BUDGET_MS        — optional, default 200 (web-vitals "good" threshold).
 //
 // Exit codes:
-//   0 — INP ≤ budget.
-//   1 — INP > budget, no measurement captured, chromium / network failure,
-//       or any other failure. Fail-closed: a silently absent metric means
-//       the gate isn't validating anything, so the workflow should fail
-//       loudly rather than green-light an unverifiable run.
+//   0 — every surface's INP ≤ budget.
+//   1 — any surface exceeds the budget, captures no measurement, lands
+//       on the SSO interstitial, or otherwise fails. Fail-closed: a
+//       silently absent metric means the gate isn't validating anything,
+//       so the workflow should fail loudly rather than green-light an
+//       unverifiable run.
 
 import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
@@ -70,131 +79,211 @@ const webVitalsIife = resolve(
   "web-vitals.iife.js",
 );
 
-const browser = await chromium.launch({ headless: true });
-let exitCode = 0;
-try {
-  // `bypassCSP: true` is required because the dashboard ships a nonce-based
-  // CSP (`script-src 'self' 'nonce-…'`, no `'unsafe-inline'`, see
-  // `ui-dashboard/src/lib/csp.ts`). `page.addScriptTag({ path })` injects
-  // an un-nonced inline `<script>` element that Chromium would otherwise
-  // block, leaving `window.webVitals` undefined and the INP read NaN.
-  // The bypass only affects the test context; the served dashboard's CSP
-  // is unchanged.
+// One surface = one navigation + interaction sequence + INP read. Each
+// runs in a fresh chromium context so prior interactions can't pollute
+// the next surface's `onINP` observer.
+const SURFACES = [
+  {
+    name: "pools-filter",
+    path: "/pools",
+    readySelector:
+      'input[aria-label="Filter swaps by pool ID or pool address"]',
+    async interact(page) {
+      const filterInput =
+        'input[aria-label="Filter swaps by pool ID or pool address"]';
+      await page.click(filterInput);
+      // `pressSequentially()` sends real keydown/keyup events. `page.fill()`
+      // would fire only a synthetic `input` event, which wouldn't surface
+      // per-keystroke latency to web-vitals.
+      await page
+        .locator(filterInput)
+        .pressSequentially("0x0000000000000000000000000000000000000000", {
+          delay: 20,
+        });
+      await page.click('button:has-text("Apply")');
+    },
+  },
+  {
+    name: "leaderboard-time-window",
+    path: "/leaderboard",
+    // Wait for the radio-group shell that holds the time-window buttons.
+    readySelector: '[role="group"][aria-label="Time window"]',
+    async interact(page) {
+      // The leaderboard ships with one window active by default; clicking a
+      // sibling triggers a `router.replace`-backed re-render via
+      // `updateRange`. The click is a qualifying Event-Timing interaction.
+      // We pick an explicit alternative window so the click flips state
+      // even when the default changes.
+      const buttons = page.locator(
+        '[role="group"][aria-label="Time window"] button',
+      );
+      const count = await buttons.count();
+      if (count < 2) {
+        throw new Error(
+          `leaderboard time-window group has ${count} button(s); expected at least 2`,
+        );
+      }
+      // Find an inactive button (`aria-pressed="false"`) and click it.
+      for (let i = 0; i < count; i += 1) {
+        const btn = buttons.nth(i);
+        const pressed = await btn.getAttribute("aria-pressed");
+        if (pressed === "false") {
+          await btn.click();
+          return;
+        }
+      }
+      throw new Error(
+        "leaderboard time-window group has no inactive button to click",
+      );
+    },
+  },
+  {
+    name: "leaderboard-sort",
+    path: "/leaderboard",
+    // The `SortableTh` from `ui-dashboard/src/components/sortable-th.tsx`
+    // renders a `<th scope="col" aria-sort>` containing a `<button>` —
+    // we drive sort by clicking that button.
+    readySelector: 'th[aria-sort] button:has-text("Volume")',
+    async interact(page) {
+      // Click the Volume column header to toggle sort. The
+      // `useTableSort` hook re-derives the sorted list on each click, so
+      // every click is a qualifying interaction that produces an Event-
+      // Timing entry.
+      const volume = page.locator('th[aria-sort] button:has-text("Volume")');
+      await volume.click();
+      // Click again to flip direction (ascending ↔ descending). Each
+      // click is independently observed by web-vitals; with
+      // `reportAllChanges`, the worst INP across both updates `window.__inp`.
+      await volume.click();
+    },
+  },
+];
+
+async function measureSurface(browser, surface) {
+  // Each surface gets a fresh context so `onINP` state from a previous
+  // surface can't leak in. `bypassCSP: true` is required because the
+  // dashboard ships a nonce-based CSP — `page.addScriptTag({ path })`
+  // injects an un-nonced inline `<script>` that Chromium would otherwise
+  // block, leaving `window.webVitals` undefined.
   const context = await browser.newContext({
     bypassCSP: true,
     extraHTTPHeaders: bypassHeaders,
   });
-  const page = await context.newPage();
-
-  await page.goto(`${PREVIEW_URL}/pools`, {
-    waitUntil: "load",
-    timeout: 30_000,
-  });
-
-  // Sanity-check we landed on the dashboard, not the Vercel SSO interstitial.
-  // Mirrors the audited-page guard in .github/workflows/lighthouse.yml so a
-  // bypass regression fails this step too, not just the lhci accessibility
-  // assertion.
-  const landedUrl = page.url();
-  if (landedUrl.includes("vercel.com/login")) {
-    console.error(
-      `::error::Landed on Vercel SSO interstitial (${landedUrl}) — deployment-protection bypass likely regressed.`,
-    );
-    exitCode = 1;
-    throw new Error("SSO interstitial");
-  }
-
-  // Inject web-vitals' IIFE bundle so the page exposes window.webVitals.onINP.
-  await page.addScriptTag({ path: webVitalsIife });
-
-  await page.evaluate(() => {
-    window.__inp = null;
-    // `reportAllChanges: true` makes onINP fire every time the worst-observed
-    // INP value updates, not just once on visibility-change. Without it, a
-    // `PerformanceEventTiming` entry that arrives at the observer AFTER the
-    // visibility-change handler runs is silently dropped — the standard
-    // single-fire flush keeps whatever value it had at flush time, even if
-    // the slow interaction's entry only lands a few frames later. With
-    // `reportAllChanges`, every settled interaction updates `window.__inp`
-    // and the gate sees the worst one.
-    window.webVitals.onINP(
-      (metric) => {
-        window.__inp = metric.value;
-      },
-      { reportAllChanges: true },
-    );
-  });
-
-  // Wait for the dashboard's filter input to render — it's part of the
-  // /pools client-rendered shell and proves the page hydrated past the SSR
-  // skeleton.
-  const filterInput =
-    'input[aria-label="Filter swaps by pool ID or pool address"]';
-  await page.waitForSelector(filterInput, { timeout: 20_000 });
-
-  // Scripted interaction sequence: focus the input, type a filter value
-  // via real keydown/keyup events, click Apply. `pressSequentially()` sends
-  // real key events (each one is a qualifying Event-Timing-API interaction);
-  // `page.fill()` would only fire a single synthetic `input` event, which
-  // wouldn't surface typing latency to web-vitals.
-  await page.click(filterInput);
-  await page
-    .locator(filterInput)
-    .pressSequentially("0x0000000000000000000000000000000000000000", {
-      delay: 20,
+  try {
+    const page = await context.newPage();
+    await page.goto(`${PREVIEW_URL}${surface.path}`, {
+      waitUntil: "load",
+      timeout: 30_000,
     });
-  await page.click('button:has-text("Apply")');
 
-  // Settle window: let the browser paint and deliver every
-  // `PerformanceEventTiming` entry to the observer before we flush. Without
-  // this wait the Apply click's entry can arrive AFTER the visibility-change
-  // and be silently dropped. 1.5 s is well beyond the worst-case
-  // PerformanceObserver microtask delay observed on GHA runners while
-  // staying within the step's 30 s budget.
-  await page.waitForTimeout(1_500);
+    // Sanity-check we landed on the dashboard, not the Vercel SSO
+    // interstitial. Mirrors the audited-page guard in
+    // `.github/workflows/lighthouse.yml` so a bypass regression fails
+    // this step too, not just the lhci accessibility assertion.
+    const landedUrl = page.url();
+    if (landedUrl.includes("vercel.com/login")) {
+      throw new Error(
+        `Landed on Vercel SSO interstitial (${landedUrl}) — deployment-protection bypass likely regressed.`,
+      );
+    }
 
-  // Force web-vitals to flush by hiding the page (its `onINP` reports on
-  // visibility change in addition to the per-update callbacks we enabled
-  // via `reportAllChanges: true`).
-  await page.evaluate(() =>
-    Object.defineProperty(document, "visibilityState", {
-      value: "hidden",
-      configurable: true,
-    }),
-  );
-  await page.evaluate(() =>
-    document.dispatchEvent(new Event("visibilitychange")),
-  );
-  await page
-    .waitForFunction(() => window.__inp !== null, { timeout: 5_000 })
-    .catch(() => {});
+    await page.addScriptTag({ path: webVitalsIife });
 
-  const inp = await page.evaluate(() => window.__inp);
+    await page.evaluate(() => {
+      window.__inp = null;
+      // `reportAllChanges: true` makes onINP fire every time the
+      // worst-observed INP value updates, not just once on
+      // visibility-change. Without it, a `PerformanceEventTiming` entry
+      // that arrives at the observer AFTER the visibility-change handler
+      // runs is silently dropped.
+      window.webVitals.onINP(
+        (metric) => {
+          window.__inp = metric.value;
+        },
+        { reportAllChanges: true },
+      );
+    });
 
-  if (inp === null) {
-    console.error(
-      "::error::No INP measurement captured — web-vitals didn't observe a qualifying interaction inside the read window. Failing closed: a silently absent metric means the gate isn't validating anything (web-vitals API change, broken flush, or unqualifying interaction). Investigate before re-running.",
+    await page.waitForSelector(surface.readySelector, { timeout: 20_000 });
+    await surface.interact(page);
+
+    // Settle window: let the browser paint and deliver every
+    // `PerformanceEventTiming` entry to the observer before we flush.
+    await page.waitForTimeout(1_500);
+
+    // Flush via visibility-change in addition to the per-update
+    // `reportAllChanges` callbacks. Belt-and-suspenders.
+    await page.evaluate(() =>
+      Object.defineProperty(document, "visibilityState", {
+        value: "hidden",
+        configurable: true,
+      }),
     );
-    exitCode = 1;
-  } else if (inp > INP_BUDGET_MS) {
-    console.error(
-      `::error::INP regression: ${inp.toFixed(1)}ms > ${INP_BUDGET_MS}ms budget`,
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange")),
     );
-    exitCode = 1;
-  } else {
-    console.log(
-      `INP measurement: ${inp.toFixed(1)}ms (budget: ${INP_BUDGET_MS}ms) — passed`,
-    );
+    await page
+      .waitForFunction(() => window.__inp !== null, { timeout: 5_000 })
+      .catch(() => {});
+
+    const inp = await page.evaluate(() => window.__inp);
+    return { name: surface.name, path: surface.path, inp };
+  } finally {
+    await context.close();
   }
-} catch (err) {
-  if (exitCode === 0) {
-    console.error(
-      `::error::INP measurement failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    exitCode = 1;
+}
+
+const browser = await chromium.launch({ headless: true });
+const results = [];
+let exitCode = 0;
+try {
+  for (const surface of SURFACES) {
+    try {
+      const result = await measureSurface(browser, surface);
+      results.push(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `::error::INP measurement failed for ${surface.name} (${surface.path}): ${msg}`,
+      );
+      results.push({
+        name: surface.name,
+        path: surface.path,
+        inp: null,
+        error: msg,
+      });
+      exitCode = 1;
+    }
   }
 } finally {
   await browser.close();
+}
+
+console.log(`\nINP measurements (budget: ${INP_BUDGET_MS}ms):`);
+for (const r of results) {
+  if (r.error) {
+    console.log(`  ✗ ${r.name} (${r.path}) → ERROR: ${r.error}`);
+    continue;
+  }
+  if (r.inp === null) {
+    console.log(`  ✗ ${r.name} (${r.path}) → no measurement captured`);
+    exitCode = 1;
+    continue;
+  }
+  if (r.inp > INP_BUDGET_MS) {
+    console.log(
+      `  ✗ ${r.name} (${r.path}) → ${r.inp.toFixed(1)}ms (over budget)`,
+    );
+    exitCode = 1;
+    continue;
+  }
+  console.log(`  ✓ ${r.name} (${r.path}) → ${r.inp.toFixed(1)}ms`);
+}
+
+if (exitCode !== 0) {
+  console.error(
+    "::error::One or more INP measurements exceeded the budget, captured no value, or errored. Fail-closed: a silently absent metric means the gate isn't validating anything (web-vitals API change, broken flush, unqualifying interaction, bypass regression, or selector drift). Investigate before re-running.",
+  );
 }
 
 process.exit(exitCode);
