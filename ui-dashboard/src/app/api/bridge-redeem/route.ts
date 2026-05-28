@@ -162,7 +162,7 @@ function getSingleVaaRaw(
     };
   }
 
-  const vaaRaw = operations[0].vaa?.raw;
+  const vaaRaw = operations[0]!.vaa?.raw;
   if (!vaaRaw || vaaRaw.length === 0) {
     return {
       ok: false,

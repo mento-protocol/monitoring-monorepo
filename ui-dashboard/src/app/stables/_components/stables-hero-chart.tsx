@@ -73,7 +73,7 @@ export function StablesHeroChart({
     for (const [key, rows] of grouped) {
       const series = buildTokenUsdTimeSeries(rows, rates, effectiveStartTs);
       if (series.length === 0) continue;
-      const sample = rows[0];
+      const sample = rows[0]!;
       breakdownEntries.push({
         id: key,
         name: displayLabel(sample.tokenSymbol, sample.source),
@@ -99,7 +99,7 @@ export function StablesHeroChart({
 
   const headline =
     totalSeries.length > 0
-      ? formatUSD(totalSeries[totalSeries.length - 1].value)
+      ? formatUSD(totalSeries[totalSeries.length - 1]!.value)
       : "—";
   const change = stockWoWChangePct(totalSeries);
 

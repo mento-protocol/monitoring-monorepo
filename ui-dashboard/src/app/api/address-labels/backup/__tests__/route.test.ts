@@ -262,7 +262,7 @@ describe("GET /api/address-labels/backup", () => {
     });
     await GET(req);
 
-    const stored = JSON.parse(hashBlobContents().labels);
+    const stored = JSON.parse(hashBlobContents().labels!);
     expect(stored["0xggg"].name).toBe("Cross-chain");
     expect(stored["0xabc"].name).toBe("Test");
     // The per-hash blob is just the records map; no `addresses` /
@@ -284,7 +284,7 @@ describe("GET /api/address-labels/backup", () => {
     });
     await GET(req);
 
-    const stored = JSON.parse(hashBlobContents().reports);
+    const stored = JSON.parse(hashBlobContents().reports!);
     expect(stored["0xabc"]).toEqual({
       body: "Suspected MEV operator. See thread.",
       title: "Investigation",
@@ -306,7 +306,7 @@ describe("GET /api/address-labels/backup", () => {
     });
     await GET(req);
 
-    const reportsBlob = JSON.parse(hashBlobContents().reports);
+    const reportsBlob = JSON.parse(hashBlobContents().reports!);
     expect(reportsBlob).toEqual({});
     // Manifest still includes the reports entry.
     const manifest = JSON.parse(manifestBody().content);

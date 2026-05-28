@@ -89,7 +89,7 @@ async function parseSniffedPayload(
 }
 
 function normalizeMediaType(contentType: string): string {
-  return contentType.split(";", 1)[0].trim().toLowerCase();
+  return contentType.split(";", 1)[0]!.trim().toLowerCase();
 }
 
 function dispatchJsonImport(

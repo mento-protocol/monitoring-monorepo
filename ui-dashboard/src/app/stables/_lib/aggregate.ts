@@ -111,7 +111,7 @@ function buildTokenAgg(
     if (ta > tb) return 1;
     return 0;
   });
-  const latest = rows[rows.length - 1];
+  const latest = rows[rows.length - 1]!;
   const latestSupply = BigInt(latest.totalSupply);
   const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff);
   const netChange7d = latestSupply - baselineSupply;
@@ -179,7 +179,7 @@ export function buildTokenUsdTimeSeries(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Array<{ timestamp: number; valueUsd: number }> {
   if (snapshots.length === 0) return [];
-  const symbol = snapshots[0].tokenSymbol;
+  const symbol = snapshots[0]!.tokenSymbol;
   const rate = effectiveOracleRate(rates, symbol);
   if (rate == null) return [];
 
@@ -191,7 +191,7 @@ export function buildTokenUsdTimeSeries(
 
   const dayStartNow =
     Math.floor(nowSeconds / SECONDS_PER_DAY_NUMBER) * SECONDS_PER_DAY_NUMBER;
-  const decimals = sorted[0].tokenDecimals;
+  const decimals = sorted[0]!.tokenDecimals;
 
   // Walk pre-window rows to seed the baseline. The last row at or before
   // effectiveStartTs holds the supply we forward-fill from.
@@ -199,9 +199,9 @@ export function buildTokenUsdTimeSeries(
   let lastSupply = BigInt(0);
   while (
     cursor < sorted.length &&
-    Number(sorted[cursor].timestamp) < effectiveStartTs
+    Number(sorted[cursor]!.timestamp) < effectiveStartTs
   ) {
-    lastSupply = BigInt(sorted[cursor].totalSupply);
+    lastSupply = BigInt(sorted[cursor]!.totalSupply);
     cursor++;
   }
 
@@ -211,8 +211,8 @@ export function buildTokenUsdTimeSeries(
     d <= dayStartNow;
     d += SECONDS_PER_DAY_NUMBER
   ) {
-    while (cursor < sorted.length && Number(sorted[cursor].timestamp) <= d) {
-      lastSupply = BigInt(sorted[cursor].totalSupply);
+    while (cursor < sorted.length && Number(sorted[cursor]!.timestamp) <= d) {
+      lastSupply = BigInt(sorted[cursor]!.totalSupply);
       cursor++;
     }
     out.push({
