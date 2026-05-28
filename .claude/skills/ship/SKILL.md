@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Ship monitoring-monorepo changes through the repo's Codex-compatible workflow, preflight, quality gate, closeout review, commit, push, PR create/update, and readiness babysitting. Use when the user says "ship it", "/ship", "push this", "open a PR", "create a PR", "publish this", or "send it" in this repo.
+description: "Ship monitoring-monorepo changes through the repo's Codex-compatible workflow: preflight, quality gate, closeout review, commit, push, PR create/update, and readiness babysitting. Use when the user says \"ship it\", \"/ship\", \"push this\", \"open a PR\", \"create a PR\", \"publish this\", or \"send it\" in this repo."
 title: Ship Skill
 status: active
 owner: eng
@@ -10,10 +10,10 @@ last_verified: 2026-05-28
 
 # Ship
 
-Use this repo-local adapter for shipping `monitoring-monorepo` work from
-Claude Code on the web, Codex Cloud, or any checkout that does not have the
-user's personal skills installed. It preserves the local `/ship` contract while
-relying only on repo-visible commands and GitHub tooling.
+Use this repo-local adapter for shipping `monitoring-monorepo` work from Codex
+Cloud or any checkout that does not have the user's personal skills installed.
+It preserves the local `/ship` contract while relying only on repo-visible
+commands and GitHub tooling.
 
 ## Preflight
 
