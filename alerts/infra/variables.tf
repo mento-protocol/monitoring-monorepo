@@ -243,9 +243,9 @@ variable "project_name" {
 }
 
 variable "org_id" {
-  description = "GCP organization ID"
+  description = "GCP organization ID for the existing Mento organization. Keep this non-null so CI plans do not drift the project_factory module against live state."
   type        = string
-  default     = null
+  default     = "599540483579"
 }
 
 variable "billing_account" {

@@ -83,7 +83,7 @@ slack_bot_token = "xoxb-..."
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
-org_id           = "123456789012"        # Optional, omit if not using organization
+org_id           = "599540483579"
 billing_account  = "XXXXXX-XXXXXX-XXXXXX"  # Required
 region           = "europe-west1"        # Optional, defaults to "europe-west1"
 

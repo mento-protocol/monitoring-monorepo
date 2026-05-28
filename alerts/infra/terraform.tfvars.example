@@ -49,7 +49,7 @@ slack_bot_token = "xoxb-..."
 project_name = "mento-alerts"
 
 # GCP organization ID
-org_id = "123456789012"
+org_id = "599540483579"
 
 # Billing account ID (required)
 # Format: XXXXXX-XXXXXX-XXXXXX
