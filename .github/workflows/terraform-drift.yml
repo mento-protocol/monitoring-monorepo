@@ -57,11 +57,6 @@ jobs:
         # needed). Matches the pattern in `.github/workflows/infra.yml` +
         # `ci.yml` which also call `node scripts/tf-stacks.mjs` directly.
         #
-        # `alerts-delivery` is skipped here pending PR #627 (local_file.env_file
-        # fix). That stack always reports drift on fresh-checkout CI runners
-        # because `local_file.env_file` stats a gitignored file that never
-        # exists in CI. Perma-positive drift would kill the signal of this
-        # workflow. Remove the filter clause once PR #627 ships.
         run: |
           set -euo pipefail
           node scripts/tf-stacks.mjs list --json \
@@ -70,7 +65,6 @@ jobs:
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
                 .filter(s => s.ci.apply === "push-main-production-environment")
-                .filter(s => s.id !== "alerts-delivery")
                 .map(s => ({ id: s.id, name: s.name, path: s.path }));
               const matrix = JSON.stringify({ include: filtered });
               const hasStacks = filtered.length > 0 ? "true" : "false";

@@ -80,18 +80,18 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 ### Components
 
-| Component           | Technology             | Hosting                      | Repo Path                               |
-| ------------------- | ---------------------- | ---------------------------- | --------------------------------------- |
-| Indexer             | Envio HyperIndex       | Envio hosted                 | `indexer-envio/`                        |
-| GraphQL API         | Hasura (auto-managed)  | Envio hosted                 | —                                       |
-| Dashboard           | Next.js 16 + Plotly    | Vercel                       | `ui-dashboard/`                         |
-| Shared config       | TypeScript             | —                            | `shared-config/`                        |
-| Metrics bridge (v3) | Node 22 + prom-client  | Cloud Run (mento-monitoring) | `metrics-bridge/`                       |
-| Aegis (v2)          | NestJS                 | App Engine (mento-prod)      | `../aegis/`                             |
-| Grafana Agent       | Docker (grafana/agent) | App Engine (mento-prod)      | `../aegis/grafana-agent/`               |
-| Aegis alert rules   | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-alerts/`    |
-| Aegis dashboards    | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-dashboard/` |
-| v3 alert rules      | Terraform (HCL)        | Grafana Cloud                | `alerts/rules/`                         |
+| Component            | Technology             | Hosting                       | Repo Path              |
+| -------------------- | ---------------------- | ----------------------------- | ---------------------- |
+| Indexer              | Envio HyperIndex       | Envio hosted                  | `indexer-envio/`       |
+| GraphQL API          | Hasura (auto-managed)  | Envio hosted                  | —                      |
+| Dashboard            | Next.js 16 + Plotly    | Vercel                        | `ui-dashboard/`        |
+| Shared config        | TypeScript             | —                             | `shared-config/`       |
+| Metrics bridge (v3)  | Node 22 + prom-client  | Cloud Run (mento-monitoring)  | `metrics-bridge/`      |
+| Aegis (v2)           | NestJS                 | App Engine (mento-monitoring) | `aegis/`               |
+| Grafana Agent        | Docker (grafana/agent) | App Engine (mento-monitoring) | `aegis/grafana-agent/` |
+| Aegis service health | Terraform (HCL)        | Grafana Cloud                 | `aegis/terraform/`     |
+| Aegis dashboards     | Terraform (HCL)        | Grafana Cloud                 | `aegis/terraform/`     |
+| v3 alert rules       | Terraform (HCL)        | Grafana Cloud                 | `alerts/rules/`        |
 
 ---
 
@@ -331,23 +331,23 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 ### Aegis v2 (live)
 
-Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed in the aegis repo.
+Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. Protocol alert rules, contact points, global notification policy, message templates, and mute timings are Terraform-managed in `alerts/rules`; `aegis/terraform` owns the Aegis dashboard/folder and Aegis service-health rule group.
 
 Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
-| Group            | Rules                               | Notification Channels                                                      |
-| ---------------- | ----------------------------------- | -------------------------------------------------------------------------- |
-| Oracle Relayers  | Stale price feeds, low CELO balance | Slack #alerts-oracles + #alerts-critical/Splunk (page, celo)               |
-| Reserve Balances | Low USDC/USDT/axlUSDC               | Slack #alerts-reserve                                                      |
-| Trading Modes    | Circuit breakers tripped            | Slack #alerts-critical/Splunk (page, celo); #alerts-testnet (celo-sepolia) |
-| Trading Limits   | L0/L1/LG utilization >90%           | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)            |
-| Aegis Service    | RPC failures, data staleness        | Slack #alerts-infra; #alerts-critical/Splunk (page)                        |
+| Group            | Rules                                       | Notification Channels                                                               |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low native-token balance | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                 |
+| Reserve Balances | Low USDC/USDT/axlUSDC                       | Slack #alerts-reserve                                                               |
+| Trading Modes    | Circuit breakers tripped                    | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains) |
+| Trading Limits   | L0/L1/LG utilization >90%                   | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                     |
+| Aegis Service    | RPC failures, data staleness                | Slack #alerts-infra; #alerts-critical/Splunk (page)                                 |
 
 ### v3 FPMM Alerts (live)
 
-**Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (aegis repo, App Engine in `mento-prod`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+**Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 
-**Terraform module** `alerts/rules/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/alerts-rules`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
+**Terraform module** `alerts/rules/` — Grafana provider, Slack contact points, global notification policy, message templates, mute timings, and protocol rule groups. Separate state backend (`gs://mento-terraform-tfstate-6ed6/alerts-rules`).
 
 **Slack channels.** Domain-split warnings + cross-service critical channel:
 
@@ -449,9 +449,9 @@ when both round equal. New pools render `—` for the subtitle until a
 
 ```
 Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Grafana Agent ── remote_write ── Grafana Cloud
- (monitoring-monorepo)          (Cloud Run,            (aegis repo, App      (clabsmento.
+ (monitoring-monorepo)          (Cloud Run,            (aegis/, App          (clabsmento.
                                  mento-monitoring       Engine in             grafana.net)
-                                 GCP project)           mento-prod)
+                                 GCP project)           mento-monitoring)
 ```
 
 **Operational notes.**

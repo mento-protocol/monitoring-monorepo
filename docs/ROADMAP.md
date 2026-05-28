@@ -86,13 +86,13 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Live protocol alert rules** (Terraform-managed in `alerts/rules/`; Aegis service-health stays in `aegis/terraform/`):
 
-| Alert Group      | What it monitors                                        | Channels                                                                   |
-| ---------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Oracle Relayers  | Stale price feeds, low CELO balance for relayer wallets | Slack #alerts-oracles + #alerts-critical/Splunk (page, celo)               |
-| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                        | Slack #alerts-reserve                                                      |
-| Trading Modes    | Circuit breakers tripped (trading halted per rate feed) | Slack #alerts-critical/Splunk (page, celo); #alerts-testnet (celo-sepolia) |
-| Trading Limits   | L0/L1/LG utilization >90%                               | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)            |
-| Aegis Service    | RPC failures, data staleness                            | Slack #alerts-infra; #alerts-critical/Splunk (page)                        |
+| Alert Group      | What it monitors                                                | Channels                                                                            |
+| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                 |
+| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                | Slack #alerts-reserve                                                               |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)         | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains) |
+| Trading Limits   | L0/L1/LG utilization >90%                                       | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                     |
+| Aegis Service    | RPC failures, data staleness                                    | Slack #alerts-infra; #alerts-critical/Splunk (page)                                 |
 
 Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
@@ -111,7 +111,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 - **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Agent (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 - **Terraform module** `alerts/rules/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/alerts-rules`).
-- **Slack channels.** Domain-split: `#alerts-critical` (page-worthy across services) + per-domain warning channels (`#alerts-oracles`, `#alerts-pools`, `#alerts-infra`). Protocol/Aegis routing additionally uses `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed for v3.
+- **Slack channels.** Domain-split: `#alerts-critical` (page-worthy across services) + per-domain warning channels (`#alerts-oracles`, `#alerts-pools`, `#alerts-infra`). Protocol/Aegis routing additionally uses `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Global routing and contact points live in `alerts/rules`, so v3 changes no longer coordinate through Aegis Terraform resources.
 
 **Live FPMM + bridge rule inventory:**
 
