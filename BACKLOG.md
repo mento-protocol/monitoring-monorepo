@@ -19,8 +19,8 @@ Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
 DORA metrics and Dev Containers remain intentionally excluded. CodeScene-equivalent
 OSS quality checks have shipped (knip, dependency-cruiser, ESLint complexity
 budgets, jscpd, code-health history, indexer `no-unsafe-*`, three blocking
-mutation gates); residual `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
-is now tracked as GitHub issues #666–#671.
+mutation gates); the `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
+completed via GitHub issues #666–#671 — the flag is now on across all packages.
 
 ### `mise` Toolchain Management Trial
 

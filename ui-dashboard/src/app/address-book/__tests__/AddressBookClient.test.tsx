@@ -902,7 +902,7 @@ describe("AddressBookClient — CSV import", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/address-labels/import");
     expect((init as RequestInit).method).toBe("POST");
     expect(
@@ -1108,7 +1108,7 @@ describe("AddressBookClient — JSON import variants", () => {
     };
     await importJson(snapshot, "snapshot.json");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/address-labels/import");
     expect(
       (init as RequestInit).headers as Record<string, string>,
@@ -1126,7 +1126,7 @@ describe("AddressBookClient — JSON import variants", () => {
     ];
     await importJson(safe, "safe.json");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [, init] = fetchMock.mock.calls[0];
+    const [, init] = fetchMock.mock.calls[0]!;
     expect(
       (init as RequestInit).headers as Record<string, string>,
     ).toMatchObject({
@@ -1149,7 +1149,7 @@ describe("AddressBookClient — JSON import variants", () => {
     };
     await importJson(simple, "simple.json");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [, init] = fetchMock.mock.calls[0];
+    const [, init] = fetchMock.mock.calls[0]!;
     expect(
       (init as RequestInit).headers as Record<string, string>,
     ).toMatchObject({
