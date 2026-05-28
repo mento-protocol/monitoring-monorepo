@@ -122,9 +122,13 @@ resource "grafana_message_template" "slack_trading_mode_alert_title" {
   name     = "Slack - Trading Mode Alert Title"
   template = <<-EOT
   {{ define "slack.trading_mode_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
+  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
+  {{ .CommonLabels.alertname -}}
+  {{ else if (len .Alerts.Firing) -}}
+  🚨
+  {{- else if (len .Alerts.Resolved) -}}
+  ✅
+  {{- end -}}
   {{ end -}}
   EOT
 }
@@ -144,6 +148,7 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   # for the per-feed allowlist: `reference-data-directory.vercel.app/feeds-<chain>-mainnet.json`.
   template = <<-EOT
 {{ define "slack.trading_mode_alert_message" }}
+{{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
@@ -163,7 +168,7 @@ ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
-*🚨 Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*
+*{{ if $mixedState }}🚨 {{ end }}Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*
 - Check for tripped breakers on the <{{ $poolURL }}|{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}>{{ if and $chainlinkFeedPath $chainlinkSlug }}
 - Check the <https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
 {{ end -}}
@@ -171,7 +176,7 @@ ${local.monad_chainlink_slug_branches}
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-*✅ Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}*
+*{{ if $mixedState }}✅ {{ end }}Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}*
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
