@@ -78,15 +78,26 @@ Please top up the {{ $token }} balance of the [{{ .Labels.owner }}](https://celo
 {{ define "discord.trading_mode_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
-{{ $rateFeedWithHyphen := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1-$2" .Labels.rateFeed -}}
-{{ $chainlinkSlug := $rateFeedWithHyphen | toLower -}}
 {{ $chain := .Labels.chain | title -}}
+{{ $chainId := "" -}}
+${local.chain_id_branches}
+{{ $chainlinkFeedPath := "" -}}
+${local.chainlink_feed_path_branches}
+{{ $pool := "" -}}
+{{ $chainlinkSlug := "" -}}
+{{ if eq .Labels.chain "celo" -}}
+${local.celo_pool_branches}
+${local.celo_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "monad" -}}
+${local.monad_pool_branches}
+${local.monad_chainlink_slug_branches}
+{{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
-{{ if and (eq .Labels.chain "celo") (eq .Labels.rateFeed "USDTUSD") -}}{{ $poolURL = "https://monitoring.mento.org/pool/42220-0x0feba760d93423d127de1b6abecdb60e5253228d?tab=oracle" }}{{ end -}}
-**🚨 Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**{{ if eq $chain "Celo" }}
-- Check for tripped breakers on the [{{ $rateFeedWithSlash }} pool]({{ $poolURL }})
-- Check the [Chainlink feed](https://data.chain.link/feeds/celo/mainnet/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ else }}
-- Check the [alert details]({{ $poolURL }}) for tripped breakers{{ end }}
+{{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
+**🚨 Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}**
+- Check for tripped breakers on the [{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}]({{ $poolURL }}){{ if and $chainlinkFeedPath $chainlinkSlug }}
+- Check the [Chainlink feed](https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}) for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
