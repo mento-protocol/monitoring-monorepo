@@ -132,4 +132,37 @@ assert.match(
 );
 assert.match(JSON.stringify(payload.blocks), /Resource addresses only/);
 
+const payloadNoPr = buildSlackPayload({
+  channel: "#ci-failures",
+  stackLabel: "alerts<&>/rules",
+  targetEnvironment: "production",
+  workflowName: "Alerts Rules",
+  runNumber: "7",
+  runUrl:
+    "https://github.com/mento-protocol/monitoring-monorepo/actions/runs/2",
+  commitUrl:
+    "https://github.com/mento-protocol/monitoring-monorepo/commit/abc1234",
+  sha: "abc1234",
+  actor: "chapati23",
+  trigger: "Push to main at abc1234",
+  pullRequest: null,
+  parsedPlan: {
+    counts: null,
+    resourceActions: [],
+  },
+});
+
+assert.equal(
+  payloadNoPr.text,
+  "Terraform apply pending: alerts&lt;&amp;&gt;/rules (changes detected)",
+);
+assert.match(JSON.stringify(payloadNoPr.blocks), /Push to main at abc1234/);
+assert.equal(
+  payloadNoPr.blocks
+    .at(-1)
+    .elements.some((element) => element.text?.text === "Open merged PR"),
+  false,
+);
+assert.match(JSON.stringify(payloadNoPr.blocks), /changes detected/);
+
 console.log("notify-terraform-apply tests passed");

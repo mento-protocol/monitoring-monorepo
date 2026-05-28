@@ -444,7 +444,7 @@ function buildSlackPayload({
 
   return {
     channel,
-    text: `Terraform apply pending: ${stackLabel} (${planSummary})`,
+    text: `Terraform apply pending: ${slackEscape(stackLabel)} (${slackEscape(planSummary)})`,
     blocks,
     unfurl_links: false,
     unfurl_media: false,

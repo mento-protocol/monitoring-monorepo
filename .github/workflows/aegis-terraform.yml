@@ -40,12 +40,14 @@ on:
     branches: [main]
     paths:
       - aegis/terraform/**
+      - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - .github/workflows/aegis-terraform.yml
   push:
     branches: [main]
     paths:
       - aegis/terraform/**
+      - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - .github/workflows/aegis-terraform.yml
 
@@ -157,9 +159,10 @@ jobs:
         id: plan
         # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.
         # `set +e` around terraform so exit-2 (changes) doesn't fail the step;
-        # capture terraform's exit (not tee's) via PIPESTATUS, emit as a step
+        # capture terraform's exit before sanitizing output, emit as a step
         # output for `detect`, and only `exit 1` on real errors.
-        # Plan output is teed to `/tmp/tf-plan.txt` for the sticky comment.
+        # Plan output is captured raw, sanitized, then written to
+        # `/tmp/tf-plan.txt` for logs, the sticky comment, and Slack.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
         # `-lock-timeout=2m`: speculative PR plans can race a main-branch
@@ -167,9 +170,11 @@ jobs:
         # CI on a long apply, long enough to absorb typical lock holds.
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
-          EXITCODE=${PIPESTATUS[0]}
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          EXITCODE=$?
           set -e
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
+          cat /tmp/tf-plan.txt
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
           case "$EXITCODE" in
             0) echo "Plan: no changes" ;;
