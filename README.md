@@ -218,7 +218,8 @@ and keep the existing GCS backend prefix `aegis`:
 ```bash
 pnpm aegis:tf:init
 pnpm aegis:tf:plan
-pnpm aegis:tf:apply
+# Apply runs in CI on merge to main (.github/workflows/aegis-terraform.yml),
+# gated by the `production` GitHub Environment required-reviewer rule.
 ```
 
 Protocol Grafana alert rules and global Grafana routing live in

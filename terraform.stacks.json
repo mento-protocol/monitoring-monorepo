@@ -114,22 +114,19 @@
       "providers": ["grafana"],
       "ci": {
         "validate": "changed-paths",
-        "plan": "manual",
-        "apply": "manual"
+        "plan": "pull-request",
+        "apply": "push-main-production-environment"
       },
-      "applyPolicy": "human-review-required",
+      "applyPolicy": "ci-production-environment-approved",
       "changedPathPatterns": [
         "aegis/terraform/**",
         "terraform.stacks.json",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml"
+        ".github/workflows/infra.yml",
+        ".github/workflows/aegis-terraform.yml"
       ],
-      "aliases": [
-        "pnpm aegis:tf:init",
-        "pnpm aegis:tf:plan",
-        "pnpm aegis:tf:apply"
-      ]
+      "aliases": ["pnpm aegis:tf:init", "pnpm aegis:tf:plan"]
     }
   ]
 }

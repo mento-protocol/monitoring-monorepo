@@ -1,0 +1,317 @@
+name: Aegis Terraform
+
+# Terraform plan-on-PR + apply-on-merge for `aegis/terraform/` — the Aegis
+# Grafana folder, dashboard, and service-health alert group. The stack's GCS
+# backend impersonates `org-terraform@mento-terraform-seed-ffac` (see
+# `aegis/terraform/main.tf`), so the CI deployer SA needs
+# `roles/iam.serviceAccountTokenCreator` on `org-terraform`. That grant lives
+# in `terraform/ci-wif.tf` (resource `ci_alerts_org_terraform_token_creator`,
+# shared with `alerts/rules/` and `alerts/infra/`) and is already applied —
+# the existing IAM binding covers aegis as a third consumer with no new
+# resource needed (one `(service_account_id, role, member)` triple).
+#
+# Plan/apply split:
+#   - `plan` job runs on every PR + push/dispatch to main. It runs
+#     `terraform plan -detailed-exitcode` and emits a `has-changes` job
+#     output. On PRs it posts a sticky comment with the plan diff.
+#   - `apply` job only runs on push/dispatch to main AND only when the plan
+#     reported actual changes. When there are no changes the apply job is
+#     skipped entirely, which means the `production` Environment's
+#     required-reviewer prompt only fires on real-change merges.
+#
+# Note: we intentionally do NOT save the plan as a binary artifact for
+# cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
+# sensitive data in cleartext in the plan file"
+# (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
+# TF_VAR_* env block here carries the production Grafana SA token.
+# Uploading the binary plan as a workflow artifact would expose that
+# secret to anyone with `actions:read`. Instead the apply job re-plans at
+# gate-approval time — the trade-off is the brief "between approval and
+# apply" drift window, which the reviewer can detect by checking the
+# apply-job's plan output before approving.
+#
+# Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
+# (matrix module `aegis`). This workflow adds the plan diff comment +
+# the apply gate.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - aegis/terraform/**
+      - .github/workflows/aegis-terraform.yml
+  push:
+    branches: [main]
+    paths:
+      - aegis/terraform/**
+      - .github/workflows/aegis-terraform.yml
+
+# PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
+# is fine — a newer plan supersedes an older one).
+#
+# Push/dispatch runs share ONE group `<workflow>-deploy` with
+# `cancel-in-progress: false`, so concurrent merges queue and apply
+# strictly in order. Without this, a SHA-unique group would let two
+# close-together merges run `terraform apply` in parallel and the older
+# one could roll the state back to stale config.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Push/dispatch: queue all pending applies (up to 100) so intermediate
+  # main-branch merges don't get silently dropped by GitHub's default
+  # `queue: single` behavior (only one pending; newer-pending cancels
+  # older). For PR events, keep the default `single` — the cancel-on-new-
+  # push semantics there are what we want. `queue: max` + `cancel-in-
+  # progress: true` is invalid per GitHub, so the conditional matches the
+  # cancel-in-progress conditional above. The bundled actionlint version
+  # doesn't recognise the `queue` key yet (added by GitHub in 2025); see
+  # https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs
+  # trunk-ignore(actionlint/syntax-check)
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
+
+permissions: read-all
+
+jobs:
+  plan:
+    name: Terraform Plan (aegis/terraform)
+    # Fork PRs and Dependabot PRs don't get repository secrets, so the
+    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # Skip the job in those contexts — the plan is only meaningful when
+    # secrets are available. Internal PRs + main pushes run.
+    if: >-
+      (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.fork == false
+        && github.event.pull_request.user.login != 'dependabot[bot]')
+      || (github.ref == 'refs/heads/main'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+      actions: read
+    defaults:
+      run:
+        working-directory: aegis/terraform
+    outputs:
+      has-changes: ${{ steps.detect.outputs.has-changes }}
+    env:
+      # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.
+        # `set +e` around terraform so exit-2 (changes) doesn't fail the step;
+        # capture terraform's exit (not tee's) via PIPESTATUS, emit as a step
+        # output for `detect`, and only `exit 1` on real errors.
+        # Plan output is teed to `/tmp/tf-plan.txt` for the sticky comment.
+        # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
+        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # `-lock-timeout=2m`: speculative PR plans can race a main-branch
+        # apply (separate concurrency groups). 2m is short enough not to stall
+        # CI on a long apply, long enough to absorb typical lock holds.
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
+          EXITCODE=${PIPESTATUS[0]}
+          set -e
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          case "$EXITCODE" in
+            0) echo "Plan: no changes" ;;
+            2) echo "Plan: changes detected" ;;
+            *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;
+          esac
+
+      - name: Detect changes
+        id: detect
+        if: success()
+        env:
+          # `exitcode` is a system-controlled enum (0/2 here — 1 already
+          # bailed in the previous step). Passing through `env:` rather than
+          # inlining `${{ ... }}` in `run:` keeps this aligned with the
+          # GitHub Actions workflow-injection hardening pattern.
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          if [ "$EXITCODE" = "2" ]; then
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post plan as sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          # Pass workflow context through env vars instead of `${{ }}`
+          # substitution in the inline script to keep the script free of
+          # template injection points (defensive — `steps.*.outcome` is an
+          # enum controlled by Actions, but env-based passing is the standard
+          # hardening pattern).
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+        with:
+          script: |
+            const fs = require("fs");
+            const planOutput = fs.existsSync("/tmp/tf-plan.txt")
+              ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
+              : "(Plan did not produce output — check the workflow logs.)";
+
+            // GitHub PR comment hard cap is ~65KB. Aegis plans are small
+            // (one folder + one dashboard module + one service-health alert
+            // group) but truncate defensively just in case dashboard JSON
+            // grows.
+            const MAX = 50_000;
+            const truncated = planOutput.length > MAX;
+            const planBody = truncated
+              ? "... (truncated, see workflow logs)\n" + planOutput.slice(-MAX)
+              : planOutput;
+
+            const planOutcome = process.env.PLAN_OUTCOME || "unknown";
+            const hasChanges = process.env.HAS_CHANGES === "true";
+            const statusIcon = planOutcome === "success"
+              ? (hasChanges ? "📝" : "✅")
+              : "❌";
+            const statusText = planOutcome === "success"
+              ? (hasChanges ? "changes detected — merge will trigger apply" : "no changes — merge will skip apply")
+              : "plan failed";
+
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const body =
+              `## Terraform Plan — \`aegis/terraform/\`\n\n` +
+              `**Status:** ${statusIcon} ${statusText}\n\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
+              `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `<!-- aegis-terraform-plan-comment -->`;
+
+            // Paginate through all PR comments to find the existing
+            // plan-sticky marker. `listComments` caps at 100 per page;
+            // on long-lived PRs the marker could sit past page 1 and
+            // we'd duplicate-create instead of updating. `paginate`
+            // walks every page.
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
+              },
+            );
+
+            const existing = comments.find(c =>
+              c.body && c.body.includes("<!-- aegis-terraform-plan-comment -->"),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  apply:
+    name: Terraform Apply (aegis/terraform)
+    needs: plan
+    # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
+    # there are real changes. When `has-changes=false` the job is skipped
+    # entirely — the production-environment approval prompt never fires for
+    # no-op merges (the gap that motivated the saved-plan refactor).
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.plan.outputs.has-changes == 'true'
+    # Reuses the existing `production` environment shared with metrics-bridge,
+    # alerts/rules, and alerts/infra. The required-reviewer rule on that
+    # environment gates each apply behind manual approval.
+    environment:
+      name: production
+      url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    defaults:
+      run:
+        working-directory: aegis/terraform
+    env:
+      # Provider auth env vars still need to be present at apply time — saved
+      # plans don't serialize provider configuration, so init re-evaluates
+      # the provider blocks against these values to talk to Grafana.
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Apply
+        # Re-plans + applies in a single step. The reviewer at the
+        # production-environment gate should read this job's plan output
+        # before approving — it's the ground truth for what lands.
+        # `-lock-timeout=10m`: apply must wait for any in-progress state
+        # lock rather than failing the deploy.
+        run: terraform apply -auto-approve -input=false -lock-timeout=10m
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
