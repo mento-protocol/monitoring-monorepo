@@ -347,6 +347,46 @@ export function effectiveThreshold(
  *     would corrupt the chart's verdict math),
  *   - VALUE_DELTA `referenceValue` is null (breaker not yet configured).
  */
+/**
+ * Bootstrap (if BreakerBox events predate start_block) + resolve in one
+ * call. Used by both OracleReported and MedianUpdated handlers — without
+ * the conditional bootstrap, the very first event for a feed whose
+ * `BreakerAdded` predates start_block resolves to null and persists null
+ * historical-band fields forever after.
+ */
+export async function bootstrapAndResolveBreakerSnapshotFields(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  rateFeedID: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  knownConfigsLength: number;
+  poolsLength: number;
+}): Promise<{
+  breakerBaselineAtSnapshot: bigint;
+  breakerThresholdAtSnapshot: bigint;
+} | null> {
+  const {
+    context,
+    chainId,
+    rateFeedID,
+    blockNumber,
+    blockTimestamp,
+    knownConfigsLength,
+    poolsLength,
+  } = args;
+  if (knownConfigsLength === 0 && poolsLength > 0) {
+    await bootstrapFeedBreakerConfigs(
+      context,
+      chainId,
+      rateFeedID,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
+  return resolveBreakerSnapshotFields(context, chainId, rateFeedID);
+}
+
 export async function resolveBreakerSnapshotFields(
   context: EvmOnEventContext,
   chainId: number,

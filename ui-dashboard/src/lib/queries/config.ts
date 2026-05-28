@@ -103,6 +103,10 @@ export const ORACLE_SNAPSHOTS_CHART = `
 // degrades just the per-snapshot band path to the current-band fallback
 // instead of breaking the whole oracle chart. Nullable for pre-deploy rows
 // + unseeded EMA — the chart falls back to the current band in those cases.
+//
+// Note: the active deviation breaker is now fetched via the shared
+// `POOL_BREAKER_CONFIG` query (PR #635) — `BREAKER_CONFIG_FOR_RATE_FEED`
+// was removed to dedup the per-page Hasura fetch.
 export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
   query OracleSnapshotsChartBandsExt($poolId: String!, $limit: Int!) {
     OracleSnapshot(
@@ -120,36 +124,6 @@ export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
   }
 `;
 
-// The active deviation breaker for the pool's rate feed. There's typically
-// one enabled MEDIAN_DELTA or VALUE_DELTA per feed (MARKET_HOURS is a
-// schedule halt, not a deviation comparator — excluded here). All numeric
-// fields ride as Fixidity 1e24 strings; divide by 1e24 to get the float.
-export const BREAKER_CONFIG_FOR_RATE_FEED = `
-  query BreakerConfigForRateFeed($rateFeedID: String!, $chainId: Int!) {
-    BreakerConfig(
-      where: {
-        rateFeedID: { _eq: $rateFeedID }
-        chainId: { _eq: $chainId }
-        enabled: { _eq: true }
-        breaker: { kind: { _neq: MARKET_HOURS } }
-      }
-      # Deterministic pick when a feed somehow ends up with two enabled
-      # non-MARKET_HOURS breakers — the chart reads [0] downstream.
-      order_by: { id: asc }
-      limit: 2
-    ) {
-      id
-      breaker { kind defaultRateChangeThreshold }
-      rateChangeThreshold
-      referenceValue
-      medianRatesEMA
-      lastMedianRate
-      status
-      lastTripAt
-      cooldownTime
-    }
-  }
-`;
 
 export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
   query OracleSnapshotsCountPage($poolId: String!, $limit: Int!, $offset: Int!) {
@@ -192,6 +166,10 @@ export const POOL_BREAKER_CONFIG = `
         chainId: { _eq: $chainId }
         rateFeedID: { _eq: $rateFeedID }
       }
+      # Deterministic pick when a feed somehow ends up with multiple
+      # trip-able breakers — pickTrippableConfig() returns the first
+      # enabled non-MARKET_HOURS row, so the order matters.
+      order_by: { id: asc }
     ) {
       id
       enabled

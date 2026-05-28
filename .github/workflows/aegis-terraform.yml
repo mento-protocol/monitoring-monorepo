@@ -1,13 +1,14 @@
-name: Alerts Infra
+name: Aegis Terraform
 
-# Terraform plan-on-PR + apply-on-merge for `alerts/infra/` — the event-driven
-# alert delivery stack (Cloud Function + Discord channels + Sentry bridge +
-# QuickNode webhooks). The stack's GCS backend and google provider both
-# impersonate `org-terraform@mento-terraform-seed-ffac` (see versions.tf and
-# providers.tf), so the CI deployer SA needs `roles/iam.serviceAccountTokenCreator`
-# on `org-terraform`. That grant lives in `terraform/ci-wif.tf`
-# (resource `ci_alerts_org_terraform_token_creator`, shared with `alerts/rules/`)
-# and must be applied from the top-level stack before this workflow can succeed.
+# Terraform plan-on-PR + apply-on-merge for `aegis/terraform/` — the Aegis
+# Grafana folder, dashboard, and service-health alert group. The stack's GCS
+# backend impersonates `org-terraform@mento-terraform-seed-ffac` (see
+# `aegis/terraform/main.tf`), so the CI deployer SA needs
+# `roles/iam.serviceAccountTokenCreator` on `org-terraform`. That grant lives
+# in `terraform/ci-wif.tf` (resource `ci_alerts_org_terraform_token_creator`,
+# shared with `alerts/rules/` and `alerts/infra/`) and is already applied —
+# the existing IAM binding covers aegis as a third consumer with no new
+# resource needed (one `(service_account_id, role, member)` triple).
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -22,16 +23,15 @@ name: Alerts Infra
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
-# TF_VAR_* env block here carries production Sentry/Discord/QuickNode/
-# Slack/GitHub credentials. Uploading the binary plan as a workflow
-# artifact would expose those secrets to anyone with `actions:read`.
-# Instead the apply job re-plans at gate-approval time — the trade-off
-# is the brief "between approval and apply" drift window, which the
-# reviewer can detect by checking the apply-job's plan output before
-# approving.
+# TF_VAR_* env block here carries the production Grafana SA token.
+# Uploading the binary plan as a workflow artifact would expose that
+# secret to anyone with `actions:read`. Instead the apply job re-plans at
+# gate-approval time — the trade-off is the brief "between approval and
+# apply" drift window, which the reviewer can detect by checking the
+# apply-job's plan output before approving.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
-# (matrix module `alerts/infra`). This workflow adds the plan diff comment +
+# (matrix module `aegis`). This workflow adds the plan diff comment +
 # the apply gate.
 
 on:
@@ -39,13 +39,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - alerts/infra/**
-      - .github/workflows/alerts-infra.yml
+      - aegis/terraform/**
+      - .github/workflows/aegis-terraform.yml
   push:
     branches: [main]
     paths:
-      - alerts/infra/**
-      - .github/workflows/alerts-infra.yml
+      - aegis/terraform/**
+      - .github/workflows/aegis-terraform.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
 # is fine — a newer plan supersedes an older one).
@@ -54,8 +54,7 @@ on:
 # `cancel-in-progress: false`, so concurrent merges queue and apply
 # strictly in order. Without this, a SHA-unique group would let two
 # close-together merges run `terraform apply` in parallel and the older
-# one could roll the state back to stale config (Cloud Function source +
-# QuickNode webhooks + Discord channels are all order-sensitive).
+# one could roll the state back to stale config.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -75,7 +74,7 @@ permissions: read-all
 
 jobs:
   plan:
-    name: Terraform Plan (alerts/infra)
+    name: Terraform Plan (aegis/terraform)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
     # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
@@ -95,25 +94,12 @@ jobs:
       actions: read
     defaults:
       run:
-        working-directory: alerts/infra
+        working-directory: aegis/terraform
     outputs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
     env:
-      # Sentry
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # Discord
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      # GCP
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
-      # QuickNode
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
-      # Slack (for restapi.slack provider — creates/archives Sentry alert channels)
-      TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      # GitHub (for github_actions_secret resources that self-manage these secrets)
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+      # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -180,61 +166,6 @@ jobs:
             echo "has-changes=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Strip refresh noise from plan output
-        # Terraform's plan output starts with a long `Refreshing state...` /
-        # `Reading...` / `Read complete after` preamble — one line per state
-        # entry, easily dominates the plan view when the stack has dozens of
-        # resources. Strip those lines in-place so the Plan summary and the
-        # sticky PR comment (both downstream of /tmp/tf-plan.txt) show only
-        # the actionable diff. The raw output is still in the workflow log
-        # for debugging refresh failures.
-        if: always()
-        working-directory: /tmp
-        run: |
-          if [ -f tf-plan.txt ]; then
-            awk '
-              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
-              NF || found { found=1; print }
-            ' tf-plan.txt | cat -s > tf-plan.clean.txt
-            mv tf-plan.clean.txt tf-plan.txt
-          fi
-
-      - name: Plan summary
-        # Renders the plan diff at the top of the job page so reviewers
-        # don't have to scroll the raw `Plan` step log. Same source data
-        # as the sticky PR comment (`/tmp/tf-plan.txt`), but visible on
-        # `push` runs too where there's no PR to comment on. `if: always()`
-        # so a failed plan still surfaces the error inline.
-        if: always()
-        env:
-          PLAN_OUTCOME: ${{ steps.plan.outcome }}
-          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
-        run: |
-          {
-            echo '## Terraform Plan — `alerts/infra/`'
-            echo
-            if [ "$PLAN_OUTCOME" = "success" ]; then
-              if [ "$HAS_CHANGES" = "true" ]; then
-                echo '**Status:** 📝 changes detected — merge will trigger apply'
-              else
-                echo '**Status:** ✅ no changes — merge will skip apply'
-              fi
-            else
-              case "$PLAN_OUTCOME" in
-                cancelled) echo '**Status:** ⚠️ plan cancelled' ;;
-                skipped)   echo '**Status:** ⚠️ plan skipped' ;;
-                *)         echo '**Status:** ❌ plan failed' ;;
-              esac
-            fi
-            echo
-            echo '<details open><summary>Plan output</summary>'
-            echo
-            echo '```hcl'
-            tail -c 50000 /tmp/tf-plan.txt 2>/dev/null || echo '(no plan output captured)'
-            echo '```'
-            echo '</details>'
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -253,10 +184,10 @@ jobs:
               ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
               : "(Plan did not produce output — check the workflow logs.)";
 
-            // GitHub PR comment hard cap is ~65KB. A fresh alerts/infra plan
-            // (Cloud Function + Discord channels + Sentry + QuickNode) can
-            // easily blow past that. Tail the last 50KB so the apply/destroy
-            // summary stays visible and link to the run for the full log.
+            // GitHub PR comment hard cap is ~65KB. Aegis plans are small
+            // (one folder + one dashboard module + one service-health alert
+            // group) but truncate defensively just in case dashboard JSON
+            // grows.
             const MAX = 50_000;
             const truncated = planOutput.length > MAX;
             const planBody = truncated
@@ -277,13 +208,13 @@ jobs:
               `/actions/runs/${context.runId}`;
 
             const body =
-              `## Terraform Plan — \`alerts/infra/\`\n\n` +
+              `## Terraform Plan — \`aegis/terraform/\`\n\n` +
               `**Status:** ${statusIcon} ${statusText}\n\n` +
               `[Full workflow logs](${runUrl})\n\n` +
               `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
               `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
               `</details>\n\n` +
-              `<!-- alerts-infra-plan-comment -->`;
+              `<!-- aegis-terraform-plan-comment -->`;
 
             // Paginate through all PR comments to find the existing
             // plan-sticky marker. `listComments` caps at 100 per page;
@@ -301,7 +232,7 @@ jobs:
             );
 
             const existing = comments.find(c =>
-              c.body && c.body.includes("<!-- alerts-infra-plan-comment -->"),
+              c.body && c.body.includes("<!-- aegis-terraform-plan-comment -->"),
             );
 
             if (existing) {
@@ -324,7 +255,7 @@ jobs:
         if: always()
 
   apply:
-    name: Terraform Apply (alerts/infra)
+    name: Terraform Apply (aegis/terraform)
     needs: plan
     # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
     # there are real changes. When `has-changes=false` the job is skipped
@@ -335,8 +266,8 @@ jobs:
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
     # Reuses the existing `production` environment shared with metrics-bridge,
-    # aegis, and alerts/rules. The required-reviewer rule on that environment
-    # gates each apply behind manual approval.
+    # alerts/rules, and alerts/infra. The required-reviewer rule on that
+    # environment gates each apply behind manual approval.
     environment:
       name: production
       url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
@@ -348,20 +279,12 @@ jobs:
       actions: read
     defaults:
       run:
-        working-directory: alerts/infra
+        working-directory: aegis/terraform
     env:
       # Provider auth env vars still need to be present at apply time — saved
       # plans don't serialize provider configuration, so init re-evaluates
-      # the provider blocks against these values to talk to the upstream APIs.
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
-      TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+      # the provider blocks against these values to talk to Grafana.
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -383,63 +306,12 @@ jobs:
         run: terraform init -input=false
 
       - name: Apply
-        id: apply
         # Re-plans + applies in a single step. The reviewer at the
         # production-environment gate should read this job's plan output
         # before approving — it's the ground truth for what lands.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
-        # `-no-color`: keep the output free of ANSI escapes so the apply
-        # summary step renders cleanly in the job summary markdown.
-        # Output teed to `/tmp/tf-apply.txt` for the apply summary step;
-        # PIPESTATUS preserves terraform's exit code over tee's.
-        run: |
-          set +e
-          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m 2>&1 | tee /tmp/tf-apply.txt
-          EXITCODE=${PIPESTATUS[0]}
-          set -e
-          exit "$EXITCODE"
-
-      - name: Strip refresh noise from apply output
-        # Same preamble-stripping treatment as the plan step — terraform
-        # apply also refreshes state before showing the action plan. See the
-        # equivalent step under `plan` for the full rationale.
-        if: always()
-        working-directory: /tmp
-        run: |
-          if [ -f tf-apply.txt ]; then
-            awk '
-              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
-              NF || found { found=1; print }
-            ' tf-apply.txt | cat -s > tf-apply.clean.txt
-            mv tf-apply.clean.txt tf-apply.txt
-          fi
-
-      - name: Apply summary
-        # Renders the apply output at the top of the job page so reviewers
-        # don't have to scroll the raw `Apply` step log to confirm what
-        # actually landed. `if: always()` so a failed apply still surfaces
-        # the error inline.
-        if: always()
-        env:
-          APPLY_OUTCOME: ${{ steps.apply.outcome }}
-        run: |
-          {
-            echo '## Terraform Apply — `alerts/infra/`'
-            echo
-            case "$APPLY_OUTCOME" in
-              success) echo '**Status:** ✅ applied' ;;
-              failure) echo '**Status:** ❌ apply failed' ;;
-              *)       printf '**Status:** %s\n' "$APPLY_OUTCOME" ;;
-            esac
-            echo
-            echo '<details open><summary>Apply output</summary>'
-            echo
-            echo '```terraform'
-            tail -c 50000 /tmp/tf-apply.txt 2>/dev/null || echo '(no apply output captured)'
-            echo '```'
-            echo '</details>'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: terraform apply -auto-approve -input=false -lock-timeout=10m
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

@@ -78,12 +78,19 @@ jobs:
             # time out and fail a required check. Keep these in sync with
             # vercel-ignore-build.sh — both lists govern the same "is this a
             # dashboard-affecting change" decision.
+            #
+            # `.lighthouserc.cjs` is in BOTH lists so config-only PRs (e.g.
+            # changing severity from `warn` to `error` or adjusting a budget
+            # threshold) actually exercise the gate they're changing.
+            # Without it, a budget change merges without empirical validation
+            # and the next dashboard PR is the place breakage surfaces.
             dashboard:
               - ui-dashboard/**
               - shared-config/**
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
+              - .lighthouserc.cjs
 
       - name: Decide whether to run Lighthouse
         id: decide

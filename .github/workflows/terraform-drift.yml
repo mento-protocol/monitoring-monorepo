@@ -1,0 +1,268 @@
+name: Terraform Drift Detection
+
+# Daily scheduled `terraform plan -detailed-exitcode` for every Terraform stack
+# whose `ci.apply == "push-main-production-environment"` in
+# `terraform.stacks.json`. Read-only — never applies. On exit-2 ("changes
+# pending"), opens or updates a GitHub issue labelled `drift-detection` +
+# `stack:<id>` with the plan tail.
+#
+# Why this exists: auto-applied stacks (alerts/rules, alerts/infra, aegis once
+# PR #629 lands) can still drift when state changes outside Terraform — UI
+# edits in Grafana, manual gcloud changes, Slack admins renaming channels.
+# Without a periodic check, drift can sit invisible for weeks. The 2026-05-27
+# alerts/rules rollout surfaced ~25 template renames worth of accumulated
+# drift; a daily plan job would have caught it days earlier.
+#
+# Auth note: today this uses the existing `GCP_SERVICE_ACCOUNT` (write-capable
+# deployer SA), same as the plan jobs in alerts-{rules,infra}.yml. After the
+# read-only plan SA prep (PR #630) is applied + the per-stack workflows
+# swap to `GCP_SERVICE_ACCOUNT_PLAN`, this workflow should make the same swap.
+
+on:
+  schedule:
+    # Daily at 05:23 UTC — off-peak globally, off-the-hour to dodge cron
+    # contention on GitHub's scheduler.
+    - cron: 23 5 * * *
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover auto-applied stacks
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+      has-stacks: ${{ steps.filter.outputs.has-stacks }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Filter registry to auto-applied stacks
+        id: filter
+        # Read `terraform.stacks.json` via `node scripts/tf-stacks.mjs list
+        # --json`, keep only stacks whose
+        # `ci.apply == "push-main-production-environment"`, emit a
+        # matrix.include payload.
+        #
+        # We invoke the script via `node` directly rather than `pnpm tf list`
+        # because pnpm isn't pre-installed on GitHub/Blacksmith Ubuntu 24.04
+        # runners, and the script only uses Node stdlib (no node_modules
+        # needed). Matches the pattern in `.github/workflows/infra.yml` +
+        # `ci.yml` which also call `node scripts/tf-stacks.mjs` directly.
+        #
+        # `alerts-delivery` is skipped here pending PR #627 (local_file.env_file
+        # fix). That stack always reports drift on fresh-checkout CI runners
+        # because `local_file.env_file` stats a gitignored file that never
+        # exists in CI. Perma-positive drift would kill the signal of this
+        # workflow. Remove the filter clause once PR #627 ships.
+        run: |
+          set -euo pipefail
+          node scripts/tf-stacks.mjs list --json \
+            | node -e '
+              const stdin = require("fs").readFileSync(0, "utf8");
+              const { stacks } = JSON.parse(stdin);
+              const filtered = stacks
+                .filter(s => s.ci.apply === "push-main-production-environment")
+                .filter(s => s.id !== "alerts-delivery")
+                .map(s => ({ id: s.id, name: s.name, path: s.path }));
+              const matrix = JSON.stringify({ include: filtered });
+              const hasStacks = filtered.length > 0 ? "true" : "false";
+              require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${matrix}\n`);
+              require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `has-stacks=${hasStacks}\n`);
+              console.log("Discovered stacks:", filtered.map(s => s.id).join(", ") || "(none)");
+            '
+
+  drift-check:
+    name: Drift Plan (${{ matrix.id }})
+    needs: discover
+    if: needs.discover.outputs.has-stacks == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      actions: read
+    env:
+      # Union of every TF_VAR_* secret across the auto-applied stacks. Each
+      # `terraform plan` only reads the vars its stack declares — extra vars
+      # are harmless. Keep this block in sync with the env blocks in
+      # `.github/workflows/alerts-rules.yml`, `alerts-infra.yml`, and
+      # `aegis-terraform.yml`.
+      TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+      TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
+      TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
+      TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_STAGING }}
+      TF_VAR_discord_alerts_webhook_url_trading_modes_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_PROD }}
+      TF_VAR_discord_alerts_webhook_url_trading_limits: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_LIMITS }}
+      TF_VAR_discord_alerts_webhook_url_aegis: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_AEGIS }}
+      TF_VAR_discord_alerts_webhook_url_catch_all: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_CATCH_ALL }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          # TODO: swap to `GCP_SERVICE_ACCOUNT_PLAN` once PR #630 lands and is
+          # applied. This workflow is read-only so the over-privileged SA
+          # doesn't cause harm, but using the plan-readonly SA tightens the
+          # blast-radius story.
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Plan
+        id: plan
+        # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes
+        # (= drift, since main is the deployed code). Capture stdout +
+        # stderr in `/tmp/tf-plan.txt` for the issue body. `set +e` so a
+        # non-zero exit doesn't fail the step; we route based on PIPESTATUS.
+        #
+        # `matrix.id` is passed through `env:` rather than inlining via
+        # `${{ }}` in the `run:` block, matching the workflow-injection
+        # hardening pattern used in alerts-rules.yml / alerts-infra.yml.
+        # The registry values are repo-controlled, but env-passing is the
+        # established convention.
+        env:
+          STACK_ID: ${{ matrix.id }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
+          EXITCODE=${PIPESTATUS[0]}
+          set -e
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          case "$EXITCODE" in
+            0) echo "No drift in $STACK_ID" ;;
+            2) echo "::warning::Drift detected in $STACK_ID — issue will be opened/updated" ;;
+            *) echo "::error::terraform plan failed for $STACK_ID with exit code $EXITCODE"; exit 1 ;;
+          esac
+
+      - name: Ensure drift labels exist
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          STACK_ID: ${{ matrix.id }}
+          GH_TOKEN: ${{ github.token }}
+        # `github.rest.issues.create()` SILENTLY DROPS unknown label names —
+        # no 422, the issue just lands without labels. The next run's
+        # `listForRepo({ labels })` query then returns [], `existing` is
+        # always undefined, and every drift cycle creates a fresh duplicate
+        # issue. `gh label create --force` is idempotent (creates if missing,
+        # updates if present), so it's safe to run unconditionally each
+        # drift-detected cycle.
+        run: |
+          set -euo pipefail
+          gh label create "drift-detection" --color "d73a4a" --description "Terraform drift detected by scheduled workflow" --force
+          gh label create "stack:$STACK_ID" --color "0e8a16" --description "Affects Terraform stack: $STACK_ID" --force
+
+      - name: Open or update drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          STACK_ID: ${{ matrix.id }}
+          STACK_NAME: ${{ matrix.name }}
+        with:
+          script: |
+            const fs = require("fs");
+            const stackId = process.env.STACK_ID;
+            const stackName = process.env.STACK_NAME;
+            const planOutput = fs.existsSync("/tmp/tf-plan.txt")
+              ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
+              : "(Plan did not produce output — check the workflow logs.)";
+
+            // GitHub issue body cap is ~65KB. Keep the plan tail (last 50 KB);
+            // discard the head (provider init noise) — the apply/destroy summary
+            // we care about lives at the bottom of the plan output.
+            const MAX = 50_000;
+            const truncated = planOutput.length > MAX;
+            const planBody = truncated
+              ? "... (truncated, see workflow logs)\n" + planOutput.slice(-MAX)
+              : planOutput;
+
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const now = new Date().toISOString();
+
+            const body =
+              `**Stack:** \`${stackId}\` (${stackName})\n` +
+              `**Last checked:** ${now}\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `Terraform reported pending changes against this stack's state. ` +
+              `Either there's drift from out-of-band edits (Grafana UI, manual gcloud, ` +
+              `Slack channel renames, etc.) OR there's code on \`main\` that hasn't ` +
+              `been applied yet. Investigate by running \`terraform plan\` from a clean ` +
+              `\`main\` checkout against this stack.\n\n` +
+              `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
+              `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `<!-- terraform-drift-stack:${stackId} -->`;
+
+            const labels = ["drift-detection", `stack:${stackId}`];
+
+            // Look for an existing open issue with both labels. `paginate`
+            // walks every page.
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                labels: labels.join(","),
+                per_page: 100,
+              },
+            );
+
+            // Defense in depth: also confirm the marker comment is present,
+            // in case labels got stripped manually.
+            const existing = issues.find(i =>
+              i.body && i.body.includes(`<!-- terraform-drift-stack:${stackId} -->`),
+            );
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+              console.log(`Updated existing drift issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Terraform drift detected: ${stackName}`,
+                body,
+                labels,
+              });
+              console.log(`Opened drift issue #${created.data.number}`);
+            }
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()

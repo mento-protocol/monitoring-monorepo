@@ -177,7 +177,7 @@ For local development, you'll need to set up environment variables. The function
 
 1. **Generate `.env` file:**
 
-   After `terraform apply`, generate `.env` from root directory:
+   After `terraform apply`, generate `.env` from this directory:
 
    ```bash
    pnpm run generate:env
@@ -187,6 +187,10 @@ For local development, you'll need to set up environment variables. The function
    `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`,
    `QUICKNODE_SIGNING_SECRET`, `QUICKNODE_REPLAY_BUCKET`,
    `FUNCTION_TIMEOUT_SECONDS`, `SUPPORTED_CHAINS`.
+
+   The script uses `terraform apply -replace` to force the provisioner
+   to re-run, so `.env` is always regenerated from current state even
+   if upstream variables haven't changed.
 
 2. **Run locally:**
 

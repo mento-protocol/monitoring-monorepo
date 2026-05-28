@@ -96,6 +96,22 @@ export function resolveSnapshotBand(
 
 type BreakerConfigStatus = "loading" | "ready" | "missing";
 
+// Pure helper extracted from `buildOraclePlotData` so the verdict logic is
+// unit-testable in isolation. Returns `null` when we can't make a verdict
+// (config not ready, baseline/threshold missing, or non-finite price); `true`
+// when the price would trip the breaker; `false` when it sits within band.
+function isOutOfBand(
+  price: number,
+  baseline: number | null,
+  thresholdRatio: number | null,
+  breakerConfigStatus: BreakerConfigStatus,
+): boolean | null {
+  if (breakerConfigStatus !== "ready") return null;
+  if (!baseline || !thresholdRatio) return null;
+  if (!Number.isFinite(price)) return null;
+  return Math.abs(price - baseline) / baseline > thresholdRatio;
+}
+
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
   token0Symbol?: string | undefined;
@@ -162,6 +178,14 @@ export function OracleChart({
     thresholdRatio,
   });
 
+  // Whether ANY snapshot carries a persisted at-the-time band. When the
+  // current breaker fetch is loading / errored / missing, the markers can
+  // still color themselves green/red from these — so the legend needs to
+  // describe that case rather than say "band check unavailable."
+  const hasPersistedBands = snapshots.some(
+    (s) => s.breakerBaselineAtSnapshot != null,
+  );
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
@@ -171,6 +195,7 @@ export function OracleChart({
         breachStartedAt={breachStartedAt}
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
+        hasPersistedBands={hasPersistedBands}
       />
       <Plot
         data={[plotData.deviationTrace]}
@@ -240,6 +265,11 @@ function buildOraclePlotData({
     return Number(s.oraclePrice) / FIXIDITY_ONE;
   });
 
+  // `buildSnapshotMarkers` resolves per-snapshot persisted bands (when
+  // present) and falls back to the current `currentBaseline / currentThresholdRatio`
+  // otherwise, then computes marker color / size / hover text in one pass.
+  // The fallback `isOutOfBand` extraction from PR #637 stays — the marker
+  // builder calls into it internally for the fallback path.
   const { markerColors, markerSizes, hoverText } = buildSnapshotMarkers({
     snapshots,
     prices,
@@ -355,12 +385,15 @@ function buildSnapshotMarkers({
   // Marker is "tripping" if the reported price crosses ITS snapshot's band.
   // When neither persisted nor current band is available, the verdict is
   // genuinely unknown — return null and let the caller render the marker in
-  // a neutral state instead of greenwashing it. Also guards baseline === 0:
-  // `resolveSnapshotBand` returns whatever `fixidityToFloat` produces, and
-  // `fixidityToFloat("0")` is `0` (finite), which would pass the `!= null`
-  // check and then divide by zero below, turning every marker red. The
-  // indexer's resolver normally writes `null` for an unseeded `0n` baseline,
-  // but a manual DB write or a backfill edge case could still surface zero.
+  // a neutral state instead of greenwashing it. We guard both `baseline === 0`
+  // (divide-by-zero — every marker would render red) AND `thresholdRatio
+  // === 0` (`|x - b| / b > 0` is true for any non-exact price — same
+  // all-red failure mode). `resolveSnapshotBand` returns whatever
+  // `fixidityToFloat` produces, and `fixidityToFloat("0")` is `0` (finite),
+  // which would pass a naive `!= null` check. The indexer's resolver
+  // normally writes `null` for an unseeded `0n` baseline AND for a zero
+  // effective threshold, but a manual DB write or backfill edge case could
+  // still surface either as zero — treat both as "no band".
   const isOutOfBand = (
     price: number,
     band: { baseline: number | null; thresholdRatio: number | null },
@@ -369,6 +402,7 @@ function buildSnapshotMarkers({
       band.baseline == null ||
       band.baseline === 0 ||
       band.thresholdRatio == null ||
+      band.thresholdRatio === 0 ||
       !Number.isFinite(price)
     )
       return null;
@@ -628,32 +662,41 @@ function OracleChartLegend({
   breachStartedAt,
   breakerConfig,
   breakerConfigStatus,
+  hasPersistedBands,
 }: {
   breachStartedAt: string | null | undefined;
   breakerConfig: BreakerConfigForChart | null | undefined;
   breakerConfigStatus: BreakerConfigStatus;
+  hasPersistedBands: boolean;
 }) {
-  // When we don't have a CURRENT breaker to compare against (still loading or
-  // genuinely missing), the legend cannot describe the current-band shape.
-  // BUT per-snapshot persisted bands are self-contained — they color markers
-  // green/red against the band that was armed at write time, independent of
-  // the current breaker fetch. Show the verdict chips alongside the status
-  // message so operators looking at the colored markers see what they mean.
+  // When the current breaker isn't ready, the markers can be one of two
+  // things: persisted per-snapshot verdicts (if any snapshot carries an
+  // at-the-time band) OR genuinely-neutral (no current AND no persisted).
+  // The legend copy must match what the markers actually display so an
+  // operator never sees red/green markers next to "band check unavailable."
   if (breakerConfigStatus !== "ready" || !breakerConfig) {
-    const msg =
-      breakerConfigStatus === "loading"
+    const loading = breakerConfigStatus === "loading";
+    const msg = hasPersistedBands
+      ? loading
+        ? "Verdicts use each snapshot's at-the-time band; current breaker still loading"
+        : "No active current breaker — verdicts use each snapshot's at-the-time persisted band only"
+      : loading
         ? "Loading current breaker config…"
-        : "No active breaker for this rate feed — current band check unavailable";
+        : "No active breaker for this rate feed — band check unavailable";
     return (
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-          Within band when evaluated
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-          Outside band — breaker would trip
-        </span>
+        {hasPersistedBands && (
+          <>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              Within band when evaluated
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+              Outside band — breaker would trip
+            </span>
+          </>
+        )}
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
           {msg}
@@ -709,3 +752,13 @@ function OracleChartLegend({
     </div>
   );
 }
+
+// Test-only surface — keeps these helpers out of the module's public API
+// while letting `__tests__/oracle-chart.test.ts` import them directly. Do
+// not import this from production code.
+export const __test__ = {
+  buildOracleShapes,
+  buildOracleXaxis,
+  buildOraclePlotData,
+  isOutOfBand,
+};

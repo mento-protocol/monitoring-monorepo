@@ -33,6 +33,7 @@ import {
 } from "../rpc.js";
 import { reportExpiryEffect } from "../rpc/effects.js";
 import {
+  bootstrapAndResolveBreakerSnapshotFields,
   bootstrapFeedBreakerConfigs,
   nextMedianEMA,
   resolveBreakerSnapshotFields,
@@ -77,17 +78,18 @@ indexer.onEvent(
 
     const oracleTimestamp = event.params.timestamp;
 
-    // Resolve once per event so every per-pool snapshot row captures the
-    // same baseline/threshold pair. Reads BreakerConfig.medianRatesEMA
-    // (MEDIAN_DELTA) or referenceValue (VALUE_DELTA) + the linked Breaker's
-    // effective threshold. Returns null when no trip-able breaker is
-    // configured (or EMA is unseeded) — chart consumers fall back to the
-    // current band for those rows. See resolveBreakerSnapshotFields doc.
-    const breakerSnapshotFields = await resolveBreakerSnapshotFields(
-      context,
-      event.chainId,
-      rateFeedID,
-    );
+    // Bootstrap-if-needed + resolve in one call. See helper doc; bootstrap
+    // covers fresh-sync feeds whose BreakerBox events predate start_block.
+    const breakerSnapshotFields =
+      await bootstrapAndResolveBreakerSnapshotFields({
+        context,
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+        blockTimestamp,
+        knownConfigsLength: breakerConfigs.length,
+        poolsLength: poolIds.length,
+      });
 
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
     // writes don't race. Fan out in parallel — on a rate feed shared by 5-10
