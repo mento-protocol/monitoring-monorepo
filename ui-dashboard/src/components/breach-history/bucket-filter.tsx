@@ -61,7 +61,7 @@ export function BucketFilter({
     itemCount: BUCKET_OPTIONS.length,
     activation: "automatic",
     arrowKeys: "all",
-    onActivate: (index) => onChange(BUCKET_OPTIONS[index]),
+    onActivate: (index) => onChange(BUCKET_OPTIONS[index]!),
   });
 
   return (

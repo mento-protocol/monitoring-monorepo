@@ -208,7 +208,7 @@ export function buildDailyVolumeSeries(
     series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
     let i = 0;
     for (const entry of perChain.values()) {
-      byChain[i].series.push({
+      byChain[i]!.series.push({
         timestamp,
         volumeUSD: entry.bucketTotals.get(timestamp) ?? 0,
       });

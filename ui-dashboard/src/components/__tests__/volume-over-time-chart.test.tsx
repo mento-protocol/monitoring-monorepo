@@ -247,13 +247,14 @@ describe("buildDailyVolumeSeries", () => {
 
     // Per-bucket invariant: chainA + chainB = total for every bucket.
     for (let i = 0; i < series.length; i++) {
-      expect(chainA.series[i].volumeUSD + chainB.series[i].volumeUSD).toBe(
-        series[i].volumeUSD,
-      );
-      expect(chainA.series[i].timestamp).toBe(series[i].timestamp);
+      const bucketA = chainA.series[i]!;
+      const bucketB = chainB.series[i]!;
+      const bucketTotal = series[i]!;
+      expect(bucketA.volumeUSD + bucketB.volumeUSD).toBe(bucketTotal.volumeUSD);
+      expect(bucketA.timestamp).toBe(bucketTotal.timestamp);
     }
     // Zero-fill: chain B emits 0 on day 1 (rather than being omitted).
-    expect(chainB.series[1].volumeUSD).toBe(0);
+    expect(chainB.series[1]!.volumeUSD).toBe(0);
   });
 
   it("omits chains whose snapshots are all out-of-window or null-priced", () => {
@@ -293,7 +294,7 @@ describe("buildDailyVolumeSeries", () => {
     );
 
     expect(byChain).toHaveLength(1);
-    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
+    expect(byChain[0]!.network.id).toBe(TVL_NETWORK.id);
   });
 
   it("marks the v3 series partial when untrusted-decimal snapshots are skipped", () => {

@@ -397,17 +397,17 @@ function buildSnapshotMarkers({
 
   const markerColors = snapshots.map((s, i) => {
     if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
-    const p = prices[i];
+    const p = prices[i]!;
     if (!Number.isFinite(p)) return "#64748b";
-    const verdict = isOutOfBand(p, perSnapshotBands[i]);
+    const verdict = isOutOfBand(p, perSnapshotBands[i]!);
     if (verdict === null) return "#64748b"; // unknown band — neutral
     return verdict ? "#ef4444" : "#22c55e";
   });
   const markerSizes = snapshots.map((s, i) => {
     if (!s.oracleOk) return isSparse ? 12 : 9;
-    const p = prices[i];
+    const p = prices[i]!;
     if (!Number.isFinite(p)) return isSparse ? 8 : 4;
-    return isOutOfBand(p, perSnapshotBands[i]) === true
+    return isOutOfBand(p, perSnapshotBands[i]!) === true
       ? isSparse
         ? 12
         : 8
@@ -419,9 +419,9 @@ function buildSnapshotMarkers({
   const hoverText = snapshots.map((s, i) =>
     formatOracleChartHoverText({
       snapshot: s,
-      price: prices[i],
-      baseline: perSnapshotBands[i].baseline,
-      thresholdRatio: perSnapshotBands[i].thresholdRatio,
+      price: prices[i]!,
+      baseline: perSnapshotBands[i]!.baseline,
+      thresholdRatio: perSnapshotBands[i]!.thresholdRatio,
       // Match `resolveSnapshotBand`'s pair-of-two semantics: a half-populated
       // row (only one persisted field set) falls back to the current band,
       // so the hover wording should not say "at the time" for that case.
@@ -555,7 +555,7 @@ function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
     // Newly-indexed pool with exactly one snapshot — pad ±1h around the
     // sole timestamp so the marker doesn't render against a zero-width
     // (degenerate) X axis.
-    const ts = new Date(timestamps[0]).getTime();
+    const ts = new Date(timestamps[0]!).getTime();
     const pad = 3600_000;
     xaxisBase.range = [
       new Date(ts - pad).toISOString(),
@@ -563,8 +563,8 @@ function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
     ];
     xaxisBase.autorange = false;
   } else if (isSparse && timestamps.length >= 2) {
-    const minTs = new Date(timestamps[0]).getTime();
-    const maxTs = new Date(timestamps[timestamps.length - 1]).getTime();
+    const minTs = new Date(timestamps[0]!).getTime();
+    const maxTs = new Date(timestamps[timestamps.length - 1]!).getTime();
     const pad = Math.max((maxTs - minTs) * 0.1, 3600_000);
     xaxisBase.range = [
       new Date(minTs - pad).toISOString(),
@@ -572,8 +572,8 @@ function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
     ];
     xaxisBase.autorange = false;
   } else if (timestamps.length > 0) {
-    const maxTs = new Date(timestamps[timestamps.length - 1]).getTime();
-    const minDataTs = new Date(timestamps[0]).getTime();
+    const maxTs = new Date(timestamps[timestamps.length - 1]!).getTime();
+    const minDataTs = new Date(timestamps[0]!).getTime();
     const sevenDaysMs = 7 * 24 * 3_600_000;
     const start = Math.max(minDataTs, maxTs - sevenDaysMs);
     xaxisBase.range = [

@@ -124,8 +124,9 @@ export function useCrossFade(params: {
   // flows through React state (which drives the cross-fade).
   const handleLegendClick = useCallback(
     (e: { readonly curveNumber: number }): boolean => {
-      const seriesKey = currentBreakdown[e.curveNumber]
-        ? breakdownVisibilityKey(currentBreakdown[e.curveNumber])
+      const clickedSeries = currentBreakdown[e.curveNumber];
+      const seriesKey = clickedSeries
+        ? breakdownVisibilityKey(clickedSeries)
         : null;
       if (seriesKey === null) return false;
       setHiddenKeys((prev) => {
