@@ -13,10 +13,10 @@ name: Alerts Infra
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
 #     `terraform plan -detailed-exitcode` and emits a `has-changes` job
 #     output. On PRs it posts a sticky comment with the plan diff.
-#   - `apply` job only runs on push/dispatch to main AND only when the plan
-#     reported actual changes. When there are no changes the apply job is
-#     skipped entirely, which means the `production` Environment's
-#     required-reviewer prompt only fires on real-change merges.
+#   - `apply` job only runs on push/dispatch to main, only when the plan
+#     reported actual changes, and only for stack-root changes or explicit
+#     workflow_dispatch. Workflow/notifier-only edits can still plan, but they
+#     do not open the `production` Environment gate for unrelated drift.
 #
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
@@ -106,6 +106,7 @@ jobs:
         working-directory: alerts/infra
     outputs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
+      stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
       # Sentry
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
@@ -124,6 +125,30 @@ jobs:
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Detect stack path changes
+        id: stack_changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          STACK_PATH: alerts/infra
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$BASE_SHA" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+            echo "stack-changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -221,13 +246,18 @@ jobs:
         env:
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         run: |
           {
             echo '## Terraform Plan — `alerts/infra/`'
             echo
             if [ "$PLAN_OUTCOME" = "success" ]; then
               if [ "$HAS_CHANGES" = "true" ]; then
-                echo '**Status:** 📝 changes detected — merge will trigger apply'
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  echo '**Status:** 📝 changes detected — stack change is eligible for apply'
+                else
+                  echo '**Status:** ⚠️ drift detected — stack path unchanged, apply will skip'
+                fi
               else
                 echo '**Status:** ✅ no changes — merge will skip apply'
               fi
@@ -253,6 +283,7 @@ jobs:
           && github.ref == 'refs/heads/main'
           && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.detect.outputs.has-changes == 'true'
+          && (github.event_name == 'workflow_dispatch' || steps.stack_changes.outputs.stack-changed == 'true')
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -274,6 +305,7 @@ jobs:
           # hardening pattern).
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         with:
           script: |
             const fs = require("fs");
@@ -293,11 +325,14 @@ jobs:
 
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
             const hasChanges = process.env.HAS_CHANGES === "true";
+            const stackChanged = process.env.STACK_CHANGED === "true";
             const statusIcon = planOutcome === "success"
-              ? (hasChanges ? "📝" : "✅")
+              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
               : "❌";
             const statusText = planOutcome === "success"
-              ? (hasChanges ? "changes detected — merge will trigger apply" : "no changes — merge will skip apply")
+              ? (hasChanges
+                  ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
+                  : "no changes — merge will skip apply")
               : "plan failed";
 
             const runUrl =
@@ -354,14 +389,15 @@ jobs:
   apply:
     name: Terraform Apply (alerts/infra)
     needs: plan
-    # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
-    # there are real changes. When `has-changes=false` the job is skipped
-    # entirely — the production-environment approval prompt never fires for
-    # no-op merges (the gap that motivated the saved-plan refactor).
+    # Apply when (a) on main, (b) push or dispatch event, (c) plan said
+    # there are real changes, AND (d) the stack root changed or a maintainer
+    # explicitly dispatched the workflow. Workflow/notifier-only edits can
+    # surface drift in the plan without opening the production approval gate.
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
+      && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')
     # Reuses the existing `production` environment shared with metrics-bridge,
     # aegis, and alerts/rules. The required-reviewer rule on that environment
     # gates each apply behind manual approval.
