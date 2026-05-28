@@ -16,54 +16,6 @@ variable "slack_bot_token" {
   sensitive   = true
 }
 
-variable "discord_alerts_webhook_url_staging" {
-  description = "Webhook URL for the Discord channel where alerts for staging oracle relayers are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_prod" {
-  description = "Webhook URL for the Discord channel where alerts for prod oracle relayers are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_reserve" {
-  description = "Webhook URL for the Discord channel where reserve balance alerts are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_trading_modes_staging" {
-  description = "Webhook URL for the Discord channel where trading mode alerts on staging are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_trading_modes_prod" {
-  description = "Webhook URL for the Discord channel where trading mode alerts on production are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_trading_limits" {
-  description = "Webhook URL for the Discord channel where trading limit alerts are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_aegis" {
-  description = "Webhook URL for the Discord channel where Aegis service alerts are sent."
-  type        = string
-  sensitive   = true
-}
-
-variable "discord_alerts_webhook_url_catch_all" {
-  description = "Catch-all Discord webhook URL for alerts without a configured contact point."
-  type        = string
-  sensitive   = true
-}
-
 variable "splunk_on_call_alerts_webhook_url" {
   description = "Webhook URL for triggering Splunk On-Call alerts."
   type        = string
@@ -84,7 +36,7 @@ variable "slack_channel_critical" {
 
 variable "slack_channel_warnings" {
   type        = string
-  description = "[DEPRECATED] Slack channel for lower-severity alerts. Retained for dual-route compatibility; remove after all v3 rules migrate to domain-specific channels."
+  description = "[DEPRECATED] Slack channel for lower-severity alerts. Retained for legacy warning-channel compatibility; remove after all v3 rules migrate to domain-specific channels."
   default     = "#alerts-warning"
 }
 

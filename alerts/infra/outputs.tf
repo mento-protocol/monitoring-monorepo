@@ -13,11 +13,6 @@ output "monitored_multisigs" {
   }
 }
 
-output "discord_channels" {
-  description = "Legacy Discord channels retained during Slack cutover"
-  value       = module.discord_channels.multisig_discord_channels
-}
-
 output "slack_channels" {
   description = "Slack channel names for on-chain event monitoring"
   value       = module.slack_channels.channel_names

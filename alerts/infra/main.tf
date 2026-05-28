@@ -54,31 +54,13 @@ resource "google_service_account" "project_sa" {
 # Modules #
 ###########
 
-# Preserve existing state on the rename from the vendored upstream names
-# (`discord_channel_manager` / `sentry_alerts`) to the new names. Without
-# these `moved` blocks, `terraform plan` against a previously-applied state
-# would propose destroy+recreate of the Discord channels and Sentry alert
-# rules — a recreate would invalidate webhook URLs and lose Sentry alert
-# IDs. The `moved` blocks make the rename a no-op state migration.
-moved {
-  from = module.discord_channel_manager
-  to   = module.discord_channels
-}
+# Preserve existing state on the rename from the vendored upstream
+# `sentry_alerts` name to `sentry_bridge`. Without this `moved` block,
+# Terraform would propose destroy+recreate of Sentry alert rules and lose
+# Sentry alert IDs. The block makes the rename a no-op state migration.
 moved {
   from = module.sentry_alerts
   to   = module.sentry_bridge
-}
-
-# Create Discord channels and webhooks for alerts and events
-module "discord_channels" {
-  source = "./channels/discord-channels"
-
-  providers = {
-    restapi.discord = restapi.discord
-  }
-
-  discord_server_id   = var.discord_server_id
-  discord_category_id = var.discord_category_id
 }
 
 # Create Slack channels for on-chain alerts and events.
@@ -182,7 +164,7 @@ module "onchain_event_listeners" {
 # GitHub UI would surface as a TF diff. Secrets in state are
 # encrypted at rest in GCS and gated by `org-terraform` impersonation
 # (same gate as every other secret already managed here, e.g. the
-# Sentry / Discord / Slack / QuickNode tokens above).
+# Sentry / temporary Discord cleanup / Slack / QuickNode tokens above).
 #
 # Map: tfvars variable → secret name. Mirrors the env: block in
 # alerts-infra.yml.
@@ -242,7 +224,7 @@ locals {
 # outside Terraform — non-trivial complexity for marginal benefit here: the
 # state file is already encrypted at rest in GCS, gated by `org-terraform`
 # impersonation (same gate that already protects sentry_auth_token /
-# discord_bot_token / quicknode_signing_secret in this same state). The
+# temporary discord_bot_token / quicknode_signing_secret in this same state). The
 # provider handles libsodium server-side against GitHub's public key on its
 # way to the API. If the threat model ever shifts (state exposed to a wider
 # audience), revisit — `gh secret set` and `data.github_actions_public_key`

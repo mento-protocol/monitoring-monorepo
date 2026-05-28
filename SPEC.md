@@ -69,14 +69,13 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
                 │ Slack #alerts-critical            │
                 │ Slack #alerts-oracles / -pools /  │
                 │       -infra / -reserve / -testnet│
-                │ Discord (Aegis v2, soak window)   │
                 └───────────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
-2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Slack `#alerts-critical` + per-domain warning channels + Splunk On-Call (page severity); Discord dual-route stays live during the migration soak window
+2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Slack `#alerts-critical` + per-domain warning channels + Splunk On-Call (page severity)
 3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` (page-worthy) + per-domain warning channels (`#alerts-oracles` / `#alerts-pools` / `#alerts-infra`) — rules in `alerts/rules/`
 
 ### Components
@@ -334,7 +333,7 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed in the aegis repo.
 
-Currently dual-routed to Slack alongside the legacy Discord channels during the migration soak window; the cutover PR removes the Discord side.
+Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
 | Group            | Rules                               | Notification Channels                                                      |
 | ---------------- | ----------------------------------- | -------------------------------------------------------------------------- |
@@ -359,7 +358,7 @@ Currently dual-routed to Slack alongside the legacy Discord channels during the 
 | `#alerts-pools`    | Pool-mechanics warnings — deviation, rebalancer effectiveness, trading-limit pressure                |
 | `#alerts-infra`    | Service-infra warnings — indexer, metrics-bridge, Aegis service health                               |
 
-Aegis v2 dual-route additionally lands in `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Initial rollout was severity-split (`#alerts-warnings` catch-all); refined to per-domain channels once operators wanted to mute/focus by service.
+Protocol/Aegis routing additionally uses `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Initial rollout was severity-split (`#alerts-warnings` catch-all); refined to per-domain channels once operators wanted to mute/focus by service.
 
 **Rules shipped** (10 rules across 2 services — see `alerts/rules/rules-*.tf`):
 
@@ -476,7 +475,6 @@ Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Graf
 - `lastOracleUpdateTxHash` on `Pool` — unblocks tx-link enrichment in Slack alerts
 - ChainStat / GlobalStat aggregate entities
 - Gap-fill logic for snapshot charts
-- Cut over Aegis v2 alerts to Slack-only (dual-route soak in progress; cutover PR removes Discord side once parity is verified)
 - Merge Aegis into the monorepo — retire the sibling `../aegis/` repo, fold its Terraform into `terraform/`
 - Grafana Agent → Grafana Alloy — Agent reached EOL on 2025-11-01; Alloy is the OTel-collector successor
 - Streamlit sandbox

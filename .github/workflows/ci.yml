@@ -476,10 +476,6 @@ jobs:
             echo "::error::event-hashes.json is stale. Regenerate with: cd alerts/infra/onchain-event-handler && pnpm run build:event-hashes"
             exit 1
           fi
-      # Sibling workspace package — covers check-discord-permissions.ts and
-      # any other operator scripts so TS breakage can't merge silently.
-      - name: Typecheck (alerts-scripts)
-        run: pnpm --filter @mento-protocol/alerts-scripts typecheck
       # Operator shell scripts (deploy, get-logs, manage-quicknode-webhook, etc.).
       # Runtime invocation by operators, so a syntax error here breaks deploy
       # / incident flows rather than CI. `bash -n` parses without executing.

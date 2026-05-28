@@ -59,7 +59,7 @@
       "id": "alerts-delivery",
       "name": "Alerts Delivery",
       "path": "alerts/infra",
-      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Function, Discord channel management, Sentry bridge, Slack channel lifecycle, and related GCP resources.",
+      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Function, Sentry bridge, Slack channel lifecycle, and related GCP resources. Discord provider is temporary until legacy state cleanup completes.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

@@ -17,13 +17,13 @@ Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terrafo
 
 1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
-3. **Discord and Splunk webhook URLs** for legacy protocol/Aegis routes. These moved here from `aegis/terraform`.
+3. **Splunk On-Call webhook URL** for page-severity protocol/Aegis routes.
 
 ## Running
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Paste the Slack bot token, Grafana SA token, Discord webhooks, and Splunk webhook into terraform.tfvars.
+# Paste the Slack bot token, Grafana SA token, and Splunk webhook into terraform.tfvars.
 
 pnpm alerts:rules:init
 pnpm alerts:rules:plan

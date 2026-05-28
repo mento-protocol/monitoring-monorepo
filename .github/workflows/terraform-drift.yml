@@ -102,14 +102,6 @@ jobs:
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
-      TF_VAR_discord_alerts_webhook_url_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_STAGING }}
-      TF_VAR_discord_alerts_webhook_url_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_PROD }}
-      TF_VAR_discord_alerts_webhook_url_reserve: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_RESERVE }}
-      TF_VAR_discord_alerts_webhook_url_trading_modes_staging: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_STAGING }}
-      TF_VAR_discord_alerts_webhook_url_trading_modes_prod: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_MODES_PROD }}
-      TF_VAR_discord_alerts_webhook_url_trading_limits: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_TRADING_LIMITS }}
-      TF_VAR_discord_alerts_webhook_url_aegis: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_AEGIS }}
-      TF_VAR_discord_alerts_webhook_url_catch_all: ${{ secrets.TF_VAR_DISCORD_ALERTS_WEBHOOK_URL_CATCH_ALL }}
     defaults:
       run:
         working-directory: ${{ matrix.path }}

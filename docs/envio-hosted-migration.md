@@ -163,7 +163,7 @@ The config file is the same. No code changes needed between environments — onl
 
 ### Post-Deploy
 
-- Set up alerts in Envio dashboard (Slack/Discord notifications)
+- Set up alerts in Envio dashboard (Slack notifications)
 - Configure domain whitelisting for the Vercel domain
 - Monitor the 100k event limit — plan upgrade before hitting it
 - Note 30-day auto-deletion on free tier — redeploy or upgrade before expiry

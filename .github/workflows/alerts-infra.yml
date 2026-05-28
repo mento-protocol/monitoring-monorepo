@@ -1,7 +1,7 @@
 name: Alerts Infra
 
 # Terraform plan-on-PR + apply-on-merge for `alerts/infra/` — the event-driven
-# alert delivery stack (Cloud Function + Discord channels + Sentry bridge +
+# alert delivery stack (Cloud Function + Slack channels + Sentry bridge +
 # QuickNode webhooks). The stack's GCS backend and google provider both
 # impersonate `org-terraform@mento-terraform-seed-ffac` (see versions.tf and
 # providers.tf), so the CI deployer SA needs `roles/iam.serviceAccountTokenCreator`
@@ -22,8 +22,9 @@ name: Alerts Infra
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
-# TF_VAR_* env block here carries production Sentry/Discord/QuickNode/
-# Slack/GitHub credentials. Uploading the binary plan as a workflow
+# TF_VAR_* env block here carries production Sentry/QuickNode/Slack/GitHub
+# credentials plus temporary Discord destroy credentials. Uploading the binary
+# plan as a workflow
 # artifact would expose those secrets to anyone with `actions:read`.
 # Instead the apply job re-plans at gate-approval time — the trade-off
 # is the brief "between approval and apply" drift window, which the
@@ -54,8 +55,8 @@ on:
 # `cancel-in-progress: false`, so concurrent merges queue and apply
 # strictly in order. Without this, a SHA-unique group would let two
 # close-together merges run `terraform apply` in parallel and the older
-# one could roll the state back to stale config (Cloud Function source +
-# QuickNode webhooks + Discord channels are all order-sensitive).
+# one could roll the state back to stale config (Cloud Function source,
+# QuickNode webhooks, and Slack/Sentry channel routing are all order-sensitive).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -101,7 +102,7 @@ jobs:
     env:
       # Sentry
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # Discord
+      # Temporary Discord destroy credentials; remove after legacy state is gone.
       TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
       TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
       TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
@@ -254,7 +255,7 @@ jobs:
               : "(Plan did not produce output — check the workflow logs.)";
 
             // GitHub PR comment hard cap is ~65KB. A fresh alerts/infra plan
-            // (Cloud Function + Discord channels + Sentry + QuickNode) can
+            // (Cloud Function + Slack channels + Sentry + QuickNode) can
             // easily blow past that. Tail the last 50KB so the apply/destroy
             // summary stays visible and link to the run for the full log.
             const MAX = 50_000;

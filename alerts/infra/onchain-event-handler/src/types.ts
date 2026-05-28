@@ -23,18 +23,6 @@ export interface NotificationField {
   inline?: boolean;
 }
 
-export interface DiscordEmbed {
-  title: string;
-  description: string;
-  color: number;
-  fields: NotificationField[];
-  timestamp: string;
-}
-
-export interface DiscordMessage {
-  embeds: DiscordEmbed[];
-}
-
 export interface NotificationContent {
   title: string;
   description: string;
