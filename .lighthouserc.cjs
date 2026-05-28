@@ -114,9 +114,13 @@ module.exports = {
         //
         // INP is asserted in a separate workflow step that runs
         // `ui-dashboard/scripts/measure-inp.mjs` — Playwright drives a
-        // scripted interaction on /pools and the web-vitals library reports
-        // the real Event-Timing-API INP. Budget defaults to 200 ms (web-vitals
-        // "good" threshold) and is overridable via INP_BUDGET_MS.
+        // set of scripted interactions on /pools (filter input + Apply
+        // click) and /leaderboard (time-window switch, column sort), and
+        // the web-vitals library reports the real Event-Timing-API INP
+        // for each. Each surface is asserted independently against the
+        // INP_BUDGET_MS budget (default 200 ms, web-vitals "good"
+        // threshold). Pool-detail chart hover coverage is tracked in
+        // BACKLOG.
       },
     },
     upload: {
