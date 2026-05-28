@@ -189,8 +189,7 @@ jobs:
         # entry, easily dominates the plan view when the stack has dozens of
         # resources. Strip those lines in-place so the Plan summary and the
         # sticky PR comment (both downstream of /tmp/tf-plan.txt) show only
-        # the actionable diff. The raw output is still in the workflow log
-        # for debugging refresh failures.
+        # the actionable diff.
         if: always()
         working-directory: /tmp
         run: |
@@ -389,13 +388,24 @@ jobs:
         # lock rather than failing the deploy.
         # `-no-color`: keep the output free of ANSI escapes so the apply
         # summary step renders cleanly in the job summary markdown.
-        # Output teed to `/tmp/tf-apply.txt` for the apply summary step;
-        # PIPESTATUS preserves terraform's exit code over tee's.
+        # Apply output is captured raw, sanitized, then written to
+        # `/tmp/tf-apply.txt` for logs and the apply summary. Destroying
+        # legacy Discord contact points can print provider state such as
+        # webhook URLs, so never tee raw Terraform output to GitHub logs.
         run: |
           set +e
-          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m 2>&1 | tee /tmp/tf-apply.txt
-          EXITCODE=${PIPESTATUS[0]}
+          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1
+          EXITCODE=$?
           set -e
+          sed -E \
+            -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
+            -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
+            -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
+            -e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
+            -e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            /tmp/tf-apply.raw > /tmp/tf-apply.txt
+          cat /tmp/tf-apply.txt
           exit "$EXITCODE"
 
       - name: Strip refresh noise from apply output
