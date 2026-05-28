@@ -250,33 +250,10 @@ resource "restapi_object" "ci_failures_invite_eng" {
     # `alltrue([])` is `true` in Terraform, so without it a real failure
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
     # NO `errors` array) would silently pass the postcondition.
-    #
-    # The `channel_not_found` branch is a one-time migration escape hatch for
-    # old state. Previous config also stored `id_attribute = "ok"` but used
-    # `read_path = "/conversations.info?channel={id}"`, so refresh asks Slack
-    # for `channel=true` or `channel=false` before Terraform can persist the
-    # new `/api.test` read path. `id = "false"` is only accepted when the
-    # historical create response was the benign all-already_in_channel case;
-    # a fresh create failure such as missing_scope or channel_not_found still
-    # fails this postcondition.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
-          || (
-            try(jsondecode(self.api_response).error, "") == "channel_not_found"
-            && (
-              self.id == "true"
-              || (
-                self.id == "false"
-                && try(length(jsondecode(self.create_response).errors), 0) > 0
-                && alltrue([
-                  for err in try(jsondecode(self.create_response).errors, []) :
-                  try(err.error, "") == "already_in_channel"
-                ])
-              )
-            )
-          )
           || (
             try(length(jsondecode(self.api_response).errors), 0) > 0
             && alltrue([
