@@ -10,7 +10,7 @@
 import { GraphQLClient } from "graphql-request";
 import * as Sentry from "@sentry/nextjs";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
-import type { Network, IndexerNetworkId } from "@/lib/networks";
+import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_BREACH_ROLLUP,
   ALL_POOLS_HEALTH_CURSOR,
@@ -749,7 +749,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
     return emptyNetworkData(
-      NETWORKS[configuredNetworkIds[i] as IndexerNetworkId],
+      NETWORKS[configuredNetworkIds[i]!],
       windows,
       result.reason instanceof Error
         ? result.reason
