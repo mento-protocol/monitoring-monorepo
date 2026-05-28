@@ -96,22 +96,6 @@ export function resolveSnapshotBand(
 
 type BreakerConfigStatus = "loading" | "ready" | "missing";
 
-// Pure helper extracted from `buildOraclePlotData` so the verdict logic is
-// unit-testable in isolation. Returns `null` when we can't make a verdict
-// (config not ready, baseline/threshold missing, or non-finite price); `true`
-// when the price would trip the breaker; `false` when it sits within band.
-function isOutOfBand(
-  price: number,
-  baseline: number | null,
-  thresholdRatio: number | null,
-  breakerConfigStatus: BreakerConfigStatus,
-): boolean | null {
-  if (breakerConfigStatus !== "ready") return null;
-  if (!baseline || !thresholdRatio) return null;
-  if (!Number.isFinite(price)) return null;
-  return Math.abs(price - baseline) / baseline > thresholdRatio;
-}
-
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
   token0Symbol?: string | undefined;
@@ -760,5 +744,4 @@ export const __test__ = {
   buildOracleShapes,
   buildOracleXaxis,
   buildOraclePlotData,
-  isOutOfBand,
 };

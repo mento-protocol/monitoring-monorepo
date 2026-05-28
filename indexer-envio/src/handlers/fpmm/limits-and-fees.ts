@@ -30,7 +30,8 @@ import {
   pickActiveThreshold,
 } from "../../priceDifference.js";
 import { recordHealthSample } from "../../healthScore.js";
-import { resolveBreakerSnapshotFields } from "../../breakers.js";
+import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
+import { getBreakerConfigsByFeed } from "../../rpc.js";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -167,6 +168,36 @@ indexer.onEvent(
     ),
 );
 
+// Resolve per-snapshot breaker baseline+threshold for a feed at a specific
+// block, conditionally bootstrapping when the BreakerBox events predate
+// start_block. Mirrors the OracleReported / MedianUpdated pattern — without
+// the bootstrap the first RebalanceThresholdUpdated for a feed on a fresh
+// sync would persist null band fields forever.
+async function resolveBreakerFieldsForFeedAtBlock(
+  context: Parameters<
+    typeof bootstrapAndResolveBreakerSnapshotFields
+  >[0]["context"],
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): ReturnType<typeof bootstrapAndResolveBreakerSnapshotFields> {
+  const knownConfigs = await getBreakerConfigsByFeed(
+    context,
+    chainId,
+    rateFeedID,
+  );
+  return bootstrapAndResolveBreakerSnapshotFields({
+    context,
+    chainId,
+    rateFeedID,
+    blockNumber,
+    blockTimestamp,
+    knownConfigsLength: knownConfigs.length,
+    poolsLength: 1,
+  });
+}
+
 // Build the `threshold_updated`-source `OracleSnapshot` row. Extracted so
 // the parent handler stays under the project's max-lines-per-function
 // budget without losing the per-field comments. Returns the constructed
@@ -192,7 +223,7 @@ function buildThresholdUpdatedSnapshot({
   pool: Pool;
   snapshotFields: ReturnType<typeof recordHealthSample>["snapshotFields"];
   breakerSnapshotFields: Awaited<
-    ReturnType<typeof resolveBreakerSnapshotFields>
+    ReturnType<typeof bootstrapAndResolveBreakerSnapshotFields>
   >;
 }): OracleSnapshot {
   return {
@@ -437,11 +468,13 @@ indexer.onEvent(
       // may be 0 / stale, so the row would mix a fresh deviation with an
       // unrelated displayed oracle price.
       if (medianFresh) {
-        // Per-point band capture — see resolveBreakerSnapshotFields docs.
-        const breakerSnapshotFields = await resolveBreakerSnapshotFields(
+        // Per-point band capture — see resolveBreakerFieldsForFeedAtBlock.
+        const breakerSnapshotFields = await resolveBreakerFieldsForFeedAtBlock(
           context,
           event.chainId,
           existing.referenceRateFeedID,
+          blockNumber,
+          blockTimestamp,
         );
         context.OracleSnapshot.set(
           buildThresholdUpdatedSnapshot({

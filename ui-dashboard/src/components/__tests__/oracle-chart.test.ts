@@ -8,12 +8,7 @@ import {
 } from "../oracle-chart";
 import type { OracleSnapshot } from "@/lib/types";
 
-const {
-  buildOracleShapes,
-  buildOracleXaxis,
-  buildOraclePlotData,
-  isOutOfBand,
-} = __test__;
+const { buildOracleShapes, buildOracleXaxis, buildOraclePlotData } = __test__;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -217,52 +212,11 @@ describe("resolveSnapshotBand", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// isOutOfBand
-// ---------------------------------------------------------------------------
-
-describe("isOutOfBand", () => {
-  it("returns null when breakerConfigStatus is not ready", () => {
-    expect(isOutOfBand(1.0, 1.0, 0.01, "loading")).toBe(null);
-    expect(isOutOfBand(1.0, 1.0, 0.01, "missing")).toBe(null);
-  });
-
-  it("returns null when baseline is missing", () => {
-    expect(isOutOfBand(1.0, null, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns null when baseline is zero (falsy guards against div-by-zero)", () => {
-    // Pinned because the implementation uses `if (!baseline || !thresholdRatio)`
-    // rather than an explicit `=== null` check, so 0 must also short-circuit.
-    expect(isOutOfBand(1.0, 0, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns null when thresholdRatio is missing", () => {
-    expect(isOutOfBand(1.0, 1.0, null, "ready")).toBe(null);
-  });
-
-  it("returns null when thresholdRatio is zero (degenerate zero-width band)", () => {
-    // Same falsy-guard semantics — a 0 threshold would otherwise classify
-    // every non-equal price as out-of-band.
-    expect(isOutOfBand(1.0, 1.0, 0, "ready")).toBe(null);
-  });
-
-  it("returns null when price is NaN", () => {
-    expect(isOutOfBand(Number.NaN, 1.0, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns true when |price - baseline| / baseline > thresholdRatio", () => {
-    // baseline=1, threshold=0.01 → trip outside [0.99, 1.01].
-    expect(isOutOfBand(1.02, 1.0, 0.01, "ready")).toBe(true);
-    expect(isOutOfBand(0.97, 1.0, 0.01, "ready")).toBe(true);
-  });
-
-  it("returns false when price sits inside the band", () => {
-    expect(isOutOfBand(1.0, 1.0, 0.01, "ready")).toBe(false);
-    expect(isOutOfBand(1.005, 1.0, 0.01, "ready")).toBe(false);
-    expect(isOutOfBand(0.995, 1.0, 0.01, "ready")).toBe(false);
-  });
-});
+// `isOutOfBand` was removed in PR #636 round-2 — the verdict logic lives
+// inside `buildSnapshotMarkers`'s inner closure now (it needs per-snapshot
+// band resolution, not a global `breakerConfigStatus` gate), and the
+// module-level helper was dead production code. Coverage of the actual
+// verdict math is exercised end-to-end via `buildOraclePlotData` below.
 
 // ---------------------------------------------------------------------------
 // buildOracleShapes
