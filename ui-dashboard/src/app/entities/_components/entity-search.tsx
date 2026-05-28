@@ -95,15 +95,14 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
 
   // Canonicalize the URL so deep links like `?page=999`, `?page=foo`, or
   // `?page=1` (default) don't leave the address bar advertising a different
-  // view than the rendered one. Cursor PR #653 (review id 4381935282)
-  // flagged this — refresh / share otherwise replay the stale params instead
-  // of the visible state. Pattern mirrors `use-table-sort.ts:156-174` mount-
-  // time canonicalization and the bridge-flows pager `page=1` URL-clearing
-  // test. We don't touch `page` state — `clampedPage` is recomputed per
-  // render, so a transient state.page > totalPages is harmless until the
-  // next user action (typing, Next/Prev, popstate) re-syncs it. Avoids the
-  // `effect/no-derived-state` lint that fires when a useEffect writes state
-  // derivable in render.
+  // view than the rendered one — refresh / share would otherwise replay the
+  // stale params instead of the visible state. Pattern mirrors
+  // `use-table-sort.ts:156-174` mount-time canonicalization and the
+  // bridge-flows pager `page=1` URL-clearing test. We don't touch `page`
+  // state — `clampedPage` is recomputed per render, so a transient
+  // state.page > totalPages is harmless until the next user action
+  // (typing, Next/Prev, popstate) re-syncs it. Avoids `effect/no-derived-
+  // state` which fires when a useEffect writes state derivable in render.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);

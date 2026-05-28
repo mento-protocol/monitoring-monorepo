@@ -179,17 +179,16 @@ export function IntelTransfers({ address }: { address: string }) {
     },
   );
 
-  // Canonicalize the URL after data lands. Cursor PR #653 (review id
-  // 4381935282) flagged that deep links like `?page=999` (out of range),
-  // `?page=foo` (malformed), or `?page=1` (default) render the clamped
-  // page but leave the stale param in the address bar, so refresh/share
-  // don't reproduce the visible state. Pattern mirrors
-  // `use-table-sort.ts:156-174` (sort) and the bridge-flows pager's
-  // `page=1` URL-clearing test. We don't touch `page` state — the rendered
-  // value is `clampedPage` derived per-render, so a transient
-  // state.page > totalPages is harmless until the next user action
-  // re-syncs via `updatePage` (avoids the `effect/no-derived-state`
-  // lint that fires when a useEffect writes state derivable in render).
+  // Canonicalize the URL after data lands. Deep links like `?page=999`
+  // (out of range), `?page=foo` (malformed), or `?page=1` (default)
+  // otherwise render the clamped page but leave the stale param in the
+  // address bar, so refresh / share don't reproduce the visible state.
+  // Pattern mirrors `use-table-sort.ts:156-174` (sort) and the bridge-
+  // flows pager's `page=1` URL-clearing test. We don't touch `page`
+  // state — the rendered value is `clampedPage` derived per-render, so a
+  // transient state.page > totalPages is harmless until the next user
+  // action re-syncs via `updatePage` (avoids `effect/no-derived-state`
+  // which fires when a useEffect writes state derivable in render).
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!data) return;
