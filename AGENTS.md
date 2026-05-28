@@ -237,9 +237,11 @@ pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
 pnpm infra:apply              # Apply infrastructure changes
 # Event-driven alerts stack (Cloud Function + Discord channels + Sentry bridge + QuickNode webhooks):
-pnpm alerts:infra:init / alerts:infra:plan / alerts:infra:apply
+pnpm alerts:infra:init / alerts:infra:plan
 # Grafana metric alert rules (v3 Slack rules):
-pnpm alerts:rules:init / alerts:rules:plan / alerts:rules:apply
+pnpm alerts:rules:init / alerts:rules:plan
+# Apply happens via CI on merge to main (alerts-rules.yml / alerts-infra.yml).
+# Production gate enforces required-reviewer approval.
 ```
 
 Terraform stack ownership is registered in `terraform.stacks.json` and

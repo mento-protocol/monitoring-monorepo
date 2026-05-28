@@ -53,11 +53,7 @@
         ".github/workflows/infra.yml",
         ".github/workflows/alerts-rules.yml"
       ],
-      "aliases": [
-        "pnpm alerts:rules:init",
-        "pnpm alerts:rules:plan",
-        "pnpm alerts:rules:apply"
-      ]
+      "aliases": ["pnpm alerts:rules:init", "pnpm alerts:rules:plan"]
     },
     {
       "id": "alerts-delivery",
@@ -95,11 +91,7 @@
         ".github/workflows/infra.yml",
         ".github/workflows/alerts-infra.yml"
       ],
-      "aliases": [
-        "pnpm alerts:infra:init",
-        "pnpm alerts:infra:plan",
-        "pnpm alerts:infra:apply"
-      ]
+      "aliases": ["pnpm alerts:infra:init", "pnpm alerts:infra:plan"]
     },
     {
       "id": "aegis",
