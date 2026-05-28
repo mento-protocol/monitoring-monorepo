@@ -44,12 +44,15 @@ resource "terraform_data" "env_file" {
     content_hash = sha256(local.env_file_content)
   }
 
-  # `umask 077` ensures the file is created with 0600 permissions.
-  # Content is passed via env var to avoid shell quoting pitfalls with
-  # embedded JSON / special characters in the heredoc body.
+  # `umask 077` covers the create path; explicit `chmod 0600` after the
+  # write enforces the mode on the truncate-rewrite path too (the `>`
+  # redirect preserves the existing file's permissions, so an `.env`
+  # created earlier with looser perms would otherwise keep them across
+  # provisioner re-runs). Content is passed via env var to avoid shell
+  # quoting pitfalls with embedded JSON / special characters.
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command     = "umask 077 && printf '%s' \"$ENV_CONTENT\" > '${path.module}/.env'"
+    command     = "umask 077 && printf '%s' \"$ENV_CONTENT\" > '${path.module}/.env' && chmod 0600 '${path.module}/.env'"
     environment = {
       ENV_CONTENT = local.env_file_content
     }
