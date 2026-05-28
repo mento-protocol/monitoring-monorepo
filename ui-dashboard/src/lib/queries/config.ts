@@ -124,7 +124,6 @@ export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
   }
 `;
 
-
 export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
   query OracleSnapshotsCountPage($poolId: String!, $limit: Int!, $offset: Int!) {
     OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
