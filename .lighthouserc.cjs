@@ -116,8 +116,7 @@ module.exports = {
         // the web-vitals library reports the real Event-Timing-API INP
         // for each. Each surface is asserted independently against the
         // INP_BUDGET_MS budget (default 200 ms, web-vitals "good"
-        // threshold). Pool-detail chart hover coverage is tracked in
-        // BACKLOG.
+        // threshold).
       },
     },
     upload: {
