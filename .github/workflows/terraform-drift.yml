@@ -46,10 +46,16 @@ jobs:
 
       - name: Filter registry to auto-applied stacks
         id: filter
-        # Read `terraform.stacks.json` via `pnpm tf list --json` (the
-        # canonical entry point per AGENTS.md / repo convention), keep only
-        # stacks whose `ci.apply == "push-main-production-environment"`, emit
-        # a matrix.include payload.
+        # Read `terraform.stacks.json` via `node scripts/tf-stacks.mjs list
+        # --json`, keep only stacks whose
+        # `ci.apply == "push-main-production-environment"`, emit a
+        # matrix.include payload.
+        #
+        # We invoke the script via `node` directly rather than `pnpm tf list`
+        # because pnpm isn't pre-installed on GitHub/Blacksmith Ubuntu 24.04
+        # runners, and the script only uses Node stdlib (no node_modules
+        # needed). Matches the pattern in `.github/workflows/infra.yml` +
+        # `ci.yml` which also call `node scripts/tf-stacks.mjs` directly.
         #
         # `alerts-delivery` is skipped here pending PR #627 (local_file.env_file
         # fix). That stack always reports drift on fresh-checkout CI runners
@@ -58,7 +64,7 @@ jobs:
         # workflow. Remove the filter clause once PR #627 ships.
         run: |
           set -euo pipefail
-          pnpm tf list --json \
+          node scripts/tf-stacks.mjs list --json \
             | node -e '
               const stdin = require("fs").readFileSync(0, "utf8");
               const { stacks } = JSON.parse(stdin);
