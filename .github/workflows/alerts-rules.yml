@@ -44,11 +44,13 @@ on:
     branches: [main]
     paths:
       - alerts/rules/**
+      - scripts/sanitize-terraform-output.sh
       - .github/workflows/alerts-rules.yml
   push:
     branches: [main]
     paths:
       - alerts/rules/**
+      - scripts/sanitize-terraform-output.sh
       - .github/workflows/alerts-rules.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
@@ -156,15 +158,7 @@ jobs:
           terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
           EXITCODE=$?
           set -e
-          sed -E \
-            -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
-            -e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
-            -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
-            -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-            -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-            -e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-            -e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-            /tmp/tf-plan.raw > /tmp/tf-plan.txt
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
           cat /tmp/tf-plan.txt
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
           case "$EXITCODE" in
@@ -391,23 +385,11 @@ jobs:
         # contact-point resources have no config dependency edge, so force that
         # policy update first when the full plan still includes their deletes.
         run: |
-          sanitize_terraform_output() {
-            sed -E \
-              -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
-              -e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
-              -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
-              -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-              -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-              -e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-              -e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-              "$1" > "$2"
-          }
-
           set +e
           terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=10m > /tmp/tf-preapply-plan.raw 2>&1
           PLAN_EXITCODE=$?
           set -e
-          sanitize_terraform_output /tmp/tf-preapply-plan.raw /tmp/tf-preapply-plan.txt
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-preapply-plan.raw /tmp/tf-preapply-plan.txt
           cat /tmp/tf-preapply-plan.txt
 
           case "$PLAN_EXITCODE" in
@@ -423,7 +405,7 @@ jobs:
               ;;
           esac
 
-          if ! grep -Eq 'grafana_contact_point\.discord_channel_.*will be destroyed' /tmp/tf-preapply-plan.txt; then
+          if ! grep -Eq 'grafana_contact_point\.discord_channel_[^[:space:]]+( \([^)]+\))? will be destroyed' /tmp/tf-preapply-plan.txt; then
             echo "Pre-apply migration: no legacy Discord contact-point deletes detected."
             exit 0
           fi
@@ -433,7 +415,7 @@ jobs:
           terraform apply -target=grafana_notification_policy.all -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-policy-preapply.raw 2>&1
           APPLY_EXITCODE=$?
           set -e
-          sanitize_terraform_output /tmp/tf-policy-preapply.raw /tmp/tf-policy-preapply.txt
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-policy-preapply.raw /tmp/tf-policy-preapply.txt
           cat /tmp/tf-policy-preapply.txt
           exit "$APPLY_EXITCODE"
 
@@ -455,15 +437,7 @@ jobs:
           terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1
           EXITCODE=$?
           set -e
-          sed -E \
-            -e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
-            -e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
-            -e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
-            -e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-            -e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-            -e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
-            -e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-            /tmp/tf-apply.raw > /tmp/tf-apply.txt
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-apply.raw /tmp/tf-apply.txt
           cat /tmp/tf-apply.txt
           exit "$EXITCODE"
 
