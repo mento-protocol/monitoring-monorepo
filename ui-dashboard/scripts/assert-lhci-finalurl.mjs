@@ -28,7 +28,7 @@
 //   1 — manifest missing, no reports, or at least one finalUrl mismatched.
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 const PREVIEW_URL = process.env.PREVIEW_URL;
 if (!PREVIEW_URL) {
@@ -37,6 +37,10 @@ if (!PREVIEW_URL) {
 }
 
 const EXPECTED_HOST = new URL(PREVIEW_URL).host;
+// Keep in sync with the `--collect.url` flags passed to `lhci autorun`
+// in .github/workflows/lighthouse.yml. Adding a third audited URL there
+// without updating this set will surface here as a "path mismatch"
+// failure for the legitimate new page.
 const EXPECTED_PATHS = new Set(["/", "/pools"]);
 const MANIFEST_PATH = resolve(".lighthouseci/manifest.json");
 
@@ -55,7 +59,6 @@ if (!Array.isArray(manifest) || manifest.length === 0) {
   process.exit(1);
 }
 
-const manifestDir = dirname(MANIFEST_PATH);
 const failures = [];
 const summary = [];
 
@@ -66,7 +69,14 @@ for (const entry of manifest) {
     );
     continue;
   }
-  const reportPath = join(manifestDir, entry.jsonPath);
+  // lhci writes absolute paths into `jsonPath` (see `path.resolve` in
+  // `@lhci/cli` collect output). `resolve()` is a no-op on absolute
+  // input and CWD-relative on relative input, so it handles both shapes
+  // safely. `path.join(manifestDir, entry.jsonPath)` would silently
+  // produce a concatenated nonsense path like
+  // `/runner/.../.lighthouseci/runner/.../.lighthouseci/lhr-…json` and
+  // every `existsSync` would return false.
+  const reportPath = resolve(entry.jsonPath);
   if (!existsSync(reportPath)) {
     failures.push(`Report file missing: ${reportPath}`);
     continue;

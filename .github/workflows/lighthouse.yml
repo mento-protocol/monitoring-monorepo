@@ -265,6 +265,14 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json') }}
+          # `restore-keys` lets an unrelated `package.json` edit still
+          # reuse the most recent chromium cache instead of triggering a
+          # ~130 MB fresh download. `playwright install` then fast-
+          # validates the existing binary against the version it wants
+          # (no-op on match, re-download only on a real Playwright
+          # version bump).
+          restore-keys: |
+            playwright-chromium-
 
       - name: Install Playwright Chromium (for INP measurement)
         # The INP step uses `@playwright/test`'s chromium (the dashboard's
