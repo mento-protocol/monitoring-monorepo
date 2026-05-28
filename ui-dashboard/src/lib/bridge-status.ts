@@ -188,6 +188,7 @@ export function parseDurationSeconds(input: string): number | null {
   let matched = false;
   for (const m of trimmed.matchAll(pattern)) {
     const [, num, unit] = m;
+    if (num === undefined || unit === undefined) return null;
     const factor = unitSeconds[unit];
     if (factor == null) return null;
     total += Number(num) * factor;

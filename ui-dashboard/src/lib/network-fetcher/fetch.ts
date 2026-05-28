@@ -643,7 +643,7 @@ export async function fetchNetworkData(
   // we fetched.
   const oldestFetchedTs =
     snapshotsAllDaily.length > 0
-      ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1].timestamp)
+      ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1]!.timestamp)
       : Number.POSITIVE_INFINITY;
   const paginationIssue: Error | null =
     snapshotsAllDailyError ??
@@ -749,7 +749,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
     return emptyNetworkData(
-      NETWORKS[configuredNetworkIds[i]],
+      NETWORKS[configuredNetworkIds[i]!],
       windows,
       result.reason instanceof Error
         ? result.reason

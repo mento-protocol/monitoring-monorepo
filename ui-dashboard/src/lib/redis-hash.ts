@@ -180,6 +180,7 @@ async function evalHashWriteScript(
   const replaceFirst = operation === "replacement";
   for (let i = 0; i < plan.length; i++) {
     const unit = plan[i];
+    if (unit === undefined) continue;
     try {
       if (unit.kind === "eval") {
         const keys = unit.batch.map((r) => r.key);

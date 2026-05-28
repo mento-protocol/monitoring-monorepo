@@ -501,13 +501,46 @@ function computeDailyVolumeSeries(entries: PriceableEntry[]): number[] {
 // contribute 0 and the aggregate zigzags based on which pools happened
 // to tick that day — the line chart on the homepage doesn't agree with
 // any real trend.
+type TvlHistory = {
+  pool: Pool;
+  slice: ChainSlice;
+  points: Array<{ ts: number; r0: string; r1: string }>;
+};
+
+/**
+ * Advances the per-history cursor through the daily-bucket points until the
+ * next point would land in a future day, then returns the priced TVL
+ * contribution for the cursor's current point (or `null` if the cursor is
+ * still before the first point or the point is missing). Split out of
+ * {@link computeDailyTvlSeries} to keep the per-bucket loop within the
+ * file's cognitive-complexity budget.
+ */
+function priceTvlAtBucket(
+  h: TvlHistory,
+  startCursor: number,
+  bucketStart: number,
+  bucketDuration: number,
+): { nextCursor: number; usd: number | null } {
+  let cursor = startCursor;
+  while (
+    cursor + 1 < h.points.length &&
+    (h.points[cursor + 1]?.ts ?? Infinity) < bucketStart + bucketDuration
+  ) {
+    cursor++;
+  }
+  if (cursor < 0) return { nextCursor: cursor, usd: null };
+  const point = h.points[cursor];
+  if (point === undefined) return { nextCursor: cursor, usd: null };
+  const usd = poolTvlUSD(
+    { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
+    h.slice.network,
+    h.slice.rates,
+  );
+  return { nextCursor: cursor, usd };
+}
+
 function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
-  type History = {
-    pool: Pool;
-    slice: ChainSlice;
-    points: Array<{ ts: number; r0: string; r1: string }>;
-  };
-  const histories: History[] = [];
+  const histories: TvlHistory[] = [];
   for (const { pool, slice } of entries) {
     const points = slice.daily
       .flatMap((d) =>
@@ -546,20 +579,15 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
     let tvl = 0;
     for (let i = 0; i < histories.length; i++) {
       const h = histories[i];
-      while (
-        cursors[i] + 1 < h.points.length &&
-        h.points[cursors[i] + 1].ts < ts + SECONDS_PER_DAY
-      ) {
-        cursors[i]++;
-      }
-      if (cursors[i] < 0) continue;
-      const point = h.points[cursors[i]];
-      const v = poolTvlUSD(
-        { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
-        h.slice.network,
-        h.slice.rates,
+      if (h === undefined) continue;
+      const { nextCursor, usd } = priceTvlAtBucket(
+        h,
+        cursors[i] ?? -1,
+        ts,
+        SECONDS_PER_DAY,
       );
-      if (v !== null) tvl += v;
+      cursors[i] = nextCursor;
+      if (usd !== null) tvl += usd;
     }
     series.push(tvl);
   }

@@ -301,10 +301,11 @@ export function parseCsv(text: string): CsvParseResult {
   // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports.
   const stripped = text.startsWith("﻿") ? text.slice(1) : text;
   const lines = stripped.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length === 0) return { rows: [], hasTagsColumn: false };
+  const [headerLine, ...bodyLines] = lines;
+  if (headerLine === undefined) return { rows: [], hasTagsColumn: false };
 
   // Parse header
-  const headerParsed = splitCsvLine(lines[0]);
+  const headerParsed = splitCsvLine(headerLine);
   if ("error" in headerParsed) {
     return { error: `Malformed CSV header: ${headerParsed.error}` };
   }
@@ -322,11 +323,12 @@ export function parseCsv(text: string): CsvParseResult {
   }
 
   const rows: CsvRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const parsedLine = splitCsvLine(lines[i]);
+  for (const [bodyIdx, line] of bodyLines.entries()) {
+    const lineNumber = bodyIdx + 2;
+    const parsedLine = splitCsvLine(line);
     if ("error" in parsedLine) {
       return {
-        error: `Malformed CSV on line ${i + 1}: ${parsedLine.error}`,
+        error: `Malformed CSV on line ${lineNumber}: ${parsedLine.error}`,
       };
     }
     const cols = parsedLine.cols;
@@ -345,18 +347,18 @@ export function parseCsv(text: string): CsvParseResult {
     if (!address && !name && tags.length === 0) continue;
     if (!address) {
       return {
-        error: `Empty address on line ${i + 1}`,
+        error: `Empty address on line ${lineNumber}`,
       };
     }
     if (!isValidAddress(address)) {
       return {
-        error: `Invalid address on line ${i + 1}: "${address}"`,
+        error: `Invalid address on line ${lineNumber}: "${address}"`,
       };
     }
     // Relaxed validation: at least one of name or tags must be non-empty
     if (!name && tags.length === 0) {
       return {
-        error: `Empty name for address ${address} on line ${i + 1}`,
+        error: `Empty name for address ${address} on line ${lineNumber}`,
       };
     }
 
