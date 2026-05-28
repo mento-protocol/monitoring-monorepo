@@ -14,6 +14,11 @@ export function formatOracleChartHoverText({
   thresholdRatio,
   token0Symbol,
   token1Symbol,
+  // True when `baseline`/`thresholdRatio` come from the per-snapshot
+  // persisted fields (so the verdict is the actual at-the-time evaluation),
+  // false when they come from the current breaker config fallback.
+  // Defaults to false to preserve old callers' wording.
+  isHistoricalBand = false,
 }: {
   snapshot: OracleSnapshot;
   price: number;
@@ -21,6 +26,7 @@ export function formatOracleChartHoverText({
   thresholdRatio?: number | null;
   token0Symbol: string;
   token1Symbol: string;
+  isHistoricalBand?: boolean;
 }): string {
   const d = new Date(Number(snapshot.timestamp) * 1000);
   const ts =
@@ -47,15 +53,23 @@ export function formatOracleChartHoverText({
           const sign = delta >= 0 ? "+" : "";
           const thresholdBps =
             thresholdRatio != null ? thresholdRatio * 10_000 : null;
-          // Verdict is a CURRENT-state lens — checks the point against
-          // today's baseline + threshold, not the snapshot's at-the-time
-          // band. Matters most for MEDIAN_DELTA pools where the EMA
-          // drifts; the legend/title clarify the "current" framing.
+          // Wording flips on `isHistoricalBand`: when the baseline comes
+          // from the per-snapshot persisted fields (the comparator the
+          // contract actually evaluated against), drop "current" because
+          // the verdict isn't current-lens — it's the at-the-time call.
+          // Pre-deploy snapshots + null-source rows still resolve to the
+          // current band and keep the "current" framing.
+          const breachLabel = isHistoricalBand
+            ? " · would have tripped at the time"
+            : " · would trip current band";
+          const okLabel = isHistoricalBand
+            ? " · within band at the time"
+            : " · within current band";
           const verdict =
             thresholdBps != null
               ? Math.abs(bps) > thresholdBps
-                ? " · would trip current band"
-                : " · within current band"
+                ? breachLabel
+                : okLabel
               : "";
           return `<br>Δ vs baseline: ${sign}${delta.toFixed(8)} (${sign}${bps.toFixed(1)} bps)${verdict}`;
         })()

@@ -32,7 +32,12 @@ import {
   getBreakerConfigsByFeed,
 } from "../rpc.js";
 import { reportExpiryEffect } from "../rpc/effects.js";
-import { bootstrapFeedBreakerConfigs, nextMedianEMA } from "../breakers.js";
+import {
+  bootstrapAndResolveBreakerSnapshotFields,
+  bootstrapFeedBreakerConfigs,
+  nextMedianEMA,
+  resolveBreakerSnapshotFields,
+} from "../breakers.js";
 
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
@@ -45,17 +50,46 @@ indexer.onEvent(
 
     // Chain-scoped — getPoolsByFeed filters by chainId to prevent cross-chain
     // oracle bleed (same rateFeedID exists on both Celo and Monad). See rpc.ts.
-    const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
+    // Co-fetched with the BreakerConfig lookup so the preload phase warms
+    // both entity caches in one pass; OracleReported is the highest-frequency
+    // oracle event, so an unpreloaded BreakerConfig read here would hit the
+    // DB ~5× per epoch.
+    const [poolIds, breakerConfigs] = await Promise.all([
+      getPoolsByFeed(context, event.chainId, rateFeedID),
+      getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
+    ]);
     if (poolIds.length === 0) return;
 
     // Preload phase: seed Pool + open-breach-row lookups so Envio can
-    // batch them, then bail. Processing phase runs RPC + writes with
-    // consistent in-batch state. See `maybePreloadPool` in pool.ts.
-    if (await maybePreloadPool(context, poolIds)) return;
+    // batch them, then bail. Also warm the per-feed Breaker entities the
+    // baseline/threshold resolver will read in the processing phase — same
+    // pattern as MedianUpdated below. See `maybePreloadPool` in pool.ts.
+    if (context.isPreload) {
+      await Promise.all([
+        maybePreloadPool(context, poolIds),
+        ...breakerConfigs.map(async (cfg) => {
+          await context.Breaker.get(cfg.breaker_id);
+        }),
+      ]);
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     const oracleTimestamp = event.params.timestamp;
+
+    // Bootstrap-if-needed + resolve in one call. See helper doc; bootstrap
+    // covers fresh-sync feeds whose BreakerBox events predate start_block.
+    const breakerSnapshotFields =
+      await bootstrapAndResolveBreakerSnapshotFields({
+        context,
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+        blockTimestamp,
+        knownConfigsLength: breakerConfigs.length,
+        poolsLength: poolIds.length,
+      });
 
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
     // writes don't race. Fan out in parallel — on a rate feed shared by 5-10
@@ -247,6 +281,13 @@ indexer.onEvent(
           source: "oracle_reported",
           blockNumber,
           txHash: event.transaction.hash,
+          // No breaker, or unseeded EMA / unconfigured referenceValue →
+          // undefined (Envio's nullable codegen). The chart consumer falls
+          // back to the current band for these rows.
+          breakerBaselineAtSnapshot:
+            breakerSnapshotFields?.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot:
+            breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);
@@ -304,6 +345,45 @@ indexer.onEvent(
 
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    // Eager bootstrap BEFORE the snapshot resolve. On a fresh sync where the
+    // BreakerBox `BreakerAdded` / per-feed config events all predate
+    // `start_block`, no event has yet hydrated `BreakerConfig` for this feed
+    // — `resolveBreakerSnapshotFields` would return null and the first
+    // MedianUpdated snapshot would persist null historical band fields,
+    // permanently mis-classifying that row as "fallback to current band"
+    // forever after. The mirror loop further down does its own bootstrap
+    // for the EMA write path; lift it here so both writes see the same
+    // hydrated entity set. `bootstrapFeedBreakerConfigs` is in-memory cached
+    // per feed, so paying it once per process is free.
+    let breakerConfigsHydrated = breakerConfigs;
+    if (breakerConfigsHydrated.length === 0 && poolIds.length > 0) {
+      await bootstrapFeedBreakerConfigs(
+        context,
+        event.chainId,
+        rateFeedID,
+        blockNumber,
+        blockTimestamp,
+      );
+      breakerConfigsHydrated = await getBreakerConfigsByFeed(
+        context,
+        event.chainId,
+        rateFeedID,
+      );
+    }
+
+    // Resolve breaker baseline/threshold BEFORE the per-pool fan-out so
+    // every snapshot row reads the SAME pre-event EMA — the comparator the
+    // contract used to evaluate this median update. The mirror loop below
+    // recomputes EMA AFTER all snapshot writes, which is what we want:
+    // historical snapshots capture the EMA-at-evaluation-time, not the
+    // post-blend value. Returns null when no trip-able breaker exists or
+    // EMA is unseeded — chart falls back to current band for those rows.
+    const breakerSnapshotFields = await resolveBreakerSnapshotFields(
+      context,
+      event.chainId,
+      rateFeedID,
+    );
 
     await Promise.all(
       // eslint-disable-next-line max-lines-per-function -- Existing per-pool fan-out preserves oracle, breach, health, and snapshot updates together.
@@ -534,6 +614,13 @@ indexer.onEvent(
           source: "oracle_median_updated",
           blockNumber,
           txHash: event.transaction.hash,
+          // Pre-event EMA + effective threshold. See the resolve call above
+          // for why this captures the comparator the contract evaluated
+          // against, not the post-blend EMA.
+          breakerBaselineAtSnapshot:
+            breakerSnapshotFields?.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot:
+            breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
         context.OracleSnapshot.set(snapshot);
@@ -567,7 +654,11 @@ indexer.onEvent(
     // non-zero), so we skip the EMA branch but still write the zero into
     // `lastMedianRate` + bump `lastUpdatedAt`.
     {
-      let configsForMirror = breakerConfigs;
+      // Already-hydrated set from the earlier eager bootstrap. Cache is
+      // in-memory and per-feed, so this is a cheap reuse; the conditional
+      // re-bootstrap below remains as a defensive no-op in case future
+      // refactors split the two write paths.
+      let configsForMirror = breakerConfigsHydrated;
       // Eager bootstrap: for v3 feeds whose breaker config was set entirely
       // before our `start_block`, no later event triggers lazy hydration. On
       // the first MedianUpdated for a feed with zero rows AND at least one

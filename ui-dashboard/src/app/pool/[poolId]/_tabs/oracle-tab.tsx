@@ -22,6 +22,7 @@ import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
+  ORACLE_SNAPSHOTS_CHART_BANDS_EXT,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_BREAKER_CONFIG,
 } from "@/lib/queries";
@@ -128,13 +129,50 @@ export function OracleTab(props: OracleTabProps) {
     // default visible window the chart opens to.
     { poolId, limit: 1000 },
   );
+  // Companion query for the per-snapshot persisted breaker fields. Isolated
+  // from `ORACLE_SNAPSHOTS_CHART` so a hosted-Hasura schema-lag (the deploy
+  // window before the indexer promote lands) degrades to the current-band
+  // fallback instead of breaking the whole chart. Merged by `id` below.
+  const { data: bandsData } = useGQL<{
+    OracleSnapshot: Array<{
+      id: string;
+      breakerBaselineAtSnapshot: string | null;
+      breakerThresholdAtSnapshot: string | null;
+    }>;
+  }>(ORACLE_SNAPSHOTS_CHART_BANDS_EXT, { poolId, limit: 1000 });
   const chartRows = useMemo(() => {
     const raw = chartData?.OracleSnapshot ?? [];
+    const bandById = new Map<
+      string,
+      {
+        breakerBaselineAtSnapshot: string | null;
+        breakerThresholdAtSnapshot: string | null;
+      }
+    >();
+    for (const row of bandsData?.OracleSnapshot ?? []) {
+      bandById.set(row.id, {
+        breakerBaselineAtSnapshot: row.breakerBaselineAtSnapshot,
+        breakerThresholdAtSnapshot: row.breakerThresholdAtSnapshot,
+      });
+    }
+    const merged = raw.map((s) => {
+      const bands = bandById.get(s.id);
+      // Merge fail-open: when the companion query errors (schema-lag) or a
+      // row hasn't been indexed yet, leave the fields null and let the chart
+      // fall back to the current band. Same shape as pre-deploy rows.
+      return {
+        ...s,
+        breakerBaselineAtSnapshot: bands?.breakerBaselineAtSnapshot ?? null,
+        breakerThresholdAtSnapshot: bands?.breakerThresholdAtSnapshot ?? null,
+      };
+    });
     // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
+    // ES2017 with no polyfill — keep the spread+sort form.
     // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-  }, [chartData]);
+    return [...merged].sort(
+      (a, b) => Number(a.timestamp) - Number(b.timestamp),
+    );
+  }, [chartData, bandsData]);
 
   // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
   // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as

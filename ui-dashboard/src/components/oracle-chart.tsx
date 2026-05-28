@@ -49,23 +49,52 @@ const fixidityToFloat = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-type BreakerConfigStatus = "loading" | "ready" | "missing";
-
-// Pure helper extracted from `buildOraclePlotData` so the verdict logic is
-// unit-testable in isolation. Returns `null` when we can't make a verdict
-// (config not ready, baseline/threshold missing, or non-finite price); `true`
-// when the price would trip the breaker; `false` when it sits within band.
-function isOutOfBand(
-  price: number,
-  baseline: number | null,
-  thresholdRatio: number | null,
-  breakerConfigStatus: BreakerConfigStatus,
-): boolean | null {
-  if (breakerConfigStatus !== "ready") return null;
-  if (!baseline || !thresholdRatio) return null;
-  if (!Number.isFinite(price)) return null;
-  return Math.abs(price - baseline) / baseline > thresholdRatio;
+/**
+ * Resolve the per-snapshot band, with fallback to the current breaker config.
+ *
+ * The indexer persists `breakerBaselineAtSnapshot` + `breakerThresholdAtSnapshot`
+ * on each `OracleSnapshot` row written from an oracle-driven source so the
+ * chart can render a historically accurate "would have tripped at the time"
+ * verdict. Pre-deploy rows + rows from non-oracle sources land as null, and
+ * fall back to the current breaker config.
+ *
+ * Exported so `oracle-chart.test.ts` can prove per-snapshot values take
+ * precedence (the spec for this fix).
+ *
+ * Returns null `baseline`/`thresholdRatio` when neither source provides a
+ * usable value — callers render a neutral verdict in that case.
+ */
+export function resolveSnapshotBand(
+  snapshot: Pick<
+    OracleSnapshot,
+    "breakerBaselineAtSnapshot" | "breakerThresholdAtSnapshot"
+  >,
+  currentBaseline: number | null,
+  currentThresholdRatio: number | null,
+): { baseline: number | null; thresholdRatio: number | null } {
+  const persistedBaseline = fixidityToFloat(snapshot.breakerBaselineAtSnapshot);
+  const persistedThreshold = fixidityToFloat(
+    snapshot.breakerThresholdAtSnapshot,
+  );
+  // Both persisted fields are written together by the indexer — if one is
+  // present the other should be too. Resolve them as a pair so we never
+  // mix a persisted baseline with a fallback threshold (that would mean
+  // evaluating a historical price against today's threshold, which is a
+  // verdict nobody asked for). When either is missing, fall back to the
+  // current pair. Skips zero/non-finite values via fixidityToFloat.
+  if (persistedBaseline != null && persistedThreshold != null) {
+    return {
+      baseline: persistedBaseline,
+      thresholdRatio: persistedThreshold,
+    };
+  }
+  return {
+    baseline: currentBaseline,
+    thresholdRatio: currentThresholdRatio,
+  };
 }
+
+type BreakerConfigStatus = "loading" | "ready" | "missing";
 
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
@@ -133,15 +162,24 @@ export function OracleChart({
     thresholdRatio,
   });
 
+  // Whether ANY snapshot carries a persisted at-the-time band. When the
+  // current breaker fetch is loading / errored / missing, the markers can
+  // still color themselves green/red from these — so the legend needs to
+  // describe that case rather than say "band check unavailable."
+  const hasPersistedBands = snapshots.some(
+    (s) => s.breakerBaselineAtSnapshot != null,
+  );
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
-        Oracle Price vs Current Breaker Band
+        Oracle Price vs Breaker Band
       </h3>
       <OracleChartLegend
         breachStartedAt={breachStartedAt}
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
+        hasPersistedBands={hasPersistedBands}
       />
       <Plot
         data={[plotData.deviationTrace]}
@@ -187,6 +225,15 @@ function buildOraclePlotData({
   thresholdRatio: number | null;
   breakerConfigStatus: BreakerConfigStatus;
 }): OraclePlotData {
+  // `breakerConfigStatus === "ready"` gates fallback-band use. When the
+  // current breaker hasn't loaded yet (or is genuinely missing), we still
+  // honor PER-SNAPSHOT persisted bands — those are self-contained, they
+  // don't depend on the current breaker row at all. Pre-deploy snapshots
+  // (no persisted fields) fall back to the current config; if that's not
+  // ready, the verdict is genuinely unknown for those points.
+  const currentBaseline = breakerConfigStatus === "ready" ? baseline : null;
+  const currentThresholdRatio =
+    breakerConfigStatus === "ready" ? thresholdRatio : null;
   const isSparse = snapshots.length < 20;
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
@@ -202,39 +249,20 @@ function buildOraclePlotData({
     return Number(s.oraclePrice) / FIXIDITY_ONE;
   });
 
-  // Marker is "tripping" if the reported price crosses the breaker band.
-  // When the breaker config isn't ready (loading / missing), we have no
-  // band to compare against, so the verdict is genuinely unknown — return
-  // null and let the caller render the marker in a neutral state instead
-  // of greenwashing it.
-  const verdict = (price: number): boolean | null =>
-    isOutOfBand(price, baseline, thresholdRatio, breakerConfigStatus);
-
-  const markerColors = snapshots.map((s, i) => {
-    if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
-    const p = prices[i];
-    if (!Number.isFinite(p)) return "#64748b";
-    const v = verdict(p);
-    if (v === null) return "#64748b"; // unknown band — neutral
-    return v ? "#ef4444" : "#22c55e";
+  // `buildSnapshotMarkers` resolves per-snapshot persisted bands (when
+  // present) and falls back to the current `currentBaseline / currentThresholdRatio`
+  // otherwise, then computes marker color / size / hover text in one pass.
+  // The fallback `isOutOfBand` extraction from PR #637 stays — the marker
+  // builder calls into it internally for the fallback path.
+  const { markerColors, markerSizes, hoverText } = buildSnapshotMarkers({
+    snapshots,
+    prices,
+    currentBaseline,
+    currentThresholdRatio,
+    isSparse,
+    token0Symbol,
+    token1Symbol,
   });
-  const markerSizes = snapshots.map((s, i) => {
-    if (!s.oracleOk) return isSparse ? 12 : 9;
-    const p = prices[i];
-    if (!Number.isFinite(p)) return isSparse ? 8 : 4;
-    return verdict(p) === true ? (isSparse ? 12 : 8) : isSparse ? 8 : 4;
-  });
-
-  const hoverText = snapshots.map((s, i) =>
-    formatOracleChartHoverText({
-      snapshot: s,
-      price: prices[i],
-      baseline,
-      thresholdRatio,
-      token0Symbol,
-      token1Symbol,
-    }),
-  );
 
   const traceMode = isSparse
     ? ("markers" as const)
@@ -301,6 +329,111 @@ function buildOraclePlotData({
   const yMax = hi + padding;
 
   return { deviationTrace, timestamps, isSparse, yMin, yMax };
+}
+
+// Per-snapshot marker styling + hover text. Extracted so the parent flow
+// stays under the project's max-lines-per-function budget (100). The
+// per-snapshot band resolution is the only place that varies per row, so
+// it lives here next to the consumers.
+function buildSnapshotMarkers({
+  snapshots,
+  prices,
+  currentBaseline,
+  currentThresholdRatio,
+  isSparse,
+  token0Symbol,
+  token1Symbol,
+}: {
+  snapshots: OracleSnapshot[];
+  prices: number[];
+  currentBaseline: number | null;
+  currentThresholdRatio: number | null;
+  isSparse: boolean;
+  token0Symbol: string;
+  token1Symbol: string;
+}): {
+  markerColors: string[];
+  markerSizes: number[];
+  hoverText: string[];
+} {
+  // Per-snapshot band resolution. When the indexer persisted the breaker's
+  // baseline + threshold at write time we use those — the breaker the
+  // contract was actually arming when this median landed — so MEDIAN_DELTA
+  // EMA drift can't retroactively flip a historical verdict. Pre-deploy
+  // rows (and `update_reserves` / `rebalanced` rows that explicitly null
+  // the fields) fall through to the current band as before.
+  const perSnapshotBands = snapshots.map((s) =>
+    resolveSnapshotBand(s, currentBaseline, currentThresholdRatio),
+  );
+
+  // Marker is "tripping" if the reported price crosses ITS snapshot's band.
+  // When neither persisted nor current band is available, the verdict is
+  // genuinely unknown — return null and let the caller render the marker in
+  // a neutral state instead of greenwashing it. We guard both `baseline === 0`
+  // (divide-by-zero — every marker would render red) AND `thresholdRatio
+  // === 0` (`|x - b| / b > 0` is true for any non-exact price — same
+  // all-red failure mode). `resolveSnapshotBand` returns whatever
+  // `fixidityToFloat` produces, and `fixidityToFloat("0")` is `0` (finite),
+  // which would pass a naive `!= null` check. The indexer's resolver
+  // normally writes `null` for an unseeded `0n` baseline AND for a zero
+  // effective threshold, but a manual DB write or backfill edge case could
+  // still surface either as zero — treat both as "no band".
+  const isOutOfBand = (
+    price: number,
+    band: { baseline: number | null; thresholdRatio: number | null },
+  ): boolean | null => {
+    if (
+      band.baseline == null ||
+      band.baseline === 0 ||
+      band.thresholdRatio == null ||
+      band.thresholdRatio === 0 ||
+      !Number.isFinite(price)
+    )
+      return null;
+    return (
+      Math.abs(price - band.baseline) / band.baseline > band.thresholdRatio
+    );
+  };
+
+  const markerColors = snapshots.map((s, i) => {
+    if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
+    const p = prices[i];
+    if (!Number.isFinite(p)) return "#64748b";
+    const verdict = isOutOfBand(p, perSnapshotBands[i]);
+    if (verdict === null) return "#64748b"; // unknown band — neutral
+    return verdict ? "#ef4444" : "#22c55e";
+  });
+  const markerSizes = snapshots.map((s, i) => {
+    if (!s.oracleOk) return isSparse ? 12 : 9;
+    const p = prices[i];
+    if (!Number.isFinite(p)) return isSparse ? 8 : 4;
+    return isOutOfBand(p, perSnapshotBands[i]) === true
+      ? isSparse
+        ? 12
+        : 8
+      : isSparse
+        ? 8
+        : 4;
+  });
+
+  const hoverText = snapshots.map((s, i) =>
+    formatOracleChartHoverText({
+      snapshot: s,
+      price: prices[i],
+      baseline: perSnapshotBands[i].baseline,
+      thresholdRatio: perSnapshotBands[i].thresholdRatio,
+      // Match `resolveSnapshotBand`'s pair-of-two semantics: a half-populated
+      // row (only one persisted field set) falls back to the current band,
+      // so the hover wording should not say "at the time" for that case.
+      isHistoricalBand:
+        s.breakerBaselineAtSnapshot != null &&
+        s.breakerThresholdAtSnapshot != null,
+      token0Symbol,
+      token1Symbol,
+    }),
+  );
+
+  return { markerColors, markerSizes, hoverText };
 }
 
 function buildOracleShapes(
@@ -513,21 +646,41 @@ function OracleChartLegend({
   breachStartedAt,
   breakerConfig,
   breakerConfigStatus,
+  hasPersistedBands,
 }: {
   breachStartedAt: string | null | undefined;
   breakerConfig: BreakerConfigForChart | null | undefined;
   breakerConfigStatus: BreakerConfigStatus;
+  hasPersistedBands: boolean;
 }) {
-  // When we don't have a breaker to compare against (still loading or
-  // genuinely missing), tell the operator that — don't show "within band"
-  // chips that imply a verdict we can't make.
+  // When the current breaker isn't ready, the markers can be one of two
+  // things: persisted per-snapshot verdicts (if any snapshot carries an
+  // at-the-time band) OR genuinely-neutral (no current AND no persisted).
+  // The legend copy must match what the markers actually display so an
+  // operator never sees red/green markers next to "band check unavailable."
   if (breakerConfigStatus !== "ready" || !breakerConfig) {
-    const msg =
-      breakerConfigStatus === "loading"
-        ? "Loading breaker config…"
+    const loading = breakerConfigStatus === "loading";
+    const msg = hasPersistedBands
+      ? loading
+        ? "Verdicts use each snapshot's at-the-time band; current breaker still loading"
+        : "No active current breaker — verdicts use each snapshot's at-the-time persisted band only"
+      : loading
+        ? "Loading current breaker config…"
         : "No active breaker for this rate feed — band check unavailable";
     return (
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+        {hasPersistedBands && (
+          <>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+              Within band when evaluated
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+              Outside band — breaker would trip
+            </span>
+          </>
+        )}
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
           {msg}
@@ -552,20 +705,26 @@ function OracleChartLegend({
     <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
       <span className="flex items-center gap-1">
         <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-        Within current band
+        {/* Marker verdicts use each snapshot's at-the-time band when
+            persisted (oracle_median_updated rows from PR #631 onward),
+            falling back to the current band for older rows. The drawn
+            band shape (dashed lines / shaded zones) below always reflects
+            the CURRENT breaker config — historical bands aren't drawn
+            because they'd produce a noisy stack of rectangles. */}
+        Within band when evaluated
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-        Outside current band — breaker would trip
+        Outside band — breaker would trip
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-4 border-t-2 border-dashed border-red-500" />
-        Breaker threshold
+        Current threshold
         {thresholdPct != null ? ` (±${(thresholdPct * 100).toFixed(2)}%)` : ""}
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-4 border-t-2 border-dotted border-slate-400" />
-        Baseline ({baselineLabel}
+        Current baseline ({baselineLabel}
         {baseline != null ? ` = ${formatBaseline(baseline)}` : ""})
       </span>
       {breachStartedAt && Number(breachStartedAt) > 0 && (
@@ -585,5 +744,4 @@ export const __test__ = {
   buildOracleShapes,
   buildOracleXaxis,
   buildOraclePlotData,
-  isOutOfBand,
 };

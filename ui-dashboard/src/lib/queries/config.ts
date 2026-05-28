@@ -95,6 +95,35 @@ export const ORACLE_SNAPSHOTS_CHART = `
   }
 `;
 
+// Companion query for the persisted-at-write breaker fields. Isolated from
+// `ORACLE_SNAPSHOTS_CHART` for the same schema-lag reason as `POOL_CONFIG_EXT`
+// — they ship with the indexer resync, so during the deploy+promote window
+// hosted Hasura rejects them as "field not found". Keeping them off the
+// primary chart query means a misordered deploy (merge-before-promote)
+// degrades just the per-snapshot band path to the current-band fallback
+// instead of breaking the whole oracle chart. Nullable for pre-deploy rows
+// + unseeded EMA — the chart falls back to the current band in those cases.
+//
+// Note: the active deviation breaker is now fetched via the shared
+// `POOL_BREAKER_CONFIG` query (PR #635) — `BREAKER_CONFIG_FOR_RATE_FEED`
+// was removed to dedup the per-page Hasura fetch.
+export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
+  query OracleSnapshotsChartBandsExt($poolId: String!, $limit: Int!) {
+    OracleSnapshot(
+      where: {
+        poolId: { _eq: $poolId }
+        source: { _eq: "oracle_median_updated" }
+      }
+      order_by: { timestamp: desc }
+      limit: $limit
+    ) {
+      id
+      breakerBaselineAtSnapshot
+      breakerThresholdAtSnapshot
+    }
+  }
+`;
+
 export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
   query OracleSnapshotsCountPage($poolId: String!, $limit: Int!, $offset: Int!) {
     OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {

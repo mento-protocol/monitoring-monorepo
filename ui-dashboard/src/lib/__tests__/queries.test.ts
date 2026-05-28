@@ -43,6 +43,7 @@ const EXPECTED_EXPORT_NAMES = [
   "TRADING_LIMITS",
   "ORACLE_SNAPSHOTS",
   "ORACLE_SNAPSHOTS_CHART",
+  "ORACLE_SNAPSHOTS_CHART_BANDS_EXT",
   "ORACLE_SNAPSHOTS_COUNT_PAGE",
   "POOL_DEPLOYMENT",
   "POOL_LP_POSITIONS",
@@ -378,6 +379,24 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
   it("ORACLE_SNAPSHOTS_CHART selects deviationRatio + hasHealthData", () => {
     expect(queries.ORACLE_SNAPSHOTS_CHART).toContain("deviationRatio");
     expect(queries.ORACLE_SNAPSHOTS_CHART).toContain("hasHealthData");
+  });
+
+  it("ORACLE_SNAPSHOTS_CHART_BANDS_EXT is isolated (rationale: schema-lag resilience)", () => {
+    // The new persisted-band fields ride a companion query so a Hasura
+    // schema-lag during the indexer promote window degrades to the
+    // current-band fallback instead of breaking the chart.
+    expect(queries.ORACLE_SNAPSHOTS_CHART_BANDS_EXT).toContain(
+      "breakerBaselineAtSnapshot",
+    );
+    expect(queries.ORACLE_SNAPSHOTS_CHART_BANDS_EXT).toContain(
+      "breakerThresholdAtSnapshot",
+    );
+    expect(queries.ORACLE_SNAPSHOTS_CHART).not.toContain(
+      "breakerBaselineAtSnapshot",
+    );
+    expect(queries.ORACLE_SNAPSHOTS_CHART).not.toContain(
+      "breakerThresholdAtSnapshot",
+    );
   });
 
   it("POOL_DEPLOYMENT looks up FactoryDeployment.txHash", () => {

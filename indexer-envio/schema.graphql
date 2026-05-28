@@ -223,6 +223,25 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   deviationRatio: String! # priceDifference / rebalanceThreshold, 6dp fixed
   healthBinaryValue: String! # "1.000000" if d ≤ 1.01 (within tolerance), "0.000000" otherwise
   hasHealthData: Boolean! # false for legacy/no-data rows
+  # Breaker reference captured AT WRITE TIME so the chart can render the
+  # historically accurate band per point instead of comparing every row
+  # against the current EMA (which drifts on MEDIAN_DELTA feeds, so a sample
+  # that was inside the band at report time can later read as "outside the
+  # current band" purely from EMA drift). Fixidity 1e24.
+  # - MEDIAN_DELTA → BreakerConfig.medianRatesEMA at snapshot time
+  # - VALUE_DELTA  → BreakerConfig.referenceValue at snapshot time
+  # Nullable: pre-deploy rows have no value; rows from non-oracle sources
+  # (`update_reserves`, `rebalanced`) explicitly write null because breaker
+  # state isn't relevant to them. EMA == 0n ("unseeded" sentinel — see
+  # BreakerConfig.medianRatesEMA doc) also lands as null so the chart's
+  # per-point verdict can fall through to "no band check" instead of
+  # dividing by zero.
+  breakerBaselineAtSnapshot: BigInt
+  # Effective breaker threshold (post-`effectiveThreshold()` resolution of
+  # the `rateChangeThreshold == 0` sentinel — see BreakerConfig comment +
+  # `src/breakers.ts:effectiveThreshold`) captured at snapshot time.
+  # Fixidity 1e24. Nullable for the same reasons as breakerBaselineAtSnapshot.
+  breakerThresholdAtSnapshot: BigInt
 }
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {

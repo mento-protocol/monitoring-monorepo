@@ -30,6 +30,8 @@ import {
   pickActiveThreshold,
 } from "../../priceDifference.js";
 import { recordHealthSample } from "../../healthScore.js";
+import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
+import { getBreakerConfigsByFeed } from "../../rpc.js";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -165,6 +167,89 @@ indexer.onEvent(
       event.params.newIncentive,
     ),
 );
+
+// Resolve per-snapshot breaker baseline+threshold for a feed at a specific
+// block, conditionally bootstrapping when the BreakerBox events predate
+// start_block. Mirrors the OracleReported / MedianUpdated pattern — without
+// the bootstrap the first RebalanceThresholdUpdated for a feed on a fresh
+// sync would persist null band fields forever.
+async function resolveBreakerFieldsForFeedAtBlock(
+  context: Parameters<
+    typeof bootstrapAndResolveBreakerSnapshotFields
+  >[0]["context"],
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): ReturnType<typeof bootstrapAndResolveBreakerSnapshotFields> {
+  const knownConfigs = await getBreakerConfigsByFeed(
+    context,
+    chainId,
+    rateFeedID,
+  );
+  return bootstrapAndResolveBreakerSnapshotFields({
+    context,
+    chainId,
+    rateFeedID,
+    blockNumber,
+    blockTimestamp,
+    knownConfigsLength: knownConfigs.length,
+    poolsLength: 1,
+  });
+}
+
+// Build the `threshold_updated`-source `OracleSnapshot` row. Extracted so
+// the parent handler stays under the project's max-lines-per-function
+// budget without losing the per-field comments. Returns the constructed
+// row (caller persists via `context.OracleSnapshot.set`).
+function buildThresholdUpdatedSnapshot({
+  event,
+  blockNumber,
+  blockTimestamp,
+  poolId,
+  pool,
+  snapshotFields,
+  breakerSnapshotFields,
+}: {
+  event: {
+    chainId: number;
+    block: { number: number };
+    logIndex: number;
+    transaction: { hash: string };
+  };
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  poolId: string;
+  pool: Pool;
+  snapshotFields: ReturnType<typeof recordHealthSample>["snapshotFields"];
+  breakerSnapshotFields: Awaited<
+    ReturnType<typeof bootstrapAndResolveBreakerSnapshotFields>
+  >;
+}): OracleSnapshot {
+  return {
+    id: eventId(event.chainId, event.block.number, event.logIndex),
+    chainId: event.chainId,
+    poolId,
+    timestamp: blockTimestamp,
+    // Use `lastMedianPrice` so the snapshot's displayed oracle price is
+    // consistent with the priceDifference / threshold fields, which were
+    // both computed from the median above.
+    oraclePrice: pool.lastMedianPrice,
+    oracleOk: pool.oracleOk,
+    numReporters: pool.oracleNumReporters,
+    priceDifference: pool.priceDifference,
+    // See sortedOracles.OracleReported — `persistableThreshold` gates the
+    // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
+    rebalanceThreshold: persistableThreshold(pool),
+    source: "threshold_updated",
+    blockNumber,
+    txHash: event.transaction.hash,
+    breakerBaselineAtSnapshot: breakerSnapshotFields?.breakerBaselineAtSnapshot,
+    breakerThresholdAtSnapshot:
+      breakerSnapshotFields?.breakerThresholdAtSnapshot,
+    ...snapshotFields,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // FPMM.RebalanceThresholdUpdated
@@ -383,27 +468,25 @@ indexer.onEvent(
       // may be 0 / stale, so the row would mix a fresh deviation with an
       // unrelated displayed oracle price.
       if (medianFresh) {
-        const snapshot: OracleSnapshot = {
-          id: eventId(event.chainId, event.block.number, event.logIndex),
-          chainId: event.chainId,
-          poolId,
-          timestamp: blockTimestamp,
-          // Use `lastMedianPrice` so the snapshot's displayed oracle price
-          // is consistent with the priceDifference / threshold fields,
-          // which were both computed from the median above.
-          oraclePrice: pool.lastMedianPrice,
-          oracleOk: pool.oracleOk,
-          numReporters: pool.oracleNumReporters,
-          priceDifference: pool.priceDifference,
-          // See sortedOracles.OracleReported — `persistableThreshold` gates the
-          // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
-          rebalanceThreshold: persistableThreshold(pool),
-          source: "threshold_updated",
+        // Per-point band capture — see resolveBreakerFieldsForFeedAtBlock.
+        const breakerSnapshotFields = await resolveBreakerFieldsForFeedAtBlock(
+          context,
+          event.chainId,
+          existing.referenceRateFeedID,
           blockNumber,
-          txHash: event.transaction.hash,
-          ...snapshotFields,
-        };
-        context.OracleSnapshot.set(snapshot);
+          blockTimestamp,
+        );
+        context.OracleSnapshot.set(
+          buildThresholdUpdatedSnapshot({
+            event,
+            blockNumber,
+            blockTimestamp,
+            poolId,
+            pool,
+            snapshotFields,
+            breakerSnapshotFields,
+          }),
+        );
       }
     }
     await upsertSnapshot({

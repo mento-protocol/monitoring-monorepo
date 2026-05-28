@@ -1,24 +1,30 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it } from "vitest";
-import { __test__, formatOracleChartHoverText } from "../oracle-chart";
+import {
+  __test__,
+  formatOracleChartHoverText,
+  resolveSnapshotBand,
+} from "../oracle-chart";
 import type { OracleSnapshot } from "@/lib/types";
 
-const {
-  buildOracleShapes,
-  buildOracleXaxis,
-  buildOraclePlotData,
-  isOutOfBand,
-} = __test__;
+const { buildOracleShapes, buildOracleXaxis, buildOraclePlotData } = __test__;
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// Fixidity 1e24 encoding for `oraclePrice`. We build the string by multiplying
-// the float by 1e6 (rounded to an integer) then padding 18 zeros, which gives
-// us a deterministic 24-digit decimal scale without losing precision on the
-// price magnitudes the chart exercises.
+// Fixidity is 1e24 — encode the Mento contract scale. Strings here mirror
+// the Hasura wire format (BigInt → JSON string) the chart actually sees.
+// 1.05 × 1e24 → "1050000000000000000000000". The threshold 0.001 (10 bps)
+// is also Fixidity, so 0.001 × 1e24 → "1000000000000000000000".
+const FIXIDITY_ONE_05 = "1050000000000000000000000"; // 1.05
+const FIXIDITY_ZERO_001 = "1000000000000000000000"; // 0.001 = 10bps
+
+// Generic Fixidity 1e24 encoder for `oraclePrice` tests. We multiply by 1e6
+// (rounded to an integer) then pad 18 zeros, which gives a deterministic
+// 24-digit decimal scale without losing precision on chart-relevant
+// magnitudes.
 const toFixidity = (n: number): string =>
   BigInt(Math.round(n * 1_000_000)).toString() + "0".repeat(18);
 
@@ -112,54 +118,105 @@ describe("formatOracleChartHoverText", () => {
 
     expect(text).not.toContain("Δ vs baseline");
   });
-});
 
-// ---------------------------------------------------------------------------
-// isOutOfBand
-// ---------------------------------------------------------------------------
+  it("uses 'at the time' wording for historical band verdicts", () => {
+    // When the indexer persists the breaker baseline on the snapshot row,
+    // the chart's verdict isn't a "current-lens" check — it's the actual
+    // at-the-time evaluation. The hover wording must reflect that so an
+    // operator reading a green dot doesn't think "this passes today."
+    const ok = formatOracleChartHoverText({
+      snapshot: oracleSnapshot(),
+      price: 1.0005,
+      baseline: 1.0,
+      thresholdRatio: 0.0015,
+      isHistoricalBand: true,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+    });
+    expect(ok).toContain("within band at the time");
 
-describe("isOutOfBand", () => {
-  it("returns null when breakerConfigStatus is not ready", () => {
-    expect(isOutOfBand(1.0, 1.0, 0.01, "loading")).toBe(null);
-    expect(isOutOfBand(1.0, 1.0, 0.01, "missing")).toBe(null);
-  });
-
-  it("returns null when baseline is missing", () => {
-    expect(isOutOfBand(1.0, null, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns null when baseline is zero (falsy guards against div-by-zero)", () => {
-    // Pinned because the implementation uses `if (!baseline || !thresholdRatio)`
-    // rather than an explicit `=== null` check, so 0 must also short-circuit.
-    expect(isOutOfBand(1.0, 0, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns null when thresholdRatio is missing", () => {
-    expect(isOutOfBand(1.0, 1.0, null, "ready")).toBe(null);
-  });
-
-  it("returns null when thresholdRatio is zero (degenerate zero-width band)", () => {
-    // Same falsy-guard semantics — a 0 threshold would otherwise classify
-    // every non-equal price as out-of-band.
-    expect(isOutOfBand(1.0, 1.0, 0, "ready")).toBe(null);
-  });
-
-  it("returns null when price is NaN", () => {
-    expect(isOutOfBand(Number.NaN, 1.0, 0.01, "ready")).toBe(null);
-  });
-
-  it("returns true when |price - baseline| / baseline > thresholdRatio", () => {
-    // baseline=1, threshold=0.01 → trip outside [0.99, 1.01].
-    expect(isOutOfBand(1.02, 1.0, 0.01, "ready")).toBe(true);
-    expect(isOutOfBand(0.97, 1.0, 0.01, "ready")).toBe(true);
-  });
-
-  it("returns false when price sits inside the band", () => {
-    expect(isOutOfBand(1.0, 1.0, 0.01, "ready")).toBe(false);
-    expect(isOutOfBand(1.005, 1.0, 0.01, "ready")).toBe(false);
-    expect(isOutOfBand(0.995, 1.0, 0.01, "ready")).toBe(false);
+    const breach = formatOracleChartHoverText({
+      snapshot: oracleSnapshot(),
+      price: 0.998,
+      baseline: 1.0,
+      thresholdRatio: 0.0015,
+      isHistoricalBand: true,
+      token0Symbol: "cUSD",
+      token1Symbol: "USDC",
+    });
+    expect(breach).toContain("would have tripped at the time");
   });
 });
+
+describe("resolveSnapshotBand", () => {
+  it("prefers persisted per-snapshot baseline + threshold over current config", () => {
+    // Spec for the PR-624 follow-up: a snapshot written with the indexer's
+    // breakerBaselineAtSnapshot must override the live breaker config so
+    // EMA drift between write-time and read-time can't flip a historical
+    // verdict. 1.05 / 0.001 = the band that was actually armed when the
+    // median landed; 1.10 / 0.003 = today's current band.
+    const snapshot = oracleSnapshot({
+      breakerBaselineAtSnapshot: FIXIDITY_ONE_05,
+      breakerThresholdAtSnapshot: FIXIDITY_ZERO_001,
+    });
+
+    const resolved = resolveSnapshotBand(snapshot, 1.1, 0.003);
+
+    expect(resolved.baseline).toBeCloseTo(1.05, 10);
+    expect(resolved.thresholdRatio).toBeCloseTo(0.001, 10);
+  });
+
+  it("falls back to current config when per-snapshot fields are absent", () => {
+    // Pre-deploy rows + rows from non-oracle sources (update_reserves,
+    // rebalanced) explicitly null these fields. The chart should reuse the
+    // current breaker config rather than refuse to render the verdict.
+    const snapshot = oracleSnapshot({
+      breakerBaselineAtSnapshot: null,
+      breakerThresholdAtSnapshot: null,
+    });
+
+    const resolved = resolveSnapshotBand(snapshot, 1.08, 0.04);
+
+    expect(resolved.baseline).toBeCloseTo(1.08, 10);
+    expect(resolved.thresholdRatio).toBeCloseTo(0.04, 10);
+  });
+
+  it("falls back to current when one persisted field is null", () => {
+    // Pair-of-two semantics — the indexer writes both fields together,
+    // so a half-populated row indicates corruption. Refuse the partial
+    // persisted pair and fall back rather than mixing a persisted
+    // baseline with a current threshold.
+    const snapshot = oracleSnapshot({
+      breakerBaselineAtSnapshot: FIXIDITY_ONE_05,
+      breakerThresholdAtSnapshot: null,
+    });
+
+    const resolved = resolveSnapshotBand(snapshot, 1.1, 0.003);
+
+    expect(resolved.baseline).toBeCloseTo(1.1, 10);
+    expect(resolved.thresholdRatio).toBeCloseTo(0.003, 10);
+  });
+
+  it("returns nulls when neither persisted nor current band is usable", () => {
+    // No breaker exists for this feed, no historical anchor either —
+    // markers should render as neutral / unknown, not greenwash to OK.
+    const snapshot = oracleSnapshot({
+      breakerBaselineAtSnapshot: null,
+      breakerThresholdAtSnapshot: null,
+    });
+
+    const resolved = resolveSnapshotBand(snapshot, null, null);
+
+    expect(resolved.baseline).toBeNull();
+    expect(resolved.thresholdRatio).toBeNull();
+  });
+});
+
+// `isOutOfBand` was removed in PR #636 round-2 — the verdict logic lives
+// inside `buildSnapshotMarkers`'s inner closure now (it needs per-snapshot
+// band resolution, not a global `breakerConfigStatus` gate), and the
+// module-level helper was dead production code. Coverage of the actual
+// verdict math is exercised end-to-end via `buildOraclePlotData` below.
 
 // ---------------------------------------------------------------------------
 // buildOracleShapes
