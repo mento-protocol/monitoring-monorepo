@@ -56,11 +56,16 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      # Required for the sticky Lighthouse PR comment, which uses the
-      # GitHub Issues comments API even on pull requests.
+      # Required for the sticky Lighthouse PR comment. The comment is
+      # posted via the issues-comments API (`/repos/{repo}/issues/{n}/comments`)
+      # but GitHub authorizes writes against a PR's underlying issue
+      # only when BOTH `issues: write` AND `pull-requests: write` are
+      # granted — the 403 response header is explicit:
+      # `x-accepted-github-permissions: issues=write; pull_requests=write`.
+      # `pull-requests: write` also satisfies dorny/paths-filter, which
+      # only needs read.
       issues: write
-      # Required by dorny/paths-filter in pull_request mode.
-      pull-requests: read
+      pull-requests: write
       # `deployments: read` lets the job query the GitHub Deployments API to
       # find the Vercel preview URL without needing a Vercel API token.
       deployments: read

@@ -174,6 +174,55 @@ const SURFACES = [
       await volume.click();
     },
   },
+  {
+    name: "pool-detail-tvl-range",
+    // Canonical Celo USDC/USDm Mento pool — verified stable on prod
+    // (`/pool/42220-0x462f…aaa19e` renders as "USDC/USDm on Celo"). The
+    // same fully-qualified ID powers `ui-dashboard/tests/browser/*` and
+    // the fixture server. Mento v2 exchange contracts are immutable, so
+    // hardcoding is safe; if the pool is ever retired the surface will
+    // fail fast on the readySelector and the gate will surface it.
+    path: "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+    // Anchor readiness on the actual Plotly plot inside the TVL card —
+    // NOT on the range buttons alone. The `TimeSeriesChartCard`
+    // (`components/time-series-chart-card.tsx:465-493`) renders its range
+    // `<div role="group">` OUTSIDE the `isLoading` branch, so the buttons
+    // are visible while `PlotSkeleton` is still rendered. Clicking before
+    // Plotly mounts would measure a cheap `useState<RangeKey>` flip over
+    // an empty/filtered-empty series instead of the
+    // `filterSeriesByRange` + Plotly re-render this gate is meant to
+    // protect. The CSS `section:has(range-group):has(.js-plotly-plot)`
+    // anchor only matches once both have rendered in the same TVL card —
+    // `.js-plotly-plot` is `react-plotly.js`'s root class, added by the
+    // Plotly library once `Plotly.newPlot()` completes.
+    readySelector:
+      'section:has([role="group"][aria-label="Pool TVL chart time range"]):has(.js-plotly-plot)',
+    async interact(page) {
+      // The chart's default range is "all"; clicking a sibling range
+      // (1D / 7D / 30D / 90D) flips `useState<RangeKey>` and triggers a
+      // `filterSeriesByRange` recompute + a Plotly re-render — both
+      // qualifying interactions. We pick an explicit inactive button so
+      // the click flips state even if the default range ever changes.
+      const buttons = page.locator(
+        '[role="group"][aria-label="Pool TVL chart time range"] button',
+      );
+      const count = await buttons.count();
+      if (count < 2) {
+        throw new Error(
+          `pool TVL range group has ${count} button(s); expected at least 2`,
+        );
+      }
+      for (let i = 0; i < count; i += 1) {
+        const btn = buttons.nth(i);
+        const pressed = await btn.getAttribute("aria-pressed");
+        if (pressed === "false") {
+          await btn.click();
+          return;
+        }
+      }
+      throw new Error("pool TVL range group has no inactive button to click");
+    },
+  },
 ];
 
 async function measureSurface(browser, surface) {
