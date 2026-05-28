@@ -13,10 +13,18 @@ name: Alerts Rules
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
 #     `terraform plan -detailed-exitcode` and emits a `has-changes` job
 #     output. On PRs it posts a sticky comment with the plan diff.
-#   - `apply` job only runs on push/dispatch to main AND only when the plan
-#     reported actual changes. When there are no changes the apply job is
-#     skipped entirely, which means the `production` Environment's
-#     required-reviewer prompt only fires on real-change merges.
+#   - `apply` job only runs on push/dispatch to main, only when the plan
+#     reported actual changes, and only for stack-root changes or explicit
+#     workflow_dispatch. No-change merges skip apply entirely, so the
+#     `production` Environment approval only fires on eligible real-change
+#     merges. Workflow/notifier-only edits can still plan, but they do not open
+#     the gate for unrelated drift.
+#   - During the legacy Discord cleanup, the apply job first targets the
+#     notification policy when old Discord contact points are still planned for
+#     destroy. Grafana rejects contact-point deletes while a policy still
+#     references them, and removed resources no longer give Terraform an
+#     ordering edge on their own.
+#
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
@@ -39,12 +47,14 @@ on:
     paths:
       - alerts/rules/**
       - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/alerts-rules.yml
   push:
     branches: [main]
     paths:
       - alerts/rules/**
       - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/alerts-rules.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
@@ -99,6 +109,7 @@ jobs:
         working-directory: alerts/rules
     outputs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
+      stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
       # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
@@ -108,6 +119,32 @@ jobs:
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect stack path changes
+        id: stack_changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          STACK_PATH: alerts/rules
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$BASE_SHA" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+            echo "stack-changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -205,13 +242,18 @@ jobs:
         env:
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         run: |
           {
             echo '## Terraform Plan — `alerts/rules/`'
             echo
             if [ "$PLAN_OUTCOME" = "success" ]; then
               if [ "$HAS_CHANGES" = "true" ]; then
-                echo '**Status:** 📝 changes detected — merge will trigger apply'
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  echo '**Status:** 📝 changes detected — stack change is eligible for apply'
+                else
+                  echo '**Status:** ⚠️ drift detected — stack path unchanged, apply will skip'
+                fi
               else
                 echo '**Status:** ✅ no changes — merge will skip apply'
               fi
@@ -231,6 +273,23 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Notify Slack that Terraform apply is pending
+        if: >-
+          success()
+          && github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.detect.outputs.has-changes == 'true'
+          && (github.event_name == 'workflow_dispatch' || steps.stack_changes.outputs.stack-changed == 'true')
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: "${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-failures' }}"
+          TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
+          TERRAFORM_STACK_LABEL: alerts/rules
+          TERRAFORM_TARGET_ENVIRONMENT: production
+        run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
+
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -242,6 +301,7 @@ jobs:
           # hardening pattern).
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         with:
           script: |
             const fs = require("fs");
@@ -262,11 +322,14 @@ jobs:
 
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
             const hasChanges = process.env.HAS_CHANGES === "true";
+            const stackChanged = process.env.STACK_CHANGED === "true";
             const statusIcon = planOutcome === "success"
-              ? (hasChanges ? "📝" : "✅")
+              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
               : "❌";
             const statusText = planOutcome === "success"
-              ? (hasChanges ? "changes detected — merge will trigger apply" : "no changes — merge will skip apply")
+              ? (hasChanges
+                  ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
+                  : "no changes — merge will skip apply")
               : "plan failed";
 
             const runUrl =
@@ -323,14 +386,15 @@ jobs:
   apply:
     name: Terraform Apply (alerts/rules)
     needs: plan
-    # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
-    # there are real changes. When `has-changes=false` the job is skipped
-    # entirely — the production-environment approval prompt never fires for
-    # no-op merges (the gap that motivated the saved-plan refactor).
+    # Apply when (a) on main, (b) push or dispatch event, (c) plan said
+    # there are real changes, AND (d) the stack root changed or a maintainer
+    # explicitly dispatched the workflow. Workflow/notifier-only edits can
+    # surface drift in the plan without opening the production approval gate.
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
+      && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')
     # Reuses the existing `production` environment shared with metrics-bridge,
     # aegis, and alerts/infra. The required-reviewer rule on that environment
     # gates each apply behind manual approval.
