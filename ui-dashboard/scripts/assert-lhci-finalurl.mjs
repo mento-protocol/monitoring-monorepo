@@ -11,24 +11,30 @@
 //   - Trailing-slash redirect to a different path → unexpected pathname
 //
 // All of those used to silently pass when the gate only looked for
-// `vercel.com/login`. The manifest check fails closed on any mismatch.
+// `vercel.com/login`.
 //
 // Required env:
 //   PREVIEW_URL  — the Vercel preview URL the workflow asked lhci to
 //                  audit. Used to derive the expected host.
 //
 // Reads:
-//   .lighthouseci/manifest.json — written by `lhci collect` / `lhci
-//                                  autorun`. Lists every per-run report
-//                                  with its on-disk JSON path.
+//   .lighthouseci/lhr-*.json — one full Lighthouse report per run, written
+//                              by `lhci collect` / `lhci autorun`. Each
+//                              has `finalUrl` (and `requestedUrl`) at the
+//                              top level. We don't read `.lighthouseci/
+//                              manifest.json` because `lhci autorun` only
+//                              writes that when uploading to the
+//                              filesystem target — with
+//                              `upload.target: "temporary-public-storage"`
+//                              (this repo's config) it's absent.
 //
 // Exit codes:
 //   0 — every audited finalUrl matched the expected host + one of the
 //       expected pathnames.
-//   1 — manifest missing, no reports, or at least one finalUrl mismatched.
+//   1 — no reports found, or at least one finalUrl mismatched.
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 const PREVIEW_URL = process.env.PREVIEW_URL;
 if (!PREVIEW_URL) {
@@ -42,19 +48,25 @@ const EXPECTED_HOST = new URL(PREVIEW_URL).host;
 // without updating this set will surface here as a "path mismatch"
 // failure for the legitimate new page.
 const EXPECTED_PATHS = new Set(["/", "/pools"]);
-const MANIFEST_PATH = resolve(".lighthouseci/manifest.json");
+const LHCI_DIR = resolve(".lighthouseci");
 
-if (!existsSync(MANIFEST_PATH)) {
+if (!existsSync(LHCI_DIR)) {
   console.error(
-    `::error::${MANIFEST_PATH} not found — lhci likely crashed before writing the manifest. Failing closed.`,
+    `::error::${LHCI_DIR} not found — lhci likely crashed before writing any reports. Failing closed.`,
   );
   process.exit(1);
 }
 
-const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
-if (!Array.isArray(manifest) || manifest.length === 0) {
+// lhci writes one `lhr-<hash>.json` per run (numberOfRuns=3 × 2 URLs = 6
+// files) under `.lighthouseci/`. Each is a full Lighthouse report JSON
+// with `finalUrl` + `requestedUrl` at the top level.
+const reports = readdirSync(LHCI_DIR)
+  .filter((name) => name.startsWith("lhr-") && name.endsWith(".json"))
+  .map((name) => join(LHCI_DIR, name));
+
+if (reports.length === 0) {
   console.error(
-    `::error::${MANIFEST_PATH} is empty or not an array — no reports to verify. Failing closed.`,
+    `::error::No lhr-*.json reports found under ${LHCI_DIR} — lhci likely crashed before writing any. Failing closed.`,
   );
   process.exit(1);
 }
@@ -62,26 +74,9 @@ if (!Array.isArray(manifest) || manifest.length === 0) {
 const failures = [];
 const summary = [];
 
-for (const entry of manifest) {
-  if (!entry.jsonPath) {
-    failures.push(
-      `Manifest entry for ${entry.url ?? "<unknown>"} has no jsonPath`,
-    );
-    continue;
-  }
-  // lhci writes absolute paths into `jsonPath` (see `path.resolve` in
-  // `@lhci/cli` collect output). `resolve()` is a no-op on absolute
-  // input and CWD-relative on relative input, so it handles both shapes
-  // safely. `path.join(manifestDir, entry.jsonPath)` would silently
-  // produce a concatenated nonsense path like
-  // `/runner/.../.lighthouseci/runner/.../.lighthouseci/lhr-…json` and
-  // every `existsSync` would return false.
-  const reportPath = resolve(entry.jsonPath);
-  if (!existsSync(reportPath)) {
-    failures.push(`Report file missing: ${reportPath}`);
-    continue;
-  }
+for (const reportPath of reports) {
   const lhr = JSON.parse(readFileSync(reportPath, "utf8"));
+  const requestedUrl = lhr.requestedUrl ?? "<unknown>";
   const finalUrl = lhr.finalUrl ?? lhr.finalDisplayedUrl;
   if (!finalUrl) {
     failures.push(`Report ${reportPath} has no finalUrl`);
@@ -99,21 +94,21 @@ for (const entry of manifest) {
   const hostOk = parsed.host === EXPECTED_HOST;
   const pathOk = EXPECTED_PATHS.has(parsed.pathname);
   summary.push(
-    `  ${hostOk && pathOk ? "✓" : "✗"} ${entry.url ?? "<unknown>"} → ${finalUrl}`,
+    `  ${hostOk && pathOk ? "✓" : "✗"} ${requestedUrl} → ${finalUrl}`,
   );
   if (!hostOk) {
     failures.push(
-      `Host mismatch for ${entry.url ?? "<unknown>"}: expected ${EXPECTED_HOST}, got ${parsed.host} (finalUrl=${finalUrl})`,
+      `Host mismatch for ${requestedUrl}: expected ${EXPECTED_HOST}, got ${parsed.host} (finalUrl=${finalUrl})`,
     );
   }
   if (!pathOk) {
     failures.push(
-      `Path mismatch for ${entry.url ?? "<unknown>"}: expected ${[...EXPECTED_PATHS].join(" or ")}, got ${parsed.pathname} (finalUrl=${finalUrl})`,
+      `Path mismatch for ${requestedUrl}: expected ${[...EXPECTED_PATHS].join(" or ")}, got ${parsed.pathname} (finalUrl=${finalUrl})`,
     );
   }
 }
 
-console.log(`Audited ${manifest.length} report(s) against ${EXPECTED_HOST}:`);
+console.log(`Audited ${reports.length} report(s) against ${EXPECTED_HOST}:`);
 console.log(summary.join("\n"));
 
 if (failures.length > 0) {
