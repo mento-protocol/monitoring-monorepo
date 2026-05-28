@@ -130,8 +130,11 @@ jobs:
             # imports are picked up. Tests include both the direct unit
             # tests and the `code-quality-invariants.test.ts` covered by
             # `vitest.mutation.config.ts`. `schema.graphql` is in the filter
-            # because `tradingLimits.ts` imports `type { TradingLimit }`
-            # from `envio` — a codegen type sourced from the schema.
+            # because `tradingLimits.ts` imports `type { TradingLimit }` from
+            # the `envio` package, which re-exports the codegen-generated
+            # `.envio/types.d.ts` — so a `schema.graphql` change that
+            # reshapes the `TradingLimit` entity flows through codegen into
+            # the mutated file's compile surface.
             indexer:
               - indexer-envio/src/**
               - indexer-envio/test/**
