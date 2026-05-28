@@ -1,8 +1,7 @@
 # Sentry Alerts Module
 
 This module configures Sentry → **Slack** error monitoring for every project
-in the `mento-labs` Sentry organization. Discord support was retired when the
-team's alert taxonomy migrated to Slack; see `alerts/rules/` for the sibling
+in the `mento-labs` Sentry organization. See `alerts/rules/` for the sibling
 Grafana → Slack setup.
 
 ## What it does
@@ -140,14 +139,11 @@ a no-op for that resource.
 
 ## Rollback
 
-`git revert <PR-SHA>` + `terraform apply` re-creates the prior shape (Discord
-channels + `sentry_issue_alert` rules) within ~2 minutes. **Important
-additional caveat introduced by Slack-channel ownership:** a revert that
-removes the `restapi_object.sentry_slack_channel` resources will archive
-every `#sentry-<slug>` Slack channel via `conversations.archive`. If the
-revert also re-creates `sentry_alert` resources that reference those channel
-names, those alerts post to archived channels (silent delivery failure). To
-revert safely without orphaning alerts in archived channels:
+A revert that removes the `restapi_object.sentry_slack_channel` resources will
+archive every `#sentry-<slug>` Slack channel via `conversations.archive`. If the
+revert also creates alert resources that reference those channel names, those
+alerts post to archived channels (silent delivery failure). To revert safely
+without orphaning alerts in archived channels:
 
 1. `terraform state rm 'module.sentry_bridge.restapi_object.sentry_slack_channel["<slug>"]'`
    for each project (drops the channels from state without archiving them).
@@ -155,13 +151,8 @@ revert safely without orphaning alerts in archived channels:
 3. The channels remain in Slack with their history intact; the alerts route
    to them normally.
 
-Other rollback caveats (carried over from PR #561):
+Other rollback caveats:
 
-- **Discord channels get fresh snowflake IDs.** The original
-  `#sentry-<project-slug>` Discord channels are destroyed by this PR, so a
-  revert spins up _new_ channels with the same names but new IDs. Any
-  bookmark, pinned-message reference, or cross-link to the old channel IDs
-  is dead. Message history is gone.
 - **Loss window = time between a Slack-delivery failure being detected and
   the revert applying.** During this window, Sentry events fire but no
   notification lands.

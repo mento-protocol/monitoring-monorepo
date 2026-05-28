@@ -268,6 +268,8 @@ assert_script_occurrences() {
 assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
+assert_script_occurrences 1 'Avoid overriding a usable TMPDIR'
+assert_script_occurrences 1 'tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"'
 assert_script_occurrences 1 "command -v sha256sum"
 assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
@@ -1070,7 +1072,7 @@ run_gate "alerts/infra/onchain-event-handler/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
-run_gate "alerts/infra/onchain-event-handler/src/discord.ts"
+run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 assert_contains "- pnpm exec turbo run test --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"

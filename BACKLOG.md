@@ -117,64 +117,36 @@ One item deferred from the May 2026 marathon PR review.
    stateful-data UI checklist (`docs/pr-checklists/stateful-data-ui.md`)
    already covers the URL-as-state idiom.
 
-## Discord → Slack alert migration: cutover + cleanup
+## Slack alert cleanup follow-up
 
-Phase 1 (setup + dual-route) shipped in PRs #485 and #494. Both Aegis and v3 alert stacks are live in Grafana Cloud; every Aegis alert fires both Discord (legacy) and Slack (new) during the soak window. Splunk On-Call routing for `severity=page` is preserved and now also fires for prod trading-modes (newly-escalated). Weekend FX mute timing extended to every new Slack route.
-
-### Soak verification (during the ≥5-day soak window)
-
-- [ ] **Oracle-relayer warning on Celo prod** — confirm parity in Discord `#prod-oracle-relayers` AND Slack `#alerts-oracles`.
-- [ ] **`severity=page` event** (oracle-relayers stale, trading-limits L1/LG, aegis service health, or trading-modes-prod circuit-breaker) — confirm Splunk On-Call still pages, `#alerts-critical` lights up, Discord side still fires.
-- [ ] **FX-feed alert during Fri 21:00 – Sun 21:00 UTC** — confirm muted on Splunk + `#alerts-critical` + `#alerts-oracles` + `#alerts-testnet`. Easy to test on a weekend-disabled feed (e.g. CELOPHP, EURXOF).
-- [ ] **celo-sepolia alert** — confirm it lands in `#alerts-testnet` only, NOT `#alerts-critical` or `#alerts-oracles`.
-- [ ] **Daily catch-all sweep** — eyeball Discord `#alerts-catch-all` for any unmapped alerts. Anything that lands there is alert-config-drift signal worth fixing before cutover.
-
-### Cutover PR (when soak shows clean parity, ≥5 days dual-routing without surprises)
-
-Single-file change to `aegis/terraform/grafana-alerts/notification-policies.tf`. After this PR ships, Discord alerts stop firing entirely; Slack is the only delivery (plus Splunk for page-severity).
-
-- [ ] Remove the 8 Discord-contact-point policy blocks (oracle-relayers staging/prod, reserve, trading-modes staging/prod, aegis, trading-limits).
-- [ ] Flip root `contact_point` from `discord_channel_catch_all` → `grafana_contact_point.slack_alerts_infra`.
-- [ ] Flip the 2 weekend-FX `continue = true` flags back to `false` (no Discord siblings left to chain into).
-- [ ] Test plan mirrors the soak checks above, but with Discord channels now expected to be silent.
-
-### Cleanup PR (final, immediately after cutover)
-
-- [ ] Delete the 8 `discord_channel_*` contact-point resources from `aegis/terraform/grafana-alerts/contact-points.tf`.
-- [ ] Delete `aegis/terraform/grafana-alerts/message-templates-discord.tf` (the consolidated bundle — its whole purpose was a stepping stone to free template quota; goes away when Discord retires).
-- [ ] Delete `local.alert_config` dispatcher in `aegis/terraform/grafana-alerts/locals.tf`. Splunk already migrated to `alert_config_victorops`; only Discord references the original.
-- [ ] Drop the 6 `discord_*_template` fields from each `alert_types` entry in `locals.tf` (Discord-named templates won't exist anymore).
-- [ ] Remove the 8 `discord_alerts_webhook_url_*` variables from `aegis/terraform/grafana-alerts/variables.tf`, `aegis/terraform/variables.tf`, and `aegis/terraform/main.tf`.
-- [ ] Drop the Discord webhook URLs from `aegis/terraform/terraform.tfvars` (manual; gitignored).
-- [ ] Update docs: `aegis/README.md` lines 305–393 (replace Discord setup with Slack setup), root `AGENTS.md` (change "Discord contact points" → "Slack contact points" in the Aegis terraform description), `docs/BACKLOG.md` (drop this entire section), `docs/ROADMAP.md` (mark Aegis migration complete, remove dual-route notes).
-- [ ] Archive (don't delete) the 8 Discord channels in the Discord server UI. Preserves incident archaeology.
-- [ ] Confirm `DISCORD_BOT_TOKEN` GitHub Actions secret is deleted (was deleted earlier when the deploy-notification workflow retired; re-verify).
-- [ ] Confirm no other repo references to Discord remain: `rg -i 'discord' aegis/ .github/ docs/ scripts/ AGENTS.md CLAUDE.md README.md` should be empty after this PR.
-
-### Loose ends carried in from the migration session
-
-The `splunk_on_call` "1 to change" drift was fixed by bumping `grafana/grafana` from `3.7.0` to `3.25.9`, which picks up upstream PR [#2123](https://github.com/grafana/terraform-provider-grafana/pull/2123) (v3.22.3) marking `victorops.url` as `Sensitive` and packing it from state on refresh. Side effect to be aware of: out-of-band changes to the webhook URL itself are now invisible to plan, the same way Slack tokens and PagerDuty integration keys already are; title/description still drift-detect.
-
-Follow-up `alerts/rules/` was moved onto the v4 major (3.25.9 → 4.36.2) by renaming the 25 `grafana_message_template` outer names away from `:` separators (`Slack: X` → `Slack - X`, same for `VictorOps`/`Discord`). Required because upstream PR [#2567](https://github.com/grafana/terraform-provider-grafana/pull/2567) (v4.28.1+) rewrote the resource to the Plugin Framework with an unbounded `strings.Split(id, ":")`, breaking colon-in-name parsing that v3.x and v4.28.0 handled fine via `SplitN(id, ":", 2)`. Inner `{{ define "slack.X" }}` names (referenced by `alert_config` locals) were left unchanged, so downstream `{{ template "X" . }}` invocations were untouched. `aegis/terraform/` followed on the same day with a clean `~> 4.36` bump (no colon-in-name resources, plan was "No changes" against the existing state).
+Slack is now the active delivery path for protocol, Aegis service-health,
+Sentry, and on-chain multisig alerts. After the first `alerts/infra` cleanup
+apply confirms the legacy Discord channel/webhook resources are gone from
+Terraform state, remove the temporary Discord provider, variables, GitHub
+Actions secrets, and provider lockfile entries.
 
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 
 The 2026-05-22/24 weekend exposed several over-paging classes on `#alerts-critical`. PRs #569 / #572 / #574 / #576 fixed the highest-leverage items (reserve thresholds, weekend FX feed mute, Metrics Bridge Poll Errors rule tuning, stale-price Slack template). These are the loose ends.
 
-_Auto-apply design decision resolved 2026-05-27._ `alerts/rules/`, `alerts/infra/`, and `aegis/terraform/` now auto-apply via CI on merge (PRs #619 / #622 / #629), gated by the `production` GitHub Environment required-reviewer rule. See Terraform CI/CD audit follow-ups below for the remaining hardening work.
+_Auto-apply design decision resolved 2026-05-27._ `alerts/rules/`, `alerts/infra/`, and `aegis/terraform/` now auto-apply via CI on merge, gated by the `production` GitHub Environment required-reviewer rule. Scheduled drift detection covers all auto-applied stacks. See Terraform CI/CD audit follow-ups below for the remaining hardening work.
 
 ## Terraform CI/CD audit follow-ups (post-#622)
 
-PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. The remaining follow-ups below are 2 hardening/coverage tasks and 2 deferred deeper-investment items.
+PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. Follow-up PRs added Aegis auto-apply, scheduled drift detection, and the local Terraform apply guard. The remaining audit follow-ups below cover plan-credential hardening, quality-of-life fixes, and deferred deeper-investment items.
 
 ### Tier 1 — Hardening + coverage
 
 - [ ] **Finish the read-only plan SA workflow swap.** PRs #630 / #640 added the `metrics-bridge-plan-readonly@` CI SA and the `org-terraform-plan-readonly@` seed-project SA with `roles/storage.objectViewer` on the state bucket. Remaining work: after that Terraform wiring is applied and `GCP_SERVICE_ACCOUNT_PLAN` is seeded, switch Terraform plan jobs in `alerts-rules.yml`, `alerts-infra.yml`, `aegis-terraform.yml`, and `terraform-drift.yml` to the read-only chain via `-backend-config="impersonate_service_account=..."` + `-lock=false`; apply jobs stay on the write-capable deployer. This does NOT mitigate `TF_VAR_*` cleartext exposure at plan time — providers still need them to refresh.
-- [ ] **Enable `alerts-delivery` in Terraform drift detection.** `.github/workflows/terraform-drift.yml` is live and matrix-driven for auto-applied stacks, but still filters out `alerts-delivery` pending the old `local_file.env_file` false-positive fix. Once the PR #627 state transition has applied cleanly, remove that hard-coded filter so drift coverage includes every stack whose `ci.apply == "push-main-production-environment"` in `terraform.stacks.json`.
 
 ### Tier 2 — Deferred
 
-- [ ] **Saved-plan binding via KMS — deferred.** PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS envelope encryption to recover the "binding plan" property (byte-for-byte equality between PR-time review and apply-time execution). Recommendation: defer. Cost/value analysis: alerts stacks change ~1-2× per month, blast radius is alert delivery (recoverable on 15-min cycle), and the drift window between plan and apply is mitigated by the re-plan at apply gate. **Hard prerequisite to revisit: ship full Tier-1 drift coverage above.** Once drift is caught within 24h regardless of which plan ran, the marginal value of binding-plan approaches zero. Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to auto-apply.
+- [ ] **`alerts/infra/onchain-event-handler/local-dotenv-file.tf` exit-2 false positive.** The `local_file.env_file` resource always plans as "create" on fresh-checkout CI runners (the file is gitignored and absent on clean clone). Defeats the skip-when-no-changes optimization for alerts-infra — production gate fires on every merge. Fix: replace with `terraform_data` + `local-exec` provisioner so refresh has no on-disk state to drift against. `removed { lifecycle { destroy = false } }` block detaches the old resource without nuking local `.env` files.
+- [ ] **PR #609 follow-up — mixed-state trading-mode visibility.** When firing AND resolved trading-mode alerts arrive in the same Grafana group notification, the title's global `🚨` masks the resolved entries. Fix: switch the trading-mode title to the count-summary pattern proven in `slack.trading_limits_alert_title` (`[N FIRING | M RESOLVED] {{ .CommonLabels.alertname }}`) + embed per-alert emoji inline in body bold heading. Slack template update only.
+
+### Tier 3 — Deferred
+
+- [ ] **Saved-plan binding via KMS — deferred.** PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS envelope encryption to recover the "binding plan" property (byte-for-byte equality between PR-time review and apply-time execution). Recommendation: defer. Cost/value analysis: alerts stacks change ~1-2× per month, blast radius is alert delivery (recoverable on 15-min cycle), and the drift window between plan and apply is mitigated by the re-plan at apply gate. **Hard prerequisite to revisit: keep scheduled drift detection healthy for every auto-applied stack.** Once drift is caught within 24h regardless of which plan ran, the marginal value of binding-plan approaches zero. Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to auto-apply.
 
 ## Alerts integration follow-ups
 
@@ -185,17 +157,11 @@ Items below are net-new functionality or polish, not migration blockers.
 
 ### Tier 1 — Next-phase work
 
-- [ ] **Retire legacy on-chain Discord resources after Slack soak** — once the
-      Slack adapter apply has run and `#multisig-alerts` / `#multisig-events`
-      receive production events, remove `module.discord_channels`, the root
-      Discord provider/variables/GitHub secrets, and
-      `channels/discord-channels/`. Keep the provider available until the
-      first destroy apply can cleanly archive/delete the Discord-managed state.
 - [ ] **Tighten Cloud Function ingress** — `alerts/infra/onchain-event-handler/main.tf` currently sets `ingress_settings = "ALLOW_ALL"` + `member = "allUsers"` on the function IAM, defended in-code by QuickNode HMAC-SHA256 signature verification, timestamp tolerance, and nonce replay protection. Accepted risk for now (matches vendored upstream). Revisit only with verified QuickNode stable egress IPs or OIDC-signed delivery: switch to `INTERNAL_AND_GCLB` + allowlist QuickNode IPs (or verify OIDC token in code) and drop `allUsers`. HMAC stays as defense-in-depth either way.
 
 ### Tier 2 — Gated on external work
 
-- [ ] **Consolidate Aegis v2 alerts** under `alerts/rules-v2/` once the in-flight Aegis Discord→Slack cutover lands.
+- [ ] **Consolidate Aegis v2 alerts** under `alerts/rules-v2/` now that Aegis delivery is Slack-first.
 
 ### Tier 3 — Hygiene / cosmetic
 
@@ -205,7 +171,6 @@ Items below are net-new functionality or polish, not migration blockers.
 ### Sentry → Slack follow-ups (post #561 + #570)
 
 - [ ] **Zero-default-monitor edge case in `data.sentry_project_issue_stream_monitor`** — if a brand-new Sentry project lands in the org before its default issue-stream monitor has been provisioned (rare — Sentry creates it eagerly), the per-project data source lookup fails and the `for_each` plan errors out for ALL projects in the same apply. Documented as a "Known limitation" in `alerts/infra/channels/sentry-bridge/README.md`. Promote to a structural fix when this actually bites — options: (a) two-phase apply with `data.sentry_project_issue_stream_monitor` re-resolved between phases; (b) pre-flight script that polls Sentry until each new project's default monitor is present; (c) filter `local.projects` to projects with monitors via a separate data source check.
-- [ ] **Drop the now-unused `discord` provider declaration from `channels/sentry-bridge/`** — `versions.tf` `required_providers.discord` and `alerts/infra/main.tf` `providers = { discord = discord }` were intentionally retained through the migration apply so Terraform could destroy the Discord-typed resources cleanly. Once the apply lands and state no longer references Discord-typed resources, both blocks (and the cross-link comments) can be removed in a tiny follow-up PR.
 
 ## OracleSnapshot.priceDifference on drained pools (post #624)
 

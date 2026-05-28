@@ -12,8 +12,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 │
 ├── channels/
 │   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)
-│   ├── slack-channels/     # Slack channels for on-chain multisig events
-│   └── discord-channels/   # Discord channels and webhooks
+│   └── slack-channels/     # Slack channels for on-chain multisig events
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
 └── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
 ```
@@ -52,7 +51,7 @@ graph LR
 
 - **Terraform** >= 1.10.0
 - **GCP account** with billing enabled
-- **Discord bot** with admin permissions while legacy Discord resources remain in state
+- **Discord bot** with admin permissions only until the first post-Slack cleanup apply destroys legacy Discord resources from state
 - **Slack bot** with channel-management and chat scopes
 - **Sentry account** (for JS error monitoring)
 - **QuickNode account** (for blockchain monitoring)
@@ -68,7 +67,8 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-# Discord Configuration (legacy on-chain channel resources retained during Slack cutover)
+# Temporary cleanup-only Discord credentials.
+# Required until the first cleanup apply destroys legacy Discord resources from state.
 discord_bot_token      = "<your-discord-bot-token>"
 discord_server_id      = "<discord-server-id>"
 discord_category_id    = "<alert-category-id>"
@@ -243,22 +243,6 @@ terraform destroy  # Everything
 
 ## 🐛 Troubleshooting
 
-### Discord Permission Errors
-
-Use the permission checker script:
-
-```bash
-cd scripts && npm install
-npx tsx scripts/check-discord-permissions.ts
-```
-
-**Common errors:**
-
-- `HTTP 403 Forbidden, code 50013` - Missing `MANAGE_CHANNELS` or `MANAGE_WEBHOOKS` permissions
-- `HTTP 403 Forbidden, code 50001` - Bot needs proper role permissions
-
-**Quick fix:** Grant bot `Administrator` permission in Discord Server Settings → Roles.
-
 ### Invalid Address Format
 
 Addresses must:
@@ -283,7 +267,6 @@ This shows REST API requests/responses for troubleshooting.
 
 - [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Slack bridge module
 - [`channels/slack-channels/README.md`](channels/slack-channels/README.md) - Slack channels for on-chain event notifications
-- [`channels/discord-channels/README.md`](channels/discord-channels/README.md) - Discord channels + webhooks module
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
 
@@ -301,7 +284,6 @@ Follows [AWS Terraform best practices](https://docs.aws.amazon.com/prescriptive-
 - [Terraform Documentation](https://developer.hashicorp.com/terraform/docs)
 - [Sentry API Docs](https://docs.sentry.io/api/)
 - [Slack API Docs](https://api.slack.com/web)
-- [Discord Developer Docs](https://discord.com/developers/docs)
 - [QuickNode Documentation](https://www.quicknode.com/docs)
 
 ## 🔒 Security

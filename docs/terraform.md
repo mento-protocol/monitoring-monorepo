@@ -15,7 +15,7 @@ Use it instead of inferring ownership from directory names.
 | ----------------- | ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved local apply                           |
 | `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | PR plan; `main` apply through the `production` GitHub Environment |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Discord channel management, Sentry bridge, Slack channel lifecycle, related GCP resources       | PR plan; `main` apply through the `production` GitHub Environment |
+| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                   | PR plan; `main` apply through the `production` GitHub Environment |
 | `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
@@ -60,9 +60,9 @@ validation inside the required `CI / ci` sentinel. Keep Terraform path routing
 in `terraform.stacks.json` rather than duplicating stack ownership in workflow
 YAML.
 
-`alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior, and all
-remain gated by the `production` GitHub Environment. The `platform` stack is
-manual apply only.
+`alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior on
+`main`, gated by the `production` GitHub Environment. The platform stack remains
+manual-plan/manual-apply only.
 
 ## Grafana Alert Ownership Migration
 
@@ -79,8 +79,8 @@ Current ownership:
 
 Local gitignored tfvars files must follow the same ownership:
 
-- `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, Discord
-  webhook URLs, and Splunk On-Call webhook URL.
+- `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, and Splunk
+  On-Call webhook URL.
 - `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
 
 Verify ownership and drift with:

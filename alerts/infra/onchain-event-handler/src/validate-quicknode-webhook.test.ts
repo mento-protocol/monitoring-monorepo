@@ -27,20 +27,10 @@ function request(signature = sign()): Request {
   } as Request & { rawBody: Buffer };
 }
 
-function response(status: number, body?: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: String(status),
-    json: async () => body,
-  } as Response;
-}
-
 async function loadValidator() {
   vi.resetModules();
   process.env.MULTISIG_CONFIG = "{}";
   process.env.QUICKNODE_SIGNING_SECRET = secret;
-  process.env.QUICKNODE_REPLAY_BUCKET = "quicknode-replay-test";
   process.env.SLACK_BOT_TOKEN = "xoxb-test";
   process.env.SLACK_CHANNEL_ALERTS = "Calerts";
   process.env.SLACK_CHANNEL_EVENTS = "Cevents";
@@ -59,12 +49,8 @@ describe("validateQuickNodeWebhook", () => {
     vi.resetModules();
   });
 
-  it("accepts a signed nonce and acknowledges duplicate nonces without auth retries", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(response(200, { access_token: "token-1" }))
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(response(412, {}));
+  it("accepts a signed request without reserving the replay nonce", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const { validateQuickNodeWebhook } = await loadValidator();
@@ -74,31 +60,7 @@ describe("validateQuickNodeWebhook", () => {
       nonce,
       timestamp,
     });
-    await expect(validateQuickNodeWebhook(request())).resolves.toEqual({
-      valid: false,
-      status: 200,
-      message: "Duplicate webhook nonce already processed",
-      replayed: true,
-    });
-
-    const uploadCall = fetchMock.mock.calls[1];
-    expect(String(uploadCall[0])).toContain("/upload/storage/v1/b/");
-    expect(String(uploadCall[0])).toContain(
-      "name=quicknode-replay-nonces%2F1700000000%2F",
-    );
-    expect(String(uploadCall[0])).toContain("ifGenerationMatch=0");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
-  it("fails closed when the replay nonce bucket is not configured", async () => {
-    const { validateQuickNodeWebhook } = await loadValidator();
-    delete process.env.QUICKNODE_REPLAY_BUCKET;
-
-    await expect(validateQuickNodeWebhook(request())).resolves.toEqual({
-      valid: false,
-      status: 500,
-      message: "Server configuration error",
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not reserve a nonce when the signature is invalid", async () => {

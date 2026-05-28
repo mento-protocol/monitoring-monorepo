@@ -4,8 +4,8 @@
 #
 # One public Slack channel per auto-discovered Sentry project, created via
 # Slack's `conversations.create` Web API endpoint. The `mastercard/restapi`
-# provider is reused (same pattern as `channels/discord-channels/` for
-# Discord webhooks and `onchain-event-listeners/` for QuickNode webhooks).
+# provider is reused (same pattern as `onchain-event-listeners/` for QuickNode
+# webhooks).
 #
 # Why restapi instead of a dedicated Slack provider:
 #   - `pablovarela/slack` was the most-downloaded Slack TF provider but the

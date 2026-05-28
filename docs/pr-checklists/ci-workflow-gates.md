@@ -53,6 +53,7 @@ A cache key that misses an input silently serves stale build artifacts.
 
 - [ ] If the workflow runs codegen (e.g. `pnpm indexer:codegen`), the cache key MUST include the codegen scripts AND every config file that codegen reads (e.g. `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`, `schema.graphql`, `scripts/run-envio-with-env.mjs`)
 - [ ] Lockfile (`pnpm-lock.yaml`) is necessary but NOT sufficient — codegen output depends on more than dep versions
+- [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, NOT just `package.json`. A caret-range dep (`@playwright/test: ^1.60.0`) lets a lockfile-only update flip the resolved Playwright version — and thus the Chromium revision it wants — without changing `package.json`'s hash. Result: every CI run restores the stale cache, the install step re-downloads (~130 MB for Chromium), but `actions/cache` won't re-save under the already-hit key, so the download repeats indefinitely until something forces a `package.json` change. Caught on PR #633 (`.github/workflows/lighthouse.yml` Playwright Chromium cache step). Pair with a `restore-keys:` fallback so unrelated lockfile churn still benefits from a near-match cache.
 
 ## 6. Fail-closed audit / security workflows
 
