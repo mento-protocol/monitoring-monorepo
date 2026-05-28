@@ -44,7 +44,7 @@ the code-health history report, and `indexer-envio` `no-unsafe-*`. See
 `AGENTS.md` "Code health budgets" and `docs/pr-checklists/code-health.md` for
 the landed mechanism + severities.
 
-- [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** when deferred, **525 as of 2026-05-28** before partial burn-down. Flag stays OFF until errors hit zero; verify locally with `cd ui-dashboard && pnpm exec tsc --noEmit --noUncheckedIndexedAccess`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check. Remaining sub-items (counts after the lib/\*\* PR landed):
+- [ ] Enable `noUncheckedIndexedAccess: true` on `ui-dashboard/tsconfig.json`. The strict-TS PR turned it on for `shared-config`, `indexer-envio`, and `metrics-bridge` (each was clean or near-clean); dashboard had **355 typecheck errors** when deferred, **437 as of 2026-05-28** before partial burn-down. Flag stays OFF until errors hit zero; verify locally with `cd ui-dashboard && pnpm exec tsc --noEmit --noUncheckedIndexedAccess`. Pattern: wrap `arr[i]` accesses in explicit guards, or use destructuring with `??` defaults. Some sites genuinely need a re-think of the iteration shape rather than a null-check. Remaining sub-items (counts after the lib/\*\* PR landed):
   - [x] `lib/**` production (was 53 errors across 12 files)
   - [ ] `lib/**/__tests__/` (115 test errors)
   - [ ] `hooks/**` (~21 errors)
