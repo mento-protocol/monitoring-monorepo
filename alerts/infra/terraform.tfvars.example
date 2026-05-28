@@ -38,19 +38,6 @@ sentry_slack_workspace_name = "Mento Labs"
 slack_bot_token = "xoxb-..."
 
 #####################
-# Temporary Discord Cleanup
-#####################
-# Retained only so the first post-Slack cleanup apply can destroy legacy
-# Terraform-managed Discord resources from state. Remove these after that
-# apply and the follow-up provider/secret cleanup.
-
-discord_bot_token = "your-bot-token"
-
-discord_server_id = "1234567890123456789"
-
-discord_category_id = "1234567890123456789"
-
-#####################
 # Google Cloud Configuration
 #####################
 # The project-factory module will automatically create ONE GCP project
@@ -62,7 +49,7 @@ discord_category_id = "1234567890123456789"
 project_name = "mento-alerts"
 
 # GCP organization ID
-org_id = "123456789012"
+org_id = "599540483579"
 
 # Billing account ID (required)
 # Format: XXXXXX-XXXXXX-XXXXXX

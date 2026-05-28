@@ -6,13 +6,6 @@ provider "sentry" {
   token = var.sentry_auth_token
 }
 
-# Temporary provider configuration retained so Terraform can destroy legacy
-# Discord resources that still exist in state after the Slack cutover. Remove
-# it after the cleanup apply shows no Discord-typed resources remain.
-provider "discord" {
-  token = var.discord_bot_token
-}
-
 # GitHub provider — used solely to push the `TF_VAR_*` repo secrets that
 # `.github/workflows/alerts-infra.yml` consumes (see `github_actions_secret`
 # resources in `main.tf`). The PAT in `var.github_token` should be
@@ -22,18 +15,6 @@ provider "discord" {
 provider "github" {
   token = var.github_token
   owner = "mento-protocol"
-}
-
-# Temporary Discord API provider for legacy webhook destroy.
-provider "restapi" {
-  alias = "discord"
-  uri   = "https://discord.com/api/v10"
-  headers = {
-    "Authorization" = "Bot ${var.discord_bot_token}"
-    "Content-Type"  = "application/json"
-  }
-  write_returns_object = true
-  debug                = var.debug_mode
 }
 
 # Google Cloud Provider

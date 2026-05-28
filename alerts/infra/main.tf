@@ -164,7 +164,7 @@ module "onchain_event_listeners" {
 # GitHub UI would surface as a TF diff. Secrets in state are
 # encrypted at rest in GCS and gated by `org-terraform` impersonation
 # (same gate as every other secret already managed here, e.g. the
-# Sentry / temporary Discord cleanup / Slack / QuickNode tokens above).
+# Sentry / Slack / QuickNode tokens above).
 #
 # Map: tfvars variable → secret name. Mirrors the env: block in
 # alerts-infra.yml.
@@ -179,9 +179,6 @@ locals {
   # only through the resource's `value` field.
   alerts_infra_ci_secret_names = toset([
     "TF_VAR_SENTRY_AUTH_TOKEN",
-    "TF_VAR_DISCORD_BOT_TOKEN",
-    "TF_VAR_DISCORD_SERVER_ID",
-    "TF_VAR_DISCORD_CATEGORY_ID",
     "TF_VAR_BILLING_ACCOUNT",
     "TF_VAR_QUICKNODE_API_KEY",
     "TF_VAR_QUICKNODE_SIGNING_SECRET",
@@ -207,9 +204,6 @@ locals {
 
   alerts_infra_ci_secret_values = {
     TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
-    TF_VAR_DISCORD_BOT_TOKEN        = var.discord_bot_token
-    TF_VAR_DISCORD_SERVER_ID        = var.discord_server_id
-    TF_VAR_DISCORD_CATEGORY_ID      = var.discord_category_id
     TF_VAR_BILLING_ACCOUNT          = var.billing_account
     TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
     TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
@@ -224,7 +218,7 @@ locals {
 # outside Terraform — non-trivial complexity for marginal benefit here: the
 # state file is already encrypted at rest in GCS, gated by `org-terraform`
 # impersonation (same gate that already protects sentry_auth_token /
-# temporary discord_bot_token / quicknode_signing_secret in this same state). The
+# quicknode_signing_secret in this same state). The
 # provider handles libsodium server-side against GitHub's public key on its
 # way to the API. If the threat model ever shifts (state exposed to a wider
 # audience), revisit — `gh secret set` and `data.github_actions_public_key`

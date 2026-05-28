@@ -51,7 +51,6 @@ graph LR
 
 - **Terraform** >= 1.10.0
 - **GCP account** with billing enabled
-- **Discord bot** with admin permissions only until the first post-Slack cleanup apply destroys legacy Discord resources from state
 - **Slack bot** with channel-management and chat scopes
 - **Sentry account** (for JS error monitoring)
 - **QuickNode account** (for blockchain monitoring)
@@ -67,12 +66,6 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-# Temporary cleanup-only Discord credentials.
-# Required until the first cleanup apply destroys legacy Discord resources from state.
-discord_bot_token      = "<your-discord-bot-token>"
-discord_server_id      = "<discord-server-id>"
-discord_category_id    = "<alert-category-id>"
-
 # Sentry Configuration
 sentry_auth_token             = "your-sentry-auth-token"
 sentry_organization_slug      = "my-org"            # Optional, defaults to "mento-labs"
@@ -90,7 +83,7 @@ slack_bot_token = "xoxb-..."
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
-org_id           = "123456789012"        # Optional, omit if not using organization
+org_id           = "599540483579"
 billing_account  = "XXXXXX-XXXXXX-XXXXXX"  # Required
 region           = "europe-west1"        # Optional, defaults to "europe-west1"
 
