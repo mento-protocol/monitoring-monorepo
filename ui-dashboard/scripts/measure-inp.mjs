@@ -106,8 +106,15 @@ const SURFACES = [
   {
     name: "leaderboard-time-window",
     path: "/leaderboard",
-    // Wait for the radio-group shell that holds the time-window buttons.
-    readySelector: '[role="group"][aria-label="Time window"]',
+    // Wait for actual leaderboard rows to render — NOT just the time-window
+    // group itself, which mounts in the page header before any SWR data is
+    // loaded. If we click while the tables are still empty/loading, the
+    // measured INP only covers the cheap `window.history.replaceState`
+    // URL-state update over empty arrays, missing the expensive
+    // re-aggregation/re-render that this gate is meant to protect. The
+    // Volume `SortableTh` only mounts once the table has columns, so it's
+    // a reliable "rows have loaded" anchor.
+    readySelector: 'th[aria-sort] button:has-text("Volume")',
     async interact(page) {
       // The leaderboard ships with one window active by default; clicking
       // a sibling triggers a `window.history.replaceState`-backed re-render
