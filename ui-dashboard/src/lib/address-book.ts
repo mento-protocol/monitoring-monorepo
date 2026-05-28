@@ -71,12 +71,10 @@ export function countImportLabels(parsed: unknown): number {
       if (
         typeof entry === "object" &&
         entry !== null &&
-        !Array.isArray(entry)
+        !Array.isArray(entry) &&
+        typeof (entry as { address?: unknown }).address === "string"
       ) {
-        const address = (entry as Record<string, unknown>).address;
-        if (typeof address === "string") {
-          addresses.add(address.toLowerCase());
-        }
+        addresses.add((entry as { address: string }).address.toLowerCase());
       }
     }
     return addresses.size;

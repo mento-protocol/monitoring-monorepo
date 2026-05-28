@@ -21,6 +21,31 @@ export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
 const SECS_PER_DAY = 86_400;
 
+/**
+ * Yields one `(sym, rawAmount, decimals)` triple per defined slot of the
+ * parallel `tokenSymbols[]` / `amounts[]` / `tokenDecimals[]` arrays the
+ * indexer emits on each `PoolDailyFeeSnapshot`. Indices where any of the
+ * three is `undefined` are skipped — the indexer's invariant says they don't
+ * mismatch in practice, but `noUncheckedIndexedAccess` requires the guard
+ * and centralising it here keeps the per-aggregator complexity down.
+ */
+export function* iterateFeeSnapshotTokens(
+  s: Pick<PoolDailyFeeSnapshot, "tokenSymbols" | "amounts" | "tokenDecimals">,
+): Iterable<{ sym: string; rawAmount: string; decimals: number }> {
+  for (let i = 0; i < s.tokenSymbols.length; i++) {
+    const sym = s.tokenSymbols[i];
+    const rawAmount = s.amounts[i];
+    const decimals = s.tokenDecimals[i];
+    if (
+      sym !== undefined &&
+      rawAmount !== undefined &&
+      decimals !== undefined
+    ) {
+      yield { sym, rawAmount, decimals };
+    }
+  }
+}
+
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
@@ -93,17 +118,7 @@ export function aggregateProtocolFees(
     }
 
     // FX side: price each non-pegged slot via the oracle rate map.
-    for (let i = 0; i < s.tokenSymbols.length; i++) {
-      const sym = s.tokenSymbols[i];
-      const rawAmount = s.amounts[i];
-      const decimals = s.tokenDecimals[i];
-      if (
-        sym === undefined ||
-        rawAmount === undefined ||
-        decimals === undefined
-      ) {
-        continue;
-      }
+    for (const { sym, rawAmount, decimals } of iterateFeeSnapshotTokens(s)) {
       if (UNRESOLVED_SYMBOLS.has(sym)) {
         unresolvedCount++;
         if (in24h) unresolvedCount24h++;

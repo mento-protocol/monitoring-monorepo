@@ -10,7 +10,7 @@
 import { GraphQLClient } from "graphql-request";
 import * as Sentry from "@sentry/nextjs";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
-import type { Network } from "@/lib/networks";
+import type { Network, IndexerNetworkId } from "@/lib/networks";
 import {
   ALL_POOLS_BREACH_ROLLUP,
   ALL_POOLS_HEALTH_CURSOR,
@@ -641,10 +641,9 @@ export async function fetchNetworkData(
   // daily rows ≈ 2.7 years per pool) the 24h/7d/30d windows remain fully
   // covered. Rows come in newest-first, so the last element is the oldest
   // we fetched.
-  const oldestFetched = snapshotsAllDaily[snapshotsAllDaily.length - 1];
   const oldestFetchedTs =
-    oldestFetched !== undefined
-      ? Number(oldestFetched.timestamp)
+    snapshotsAllDaily.length > 0
+      ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1]!.timestamp)
       : Number.POSITIVE_INFINITY;
   const paginationIssue: Error | null =
     snapshotsAllDailyError ??
@@ -749,12 +748,8 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
-    const networkId = configuredNetworkIds[i];
-    // Unreachable: results and configuredNetworkIds are zipped by Promise.allSettled.
-    if (networkId === undefined)
-      throw new Error("Network id index out of range");
     return emptyNetworkData(
-      NETWORKS[networkId],
+      NETWORKS[configuredNetworkIds[i] as IndexerNetworkId],
       windows,
       result.reason instanceof Error
         ? result.reason
