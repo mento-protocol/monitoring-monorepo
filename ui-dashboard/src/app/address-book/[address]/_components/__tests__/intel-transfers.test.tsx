@@ -196,6 +196,27 @@ describe("IntelTransfers — URL state", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("canonicalizes ?page=1 (default) to empty URL after data lands", () => {
+    setUrl("page=1");
+    render();
+    expect(window.location.search).toBe("");
+    expect(pageStatus()).toMatch(/page 1 of 2/);
+  });
+
+  it("canonicalizes malformed ?page=foo to empty URL after data lands", () => {
+    setUrl("page=foo");
+    render();
+    expect(window.location.search).toBe("");
+    expect(pageStatus()).toMatch(/page 1 of 2/);
+  });
+
+  it("canonicalizes out-of-range ?page=999 to ?page=<clamped> after data lands", () => {
+    setUrl("page=999");
+    render();
+    expect(window.location.search).toBe("?page=2");
+    expect(pageStatus()).toMatch(/page 2 of 2/);
+  });
+
   it("popstate sync picks up back/forward URL changes", () => {
     render();
     expect(pageStatus()).toMatch(/page 1 of 2/);

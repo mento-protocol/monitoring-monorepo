@@ -92,6 +92,28 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.max(1, Math.min(page, totalPages));
+
+  // Canonicalize the URL so deep links like `?page=999`, `?page=foo`, or
+  // `?page=1` (default) don't leave the address bar advertising a different
+  // view than the rendered one. Cursor PR #653 (review id 4381935282)
+  // flagged this — refresh / share otherwise replay the stale params instead
+  // of the visible state. Pattern mirrors `use-table-sort.ts:156-174` mount-
+  // time canonicalization and the bridge-flows pager `page=1` URL-clearing
+  // test. We don't touch `page` state — `clampedPage` is recomputed per
+  // render, so a transient state.page > totalPages is harmless until the
+  // next user action (typing, Next/Prev, popstate) re-syncs it. Avoids the
+  // `effect/no-derived-state` lint that fires when a useEffect writes state
+  // derivable in render.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const rawQuery = params.get("q");
+    const rawPage = params.get("page");
+    const expectedQuery = query ? query : null;
+    const expectedPage = clampedPage <= 1 ? null : String(clampedPage);
+    if (rawQuery === expectedQuery && rawPage === expectedPage) return;
+    writeUrl(query, clampedPage);
+  }, [query, clampedPage]);
   const visible = filtered.slice(
     (clampedPage - 1) * PAGE_SIZE,
     clampedPage * PAGE_SIZE,
@@ -123,31 +145,50 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
           </li>
         ))}
       </ul>
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-xs text-slate-500">
-            Page {clampedPage} of {totalPages}
-          </span>
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => updatePage(Math.max(1, clampedPage - 1))}
-              disabled={clampedPage === 1}
-              className="rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400"
-            >
-              &laquo; Prev
-            </button>
-            <button
-              type="button"
-              onClick={() => updatePage(Math.min(totalPages, clampedPage + 1))}
-              disabled={clampedPage === totalPages}
-              className="rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400"
-            >
-              Next &raquo;
-            </button>
-          </div>
-        </div>
-      )}
+      <EntityPager
+        page={clampedPage}
+        totalPages={totalPages}
+        onChange={updatePage}
+      />
+    </div>
+  );
+}
+
+function EntityPager({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (next: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const btn =
+    "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400";
+  return (
+    <div className="mt-4 flex items-center justify-between">
+      <span className="text-xs text-slate-500">
+        Page {page} of {totalPages}
+      </span>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(1, page - 1))}
+          disabled={page === 1}
+          className={btn}
+        >
+          &laquo; Prev
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(totalPages, page + 1))}
+          disabled={page === totalPages}
+          className={btn}
+        >
+          Next &raquo;
+        </button>
+      </div>
     </div>
   );
 }

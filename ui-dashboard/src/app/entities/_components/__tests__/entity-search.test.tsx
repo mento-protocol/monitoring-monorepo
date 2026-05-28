@@ -178,6 +178,35 @@ describe("EntitySearch — URL state", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("canonicalizes ?page=1 (default) to empty URL on mount", () => {
+    setUrl("page=1");
+    render();
+    expect(window.location.search).toBe("");
+    expect(pageStatus()).toBe("Page 1 of 2");
+  });
+
+  it("canonicalizes malformed ?page=foo to empty URL on mount", () => {
+    setUrl("page=foo");
+    render();
+    expect(window.location.search).toBe("");
+    expect(pageStatus()).toBe("Page 1 of 2");
+  });
+
+  it("canonicalizes out-of-range ?page=999 to ?page=<clamped> on mount", () => {
+    setUrl("page=999");
+    render();
+    expect(window.location.search).toBe("?page=2");
+    expect(pageStatus()).toBe("Page 2 of 2");
+  });
+
+  it("canonicalizes ?q=beta&page=999 to ?q=beta (clamped to 1 page) on mount", () => {
+    // 2 beta-* slugs fit on one page, so the URL should drop the page param.
+    setUrl("q=beta&page=999");
+    render();
+    expect(window.location.search).toBe("?q=beta");
+    expect(searchInput().value).toBe("beta");
+  });
+
   it("popstate sync picks up back/forward URL changes", () => {
     render();
     expect(searchInput().value).toBe("");
