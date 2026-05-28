@@ -156,6 +156,10 @@ assert.equal(
   payloadNoPr.text,
   "Terraform apply pending: alerts&lt;&amp;&gt;/rules (changes detected)",
 );
+assert.equal(
+  payloadNoPr.blocks[0].text.text,
+  "Terraform apply pending: alerts&lt;&amp;&gt;/rules",
+);
 assert.match(JSON.stringify(payloadNoPr.blocks), /Push to main at abc1234/);
 assert.equal(
   payloadNoPr.blocks

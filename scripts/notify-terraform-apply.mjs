@@ -368,7 +368,7 @@ function buildSlackPayload({
       type: "header",
       text: {
         type: "plain_text",
-        text: `Terraform apply pending: ${stackLabel}`,
+        text: `Terraform apply pending: ${slackEscape(stackLabel)}`,
       },
     },
     {
