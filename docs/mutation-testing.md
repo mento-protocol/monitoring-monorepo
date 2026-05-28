@@ -22,13 +22,17 @@ Each command runs StrykerJS with the Vitest runner and a dedicated mutation
 Vitest config so each baseline executes only the direct unit tests for the
 mutated files.
 
-Latest indexer result after adding the baseline:
+Latest indexer result:
 
-- Runtime: 5s on the final root-script run
+- Runtime: 7s on the final root-script run (5-9s observed locally)
 - Mutation score: 94.78% total / covered
 - Mutants: 127 killed, 0 timed out, 7 survived, 0 no coverage
 - Per-file: `helpers.ts` 91.11% total / covered; `tradingLimits.ts`
   96.63% total / covered
+- `indexer-envio/stryker.config.mjs` sets `break: 92` (current baseline
+  94.78% with the standard 2-pt margin). All remaining survivors are
+  classified as equivalent mutants or accepted noise — see the
+  Survivor Classification section below.
 
 The initial indexer scope is limited to deterministic helpers with direct tests:
 chain/event/pool/snapshot ID helpers and trading-limit derivation. A trial that
@@ -37,13 +41,17 @@ also mutated `healthScore.ts` and `priceDifference.ts` ran in 1m07s but scored
 survivors/no-coverage mutants. Revisit those one file at a time after adding
 smaller direct tests; adding them now would dilute the baseline.
 
-Latest dashboard result after adding focused assertions:
+Latest dashboard result:
 
-- Runtime: 14s on the final root-script run (5-14s observed locally)
+- Runtime: 9s on the final root-script run (5-14s observed locally)
 - Mutation score: 88.81% total / 92.70% covered
 - Mutants: 122 killed, 5 timed out, 10 survived, 6 no coverage
 - Per-file: `weekend.ts` 87.07% total / 91.82% covered; `pool-id.ts`
   96.30% total / covered
+- `ui-dashboard/stryker.config.mjs` sets `break: 86` (current baseline
+  88.81% with the standard 2-pt margin). All remaining survivors are
+  classified as equivalent mutants or accepted noise — see the
+  Survivor Classification section below.
 
 Latest metrics-bridge result after narrowing to the probe runner:
 

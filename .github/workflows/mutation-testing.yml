@@ -3,14 +3,13 @@ name: Mutation Testing
 on:
   workflow_dispatch:
   schedule:
-    # Weekly advisory baseline for the dashboard job (which stays advisory).
-    # The bridge job is also re-run here so cron acts as a backstop signal
-    # even when no PR has touched probe code that week.
+    # Weekly backstop run so all three gates also produce a baseline
+    # signal when no PR has touched their inputs that week.
     - cron: 17 5 * * 1
   pull_request:
     # Intentionally NO `paths:` filter — required-status workflows must run on
     # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # The bridge job uses an internal path-detection step that is
+    # Each job uses an internal path-detection step that is
     # continue-on-error, so a detector failure cannot fail the workflow
     # (fail-closed: the mutation step then runs anyway).
 
@@ -23,17 +22,164 @@ permissions:
 
 jobs:
   dashboard-logic-baseline:
-    # Advisory: cron + manual dispatch only. PR runs skip this job — the
-    # dashboard mutation gate is not blocking yet (see BACKLOG).
-    if: github.event_name != 'pull_request'
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to invoke `pnpm dashboard:mutation`:
+    #   - cron / workflow_dispatch     → always run the mutation step
+    #   - PR + filter succeeded + dashboard=true  → run
+    #   - PR + filter succeeded + dashboard=false → no-op skip
+    #   - PR + filter failed (any cause)          → run (fail-closed)
+    # `ui-dashboard/stryker.config.mjs` sets `break: 86`, so when the
+    # mutation step does run, a score below 86% fails the job.
     name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
+    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        # `continue-on-error: true` keeps a failed path-detection step from
+        # failing the job; the `decide` step below interprets a missing/failed
+        # filter as "run the full gate" (fail-closed).
+        continue-on-error: true
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Anything that can affect the result of `pnpm dashboard:mutation`.
+            # The mutated files are `src/lib/weekend.ts` + `src/lib/pool-id.ts`,
+            # but `src/lib/**` is broader so co-located helpers reachable via
+            # `@/lib/*` aliases (e.g. `validators.ts` imported by `pool-id.ts`)
+            # are also picked up. `weekend.ts` imports the FX calendar JSON
+            # shipped from `shared-config`, so the calendar + the shared-config
+            # package metadata are in the filter too. Configs +
+            # package-manager files (root + dashboard) capture script wiring +
+            # version drift.
+            dashboard:
+              - ui-dashboard/src/lib/**
+              - ui-dashboard/stryker.config.mjs
+              - ui-dashboard/vitest.mutation.config.ts
+              - ui-dashboard/package.json
+              - ui-dashboard/tsconfig.json
+              # Upstream workspace deps: weekend.ts imports the FX calendar
+              # JSON from `@mento-protocol/monitoring-config/fx-calendar.json`.
+              - shared-config/fx-calendar.json
+              - shared-config/src/**
+              - shared-config/package.json
+              - shared-config/tsconfig.json
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              # `.github/actions/pnpm-install` uses `.node-version` to set
+              # the Node runtime that Stryker + the mutation tests run on.
+              - .node-version
+              - .github/workflows/mutation-testing.yml
+              - .github/actions/pnpm-install/**
+      - name: Decide whether to run mutation
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+        run: |
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by $EVENT — running mutation gate."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running mutation gate."
+          elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Dashboard mutation inputs changed — running mutation gate."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Dashboard mutation code + its inputs unchanged — skipping mutation gate."
+          fi
       - uses: ./.github/actions/pnpm-install
+        if: steps.decide.outputs.run == 'true'
       - name: Run dashboard mutation baseline
+        if: steps.decide.outputs.run == 'true'
         run: pnpm dashboard:mutation
+
+  indexer-logic-baseline:
+    # Always runs (required-status safe — same shape as the dashboard +
+    # bridge jobs). `indexer-envio/stryker.config.mjs` sets `break: 92`,
+    # so when the mutation step does run, a score below 92% fails the job.
+    name: Indexer logic baseline
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        continue-on-error: true
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            # Anything that can affect the result of `pnpm indexer:mutation`.
+            # The mutated files are `src/helpers.ts` + `src/tradingLimits.ts`;
+            # `src/**` is broader so sibling helpers reachable via local
+            # imports are picked up. Tests include both the direct unit
+            # tests and the `code-quality-invariants.test.ts` covered by
+            # `vitest.mutation.config.ts`. `schema.graphql` is in the filter
+            # because `tradingLimits.ts` imports `type { TradingLimit }`
+            # from `envio` — a codegen type sourced from the schema.
+            indexer:
+              - indexer-envio/src/**
+              - indexer-envio/test/**
+              - indexer-envio/schema.graphql
+              - indexer-envio/stryker.config.mjs
+              - indexer-envio/vitest.mutation.config.ts
+              - indexer-envio/vitest.config.ts
+              - indexer-envio/package.json
+              - indexer-envio/tsconfig.json
+              # Upstream workspace deps: handlers (transitively reachable
+              # from the broader `src/**` glob above) consume shared
+              # tokens/chains config. Keep these in the filter so a
+              # shared-config rename can't drop coverage.
+              - shared-config/src/**
+              - shared-config/package.json
+              - shared-config/tsconfig.json
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - .npmrc
+              - .node-version
+              - .github/workflows/mutation-testing.yml
+              - .github/actions/pnpm-install/**
+      - name: Decide whether to run mutation
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          FILTER_OUTCOME: ${{ steps.filter.outcome }}
+          INDEXER_CHANGED: ${{ steps.filter.outputs.indexer }}
+        run: |
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by $EVENT — running mutation gate."
+          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running mutation gate."
+          elif [[ "$INDEXER_CHANGED" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Indexer mutation inputs changed — running mutation gate."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Indexer mutation code + its inputs unchanged — skipping mutation gate."
+          fi
+      - uses: ./.github/actions/pnpm-install
+        if: steps.decide.outputs.run == 'true'
+      - name: Run indexer mutation baseline
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm indexer:mutation
 
   bridge-rebalance-probe-baseline:
     # Always runs (required-status safe — no `paths:` filter at workflow
@@ -43,8 +189,8 @@ jobs:
     #   - PR + filter succeeded + bridge=true   → run
     #   - PR + filter succeeded + bridge=false  → no-op skip
     #   - PR + filter failed (any cause)        → run (fail-closed)
-    # `metrics-bridge/stryker.config.mjs` sets `break: 80`, so when the
-    # mutation step does run, a score below 80% fails the job.
+    # `metrics-bridge/stryker.config.mjs` sets `break: 84`, so when the
+    # mutation step does run, a score below 84% fails the job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
