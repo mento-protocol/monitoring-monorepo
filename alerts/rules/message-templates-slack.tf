@@ -126,9 +126,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_title" {
   {{ .CommonLabels.alertname -}}
   {{ else if (len .Alerts.Firing) -}}
   🚨
-  {{ else if (len .Alerts.Resolved) -}}
+  {{- else if (len .Alerts.Resolved) -}}
   ✅
-  {{ end -}}
+  {{- end -}}
   {{ end -}}
   EOT
 }
