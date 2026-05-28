@@ -304,7 +304,10 @@ export function parseCsv(text: string): CsvParseResult {
   if (lines.length === 0) return { rows: [], hasTagsColumn: false };
 
   // Parse header
-  const headerParsed = splitCsvLine(lines[0]);
+  // Bounds-checked above (`lines.length === 0` early-return), so `lines[0]`
+  // is provably defined.
+  const headerLine = lines[0] ?? "";
+  const headerParsed = splitCsvLine(headerLine);
   if ("error" in headerParsed) {
     return { error: `Malformed CSV header: ${headerParsed.error}` };
   }
@@ -323,7 +326,9 @@ export function parseCsv(text: string): CsvParseResult {
 
   const rows: CsvRow[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const parsedLine = splitCsvLine(lines[i]);
+    const line = lines[i];
+    if (line === undefined) continue;
+    const parsedLine = splitCsvLine(line);
     if ("error" in parsedLine) {
       return {
         error: `Malformed CSV on line ${i + 1}: ${parsedLine.error}`,

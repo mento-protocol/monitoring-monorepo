@@ -71,9 +71,18 @@ function priceFeeSnapshotInUsd(
   // placeholders.
   for (let i = 0; i < s.tokenSymbols.length; i++) {
     const sym = s.tokenSymbols[i];
+    const rawAmount = s.amounts[i];
+    const decimals = s.tokenDecimals[i];
+    if (
+      sym === undefined ||
+      rawAmount === undefined ||
+      decimals === undefined
+    ) {
+      continue;
+    }
     if (UNRESOLVED_SYMBOLS.has(sym)) continue;
     if (isUsdPegged(sym)) continue;
-    const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+    const amount = parseWei(rawAmount, decimals);
     const priced = tokenToUSD(sym, amount, rates);
     if (priced === null) continue;
     usd += priced;

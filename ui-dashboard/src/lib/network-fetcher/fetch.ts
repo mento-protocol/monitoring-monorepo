@@ -641,9 +641,10 @@ export async function fetchNetworkData(
   // daily rows ≈ 2.7 years per pool) the 24h/7d/30d windows remain fully
   // covered. Rows come in newest-first, so the last element is the oldest
   // we fetched.
+  const oldestFetched = snapshotsAllDaily[snapshotsAllDaily.length - 1];
   const oldestFetchedTs =
-    snapshotsAllDaily.length > 0
-      ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1].timestamp)
+    oldestFetched !== undefined
+      ? Number(oldestFetched.timestamp)
       : Number.POSITIVE_INFINITY;
   const paginationIssue: Error | null =
     snapshotsAllDailyError ??
@@ -748,8 +749,12 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
+    const networkId = configuredNetworkIds[i];
+    // Unreachable: results and configuredNetworkIds are zipped by Promise.allSettled.
+    if (networkId === undefined)
+      throw new Error("Network id index out of range");
     return emptyNetworkData(
-      NETWORKS[configuredNetworkIds[i]],
+      NETWORKS[networkId],
       windows,
       result.reason instanceof Error
         ? result.reason

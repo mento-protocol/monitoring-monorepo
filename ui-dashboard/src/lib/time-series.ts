@@ -81,14 +81,16 @@ export function stockWoWChangePct(
 ): number | null {
   if (series.length < 2) return null;
   const now = series[series.length - 1];
+  if (now === undefined) return null;
   const upperCutoff = now.timestamp - 7 * SECONDS_PER_DAY;
   const lowerCutoff = now.timestamp - 14 * SECONDS_PER_DAY;
   let ago: TimeSeriesPoint | null = null;
   for (let i = series.length - 2; i >= 0; i--) {
-    const ts = series[i].timestamp;
-    if (ts > upperCutoff) continue;
-    if (ts < lowerCutoff) break;
-    ago = series[i];
+    const point = series[i];
+    if (point === undefined) continue;
+    if (point.timestamp > upperCutoff) continue;
+    if (point.timestamp < lowerCutoff) break;
+    ago = point;
     break;
   }
   if (!ago || ago.value <= 0) return null;

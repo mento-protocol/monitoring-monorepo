@@ -546,14 +546,18 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
     let tvl = 0;
     for (let i = 0; i < histories.length; i++) {
       const h = histories[i];
+      if (h === undefined) continue;
+      let cursor = cursors[i] ?? -1;
       while (
-        cursors[i] + 1 < h.points.length &&
-        h.points[cursors[i] + 1].ts < ts + SECONDS_PER_DAY
+        cursor + 1 < h.points.length &&
+        (h.points[cursor + 1]?.ts ?? Infinity) < ts + SECONDS_PER_DAY
       ) {
-        cursors[i]++;
+        cursor++;
       }
-      if (cursors[i] < 0) continue;
-      const point = h.points[cursors[i]];
+      cursors[i] = cursor;
+      if (cursor < 0) continue;
+      const point = h.points[cursor];
+      if (point === undefined) continue;
       const v = poolTvlUSD(
         { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
         h.slice.network,

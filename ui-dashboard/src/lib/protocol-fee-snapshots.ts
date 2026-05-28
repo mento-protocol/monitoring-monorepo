@@ -86,12 +86,21 @@ export function aggregateFeeSnapshotsByPool(
     // unpriced day doesn't pollute the recent 24h/7d/30d cells.
     for (let i = 0; i < s.tokenSymbols.length; i++) {
       const sym = s.tokenSymbols[i];
+      const rawAmount = s.amounts[i];
+      const decimals = s.tokenDecimals[i];
+      if (
+        sym === undefined ||
+        rawAmount === undefined ||
+        decimals === undefined
+      ) {
+        continue;
+      }
       if (UNRESOLVED_SYMBOLS.has(sym)) {
         markUnpriced(entry, in24h, in7d, in30d);
         continue;
       }
       if (isUsdPegged(sym)) continue;
-      const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+      const amount = parseWei(rawAmount, decimals);
       const usd = tokenToUSD(sym, amount, rates);
       if (usd === null) {
         markUnpriced(entry, in24h, in7d, in30d);
