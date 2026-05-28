@@ -3,6 +3,7 @@ import { computePriceDifference } from "../src/EventHandlers";
 import {
   buildRebalanceOutcome,
   computeEffectivenessRatio,
+  hasDegenerateReserves,
   tryDeriveRebalanceState,
 } from "../src/priceDifference";
 
@@ -305,6 +306,51 @@ describe("computePriceDifference", () => {
       }),
     );
     assert.equal(pd, 0n);
+  });
+
+  it("flags reserves where one normalized side is below 0.01% of the other", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 9_999n,
+          reserves1: 100_000_000n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 6,
+        }),
+      ),
+      true,
+    );
+  });
+
+  it("does not flag reserves exactly at the 0.01% boundary", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 10_000n,
+          reserves1: 100_000_000n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 6,
+        }),
+      ),
+      false,
+    );
+  });
+
+  it("normalizes token decimals before reserve-degeneracy detection", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 10_000_000n,
+          reserves1: 999n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 18,
+        }),
+      ),
+      true,
+    );
   });
 });
 

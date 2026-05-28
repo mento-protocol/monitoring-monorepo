@@ -4,7 +4,10 @@
 
 import type { Pool } from "envio";
 import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
-import { computePriceDifference } from "./priceDifference.js";
+import {
+  computePriceDifference,
+  hasDegenerateReserves,
+} from "./priceDifference.js";
 import {
   compactFees,
   feesEffect,
@@ -142,6 +145,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   // false = unread (schema default); true = real on-chain value persisted.
   // While false, upsertPool's self-heal retries the effect on every event.
   invertRateFeedKnown: false,
+  degenerateReserves: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   rebalanceThresholdAbove: 0,
@@ -183,6 +187,18 @@ export const DEFAULT_ORACLE_FIELDS = {
   cumulativeCriticalSeconds: 0n,
   breachCount: 0,
 };
+
+type OracleDelta = Partial<typeof DEFAULT_ORACLE_FIELDS>;
+
+function nextDegenerateReserveState(
+  next: Pool,
+  oracleDelta: OracleDelta | undefined,
+  canRecompute: boolean,
+): boolean {
+  if (oracleDelta?.degenerateReserves !== undefined)
+    return oracleDelta.degenerateReserves;
+  return canRecompute ? hasDegenerateReserves(next) : next.degenerateReserves;
+}
 
 const getOrCreatePool = async (
   context: PoolContext,
@@ -471,6 +487,11 @@ export const upsertPool = async ({
     : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
+  const degenerateReserves = nextDegenerateReserveState(
+    next,
+    oracleDelta,
+    canRecompute,
+  );
 
   // When priceDifference is frozen (no contract-provided value AND can't
   // recompute), skip the breach pipeline entirely. Feeding the frozen
@@ -492,12 +513,16 @@ export const upsertPool = async ({
   const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
   const becameNeverRebalance = isNeverRebalance(next);
   if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
-    const persistedNoBreach: Pool = { ...next, priceDifference };
+    const persistedNoBreach: Pool = {
+      ...next,
+      priceDifference,
+      degenerateReserves,
+    };
     context.Pool.set(persistedNoBreach);
     return persistedNoBreach;
   }
 
-  const withDeviation = { ...next, priceDifference };
+  const withDeviation = { ...next, priceDifference, degenerateReserves };
   // Compute breach-start BEFORE health, so computeHealthStatus reads the
   // current row's anchor (grace window is keyed on it). Reversing the order
   // would ask health about the stale (prior-event) breach start.

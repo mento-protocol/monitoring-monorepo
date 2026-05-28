@@ -517,6 +517,7 @@ function OracleSnapshotRow({
     : null;
   const diffBps = Number(row.priceDifference);
   const thresholdBps = row.rebalanceThreshold;
+  const degenerateReserves = row.degenerateReserves === true;
   // `hasHealthData=false` rows preserve the previous priceDifference and may
   // carry a raw threshold of 0 or an unread fallback — show "—" rather than
   // fake a %.
@@ -553,8 +554,20 @@ function OracleSnapshotRow({
       </Td>
       <Td mono small align="right">
         {diffBps > 0 ? (
-          <span title={`${diffBps.toLocaleString()} bps`}>
+          <span
+            className={degenerateReserves ? "text-amber-300" : undefined}
+            title={
+              degenerateReserves
+                ? `${diffBps.toLocaleString()} bps from effectively one-sided reserves`
+                : `${diffBps.toLocaleString()} bps`
+            }
+          >
             {diffPct !== null ? `${diffPct}%` : `${diffBps} bps`}
+            {degenerateReserves && (
+              <span className="ml-1 rounded border border-amber-500/40 px-1 text-[9px] uppercase text-amber-300">
+                one-sided
+              </span>
+            )}
           </span>
         ) : (
           "—"

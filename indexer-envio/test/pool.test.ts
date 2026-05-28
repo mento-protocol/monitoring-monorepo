@@ -138,6 +138,45 @@ describe("nextDeviationBreachStartedAt", () => {
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), TS);
   });
 
+  it("does not open a breach for degenerate-reserve priceDifference samples", () => {
+    const prev = makePool({
+      priceDifference: 4500n,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 73_000_000_000n,
+      degenerateReserves: true,
+    });
+    assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
+  });
+
+  it("closes an existing breach when the next sample becomes degenerate", () => {
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: 1_600_000_000n,
+    });
+    const next = makePool({
+      priceDifference: 73_000_000_000n,
+      degenerateReserves: true,
+    });
+    assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
+  });
+
+  it("does not defer a degenerate-reserve close on UpdateReserves", () => {
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: 1_600_000_000n,
+    });
+    const next = makePool({
+      priceDifference: 73_000_000_000n,
+      degenerateReserves: true,
+    });
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "fpmm_update_reserves"),
+      0n,
+    );
+  });
+
   it("oracle-stale does NOT clear an active deviation breach", () => {
     // isInDeviationBreach is intentionally price-only. A pool that is in breach
     // should keep its start timestamp even if the oracle goes stale.

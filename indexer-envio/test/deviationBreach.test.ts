@@ -147,6 +147,30 @@ describe("recordBreachTransition — rising edge", () => {
     assert.equal(row.startedByEvent, "rebalance");
   });
 
+  it("does not open a breach row for degenerate-reserve samples", async () => {
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 4000n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 73_000_000_000n,
+      rebalanceThreshold: 5000,
+      degenerateReserves: true,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xdegenerate",
+      source: "fpmm_swap",
+    });
+
+    assert.deepStrictEqual(poolUpdate, {});
+    assert.equal(store.size, 0);
+  });
+
   it("treats a missing prev as a fresh breach when next is already breached", async () => {
     const { store, context } = makeMockContext();
     const next = makePool({

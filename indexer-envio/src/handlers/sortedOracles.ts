@@ -7,6 +7,7 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers.js";
 import {
   computePriceDifference,
+  hasDegenerateReserves,
   pickActiveThreshold,
 } from "../priceDifference.js";
 import {
@@ -39,6 +40,43 @@ import {
   resolveBreakerSnapshotFields,
 } from "../breakers.js";
 
+function priceDifferenceForOracleSample(
+  pool: Pool,
+  decimalsTrustworthy: boolean,
+  oraclePrice: bigint,
+): bigint {
+  return decimalsTrustworthy && !isVirtualPool(pool) && oraclePrice > 0n
+    ? computePriceDifference(pool)
+    : pool.priceDifference;
+}
+
+function degenerateReservesForOracleSample(
+  pool: Pool,
+  decimalsTrustworthy: boolean,
+): boolean {
+  return decimalsTrustworthy && !isVirtualPool(pool)
+    ? hasDegenerateReserves(pool)
+    : pool.degenerateReserves;
+}
+
+function shouldHoldOracleReportedCursor(pool: Pool): boolean {
+  return !pool.tokenDecimalsKnown && !isNeverRebalance(pool);
+}
+
+function holdOracleReportedCursor(
+  context: { Pool: { set: (pool: Pool) => void } },
+  updatedPool: Pool,
+  existing: Pool,
+): void {
+  context.Pool.set({
+    ...updatedPool,
+    oracleTimestamp: existing.oracleTimestamp,
+    oracleOk: existing.oracleOk,
+    oracleTxHash: existing.oracleTxHash,
+    oraclePrice: existing.oraclePrice,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
 // ---------------------------------------------------------------------------
@@ -47,13 +85,10 @@ indexer.onEvent(
   { contract: "SortedOracles", event: "OracleReported" },
   async ({ event, context }) => {
     const rateFeedID = asAddress(event.params.token);
-
     // Chain-scoped — getPoolsByFeed filters by chainId to prevent cross-chain
     // oracle bleed (same rateFeedID exists on both Celo and Monad). See rpc.ts.
     // Co-fetched with the BreakerConfig lookup so the preload phase warms
-    // both entity caches in one pass; OracleReported is the highest-frequency
-    // oracle event, so an unpreloaded BreakerConfig read here would hit the
-    // DB ~5× per epoch.
+    // both entity caches in one pass; OracleReported is high-frequency.
     const [poolIds, breakerConfigs] = await Promise.all([
       getPoolsByFeed(context, event.chainId, rateFeedID),
       getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
@@ -75,7 +110,6 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-
     const oracleTimestamp = event.params.timestamp;
 
     // Bootstrap-if-needed + resolve in one call. See helper doc; bootstrap
@@ -136,10 +170,6 @@ indexer.onEvent(
         // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
         // here. Diagnostic-only field — see schema.graphql for why it can't
         // replace `lastOracleReportAt` as the freshness gate.
-        const lastFreshReporterAt =
-          oracleTimestamp > existing.lastFreshReporterAt
-            ? oracleTimestamp
-            : existing.lastFreshReporterAt;
         const updatedPool: Pool = {
           ...existing,
           oracleTimestamp,
@@ -148,7 +178,10 @@ indexer.onEvent(
           oraclePrice,
           oracleExpiry,
           oracleNumReporters: existing.oracleNumReporters,
-          lastFreshReporterAt,
+          lastFreshReporterAt:
+            oracleTimestamp > existing.lastFreshReporterAt
+              ? oracleTimestamp
+              : existing.lastFreshReporterAt,
           updatedAtBlock: blockNumber,
           updatedAtTimestamp: blockTimestamp,
         };
@@ -176,20 +209,8 @@ indexer.onEvent(
         // regardless of priceDifference. Letting them through means uptime
         // accrual keeps moving on every oracle event even if decimals
         // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
-        if (!updatedPool.tokenDecimalsKnown && !isNeverRebalance(updatedPool)) {
-          // Preserve the FULL freshness cursor — timestamp, oracleOk,
-          // tx hash, AND displayed oraclePrice. Persisting the current
-          // event's `oraclePrice` / `oracleTxHash` next to a frozen
-          // timestamp would render a misleading row in the oracle tab
-          // (fresh price + tx, stale timestamp). codex P2 PR #370
-          // #3214756049 + #3214756054.
-          context.Pool.set({
-            ...updatedPool,
-            oracleTimestamp: existing.oracleTimestamp,
-            oracleOk: existing.oracleOk,
-            oracleTxHash: existing.oracleTxHash,
-            oraclePrice: existing.oraclePrice,
-          });
+        if (shouldHoldOracleReportedCursor(updatedPool)) {
+          holdOracleReportedCursor(context, updatedPool, existing);
           return;
         }
 
@@ -202,11 +223,20 @@ indexer.onEvent(
         // read the row's priceDifference directly (BreachEvent, oracle tab
         // detail) would see a fake non-zero value. Preserve existing instead.
         const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
-        const priceDifference =
-          decimalsTrustworthy && !isVirtualPool(updatedPool) && oraclePrice > 0n
-            ? computePriceDifference(updatedPool)
-            : updatedPool.priceDifference;
-        const withDev = { ...updatedPool, priceDifference };
+        const priceDifference = priceDifferenceForOracleSample(
+          updatedPool,
+          decimalsTrustworthy,
+          oraclePrice,
+        );
+        const degenerateReserves = degenerateReservesForOracleSample(
+          updatedPool,
+          decimalsTrustworthy,
+        );
+        const withDev = {
+          ...updatedPool,
+          priceDifference,
+          degenerateReserves,
+        };
         const deviationBreachStartedAt = nextDeviationBreachStartedAt(
           existing,
           withDev,
@@ -270,6 +300,7 @@ indexer.onEvent(
           oracleOk: true,
           numReporters: existing.oracleNumReporters,
           priceDifference,
+          degenerateReserves,
           // Persist the effective threshold so asymmetric pools with active
           // side = 0 still show a non-zero denominator in the chart's
           // deviation-ratio math (raw 0 would render 0%/—). Use
@@ -526,13 +557,20 @@ indexer.onEvent(
         // Preserve existing priceDifference when decimals are untrusted —
         // see OracleReported handler comment block for rationale.
         const decimalsTrustworthy = withThreshold.tokenDecimalsKnown === true;
-        const priceDifference =
-          decimalsTrustworthy &&
-          !isVirtualPool(withThreshold) &&
-          oraclePrice > 0n
-            ? computePriceDifference(withThreshold)
-            : withThreshold.priceDifference;
-        const withDev = { ...withThreshold, priceDifference };
+        const priceDifference = priceDifferenceForOracleSample(
+          withThreshold,
+          decimalsTrustworthy,
+          oraclePrice,
+        );
+        const degenerateReserves = degenerateReservesForOracleSample(
+          withThreshold,
+          decimalsTrustworthy,
+        );
+        const withDev = {
+          ...withThreshold,
+          priceDifference,
+          degenerateReserves,
+        };
         const deviationBreachStartedAt = nextDeviationBreachStartedAt(
           existing,
           withDev,
@@ -608,6 +646,7 @@ indexer.onEvent(
           oracleOk: true,
           numReporters: existing.oracleNumReporters,
           priceDifference,
+          degenerateReserves,
           // See OracleReported handler — `persistableThreshold` gates 1e12
           // never-rebalance sentinel out of the `Int!`-typed write.
           rebalanceThreshold: persistableThreshold(finalPool),

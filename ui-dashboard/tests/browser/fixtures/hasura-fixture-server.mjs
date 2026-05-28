@@ -65,6 +65,7 @@ function poolFixture({
     oracleNumReporters: 5,
     referenceRateFeedID: "",
     priceDifference: "0",
+    degenerateReserves: false,
     rebalanceThreshold: 100,
     rebalanceThresholdAbove: 100,
     rebalanceThresholdBelow: 100,
@@ -173,6 +174,33 @@ function dailySnapshotsFor(poolId) {
   }));
 }
 
+function oracleSnapshotsFor(poolId) {
+  const pool = poolsById.get(poolId);
+  if (!pool) return [];
+  return [
+    {
+      id: `${poolId}-oracle-1`,
+      chainId: pool.chainId,
+      poolId,
+      timestamp: String(nowSeconds() - 60),
+      oraclePrice: FIXED_1,
+      oracleOk: true,
+      numReporters: 5,
+      priceDifference: "73000000000",
+      degenerateReserves: true,
+      rebalanceThreshold: 5000,
+      source: "oracle_median_updated",
+      blockNumber: "2200",
+      txHash:
+        "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      deviationRatio: "14600000",
+      hasHealthData: true,
+      breakerBaselineAtSnapshot: null,
+      breakerThresholdAtSnapshot: null,
+    },
+  ];
+}
+
 const swaps = [
   {
     id: "swap-1",
@@ -260,6 +288,30 @@ function handleGraphQL({ query, variables = {} }) {
     case "PoolOgDailySnapshots":
       return {
         PoolDailySnapshot: dailySnapshotsFor(String(variables.poolId)),
+      };
+    case "OracleSnapshots":
+    case "OracleSnapshotsChart":
+      return {
+        OracleSnapshot: oracleSnapshotsFor(String(variables.poolId)).slice(
+          0,
+          variables.limit ?? undefined,
+        ),
+      };
+    case "OracleSnapshotsChartBandsExt":
+      return {
+        OracleSnapshot: oracleSnapshotsFor(String(variables.poolId)).map(
+          (snapshot) => ({
+            id: snapshot.id,
+            breakerBaselineAtSnapshot: snapshot.breakerBaselineAtSnapshot,
+            breakerThresholdAtSnapshot: snapshot.breakerThresholdAtSnapshot,
+          }),
+        ),
+      };
+    case "OracleSnapshotsCountPage":
+      return {
+        OracleSnapshot: oracleSnapshotsFor(String(variables.poolId)).map(
+          (snapshot) => ({ id: snapshot.id }),
+        ),
       };
     case "PoolDailyFeeSnapshotsPage":
       return { PoolDailyFeeSnapshot: [] };

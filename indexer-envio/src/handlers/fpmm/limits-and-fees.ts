@@ -27,6 +27,7 @@ import {
 } from "../../pool.js";
 import {
   computePriceDifference,
+  hasDegenerateReserves,
   pickActiveThreshold,
 } from "../../priceDifference.js";
 import { recordHealthSample } from "../../healthScore.js";
@@ -238,6 +239,7 @@ function buildThresholdUpdatedSnapshot({
     oracleOk: pool.oracleOk,
     numReporters: pool.oracleNumReporters,
     priceDifference: pool.priceDifference,
+    degenerateReserves: pool.degenerateReserves,
     // See sortedOracles.OracleReported — `persistableThreshold` gates the
     // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
     rebalanceThreshold: persistableThreshold(pool),
@@ -327,6 +329,9 @@ indexer.onEvent(
     // fields and preserves existing breach/health state.
     let priceDifferenceFromMedian: bigint | null = null;
     let active: number | null = null;
+    const degenerateReserves = existing.tokenDecimalsKnown
+      ? hasDegenerateReserves(existing)
+      : existing.degenerateReserves;
     if (medianFresh) {
       // Synthetic pool view using `lastMedianPrice` (clean median) for both
       // direction-pick AND priceDifference. Without this, upsertPool's
@@ -408,6 +413,7 @@ indexer.onEvent(
           rebalanceThresholdAbove: 0,
           rebalanceThresholdBelow: 0,
           rebalanceThresholdsKnown: true,
+          degenerateReserves,
         },
         existing: { pool: existing },
       });
@@ -427,6 +433,7 @@ indexer.onEvent(
           rebalanceThreshold: active,
           rebalanceThresholdsKnown: true,
           priceDifference: priceDifferenceFromMedian,
+          degenerateReserves,
           ...(rpcSucceeded ? { oracleOk: true } : {}),
         },
         existing: { pool: existing },

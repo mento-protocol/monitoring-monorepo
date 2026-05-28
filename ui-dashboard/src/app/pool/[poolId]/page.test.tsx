@@ -320,6 +320,7 @@ const oracleRows: OracleSnapshot[] = [
     txHash: "0xabc123def456",
   },
 ];
+let oracleRowsForTest: OracleSnapshot[] = oracleRows;
 
 const poolSnapshots: PoolSnapshot[] = [
   {
@@ -434,6 +435,7 @@ beforeEach(() => {
   currentSearchParams = new URLSearchParams();
   oracleCount = 51;
   oracleCountError = false;
+  oracleRowsForTest = oracleRows;
   window.history.replaceState({}, "", "/pool/pool-1");
 
   useGQLMock.mockImplementation(
@@ -469,13 +471,13 @@ beforeEach(() => {
         });
       if (query === ORACLE_SNAPSHOTS)
         return makeGqlResult({
-          OracleSnapshot: oracleRows.map((row, index) => ({
+          OracleSnapshot: oracleRowsForTest.map((row, index) => ({
             ...row,
             id: `oracle-${(variables?.offset ?? 0) + index + 1}`,
           })),
         });
       if (query === ORACLE_SNAPSHOTS_CHART)
-        return makeGqlResult({ OracleSnapshot: oracleRows });
+        return makeGqlResult({ OracleSnapshot: oracleRowsForTest });
       if (query === ORACLE_SNAPSHOTS_COUNT_PAGE)
         return oracleCountError
           ? { data: null, error: new Error("count failed"), isLoading: false }
@@ -641,6 +643,22 @@ describe("Pool detail tab search", () => {
     const html = renderWithParams({ tab: "oracle" });
     expect(html).toContain('href="https://celoscan.io/tx/0xabc123def456"');
     expect(html).toContain(">median-feed</a>");
+  });
+
+  it("marks oracle rows whose price difference comes from one-sided reserves", () => {
+    oracleRowsForTest = [
+      {
+        ...oracleRows[0]!,
+        priceDifference: "73000000000",
+        rebalanceThreshold: 5000,
+        degenerateReserves: true,
+      },
+    ];
+    const html = renderWithParams({ tab: "oracle" });
+    expect(html).toContain("one-sided");
+    expect(html).toContain(
+      "73,000,000,000 bps from effectively one-sided reserves",
+    );
   });
 
   it("loads chart and count oracle queries and renders pagination metadata", () => {

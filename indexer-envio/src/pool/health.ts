@@ -254,6 +254,11 @@ export function nextDeviationBreachStartedAt(
 ): bigint {
   const wasBreachedPrice = prev ? isInDeviationBreach(prev) : false;
   const wasBreachedAnchor = prev ? prev.deviationBreachStartedAt > 0n : false;
+  // A drained/effectively one-sided pool can produce a faithful but enormous
+  // priceDifference. Keep the value, but do not open or continue breach
+  // accounting from that sample; otherwise drained-pool windows dominate the
+  // lifetime uptime counters.
+  if (next.degenerateReserves) return 0n;
   const isBreached = isInDeviationBreach(next);
   if (!isBreached) {
     // Defer the close when this transition is being driven by
