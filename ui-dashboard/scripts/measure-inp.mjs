@@ -109,11 +109,13 @@ const SURFACES = [
     // Wait for the radio-group shell that holds the time-window buttons.
     readySelector: '[role="group"][aria-label="Time window"]',
     async interact(page) {
-      // The leaderboard ships with one window active by default; clicking a
-      // sibling triggers a `router.replace`-backed re-render via
-      // `updateRange`. The click is a qualifying Event-Timing interaction.
-      // We pick an explicit alternative window so the click flips state
-      // even when the default changes.
+      // The leaderboard ships with one window active by default; clicking
+      // a sibling triggers a `window.history.replaceState`-backed re-render
+      // via `updateRange` (NOT `router.replace` — see `_lib/url-state.ts`
+      // and the CLAUDE.md rule on URL-as-state writes). The click is a
+      // qualifying Event-Timing interaction. We pick an explicit
+      // alternative window so the click flips state even when the default
+      // changes.
       const buttons = page.locator(
         '[role="group"][aria-label="Time window"] button',
       );
@@ -142,14 +144,22 @@ const SURFACES = [
     path: "/leaderboard",
     // The `SortableTh` from `ui-dashboard/src/components/sortable-th.tsx`
     // renders a `<th scope="col" aria-sort>` containing a `<button>` —
-    // we drive sort by clicking that button.
+    // we drive sort by clicking that button. `/leaderboard` mounts two
+    // tables that each have a Volume column (the top-traders
+    // `LeaderboardTable` and the `AggregatorBreakdownSection`), so the
+    // selector is anchored to whichever one renders first in document
+    // order via `.first()` — both produce an equivalent INP signal for
+    // gate purposes, and Playwright's strict-mode locator would
+    // otherwise throw on the multi-match.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
     async interact(page) {
       // Click the Volume column header to toggle sort. The
       // `useTableSort` hook re-derives the sorted list on each click, so
       // every click is a qualifying interaction that produces an Event-
       // Timing entry.
-      const volume = page.locator('th[aria-sort] button:has-text("Volume")');
+      const volume = page
+        .locator('th[aria-sort] button:has-text("Volume")')
+        .first();
       await volume.click();
       // Click again to flip direction (ascending ↔ descending). Each
       // click is independently observed by web-vitals; with
