@@ -46,7 +46,8 @@ jobs:
 
       - name: Filter registry to auto-applied stacks
         id: filter
-        # Read `terraform.stacks.json` via `pnpm tf list --json`, keep only
+        # Read `terraform.stacks.json` via `pnpm tf list --json` (the
+        # canonical entry point per AGENTS.md / repo convention), keep only
         # stacks whose `ci.apply == "push-main-production-environment"`, emit
         # a matrix.include payload.
         #
@@ -57,7 +58,7 @@ jobs:
         # workflow. Remove the filter clause once PR #627 ships.
         run: |
           set -euo pipefail
-          node scripts/tf-stacks.mjs list --json \
+          pnpm tf list --json \
             | node -e '
               const stdin = require("fs").readFileSync(0, "utf8");
               const { stacks } = JSON.parse(stdin);
@@ -136,6 +137,14 @@ jobs:
         # (= drift, since main is the deployed code). Capture stdout +
         # stderr in `/tmp/tf-plan.txt` for the issue body. `set +e` so a
         # non-zero exit doesn't fail the step; we route based on PIPESTATUS.
+        #
+        # `matrix.id` is passed through `env:` rather than inlining via
+        # `${{ }}` in the `run:` block, matching the workflow-injection
+        # hardening pattern used in alerts-rules.yml / alerts-infra.yml.
+        # The registry values are repo-controlled, but env-passing is the
+        # established convention.
+        env:
+          STACK_ID: ${{ matrix.id }}
         run: |
           set +e
           terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m 2>&1 | tee /tmp/tf-plan.txt
@@ -143,10 +152,27 @@ jobs:
           set -e
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
           case "$EXITCODE" in
-            0) echo "No drift in ${{ matrix.id }}" ;;
-            2) echo "::warning::Drift detected in ${{ matrix.id }} — issue will be opened/updated" ;;
-            *) echo "::error::terraform plan failed for ${{ matrix.id }} with exit code $EXITCODE"; exit 1 ;;
+            0) echo "No drift in $STACK_ID" ;;
+            2) echo "::warning::Drift detected in $STACK_ID — issue will be opened/updated" ;;
+            *) echo "::error::terraform plan failed for $STACK_ID with exit code $EXITCODE"; exit 1 ;;
           esac
+
+      - name: Ensure drift labels exist
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          STACK_ID: ${{ matrix.id }}
+          GH_TOKEN: ${{ github.token }}
+        # `github.rest.issues.create()` SILENTLY DROPS unknown label names —
+        # no 422, the issue just lands without labels. The next run's
+        # `listForRepo({ labels })` query then returns [], `existing` is
+        # always undefined, and every drift cycle creates a fresh duplicate
+        # issue. `gh label create --force` is idempotent (creates if missing,
+        # updates if present), so it's safe to run unconditionally each
+        # drift-detected cycle.
+        run: |
+          set -euo pipefail
+          gh label create "drift-detection" --color "d73a4a" --description "Terraform drift detected by scheduled workflow" --force
+          gh label create "stack:$STACK_ID" --color "0e8a16" --description "Affects Terraform stack: $STACK_ID" --force
 
       - name: Open or update drift issue
         if: steps.plan.outputs.exitcode == '2'
@@ -163,7 +189,9 @@ jobs:
               ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
               : "(Plan did not produce output — check the workflow logs.)";
 
-            // GitHub issue body cap is ~65KB. Truncate the plan tail.
+            // GitHub issue body cap is ~65KB. Keep the plan tail (last 50 KB);
+            // discard the head (provider init noise) — the apply/destroy summary
+            // we care about lives at the bottom of the plan output.
             const MAX = 50_000;
             const truncated = planOutput.length > MAX;
             const planBody = truncated
