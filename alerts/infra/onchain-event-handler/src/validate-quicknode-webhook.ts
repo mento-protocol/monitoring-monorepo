@@ -1,7 +1,6 @@
 import type { Request } from "@google-cloud/functions-framework";
 import config from "./config";
 import { logger } from "./logger";
-import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { verifyQuickNodeSignature } from "./verify-quicknode-signature";
 
 type ValidationResult =
@@ -11,7 +10,6 @@ type ValidationResult =
       status: number;
       message: string;
       error?: unknown;
-      replayed?: boolean;
     };
 
 /**
@@ -106,11 +104,6 @@ export async function validateQuickNodeWebhook(
       status: 401,
       message: "Unauthorized: Invalid signature",
     };
-  }
-
-  const replayValidation = await reserveQuickNodeNonce(nonce, timestamp);
-  if (!replayValidation.valid) {
-    return replayValidation;
   }
 
   return { valid: true, nonce, timestamp };
