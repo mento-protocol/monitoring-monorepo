@@ -13,17 +13,17 @@ last_verified: 2026-05-21
 `alerts/` is the domain folder for all alert plumbing. Two independent Terraform stacks live here:
 
 - **`alerts/rules/`** — protocol Grafana metric alert rules + global Grafana notification policy/contact points/templates/mute timings. Grafana provider only. Changes daily (threshold tuning).
-- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + GCP project. Temporary Discord provider wiring may remain only until legacy state is destroyed. Multi-provider. Changes monthly.
+- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + GCP project. Multi-provider. Changes monthly.
 
 Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
 
 ## Operating Rules
 
 - **Plan before apply, always.** Never `apply` without explicit human approval.
-- **`alerts/infra/` modules talk to live external APIs** (Slack, Sentry, QuickNode, and temporary legacy Discord cleanup while retained). Cosmetic changes can have real side effects.
+- **`alerts/infra/` modules talk to live external APIs** (Slack, Sentry, and QuickNode). Cosmetic changes can have real side effects.
 - **QuickNode state-management hack** in `alerts/infra/onchain-event-listeners/main.tf` is scoped to the current chain via `var.chain_key`. Renaming the `module "onchain_event_listeners"` block in `alerts/infra/main.tf` would silently break the state-rm grep.
 - **Cloud Function lockfile**: Cloud Build deploys `alerts/infra/onchain-event-handler/` as its own source root, so keep its package-local `pnpm-lock.yaml` in sync when handler deps change. Regenerate with `cd alerts/infra/onchain-event-handler && pnpm install --lockfile-only --lockfile-dir .`. The package-local `pnpm-workspace.yaml` mirrors the root release-age guard and carries standalone Cloud Build overrides; keep it in the function source hash. CI installs from the package-local lock before handler checks, and supply-chain CI audits/lints both root and handler lockfiles.
-- **Slack delivery is the active path.** `alerts/rules/` owns Grafana Slack contact points plus Splunk routing for page-severity protocol and Aegis service-health alerts. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events route to Slack via `slack-channels` + the Cloud Function. Temporary Discord provider variables can remain only until Terraform destroys the old channel/webhook state, then remove them in the follow-up cleanup.
+- **Slack delivery is the active path.** `alerts/rules/` owns Grafana Slack contact points plus Splunk routing for page-severity protocol and Aegis service-health alerts. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events route to Slack via `slack-channels` + the Cloud Function.
 
 ## Verification
 

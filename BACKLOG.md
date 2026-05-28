@@ -103,14 +103,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
-## Slack alert cleanup follow-up
-
-Slack is now the active delivery path for protocol, Aegis service-health,
-Sentry, and on-chain multisig alerts. After the first `alerts/infra` cleanup
-apply confirms the legacy Discord channel/webhook resources are gone from
-Terraform state, remove the temporary Discord provider, variables, GitHub
-Actions secrets, and provider lockfile entries.
-
 ## Alerts hygiene follow-ups (from 2026-05 weekend-noise triage)
 
 The 2026-05-22/24 weekend exposed several over-paging classes on `#alerts-critical`. PRs #569 / #572 / #574 / #576 fixed the highest-leverage items (reserve thresholds, weekend FX feed mute, Metrics Bridge Poll Errors rule tuning, stale-price Slack template). These are the loose ends.

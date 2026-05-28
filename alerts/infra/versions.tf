@@ -13,10 +13,6 @@ terraform {
       # `sentry_issue_alert` (provider issues #816, #844, #846).
       version = "0.15.0-beta3"
     }
-    discord = {
-      source  = "Lucky3028/discord"
-      version = ">= 2.0.1"
-    }
     github = {
       source  = "integrations/github"
       version = ">= 6.0"
@@ -62,4 +58,3 @@ terraform {
     impersonate_service_account = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
   }
 }
-

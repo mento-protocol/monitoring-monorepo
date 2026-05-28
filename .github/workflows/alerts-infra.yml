@@ -107,10 +107,6 @@ jobs:
     env:
       # Sentry
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # Temporary Discord destroy credentials; remove after legacy state is gone.
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
       # GCP
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # QuickNode
@@ -364,9 +360,6 @@ jobs:
       # plans don't serialize provider configuration, so init re-evaluates
       # the provider blocks against these values to talk to the upstream APIs.
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      TF_VAR_discord_bot_token: ${{ secrets.TF_VAR_DISCORD_BOT_TOKEN }}
-      TF_VAR_discord_server_id: ${{ secrets.TF_VAR_DISCORD_SERVER_ID }}
-      TF_VAR_discord_category_id: ${{ secrets.TF_VAR_DISCORD_CATEGORY_ID }}
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}

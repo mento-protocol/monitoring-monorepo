@@ -91,41 +91,6 @@ variable "slack_bot_token" {
 }
 
 #####################
-# Temporary Discord Cleanup Variables
-#####################
-
-variable "discord_bot_token" {
-  description = "Temporary Discord bot token retained only so the first post-Slack cleanup apply can destroy legacy Discord resources from state. Remove after that apply."
-  type        = string
-  sensitive   = true
-
-  validation {
-    condition     = length(var.discord_bot_token) > 50
-    error_message = "Discord bot token must be a valid token string."
-  }
-}
-
-variable "discord_server_id" {
-  description = "Temporary legacy Discord server ID retained only until the post-Slack cleanup apply destroys legacy Discord resources and the matching GitHub secret can be removed."
-  type        = string
-
-  validation {
-    condition     = can(regex("^[0-9]{17,20}$", var.discord_server_id))
-    error_message = "Discord server ID must be a valid snowflake ID (17-20 digit number)."
-  }
-}
-
-variable "discord_category_id" {
-  description = "Temporary legacy Discord category ID retained only until the post-Slack cleanup apply destroys legacy Discord resources and the matching GitHub secret can be removed."
-  type        = string
-
-  validation {
-    condition     = can(regex("^[0-9]{17,20}$", var.discord_category_id))
-    error_message = "Discord category ID must be a valid snowflake ID (17-20 digit number)."
-  }
-}
-
-#####################
 # Blockchain Configuration
 #####################
 # NOTE: This deployment creates ONE central GCP project that handles alerts
@@ -257,7 +222,7 @@ variable "multisigs" {
 #####################
 
 variable "debug_mode" {
-  description = "Enable per-resource debug logging on the QuickNode, Discord, and Slack restapi providers. With TF_LOG=DEBUG the full HTTP request/response gets logged — that leaks the QuickNode `x-api-key` header + `security_token` body field, the Discord `Authorization: Bot <token>` header, AND the Slack `Authorization: Bearer xoxb-...` header. Keep false in CI; only flip when actively debugging."
+  description = "Enable per-resource debug logging on the QuickNode and Slack restapi providers. With TF_LOG=DEBUG the full HTTP request/response gets logged — that leaks the QuickNode `x-api-key` header + `security_token` body field and the Slack `Authorization: Bearer xoxb-...` header. Keep false in CI; only flip when actively debugging."
   type        = bool
   default     = false
 }
