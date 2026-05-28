@@ -1,13 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 const PAGE_SIZE = 100;
 
+function readQueryFromParams(params: URLSearchParams): string {
+  return params.get("q") ?? "";
+}
+
+function readPageFromParams(params: URLSearchParams): number {
+  const raw = params.get("page");
+  const parsed = raw === null ? NaN : Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+function writeUrl(nextQuery: string, nextPage: number): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (nextQuery) params.set("q", nextQuery);
+  else params.delete("q");
+  if (nextPage <= 1) params.delete("page");
+  else params.set("page", String(nextPage));
+  const qs = params.toString();
+  const nextUrl =
+    window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+  window.history.replaceState(window.history.state, "", nextUrl);
+}
+
 export function EntitySearch({ slugs }: { slugs: string[] }) {
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
+  // `useSearchParams` is used only for the SSR-pass fallback. The root layout
+  // already wraps the tree in <Suspense> (`app/layout.tsx:56`), satisfying the
+  // rule transitively — the static check just can't see across files.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
+  const searchParams = useSearchParams();
+  const initialParams =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : searchParams;
+  const [query, setQuery] = useState<string>(() =>
+    readQueryFromParams(initialParams),
+  );
+  const [page, setPage] = useState<number>(() =>
+    readPageFromParams(initialParams),
+  );
+
+  const updateQuery = useCallback((next: string) => {
+    setQuery(next);
+    setPage(1);
+    writeUrl(next, 1);
+  }, []);
+
+  const updatePage = useCallback(
+    (next: number) => {
+      setPage(next);
+      writeUrl(query, next);
+    },
+    [query],
+  );
+
+  // `setQuery` and `setPage` below dispatch from a single popstate event, so
+  // React's auto-batching collapses them to one re-render.
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setQuery((prev) => {
+        const next = readQueryFromParams(params);
+        return prev === next ? prev : next;
+      });
+      setPage((prev) => {
+        const next = readPageFromParams(params);
+        return prev === next ? prev : next;
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const lower = query.toLowerCase();
   const filtered = query
@@ -22,8 +93,7 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
   );
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    setPage(1);
+    updateQuery(e.target.value);
   };
 
   return (
@@ -60,7 +130,7 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
           <div className="flex gap-1.5">
             <button
               type="button"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => updatePage(Math.max(1, clampedPage - 1))}
               disabled={clampedPage === 1}
               className="rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400"
             >
@@ -68,7 +138,7 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
             </button>
             <button
               type="button"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => updatePage(Math.min(totalPages, clampedPage + 1))}
               disabled={clampedPage === totalPages}
               className="rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400"
             >

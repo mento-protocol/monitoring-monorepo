@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { fetchJsonOr404 } from "@/lib/fetch-json";
@@ -11,6 +12,23 @@ import { Pagination } from "@/components/pagination";
 import type { IntelTransfersRecord } from "@/lib/intel-transfers";
 
 const PAGE_SIZE = 50;
+
+function readPageFromParams(params: URLSearchParams): number {
+  const raw = params.get("page");
+  const parsed = raw === null ? NaN : Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+function writePageToUrl(next: number): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (next <= 1) params.delete("page");
+  else params.set("page", String(next));
+  const qs = params.toString();
+  const nextUrl =
+    window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+  window.history.replaceState(window.history.state, "", nextUrl);
+}
 
 type Transfer = {
   id: string;
@@ -117,7 +135,37 @@ function TransferRow({ tx, isIn }: { tx: Transfer; isIn: boolean }) {
 
 export function IntelTransfers({ address }: { address: string }) {
   const { status } = useSession();
-  const [page, setPage] = useState(1);
+  // `useSearchParams` is used only for the SSR-pass fallback. The root layout
+  // already wraps the tree in <Suspense> (`app/layout.tsx:56`), satisfying the
+  // rule transitively — the static check just can't see across files.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
+  const searchParams = useSearchParams();
+  const [page, setPage] = useState<number>(() => {
+    const params =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : searchParams;
+    return readPageFromParams(params);
+  });
+
+  const updatePage = useCallback((next: number) => {
+    setPage(next);
+    writePageToUrl(next);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setPage((prev) => {
+        const next = readPageFromParams(params);
+        return prev === next ? prev : next;
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const { data } = useSWR<IntelTransfersRecord | null>(
     status === "authenticated" ? `/api/intel/transfers/${address}` : null,
     (url: string) =>
@@ -187,7 +235,7 @@ export function IntelTransfers({ address }: { address: string }) {
             page={clampedPage}
             pageSize={PAGE_SIZE}
             total={sorted.length}
-            onPageChange={setPage}
+            onPageChange={updatePage}
           />
         )}
       </div>
