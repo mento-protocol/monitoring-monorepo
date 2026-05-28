@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// Assert every Lighthouse run audited a URL whose `finalUrl` matches the
-// preview host + one of the expected dashboard paths. Replaces the prior
-// stdout `grep` for `vercel.com/login` with a structural check that
-// catches every kind of bypass / deployment regression, not just the SSO
-// interstitial:
+// Assert every Lighthouse run audited the right URL AND actually loaded
+// the dashboard (not an in-place error / interstitial). Replaces the prior
+// stdout `grep` for `vercel.com/login` with a structural three-gate check:
 //
-//   - Bypass token rotated and GitHub side stale → SSO interstitial host
-//   - Deployment dropped (404 / 503 fallback) → Vercel error host
-//   - Preview URL pointed at the wrong project → wrong vercel.app host
-//   - Trailing-slash redirect to a different path → unexpected pathname
+//   1. `finalUrl` host + pathname match the preview + expected dashboard
+//      paths — catches host-level regressions (SSO interstitial host,
+//      wrong vercel.app project, off-list path).
+//   2. `lhr.runtimeError.code === 'NO_ERROR'` — catches Lighthouse-internal
+//      failures (NO_FCP, NO_DOCUMENT_REQUEST, PROTOCOL_TIMEOUT).
+//   3. The main-document network request returned HTTP 2xx — catches
+//      Vercel "Deployment not found" / mid-deploy 503 / auth interstitial
+//      pages that render in place with the same host+pathname but a 4xx
+//      or 5xx status code. Without this, a 503-as-200-body or a 404 page
+//      at `/pools` would silently pass.
 //
 // All of those used to silently pass when the gate only looked for
 // `vercel.com/login`.
@@ -30,8 +34,9 @@
 //
 // Exit codes:
 //   0 — every audited finalUrl matched the expected host + one of the
-//       expected pathnames.
-//   1 — no reports found, or at least one finalUrl mismatched.
+//       expected pathnames, Lighthouse reported no runtime error, and
+//       the main document returned HTTP 2xx.
+//   1 — no reports found, or at least one report failed any gate above.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -93,8 +98,39 @@ for (const reportPath of reports) {
   }
   const hostOk = parsed.host === EXPECTED_HOST;
   const pathOk = EXPECTED_PATHS.has(parsed.pathname);
+
+  // Gate 2: Lighthouse runtime error. Set when Lighthouse itself couldn't
+  // complete the audit — NO_FCP, NO_DOCUMENT_REQUEST, PROTOCOL_TIMEOUT,
+  // etc. `'NO_ERROR'` is the success sentinel; absent field also counts
+  // as success on older lhci versions.
+  const runtimeErrorCode = lhr.runtimeError?.code;
+  const runtimeOk = !runtimeErrorCode || runtimeErrorCode === "NO_ERROR";
+
+  // Gate 3: HTTP status of the main document. `lhr.audits['network-
+  // requests'].details.items` lists every request observed during the
+  // audit; the entry whose `url` matches `finalUrl` is the main document
+  // request. Vercel can serve a "Deployment not found" / 503 / auth
+  // interstitial at the requested URL with status 4xx/5xx but a non-
+  // empty HTML body — in that case host + pathname still match the
+  // preview, but `statusCode >= 400` is the giveaway. If the network-
+  // requests audit is unavailable (older lhci, plugin disabled) we skip
+  // this gate rather than failing closed on an absent signal.
+  const networkItems =
+    lhr.audits?.["network-requests"]?.details?.items ?? null;
+  let statusCode = null;
+  let statusOk = true;
+  if (Array.isArray(networkItems) && networkItems.length > 0) {
+    const mainDoc =
+      networkItems.find((item) => item?.url === finalUrl) ?? networkItems[0];
+    statusCode = mainDoc?.statusCode ?? null;
+    if (typeof statusCode === "number" && statusCode >= 400) {
+      statusOk = false;
+    }
+  }
+
+  const allOk = hostOk && pathOk && runtimeOk && statusOk;
   summary.push(
-    `  ${hostOk && pathOk ? "✓" : "✗"} ${requestedUrl} → ${finalUrl}`,
+    `  ${allOk ? "✓" : "✗"} ${requestedUrl} → ${finalUrl}${statusCode !== null ? ` [${statusCode}]` : ""}${runtimeErrorCode && runtimeErrorCode !== "NO_ERROR" ? ` runtimeError=${runtimeErrorCode}` : ""}`,
   );
   if (!hostOk) {
     failures.push(
@@ -104,6 +140,16 @@ for (const reportPath of reports) {
   if (!pathOk) {
     failures.push(
       `Path mismatch for ${requestedUrl}: expected ${[...EXPECTED_PATHS].join(" or ")}, got ${parsed.pathname} (finalUrl=${finalUrl})`,
+    );
+  }
+  if (!runtimeOk) {
+    failures.push(
+      `Lighthouse runtime error for ${requestedUrl}: ${runtimeErrorCode} (${lhr.runtimeError?.message ?? "no message"}) — Lighthouse could not complete the audit`,
+    );
+  }
+  if (!statusOk) {
+    failures.push(
+      `Main document for ${requestedUrl} returned HTTP ${statusCode} (finalUrl=${finalUrl}) — likely a Vercel error/interstitial page rendered in place`,
     );
   }
 }

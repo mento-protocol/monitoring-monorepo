@@ -16,7 +16,7 @@
     "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
-    "generate:env": "terraform -chdir=.. apply -target=module.onchain_event_handler.local_file.env_file",
+    "generate:env": "terraform -chdir=.. apply -replace=module.onchain_event_handler.terraform_data.env_file -target=module.onchain_event_handler.terraform_data.env_file",
     "health": "./scripts/test-healthcheck.sh",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",

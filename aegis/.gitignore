@@ -42,8 +42,13 @@ yarn.lock
 out/
 cache/
 
-# Terraform
-.terraform*
+# Terraform — narrow patterns so `.terraform.lock.hcl` stays tracked
+# (the inner aegis/terraform/.gitignore documents the lockfile as
+# intentionally committed; the broader `.terraform*` glob used to swallow
+# it). The transient dirs are already re-ignored inside aegis/terraform/.
+.terraform/
+.terraform-agent-gate/
+.terraform-tf-wrapper/
 *.tfvars
 terraform.tfstate*
 errored.tfstate

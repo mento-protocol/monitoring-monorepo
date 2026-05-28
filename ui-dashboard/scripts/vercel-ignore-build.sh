@@ -11,6 +11,13 @@ dashboard_paths=(
   "package.json"
   "pnpm-lock.yaml"
   "pnpm-workspace.yaml"
+  # `.lighthouserc.cjs` must trigger a Vercel preview so the matching
+  # `.github/workflows/lighthouse.yml` filter (which also includes this
+  # file) actually has a deployment to audit when the lhci config
+  # changes. Without this, config-only PRs would skip Vercel build,
+  # the workflow would wait for a non-existent preview, and the
+  # required check would time out instead of validating the new budgets.
+  ".lighthouserc.cjs"
 )
 
 pull_request_id="${VERCEL_GIT_PULL_REQUEST_ID:-}"

@@ -315,13 +315,16 @@ main() {
 
 	# Fail fast if the runtime SA wasn't resolved from state. Passing
 	# `--service-account=` (empty) to gcloud aborts with an opaque flag-
-	# parse error; a clear message here pushes the operator back to
-	# `pnpm alerts:infra:apply` (which creates the SA) rather than
+	# parse error; a clear message here pushes the operator back to a fresh
+	# apply (CI-driven on merge, or `terraform -chdir=alerts/infra apply`
+	# from a clean main checkout for first-time bootstrap) rather than
 	# letting the deploy fall back to the project default SA, which
 	# wouldn't have Secret Manager access anyway.
 	if [[ -z ${service_account_email} ]]; then
 		error "Runtime service account not found in Terraform state."
-		error "Run 'pnpm alerts:infra:apply' first so module.onchain_event_handler.google_service_account.function_runtime exists."
+		error "Apply alerts/infra first so module.onchain_event_handler.google_service_account.function_runtime exists."
+		error "  - If an alerts/infra change is already pending on main: it will apply via .github/workflows/alerts-infra.yml after production-environment review."
+		error "  - First-time bootstrap (or empty state): run 'terraform -chdir=alerts/infra apply' from a clean main checkout."
 		exit 1
 	fi
 
@@ -329,7 +332,7 @@ main() {
 	# happen if Terraform state is missing or stale.
 	if [[ -z ${project_id} ]]; then
 		error "GCP project_id not found in Terraform state."
-		error "Run 'pnpm alerts:infra:apply' first."
+		error "Apply alerts/infra first (CI on merge or 'terraform -chdir=alerts/infra apply' for bootstrap)."
 		exit 1
 	fi
 
@@ -374,7 +377,7 @@ main() {
 	else
 		error "No env-vars-file resolved from Terraform state."
 		error "Required env vars (MULTISIG_CONFIG, SUPPORTED_CHAINS, FUNCTION_TIMEOUT_SECONDS, MULTISIG_*) are computed by Terraform and would be missing from a hotfix deploy — the function would fail config validation on boot."
-		error "Run 'pnpm alerts:infra:apply' first to populate state with the env-var outputs."
+		error "Apply alerts/infra first to populate state with the env-var outputs (CI on merge or 'terraform -chdir=alerts/infra apply' for bootstrap)."
 		exit 1
 	fi
 

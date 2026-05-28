@@ -227,7 +227,8 @@ pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
 pnpm aegis:agent:seed-secrets # Seed/rotate Grafana Agent Secret Manager versions
 pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
-pnpm aegis:tf:init / aegis:tf:plan / aegis:tf:apply
+pnpm aegis:tf:init / aegis:tf:plan
+# Apply runs in CI on merge to main (aegis-terraform.yml; production gate).
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
@@ -236,9 +237,11 @@ pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
 pnpm infra:apply              # Apply infrastructure changes
 # Event-driven alerts stack (Cloud Function + Discord channels + Sentry bridge + QuickNode webhooks):
-pnpm alerts:infra:init / alerts:infra:plan / alerts:infra:apply
+pnpm alerts:infra:init / alerts:infra:plan
 # Grafana metric alert rules (v3 Slack rules):
-pnpm alerts:rules:init / alerts:rules:plan / alerts:rules:apply
+pnpm alerts:rules:init / alerts:rules:plan
+# Apply happens via CI on merge to main (alerts-rules.yml / alerts-infra.yml).
+# Production gate enforces required-reviewer approval.
 ```
 
 Terraform stack ownership is registered in `terraform.stacks.json` and

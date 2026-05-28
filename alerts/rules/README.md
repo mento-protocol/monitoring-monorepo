@@ -27,7 +27,10 @@ cp terraform.tfvars.example terraform.tfvars
 
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
-pnpm alerts:rules:apply
+# Apply happens via CI on merge to main (.github/workflows/alerts-rules.yml).
+# The `production` GitHub Environment enforces required-reviewer approval before
+# the apply job runs. Do not run `terraform -chdir=alerts/rules apply` locally
+# from a feature branch — it will fight CI on the next merge.
 ```
 
 All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place per stack.

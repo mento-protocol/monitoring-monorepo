@@ -78,12 +78,19 @@ jobs:
             # time out and fail a required check. Keep these in sync with
             # vercel-ignore-build.sh — both lists govern the same "is this a
             # dashboard-affecting change" decision.
+            #
+            # `.lighthouserc.cjs` is in BOTH lists so config-only PRs (e.g.
+            # changing severity from `warn` to `error` or adjusting a budget
+            # threshold) actually exercise the gate they're changing.
+            # Without it, a budget change merges without empirical validation
+            # and the next dashboard PR is the place breakage surfaces.
             dashboard:
               - ui-dashboard/**
               - shared-config/**
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
+              - .lighthouserc.cjs
 
       - name: Decide whether to run Lighthouse
         id: decide
@@ -254,20 +261,24 @@ jobs:
 
       - name: Cache Playwright Chromium
         # `playwright install chromium` re-downloads ~130 MB on every run
-        # otherwise. The cache key is the SHA of `ui-dashboard/package.json`
-        # — that file pins `@playwright/test`'s version, so the key
-        # invalidates exactly when the Chromium revision Playwright wants
-        # could have changed (and not on unrelated dependency churn). On a
-        # cache hit the next step is a no-op; on a miss it downloads and
-        # the post-step writes the cache for future runs.
+        # otherwise. The cache key hashes BOTH `ui-dashboard/package.json`
+        # (the version range, e.g. `^1.60.0`) AND `pnpm-lock.yaml` (the
+        # resolved version pnpm actually picks). Keying on package.json
+        # alone misses lockfile-only `@playwright/test` updates within the
+        # caret range — in that case the key would stay constant while
+        # the Chromium revision Playwright wants flips, so every run
+        # restores the stale cache, the install step re-downloads, but
+        # actions/cache won't re-save under the already-hit key, so the
+        # next run re-downloads again indefinitely. Hashing the lockfile
+        # makes the key flip on any real Playwright version bump.
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json') }}
-          # `restore-keys` lets an unrelated `package.json` edit still
-          # reuse the most recent chromium cache instead of triggering a
-          # ~130 MB fresh download. `playwright install` then fast-
+          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          # `restore-keys` lets an unrelated lockfile or `package.json`
+          # edit still reuse the most recent chromium cache instead of
+          # triggering a ~130 MB fresh download. `playwright install` then fast-
           # validates the existing binary against the version it wants
           # (no-op on match, re-download only on a real Playwright
           # version bump).

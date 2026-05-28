@@ -1,30 +1,33 @@
 // Lighthouse CI configuration for the ui-dashboard.
 //
-// BASELINES (measured 2026-05-18, desktop, monitoring.mento.org):
-//   Accessibility: 0.94  (production; see CI run in PR that introduced this)
-//   Performance:   not captured by CI tool; conservative desktop estimate used
-//   LCP:           ~1 200 ms  (SSR + CDN-served, desktop)
-//   CLS:           0.00       (measured directly via Lighthouse JSON)
-//   INP:           not captured by Lighthouse navigation mode (needs user-flow)
+// BASELINES (production prod measurement 2026-05-18 + first real CI run
+// 2026-05-27 against the Vercel preview after the bypass cookie + GitHub
+// secret sync landed):
+//   Accessibility: 0.94  (prod; deterministic across runs)
+//   Performance:   silent-passed ≥ 0.75 floor on every URL
+//   LCP:           silent-passed ≤ 1 700 ms on every URL (prod baseline ~1 200 ms)
+//   CLS:           0.4896 on /pools (deterministic across 3 runs — a real
+//                  hydration shift, NOT measurement noise; tracked in BACKLOG)
+//   INP:           40 ms on /pools filter interaction (web-vitals; ≪ 200 ms budget)
 //
 // BUDGET RATIONALE:
-//   All performance budgets start as `warn` (not `error`) because CWV vary
-//   run-to-run and are sensitive to CI runner load. They are early warnings,
-//   not hard blocks. Accessibility starts as `error` because it is
-//   deterministic across runs and the score only degrades on code changes.
+//   Accessibility + Performance + LCP are now `error` (blocking).
+//   Accessibility because the score is deterministic; Performance + LCP
+//   because the first empirical CI run passed them comfortably without
+//   any dashboard change. CI runner load variance is real but the
+//   headroom (perf score 5 points below the typical run, LCP 500 ms
+//   above) absorbs it. CLS stays `warn` until the /pools hydration shift
+//   is fixed — promoting to `error` now would block every dashboard PR
+//   on a known bug at the gate level.
 //
 //   Headroom applied:
-//     performance score:  baseline - 0.05  (warn at <0.75 → catches big regressions)
-//     LCP:                baseline + 500 ms (warn at >1 700 ms)
-//     CLS:                max(baseline + 0.05, 0.10) = 0.10
-//     INP:                (not asserted; navigation mode doesn't produce a value)
-//     accessibility:      0.94 (error; matches current prod baseline 0.94 so
-//                         any regression is caught without blocking current PRs)
-//
-// WARN → ERROR PROMOTION:
-//   Once the CI infrastructure has collected 5+ stable runs and a representative
-//   percentile distribution is known, promote performance budgets from `warn`
-//   to `error`. Tracked in BACKLOG under "Lighthouse CI Follow-Ups".
+//     performance score:  baseline - 0.05  (error at <0.75 → catches big regressions)
+//     LCP:                baseline + 500 ms (error at >1 700 ms)
+//     CLS:                0.10 (warn — deliberately tighter than the
+//                         current /pools value so the regression stays
+//                         visible; tracked in BACKLOG)
+//     INP:                200 ms (in measure-inp.mjs; web-vitals "good" threshold)
+//     accessibility:      0.94 (error; matches current prod baseline)
 //
 // PAGES AUDITED:
 //   Injected at workflow runtime from LHCI_URLS env var (comma-separated).
@@ -57,8 +60,14 @@ module.exports = {
       // `warn` = advisory (non-blocking); `error` = blocking.
       // See budget rationale above.
       assertions: {
-        // Performance score: warn below 0.75 (desktop SSR, production baseline ~0.80)
-        "categories:performance": ["warn", { minScore: 0.75 }],
+        // Performance score: error below 0.75 (desktop SSR, production
+        // baseline ~0.80). First real CI run with the bypass working
+        // (PR #614 on commit a9e4a5a4) silent-passed every URL well above
+        // the 0.75 floor, so promoting from `warn` to `error` doesn't
+        // demand any dashboard change. The 5-point headroom catches any
+        // material regression while staying clear of CI runner load
+        // variance.
+        "categories:performance": ["error", { minScore: 0.75 }],
 
         // Accessibility score: error below 0.94
         // Production measured at 0.94 on 2026-05-18. Threshold matches
@@ -78,12 +87,25 @@ module.exports = {
         // unexpected redirect all fail closed).
         "categories:accessibility": ["error", { minScore: 0.94 }],
 
-        // Largest Contentful Paint: warn above 1 700 ms
-        // Baseline ~1 200 ms desktop + 500 ms headroom.
-        "largest-contentful-paint": ["warn", { maxNumericValue: 1700 }],
+        // Largest Contentful Paint: error above 1 700 ms
+        // Baseline ~1 200 ms desktop + 500 ms headroom. First real CI run
+        // with the bypass working (PR #614) silent-passed both URLs well
+        // under 1 700 ms, so promoting to `error` doesn't demand any
+        // dashboard change. Catches LCP regressions on the first commit
+        // that introduces them, rather than waiting for an engineer to
+        // notice the lhci `⚠️` line.
+        "largest-contentful-paint": ["error", { maxNumericValue: 1700 }],
 
-        // Cumulative Layout Shift: warn above 0.10
-        // Production measured at 0.00. Using standard "good" threshold.
+        // Cumulative Layout Shift: warn above 0.10 (intentionally NOT
+        // promoted to error in this PR). First real CI run with the
+        // bypass working (PR #614) measured CLS = 0.4896 deterministically
+        // on /pools — all three runs identical. That's a real, consistent
+        // layout shift during /pools hydration, not measurement noise.
+        // Promoting to `error` at 0.10 would block every dashboard PR
+        // until the underlying shift is fixed; widening the budget to
+        // cover 0.49 would hide the regression at the gate level. Leave
+        // as `warn` so the `⚠️` line stays visible while the fix is in
+        // BACKLOG.
         "cumulative-layout-shift": ["warn", { maxNumericValue: 0.1 }],
 
         // NOTE: INP (interaction-to-next-paint) is intentionally NOT asserted
