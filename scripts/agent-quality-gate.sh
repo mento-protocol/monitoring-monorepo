@@ -124,12 +124,14 @@ scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
 success_stamp_file="$scratch_dir/last-success.stamp"
 success_stamp_ttl_seconds=900
-# Don't override TMPDIR under Claude Code's seatbelt — it blocks AF_UNIX
-# socket creation in repo paths, which breaks `terraform validate` (the
-# Grafana provider uses go-plugin grpc on a socket in TMPDIR). Trunk's
-# pre-push callback strips env vars, so fall back to the worktree-path
-# check when $CLAUDE_SANDBOX is gone.
-if [[ -z "${CLAUDE_SANDBOX:-}" && "$repo_root" != *"/.claude/worktrees/"* ]]; then
+# Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
+# a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
+# Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
+# before falling back to the repo scratch dir.
+tmpdir_candidate="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+if [[ -d "$tmpdir_candidate" && -w "$tmpdir_candidate" ]]; then
+  export TMPDIR="$tmpdir_candidate"
+else
   export TMPDIR="$scratch_dir"
 fi
 
@@ -983,11 +985,8 @@ while IFS= read -r path; do
     alerts/infra/scripts/*)
       add_surface "alerts-infra"
       case "$path" in
-        alerts/infra/scripts/package.json|alerts/infra/scripts/tsconfig.json|alerts/infra/scripts/*.ts)
-          add_command "pnpm --filter @mento-protocol/alerts-scripts typecheck" "alerts-scripts pkg changed"
-          ;;
         alerts/infra/scripts/*.sh)
-          add_command "bash -n $(quote_path "$path")" "alerts-scripts shell script changed"
+          add_command "bash -n $(quote_path "$path")" "alerts infra shell script changed"
           ;;
       esac
       ;;

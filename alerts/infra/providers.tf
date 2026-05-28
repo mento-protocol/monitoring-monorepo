@@ -6,6 +6,9 @@ provider "sentry" {
   token = var.sentry_auth_token
 }
 
+# Temporary provider configuration retained so Terraform can destroy legacy
+# Discord resources that still exist in state after the Slack cutover. Remove
+# it after the cleanup apply shows no Discord-typed resources remain.
 provider "discord" {
   token = var.discord_bot_token
 }
@@ -21,7 +24,7 @@ provider "github" {
   owner = "mento-protocol"
 }
 
-# Discord API provider
+# Temporary Discord API provider for legacy webhook destroy.
 provider "restapi" {
   alias = "discord"
   uri   = "https://discord.com/api/v10"
@@ -71,4 +74,3 @@ provider "restapi" {
   write_returns_object = true
   debug                = var.debug_mode
 }
-

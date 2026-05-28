@@ -313,7 +313,7 @@ alerts. Protocol alert rules and global notification routing are managed in
    grafana_service_account_token =
    ```
 
-   Discord/Splunk routing variables moved to `alerts/rules/terraform.tfvars`.
+   Slack/Splunk routing variables live in `alerts/rules/terraform.tfvars`.
 
 1. Check that it's set up correctly
 
@@ -336,7 +336,7 @@ To update the dashboard, make the desired changes in [./terraform/grafana-dashbo
 ### Grafana Alerts
 
 Aegis owns only the Aegis service-health rule group (`service=aegis`) in this
-stack. Global contact points, Discord/Splunk/Slack routing, oracle-relayer
+stack. Global contact points, Slack/Splunk routing, oracle-relayer
 rules, reserve-balance rules, trading-mode rules, and trading-limit rules live
 in `alerts/rules`.
 
@@ -349,7 +349,7 @@ To update protocol alerts or global routing, edit `../alerts/rules` and run
 Grafana uses the following concepts for managing alerts:
 
 - [**Alert Rules**](https://grafana.com/docs/grafana/latest/alerting/fundamentals/alert-rules/): A set of evaluation criteria for when an alert should trigger
-- [**Contact Points**](https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/contact-points/): Alert channels like Discord, Splunk/VictorOps, Email etc.
+- [**Contact Points**](https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/contact-points/): Alert channels like Slack, Splunk/VictorOps, Email etc.
 - [**Notification Policies**](https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/notification-policies/): Routing rules to determine which alerts get routed to what contact points.
 
 #### Current Alerts
@@ -360,30 +360,30 @@ The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 
 - Stale price feeds (oldest report expired)
 - Low CELO balance for relayer wallets
-- Routed to: Discord channels (`#🚨︱stg-oracle-relayers`, `#🚨︱prod-oracle-relayers`) + VictorOps/Splunk (mainnet only)
+- Routed to: Slack `#alerts-oracles`; page-severity alerts also route to `#alerts-critical` + VictorOps/Splunk.
 
 **Reserve Balance Alerts** (`service=reserve`):
 
 - Low reserve balances for CELO, USDC, USDT, EUROC
-- Routed to: Discord channel (`#🚨︱reserve`)
+- Routed to: Slack `#alerts-reserve`
 
 **Trading Mode Alerts** (`service=exchanges`):
 
 - Trading halted (circuit breakers tripped)
-- Routed to: Discord channels (`#🚨︱stg-trading-modes`, `#🚨︱prod-trading-modes`)
+- Routed to: Slack `#alerts-critical` + VictorOps/Splunk for prod page alerts; Slack `#alerts-testnet` for staging.
 
 **Trading Limits Alerts** (`service=trading-limits`):
 
-- **L0 Short-term Limits** (5-minute window): Alerts at 90% utilization → Discord only
-- **L1 Medium-term Limits** (daily window): Alerts at 90% utilization → Discord + VictorOps/Splunk
-- **LG Global Lifetime Limits**: Alerts at 90% utilization → Discord + VictorOps/Splunk
-- Routed to: Discord channel (`#🚨︱trading-limits-celo`) + VictorOps/Splunk (L1 & LG only)
+- **L0 Short-term Limits** (5-minute window): Alerts at 90% utilization → Slack `#alerts-pools`
+- **L1 Medium-term Limits** (daily window): Alerts at 90% utilization → Slack `#alerts-critical` + VictorOps/Splunk
+- **LG Global Lifetime Limits**: Alerts at 90% utilization → Slack `#alerts-critical` + VictorOps/Splunk
+- Routed by severity through `alerts/rules`.
 
 **Aegis Service Alerts** (`service=aegis`):
 
 - Failed RPC calls
 - Service not reporting new data
-- Routed to: Discord channel (`#🚨︱aegis`) + VictorOps/Splunk
+- Routed to: Slack `#alerts-infra`; page-severity alerts also route to `#alerts-critical` + VictorOps/Splunk.
 
 ### Terraform Troubleshooting
 

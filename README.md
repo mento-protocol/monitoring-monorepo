@@ -223,7 +223,7 @@ pnpm aegis:tf:plan
 ```
 
 Protocol Grafana alert rules and global Grafana routing live in
-`alerts/rules`; event-driven Discord/Sentry/QuickNode delivery lives in
+`alerts/rules`; event-driven Slack/Sentry/QuickNode delivery lives in
 `alerts/infra`. `terraform.stacks.json` and [docs/terraform.md](./docs/terraform.md)
 are the stack registry and operator overview. Never run Terraform apply without
 reviewing the plan first.

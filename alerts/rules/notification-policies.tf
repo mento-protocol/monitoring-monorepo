@@ -1,6 +1,6 @@
 resource "grafana_notification_policy" "all" {
   group_by      = ["alertname", "chain"]
-  contact_point = grafana_contact_point.discord_channel_catch_all.name # Default contact point
+  contact_point = grafana_contact_point.slack_alerts_infra.name # Default contact point
 
   policy {
     group_wait      = "30s"
@@ -62,111 +62,6 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Oracle Relayer Alerts (Discord) — one policy per chain, routed by env:
-    # prod chains → #prod-oracle-relayers, staging chains → #stg-oracle-relayers.
-    # Adding a chain to local.chains adds its route automatically. The
-    # `rateFeed !~` matcher excludes weekend-disabled FX feeds; balance alerts
-    # carry no rateFeed label so they always pass it.
-    dynamic "policy" {
-      for_each = local.chains
-      content {
-        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_oracle_relayers_prod.name : grafana_contact_point.discord_channel_oracle_relayers_staging.name
-
-        matcher {
-          label = "service"
-          match = "="
-          value = "oracle-relayers"
-        }
-
-        matcher {
-          label = "chain"
-          match = "="
-          value = policy.key
-        }
-
-        # Exclude the weekend-disabled feeds
-        matcher {
-          label = "rateFeed"
-          match = "!~"
-          value = local.weekend_disabled_feeds_pattern
-        }
-
-        continue = true
-      }
-    }
-
-    # Weekend-mute companion policies for the FX feeds that don't receive new
-    # data on weekends. Iterates all chains; the rateFeed matcher (not the chain)
-    # selects the weekend-disabled feeds, so chains without them simply match
-    # nothing.
-    dynamic "policy" {
-      for_each = local.chains
-      content {
-        # Apply the mute timing to the policy
-        mute_timings = [grafana_mute_timing.weekend_mute.name]
-
-        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_oracle_relayers_prod.name : grafana_contact_point.discord_channel_oracle_relayers_staging.name
-
-        matcher {
-          label = "service"
-          match = "="
-          value = "oracle-relayers"
-        }
-
-        matcher {
-          label = "chain"
-          match = "="
-          value = policy.key
-        }
-
-        matcher {
-          label = "rateFeed"
-          match = "=~"
-          value = local.weekend_disabled_feeds_pattern
-        }
-
-        # continue=true so the parallel Slack routes also fire for
-        # weekend-muted FX feeds — they share the same mute_timing.
-        continue = true
-      }
-    }
-
-    # Reserve Alerts
-    policy {
-      contact_point = grafana_contact_point.discord_channel_reserve.name
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "reserve"
-      }
-
-      continue = true
-    }
-
-    # Trading Mode Alerts (Discord) — one policy per chain, routed by env:
-    # staging chains → stg-trading-modes, prod chains → prod-trading-modes.
-    dynamic "policy" {
-      for_each = local.chains
-      content {
-        contact_point = policy.value.env == "prod" ? grafana_contact_point.discord_channel_trading_modes_prod.name : grafana_contact_point.discord_channel_trading_modes_staging.name
-
-        matcher {
-          label = "service"
-          match = "="
-          value = "exchanges"
-        }
-
-        matcher {
-          label = "chain"
-          match = "="
-          value = policy.key
-        }
-
-        continue = true
-      }
-    }
-
     # Aegis Service Alerts - Splunk On-Call
     policy {
       contact_point = grafana_contact_point.splunk_on_call.name
@@ -181,19 +76,6 @@ resource "grafana_notification_policy" "all" {
         label = "severity"
         match = "="
         value = "page"
-      }
-
-      continue = true
-    }
-
-    # Aegis Service Alerts - Discord
-    policy {
-      contact_point = grafana_contact_point.discord_channel_aegis.name
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "aegis"
       }
 
       continue = true
@@ -218,25 +100,10 @@ resource "grafana_notification_policy" "all" {
       continue = true
     }
 
-    # Trading Limits Alerts - Discord
-    policy {
-      contact_point = grafana_contact_point.discord_channel_trading_limits.name
-
-      matcher {
-        label = "service"
-        match = "="
-        value = "trading-limits"
-      }
-
-      continue = true
-    }
-
-    # Slack policies fire alongside the Discord policies above via
-    # `continue = true`. Severity matchers split alerts between
-    # `#alerts-critical` and the per-service warning channel (a
-    # refinement over the Discord tree, which routes by service+chain
-    # only). Oracle-relayer policies preserve the `weekend_mute` timing
-    # on FX feeds — see `weekend_disabled_feeds` in locals.tf.
+    # Slack policies are the terminal delivery routes. Severity matchers split
+    # alerts between `#alerts-critical` and the per-service warning channel.
+    # Oracle-relayer policies preserve the `weekend_mute` timing on FX feeds —
+    # see `weekend_disabled_feeds` in locals.tf.
 
     # Oracle Relayer page alerts → #alerts-critical (non-weekend FX)
     # `severity = page` already restricts to prod chains because
@@ -266,7 +133,6 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      continue = true
     }
 
     # Oracle Relayer page alerts → #alerts-critical (weekend FX, muted)
@@ -293,7 +159,6 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
-      continue = true
     }
 
     # Oracle Relayer warning alerts → #alerts-oracles (prod chains, non-weekend FX)
@@ -326,7 +191,6 @@ resource "grafana_notification_policy" "all" {
           value = local.weekend_disabled_feeds_pattern
         }
 
-        continue = true
       }
     }
 
@@ -362,7 +226,6 @@ resource "grafana_notification_policy" "all" {
           value = local.weekend_disabled_feeds_pattern
         }
 
-        continue = true
       }
     }
 
@@ -390,7 +253,6 @@ resource "grafana_notification_policy" "all" {
           value = local.weekend_disabled_feeds_pattern
         }
 
-        continue = true
       }
     }
 
@@ -420,7 +282,6 @@ resource "grafana_notification_policy" "all" {
           value = local.weekend_disabled_feeds_pattern
         }
 
-        continue = true
       }
     }
 
@@ -434,7 +295,6 @@ resource "grafana_notification_policy" "all" {
         value = "reserve"
       }
 
-      continue = true
     }
 
     # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
@@ -491,7 +351,6 @@ resource "grafana_notification_policy" "all" {
           value = policy.key
         }
 
-        continue = true
       }
     }
 
@@ -513,7 +372,6 @@ resource "grafana_notification_policy" "all" {
           value = policy.key
         }
 
-        continue = true
       }
     }
 
@@ -533,7 +391,6 @@ resource "grafana_notification_policy" "all" {
         value = "aegis"
       }
 
-      continue = true
     }
 
     # Aegis service warning alerts → #alerts-infra
@@ -552,7 +409,6 @@ resource "grafana_notification_policy" "all" {
         value = "page"
       }
 
-      continue = true
     }
 
     # Trading-limits page alerts → #alerts-critical (parallel to existing Splunk policy)
@@ -571,7 +427,6 @@ resource "grafana_notification_policy" "all" {
         value = "trading-limits"
       }
 
-      continue = true
     }
 
     # Trading-limits warning alerts → #alerts-pools
@@ -590,7 +445,6 @@ resource "grafana_notification_policy" "all" {
         value = "page"
       }
 
-      continue = true
     }
   }
 }

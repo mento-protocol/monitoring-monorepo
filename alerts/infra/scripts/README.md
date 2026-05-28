@@ -22,20 +22,7 @@ Each script includes comprehensive header documentation. See the script file its
 - **`get-logs.sh`** - View Cloud Function logs
 - **`test-local.sh`** - Test locally running Cloud Function
 
-### TypeScript Scripts
-
-- **`check-discord-permissions.ts`** - Check Discord bot permissions
-
 ## Common Usage Patterns
-
-### Check Discord Permissions
-
-```bash
-cd scripts && npm install
-npm run check-discord-permissions
-# Or directly:
-tsx scripts/check-discord-permissions.ts
-```
 
 ### Fix Webhook State Issues
 

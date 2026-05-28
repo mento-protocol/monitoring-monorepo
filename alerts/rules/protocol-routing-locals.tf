@@ -7,7 +7,7 @@ locals {
   # the metric `variants` in config.yaml). Keyed by the Prometheus `chain` label
   # aegis publishes. To add an EVM chain add an entry here — no other edits needed.
   #
-  #   title           → human label used in alert names / Discord copy (e.g. "Monad")
+  #   title           → human label used in alert names / notification copy (e.g. "Monad")
   #   env             → "prod" | "staging"; drives severity + notification routing
   #                     (prod → warning + prod channels, staging → info + staging)
   #   metric          → Prometheus metric for the native gas token balance
@@ -192,7 +192,7 @@ locals {
   # (`Pool.referenceRateFeedID` joined with `aegis/config.yaml` rateFeed IDs,
   # filtered to `source = fpmm_factory` — the V3 hub pool is the canonical
   # target when multiple pools share a rateFeed). Used by the trading-mode
-  # template (Slack / Discord / VictorOps) to deep-link the "tripped breakers"
+  # template (Slack / VictorOps) to deep-link the "tripped breakers"
   # bullet at `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`.
   #
   # When a rateFeed isn't in the map, the template falls back to the Grafana
@@ -299,11 +299,10 @@ locals {
     format("{{ if eq .Labels.chain %q -}}{{ $chainlinkFeedPath = %q -}}{{ end -}}", k, c.chainlink_feed_path)
   ])
 
-  # Each entry maps alertnames → three template families:
-  #   - title_template / message_template       → Discord (kept during dual-route, removed after cutover)
-  #   - slack_*                                 → Slack mrkdwn (message-templates-slack.tf)
-  #   - victorops_*                             → Splunk On-Call plain text (message-templates-victorops.tf)
-  # The three dispatchers (alert_config / alert_config_slack / alert_config_victorops) read
+  # Each entry maps alertnames → two template families:
+  #   - slack_*     → Slack mrkdwn (message-templates-slack.tf)
+  #   - victorops_* → Splunk On-Call plain text (message-templates-victorops.tf)
+  # The two dispatchers (alert_config_slack / alert_config_victorops) read
   # from this single source of truth so alertname→service mapping stays in one place.
   alert_types = {
     oracle_stale_price = {
@@ -313,8 +312,6 @@ locals {
       names = [
         for k, c in local.chains : "Oldest Report Expired [${c.title}]"
       ],
-      title_template             = "discord.oracle_stale_price_alert_title",
-      message_template           = "discord.oracle_stale_price_alert_message",
       slack_title_template       = "slack.oracle_stale_price_alert_title",
       slack_message_template     = "slack.oracle_stale_price_alert_message",
       victorops_title_template   = "victorops.oracle_stale_price_alert_title",
@@ -327,8 +324,6 @@ locals {
       names = [
         for k, c in local.chains : "Low ${c.symbol} Balance [${c.title}]"
       ],
-      title_template             = "discord.oracle_relayer_low_balance_alert_title",
-      message_template           = "discord.oracle_relayer_low_balance_alert_message",
       slack_title_template       = "slack.oracle_relayer_low_balance_alert_title",
       slack_message_template     = "slack.oracle_relayer_low_balance_alert_message",
       victorops_title_template   = "victorops.oracle_relayer_low_balance_alert_title",
@@ -340,8 +335,6 @@ locals {
         "Low USDT Reserve Balance Alert",
         "Low axlUSDC Reserve Balance Alert"
       ],
-      title_template             = "discord.reserve_balance_alert_title",
-      message_template           = "discord.reserve_balance_alert_message",
       slack_title_template       = "slack.reserve_balance_alert_title",
       slack_message_template     = "slack.reserve_balance_alert_message",
       victorops_title_template   = "victorops.reserve_balance_alert_title",
@@ -354,8 +347,6 @@ locals {
       names = [
         for k, c in local.chains : "Trading Mode Alert [${c.title}]"
       ],
-      title_template             = "discord.trading_mode_alert_title",
-      message_template           = "discord.trading_mode_alert_message",
       slack_title_template       = "slack.trading_mode_alert_title",
       slack_message_template     = "slack.trading_mode_alert_message",
       victorops_title_template   = "victorops.trading_mode_alert_title",
@@ -366,8 +357,6 @@ locals {
         "Number of failed rpc calls",
         "Aegis does not report new data"
       ],
-      title_template             = "discord.aegis_service_alert_title",
-      message_template           = "discord.aegis_service_alert_message",
       slack_title_template       = "slack.aegis_service_alert_title",
       slack_message_template     = "slack.aegis_service_alert_message",
       victorops_title_template   = "victorops.aegis_service_alert_title",
@@ -379,56 +368,14 @@ locals {
         "L1 Trading Limit Alert [Celo]",
         "LG Trading Limit Alert [Celo]"
       ],
-      title_template             = "discord.trading_limits_alert_title",
-      message_template           = "discord.trading_limits_alert_message",
       slack_title_template       = "slack.trading_limits_alert_title",
       slack_message_template     = "slack.trading_limits_alert_message",
       victorops_title_template   = "victorops.trading_limits_alert_title",
       victorops_message_template = "victorops.trading_limits_alert_message"
     }
   }
-  alert_config = {
-    title = <<-EOT
-    {{ $alertName := .CommonLabels.alertname }}
-    %{for alert_type, config in local.alert_types~}
-    %{for index, name in config.names~}
-    %{if index == 0 && alert_type == keys(local.alert_types)[0]~}
-    {{ if eq $alertName "${name}" }}
-    %{else~}
-    {{ else if eq $alertName "${name}" }}
-    %{endif~}
-    {{ template "${config.title_template}" . }}
-    %{endfor~}
-    %{endfor~}
-    {{ else }}
-    {{ $alertName }}
-    {{ .CommonLabels }}
-    {{ end }}
-    EOT
-
-    message = <<-EOT
-    {{ $alertName := .CommonLabels.alertname }}
-    %{for alert_type, config in local.alert_types~}
-    %{for index, name in config.names~}
-    %{if index == 0 && alert_type == keys(local.alert_types)[0]~}
-    {{ if (eq $alertName "${name}") }}
-    %{else~}
-    {{ else if (eq $alertName "${name}") }}
-    %{endif~}
-    {{ template "${config.message_template}" . }}
-    %{endfor~}
-    %{endfor~}
-    {{ else if (eq $alertName "DatasourceError") }}
-    The Grafana alert query might be broken. Please check the alert configuration.
-    {{ else }}
-    {{ $alertName}}
-    {{ .CommonLabels }}
-    {{ end }}
-    EOT
-  }
-
-  # Slack dispatcher — same alertname-branching as alert_config but selects the
-  # `slack.*` templates from message-templates-slack.tf. Referenced by every
+  # Slack dispatcher selects the `slack.*` templates from
+  # message-templates-slack.tf. Referenced by every
   # grafana_contact_point.slack_alerts_* in contact-points.tf.
   alert_config_slack = {
     title = <<-EOT

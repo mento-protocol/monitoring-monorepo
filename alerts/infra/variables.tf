@@ -91,11 +91,11 @@ variable "slack_bot_token" {
 }
 
 #####################
-# Discord Variables
+# Temporary Discord Cleanup Variables
 #####################
 
 variable "discord_bot_token" {
-  description = "Discord bot token"
+  description = "Temporary Discord bot token retained only so the first post-Slack cleanup apply can destroy legacy Discord resources from state. Remove after that apply."
   type        = string
   sensitive   = true
 
@@ -106,7 +106,7 @@ variable "discord_bot_token" {
 }
 
 variable "discord_server_id" {
-  description = "Discord server ID (snowflake ID)"
+  description = "Temporary legacy Discord server ID retained only until the post-Slack cleanup apply destroys legacy Discord resources and the matching GitHub secret can be removed."
   type        = string
 
   validation {
@@ -116,7 +116,7 @@ variable "discord_server_id" {
 }
 
 variable "discord_category_id" {
-  description = "Discord category ID where alert channels will be created"
+  description = "Temporary legacy Discord category ID retained only until the post-Slack cleanup apply destroys legacy Discord resources and the matching GitHub secret can be removed."
   type        = string
 
   validation {

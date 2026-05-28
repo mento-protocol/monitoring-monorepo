@@ -131,7 +131,6 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
-- [ ] **Migrate Aegis v2 alerts to Slack** — Aegis dual-routes to Slack alongside Discord today (per-domain warning channels + `#alerts-critical`). Final cutover removes the Discord contact points once dual-route has soaked.
 
 ---
 
@@ -244,7 +243,7 @@ Both functions emit one bucket per `bucketSeconds` step, aligned to bucket bound
 - [x] Alert rules: trading modes (circuit breakers tripped)
 - [x] Alert rules: trading limits (L0/L1/LG utilization >90%)
 - [x] Alert rules: Aegis service health (RPC failures, data staleness)
-- [x] Contact points: 8 Discord webhooks + Splunk On-Call
+- [x] Contact points: Slack channels + Splunk On-Call
 - [x] Notification policies with severity-based routing
 - [x] Weekend mute timings for FX rate feeds
 - [x] All Grafana config Terraform-managed
