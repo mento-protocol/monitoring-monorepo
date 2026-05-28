@@ -29,21 +29,26 @@ function writeUrl(nextQuery: string, nextPage: number): void {
   window.history.replaceState(window.history.state, "", nextUrl);
 }
 
+// Read the current URL search params, preferring `window.location` once
+// hydrated so our own `replaceState` writes are visible. Falls back to the
+// SSR-snapshot `useSearchParams` value during the server pass.
+function readInitParams(searchParams: URLSearchParams): URLSearchParams {
+  if (typeof window !== "undefined") {
+    return new URLSearchParams(window.location.search);
+  }
+  return searchParams;
+}
+
 export function EntitySearch({ slugs }: { slugs: string[] }) {
-  // `useSearchParams` is used only for the SSR-pass fallback. The root layout
-  // already wraps the tree in <Suspense> (`app/layout.tsx:56`), satisfying the
-  // rule transitively — the static check just can't see across files.
+  // SSR-pass only; layout already wraps in <Suspense> (`app/layout.tsx:56`).
   // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
-  const initialParams =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search)
-      : searchParams;
+  // Lazy init via `readInitParams` (matches `intel-transfers.tsx`).
   const [query, setQuery] = useState<string>(() =>
-    readQueryFromParams(initialParams),
+    readQueryFromParams(readInitParams(searchParams)),
   );
   const [page, setPage] = useState<number>(() =>
-    readPageFromParams(initialParams),
+    readPageFromParams(readInitParams(searchParams)),
   );
 
   const updateQuery = useCallback((next: string) => {
@@ -92,10 +97,6 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
     clampedPage * PAGE_SIZE,
   );
 
-  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateQuery(e.target.value);
-  };
-
   return (
     <div>
       <input
@@ -103,7 +104,7 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
         aria-label="Search entities"
         placeholder="Search entities…"
         value={query}
-        onChange={handleQueryChange}
+        onChange={(e) => updateQuery(e.target.value)}
         className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
       />
       <p className="mb-2 text-xs text-slate-500">
